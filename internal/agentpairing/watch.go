@@ -14,9 +14,11 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -33,6 +35,7 @@ type watchPollKey struct {
 	hash         string
 	protocol     int
 	proofVersion int
+	messages     bool
 }
 
 func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in attachwatch.DeviceRequest) error {
@@ -57,6 +60,9 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 		return fail(429, "rate_limited", "daemon registration capacity reached")
 	}
 	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+		if authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{}) != nil {
+			return fail(403, "forbidden", "paired daemon required")
+		}
 		_, principal, _, _, proof, err := attachComputer(ctx, tx, in.ComputerID)
 		if err != nil || principal != p.ID || subtle.ConstantTimeCompare([]byte(proof), []byte(digest(in.DeviceProof))) != 1 {
 			return fail(403, "forbidden", "computer proof rejected")
@@ -89,7 +95,7 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 		if m.watchKeys.keys == nil {
 			m.watchKeys.keys = make(map[string]watchPollKey)
 		}
-		m.watchKeys.keys[key] = watchPollKey{hash: digest(in.PollKey), protocol: protocol, proofVersion: in.LocalConsentProofVersion}
+		m.watchKeys.keys[key] = watchPollKey{hash: digest(in.PollKey), protocol: protocol, proofVersion: in.LocalConsentProofVersion, messages: in.MessageProtocol == attachedmsg.Protocol}
 	}
 	return err
 }
@@ -225,6 +231,10 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, fail(400, "invalid_request", "invalid local confirmation proof"))
 		return
 	}
+	if len(in.MessageLocalAuthSignature) > 144 || in.MessageLocalAuthNonce != "" && !attachwatch.LocalAuthNonceValid(in.MessageLocalAuthNonce) || in.Operation != "message_activate" && (in.MessageLocalAuthSignature != "" || in.MessageLocalAuthNonce != "") {
+		WriteError(w, fail(400, "invalid_request", "invalid messaging confirmation proof"))
+		return
+	}
 	if in.Operation == "register" {
 		if err := m.registerWatchKey(r.Context(), p, in); err != nil {
 			WriteError(w, err)
@@ -238,12 +248,20 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	m.watchKeys.RLock()
 	defer m.watchKeys.RUnlock()
 	expected := m.watchKeys.keys[p.TenantID+"/"+in.ComputerID]
-	if !hashRE.MatchString(in.PollKey) || expected.hash == "" || subtle.ConstantTimeCompare([]byte(expected.hash), []byte(digest(in.PollKey))) != 1 {
+	if expected.hash == "" && hashRE.MatchString(in.PollKey) {
+		WriteError(w, m.unknownWatchKey(r.Context(), p, in))
+		return
+	}
+	if !hashRE.MatchString(in.PollKey) || subtle.ConstantTimeCompare([]byte(expected.hash), []byte(digest(in.PollKey))) != 1 {
 		WriteError(w, fail(403, "forbidden", "daemon poll key rejected"))
 		return
 	}
 	if !uuidRE.MatchString(in.RequestID) {
 		WriteError(w, fail(400, "invalid_request", "invalid attach request"))
+		return
+	}
+	if in.Operation == "message_request" || in.Operation == "message_activate" || in.Operation == "message_observed" || in.Operation == "message_offer" || in.Operation == "message_receipt" || in.Operation == "message_validate" {
+		m.messageDevice(w, r, p, in, expected)
 		return
 	}
 	if in.Operation != "request" && in.Operation != "poll" && in.Operation != "detach" && in.Operation != "exited" {
@@ -350,7 +368,12 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			}
 			out, _, _, err = loadAttach(ctx, tx, in.RequestID)
 			out.UserCode = code
-			return err
+			if err != nil {
+				return err
+			}
+			// The committed event wakes phone delivery. Keep registration proofs,
+			// the one-time code and the process snapshot out of its payload.
+			return appendEvent(ctx, tx, p, events.Change{Type: "harness.attach_requested", After: map[string]string{"request_id": in.RequestID, "owner_id": owner}})
 		}
 		var approvedOwner string
 		out, approvedOwner, _, err = loadAttach(ctx, tx, in.RequestID)
@@ -561,13 +584,35 @@ func (m *Module) attachApprove(w http.ResponseWriter, r *http.Request, p tenant.
 func (m *Module) attachRevoke(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
 	m.attachDecision(w, r, p, "", "", true)
 }
+
+// DecideAttachVerified reuses owner, enrollment, immutable consent and local Mac
+// confirmation checks. A phone passkey never substitutes for the daemon proof.
+func (m *Module) DecideAttachVerified(ctx context.Context, p tenant.Principal, id, d, consentDigest string, revoke bool, verify func(pgx.Tx, attachwatch.View) error) (attachwatch.View, error) {
+	if verify == nil || p.Kind != tenant.Person {
+		return attachwatch.View{}, fail(403, "forbidden", "fresh person verification required")
+	}
+	if err := authz.RequirePattern(authz.BindPool(ctx, m.pool), "POST /api/agent-pairing/attach/{requestId}/approve", authz.Scope{}); err != nil {
+		return attachwatch.View{}, fail(403, "forbidden", "account management permission required")
+	}
+	return m.decideAttach(ctx, p, id, d, consentDigest, revoke, verify)
+}
+
 func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant.Principal, d, consentDigest string, revoke bool) {
+	out, err := m.decideAttach(r.Context(), p, r.PathValue("requestId"), d, consentDigest, revoke, nil)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	reply(w, out)
+}
+
+func (m *Module) decideAttach(ctx context.Context, p tenant.Principal, id, d, consentDigest string, revoke bool, verify func(pgx.Tx, attachwatch.View) error) (attachwatch.View, error) {
 	var out attachwatch.View
 	var rejected error
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
 		var owner string
 		var err error
-		out, owner, _, err = loadAttach(r.Context(), tx, r.PathValue("requestId"))
+		out, owner, _, err = loadAttach(ctx, tx, id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fail(404, "not_found", "attach unavailable")
 		}
@@ -577,19 +622,28 @@ func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant
 		if owner != p.ID {
 			return fail(403, "forbidden", "paired computer owner required")
 		}
+		if verify != nil {
+			if err := verify(tx, out); err != nil {
+				return err
+			}
+		}
 		if revoke {
 			if out.State == "confirmed_exited" {
 				return nil
 			}
-			return attachEnd(r.Context(), tx, &out, "detached")
+			return attachEnd(ctx, tx, &out, "detached")
 		}
-		expired, err := attachExpired(r.Context(), tx, &out)
+		expired, err := attachExpired(ctx, tx, &out)
 		if err != nil {
 			return err
 		}
 		if expired {
 			rejected = fail(410, "attach_ended", "attach expired")
 			return nil
+		}
+		if verify != nil {
+			d = out.Digest
+			consentDigest = out.ConsentDigest
 		}
 		if consentDigest != out.ConsentDigest {
 			return fail(409, "conflict", "consent setting changed; review the request again")
@@ -600,11 +654,11 @@ func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant
 		if d != out.Digest {
 			return fail(409, "conflict", "review digest mismatch")
 		}
-		owner, _, host, workspace, _, err := attachComputer(r.Context(), tx, out.Snapshot.ComputerID)
+		owner, _, host, workspace, _, err := attachComputer(ctx, tx, out.Snapshot.ComputerID)
 		if err != nil || owner != p.ID || host != out.Snapshot.Host || !attachwatch.Within(workspace, out.Snapshot.Process.CWD) {
 			return fail(403, "forbidden", "pairing changed")
 		}
-		if err = attachScope(r.Context(), tx, p.TenantID, owner, out.Snapshot); err != nil {
+		if err = attachScope(ctx, tx, p.TenantID, owner, out.Snapshot); err != nil {
 			return err
 		}
 		if out.State != "pending" {
@@ -620,18 +674,38 @@ func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant
 				nonce = &challenge
 				out.LocalAuthNonce = challenge
 			}
-			_, err = tx.Exec(r.Context(), `UPDATE harness_attach_requests SET state='approved',consent_mode=$2,local_auth_nonce=$3 WHERE id=$1`, out.RequestID, out.ConsentMode, nonce)
+			_, err = tx.Exec(ctx, `UPDATE harness_attach_requests SET state='approved',consent_mode=$2,local_auth_nonce=$3 WHERE id=$1`, out.RequestID, out.ConsentMode, nonce)
 			out.State = "approved"
 		}
 		return err
 	})
 	if err != nil {
-		WriteError(w, err)
-		return
+		return out, err
 	}
 	if rejected != nil {
-		WriteError(w, rejected)
-		return
+		return out, rejected
 	}
-	reply(w, out)
+	return out, nil
+}
+
+// ReviewAttach exposes the immutable request only to the paired computer owner.
+func ReviewAttach(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (attachwatch.View, error) {
+	v, owner, _, err := loadAttach(ctx, tx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return v, fail(404, "not_found", "attach unavailable")
+	}
+	if err != nil {
+		return v, err
+	}
+	if p.Kind != tenant.Person || owner != p.ID {
+		return attachwatch.View{}, fail(403, "forbidden", "paired computer owner required")
+	}
+	if err := authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}); err != nil {
+		return attachwatch.View{}, fail(403, "forbidden", "account management permission required")
+	}
+	if err := attachScope(ctx, tx, p.TenantID, owner, v.Snapshot); err != nil {
+		return attachwatch.View{}, err
+	}
+	v.LocalAuthNonce = ""
+	return v, nil
 }

@@ -53,7 +53,7 @@ func TestUndecidableQuestionDoesNotStarveAuthorizedQuestion(t *testing.T) {
 	f := setup(t)
 	var otherTicket string
 	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Other held work',$2 FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='ticket' RETURNING id::text`, f.person.TenantID, f.otherProject).Scan(&otherTicket)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Other held work',$2 FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='work' RETURNING id::text`, f.person.TenantID, f.otherProject).Scan(&otherTicket)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -178,9 +178,8 @@ func TestClaimWaitsForProjectAccessMutationWithoutTenantInversion(t *testing.T) 
 		t.Fatal("fixture must retain an authorized, unclaimed held question")
 	}
 	item := page.Items[0]
-	// Pause the real project-member DELETE after it owns the tree fence but
-	// before LockProjectMutation acquires tenant UPDATE. The claim must wait
-	// on that tree without owning tenant SHARE and preventing DELETE's progress.
+	// Pause the real project-member DELETE after tenant/tree entry. The claim
+	// must wait on the tenant fence before reaching tree or source records.
 	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(query string) bool {
 		return strings.Contains(query, "pg_advisory_xact_lock(hashtextextended($1::text, 0))")
 	})
@@ -217,23 +216,28 @@ func TestClaimWaitsForProjectAccessMutationWithoutTenantInversion(t *testing.T) 
 		dbtest.Await(t, cleanupCtx, mutationDone)
 		dbtest.Await(t, cleanupCtx, claimDone)
 	})
-	if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, mutationPID, claimDone); lock != "advisory" {
-		t.Fatalf("claim did not overlap the project's tree fence: lock=%q", lock)
+	if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, mutationPID, claimDone); lock != "transactionid" {
+		t.Fatalf("claim did not overlap the project's tenant fence: lock=%q", lock)
 	}
 	// NOWAIT proves the ordering at the observed overlap, without depending on
 	// the deadlock detector's timing or choice of victim. The paused mutation
-	// has no tenant lock yet, so only an inverted claim could block this probe.
+	// already retains the conflicting tenant fence before the claim can enter.
 	probe, err := f.d.Admin.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer probe.Rollback(context.Background())
-	if _, err := probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, f.reader.TenantID); err != nil {
+	if _, err := probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR KEY SHARE NOWAIT`, f.reader.TenantID); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "55P03" {
-			t.Fatal("claim waiting for tree already holds tenant fence (SQLSTATE 55P03)")
+			t.Fatal("project tenant fence blocks foreign-key readers (SQLSTATE 55P03)")
 		}
 		t.Fatalf("unexpected tenant lock probe failure: %v", err)
+	}
+	_, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, f.reader.TenantID)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+		t.Fatalf("mutation did not retain conflicting tenant fence: %v", err)
 	}
 	if err := probe.Rollback(ctx); err != nil {
 		t.Fatal(err)

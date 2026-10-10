@@ -48,7 +48,7 @@ func TestPublicPortalBoundary(t *testing.T) {
 	insertNode(t, d, tenantA, "PWS-1", "portal_wish", "A public wish", "Join without an account.", "published", productA, "{}")
 	insertNode(t, d, tenantA, "PWS-2", "portal_wish", "SECRET-PENDING-A", "still in review", "pending", productA, "{}")
 	insertNode(t, d, tenantA, "PWS-9", "portal_wish", "ORPHAN-WISH", "no product", "published", "", "{}")
-	insertNode(t, d, tenantA, "TKT-1", "ticket", "SECRET-TICKET-A", "SECRET-TICKET-BODY", "open", "", "{}")
+	insertNode(t, d, tenantA, "TKT-1", "work", "SECRET-TICKET-A", "SECRET-TICKET-BODY", "open", "", "{}")
 	insertNode(t, d, tenantB, "PPR-1", "portal_product", "OTHER-TENANT-PRODUCT", "other summary", "published", "", "{}")
 	insertNode(t, d, tenantC, "PPR-1", "portal_product", "SHOULD-STAY-HIDDEN", "closed summary", "published", "", "{}")
 	setPortal(t, d, tenantB, true)
@@ -276,6 +276,29 @@ func TestPublicPortalBoundary(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestUnknownPortalWritesRemainClosedUnderTenantFence(t *testing.T) {
+	d := dbtest.Open(t)
+	m := New(d.App, false, bytes.Repeat([]byte{11}, 32))
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	f := &fixture{t: t, m: m, d: d, h: mux}
+	makeTenant(t, d, "closed-write-portal", "Closed write portal")
+	for _, tc := range []struct{ path, body string }{
+		{"/wishes/PWS-1/votes", `{}`},
+		{"/wishes", `{"title":"A useful wish","summary":"A public wish for the closed portal."}`},
+		{"/corrections", `{"competitor":"Northwind","aspect":"Owner assembly","statement":"A correction for the closed portal."}`},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			known := f.do("POST", "/api/public/portal/closed-write-portal"+tc.path, tc.body, "203.0.113.90:1000", nil, nil, nil)
+			unknown := f.do("POST", "/api/public/portal/unknown-write-portal"+tc.path, tc.body, "203.0.113.91:1000", nil, nil, nil)
+			if known.Code != http.StatusNotFound || unknown.Code != http.StatusNotFound {
+				t.Fatalf("public tenant fence exposed availability: known=%d %s unknown=%d %s", known.Code, known.Body, unknown.Code, unknown.Body)
+			}
+			sameResponse(t, known, unknown)
+		})
 	}
 }
 
@@ -729,12 +752,12 @@ func assertVoteStorage(t *testing.T, d *dbtest.DB, tenantA, tenantB, ballot, rem
 		for _, name := range cols {
 			got[name] = true
 		}
-		for _, name := range []string{"tenant_id", "wish_id", "voter_hash", "weight", "created_at"} {
+		for _, name := range []string{"tenant_id", "wish_id", "voter_hash", "weight", "created_at", "product_id"} {
 			if !got[name] {
 				t.Fatalf("missing column %s in %v", name, cols)
 			}
 		}
-		if len(got) != 5 {
+		if len(got) != 6 {
 			t.Fatalf("vote columns %v", cols)
 		}
 		var stored string
@@ -913,11 +936,21 @@ func insertNode(t *testing.T, d *dbtest.DB, tenantID, key, kind, title, body, st
 		if parent != "" {
 			parentID = parent
 		}
-		return tx.QueryRow(t.Context(), `
+		err := tx.QueryRow(t.Context(), `
 			INSERT INTO nodes(tenant_id,key,kind_id,title,body,state,parent_id,fields)
 			SELECT $1::uuid,$2,k.id,$3,$4,$5,$6::uuid,$7::jsonb
 			FROM node_kinds k WHERE k.tenant_id=$1::uuid AND k.slug=$8
 			RETURNING id::text`, tenantID, key, title, body, state, parentID, fields, kind).Scan(&id)
+		if err != nil {
+			return err
+		}
+		if kind == "portal_product" && parent == "" {
+			if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.portal_moderation','on',true)`); err != nil {
+				return err
+			}
+			_, err = tx.Exec(t.Context(), `UPDATE portal_products SET published=$2,participation_policy=CASE WHEN $2 THEN 'legacy' ELSE 'disabled' END WHERE product_id=$1::uuid`, id, state == "published")
+		}
+		return err
 	})
 	if err != nil {
 		t.Fatal(err)

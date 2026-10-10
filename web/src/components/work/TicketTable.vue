@@ -1,16 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { estimateDisplay } from '../../lib/estimates'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { displayLanguage } from '../../lib/displayLanguage'
+import { vClipTip } from '../../directives/clipTip'
+import { formatEstimate, estimateDisplay } from '../../lib/estimates'
+import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, widthOf, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { COLUMN_BY_ID, costUnitLabel, layoutWidths, loadedFitWidth, releaseLabel, tagList, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
-import type { GroupBy, RowGroup, EpicRef } from '../../lib/ticketList'
+import { selectLoadedGroup, type GroupBy, type RowGroup, type EpicRef, type TicketRow } from '../../lib/ticketList'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
+import { isWorkParent, workIcon, workLabel } from '../../lib/workVocabulary'
 import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../../lib/work'
-import AppIcon from '../AppIcon.vue'
+import AppIcon, { type IconName } from '../AppIcon.vue'
 import TicketTypeIcon from './TicketTypeIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
@@ -20,6 +23,7 @@ import QuickCreateRow, { type QuickDraft } from './QuickCreateRow.vue'
 import EtaCell from './EtaCell.vue'
 import PlanningCell from './PlanningCell.vue'
 import QueueAction from './QueueAction.vue'
+import QueueStaleHint from './QueueStaleHint.vue'
 import QueueIndicator from './QueueIndicator.vue'
 import SuggestedReleaseCell from './SuggestedReleaseCell.vue'
 import { useWorkQueue } from '../../stores/workQueue'
@@ -35,7 +39,7 @@ const props = defineProps<{
   expectedRows?: number
   groups: RowGroup[]
   group: GroupBy
-  rowsById: Map<string, ListItem>
+  rowsById: Map<string, TicketRow>
   cursorId: string | null
   openId: string | null
   query: string
@@ -50,27 +54,37 @@ const props = defineProps<{
   hidingClosed: boolean
   collapsed: Set<string>
   total: number | null
-  projectKey: string
+  projectKey?: string
   scrollRoot: HTMLElement | null
   now: number
   showAssignee: boolean
   creating: boolean
-  projectId: string
-  knownStates: string[]
-  create: (draft: QuickDraft) => Promise<boolean>
+  projectId?: string
+  knownStates?: string[]
+  create?: (draft: QuickDraft) => Promise<boolean>
   // Outline mode: the tree's flat entries replace the list groups.
   outline?: OutlineEntry[] | null
   canDrag?: boolean
   // The person's saved columns, order and widths for this project (null: automatic).
+  extraColumns?: ColumnDef[]
+  // Hosts can use the approved EN/DE copy for the new group controls.
+  locale?: string
   prefs?: ListPrefs | null
   costAllowed?: boolean
   // Multi-select for bulk changes: checkboxes lead each row.
   selectable?: boolean
+  // A host may keep resolved/read-only rows visible without making them selectable.
+  rowSelectable?: (row: ListItem) => boolean
+  label?: string
+  retryLabel?: string
+  emptyText?: string
+  selectionDisabled?: boolean
+  sortDisabled?: boolean
   selected?: Set<string>
   // Phone selection with nothing chosen yet: round checks show before the first tap.
   picking?: boolean
   canAssignRelease?: boolean
-  // Native journey membership for the visible tickets. Imported fields.release is not this.
+  // Native release membership for the visible tickets. Imported fields.release is not this.
   nativeReleases?: Map<string, NativeReleaseView>
   // Live updates (AEON-326): rows waiting for Show carry a label ("Closed",
   // "Deleted", ...) and stay dimmed; rows someone else just changed tint briefly.
@@ -87,7 +101,7 @@ const emit = defineEmits<{
   cursor: [id: string]
   sort: [field: SortField, additive: boolean]
   status: [row: ListItem, anchor: HTMLElement]
-  copy: [row: ListItem]
+  copy: [row: TicketRow]
   assignee: [row: ListItem, anchor: HTMLElement]
   newTab: [row: ListItem]
   toggleGroup: [key: string]
@@ -104,16 +118,25 @@ const emit = defineEmits<{
   move: [row: ListItem, epic: ListItem | null]
   // Which columns show now (the Display menu lists them), and resized widths to save.
   layout: [visible: ColumnId[], customised: boolean]
-  widths: [widths: Partial<Record<ColumnId, number>>]
+  widths: [widths: Partial<Record<string, number>>]
   // toggle: one row on or off; range: from the last row chosen to this one.
   select: [row: ListItem, mode: 'toggle' | 'range']
   selectAll: [on: boolean]
+  // Hosts update their selected set with selectLoadedGroup (100 loaded rows).
+  selectGroup: [key: string, on: boolean]
+  moreInGroup: [key: string]
   release: [row: ListItem, anchor: HTMLElement]
   showUpdates: []
 }>()
 
+const instance = getCurrentInstance()
+const german = computed(() => displayLanguage(props.locale) === 'de')
+const groupName = (group: RowGroup) => group.project?.key ?? group.epic?.key ?? group.label
+const moreLabel = (group: RowGroup) => german.value ? `50 weitere zeigen in ${groupName(group)}` : `Show 50 more in ${groupName(group)}`
+const shownLabel = (group: RowGroup) => german.value ? `${group.loaded ?? group.rows.length} von ${group.total} gezeigt` : `${group.loaded ?? group.rows.length} of ${group.total} shown`
+
 const CLS: Record<ColumnId, string> = { key: 'c-key', title: 'c-title', status: 'c-status', priority: 'c-prio', assignee: 'c-assignee', epic: 'c-epic', release: 'c-release', tags: 'c-tags', cost: 'c-cost', estimate: 'c-estimate', created: 'c-created', updated: 'c-updated', progress: 'c-progress', eta: 'c-eta', model: 'c-model', tokens: 'c-tokens', list_cost: 'c-list-cost', paid: 'c-paid', suggested: 'c-suggested' }
-const isPlanning = (id: ColumnId): id is PlanningColumn => (PLANNING_COLUMNS as ColumnId[]).includes(id)
+const isPlanning = (id: string): id is PlanningColumn => (PLANNING_COLUMNS as string[]).includes(id)
 // Planning cells are not Tab stops. The focused row carries their descriptions.
 function planningDescribedBy(row: ListItem): string {
   return columns.value.flatMap(column => column.id === 'suggested' ? [`suggested-${row.id}`] : isPlanning(column.id) && planningTip(row, column.id) ? [`plan-${row.id}-${column.id}`] : []).join(' ')
@@ -128,9 +151,14 @@ const phone = ref(phoneQuery.matches)
 // a ticket with a worker earns Assignee even when nobody is the stored owner.
 const live = useLiveAgents()
 const queue = useWorkQueue()
-const queued = (row: ListItem) => queueable(row) ? queue.entry(props.projectId, row.id) : null
-const mayAssign = computed(() => can('nodes.write', props.projectId) || can('run.create', props.projectId))
-const workersById = computed(() => ticketWorkers(live.forProject(props.projectId), props.projectId))
+const projectOf = (row: ListItem) => row.project?.id ?? props.projectId
+const queued = (row: ListItem) => projectOf(row) && queueable(row) ? queue.entry(projectOf(row)!, row.id) : null
+const mayAssign = (row: ListItem) => !!projectOf(row) && (can('nodes.write', projectOf(row)) || can('run.create', projectOf(row)))
+const workersById = computed(() => {
+  const projects = new Set([...props.rowsById.values()].map(projectOf).filter((id): id is string => !!id))
+  if (props.projectId) projects.add(props.projectId)
+  return new Map([...projects].flatMap(id => [...ticketWorkers(live.forProject(id), id)]))
+})
 function workersOf(row: ListItem) { return workersById.value.get(row.id) ?? NO_WORKERS }
 // The server names the lead. Other live workers stay in the feed's order after it.
 function assigneeWorkers(row: ListItem) { return withServerLead(workersOf(row), row.lead_worker) }
@@ -139,10 +167,10 @@ const present = computed(() => {
   const rows = [...props.rowsById.values()]
   const listed = props.outline ? props.outline.flatMap(entry => entry.type === 'row' ? [entry.row] : []) : rows
   return {
-    assigned: props.showAssignee || !!queue.snapshots[props.projectId]?.items.length,
+    assigned: props.showAssignee || !!(props.projectId && queue.snapshots[props.projectId]?.items.length),
     suggested: rows.some(row => ['delivered', 'accepted', 'done', 'in_progress', 'in-progress', 'qa'].includes(row.state) || !!queued(row)),
     workers: listed.some(row => workersOf(row).length > 0 || !!row.lead_worker?.name),
-    estimate: rows.some(row => row.kind_slug === 'ticket' || row.kind_slug === 'task' || !!estimate(row) || (row.kind_slug === 'epic' && (row.estimate?.open_children ?? 0) > 0)),
+    estimate: rows.some(row => row.kind_slug === 'work' || row.kind_slug === 'ticket' || row.kind_slug === 'task' || !!estimate(row) || (row.kind_slug === 'epic' && (row.estimate?.open_children ?? 0) > 0)),
     release: rows.some(row => !!releaseLabel(row.fields) || props.nativeReleases?.get(row.id)?.status === 'member'),
     tags: rows.some(row => tagList(row.fields).length > 0),
     progress: listed.some(row => progressOf(row) != null),
@@ -156,35 +184,71 @@ function progressOf(row: ListItem): { pct: number; stale: boolean; label: string
   if (!eta || typeof eta.progress !== 'number') return null
   const pct = Math.max(0, Math.min(100, Math.round(eta.progress)))
   const stale = !!eta.stale || !!props.liveStale
-  const label = progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone)
+  let label = progressAccessibleName(pct, stale, stale ? progressReportedAt(row.eta) : null, props.now, timeZone, eta)
+  if (row.eta?.leaf_count && row.eta.leaf_count > 1) label += `; ${row.eta.estimated_leaves ?? 0} of ${row.eta.leaf_count} leaves estimated${row.eta.progress_basis === 'leaves' ? '; progress counts leaves' : ''}`
   return { pct, stale, label: props.liveStale ? `${label}. Showing the last successful update.` : label }
 }
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false }))
-const columns = computed(() => layout.value.columns.map(def => ({ ...def, field: def.sort, cls: CLS[def.id] })))
+const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({ ...def, field: def.sort, cls: CLS[def.id as ColumnId] ?? 'c-host' })))
+const definitions = computed<ReadonlyMap<string, ColumnDef>>(() => new Map<string, ColumnDef>([...COLUMN_BY_ID, ...columns.value.map(def => [def.id, def] as const)]))
+const hostIds = computed(() => new Set(columns.value.filter(column => !COLUMN_BY_ID.has(column.id as ColumnId)).map(column => column.id)))
+const customised = computed(() => layout.value.customised || !!hostIds.value.size)
 const ids = computed(() => columns.value.map(column => column.id))
-const has = (id: ColumnId) => ids.value.includes(id)
-watch(ids, value => emit('layout', value, layout.value.customised), { immediate: true })
+const has = (id: string) => ids.value.includes(id)
+watch(ids, value => emit('layout', value.filter((id): id is ColumnId => COLUMN_BY_ID.has(id as ColumnId)), layout.value.customised), { immediate: true })
 // Live widths while dragging a column edge; saved when the drag ends.
-const dragWidths = ref<Partial<Record<ColumnId, number>>>({})
+const measuring = ref(false)
+const autoWidths = ref<Partial<Record<string, number>>>({})
+const foldSpace = ref(0)
+let fitGeneration = 0
+let fittedRows = new Set<string>()
+let fittedColumns = new Set<string>()
+async function fitLoaded() {
+  const generation = ++fitGeneration
+  if (props.loading || phone.value) { measuring.value = false; return }
+  // Folded groups still contribute their loaded values. Briefly render their
+  // rows out of flow for measurement, then remove them before the next paint.
+  measuring.value = true
+  await nextTick()
+  if (generation !== fitGeneration) return
+  if (props.loading || phone.value || !grid.value) { measuring.value = false; return }
+  const rows = new Set([...props.rowsById.keys(), ...(props.outline ?? []).flatMap(entry => entry.type === 'row' ? [entry.row.id] : [])])
+  const newRows = [...rows].some(id => !fittedRows.has(id))
+  const next = { ...autoWidths.value }
+  for (const id of ids.value) {
+    if (id === 'title' || Number.isFinite(props.prefs?.widths?.[id]) || dragWidths.value[id] !== undefined) continue
+    if (!newRows && fittedColumns.has(id)) continue
+    next[id] = loadedFitWidth(definitions.value.get(id)!, Math.max(next[id] ?? 0, fittedWidth(id)))
+    fittedColumns.add(id)
+  }
+  fittedRows = rows
+  autoWidths.value = next
+  measuring.value = false
+}
+watch(() => props.loading, (loading, wasLoading) => {
+  if (loading && !wasLoading) { autoWidths.value = {}; foldSpace.value = 0; fittedRows.clear(); fittedColumns.clear() }
+})
+watch(() => [props.loading, phone.value, props.projectId, [...props.rowsById.keys()].join(','), ids.value.join(','), props.outline], fitLoaded, { flush: 'post' })
+const dragWidths = ref<Partial<Record<string, number>>>({})
 // Every column but Title has a col width; Title takes the rest (about 960px at most
 // on wide tables, where the spare width widens the text columns instead). Dragging
 // Title's edge gives it a width of its own. The columns beside it move within their
 // min and max, so a fixed column never collapses.
-const layoutWidth = computed(() => layout.value.customised ? Math.max(width.value, ids.value.reduce((sum, id) => sum + (id === 'title' ? COLUMN_BY_ID.get(id)!.min : dragWidths.value[id] ?? widthOf(id, props.prefs)), 0)) : width.value)
-const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value))
-function colWidth(id: ColumnId) { return id === 'title' ? null : widths.value[id] ?? null }
+const liveWidths = computed(() => ({ ...Object.fromEntries(Object.entries(autoWidths.value).filter(([id]) => !Number.isFinite(props.prefs?.widths?.[id]))), ...dragWidths.value }))
+const layoutWidth = computed(() => customised.value ? Math.max(width.value, ids.value.reduce((sum, id) => sum + (id === 'title' ? definitions.value.get(id)!.min : liveWidths.value[id] ?? widthOf(id, props.prefs, definitions.value)), 0)) : width.value)
+const widths = computed(() => layoutWidths(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value, autoWidths.value))
+function colWidth(id: string) { return id === 'title' ? null : widths.value[id] ?? null }
 function nativeRelease(row: ListItem) {
-  if (row.kind_slug === 'epic') return releaseCell({ status: 'none' })
   return releaseCell(props.nativeReleases?.get(row.id))
 }
-const titleWidth = computed(() => Math.max(0, Math.round(layoutWidth.value - Object.values(widths.value).reduce((sum, w) => sum + (w ?? 0), 0))))
-const shownWidth = (id: ColumnId) => id === 'title' ? titleWidth.value : colWidth(id) ?? 0
-function bounds(id: ColumnId) {
-  if (id === 'title') return titleRoom(ids.value, layoutWidth.value, props.prefs, dragWidths.value)
-  const def = COLUMN_BY_ID.get(id)!
+const titleWidth = computed(() => Math.max(0, Math.round(layoutWidth.value - Object.values(widths.value).reduce<number>((sum, w) => sum + (w ?? 0), 0))))
+const shownWidth = (id: string) => id === 'title' ? titleWidth.value : colWidth(id) ?? 0
+function bounds(id: string) {
+  if (id === 'title') return titleRoom(ids.value, layoutWidth.value, props.prefs, dragWidths.value, definitions.value)
+  const def = definitions.value.get(id)!
   return { min: def.min, max: def.max }
 }
-function clampColumn(id: ColumnId, value: number) {
+function clampColumn(id: string, value: number) {
   const range = bounds(id)
   return Math.max(range.min, Math.min(range.max, Math.round(value)))
 }
@@ -194,7 +258,7 @@ const card = ref<HTMLElement>()
 let sizer: ResizeObserver | undefined
 const phoneChange = () => { phone.value = phoneQuery.matches }
 onMounted(() => {
-  phoneChange(); phoneQuery.addEventListener('change', phoneChange)
+  phoneChange(); void fitLoaded(); phoneQuery.addEventListener('change', phoneChange)
   if (card.value) {
     // The first fit happens before paint, so the columns never jump into place.
     const box = getComputedStyle(card.value)
@@ -202,14 +266,14 @@ onMounted(() => {
     sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value)
   }
 })
-onBeforeUnmount(() => { phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect() })
+onBeforeUnmount(() => { fitGeneration++; phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect() })
 // ---------- Column widths: drag a header edge; double-click fits, or resets Title ----------
-let resizing: { id: ColumnId; startX: number; startWidth: number } | null = null
+let resizing: { id: string; startX: number; startWidth: number } | null = null
 // Two presses within 350ms on the same edge fit the column (pointerdown's
 // preventDefault keeps the browser from reporting dblclick reliably). Title
 // returns to automatic instead of fitting its content.
-let lastPress = { id: '' as ColumnId | '', at: 0 }
-function resizeStart(event: PointerEvent, id: ColumnId) {
+let lastPress = { id: '', at: 0 }
+function resizeStart(event: PointerEvent, id: string) {
   if (event.button !== 0) return
   event.preventDefault(); event.stopPropagation()
   if (lastPress.id === id && event.timeStamp - lastPress.at < 350) {
@@ -243,7 +307,7 @@ function resizeEnd() {
   }
   emit('widths', { ...(props.prefs?.widths ?? {}), [id]: value })
 }
-function resizeKey(event: KeyboardEvent, id: ColumnId) {
+function resizeKey(event: KeyboardEvent, id: string) {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
   event.preventDefault()
   const next = clampColumn(id, shownWidth(id) + (event.key === 'ArrowRight' ? 16 : -16))
@@ -260,27 +324,34 @@ function resetTitle() {
   emit('widths', next)
 }
 // Fit: the widest content in the column (header included), within the column's bounds.
-function autofit(id: ColumnId) {
-  const def = COLUMN_BY_ID.get(id)!
+function fittedWidth(id: string) {
+  const def = definitions.value.get(id)!
   let widest = 0
-  for (const cell of grid.value?.querySelectorAll<HTMLElement>(`.${CLS[id]} .cell, th.${CLS[id]} .th-sort, th.${CLS[id]} .th-label`) ?? []) {
+  for (const cell of grid.value?.querySelectorAll<HTMLElement>(`[data-column-id="${id}"] .cell, th[data-column-id="${id}"] .th-sort, th[data-column-id="${id}"] .th-label`) ?? []) {
     // Planning descriptions are hidden siblings whose nowrap scrollWidth is
     // the whole hover. Fit only the visible model or figure's own children.
     const content = cell.querySelector<HTMLElement>('.plan-figure, .plan-model') ?? cell
     const children = ([...content.children] as HTMLElement[]).filter(child => !child.classList.contains('sr-only'))
     const gap = parseFloat(getComputedStyle(content).columnGap) || 0
     const inner = children.reduce((sum, child) => sum + Math.max(child.scrollWidth, child.getBoundingClientRect().width), 0) + gap * Math.max(0, children.length - 1)
-    widest = Math.max(widest, inner)
+    const text = [...content.childNodes].filter(child => child.nodeType === Node.TEXT_NODE).map(child => child.textContent).join('')
+    const range = document.createRange()
+    range.selectNodeContents(content)
+    widest = Math.max(widest, inner, text.trim() ? range.getBoundingClientRect().width : 0)
   }
-  const next = Math.max(def.min, Math.min(def.max, Math.ceil(widest + 26)))
+  return Math.max(def.min, Math.min(def.max, Math.ceil(widest + 30)))
+}
+function autofit(id: string) {
+  const next = fittedWidth(id)
   dragWidths.value = { ...dragWidths.value, [id]: next }
   emit('widths', { ...(props.prefs?.widths ?? {}), [id]: next })
 }
 watch(() => props.prefs?.widths, () => { if (!resizing) dragWidths.value = {} })
+watch(() => props.projectId, () => { autoWidths.value = {}; dragWidths.value = {}; foldSpace.value = 0; fittedRows.clear(); fittedColumns.clear(); void fitLoaded() })
 function estimate(row: ListItem) { return estimateDisplay(row).text }
 // An epic with open children and no hours still has coverage to explain.
 function emptyEstimateTip(row: ListItem) {
-  if (row.kind_slug !== 'epic' || (row.estimate?.open_children ?? 0) < 1 || estimate(row)) return 'No estimate yet'
+  if (!(row.estimate?.is_parent ?? row.kind_slug === 'epic') || (row.estimate?.open_children ?? 0) < 1 || estimate(row)) return 'No estimate yet'
   return estimateDisplay(row).tip
 }
 const grid = ref<HTMLTableElement>()
@@ -288,7 +359,7 @@ const quick = ref<InstanceType<typeof QuickCreateRow>>()
 const inlineQuick = ref<InstanceType<typeof QuickCreateRow>[]>([])
 
 // One entry list for both views: the list's groups flattened, or the Outline's tree.
-type Entry = OutlineEntry | { type: 'list-group'; key: string; group: RowGroup } | { type: 'row'; key: string; row: ListItem; tree?: TreeMeta; repeat?: boolean }
+type Entry = { type: 'group-more'; key: string; group: RowGroup } | OutlineEntry | { type: 'list-group'; key: string; group: RowGroup } | { type: 'row'; key: string; row: ListItem; tree?: TreeMeta; repeat?: boolean; measuring?: boolean }
 // Each list group keeps its own tbody so its sticky header scrolls away with it.
 // A ticket under several labels shows in each label's group; only its first row
 // carries the id that keyboard focus and scrolling use.
@@ -298,11 +369,12 @@ const sections = computed<{ key: string; entries: Entry[] }[]>(() => {
   return props.groups.map(group => {
     const entries: Entry[] = []
     if (props.group !== 'none') entries.push({ type: 'list-group', key: `group-${group.key}`, group })
-    if (!props.collapsed.has(group.key)) for (const row of group.rows) {
+    if (!props.collapsed.has(group.key) || measuring.value) for (const row of group.rows) {
       const repeat = seen.has(row.id)
       seen.add(row.id)
-      entries.push({ type: 'row', key: repeat ? `${group.key}:${row.id}` : row.id, row, repeat })
+      entries.push({ type: 'row', key: repeat ? `${group.key}:${row.id}` : row.id, row, repeat, measuring: props.collapsed.has(group.key) })
     }
+    if (group.hasMore && !props.collapsed.has(group.key)) entries.push({ type: 'group-more', key: `more-${group.key}`, group })
     return { key: group.key, entries }
   })
 })
@@ -315,16 +387,16 @@ function guideClass(i: number, depth: number, guides: boolean[], last: boolean) 
 }
 function childCount(entry: { row: ListItem; tree?: TreeMeta }) {
   if (entry.tree) return entry.tree.hasChildren && !entry.tree.stats && entry.row.kind_slug !== 'epic' ? entry.row.children_count : 0
-  return entry.row.kind_slug === 'epic' ? entry.row.children_count : 0
+  return isWorkParent(entry.row) ? entry.row.children_count : 0
 }
 
 // Drag a ticket onto an epic (or onto "No epic") to move it there.
 const dragId = ref<string | null>(null)
 const dropTarget = ref<string | null>(null)
 let dragged: ListItem | null = null
-function draggable(entry: { row: ListItem; tree?: TreeMeta }) { return !!props.canDrag && !!entry.tree && entry.row.kind_slug === 'ticket' && !entry.tree.dimmed }
+function draggable(entry: { row: ListItem; tree?: TreeMeta }) { return !!props.canDrag && !!entry.tree && ['work','ticket'].includes(entry.row.kind_slug) && !entry.tree.dimmed }
 function dragStart(event: DragEvent, row: ListItem) {
-  if (!props.canDrag || row.kind_slug !== 'ticket') return
+  if (!props.canDrag || !['work','ticket'].includes(row.kind_slug)) return
   dragged = row; dragId.value = row.id
   event.dataTransfer?.setData('text/plain', row.key)
   if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
@@ -332,7 +404,7 @@ function dragStart(event: DragEvent, row: ListItem) {
 function dragEnd() { dragged = null; dragId.value = null; dropTarget.value = null }
 function validTarget(epic: ListItem | null) {
   if (!dragged) return false
-  return epic ? epic.id !== dragged.parent_id && epic.kind_slug === 'epic' : dragged.parent?.kind_slug === 'epic' || dragged.parent_id !== props.projectId
+  return epic ? epic.id !== dragged.parent_id && isWorkParent(epic) : dragged.parent?.kind_slug === 'epic' || dragged.parent_id !== props.projectId
 }
 function dragOver(event: DragEvent, epic: ListItem | null) {
   if (!validTarget(epic)) return
@@ -364,7 +436,10 @@ function ariaSort(field: SortField | null) {
   const current = sortOf(field)
   return current ? (current.desc ? 'descending' : 'ascending') : field ? 'none' : undefined
 }
-function href(row: { key: string }) { return `/p/${encodeURIComponent(props.projectKey)}/${encodeURIComponent(row.key)}` }
+function href(row: { key: string; project_key?: string; project?: { key: string } | null }) {
+  const project = row.project_key ?? row.project?.key ?? props.projectKey
+  return project ? `/p/${encodeURIComponent(project)}/${encodeURIComponent(row.key)}` : undefined
+}
 function parentOf(row: ListItem) {
   // Direct parents only: an epic, or the ticket a task belongs to. The project itself is implied.
   if (!row.parent || row.parent.kind_slug === 'project') return null
@@ -411,8 +486,11 @@ function rowClick(event: MouseEvent, row: ListItem) {
   emit('open', row)
 }
 const selecting = computed(() => !!props.picking || !!props.selected?.size)
-const loadedRows = computed(() => entries.value.filter((entry): entry is Extract<Entry, { type: 'row' }> => entry.type === 'row' && !('repeat' in entry && entry.repeat)))
-const allChecked = computed(() => !!props.selected?.size && loadedRows.value.length > 0 && loadedRows.value.every(entry => props.selected!.has(entry.row.id)))
+const loadedRows = computed(() => entries.value.filter((entry): entry is Extract<Entry, { type: 'row' }> => entry.type === 'row' && !('measuring' in entry && entry.measuring) && !('repeat' in entry && entry.repeat)))
+const allChecked = computed(() => {
+  const rows = loadedRows.value.filter(entry => props.rowSelectable?.(entry.row) ?? true)
+  return !!props.selected?.size && rows.length > 0 && rows.every(entry => props.selected!.has(entry.row.id))
+})
 function checkClick(event: MouseEvent, row: ListItem) {
   event.stopPropagation()
   if (event.shiftKey) { event.preventDefault(); emit('select', row, 'range') }
@@ -425,7 +503,7 @@ let pressOrigin: { x: number; y: number } | null = null
 let pointerDown = false
 let swallowClick = false
 function pressBegin(event: PointerEvent, row: ListItem) {
-  if (!props.selectable || !phone.value || selecting.value || event.button !== 0) return
+  if (!props.selectable || props.selectionDisabled || props.rowSelectable?.(row) === false || !phone.value || selecting.value || event.button !== 0) return
   if ((event.target as HTMLElement).closest('button, input')) return
   pointerDown = true
   swallowClick = false
@@ -433,8 +511,10 @@ function pressBegin(event: PointerEvent, row: ListItem) {
   window.clearTimeout(pressTimer)
   pressTimer = window.setTimeout(() => {
     pressTimer = 0
+    const current = props.rowsById.get(row.id)
+    if (!current || current.updated_at !== row.updated_at || props.selectionDisabled || props.rowSelectable?.(current) === false) return
     swallowClick = true
-    emit('select', row, 'toggle')
+    emit('select', current, 'toggle')
   }, HOLD_MS)
 }
 function pressMove(event: PointerEvent) {
@@ -450,7 +530,7 @@ function pressFinish(fromPointerUp: boolean) {
   if (fromPointerUp) swallowClick = false
 }
 function longPress(event: Event, row: ListItem) {
-  if (!props.selectable || !phone.value) return
+  if (!props.selectable || props.selectionDisabled || props.rowSelectable?.(row) === false || !phone.value) return
   event.preventDefault()
   if (swallowClick) return
   if (pressTimer) { window.clearTimeout(pressTimer); pressTimer = 0 }
@@ -463,6 +543,44 @@ function linkClick(event: MouseEvent) {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return // let the browser open a tab
   event.preventDefault()
 }
+const selectableRows = (group: RowGroup) => group.rows.filter(row => props.rowSelectable?.(row) ?? true)
+function groupChecked(group: RowGroup) { const rows = selectableRows(group); return rows.length > 0 && rows.every(row => props.selected?.has(row.id)) }
+function groupMixed(group: RowGroup) { return !groupChecked(group) && selectableRows(group).some(row => props.selected?.has(row.id)) }
+async function selectGroup(event: Event, group: RowGroup) {
+  const input = event.target as HTMLInputElement
+  const on = input.checked && !(groupMixed(group) && (props.selected?.size ?? 0) >= 100)
+  // Existing list hosts already consume row selection. Keep their new group
+  // checkbox usable while dedicated hosts consume the group event themselves.
+  if (!instance?.vnode.props?.onSelectGroup) {
+    const before = props.selected ?? new Set<string>()
+    const next = selectLoadedGroup(group, before, on)
+    for (const row of group.rows) if (before.has(row.id) !== next.has(row.id)) emit('select', row, 'toggle')
+  }
+  emit('selectGroup', group.key, on)
+  await nextTick()
+  // A capped selection can stay mixed. Native clicks clear indeterminate even
+  // when Vue sees the same prop value; restore the host's actual selection.
+  const current = props.groups.find(entry => entry.key === group.key)
+  if (!current || !input.isConnected) return
+  input.checked = groupChecked(current)
+  input.indeterminate = groupMixed(current)
+}
+async function toggleGroup(key: string) {
+  const head = grid.value?.querySelector<HTMLElement>(`#${CSS.escape(`row-group-${key}`)} .group-head`)
+  const top = head?.getBoundingClientRect().top
+  emit('toggleGroup', key)
+  await nextTick()
+  if (!head?.isConnected || top === undefined) return
+  const root = props.scrollRoot ?? document.scrollingElement
+  if (!root) return
+  const delta = head.getBoundingClientRect().top - top
+  const target = Math.max(0, root.scrollTop + delta)
+  // A fold near the bottom can clamp scrolling before compensation. Retain
+  // only the space needed for this anchor; unfolding reclaims it again.
+  const space = Math.max(0, Math.ceil(foldSpace.value + target - Math.max(0, root.scrollHeight - root.clientHeight)))
+  if (space !== foldSpace.value) { foldSpace.value = space; await nextTick() }
+  root.scrollTop = target
+}
 function groupEpicRow(group: RowGroup) { return group.epic ? props.rowsById.get(group.epic.id) : undefined }
 function focusGrid() { grid.value?.focus({ preventScroll: true }) }
 function scrollToRow(id: string) {
@@ -471,7 +589,9 @@ function scrollToRow(id: string) {
 
 function observe() {
   observer?.disconnect()
-  if (!sentinel.value) return
+  // Outline exposes a Show more row; an intersecting sentinel must not drain
+  // every root page merely because the first page is short.
+  if (!sentinel.value || props.outline) return
   observer = new IntersectionObserver(entries => {
     if (entries.some(entry => entry.isIntersecting) && props.hasMore && !props.loadingMore && !props.moreError) emit('more')
   }, { root: props.scrollRoot, rootMargin: '0px 0px 800px 0px' })
@@ -479,7 +599,7 @@ function observe() {
 }
 let stopLive: (() => void) | undefined
 onMounted(() => { stopLive = live.watch(); observe() })
-watch(() => [props.scrollRoot, props.hasMore, props.loadingMore], observe)
+watch(() => [props.scrollRoot, props.hasMore, props.loadingMore, !!props.outline], observe)
 onBeforeUnmount(() => { stopLive?.(); observer?.disconnect(); window.clearTimeout(pressTimer) })
 defineExpose({
   focusGrid, scrollToRow, el: grid,
@@ -489,20 +609,20 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="card" class="table-card" :class="[density, { selectable, selecting, overflowing: !phone && layoutWidth > width + 1 }]">
-    <table :style="!phone && layout.customised ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="outline ? 'Ticket outline' : 'Tickets'" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
+  <div ref="card" class="table-card" :class="[density, { selectable, selecting, customised, overflowing: !phone && layoutWidth > width + 1 }]">
+    <table :style="!phone && customised ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
       </colgroup>
       <thead>
         <tr>
-          <th v-for="column in columns" :key="column.label" scope="col" :class="[column.cls, { end: column.end }]" :aria-sort="ariaSort(column.field)">
+          <th v-for="column in columns" :key="column.id" scope="col" :data-column-id="column.id" :class="[column.cls, { end: column.end }]" :aria-sort="ariaSort(column.field)">
             <input
               v-if="column.id === 'key' && selectable" type="checkbox" class="row-check head-check" :class="{ shown: selecting }" :checked="allChecked"
-              :indeterminate="selecting && !allChecked" :aria-label="allChecked ? 'Clear the selection' : 'Select all loaded tickets'" aria-keyshortcuts="Control+A Meta+A"
+              :indeterminate="!!selected?.size && !allChecked" :disabled="selectionDisabled" :aria-label="allChecked ? 'Clear the selection' : 'Select all loaded tickets'" aria-keyshortcuts="Control+A Meta+A"
               @change="emit('selectAll', ($event.target as HTMLInputElement).checked)"
             />
-            <button v-if="column.field" type="button" class="th-sort" :class="{ on: sortOf(column.field) }" :data-tip="'Sort by ' + column.label.toLowerCase() + '\nShift-click adds a secondary sort'" @click="event => emit('sort', column.field!, event.shiftKey)">
+            <button v-if="column.field && !sortDisabled" type="button" class="th-sort" :class="{ on: sortOf(column.field) }" :data-tip="'Sort by ' + column.label.toLowerCase() + '\nShift-click adds a secondary sort'" @click="event => emit('sort', column.field!, event.shiftKey)">
               <span>{{ column.label }}</span>
               <span class="sort-mark" aria-hidden="true">
                 <template v-if="sortOf(column.field)">
@@ -530,8 +650,8 @@ defineExpose({
         </tr>
       </thead>
 
-      <tbody v-if="creating" class="create-body">
-        <QuickCreateRow ref="quick" :project-id="projectId" :known-states="knownStates" :trailing="columns.length - 4" :span="quickAligned ? undefined : columns.length - 2" :create="create" @close="emit('closeCreate')" />
+      <tbody v-if="creating && projectId && create" class="create-body">
+        <QuickCreateRow ref="quick" :project-id="projectId" :known-states="knownStates ?? []" :trailing="columns.length - 4" :span="quickAligned ? undefined : columns.length - 2" :create="create" @close="emit('closeCreate')" />
       </tbody>
       <tbody v-if="loading && !entries.length" class="skeleton-body" aria-hidden="true">
         <tr v-for="index in skeletonRows" :key="index" class="ticket-row ghost">
@@ -544,15 +664,29 @@ defineExpose({
       <tbody v-for="section in sections" v-else :key="section.key" :class="{ dim: loading }">
         <template v-for="entry in section.entries" :key="entry.key">
           <!-- List grouping header (status or epic) -->
-          <tr v-if="entry.type === 'list-group'" class="group-row" :class="{ collapsed: collapsed.has(entry.group.key) }">
+          <tr v-if="entry.type === 'list-group'" :id="`row-group-${entry.group.key}`" class="group-row" :class="{ collapsed: collapsed.has(entry.group.key) }">
             <th :colspan="columns.length" scope="rowgroup">
               <div class="group-head">
-                <button type="button" class="group-toggle" :aria-expanded="!collapsed.has(entry.group.key)" :aria-label="`${collapsed.has(entry.group.key) ? 'Expand' : 'Collapse'} ${entry.group.epic ? entry.group.epic.key : entry.group.label}`" @click="emit('toggleGroup', entry.group.key)">
+                <button type="button" class="group-toggle" :aria-expanded="!collapsed.has(entry.group.key)" :aria-label="german ? `${groupName(entry.group)} ${collapsed.has(entry.group.key) ? 'aufklappen' : 'zuklappen'}` : `${collapsed.has(entry.group.key) ? 'Expand' : 'Collapse'} ${groupName(entry.group)}`" @click="toggleGroup(entry.group.key)">
                   <AppIcon name="chevron" :size="14" />
                 </button>
-                <template v-if="group === 'status'">
+                <label v-if="selectable" class="group-check-target">
+                  <input type="checkbox" class="group-check" :checked="groupChecked(entry.group)" :indeterminate="groupMixed(entry.group)" :disabled="selectionDisabled || !selectableRows(entry.group).length" :aria-label="german ? `Alle Vorschläge in ${groupName(entry.group)} auswählen` : `Select every loaded ticket in ${groupName(entry.group)}`" @change="selectGroup($event, entry.group)" />
+                </label>
+                <template v-if="entry.group.project">
+                  <AppIcon v-if="entry.group.icon" :name="entry.group.icon as IconName" :size="14" class="group-icon" />
+                  <span class="key">{{ entry.group.project.key }}</span>
+                  <span v-clip-tip="entry.group.project.title" class="group-label">{{ entry.group.project.title }}</span>
+                  <span class="group-count mono">{{ entry.group.total }}</span>
+                </template>
+                <template v-else-if="entry.group.icon">
+                  <AppIcon :name="entry.group.icon as IconName" :size="14" />
+                  <span v-clip-tip="entry.group.label" class="group-label">{{ entry.group.label }}</span>
+                  <span class="group-count mono">{{ entry.group.total }}</span>
+                </template>
+                <template v-else-if="group === 'status'">
                   <StatusIcon :state="entry.group.state ?? ''" />
-                  <span class="group-label">{{ entry.group.label }}</span>
+                  <span v-clip-tip="entry.group.label" class="group-label">{{ entry.group.label }}</span>
                   <span class="group-count mono">{{ entry.group.total }}</span>
                 </template>
                 <template v-else-if="entry.group.epic">
@@ -570,33 +704,58 @@ defineExpose({
                 </template>
                 <template v-else-if="entry.group.person">
                   <PersonAvatar :id="entry.group.person.id" :name="entry.group.person.name" :size="18" />
-                  <span class="group-label">{{ entry.group.label }}</span>
+                  <span v-clip-tip="entry.group.label" class="group-label">{{ entry.group.label }}</span>
                   <span class="group-count mono">{{ entry.group.total }}</span>
                 </template>
                 <template v-else-if="entry.group.priority && entry.group.priority !== 'none'">
                   <PriorityIcon :priority="entry.group.priority" />
-                  <span class="group-label">{{ entry.group.label }}</span>
+                  <span v-clip-tip="entry.group.label" class="group-label">{{ entry.group.label }}</span>
                   <span class="group-count mono">{{ entry.group.total }}</span>
                 </template>
                 <template v-else-if="entry.group.kind">
                   <AppIcon :name="entry.group.kind === 'epic' ? 'epic' : entry.group.kind === 'task' ? 'task' : 'ticket'" :size="14" class="kind-glyph" :class="entry.group.kind" />
-                  <span class="group-label">{{ entry.group.label }}</span>
+                  <span v-clip-tip="entry.group.label" class="group-label">{{ entry.group.label }}</span>
                   <span class="group-count mono">{{ entry.group.total }}</span>
                 </template>
                 <template v-else-if="entry.group.tag">
                   <i class="tag-dot group-dot" :data-color="entry.group.tag.color || undefined" aria-hidden="true" />
-                  <span class="group-label">{{ entry.group.label }}</span>
+                  <span v-clip-tip="entry.group.label" class="group-label">{{ entry.group.label }}</span>
                   <span class="group-count mono">{{ entry.group.total }}</span>
                 </template>
                 <template v-else>
                   <span class="group-label muted">{{ entry.group.label }}</span>
                   <span class="group-count mono">{{ entry.group.total }}</span>
                 </template>
+                <span class="group-spacer" />
+                <span v-if="$slots['group-end']" class="group-end"><slot name="group-end" :group="entry.group" /></span>
               </div>
             </th>
           </tr>
+          <tr v-else-if="entry.type === 'group-more'" class="more-row group-more">
+            <td :colspan="columns.length"><div class="cell">
+              <span class="mono">{{ shownLabel(entry.group) }}</span>
+              <button type="button" class="more-btn" :disabled="entry.group.loadingMore" :aria-label="moreLabel(entry.group)" @click="emit('moreInGroup', entry.group.key)">{{ entry.group.loadingMore ? (german ? 'Vorschläge werden geladen…' : 'Loading suggestions…') : (german ? '50 weitere zeigen' : 'Show 50 more') }}</button>
+              <span v-if="entry.group.moreError" role="alert">{{ entry.group.moreError }}</span>
+            </div></td>
+          </tr>
 
-          <!-- Outline "No epic" group: also a drop target to take a ticket out of its epic -->
+          <!-- Unified Outline: a destination above growing rows. -->
+          <template v-else-if="entry.type === 'root'">
+            <tr
+              v-if="canDrag" class="outline-root-drop" aria-label="Project root drop destination" :class="{ 'drop-target': dropTarget === 'no-epic' }"
+              @dragover="dragOver($event, null)" @dragleave="dragLeave($event, 'no-epic')" @drop="drop($event, null)"
+            >
+              <td :colspan="columns.length">
+                <div class="root-drop-head">
+                  <AppIcon name="folder" :size="14" />
+                  <span>{{ entry.label }}</span>
+                  <span class="root-drop-hint">Drop nested work here</span>
+                </div>
+              </td>
+            </tr>
+          </template>
+
+          <!-- Legacy Outline loose-work group also accepts project-root drops. -->
           <tr
             v-else-if="entry.type === 'group'" class="group-row outline-group" :class="{ collapsed: entry.collapsed, 'drop-target': dropTarget === 'no-epic' }"
             @dragover="dragOver($event, null)" @dragleave="dragLeave($event, 'no-epic')" @drop="drop($event, null)"
@@ -616,7 +775,7 @@ defineExpose({
           <!-- Children still loading -->
           <tr v-else-if="entry.type === 'skeleton'" class="ticket-row ghost tree-row" aria-hidden="true">
             <td class="c-key"><div class="cell"><span class="skeleton sk-key" /></div></td>
-            <td class="c-title">
+            <td class="c-title" data-column-id="title">
               <div class="cell title-cell">
                 <span class="tree" :style="{ width: `${(entry.depth + 1) * INDENT}px` }">
                   <span v-for="i in entry.depth" :key="i" class="guide" :class="guideClass(i - 1, entry.depth, entry.guides, entry.last)" :style="{ left: `${(i - 1) * INDENT}px` }" />
@@ -642,60 +801,62 @@ defineExpose({
 
           <!-- Inline create under an epic -->
           <QuickCreateRow
-            v-else-if="entry.type === 'create'" ref="inlineQuick" :project-id="projectId" :known-states="knownStates" :trailing="columns.length - 4" :span="quickAligned ? undefined : columns.length - 2" :create="create"
+            v-else-if="entry.type === 'create' && projectId && create" ref="inlineQuick" :project-id="projectId" :known-states="knownStates ?? []" :trailing="columns.length - 4" :span="quickAligned ? undefined : columns.length - 2" :create="create"
             :initial-epic="entry.epic" :indent="(entry.depth + 1) * INDENT" @close="emit('closeCreate')"
           />
 
           <!-- A ticket, task or epic -->
           <tr
-            v-else :id="'repeat' in entry && entry.repeat ? undefined : `row-${entry.row.id}`" class="ticket-row"
+            v-else-if="entry.type === 'row'" :id="'repeat' in entry && entry.repeat ? undefined : `row-${entry.row.id}`" class="ticket-row"
             :class="{
+              'fit-row': 'measuring' in entry && entry.measuring,
               selected: !!selected?.has(entry.row.id),
-              cursor: cursorId === entry.row.id, open: openId === entry.row.id, epic: entry.row.kind_slug === 'epic',
-              'tree-row': !!entry.tree, dimmed: entry.tree?.dimmed, top: entry.tree && entry.tree.depth === 0 && entry.row.kind_slug === 'epic',
+              cursor: cursorId === entry.row.id, open: openId === entry.row.id, epic: isWorkParent(entry.row),
+              'tree-row': !!entry.tree, dimmed: entry.tree?.dimmed, top: entry.tree && entry.tree.depth === 0 && isWorkParent(entry.row),
               'drop-target': dropTarget === entry.row.id, dragging: dragId === entry.row.id,
               stale: !!liveLabels?.has(entry.row.id), 'live-flash': !!liveFlash?.has(entry.row.id),
             }"
             :style="entry.tree ? { '--depth': entry.tree.depth } : undefined"
-            :aria-selected="cursorId === entry.row.id" :aria-level="entry.tree ? entry.tree.depth + 1 : undefined"
+            :aria-selected="selectable ? !!selected?.has(entry.row.id) : cursorId === entry.row.id" :aria-level="entry.tree ? entry.tree.depth + 1 : undefined"
             :aria-describedby="planningDescribedBy(entry.row) || undefined"
             :aria-expanded="entry.tree?.hasChildren ? entry.tree.expanded : undefined"
             :draggable="draggable(entry) ? 'true' : undefined"
             @click="rowClick($event, entry.row)" @contextmenu="longPress($event, entry.row)"
             @pointerdown="pressBegin($event, entry.row)" @pointermove="pressMove" @pointerup="pressFinish(true)" @pointercancel="pressFinish(false)"
             @dragstart="dragStart($event, entry.row)" @dragend="dragEnd"
-            @dragover="entry.row.kind_slug === 'epic' && entry.tree ? dragOver($event, entry.row) : undefined"
-            @dragleave="dragLeave($event, entry.row.id)" @drop="entry.row.kind_slug === 'epic' && entry.tree ? drop($event, entry.row) : undefined"
+            @dragover="isWorkParent(entry.row) && entry.tree ? dragOver($event, entry.row) : undefined"
+            @dragleave="dragLeave($event, entry.row.id)" @drop="isWorkParent(entry.row) && entry.tree ? drop($event, entry.row) : undefined"
           >
-            <td v-if="phone && selecting" class="c-check">
+            <td v-if="phone && selectable" class="c-check" :aria-hidden="!selecting">
               <button
-                type="button" class="phone-check" role="checkbox" :aria-checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`"
+                type="button" class="phone-check" :class="{ 'check-placeholder': !selecting }" :tabindex="selecting ? 0 : -1" role="checkbox" :aria-checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" :disabled="selectionDisabled || (rowSelectable ? !rowSelectable(entry.row) : false)"
                 @click.stop="emit('select', entry.row, 'toggle')"
               >
                 <span class="mark" aria-hidden="true"><AppIcon v-if="selected?.has(entry.row.id)" name="check" :size="13" /></span>
               </button>
             </td>
-            <td class="c-key">
+            <td class="c-key" data-column-id="key">
               <div class="cell">
                 <input
-                  v-if="selectable" type="checkbox" class="row-check" :checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" tabindex="-1"
+                  v-if="selectable" type="checkbox" class="row-check" :checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" tabindex="-1" :disabled="selectionDisabled || (rowSelectable ? !rowSelectable(entry.row) : false)"
                   @click="checkClick($event, entry.row)" @change="emit('select', entry.row, 'toggle')"
                 />
                 <button type="button" class="key key-btn" :aria-label="`Copy ${entry.row.key}`" :data-tip="`Copy ${entry.row.key}`" @click.stop="emit('copy', entry.row)">{{ entry.row.key }}</button>
               </div>
             </td>
-            <td class="c-title">
+            <td class="c-title" data-column-id="title">
               <div class="cell title-cell">
+                <slot name="cell-title" :row="entry.row">
                 <span v-if="entry.tree" class="tree" :style="{ width: `${(entry.tree.depth + 1) * INDENT}px` }">
                   <span v-for="i in entry.tree.depth" :key="i" class="guide" :class="guideClass(i - 1, entry.tree.depth, entry.tree.guides, entry.tree.last)" :style="{ left: `${(i - 1) * INDENT}px` }" />
                   <button
-                    v-if="entry.tree.hasChildren" type="button" class="twisty" :style="{ left: `${entry.tree.depth * INDENT}px` }" :aria-expanded="entry.tree.expanded"
+                    v-if="entry.tree.hasChildren" type="button" class="twisty" :style="{ '--twisty-left': `${entry.tree.depth * INDENT}px` }" :aria-expanded="entry.tree.expanded"
                     :aria-label="`${entry.tree.expanded ? 'Collapse' : 'Expand'} ${entry.row.key}`" tabindex="-1" @click.stop="emit('toggleRow', entry.row.id)"
                   ><AppIcon name="chevron-right" :size="13" /></button>
                   <span v-else class="twisty-spacer" />
                 </span>
-                <TicketTypeIcon :kind="entry.row.kind_slug" :recurrence="entry.row.recurrence" />
-                <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
+                <TicketTypeIcon :kind="entry.row.kind_slug" :level-name="workLabel(entry.row)" :level-icon="workIcon(entry.row)" :recurrence="entry.row.recurrence" />
+                <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
                 <span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span>
                 <span v-if="childCount(entry)" class="child-count mono" :data-tip="plural(childCount(entry), 'child item')">{{ childCount(entry) }}</span>
                 <span v-if="!entry.tree && epicChip(entry.row)" class="parent-chip" :class="{ epic: epicChip(entry.row)!.kind_slug === 'epic' }" :data-tip="`${kindLabel(epicChip(entry.row)!.kind_slug)} ${epicChip(entry.row)!.key}\n${epicChip(entry.row)!.title}`">
@@ -710,35 +871,37 @@ defineExpose({
                   <span class="bar"><i :style="{ width: `${Math.round(entry.tree.stats.done / entry.tree.stats.scope * 100)}%` }" /></span>
                   <span class="mono">{{ entry.tree.stats.done }}/{{ entry.tree.stats.scope }}</span>
                 </span>
+                </slot>
               </div>
               <span class="row-actions">
-                <QueueAction :row="entry.row" :project-id="projectId" />
+                <QueueAction v-if="entry.row.is_leaf !== false && projectOf(entry.row)" :row="entry.row" :project-id="projectOf(entry.row)!" />
                 <button type="button" class="icon-btn sm flat" :aria-label="`Open ${entry.row.key} in a new tab`" data-tip="Open in new tab" @click.stop="emit('newTab', entry.row)"><AppIcon name="external" :size="13" /></button>
               </span>
             </td>
             <template v-for="column in columns.slice(2)" :key="column.id">
-              <td v-if="column.id === 'status'" class="c-status">
+              <td v-if="hostIds.has(column.id)" class="c-host" :class="{ end: column.end }" :data-column-id="column.id" :data-column-label="column.label"><div class="cell"><slot :name="`cell-${column.id}`" :row="entry.row" /></div></td>
+              <td v-else-if="column.id === 'status'" class="c-status" :data-column-id="column.id" :data-column-label="column.label">
                 <div class="cell"><button type="button" class="status-btn" :aria-label="`Status: ${statusMeta(entry.row.state).label}${queued(entry.row) ? `, queued #${queued(entry.row)!.position}` : ''}. Change status of ${entry.row.key}`" aria-haspopup="menu" @click.stop="statusClick($event, entry.row)">
                   <StatusIcon :state="entry.row.state" />
                   <span>{{ statusMeta(entry.row.state).label }}</span><span v-if="queued(entry.row)" class="q-pos">· #{{ queued(entry.row)!.position }}</span>
-                </button></div>
+                </button><QueueStaleHint :row="entry.row" /></div>
               </td>
-              <td v-else-if="column.id === 'priority'" class="c-prio" :class="{ narrow: (colWidth('priority') ?? 112) < 100 }">
+              <td v-else-if="column.id === 'priority'" class="c-prio" :data-column-id="column.id" :data-column-label="column.label" :class="{ narrow: (colWidth('priority') ?? 112) < 100 }">
                 <div class="cell" :data-tip="entry.row.priority && entry.row.priority !== 'none' ? priorityLabel(entry.row.priority) : 'No priority'">
                   <template v-if="entry.row.priority && entry.row.priority !== 'none'"><PriorityIcon :priority="entry.row.priority" /><span class="prio-label">{{ priorityLabel(entry.row.priority) }}</span></template>
                   <span v-else class="empty" aria-label="No priority">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'assignee'" class="c-assignee">
-                <div class="cell"><button type="button" class="assignee-btn" :disabled="!mayAssign" :aria-label="`Assignee: ${queued(entry.row) ? `queued #${queued(entry.row)!.position}` : entry.row.assignee?.name ?? 'Unassigned'}. Change assignee of ${entry.row.key}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)">
+              <td v-else-if="column.id === 'assignee'" class="c-assignee" :data-column-id="column.id" :data-column-label="column.label">
+                <div class="cell"><button type="button" class="assignee-btn" :disabled="!mayAssign(entry.row)" :aria-label="`Assignee: ${queued(entry.row) ? `queued #${queued(entry.row)!.position}` : entry.row.assignee?.name ?? 'Unassigned'}. Change assignee of ${entry.row.key}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)">
                   <span v-if="entry.row.assignee" class="owner" :class="{ 'with-workers': assigneeWorkers(entry.row).length || queued(entry.row) }" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span v-if="!queued(entry.row)" class="person-name">{{ entry.row.assignee.name }}</span></span>
-                  <QueueIndicator v-if="queued(entry.row)" :entry="queued(entry.row)!" :manual="queue.snapshots[projectId]?.manual_order" />
+                  <QueueIndicator v-if="queued(entry.row)" :entry="queued(entry.row)!" :manual="queue.snapshots[projectOf(entry.row) ?? '']?.manual_order" />
                   <span v-else-if="assigneeWorkers(entry.row).length && !entry.row.assignee"><AppIcon name="chevron" :size="12" /></span>
                   <span v-else-if="!entry.row.assignee" class="empty" aria-label="Unassigned">—</span>
                 </button><TicketWorkers v-if="!queued(entry.row) && assigneeWorkers(entry.row).length" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" /></div>
               </td>
-              <td v-else-if="column.id === 'suggested'" class="c-suggested"><div class="cell"><SuggestedReleaseCell :row="entry.row" :project-id="projectId" :now="now" /></div></td>
-              <td v-else-if="column.id === 'epic'" class="c-epic">
+              <td v-else-if="column.id === 'suggested'" class="c-suggested" :data-column-id="column.id" :data-column-label="column.label"><div class="cell"><SuggestedReleaseCell v-if="projectOf(entry.row)" :row="entry.row" :project-id="projectOf(entry.row)!" :now="now" /></div></td>
+              <td v-else-if="column.id === 'epic'" class="c-epic" :data-column-id="column.id" :data-column-label="column.label">
                 <div class="cell">
                   <span v-if="epicOf(entry.row)" class="epic-cell" :data-tip="`Epic ${epicOf(entry.row)!.key}\n${epicOf(entry.row)!.title}`">
                     <AppIcon name="epic" :size="12" class="epic-glyph" />
@@ -747,44 +910,45 @@ defineExpose({
                   <span v-else class="empty" aria-label="No epic">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'release'" class="c-release">
+              <td v-else-if="column.id === 'release'" class="c-release" :data-column-id="column.id" :data-column-label="column.label">
                 <div class="cell">
                   <button
-                    v-if="canAssignRelease && entry.row.kind_slug !== 'epic'" type="button" class="release-chip mono" :class="{ bare: nativeRelease(entry.row).kind !== 'member' }"
+                    v-if="canAssignRelease" type="button" class="release-chip mono" :class="{ bare: nativeRelease(entry.row).kind !== 'member' }"
                     :aria-label="nativeRelease(entry.row).kind === 'member' ? `${nativeRelease(entry.row).label}. Change release of ${entry.row.key}` : nativeRelease(entry.row).kind === 'none' ? `No release. Add ${entry.row.key} to a release` : `Release unknown. Add ${entry.row.key} to a release`"
                     @click.stop="emit('release', entry.row, $event.currentTarget as HTMLElement)"
-                  >{{ nativeRelease(entry.row).text }}</button>
-                  <span v-else-if="nativeRelease(entry.row).kind === 'member'" class="release-chip mono">{{ nativeRelease(entry.row).text }}</span>
+                  ><span v-clip-tip class="release-text">{{ nativeRelease(entry.row).text }}</span></button>
+                  <span v-else-if="nativeRelease(entry.row).kind === 'member'" v-clip-tip class="release-chip mono">{{ nativeRelease(entry.row).text }}</span>
                   <span v-else class="empty" :aria-label="nativeRelease(entry.row).label">{{ nativeRelease(entry.row).text }}</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'tags'" class="c-tags">
+              <td v-else-if="column.id === 'tags'" class="c-tags" :data-column-id="column.id" :data-column-label="column.label">
                 <div v-if="tagList(entry.row.fields).length" class="cell tag-cell" :data-tip="tagTip(tagList(entry.row.fields))">
                   <span v-for="tag in tagList(entry.row.fields).slice(0, TAG_SHOWN)" :key="tag.name" class="tag-chip"><i class="tag-dot" :data-color="tag.color || undefined" aria-hidden="true" />{{ tag.name }}</span>
                   <span v-if="tagList(entry.row.fields).length > TAG_SHOWN" class="tag-more mono">+{{ tagList(entry.row.fields).length - TAG_SHOWN }}</span>
                 </div>
                 <div v-else class="cell"><span class="empty" aria-label="No tags">—</span></div>
               </td>
-              <td v-else-if="column.id === 'cost'" class="c-cost">
+              <td v-else-if="column.id === 'cost'" class="c-cost" :data-column-id="column.id" :data-column-label="column.label">
                 <div class="cell">
                   <span v-if="costUnitLabel(entry.row.fields)" class="cost-cell" :data-tip="`Cost unit ${costUnitLabel(entry.row.fields)}`"><AppIcon name="coin" :size="12" class="cost-glyph" /><span class="cost-name">{{ costUnitLabel(entry.row.fields) }}</span></span>
                   <span v-else class="empty" aria-label="No cost unit">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'estimate'" class="c-estimate"><div class="cell"><span v-if="estimate(entry.row)" class="mono" :class="{ 'estimate-draft': estimateDisplay(entry.row).draft }" :data-tip="estimateDisplay(entry.row).tip">{{ estimate(entry.row) }}<span v-if="estimateDisplay(entry.row).draft" class="estimate-mark"> est.</span></span><span v-else class="empty" :aria-label="emptyEstimateTip(entry.row) || 'No estimate'" :data-tip="emptyEstimateTip(entry.row) || undefined">—</span></div></td>
-              <td v-else-if="column.id === 'created'" class="c-created"><div class="cell"><time :datetime="entry.row.created_at" :data-tip="absoluteTime(entry.row.created_at)">{{ relativeTime(entry.row.created_at, { now }) }}</time></div></td>
-              <td v-else-if="column.id === 'updated'" class="c-updated"><div class="cell"><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }) }}</time></div></td>
-              <td v-else-if="column.id === 'progress'" class="c-progress">
+              <td v-else-if="column.id === 'estimate'" class="c-estimate" :data-column-id="column.id" :data-column-label="column.label"><div class="cell"><span v-if="estimate(entry.row)" class="mono" :class="{ 'estimate-draft': estimateDisplay(entry.row).draft, 'aggregate-estimate': entry.row.estimate?.is_parent }" :data-tip="estimateDisplay(entry.row).tip"><template v-if="entry.row.estimate?.is_parent"><span class="aggregate-line">{{ entry.row.estimate.hours == null ? '—' : formatEstimate(entry.row.estimate.hours) }} leaves</span><span v-if="entry.row.estimate.planned_hours != null" class="aggregate-line">{{ formatEstimate(entry.row.estimate.planned_hours) }} planned</span></template><template v-else>{{ estimate(entry.row) }}<span v-if="estimateDisplay(entry.row).draft" class="estimate-mark"> est.</span></template></span><span v-else class="empty" :aria-label="emptyEstimateTip(entry.row) || 'No estimate'" :data-tip="emptyEstimateTip(entry.row) || undefined">—</span></div></td>
+              <td v-else-if="column.id === 'created'" class="c-created" :data-column-id="column.id" :data-column-label="column.label"><div class="cell"><time :datetime="entry.row.created_at" :data-tip="absoluteTime(entry.row.created_at)">{{ relativeTime(entry.row.created_at, { now }) }}</time></div></td>
+              <td v-else-if="column.id === 'updated'" class="c-updated" :data-column-id="column.id" :data-column-label="column.label"><div class="cell"><time :datetime="entry.row.updated_at" :data-tip="absoluteTime(entry.row.updated_at)">{{ relativeTime(entry.row.updated_at, { now }) }}</time></div></td>
+              <td v-else-if="column.id === 'progress'" class="c-progress" :data-column-id="column.id" :data-column-label="column.label">
                 <div class="cell">
                   <span v-if="progressOf(entry.row)" class="progress-read" :class="{ stale: progressOf(entry.row)!.stale }" role="img" :aria-label="progressOf(entry.row)!.label" :data-tip="progressOf(entry.row)!.label">
-                    <span class="bar" aria-hidden="true"><i :style="{ width: `${progressOf(entry.row)!.pct}%` }" /></span>
+                    <span v-if="!entry.row.estimate?.is_parent" class="bar" aria-hidden="true"><i :style="{ width: `${progressOf(entry.row)!.pct}%` }" /></span>
+                    <span v-else class="leaf-coverage" aria-hidden="true">{{ entry.row.eta?.estimated_leaves ?? 0 }}/{{ entry.row.eta?.leaf_count ?? 0 }} est.</span>
                     <span class="pct" aria-hidden="true">{{ progressOf(entry.row)!.pct }}%</span>
                   </span>
                   <span v-else class="empty" aria-label="No progress">—</span>
                 </div>
               </td>
-              <td v-else-if="column.id === 'eta'" class="c-eta"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" :missing="!!entry.row.eta?.has_working_session" :connection-stale="liveStale" /></div></td>
-              <td v-else-if="isPlanning(column.id)" :class="column.cls"><div class="cell"><PlanningCell :column="column.id" :row="entry.row" :row-id="entry.row.id" /></div></td>
+              <td v-else-if="column.id === 'eta'" class="c-eta" :data-column-id="column.id" :data-column-label="column.label"><div class="cell"><EtaCell :eta="etaFromTicket(entry.row.eta)" :now="now" :missing="!!entry.row.eta?.has_working_session" :connection-stale="liveStale" /></div></td>
+              <td v-else-if="isPlanning(column.id)" :class="column.cls" :data-column-id="column.id" :data-column-label="column.label"><div class="cell"><PlanningCell :column="column.id" :row="entry.row" :row-id="entry.row.id" /></div></td>
             </template>
           </tr>
         </template>
@@ -795,7 +959,7 @@ defineExpose({
       <span class="state-icon danger"><AppIcon name="alert" :size="18" /></span>
       <h2>Tickets could not be loaded</h2>
       <p>{{ error }}</p>
-      <button type="button" class="btn" @click="emit('retry')"><AppIcon name="refresh" :size="14" />Try again</button>
+      <button type="button" class="btn" @click="emit('retry')"><AppIcon name="refresh" :size="14" />{{ retryLabel ?? 'Try again' }}</button>
     </div>
     <div v-else-if="!loading && !entries.length" class="state">
       <span class="state-icon"><AppIcon :name="filtered ? 'filter' : 'inbox'" :size="18" /></span>
@@ -804,6 +968,9 @@ defineExpose({
         <div class="state-actions">
           <button type="button" class="btn" @click="emit('clearFilters')">Clear filters</button>
         </div>
+      </template>
+      <template v-else-if="emptyText">
+        <h2>{{ emptyText }}</h2>
       </template>
       <template v-else-if="hidingClosed">
         <h2>Nothing open here</h2>
@@ -820,6 +987,7 @@ defineExpose({
     <div v-if="loadingMore" class="list-foot" role="status"><span class="spinner" aria-hidden="true" />Loading more tickets…</div>
     <div v-else-if="moreError" class="list-foot error" role="alert">More tickets could not be loaded. <button type="button" class="btn sm" @click="emit('more')">Retry</button></div>
     <div v-else-if="!loading && !error && total && !hasMore && entries.length" class="list-foot end phone-only">{{ plural(total, 'ticket') }}</div>
+    <div v-if="foldSpace" class="fold-space" :style="{ height: `${foldSpace}px` }" aria-hidden="true" />
   </div>
 </template>
 
@@ -831,6 +999,11 @@ defineExpose({
   container: tickets / inline-size;
 }
 .table-card.compact { --row-h: 30px; }
+/* Touch tablets need a full 44px content line plus the row's hairline.
+   Both densities keep hit targets inside their row; fine pointers stay dense. */
+@media (min-width: 721px) and (pointer: coarse) {
+  .table-card, .table-card.compact { --row-h: 45px; }
+}
 .tickets { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 13.5px; }
 .tickets:focus-visible { box-shadow: none; }
 /* Keyboard cursor: the app focus ring around the whole row. A shadow on the
@@ -898,7 +1071,7 @@ tbody:last-of-type .ticket-row:last-child td { border-bottom: 0; }
 .guide.line::before, .guide.elbow::before { content: ''; position: absolute; left: 8.5px; top: 0; bottom: 0; width: 1px; background: var(--line-2); }
 .guide.elbow.last::before { bottom: 50%; }
 .guide.elbow::after { content: ''; position: absolute; left: 8.5px; top: 50%; width: 9px; height: 1px; background: var(--line-2); }
-.twisty { position: absolute; top: 50%; display: grid; place-items: center; width: 18px; height: 22px; margin-top: -11px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); }
+.twisty { position: absolute; top: 50%; left: var(--twisty-left); display: grid; place-items: center; width: 18px; height: 22px; margin-top: -11px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink-3); }
 .twisty svg { transition: transform .15s ease; }
 .twisty[aria-expanded="true"] svg { transform: rotate(90deg); }
 @media (hover: hover) { .twisty:hover { color: var(--ink); background: var(--row-selected); } }
@@ -940,7 +1113,11 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .ticket-row.drop-target td, .outline-group.drop-target th { background: var(--row-selected); }
 .ticket-row.drop-target { outline: 2px solid var(--teal); outline-offset: -2px; }
 .outline-group.drop-target th { box-shadow: inset 0 0 0 2px var(--teal); }
-.drop-pill { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 22px; margin-left: auto; padding: 0 10px; border-radius: 999px; background: var(--teal); color: var(--button-ink); font-size: 11.5px; font-weight: 600; box-shadow: 0 6px 14px -8px rgba(14, 111, 108, .8); }
+.outline-root-drop td { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface-raised-2); }
+.root-drop-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-height: 36px; padding: 6px 0; font-size: 12px; color: var(--ink-3); }
+.root-drop-hint { margin-left: auto; }
+.outline-root-drop.drop-target td { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }
+.drop-pill { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 22px; margin-left: auto; padding: 0 10px; border-radius: 999px; background: linear-gradient(180deg, var(--primary-hi), var(--primary)); color: var(--primary-on); font-size: 11.5px; font-weight: 600; box-shadow: 0 6px 14px -8px color-mix(in srgb, var(--primary-line) 80%, transparent); }
 .outline-group th { top: calc(var(--toolbar-h, 0px) + 35px); }
 .more-row td { height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line); }
 .more-btn { height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
@@ -956,8 +1133,9 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .key { font: 500 11.5px/18px var(--mono); color: var(--ink-2); letter-spacing: .01em; font-variant-ligatures: none; }
 .ticket-row.open .key, .ticket-row.cursor .key { color: var(--teal-ink); }
 .kind-glyph { color: var(--ink-3); }
-.kind-glyph.epic { color: var(--gold); }
+.kind-glyph.epic { color: var(--kind-parent); }
 .title-link { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); text-decoration: none; }
+.title-text { display: block; overflow: hidden; text-overflow: ellipsis; }
 .ticket-row.epic .title-link { font-weight: 650; }
 .title-link:focus-visible { box-shadow: none; }
 .child-count { flex-shrink: 0; height: 17px; padding: 0 6px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); font-size: 10.5px; line-height: 17px; color: var(--ink-2); }
@@ -965,12 +1143,15 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .parent-chip { display: inline-flex; align-items: center; gap: 5px; flex: 0 3 auto; min-width: 0; max-width: 180px; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--code-bg); color: var(--ink-3); font-size: 12px; line-height: 20px; }
 .parent-chip.epic { min-width: 64px; }
 .parent-chip:not(.epic) { flex-shrink: 0; }
-.parent-chip.epic svg { color: var(--gold); opacity: .85; }
+.parent-chip.epic svg { color: var(--kind-parent); opacity: .85; }
 .parent-chip .mono { font-size: 11px; }
 .parent-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Row actions float over the end of the title cell instead of reserving space in every
    row; the title fades out beneath them, whatever the row tint underneath. */
 td.c-title { position: relative; overflow: hidden; }
+/* Let the arrow's invisible reach cross the cell edge on touch layouts.
+   The title link and phone title text retain their own clipping. */
+@media (max-width: 720px), (pointer: coarse) { td.c-title { overflow: visible; } }
 .row-actions { position: absolute; top: 50%; right: 8px; display: inline-flex; gap: 2px; transform: translateY(-50%); visibility: hidden; }
 /* The parent chip steps out entirely while row actions show, so it is never clipped. */
 @media (hover: hover) { .ticket-row:hover .parent-chip { opacity: 0; } }
@@ -992,6 +1173,17 @@ td.c-title { position: relative; overflow: hidden; }
 .row-actions :deep(.icon-btn) { width: 24px; height: 24px; color: var(--ink-3); }
 .row-actions :deep(.icon-btn):hover { color: var(--teal-ink); }
 .compact .row-actions :deep(.icon-btn) { width: 22px; height: 22px; }
+@media (min-width: 721px) and (pointer: coarse) {
+  /* Keep the compact visuals, but reserve each full 44px reach plus the
+     existing 2px separation before interaction, as on fine pointers above.
+     Padding contains the outer edges as well. Touch can set :hover during
+     a hold; reserving space only then shrinks the name under the pointer. */
+  .row-actions { gap: 22px; padding: 0 10px; }
+  .compact .row-actions { gap: 24px; padding: 0 11px; }
+  /* Reserve the touch action reach before hover/focus so the recurring
+     marker never changes the title width when those actions appear. */
+  .title-cell { padding-right: 98px; }
+}
 
 .status-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 13px; line-height: 18px; white-space: nowrap; }
 .status-btn span { overflow: hidden; text-overflow: ellipsis; }
@@ -1016,8 +1208,12 @@ td.c-title { position: relative; overflow: hidden; }
 .c-updated time, .c-created time { color: var(--ink-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
 .c-estimate .mono.estimate-draft { color: var(--ink-3); }
 .estimate-mark { font-size: 10px; }
+.aggregate-estimate { display: grid; gap: 0; min-width: 0; max-width: 100%; line-height: 14px; text-align: right; }
+.aggregate-line { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.c-estimate .mono.aggregate-estimate { font-size: 10.5px; }
 .c-estimate .mono { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .progress-read { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; max-width: 100%; color: var(--ink-2); }
+.leaf-coverage { color: var(--ink-3); font: 10px var(--mono); white-space: nowrap; }
 .progress-read .bar { width: 36px; height: 4px; flex: none; box-shadow: none; }
 .progress-read .bar > i { box-shadow: none; }
 .progress-read .pct { flex: none; font: 500 11px/1 var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; color: var(--ink-2); }
@@ -1034,33 +1230,46 @@ th.c-progress .th-sort, th.c-eta .th-sort, th.c-tokens .th-sort, th.c-list-cost 
 .cost-name { overflow: hidden; text-overflow: ellipsis; }
 .group-dot { width: 8px; height: 8px; margin: 0 3px; }
 .release-chip { overflow: hidden; text-overflow: ellipsis; max-width: 100%; padding: 2px 7px; border: 0; border-radius: 6px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font: inherit; font-size: 11.5px; font-variant-ligatures: none; cursor: pointer; }
-button.release-chip { display: inline-flex; align-items: center; height: 22px; }
+button.release-chip { display: inline-flex; align-items: center; height: 22px; width: 100%; }
+.release-text { min-width: 0; flex: 1; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 button.release-chip.bare { background: transparent; box-shadow: none; color: var(--ink-3); }
 button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .tag-cell { gap: 4px; overflow: hidden; }
 .tag-chip { display: inline-flex; flex-shrink: 1; align-items: center; gap: 5px; min-width: 0; max-width: 100%; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The classic tag colours as a small dot; the name carries the meaning. */
 .tag-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); }
-.tag-dot[data-color="blue"] { background: #4f86c6; }
-.tag-dot[data-color="red"] { background: #d0625b; }
-.tag-dot[data-color="green"] { background: #4f9e6f; }
-.tag-dot[data-color="yellow"], .tag-dot[data-color="orange"] { background: var(--gold); }
-.tag-dot[data-color="purple"] { background: #8a6cc2; }
-.tag-dot[data-color="teal"], .tag-dot[data-color="cyan"] { background: var(--teal); }
-.tag-dot[data-color="pink"] { background: #c7679a; }
+.tag-dot[data-color="blue"] { background: var(--label-blue); }
+.tag-dot[data-color="red"] { background: var(--label-red); }
+.tag-dot[data-color="green"] { background: var(--label-green); }
+.tag-dot[data-color="yellow"], .tag-dot[data-color="orange"] { background: var(--label-yellow); }
+.tag-dot[data-color="purple"] { background: var(--label-purple); }
+.tag-dot[data-color="teal"], .tag-dot[data-color="cyan"] { background: var(--label-teal); }
+.tag-dot[data-color="pink"] { background: var(--label-pink); }
 .tag-more { flex-shrink: 0; color: var(--ink-3); font-size: 11px; }
 .c-prio.narrow .prio-label { display: none; }
 
 .group-row th { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; height: 36px; padding: 0 12px 0 8px; text-align: left; font-weight: 400; background: var(--surface-raised-2); border-bottom: 1px solid var(--line); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.group-spacer { flex: 1; min-width: 0; }
+.group-end { display: flex; align-items: center; flex: none; min-width: 0; gap: 8px; }
+.group-check-target { display: grid; place-items: center; flex: none; width: 24px; height: 24px; }
+.group-check { width: 16px; height: 16px; margin: 0; accent-color: var(--teal); cursor: pointer; }
+.group-more td { padding: 0 18px; border-bottom: 1px solid var(--line); }
+.group-more .cell { gap: 12px; color: var(--ink-3); font-size: 12px; }
+.c-host.end .cell { justify-content: flex-end; }
+@media (pointer: coarse), (max-width: 720px) {
+  .group-toggle, .group-check-target { min-width: 44px; min-height: 44px; }
+  .key-btn { min-width: 44px; min-height: 44px; height: auto; }
+  .group-more .more-btn { min-height: 44px; }
+}
 .group-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.group-toggle { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); }
+.group-toggle { flex: none; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); }
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
 .group-toggle:focus-visible, .group-epic:focus-visible { box-shadow: var(--focus-ring); }
 .group-row.collapsed .group-toggle svg { transform: rotate(-90deg); }
-.group-label { font-size: 13px; font-weight: 650; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-label { min-width: 0; font-size: 13px; font-weight: 650; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-label.muted { color: var(--ink-2); }
-.group-count { font-size: 11px; color: var(--ink-3); }
-.epic-glyph { color: var(--gold); }
+.group-count { flex: none; font-size: 11px; color: var(--ink-3); }
+.epic-glyph { color: var(--kind-parent); }
 .group-epic { display: inline-flex; align-items: center; gap: 10px; min-width: 0; height: 26px; padding: 0 8px; margin-left: -4px; border: 0; border-radius: 6px; background: transparent; }
 .group-epic:hover { background: var(--row-hover); }
 .group-epic.cursor, .group-epic.open { background: var(--row-selected); }
@@ -1114,9 +1323,11 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
     display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; grid-template-areas: "key status prio updated" "title title title title";
     align-items: center; gap: 5px 10px; height: auto; padding: 10px 14px 11px; border-bottom: 1px solid var(--line);
   }
+  /* The compact status visual is 2px shorter; leave its 44px reach inside the card. */
+  .table-card.compact .ticket-row { padding-top: 11px; }
   /* Native boxes stay for the wide layout. A phone uses the round mark instead. */
   .row-check { display: none; }
-  .table-card.selecting .ticket-row {
+  .table-card.selectable .ticket-row {
     grid-template-columns: 44px auto auto minmax(0, 1fr) auto;
     grid-template-areas: "check key status prio updated" "check title title title title";
     padding-left: 2px; column-gap: 6px;
@@ -1124,14 +1335,15 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .c-check { display: flex; grid-area: check; align-self: center; justify-content: center; }
   .phone-check {
     display: grid; place-items: center; width: 44px; height: 44px; margin: 0; padding: 0; border: 0; border-radius: 50%;
-    background: transparent; color: var(--button-ink);
+    background: transparent; color: var(--primary-on);
   }
   .phone-check .mark {
     display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
     box-shadow: inset 0 0 0 1.5px var(--ink-2); background: var(--surface);
   }
-  .phone-check[aria-checked="true"] .mark { background: var(--teal); box-shadow: none; }
+  .phone-check[aria-checked="true"] .mark { background: linear-gradient(180deg, var(--primary-hi), var(--primary)); box-shadow: none; }
   .phone-check:focus-visible { box-shadow: var(--focus-ring); }
+  .phone-check.check-placeholder { visibility: hidden; pointer-events: none; }
   .ticket-row.selected { background: var(--row-selected); }
   .ticket-row td { display: block !important; height: auto; padding: 0; border: 0; background: none !important; box-shadow: none !important; }
   .ticket-row td:first-child { padding-left: 0; }
@@ -1143,18 +1355,18 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .c-estimate { grid-area: estimate; justify-self: end; align-self: center; min-width: 0; }
   .c-estimate .cell { height: auto; }
   .ticket-row:not(:has(.c-estimate .mono)) .c-estimate { display: none !important; }
-  .ticket-row:has(.c-estimate .mono) { grid-template-areas: "key status prio updated" "title title title estimate"; }
-  .table-card.selecting .ticket-row:has(.c-estimate .mono) { grid-template-areas: "check key status prio updated" "check title title title estimate"; }
+  .table-card:not(.customised) .ticket-row:has(.c-estimate .mono) { grid-template-areas: "key status prio updated" "title title title estimate"; }
+  .table-card.selectable:not(.customised) .ticket-row:has(.c-estimate .mono) { grid-template-areas: "check key status prio updated" "check title title title estimate"; }
   .c-progress { grid-area: progress; justify-self: end; min-width: 0; }
   .ticket-row:not(:has(.progress-read)) .c-progress { display: none !important; }
-  .ticket-row:has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress"; }
-  .table-card.selecting .ticket-row:has(.progress-read) {
+  .table-card:not(.customised) .ticket-row:has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress"; }
+  .table-card.selectable:not(.customised) .ticket-row:has(.progress-read) {
     grid-template-columns: 44px auto auto minmax(0, 1fr) auto;
     grid-template-areas: "check key status prio updated" "check title title title progress";
   }
   /* With both, the title spans two lines beside progress over the estimate. */
-  .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress" "title title title estimate"; }
-  .table-card.selecting .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "check key status prio updated" "check title title title progress" "check title title title estimate"; }
+  .table-card:not(.customised) .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "key status prio updated" "title title title progress" "title title title estimate"; }
+  .table-card.selectable:not(.customised) .ticket-row:has(.c-estimate .mono):has(.progress-read) { grid-template-areas: "check key status prio updated" "check title title title progress" "check title title title estimate"; }
   /* A ready time shows where Updated sits; it is the fresher answer to "when". */
   .ticket-row:not(:has(.eta-cell)) .c-eta, .ticket-row:has(.eta-cell) .c-updated { display: none !important; }
   .c-eta { grid-area: updated; justify-self: end; min-width: 0; }
@@ -1181,7 +1393,9 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .guide { display: none; }
   /* The chevron area sits left of the title with a generous tap target. */
   .tree-row .title-cell { position: relative; padding-left: 0; }
-  .twisty { position: static; width: 36px; height: 36px; margin: -8px 0 -8px -10px; }
+  /* Centre the shared hit area on the arrow; desktop indentation is already
+     represented by the card's padding, so it must not offset the phone arrow. */
+  .twisty { position: relative; inset: auto; width: 36px; height: 36px; margin: -8px 0 -8px -10px; }
   .twisty-spacer { display: block; flex-shrink: 0; width: 26px; }
   .tree-row .tree { display: contents; }
   .tree-row .title-link { flex-basis: calc(100% - 60px); }
@@ -1196,12 +1410,45 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .c-prio .empty { display: none; }
   .ghost { display: grid; }
   .group-row, .group-row th { display: block; }
-  .group-row th { top: var(--toolbar-h, 0px); padding: 0 10px; }
-  .group-head { height: 40px; }
-  .table-card.selecting .ticket-row.tree-row { padding-left: calc(2px + var(--depth, 0) * 10px); }
+  .group-row th { top: var(--toolbar-h, 0px); padding: 0 10px; height: auto; min-height: 44px; }
+  .group-head { min-height: 44px; height: auto; flex-wrap: wrap; gap: 4px 8px; padding-block: 4px; }
+  .group-head .group-label { flex: 1; }
+  .group-end { flex: 0 0 100%; justify-content: flex-end; padding-left: 44px; }
+  .group-toggle, .group-check-target { width: 44px; height: 44px; }
+  .group-more, .group-more td { display: block; }
+  .group-more .cell { height: auto; min-height: 44px; flex-wrap: wrap; white-space: normal; }
+  .table-card.selectable .ticket-row.tree-row { padding-left: calc(2px + var(--depth, 0) * 10px); }
+  /* Saved columns read as labelled metadata below Key and Title, in the chosen
+     order. Automatic cards retain their compact layout above. No optional
+     value is hidden or placed in an implicit off-screen grid column. */
+  .table-card.customised .tickets .ticket-row {
+    grid-template-columns: minmax(0, 1fr); grid-template-areas: none;
+  }
+  .table-card.customised.selectable .tickets .ticket-row { grid-template-columns: 44px minmax(0, 1fr); }
+  .table-card.customised .ticket-row td { grid-area: auto; min-width: 0; justify-self: stretch; }
+  /* Copy remains a complete, separate touch target even while checks take
+     the first column. Long project keys wrap instead of escaping the card. */
+  .key-btn { min-width: 44px; min-height: 44px; height: auto; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+  .table-card.customised.selectable .ticket-row td { grid-column: 2; }
+  .table-card.customised.selectable .ticket-row .c-check { grid-column: 1; grid-row: 1 / span 2; }
+  .table-card.customised .ticket-row td[data-column-label] {
+    display: grid !important; grid-template-columns: minmax(7em, 30%) minmax(0, 1fr); align-items: center; gap: 8px;
+  }
+  .table-card.customised td[data-column-label]::before { content: attr(data-column-label); color: var(--ink-3); font-size: 11.5px; }
+  .table-card.customised td[data-column-label] .cell { min-width: 0; flex-wrap: wrap; justify-content: flex-start; white-space: normal; }
+  .table-card.customised .c-key .cell { min-width: 0; }
+  .table-card.customised td.c-host[data-column-label] { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .table-card.customised td.c-host[data-column-label] .cell { overflow: visible; }
+  .table-card.customised .c-host[data-column-label]::before { white-space: normal; }
+  .table-card.customised .c-prio .empty, .table-card.customised .prio-label { display: inline; }
+  .table-card.customised .cost-name, .table-card.customised .epic-name, .table-card.customised .person-name { white-space: normal; overflow-wrap: anywhere; }
+  @media (pointer: coarse) {
+    .table-card.customised .status-btn, .table-card.customised .assignee-btn, .table-card.customised button.release-chip { min-height: 44px; }
+  }
 }
 @media (min-width: 721px) {
   .table-card.overflowing { overflow-x: auto; overscroll-behavior-x: contain; }
   .table-card.overflowing thead th { top: 0; }
 }
+.ticket-row.fit-row { position: absolute; visibility: hidden; pointer-events: none; inline-size: max-content; }
 </style>

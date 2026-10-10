@@ -8,6 +8,9 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/jackc/pgx/v5"
 )
 
 func (f *fixture) listedComputers() []string {
@@ -189,9 +192,10 @@ func TestArchiveAccountCancelsQueuedHandoffRetry(t *testing.T) {
 	a, b := v.Enrollments[0], v.Enrollments[1]
 	insertRetry := func(target string) string {
 		var id string
-		if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,retry_of_run_id,retry_account_id)
-			SELECT tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,id,$2 FROM agent_runs WHERE id=$1 RETURNING id::text`,
-			*a.VerificationRunID, target).Scan(&id); err != nil {
+		if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,retry_of_run_id,retry_account_id)
+            SELECT tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,id,$2 FROM agent_runs WHERE id=$1 RETURNING id::text`, *a.VerificationRunID, target).Scan(&id)
+		}); err != nil {
 			t.Fatal(err)
 		}
 		return id

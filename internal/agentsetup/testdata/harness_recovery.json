@@ -27,6 +27,8 @@
     "probe_failed",
     "capacity_capture",
     "capacity_timeout",
+    "pairing_sync_failed",
+    "unsettled_previous_run",
     "future_reason"
   ],
   "fixes": {

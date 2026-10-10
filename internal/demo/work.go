@@ -43,14 +43,9 @@ func (s *seeder) agents() error {
 }
 
 func (s *seeder) agent(name string, scopes []string) (tenant.Principal, string, error) {
-	keyID, agentID, token, err := auth.OperatorCreateAgentKey(s.ctx, s.pool, s.tenantID, name, "", scopes, nil)
+	_, agentID, token, err := auth.OperatorCreateAgentKey(s.ctx, s.pool, s.tenantID, name, "", scopes, nil, s.admin.ID)
 	if err != nil {
 		return tenant.Principal{}, "", fmt.Errorf("agent %s: %w", name, err)
-	}
-	if name == "Lumen Scribe" {
-		if err := auth.OperatorGrantJourneyScopes(s.ctx, s.pool, s.tenantID, keyID, agentID); err != nil {
-			return tenant.Principal{}, "", err
-		}
 	}
 	return tenant.Principal{ID: agentID, TenantID: s.tenantID, Kind: tenant.Agent, Name: name}, token, nil
 }
@@ -89,10 +84,11 @@ func (s *seeder) work() error {
 }
 
 func (s *seeder) demoProfile(profiles []modelregistry.Profile, harness string) (modelregistry.Profile, error) {
-	for _, profile := range profiles {
-		if profile.Enabled && profile.Harness == harness {
-			return profile, nil
-		}
+	// An explicit grant of an older profile also qualifies every newer
+	// registered version of that line. The fictional desk records one model
+	// and one effort, so pin the current version of the first enabled line.
+	if profile, ok := explicitDemoGrant(profiles, harness); ok {
+		return profile, nil
 	}
 	// The built-in xAI pins use Cursor. Reuse that registry pin's model,
 	// effort and version for a demo Grok enrollment, without inventing a
@@ -111,6 +107,64 @@ func (s *seeder) demoProfile(profiles []modelregistry.Profile, harness string) (
 		}
 	}
 	return modelregistry.Profile{}, fmt.Errorf("no enabled %s model profile", harness)
+}
+
+// explicitDemoGrant keeps the first enabled profile's harness, family, line
+// and effort, then moves to the newest enabled version of that line. The
+// same-version other efforts stay off the grant, matching
+// aeon_account_allows_profile: only a strictly newer version inherits a pin.
+func explicitDemoGrant(profiles []modelregistry.Profile, harness string) (modelregistry.Profile, bool) {
+	anchor := -1
+	for i, profile := range profiles {
+		if profile.Enabled && profile.Harness == harness {
+			anchor = i
+			break
+		}
+	}
+	if anchor < 0 {
+		return modelregistry.Profile{}, false
+	}
+	pin := profiles[anchor]
+	best := pin
+	for _, candidate := range profiles {
+		if !sameDemoLine(pin, candidate) {
+			continue
+		}
+		_, _, bestVersion := modelregistry.ProfileLine(best)
+		_, _, candidateVersion := modelregistry.ProfileLine(candidate)
+		if successorVersion(candidateVersion, bestVersion) {
+			best = candidate
+		}
+	}
+	_, _, bestVersion := modelregistry.ProfileLine(best)
+	for _, candidate := range profiles {
+		if !sameDemoLine(pin, candidate) || candidate.Effort != pin.Effort {
+			continue
+		}
+		_, _, candidateVersion := modelregistry.ProfileLine(candidate)
+		if modelregistry.CompareModelVersions(candidateVersion, bestVersion) == 0 {
+			return candidate, true
+		}
+	}
+	return best, true
+}
+
+func sameDemoLine(pin, candidate modelregistry.Profile) bool {
+	if !candidate.Enabled || candidate.Harness != pin.Harness || candidate.Family != pin.Family {
+		return false
+	}
+	_, pinLine, _ := modelregistry.ProfileLine(pin)
+	_, candidateLine, _ := modelregistry.ProfileLine(candidate)
+	return candidateLine == pinLine
+}
+
+// successorVersion follows aeon_model_version_newer: an empty version or an
+// alias pin has no newer successor, and an alias candidate outranks a number.
+func successorVersion(candidate, pinned string) bool {
+	if candidate == pinned || candidate == "" || pinned == "" || pinned == "alias" {
+		return false
+	}
+	return modelregistry.CompareModelVersions(candidate, pinned) > 0
 }
 
 func (s *seeder) completedWork(work demoWork, profile modelregistry.Profile) error {

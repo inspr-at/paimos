@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentsetup"
 )
 
 const inboxHookMarker = " # aeon-inbox-hook-v1"
@@ -23,13 +26,49 @@ func (rt *runtime) cmdHookInstall(uninstall bool) *Command {
 		name = "uninstall"
 	}
 	var harness, scope string
-	var dryRun bool
+	var dryRun, paired bool
+	var setupRoot string
 	scope = "user"
 	return &Command{Name: name, Short: "Merge or remove Aeon inbox hooks", Use: "hook " + name + " --harness claude|codex [--scope user|project] [--dry-run]", maxArgs: 0, addFlags: func(fs *flagSet) {
 		fs.string(&harness, "harness", 0, "claude or codex")
 		fs.string(&scope, "scope", 0, "user (default) or project (current directory)")
 		fs.bool(&dryRun, "dry-run", 0, "print the owned hook changes without writing")
+		fs.bool(&paired, "paired", 0, "repair verified paired user hooks; never grants messaging")
+		fs.string(&setupRoot, "setup-root", 0, "approved private pairing state for paired repair")
 	}, run: func([]string) error {
+		if paired {
+			if scope != "user" {
+				return errors.New("project_scope")
+			}
+			if dryRun {
+				return errors.New("paired repair reports content-free capability status; dry-run is unsupported")
+			}
+			if harness != "claude" && harness != "codex" {
+				return usagef("--harness must be claude or codex")
+			}
+			store, err := agentsetup.OpenStore(setupRoot, false)
+			if err != nil {
+				return errors.New("approved pairing state unavailable")
+			}
+			defer store.Close()
+			executable, err := os.Executable()
+			if err != nil {
+				return errors.New("artifact_untrusted")
+			}
+			engine := &agentsetup.Engine{Store: store, Hooks: &agentsetup.HookInstaller{Enabled: true, Executable: executable, Scope: "user", Harness: harness}}
+			saved, err := engine.SavedOptions()
+			if err != nil {
+				return errors.New("approved pairing state unavailable")
+			}
+			engine.API = &agentsetup.HTTPClient{Origin: saved.Origin}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			progress, err := engine.RepairHooks(ctx, uninstall)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(rt.stdout).Encode(progress.HookCapabilities)
+		}
 		if harness != "claude" && harness != "codex" {
 			return usagef("--harness must be claude or codex")
 		}
@@ -103,6 +142,9 @@ func (rt *runtime) mergeInboxHooks(path, command, harness string, uninstall, dry
 	exists := err == nil
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errors.New("cannot read regular owned hook settings")
+	}
+	if bytes.Contains(before, []byte("aeon-inbox-hook-v2")) {
+		return errors.New("paired hook installation requires paired repair")
 	}
 
 	doc := map[string]json.RawMessage{}

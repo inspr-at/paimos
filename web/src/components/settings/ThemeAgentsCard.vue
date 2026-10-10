@@ -1,7 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, useId } from 'vue'
-import { agentPaletteInkTokens } from '../../lib/appearanceTheme'
+import { computed, nextTick, ref, useId } from 'vue'
 import type { ThemeRecord } from '../../lib/themes'
 import type { AgentThemeAppearance } from '../../lib/agentTheme'
 import { AGENT_PALETTES, type AgentPalette } from '../../lib/agentPalettes'
@@ -13,12 +12,6 @@ import SettingsCard from './SettingsCard.vue'
 const props = defineProps<{ draft: ThemeRecord; editable: boolean; readOnly?: boolean }>()
 const emit = defineEmits<{ change: [draft: ThemeRecord] }>()
 const id = useId(), avatarGrid = ref<HTMLElement>()
-const previewSurfaces = ref<HTMLElement[]>([])
-onMounted(() => {
-  for (const surface of previewSurfaces.value) {
-    for (const [token, ink] of Object.entries(agentPaletteInkTokens(getComputedStyle(surface)))) surface.style.setProperty(token, ink)
-  }
-})
 const appearance = computed(() => props.draft.values.agents)
 const available = new Set(availableVariants.map(variant => variant.id))
 const families = [{ id: 'indicator', name: 'Indicator' }, { id: 'robot', name: 'Robots' }, { id: 'creative', name: 'Creative' }] as const
@@ -106,16 +99,16 @@ function radioKeys(event: KeyboardEvent, options: readonly string[], current: st
           <legend>State colours</legend>
           <div class="palettes" role="radiogroup" aria-label="State colours" @keydown="radioKeys($event, AGENT_PALETTES.map(p => p.id), appearance.palette, value => change({ palette: value as AgentPalette }))">
             <button v-for="palette in AGENT_PALETTES" :key="palette.id" type="button" role="radio" :aria-checked="appearance.palette === palette.id" :tabindex="appearance.palette === palette.id ? 0 : -1" :disabled="!editable" :aria-describedby="`${id}-palette-detail`" @click="change({ palette: palette.id })">
-              <span class="palette-dots" aria-hidden="true"><i v-for="state in ['working', 'waiting', 'throttled', 'problem']" :key="state" :style="{ background: `var(--agent-${palette.id}-${state})` }" /></span>{{ palette.id === 'standard' || palette.id === 'monochrome' ? palette.name : palette.id[0]!.toUpperCase() + palette.id.slice(1) }}
+              <span class="palette-dots" aria-hidden="true"><i v-for="(state, index) in ['working', 'waiting', 'throttled', 'problem']" :key="state" :style="{ background: `light-dark(${palette.light[index]}, ${palette.dark[index]})` }" /></span>{{ ['standard', 'monochrome', 'focus', 'errors'].includes(palette.id) ? palette.name : palette.id[0]!.toUpperCase() + palette.id.slice(1) }}
             </button>
           </div>
           <p :id="`${id}-palette-detail`" class="detail palette-detail">{{ AGENT_PALETTES.find(p => p.id === appearance.palette)?.description }}</p>
-          <p class="hint">Appearance moved here from Agents under Personal. Heartbeat warnings and estimates stay there.</p>
+          <p class="hint">Appearance moved here from Personal settings, Agents. Heartbeat warnings and estimates stay there.</p>
         </fieldset>
       </div>
       <aside class="previews" aria-label="Agents preview">
         <p class="eyebrow">Every state · light and dark</p>
-        <section v-for="mode in modes" :key="mode" ref="previewSurfaces" class="agent-theme-preview" :class="mode" :aria-label="`${mode} agents preview`">
+        <section v-for="mode in modes" :key="mode" class="agent-theme-preview" :class="mode" :aria-label="`${mode} agents preview`">
           <header><strong>{{ mode === 'light' ? 'Light' : 'Dark' }}</strong><span>Live agent</span></header>
           <div class="live-row"><LiveBot :theme-agents="appearance" :size="32" id="theme-live" /><div><strong>aeon-643-agentcard</strong><span>Working on AEON-643 · 12 min</span></div></div>
           <div class="states"><div v-for="item in states" :key="item.state" class="state-preview" :data-preview-state="item.state"><LiveBot :theme-agents="appearance" :state="item.state" :size="32" :id="`theme-${item.state}`" /><span>{{ item.label }}</span></div></div>
@@ -147,7 +140,8 @@ button:disabled { cursor: default; }
 .control-row:first-of-type { margin-top: 8px; }
 .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .seg button { min-height: 44px; padding: 0 4px; font-size: 12px; }
-.switch { justify-self: start; }.switch span { min-width: 3ch; }.switch input { width: 44px; height: 24px; }
+/* 44px is the label's hit target. The track stays the shared switch. */
+.switch { justify-self: start; min-width: 44px; min-height: 44px; }.switch span { min-width: 3ch; }
 .range-control { display: grid; grid-template-columns: minmax(0, 1fr) 5ch; gap: 8px; align-items: center; }
 .range-control input { width: 100%; min-width: 0; height: 44px; accent-color: var(--teal); }
 output { text-align: right; font-variant-numeric: tabular-nums; }

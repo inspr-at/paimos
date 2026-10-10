@@ -57,6 +57,11 @@ func TestWorkLatestPinAndAutomaticResidencyReselection(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		// Catalog v3 also seeds this model. Keep eligibility tied to the two
+		// fixture pins so equal vendor versions cannot turn into a UUID tie.
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$1::uuid,$2::uuid] WHERE harness='codex'`, a.ID, b.ID); err != nil {
+			return err
+		}
 		scope, err := modelprefs.SaveScope(t.Context(), tx, p, modelprefs.Scope{Level: "default"})
 		if err != nil {
 			return err
@@ -77,6 +82,36 @@ func TestWorkLatestPinAndAutomaticResidencyReselection(t *testing.T) {
 		}
 		if got.Profile == nil || got.Profile.ID != b.ID || got.Role != "build" || got.Trace.LatestResolvedTo != b.ID || len(got.Trace.QualifyingAccountIDs) != 1 {
 			t.Fatal("latest failed", got)
+		}
+		// Main's preference path must preserve refresh health policy for
+		// latest candidates and explicit pins, including profiles off-ladder.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_observations(tenant_id,harness,model,effort,failures,last_failing_at,suppressed_until,source) VALUES($1,$2,$3,$4,2,$5,$6,'agent')`, p.TenantID, b.Harness, b.Model, b.Effort, now, now.Add(time.Hour)); err != nil {
+			return err
+		}
+		for _, cell := range []modelprefs.Cell{row.Cells["normal"], {Mode: "pinned", ProfileID: b.ID}} {
+			if err := modelprefs.PutRow(t.Context(), tx, p, scope, kind.ID, modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": cell}}); err != nil {
+				return err
+			}
+			got, err = ResolveWork(t.Context(), tx, p, q, now)
+			if err != nil {
+				return err
+			}
+			if got.Profile == nil || got.Profile.ID == b.ID || len(got.Trace.PreferredCandidates) == 0 || got.Trace.PreferredCandidates[0].ProfileID != b.ID || !strings.Contains(strings.Join(got.Trace.PreferredCandidates[0].SkipReasons, "; "), "model invalid until") {
+				t.Fatal("preference bypassed model health", cell.Mode, got)
+			}
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE model_observations SET suppressed_until=$1`, now); err != nil {
+			return err
+		}
+		if err := modelprefs.PutRow(t.Context(), tx, p, scope, kind.ID, row); err != nil {
+			return err
+		}
+		got, err = ResolveWork(t.Context(), tx, p, q, now)
+		if err != nil {
+			return err
+		}
+		if got.Profile == nil || got.Profile.ID != b.ID {
+			t.Fatal("expired health suppression still blocked latest", got)
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($1,$2,'old preference',$3)`, p.TenantID, b.ID, p.ID); err != nil {
 			return err

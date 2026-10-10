@@ -155,7 +155,7 @@ func (m *Module) runNow(w http.ResponseWriter, r *http.Request) {
 		}
 		key, name, version := "manual:"+in.Key, "", ""
 		if in.ReleaseKey != "" {
-			if item.Trigger.Kind != "event" {
+			if item.Trigger.Kind != "event" || item.Trigger.Event != "release.published" {
 				return workorders.Fail(400, "release_key requires an event trigger")
 			}
 			choices, _, err := m.releases(r.Context(), tx, item, now)
@@ -193,6 +193,16 @@ func httpError(w http.ResponseWriter, status int, message string) {
 // have finished. A failure rolls the entire transaction back; the durable key
 // and count are committed atomically, including overlap skips.
 func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence, key string, at time.Time, eventID *int64, name, version string, forceOverlap ...bool) (Occurrence, error) {
+	return occurSource(ctx, tx, actor, r, key, at, eventID, name, version, nil, forceOverlap...)
+}
+
+func occurSource(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence, key string, at time.Time, eventID *int64, name, version string, source *EventContext, forceOverlap ...bool) (Occurrence, error) {
+	// Normalize historical definitions defensively as well as migrating storage.
+	switch r.Template.Type {
+	case "epic", "ticket", "task":
+		r.Template.Type = "work"
+	}
+
 	existing, err := scanOccurrence(tx.QueryRow(ctx, `SELECT `+occurrenceColumns+` FROM recurrence_occurrences WHERE recurrence_id=$1 AND occurrence_key=$2`, r.ID, key))
 	if err == nil {
 		return existing, nil
@@ -215,6 +225,11 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 	if err != nil {
 		return Occurrence{}, err
 	}
+	// The locked reload replaces the earlier normalized copy.
+	switch r.Template.Type {
+	case "epic", "ticket", "task":
+		r.Template.Type = "work"
+	}
 	if reason == "" && r.OverlapPolicy == "skip" && !(len(forceOverlap) > 0 && forceOverlap[0]) {
 		var open bool
 		cte, join, predicate := workstate.ReadSQL("n", "cfg")
@@ -231,6 +246,13 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 	if reason == "" {
 		title := render(r.Template.Title, o.Number, at, r.Trigger, name, version)
 		body := render(r.Template.Description, o.Number, at, r.Trigger, name, version)
+		if source != nil {
+			raw, err := json.Marshal(source)
+			if err != nil || len(raw) > 4096 {
+				return Occurrence{}, workorders.Fail(400, "trigger context exceeds limits")
+			}
+			body += "\n\nTrigger context (source identifiers):\n```json\n" + string(raw) + "\n```"
+		}
 		criteria := make([]string, len(r.Template.Criteria))
 		for i, c := range r.Template.Criteria {
 			criteria[i] = render(c, o.Number, at, r.Trigger, name, version)
@@ -247,6 +269,23 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 				tags = append(tags, tagName)
 			}
 			fields := map[string]any{"type": r.Template.Type, "tags": tags, "priority": r.Template.Priority, "acceptance_criteria": criteria, "recurrence_id": r.ID, "occurrence_key": key, "occurrence_number": o.Number}
+			fields["hide_from_release_notes"] = r.Template.HideFromReleaseNotes == nil || *r.Template.HideFromReleaseNotes
+			for _, copy := range []struct {
+				key, value string
+				limit      int
+			}{
+				{"pill_en", r.Template.PillEN, 512}, {"pill_de", r.Template.PillDE, 512},
+				{"benefit_en", r.Template.BenefitEN, 4096}, {"benefit_de", r.Template.BenefitDE, 4096},
+			} {
+				if copy.value == "" {
+					continue
+				}
+				text := render(copy.value, o.Number, at, r.Trigger, name, version)
+				if len(text) > copy.limit {
+					o.Reason = "rendered_template_invalid"
+				}
+				fields[copy.key] = text
+			}
 			if r.Template.EstimateHours > 0 {
 				fields["estimate_hours"] = r.Template.EstimateHours
 				fields["estimate_source"] = "agent"

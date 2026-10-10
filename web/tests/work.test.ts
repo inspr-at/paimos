@@ -67,8 +67,8 @@ test('sort keys cycle ascending, descending, off; shift adds secondary keys', ()
 
 test('list state round-trips through the URL and maps onto the list API', () => {
   const filters = filtersFromQuery({ q: ' pill ', status: 'in-progress,qa', priority: 'high', type: 'ticket,bogus', closed: '1', sort: 'priority', group: 'status' })
-  assert.deepEqual(filters.type, ['ticket'])
-  assert.deepEqual(filtersToQuery(filters), { q: 'pill', status: 'in-progress,qa', priority: 'high', type: 'ticket', closed: '1', sort: 'priority', group: 'status' })
+  assert.deepEqual(filters.type, ['leaf'])
+  assert.deepEqual(filtersToQuery(filters), { q: 'pill', status: 'in-progress,qa', priority: 'high', type: 'leaf', closed: '1', sort: 'priority', group: 'status' })
   assert.deepEqual(effectiveSort(filters), [{ field: 'state', desc: false }, { field: 'priority', desc: false }, { field: 'updated_at', desc: true }])
   const params = apiParams('p1', filters, { facets: ['state'] })
   assert.deepEqual(params.state, ['in-progress', 'in_progress', 'qa'])
@@ -79,7 +79,7 @@ test('list state round-trips through the URL and maps onto the list API', () => 
   const plain = filtersFromQuery({})
   assert.equal(apiParams('p1', plain).sort, '-updated_at')
   assert.equal(apiParams('p1', plain).hide_closed, true)
-  assert.deepEqual(apiParams('p1', plain).kind, ['ticket', 'task', 'epic'])
+  assert.deepEqual(apiParams('p1', plain).kind, ['work', 'ticket', 'task', 'epic'])
 })
 
 test('facet options merge spellings and count once', () => {
@@ -107,7 +107,7 @@ test('status order and grouping follow the workflow, epics collect their tickets
   const byId = new Map([epic, ticket, task, loose].map(r => [r.id, r]))
   assert.equal(epicOf(task, byId)?.id, 'e')
   const groups = groupRows([epic, ticket, task, loose], 'epic')
-  assert.deepEqual(groups.map(g => [g.label, g.rows.map(r => r.id)]), [['e', ['t', 'k']], ['No epic', ['l']]])
+  assert.deepEqual(groups.map(g => [g.label, g.rows.map(r => r.id)]), [['e', ['t', 'k']], ['No parent', ['l']]])
 })
 
 test('descending status order keeps an unknown spelling last, and pages agree', () => {

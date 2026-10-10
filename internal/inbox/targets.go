@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -37,7 +38,7 @@ import (
 // The coordinator mounts this module and runs NewRoutineDispatcher per tenant
 // for server-owned grok_bot_routine webhook delivery; neither constructor
 // starts a background worker implicitly.
-func NewMessaging(pool *pgxpool.Pool, key []byte) (httpapi.Module, error) {
+func NewMessaging(pool *pgxpool.Pool, key []byte, options ...func(*messaging)) (httpapi.Module, error) {
 	if len(key) != 32 {
 		return nil, errors.New("messaging requires a 32-byte encryption key")
 	}
@@ -49,7 +50,11 @@ func NewMessaging(pool *pgxpool.Pool, key []byte) (httpapi.Module, error) {
 	if err != nil {
 		return nil, errors.New("messaging encryption unavailable")
 	}
-	return &messaging{base: newModule(pool), aead: aead}, nil
+	m := &messaging{base: newModule(pool), aead: aead}
+	for _, option := range options {
+		option(m)
+	}
+	return m, nil
 }
 
 // MessagingPlugin supplies a sealed registration for plugins.Builtin's extra
@@ -63,8 +68,9 @@ func MessagingPlugin() (plugins.Plugin, error) {
 }
 
 type messaging struct {
-	base *module
-	aead cipher.AEAD
+	heldReply HeldReplyBridge
+	base      *module
+	aead      cipher.AEAD
 	// databaseClock replaces clock_timestamp() for lease decisions. Production
 	// leaves it nil. Tests set it to simulate an API host ahead of or behind
 	// the database.
@@ -77,6 +83,7 @@ func (m *messaging) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/projects/{projectId}/messages", m.sendMessage)
 	mux.HandleFunc("GET /api/projects/{projectId}/messages", m.inspectMessages)
 	mux.HandleFunc("POST /api/projects/{projectId}/messages/{messageId}/resolution", m.resolveMessage)
+	mux.HandleFunc("POST /api/projects/{projectId}/messages/{messageId}/cancel", m.cancelSessionMessage)
 	mux.HandleFunc("GET /api/projects/{projectId}/messages/listen", m.listenMessages)
 	mux.HandleFunc("POST /api/projects/{projectId}/messages/{messageId}/ack", m.ackCompatMessage)
 	mux.HandleFunc("GET /api/projects/{projectId}/message-deliveries", m.getDeliveries)
@@ -88,6 +95,9 @@ func (m *messaging) Mount(mux *http.ServeMux) {
 // Messaging errors must not log pgx errors: they can contain private row
 // values. Return only controlled error codes, including on encryption failure.
 func messagingFailure(w http.ResponseWriter, err error) {
+	if attachedmsg.WriteError(w, err) {
+		return
+	}
 	var he *httpError
 	if errors.As(err, &he) {
 		writeError(w, he.status, he.code, he.msg)
@@ -400,4 +410,9 @@ func (m *messaging) getTargets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, items)
+}
+
+// WithAttachedMessages shares the volatile broker with raw inbox and pairing.
+func WithAttachedMessages(service *attachedmsg.Service) func(*messaging) {
+	return func(m *messaging) { m.base.attached = service }
 }

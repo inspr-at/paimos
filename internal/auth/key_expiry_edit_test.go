@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -60,14 +61,18 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin, _ := authz.BuiltinPermissions("admin")
-	if !slices.Contains(admin, "recurrences.manage") {
-		t.Fatal("fixture requires the person Admin recurrence permission")
+	if !slices.Contains(admin, "recurrences.manage") || !slices.Contains(admin, "delivery.manage") || !slices.Contains(admin, "reviewpolicy.manage") {
+		t.Fatal("fixture requires the person Admin recurrence, delivery and review-policy permissions")
+	}
+	excluded := builtinAgentExclusions(t)
+	if !excluded["recurrences.manage"] || !excluded["delivery.manage"] || !excluded["reviewpolicy.manage"] {
+		t.Fatal("built-in agents must keep recurrence, delivery and review-policy management explicit")
 	}
 	full := []string{}
 	for _, perm := range authz.Registry {
-		// Built-in agent roles require an explicit custom-role grant for
-		// recurrence automation (authz.readGrants), unlike person Admin.
-		if perm.Key == "recurrences.manage" {
+		// Built-in agent roles require an explicit custom-role grant for these
+		// permissions (authz.readGrants), unlike person Admin.
+		if excluded[perm.Key] {
 			continue
 		}
 		if perm.AgentGrantable && slices.Contains(admin, perm.Key) {
@@ -93,18 +98,20 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 		t.Fatal("narrow key already has history access")
 	}
 	beforeKeys, beforeEvents := keyCounts(t, m, owner)
-	// Full access must not smuggle this custom-role-only scope through an
-	// expiry edit. The rejected combined write must leave the key intact.
-	deniedBody, _ := json.Marshal(map[string]any{"add": []string{"recurrences.manage"}, "expires_at": time.Now().UTC().Add(24 * time.Hour)})
-	if w := scopesRequest(m, owner, key.ID, http.MethodPatch, string(deniedBody)); w.Code != http.StatusForbidden {
-		t.Fatalf("built-in agent recurrence grant status %d, want 403", w.Code)
+	// Full access must not smuggle these custom-role-only scopes through an
+	// expiry edit. Each rejected combined write must leave the key intact.
+	for _, scope := range []string{"recurrences.manage", "delivery.manage", "reviewpolicy.manage"} {
+		deniedBody, _ := json.Marshal(map[string]any{"add": []string{scope}, "expires_at": time.Now().UTC().Add(24 * time.Hour)})
+		if w := scopesRequest(m, owner, key.ID, http.MethodPatch, string(deniedBody)); w.Code != http.StatusForbidden {
+			t.Fatalf("built-in agent %s grant status %d, want 403", scope, w.Code)
+		}
 	}
 	view, err = m.agentKeyScopes(tenant.WithPrincipal(ctx, owner), owner, key.ID, nil)
 	if err != nil || view.Key.ID != key.ID || view.Key.Prefix != key.Prefix || view.Key.ExpiresAt != nil || view.Key.RevokedAt != nil || !slices.Equal(view.Key.Scopes, key.Scopes) {
-		t.Fatal("rejected recurrence grant changed the key")
+		t.Fatal("rejected automation grant changed the key")
 	}
 	if keys, events := keyCounts(t, m, owner); keys != beforeKeys || events != beforeEvents {
-		t.Fatal("rejected recurrence grant wrote a key or audit event")
+		t.Fatal("rejected automation grant wrote a key or audit event")
 	}
 	for i, days := range []int{30, 90, 365, 0} {
 		var expiry *time.Time
@@ -171,6 +178,25 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func builtinAgentExclusions(t *testing.T) map[string]bool {
+	t.Helper()
+	raw, err := os.ReadFile("../authz/builtin_agent_exclusions.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var definition struct {
+		Permissions []string `json:"permissions"`
+	}
+	if json.Unmarshal(raw, &definition) != nil || len(definition.Permissions) == 0 {
+		t.Fatal("built-in agent exclusions unreadable")
+	}
+	out := make(map[string]bool, len(definition.Permissions))
+	for _, key := range definition.Permissions {
+		out[key] = true
+	}
+	return out
 }
 
 func TestKeyScopeExpiryPermissionsAndAtomicFailure(t *testing.T) {

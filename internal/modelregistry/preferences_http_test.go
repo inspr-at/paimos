@@ -177,16 +177,20 @@ func TestWorkKindLifecyclePaginationAndTenantIsolation(t *testing.T) {
 	if restored.ArchivedAt != nil {
 		t.Fatal(restored)
 	}
-	for _, method := range []string{"DELETE", "PATCH", "POST"} {
+	if eventCount(t, admin, "work_kind.restored") != 1 {
+		t.Fatal("restore did not record its own event")
+	}
+	for _, method := range []string{"DELETE", "POST"} {
 		path := "/api/work-kinds/" + kindID(t, doc, "security")
 		body := ""
-		if method == "PATCH" {
-			body = `{"label":"Renamed"}`
-		}
 		if method == "POST" {
 			path += "/restore"
 		}
 		expectPrefError(t, admin, method, path, body, 422, "system_kind")
+	}
+	renamed := decode[workKind](t, &admin, "PATCH", "/api/work-kinds/"+kindID(t, doc, "security"), `{"label":"Security checks"}`, 200)
+	if renamed.Slug != "security" || renamed.System == nil || renamed.Label != "Security checks" {
+		t.Fatal("system identity changed", renamed)
 	}
 	expectPrefError(t, other, "PATCH", "/api/work-kinds/"+first.ID, `{"hint":"foreign"}`, 404, "not found")
 	page := decode[workKindPage](t, &admin, "GET", "/api/work-kinds?limit=1", "", 200)
@@ -291,7 +295,7 @@ func TestPreferenceTicketResolutionUsesStoredPlacement(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'TKT-1','Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id,fields) SELECT $1,id,'TKT-2','Complex backend',$2,$2,'{"area":"backend","complexity":"L","complexity_source":"manual","route_role":"build-hard","residency":"eu"}'::jsonb FROM node_kinds WHERE slug='ticket' RETURNING id::text`, admin.TenantID, project).Scan(&ticket)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id,fields) SELECT $1,id,'TKT-2','Complex backend',$2,$2,'{"area":"backend","complexity":"L","complexity_source":"manual","route_role":"build-hard","residency":"eu"}'::jsonb FROM node_kinds WHERE slug='work' RETURNING id::text`, admin.TenantID, project).Scan(&ticket)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +340,7 @@ func TestPreferenceMutationRechecksRevokedGrant(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	mux := http.NewServeMux()
-	New(appPool).Mount(mux)
+	(&Module{pool: appPool}).mount(mux, (&Module{pool: appPool}).writePreferences)
 	go func() {
 		defer close(done)
 		if err := authz.Require(authz.BindPool(request.Context(), appPool), "model_prefs.manage", authz.Scope{}); err != nil {
@@ -388,5 +392,101 @@ func TestPreferenceOpenAPIContract(t *testing.T) {
 	round, err := yaml.Marshal(spec)
 	if err != nil || len(round) == 0 {
 		t.Fatal(err)
+	}
+}
+
+func TestPreferencePickerEvidence(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "prefs-picker", "person", "Admin", []string{"admin"})
+	runner := addPrincipal(t, admin.TenantID, "agent", "Picker runner", []string{"admin"})
+	prefDoc(t, admin) // seed the registry before binding the allowed model
+	// Use the newest line version for this exact-grant/retirement fixture;
+	// predecessor grants now also qualify their registered successors.
+	const allowedSlug = "codex-6-1-sol-high"
+	var allowedID string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug=$1`, allowedSlug).Scan(&allowedID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,allowed_model_profile_ids)
+ VALUES($1,'picker-account','codex','picker-daemon',$2,'Picker account',ARRAY[$3::uuid])`, admin.TenantID, runner.ID, allowedID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doc := prefDoc(t, admin)
+	view := doc.Views["person"]
+	if view == nil || len(view.Choices) == 0 || len(view.Choices) > 256 {
+		t.Fatal("missing or unbounded picker choices")
+	}
+	total := 0
+	var profileID string
+	foundUnqualified := false
+	for _, choice := range view.Choices {
+		total += choice.ResidencyRoutes
+		if choice.Profile.Slug == allowedSlug {
+			profileID = choice.Profile.ID
+			if choice.Line != "sol" || choice.ModelVersion == "" {
+				t.Fatal("picker used catalog revision instead of model version", choice)
+			}
+		}
+		if choice.Profile.Harness == "codex" && choice.ReviewLadder && choice.Profile.Effort == "xhigh" {
+			foundUnqualified = strings.Contains(choice.ReviewReason, "Codex")
+		}
+	}
+	if total != 1 || view.Residency.QualifyingRoutes != 1 || !foundUnqualified || profileID != allowedID {
+		t.Fatal("picker evidence does not match routing or qualification", total, view.Residency.QualifyingRoutes, foundUnqualified)
+	}
+	// The same allowed account has no EU evidence: test this before retirement.
+	decode[preferenceWriteResult](t, &admin, "PUT", "/api/model-preferences/levels/person", `{"revision":0,"residency":"eu"}`, 200)
+	doc = prefDoc(t, admin)
+	if doc.Views["person"].Residency.QualifyingRoutes != 0 {
+		t.Fatal("EU route invented")
+	}
+	for _, choice := range doc.Views["person"].Choices {
+		if choice.ResidencyRoutes != 0 {
+			t.Fatal("picker invented EU residency evidence", choice)
+		}
+	}
+	decode[preferenceWriteResult](t, &admin, "PUT", "/api/model-preferences/levels/person", `{"revision":1,"residency":"any"}`, 200)
+	if prefDoc(t, admin).Views["person"].Residency.QualifyingRoutes != 1 {
+		t.Fatal("allowed route did not return")
+	}
+	decode[map[string]any](t, &admin, "POST", "/api/models/"+profileID+"/retire", `{"reason":"Picker regression"}`, 200)
+	doc = prefDoc(t, admin)
+	for _, choice := range doc.Views["person"].Choices {
+		if choice.Profile.ID == profileID {
+			t.Fatal("retired model still offered", choice)
+		}
+	}
+	if doc.Views["person"].Residency.QualifyingRoutes != 0 {
+		t.Fatal("retired model still has a route")
+	}
+}
+
+func TestPreferencePickerTruncation(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "prefs-picker-limit", "person", "Admin", []string{"admin"})
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier)
+ SELECT $1,'picker-extra-' || lpad(n::text,3,'0'),'1','codex','openai','gpt-6.1-sol','high','standard' FROM generate_series(1,257) n`, admin.TenantID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	doc := prefDoc(t, admin)
+	for _, level := range []string{"default", "person"} {
+		view := doc.Views[level]
+		var evidence map[string]any
+		raw, err := json.Marshal(view)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(raw, &evidence); err != nil {
+			t.Fatal(err)
+		}
+		if len(view.Choices) != 256 || evidence["choices_truncated"] != true {
+			t.Fatalf("%s: missing explicit truncation (%d, %v)", level, len(view.Choices), evidence["choices_truncated"])
+		}
 	}
 }

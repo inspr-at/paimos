@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { displayLanguage } from './displayLanguage.ts'
 // The release history (schema inspr.release-history.v1, served by GET /api/releases)
 // and what the release sheet derives from it: days, change groups, stats, compare
 // ranges and search. Free of Vue for unit tests.
@@ -258,7 +259,7 @@ export function hasUsableNotes(r: Pick<Release, 'notes'>): r is Pick<Release, 'n
 // The viewer's language. German locales use DE; everything else, including a
 // missing profile, uses EN.
 export function noteLocale(locale?: string | null): 'en' | 'de' {
-  return locale?.trim().toLowerCase().startsWith('de') ? 'de' : 'en'
+  return displayLanguage(locale, 'release-notes')
 }
 // The release history's own language and view, chosen in its header (AEON-323).
 // The address wins, then this person's last choice on this device, then the
@@ -471,7 +472,7 @@ export function compare(releases: Release[], a: string, b: string) {
 export function naturalKey(a: string, b: string) { return a.localeCompare(b, 'en', { numeric: true }) }
 
 // ---------- Search and filters ----------
-export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; tickets: boolean }
+export interface ReleaseFilter { q: string; features: boolean; fixes: boolean; other?: boolean; tickets?: boolean }
 export const ticketsOf = (r: Release) => [...new Set(hasUsableNotes(r) ? r.notes.items.map(item => item.key) : [...r.tickets, ...r.changes.flatMap(c => c.tickets)])].sort(naturalKey)
 // The filters follow the blocks the detail and the row counts show. Search
 // looks at the text the chosen language and view show (AEON-323): both views
@@ -482,6 +483,7 @@ export function matches(r: Release, f: ReleaseFilter, locale?: string | null, vi
   const presented = presentRelease(r, locale)
   if (f.features && !presented.features.length) return false
   if (f.fixes && !presented.fixes.length) return false
+  if (f.other && !presented.other.length) return false
   if (f.tickets && !ticketsOf(r).length) return false
   const q = f.q.trim().toLowerCase()
   if (!q) return true

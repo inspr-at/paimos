@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { displayLanguage } from './displayLanguage.ts'
 // Access: people, invites, roles, project access, agents and the access audit
 // (ADR-003, the authz contract). Wire types mirror the contract exactly; the
 // helpers below are free of Vue so they can be unit-tested.
-import permissionWords from '../../../internal/authz/permission_labels.json' with { type: 'json' }
-import projectSelfPermissions from '../../../internal/authz/project_self_permissions.json' with { type: 'json' }
-import builtinAgentExclusions from '../../../internal/authz/builtin_agent_exclusions.json' with { type: 'json' }
+import { permissionWords, projectSelfPermissions, builtinAgentExclusions } from '../../../internal/authz/permission_data.mjs'
 import { api } from './api.ts'
 import { learnPictures } from './avatar.ts'
 import { sessionGone } from './authz.ts'
@@ -110,31 +109,33 @@ export const deactivate = (principalId: string) => call<Person>(`/members/${id(p
 export const reactivate = (principalId: string) => call<Person>(`/members/${id(principalId)}/reactivate`, 'POST')
 export const linkAlias = (principalId: string, fromPrincipalId: string) => call<Person>(`/members/${id(principalId)}/aliases`, 'POST', { from_principal_id: fromPrincipalId })
 export const unlinkAlias = (principalId: string, fromPrincipalId: string) => call<void>(`/members/${id(principalId)}/aliases/${id(fromPrincipalId)}`, 'DELETE')
-// The server pages oldest first (?after=<id>); the log reads newest first, so
-// every page is read (up to a ceiling) and the result reversed.
+// Read a bounded newest-first window. The server's legacy ascending pagination
+// remains available to other clients; before walks toward older access events.
 export const AUDIT_MAX_PAGES = 40
 export async function getAudit(): Promise<{ items: AuditEvent[]; complete: boolean }> {
   const items: AuditEvent[] = []
-  let after: number | null = null
+  let before: number | null = null
   for (let page = 0; page < AUDIT_MAX_PAGES; page++) {
-    const body: { items: AuditEvent[]; next_after: number | null } = await call(`/audit?category=access${after != null ? `&after=${after}` : ''}`)
+    const body: { items: AuditEvent[]; next_before: number | null } = await call(`/audit?category=access&order=desc${before != null ? `&before=${before}` : ''}`)
+    if (!Object.hasOwn(body, 'next_before')) throw new Error('Newest access history is unavailable. Try again after the server update.')
     items.push(...body.items)
-    after = body.next_after
-    if (after == null) return { items: items.reverse(), complete: true }
+    before = body.next_before
+    if (before == null) return { items, complete: true }
   }
-  return { items: items.reverse(), complete: false }
+  return { items, complete: false }
 }
 export const createAgent = (body: { name: string; description?: string; workspace_role_id?: string; project_roles?: { project_id: string; role_id: string }[] }) => call<Agent>('/members/agents', 'POST', body)
 
 // Agent keys (existing endpoints): a new key's secret is shown only once.
-export interface AgentKeyCreated { id: string; token: string; prefix: string; name: string; expires_at: string | null }
-export const createAgentKey = (agent: PrincipalRef, expiresAt: string | null, scopes: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { principal_id: agent.principal_id, name: agent.name, scopes, ...(expiresAt ? { expires_at: expiresAt } : {}) })
+export interface AgentKeyCreated { id: string; token: string; prefix: string; name: string; expires_at: string | null; full_access?: boolean }
+export const createAgentKey = (agent: PrincipalRef, expiresAt: string | null, scopes: string[], fullAccess = false) => call<AgentKeyCreated>('/agent-keys', 'POST', { principal_id: agent.principal_id, name: agent.name, scopes, ...(fullAccess ? { full_access: true } : {}), ...(expiresAt ? { expires_at: expiresAt } : {}) })
+export const adoptAgentKey = (keyId: string) => call<AgentKey>(`/agent-keys/${id(keyId)}/adopt`, 'POST')
 export const revokeAgentKey = (keyId: string) => call<void>(`/agent-keys/${id(keyId)}`, 'DELETE')
 export const getAgentKeyScopes = (keyId: string) => call<{ key: AgentKey; grantable_scopes: string[]; agent_role?: Role | null; role_grantable_scopes?: string[] }>(`/agent-keys/${id(keyId)}/scopes`)
-export const changeAgentKeyScopes = (keyId: string, add: string[], remove: string[], roleExtension?: { role_id: string; add: string[] }, expiresAt?: string | null) => call<AgentKey>(`/agent-keys/${id(keyId)}/scopes`, 'PATCH', { add, remove, ...(roleExtension ? { role_extension: roleExtension } : {}), ...(expiresAt === undefined ? {} : { expires_at: expiresAt }) })
+export const changeAgentKeyScopes = (keyId: string, add: string[], remove: string[], roleExtension?: { role_id: string; add: string[] }, expiresAt?: string | null, fullAccess?: boolean) => call<AgentKey>(`/agent-keys/${id(keyId)}/scopes`, 'PATCH', { add, remove, ...(fullAccess === undefined ? {} : { full_access: fullAccess }), ...(roleExtension ? { role_extension: roleExtension } : {}), ...(expiresAt === undefined ? {} : { expires_at: expiresAt }) })
 export const keyExpiryAfter = (days: number, now = Date.now()) => days === 0 ? null : new Date(Math.floor(now / 1000) * 1000 + days * 86_400_000).toISOString()
 // One confirmed request commits the replacement and revocation together.
-export const rotateAgentKey = (keyId: string, expiresAt: string | null, scopes?: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { rotate_key_id: keyId, expires_at: expiresAt, ...(scopes === undefined ? {} : { rotation_scopes: scopes }) })
+export const rotateAgentKey = (keyId: string, expiresAt: string | null, scopes?: string[], fullAccess?: boolean) => call<AgentKeyCreated>('/agent-keys', 'POST', { rotate_key_id: keyId, ...(fullAccess === undefined ? {} : { full_access: fullAccess }), expires_at: expiresAt, ...(scopes === undefined ? {} : { rotation_scopes: scopes }) })
 
 export function keyExpiry(key: Pick<AgentKey, 'expires_at' | 'revoked_at'>, now = Date.now()): { label: string; soon: boolean } {
   if (!key.expires_at) return { label: 'Never', soon: false }
@@ -155,7 +156,7 @@ export const COORDINATOR_SCOPES = ['account.manage', 'inbox.read', 'inbox.send',
 export const TICKET_WORKER_SCOPES = ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'events.read', 'search.read']
 export type PresetScopes = string[] | 'all'
 export const KEY_SCOPE_PRESETS: { id: string; label: string; description: string; scopes: PresetScopes }[] = [
-  { id: 'full-access', label: 'Full access', description: 'Every agent-grantable scope allowed by this agent’s role and your permissions.', scopes: 'all' },
+  { id: 'full-access', label: 'Full access', description: 'Always every current and future agent permission, within this agent’s role, creator permissions and project access.', scopes: 'all' },
   { id: 'ticket-worker', label: 'Ticket worker', description: 'Read and edit tickets, read their history, read and write comments, and search.', scopes: TICKET_WORKER_SCOPES },
   { id: 'coordinator', label: 'Coordinator', description: 'Coordinate work, messages, accounts, views and history.', scopes: COORDINATOR_SCOPES },
 ]
@@ -375,6 +376,8 @@ export function auditSentence(event: AuditEvent, names: Names): { actor: string;
       return { actor, subject: personName, text: aliasName ? `${linked ? 'linked' : 'unlinked'} ${aliasName} ${linked ? 'to' : 'from'} ${personName}` : `${linked ? 'linked a classic identity to' : 'unlinked a classic identity from'} ${personName}` }
     }
     case 'agent_key.created': return { actor, subject: who, text: `created the key ${str(either.name) || 'for an agent'}${either.prefix ? ` (${keyHint(str(either.prefix))})` : ''}` }
+    case 'agent_key.owner_workstation_changed': return { actor, subject: who, text: `${after.owner_workstation ? 'marked' : 'unmarked'} the owner workstation key ${str(either.name)}` }
+    case 'agent_key.governance_used': return { actor, subject: who, text: `used key ${str(after.key_id)} on computer ${str(after.computer_id)} for ${str(after.action)}; ${after.step_up ? 'confirmed locally' : 'without local confirmation'} (${str(after.outcome)})` }
     case 'agent_key.scopes_changed': {
       const role = obj(after.role), priorRole = obj(before.role)
       const roleDelta = diff((priorRole.permissions as string[] | undefined) ?? [], (role.permissions as string[] | undefined) ?? [])
@@ -390,3 +393,7 @@ export function auditSentence(event: AuditEvent, names: Names): { actor: string;
     default: return { actor, subject: '', text: event.type.replace(/[._]/g, ' ') }
   }
 }
+
+export const fullAccessLabel = (locale?: string) => displayLanguage(locale) === 'de'
+  ? 'Vollzugriff (immer alle Agentenberechtigungen)'
+  : 'Full access (always all agent permissions)'

@@ -48,7 +48,8 @@ func selectHeartbeatCommits(found []heartbeatCommit, sent map[string]bool) []hea
 			continue
 		}
 		seen[sha] = true
-		out = append(out, heartbeatCommit{SHA: sha, Subject: subject})
+		c.SHA, c.Subject = sha, subject
+		out = append(out, c)
 		if len(out) == heartbeatMaxCommits {
 			break
 		}
@@ -62,6 +63,8 @@ func selectHeartbeatCommits(found []heartbeatCommit, sent map[string]bool) []hea
 // Replayed rebase commits come from HEAD. The cursor walks oldest-first so a
 // long history cannot crowd out a later commit.
 func localHeartbeatCommits(ctx context.Context, worktree string, disk *heartbeatDisk) (batch []heartbeatCommit, skipped string) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	if strings.TrimSpace(worktree) == "" || disk == nil || filepath.Clean(worktree) != filepath.Clean(disk.BoundWorktree) {
 		return nil, ""
 	}
@@ -97,7 +100,9 @@ func localHeartbeatCommits(ctx context.Context, worktree string, disk *heartbeat
 			}
 			continue
 		}
-		found = append(found, heartbeatCommit{SHA: sha, Subject: subject})
+		c := heartbeatCommit{SHA: sha, Subject: subject}
+		c.LinesAdded, c.LinesDeleted, c.FilesChanged = gitCommitDiffStats(ctx, worktree, sha)
+		found = append(found, c)
 		if len(found) == heartbeatMaxCommits {
 			break
 		}
@@ -288,4 +293,63 @@ func validCommitSHA(sha string) bool {
 		}
 	}
 	return true
+}
+
+// Diff evidence is bounded before parsing. Binary, oversized, incomplete or
+// failed reads remain unknown; only a successful complete numstat proves zero.
+func gitCommitDiffStats(ctx context.Context, worktree, sha string) (*int64, *int64, *int64) {
+	if !validCommitSHA(sha) {
+		return nil, nil, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "--no-pager", "-c", "diff.external=", "show", "--format=", "--numstat", "--no-renames", "--no-ext-diff", "--no-textconv", "--diff-merges=first-parent", sha, "--")
+	cmd.Dir = worktree
+	cmd.Stderr = io.Discard
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_PAGER=cat")
+	pipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, nil
+	}
+	if err = cmd.Start(); err != nil {
+		return nil, nil, nil
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(pipe, (1<<20)+1))
+	if readErr != nil || len(raw) > 1<<20 {
+		_ = pipe.Close()
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return nil, nil, nil
+	}
+	if err = cmd.Wait(); err != nil {
+		return nil, nil, nil
+	}
+	return parseCommitNumstat(raw)
+}
+func parseCommitNumstat(raw []byte) (*int64, *int64, *int64) {
+	var added, deleted, files int64
+	if len(raw) > 1<<20 || (len(raw) > 0 && raw[len(raw)-1] != '\n') {
+		return nil, nil, nil
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) != 3 || parts[2] == "" {
+			return nil, nil, nil
+		}
+		a, e1 := strconv.ParseInt(parts[0], 10, 64)
+		d, e2 := strconv.ParseInt(parts[1], 10, 64)
+		if e1 != nil || e2 != nil || a < 0 || d < 0 || a > 1_000_000_000-added || d > 1_000_000_000-deleted {
+			return nil, nil, nil
+		}
+		added += a
+		deleted += d
+		files++
+		if files > 10000 {
+			return nil, nil, nil
+		}
+	}
+	return &added, &deleted, &files
 }

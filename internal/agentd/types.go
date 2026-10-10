@@ -6,11 +6,13 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -45,21 +47,26 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
-	ReadOnlyReview            bool   `json:"read_only_review,omitempty"`
-	RetryOfRunID              string `json:"retry_of_run_id"`
-	CapacityHandoff           bool   `json:"capacity_handoff,omitempty"`
-	Purpose                   string `json:"purpose,omitempty"`
-	VerificationTask          string `json:"verification_task,omitempty"`
-	MaxDurationSeconds        *int64 `json:"max_duration_seconds,omitempty"`
-	VerificationPolicy        string `json:"verification_policy,omitempty"`
-	RepositoryMutationAllowed *bool  `json:"repository_mutation_allowed,omitempty"`
-	ID                        string `json:"id"`
-	WorkOrderID               string `json:"work_order_id"`
-	AgentPrincipalID          string `json:"agent_principal_id"`
-	ModelProfileID            string `json:"model_profile_id"`
-	AccountID                 string `json:"account_id"`
-	RequestedAccountID        string `json:"requested_account_id"`
-	Status                    string `json:"status"`
+	ReservationsSettled       *bool           `json:"reservations_settled,omitempty"`
+	Trace                     json.RawMessage `json:"trace,omitempty"`
+	RecoveryBrief             string          `json:"recovery_brief,omitempty"`
+	RecoveryTier              string          `json:"recovery_service_tier,omitempty"`
+	RecoveryLabel             *string         `json:"recovery_display_label,omitempty"`
+	ReadOnlyReview            bool            `json:"read_only_review,omitempty"`
+	RetryOfRunID              string          `json:"retry_of_run_id"`
+	CapacityHandoff           bool            `json:"capacity_handoff,omitempty"`
+	Purpose                   string          `json:"purpose,omitempty"`
+	VerificationTask          string          `json:"verification_task,omitempty"`
+	MaxDurationSeconds        *int64          `json:"max_duration_seconds,omitempty"`
+	VerificationPolicy        string          `json:"verification_policy,omitempty"`
+	RepositoryMutationAllowed *bool           `json:"repository_mutation_allowed,omitempty"`
+	ID                        string          `json:"id"`
+	WorkOrderID               string          `json:"work_order_id"`
+	AgentPrincipalID          string          `json:"agent_principal_id"`
+	ModelProfileID            string          `json:"model_profile_id"`
+	AccountID                 string          `json:"account_id"`
+	RequestedAccountID        string          `json:"requested_account_id"`
+	Status                    string          `json:"status"`
 }
 
 // requestedAccount retains the approved enrollment before Route fills AccountID.
@@ -89,6 +96,8 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
+	AttachedHook     bool                    `json:"-"`
+	DisplayLabel     *string                 `json:"display_label,omitempty"`
 	ServiceTier      string                  `json:"service_tier,omitempty"`
 	Doing            string                  `json:"-"`
 	DoingAt          time.Time               `json:"-"`
@@ -121,14 +130,27 @@ type HarnessControl struct {
 	Kind              string                 `json:"kind"`
 }
 
+// InboxReplyTarget is captured from an authenticated drain, never from tool input.
+type InboxReplyTarget struct {
+	PrincipalID        string
+	ProjectID          string
+	ReplyToID          string
+	SenderSessionID    string
+	RecipientSessionID *string
+}
+
 type HarnessDelivery struct {
-	Outcome           string `json:"-"`
-	FailureReason     string `json:"-"`
-	ID                string `json:"delivery_id"`
-	MessageID         string `json:"message_id"`
-	Cursor            int64  `json:"cursor"`
-	SenderPrincipalID string `json:"sender_principal_id"`
-	Body              string `json:"body"`
+	Level             string  `json:"delivery_level,omitempty"`
+	ProjectID         string  `json:"project_id,omitempty"`
+	ReplyToID         string  `json:"reply_to_id,omitempty"`
+	SenderSessionID   *string `json:"sender_session_id,omitempty"`
+	Outcome           string  `json:"-"`
+	FailureReason     string  `json:"-"`
+	ID                string  `json:"delivery_id"`
+	MessageID         string  `json:"message_id"`
+	Cursor            int64   `json:"cursor"`
+	SenderPrincipalID string  `json:"sender_principal_id"`
+	Body              string  `json:"body"`
 }
 
 type WorkOrder struct {
@@ -150,6 +172,7 @@ type WorkCriterion struct {
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
 // accepted user turn; token and cost deltas come from vendor usage reports.
 type Telemetry struct {
+	ProcessState           string                  `json:"process_state,omitempty"`
 	ServiceTier            string                  `json:"service_tier,omitempty"`
 	ReviewRange            *reviewgate.CommitRange `json:"review_range,omitempty"`
 	LimitWindow            string                  `json:"limit_window,omitempty"`
@@ -260,6 +283,7 @@ type RunTools struct {
 }
 
 type AdapterEvent struct {
+	ModelReports []modelreport.Observation
 	HarnessTier  string
 	Doing        string
 	ToolActivity *agentactivity.Activity
@@ -329,6 +353,7 @@ type ProbeStatus struct {
 	OpenRouterCredits *openrouter.Credits
 	OK                bool
 	Failure           string
+	ReasonDetail      string // Fixed publishable phrase; never raw vendor output.
 }
 
 const (
@@ -368,6 +393,7 @@ type AccountMetadata struct {
 }
 
 type EnrolledAccount struct {
+	VerifiedIdentity string // local verified login ID; never sent to another server
 	ID, Key, Harness string
 	Metadata         *AccountMetadata
 	// DependencyBlocked means this enrollment's interpreter pin is missing,

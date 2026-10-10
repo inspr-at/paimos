@@ -1,15 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { displayLanguage } from './displayLanguage.ts'
 import type { NodeRecurrence } from './api'
 import { ruleParts, type RecurrenceTrigger } from './recurrences'
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const daysDE = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag']
 const codes = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
-export const recurringWord = (locale: string) => locale.toLowerCase().startsWith('de') ? 'Wiederkehrend' : 'Recurring'
+export const recurringWord = (locale: string) => displayLanguage(locale) === 'de' ? 'Wiederkehrend' : 'Recurring'
 
 export function recurrenceSchedule(trigger: RecurrenceTrigger, locale = 'en'): string {
-  const de = locale.toLowerCase().startsWith('de')
-  if (trigger.kind === 'event') return de ? 'nach jeder Veröffentlichung' : 'after every release'
+  const de = displayLanguage(locale) === 'de'
+  if (trigger.kind === 'event') {
+    const words = { 'release.published': ['after every release', 'nach jeder Veröffentlichung'], 'node.done': ['after matching work reaches Done', 'nach Abschluss passender Arbeit'], 'knowledge.changed': ['after matching knowledge changes', 'nach Änderung passenden Wissens'], 'external.tag': ['after a signed external tag', 'nach einem signierten externen Tag'], 'external.deploy': ['after a signed external deploy', 'nach einer signierten externen Bereitstellung'] }
+    return words[trigger.event || 'release.published'][de ? 1 : 0]!
+  }
   const rule = ruleParts(trigger.rrule)
   if (rule.FREQ === 'DAILY') return de ? 'jeden Tag' : 'every day'
   if (rule.FREQ === 'WEEKLY') {
@@ -34,5 +38,5 @@ export function recurrenceSchedule(trigger: RecurrenceTrigger, locale = 'en'): s
 }
 
 export function recurrenceMarkerLabel(item: NodeRecurrence, locale = 'en'): string {
-  return `${recurringWord(locale)} · ${recurrenceSchedule(item.trigger, locale)} · ${locale.toLowerCase().startsWith('de') ? `Nr. ${item.number}` : `#${item.number}`}`
+  return `${recurringWord(locale)} · ${recurrenceSchedule(item.trigger, locale)} · ${displayLanguage(locale) === 'de' ? `Nr. ${item.number}` : `#${item.number}`}`
 }

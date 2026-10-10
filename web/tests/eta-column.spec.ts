@@ -163,7 +163,7 @@ for (const width of [1600, 1100, 390]) {
     await expect(sessionRow(page, 1).locator('.eta-cell')).toHaveText('no ETA')
     await expect(sessionRow(page, 7).locator('.eta-cell')).toHaveCount(0)
     for (const n of [2, 3, 4]) {
-      const fits = await sessionRow(page, n).evaluate(row => [...row.querySelectorAll<HTMLElement>(':scope > [role="cell"]')].every(cell => cell.scrollWidth <= cell.clientWidth + 1)
+      const fits = await sessionRow(page, n).evaluate(row => [...row.querySelectorAll<HTMLElement>(':scope > [role="gridcell"]')].every(cell => cell.scrollWidth <= cell.clientWidth + 1)
         && [...row.querySelectorAll<HTMLElement>('.when > .shown')].every(el => el.scrollWidth <= el.clientWidth))
       expect(fits).toBe(true)
     }

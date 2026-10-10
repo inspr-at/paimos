@@ -4,17 +4,18 @@ package agentaccounts
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func bResource(t *testing.T, f limitFixture) string {
@@ -141,43 +142,34 @@ func TestBEarlyAndExpiryRecoveryRaceConsumesOneWait(t *testing.T) {
 		t.Fatal("owner check did not capture its wait")
 	}
 	runs := []string{insertRun(t, f.admin, f.runner, f.profile), insertRun(t, f.admin, f.runner, f.profile)}
-	// Pause the first transaction after it owns the pairing fence. The second
-	// must already be inside its transaction attempting that same fence before
-	// the first can continue; channels prove overlap without elapsed time.
-	tracer := &bRaceTracer{held: make(chan struct{}), competing: make(chan struct{}), release: make(chan struct{})}
-	config := appPool.Config()
-	config.ConnConfig.Tracer = tracer
-	pool, err := pgxpool.NewWithConfig(t.Context(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	defer func() {
-		select {
-		case <-tracer.release:
-		default:
-			close(tracer.release)
-		}
-	}()
+	// Pause after tenant acquisition; PostgreSQL proves the second claim is
+	// blocked on that fence before the first can continue.
+	pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
+		return sql == db.TenantFenceSQL
+	})
 	racing := fixedClockModule{Module: New(pool), at: now}
 	statuses := make(chan int, 2)
 	go func() {
-		code, _ := call(t, racing, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, runs[0], "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
+		code, _ := bRaceRoute(ctx, racing, f.runner, f.token, routeBody(t, runs[0], "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
 		statuses <- code
 	}()
-	bBarrier(t, tracer.held)
+	pid := barrier.Wait(t, ctx)
+	secondDone := make(chan struct{})
 	go func() {
-		code, _ := call(t, racing, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, runs[1], "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
+		code, _ := bRaceRoute(ctx, racing, f.runner, f.token, routeBody(t, runs[1], "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
 		statuses <- code
+		close(secondDone)
 	}()
-	bBarrier(t, tracer.competing)
-	close(tracer.release)
+	if lock := dbtest.BlockedOrDone(t, ctx, adminPool, pid, secondDone); lock != "transactionid" {
+		t.Fatalf("second recovery claim did not wait on tenant: %q", lock)
+	}
+	barrier.Release()
 	counts := map[int]int{}
 	for i := 0; i < 2; i++ {
 		select {
 		case code := <-statuses:
 			counts[code]++
-		case <-time.After(20 * time.Second):
+		case <-ctx.Done():
 			t.Fatal("recovery transactions hung")
 		}
 	}
@@ -212,38 +204,14 @@ func TestBHardStopsAndStaleRoomRemainResourceSpecific(t *testing.T) {
 	f.route(t, 200)
 }
 
-// bRaceTracer establishes a competing transaction at the real serialization
-// fence. The timeout is only a hang guard; no correctness claim uses duration.
-type bRaceTracer struct {
-	count                    atomic.Int32
-	held, competing, release chan struct{}
-}
-type bRaceKey struct{}
-
-func (b *bRaceTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	if strings.HasPrefix(data.SQL, "SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'") {
-		n := b.count.Add(1)
-		if n == 2 {
-			<-b.held
-			close(b.competing)
-		}
-		return context.WithValue(ctx, bRaceKey{}, n)
-	}
-	return ctx
-}
-func (b *bRaceTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
-	if n, ok := ctx.Value(bRaceKey{}).(int32); ok && n == 1 && data.Err == nil {
-		close(b.held)
-		<-b.release
-	}
-}
-func bBarrier(t *testing.T, ch <-chan struct{}) {
-	t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(20 * time.Second):
-		t.Fatal("transaction barrier hung")
-	}
+func bRaceRoute(ctx context.Context, mod httpapi.Module, actor tenant.Principal, token, body string) (int, []byte) {
+	mux := http.NewServeMux()
+	mod.Mount(mux)
+	r := httptest.NewRequest("POST", "/api/agent-accounts/route", strings.NewReader(body)).WithContext(tenant.WithPrincipal(ctx, actor))
+	r.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	return w.Code, w.Body.Bytes()
 }
 
 func TestBUnstartedRecoveryRestoresEarlyIntent(t *testing.T) {
@@ -463,4 +431,94 @@ func TestBNullReadingCannotRenewStaleMeasuredRoom(t *testing.T) {
 	if len(out.Items) != 1 || out.Items[0].State != "unknown" || !out.Items[0].CanTry || len(out.Items[0].MeasuredUsage) != 0 || out.Items[0].DisplayReason != UsageUnknownReason {
 		t.Fatalf("null capture claimed fresh/Ready: %+v", out.Items)
 	}
+}
+
+// AEON-959: fact percentages live in account_readiness_facts. A 24/7 UTC day
+// at 20:00 has a 4/24 share of a window that resets the following 20:00.
+// 10% still fits. 60%, then 70%, have spent that share. Missing readings
+// history must not reopen it by reporting today's use as zero.
+func TestFactOnlyReportsExhaustTheDailyShare(t *testing.T) {
+	now := time.Date(2026, 10, 7, 20, 0, 0, 0, time.UTC)
+	reset := now.Add(24 * time.Hour)
+	f := readinessWorld(t, "fact-daily-share", now)
+	s := capacity.DefaultSchedule("UTC")
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	s.Reserve = capacity.ReserveOff
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: f.account.ID, Schedule: &s}), 204, nil)
+	resource := bResource(t, f)
+	read := now
+	report := func(observed time.Time, amount float64) {
+		t.Helper()
+		callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, Readiness: &ReadinessReport{BindingRevision: ptrRevision(0), Result: "success", Facts: []ReadinessFactWrite{{ResourceID: resource, WindowKey: "session", Source: "harness", ObservedAt: observed, ReadingAt: &read, ResetsAt: &reset, UsedPercent: &amount, CreditState: "unknown"}}}}), 200, nil)
+	}
+	pace := func() (capacity.Pacing, *CapacityWait) {
+		t.Helper()
+		var pacing capacity.Pacing
+		var wait *CapacityWait
+		seed(t, f.admin, func(tx pgx.Tx) error {
+			a, err := getAccount(t.Context(), tx, f.account.ID)
+			if err != nil {
+				return err
+			}
+			sched, err := routingSchedule(t.Context(), tx, a)
+			if err != nil {
+				return err
+			}
+			windows, err := factWindows(t.Context(), tx, a, now)
+			if err != nil {
+				return err
+			}
+			if len(windows) != 1 || windows[0].capacityKind != "fact" || windows[0].capacityReadAt == nil {
+				return fmt.Errorf("fact windows: %+v", windows)
+			}
+			w := windows[0]
+			v := capacity.Reading{WindowKind: w.capacityKind, Bucket: w.capacityBucket, WindowMinutes: int(w.EndsAt.Sub(w.StartsAt) / time.Minute), ResetsAt: w.EndsAt, ReadAt: *w.capacityReadAt, UsedPercent: float64(w.Used), Source: w.capacitySource}
+			pacing, _, err = readingPacing(t.Context(), tx, w.AccountID, v, now, sched)
+			if err != nil {
+				return err
+			}
+			_, wait, err = admission(t.Context(), tx, a, a.Windows, now, 0, runRow{Purpose: "managed"}, false)
+			return err
+		})
+		return pacing, wait
+	}
+	route := func(status int) string {
+		t.Helper()
+		run := insertRun(t, f.admin, f.runner, f.profile)
+		code, body := call(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, run, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
+		if code != status {
+			t.Fatalf("route status %d, want %d: %s", code, status, body)
+		}
+		if status == http.StatusConflict && !strings.Contains(string(body), "no eligible account") {
+			t.Fatalf("route denied for another reason: %s", body)
+		}
+		return run
+	}
+	report(now, 10)
+	if scalar(t, f.admin, `SELECT count(*) FROM account_capacity_readings WHERE account_id=$1`, f.account.ID) != 0 {
+		t.Fatal("fact-only report wrote a capacity reading")
+	}
+	p, wait := pace()
+	if !p.PeriodStart.Equal(now.Truncate(24*time.Hour)) || p.UsedTodayPercent != 10 || p.AvailableNowPercent <= 1 || p.AvailableNowPercent >= 10 || wait != nil {
+		t.Fatalf("10%% fact must keep a remainder of today's share: %+v wait=%+v", p, wait)
+	}
+	run := route(http.StatusOK)
+	bFinish(t, f, run, now, "completed", 0)
+	if scalar(t, f.admin, `SELECT coalesce(sum(reserved),0)::bigint FROM account_allowance_windows WHERE capacity_kind='fact' AND account_id=$1`, f.account.ID) != 0 {
+		t.Fatal("settled fact route left a reservation")
+	}
+	report(now.Add(30*time.Second), 60)
+	p, wait = pace()
+	if p.UsedTodayPercent != 60 || p.AvailableNowPercent != 0 || p.BudgetPercent <= 16 || p.BudgetPercent >= 17 || wait == nil || wait.Code != "schedule" {
+		t.Fatalf("60%% fact at 20:00 must exhaust the 4/24 share: %+v wait=%+v", p, wait)
+	}
+	route(http.StatusConflict)
+	report(now.Add(50*time.Second), 70)
+	p, wait = pace()
+	if p.UsedTodayPercent != 70 || p.AvailableNowPercent != 0 || wait == nil || wait.Code != "schedule" {
+		t.Fatalf("later fact report reopened today's share: %+v wait=%+v", p, wait)
+	}
+	route(http.StatusConflict)
 }

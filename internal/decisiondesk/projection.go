@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -79,11 +81,42 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
  FROM doctrine_proposals p
  WHERE p.tenant_id=$1 AND ($2='' OR $2='doctrine' AND p.id=$3::uuid) AND p.data->>'inbox'='true' AND p.data->>'state'='pending'
  AND coalesce((p.data->>'pr_number')::int,0)=0 AND p.created_at>(SELECT at FROM clock)-interval '30 days'
+), key_trims(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT t.id,'key_trim'::text,NULL::uuid,t.revision,'Trim key · '||k.name,t.created_at,t.expires_at,false,
+ '/api/key-trim-proposals'
+ FROM key_trim_proposals t JOIN agent_keys k ON k.tenant_id=t.tenant_id AND k.id=t.key_id
+ WHERE t.tenant_id=$1 AND t.state='pending' AND t.expires_at>(SELECT at FROM clock)
+ AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>(SELECT at FROM clock))
+ AND ($2='' OR $2='key_trim' AND t.id=$3::uuid)
+), stepups(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT s.id,'stepup'::text,s.project_id,s.revision,'Step-up approval · '||s.permission,s.created_at,s.expires_at,true,
+ '/api/stepup-requests'
+ FROM stepup_requests s LEFT JOIN nodes project ON project.tenant_id=s.tenant_id AND project.id=s.project_id
+ WHERE s.tenant_id=$1 AND s.state='pending' AND s.expires_at>(SELECT at FROM clock)
+ AND (s.project_id IS NULL OR project.id IS NOT NULL AND project.deleted_at IS NULL)
+ AND ($2='' OR $2='stepup' AND s.id=$3::uuid)
+), tier_requests(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT r.id,'tier_request'::text,s.project_id,s.service_tier_revision,
+ 'Tier request · '||r.tier,r.created_at,NULL::timestamptz,false,
+ '/api/projects/'||s.project_id||'/harness-sessions/'||s.id||'/tier'
+ FROM harness_tier_requests r
+ JOIN harness_sessions s ON s.tenant_id=r.tenant_id AND s.id=r.session_id
+ JOIN nodes project ON project.tenant_id=s.tenant_id AND project.id=s.project_id
+ WHERE r.tenant_id=$1 AND r.state='pending' AND project.deleted_at IS NULL
+ AND s.stopped_at IS NULL AND s.archived_at IS NULL AND s.phase<>'stopping'
+ AND s.management='managed' AND 'service_tier_v1'=ANY(s.capabilities)
+ AND ($2='' OR $2='tier_request' AND r.id=$3::uuid)
+), account_matrix(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT r.tenant_id,'account_matrix'::text,NULL::uuid,r.revision,'Looks right? · Account matrix'::text,
+ coalesce((SELECT min(e.at) FROM events e WHERE e.type='account_use.migrated'), 'epoch'::timestamptz),
+ NULL::timestamptz,false,'/api/account-use'
+ FROM account_use_rules r WHERE r.tenant_id=$1 AND r.confirmation_required
+ AND ($2='' OR $2='account_matrix' AND r.tenant_id=$3::uuid)
 )`
 
 const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
- SELECT *,CASE WHEN held AND kind='approval' THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
- CASE WHEN held AND kind='approval' THEN expires_at ELSE created_at END AS order_at
+ SELECT *,CASE WHEN held AND kind IN ('approval','stepup') THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
+ CASE WHEN held AND kind IN ('approval','stepup') THEN expires_at ELSE created_at END AS order_at
  FROM (
  SELECT * FROM questions WHERE project_id=ANY($5::uuid[]) AND (NOT $16 OR project_id=ANY($20::uuid[]))
  UNION ALL SELECT * FROM approvals WHERE (project_id=ANY($6::uuid[]) OR project_id IS NULL AND $8) AND (NOT $16 OR $19)
@@ -91,6 +124,10 @@ const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
  AND NOT EXISTS(SELECT 1 FROM desk_askers a JOIN desk_questions q ON q.tenant_id=a.tenant_id AND q.node_id=a.question_id
   WHERE a.tenant_id=$1 AND a.source_request_id=held_requests.id AND q.project_id=ANY($5::uuid[]))
  UNION ALL SELECT * FROM doctrine WHERE $9
+ UNION ALL SELECT * FROM key_trims WHERE $21
+ UNION ALL SELECT * FROM stepups WHERE EXISTS(SELECT 1 FROM stepup_requests s WHERE s.tenant_id=$1 AND s.id=stepups.id AND coalesce($22::jsonb->s.permission,'[]'::jsonb) @> jsonb_build_array(coalesce(s.project_id::text,'')))
+ UNION ALL SELECT * FROM tier_requests WHERE project_id=ANY($23::uuid[]) AND project_id=ANY($24::uuid[])
+ UNION ALL SELECT * FROM account_matrix WHERE $25
  ) items
 ), totals AS (
  SELECT count(*)::int AS open,count(*) FILTER (WHERE held)::int AS held,
@@ -127,7 +164,14 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}}
+	projects := map[string][]string{"questions.read": {}, "questions.decide": {}, "approvals.read": {}, "inbox.manage": {}, "harness.control": {}, "harness.read": {}}
+	stepupPermissions := map[string][]string{}
+	for _, permission := range stepup.TargetPermissions() {
+		stepupPermissions[permission] = []string{}
+		if check(permission, "") {
+			stepupPermissions[permission] = append(stepupPermissions[permission], "")
+		}
+	}
 	rows, err := tx.Query(ctx, `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.tenant_id=$1 AND k.slug='project' AND n.deleted_at IS NULL ORDER BY n.id LIMIT 1001`, p.TenantID)
 	if err != nil {
 		return page, err
@@ -145,6 +189,11 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 				projects[permission] = append(projects[permission], id)
 			}
 		}
+		for permission := range stepupPermissions {
+			if check(permission, id) {
+				stepupPermissions[permission] = append(stepupPermissions[permission], id)
+			}
+		}
 	}
 	rows.Close()
 	if err = rows.Err(); err != nil {
@@ -158,7 +207,11 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		c = *after
 	}
 	var raw []byte
-	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"]).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
+	stepupVisibility, err := json.Marshal(stepupPermissions)
+	if err != nil {
+		return page, err
+	}
+	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", "")).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
 	if err != nil {
 		return page, err
 	}
@@ -181,11 +234,37 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		if err = json.Unmarshal(record.OrderAt, &i.OrderAt); err != nil {
 			return page, err
 		}
-		if i.Kind == "doctrine" {
-			i.Href = "/settings/agent-rules#doctrine-inbox"
-		} else {
-			prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:"}[i.Kind]
-			i.Href = "/agents?needs=" + prefix + i.ID
+		prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:", "doctrine": "r:", "tier_request": "t:", "key_trim": "k:", "stepup": "s:"}[i.Kind]
+		i.Href = "/decision-desk?item=" + prefix + i.ID
+		if i.Kind == "account_matrix" {
+			i.Href = "/settings/accounts#account-use"
+		}
+		if i.Kind == "key_trim" || i.Kind == "stepup" {
+			i.Href = "/decision-desk?needs=" + prefix + i.ID
+		}
+		if i.Kind == "account_matrix" {
+			i.Href = "/settings/accounts#account-use"
+		}
+		switch i.Kind {
+		case "question":
+			i.CanDecide = check("questions.decide", i.ProjectID)
+		case "approval":
+			i.CanDecide, err = approvals.CanNotify(ctx, tx, p, i.ID)
+			if err != nil {
+				return page, err
+			}
+		case "action_request":
+			i.CanDecide = check("inbox.manage", i.ProjectID)
+		case "doctrine":
+			i.CanDecide = check("rules.write", "")
+		case "tier_request":
+			i.CanDecide = check("harness.control", i.ProjectID)
+		case "stepup":
+			i.CanDecide = true // Membership already checked each native target permission.
+		case "key_trim":
+			i.CanDecide = check("keys.manage", "")
+		case "account_matrix":
+			i.CanDecide = check("account.use.manage", "")
 		}
 		page.Items = append(page.Items, i)
 	}

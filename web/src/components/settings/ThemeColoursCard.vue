@@ -2,21 +2,24 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import type { ThemeRecord } from '../../lib/themes'
-import { CARD_COLOURS, colourContrast, derivedDark, suggestColour, type ColourMode } from '../../lib/themeColours'
+import { CARD_COLOURS, colourContrast, deriveDark, roles, themeTokens, type ColourMode } from '../../lib/themeEngine'
 import SettingsCard from './SettingsCard.vue'
 import ThemeColourPicker from './ThemeColourPicker.vue'
 import AppIcon from '../AppIcon.vue'
-const props = defineProps<{ draft: ThemeRecord; editable: boolean }>()
+// `editable` enables the controls; `permitted` says whether the person may
+// change this theme at all, so a temporary lock (saving, a conflict) never
+// reads as a missing permission.
+const props = defineProps<{ draft: ThemeRecord; editable: boolean; permitted: boolean }>()
 const emit = defineEmits<{ change: [draft: ThemeRecord] }>()
 type AccentKey = 'primary' | 'secondary'
 type Pick = { accent: AccentKey; mode: ColourMode } | { marker: true }
 const picker = ref<Pick | null>(null)
 let opener: HTMLElement | null = null
-const accents = [{ key: 'primary' as const, label: 'Primary accent', hint: 'Buttons, links, selection, focus and progress' }, { key: 'secondary' as const, label: 'Secondary accent', hint: 'Stars, highlights, warnings and waiting work' }]
+const accents = [{ key: 'primary' as const, label: 'Primary accent', hint: 'Buttons, links, selection, focus and progress' }, { key: 'secondary' as const, label: 'Secondary accent', hint: 'Stars, highlights and waiting work' }]
 const modes: ColourMode[] = ['light', 'dark']
 const markers = [{ value: 'primary' as const, label: 'Primary' }, { value: 'secondary' as const, label: 'Secondary' }, { value: 'neutral' as const, label: 'Neutral grey' }, { value: 'custom' as const, label: 'Custom' }]
-const value = (key: AccentKey, mode: ColourMode) => props.draft.values[key][mode] ?? derivedDark(props.draft.values[key].light)
-const ratio = (key: AccentKey, mode: ColourMode) => colourContrast(value(key, mode), CARD_COLOURS[mode])
+const value = (key: AccentKey, mode: ColourMode) => props.draft.values[key][mode] ?? deriveDark(props.draft.values[key].light)
+const ratio = (key: AccentKey, mode: ColourMode) => colourContrast(roles(value(key, mode), mode).ink, CARD_COLOURS[mode])
 const pickerValue = computed(() => !picker.value ? '#0e6f6c' : 'marker' in picker.value ? props.draft.values.recurring_marker.custom ?? '#8547b0' : value(picker.value.accent, picker.value.mode))
 const pickerTitle = computed(() => !picker.value ? '' : 'marker' in picker.value ? 'Recurring marker · custom' : `${picker.value.accent === 'primary' ? 'Primary' : 'Secondary'} accent · ${picker.value.mode}`)
 function edit(fn: (theme: ThemeRecord) => void) { if (!props.editable) return; const copy = JSON.parse(JSON.stringify(props.draft)) as ThemeRecord; fn(copy); emit('change', copy) }
@@ -35,14 +38,14 @@ function markerColour(mode: ColourMode) {
   const choice = props.draft.values.recurring_marker
   if (choice.source === 'primary' || choice.source === 'secondary') return value(choice.source, mode)
   if (choice.source === 'neutral') return mode === 'light' ? '#7c8c8d' : '#8aa3a2'
-  return mode === 'light' ? choice.custom ?? '#8547b0' : derivedDark(choice.custom ?? '#8547b0')
+  return mode === 'light' ? choice.custom ?? '#8547b0' : deriveDark(choice.custom ?? '#8547b0')
 }
-watch(() => [props.draft.id, props.editable], () => { picker.value = null })
+watch([() => props.draft.id, () => props.editable], () => { picker.value = null })
 </script>
 <template>
-  <SettingsCard :title="`Colours · ${draft.name || 'Untitled theme'}`" icon="sun" anchor="colours">
+  <SettingsCard title="Colours" icon="sun" anchor="colours">
     <template #lead>Primary and secondary accents, and the mark on recurring tickets. Only the preview changes until Save.</template>
-    <p class="permission-note">{{ editable ? (draft.scope === 'workspace' ? 'Workspace theme · you manage it.' : 'Your theme · only you see it.') : 'Read-only workspace theme. Duplicate it to make your own.' }}</p>
+    <div class="permission-note"><p><strong>{{ draft.name || 'Untitled theme' }}</strong> · {{ permitted ? (draft.scope !== 'personal' ? 'Workspace theme · you manage it.' : 'Your theme · only you see it.') : draft.scope !== 'personal' ? 'Read-only workspace theme. Duplicate it to make your own.' : 'Read-only. Changing your theme needs permission to edit your profile.' }}</p></div>
     <div class="editor-grid">
       <div class="colour-controls">
         <div v-for="accent in accents" :key="accent.key" class="colour-field">
@@ -52,7 +55,7 @@ watch(() => [props.draft.id, props.editable], () => { picker.value = null })
           </div>
           <div class="derived"><span>{{ draft.values[accent.key].dark === null ? 'Dark derived from light' : 'Dark set by hand' }}</span><button type="button" class="text-link" :disabled="!editable || draft.values[accent.key].dark === null" :aria-label="`Use derived ${accent.key} dark`" @click="edit(theme => theme.values[accent.key].dark = null)">Use derived</button></div>
           <div class="contrast-lines">
-            <p v-for="mode in modes" :key="mode" :class="{ warning: ratio(accent.key, mode) < 4.5 }" :data-testid="`${accent.key}-${mode}-contrast`"><AppIcon :name="ratio(accent.key, mode) < 4.5 ? 'alert' : 'check'" :size="13" /><span>{{ mode === 'light' ? 'Light' : 'Dark' }} {{ (Math.floor(ratio(accent.key, mode) * 10) / 10).toFixed(1) }}:1 on cards<span v-if="ratio(accent.key, mode) < 4.5"> · below 4.5:1</span></span><button type="button" class="text-link suggest" :style="{ visibility: ratio(accent.key, mode) < 4.5 && editable ? 'visible' : 'hidden' }" :disabled="!editable || ratio(accent.key, mode) >= 4.5" :aria-label="`Suggest readable ${accent.key} ${mode}`" @click="edit(theme => theme.values[accent.key][mode] = suggestColour(value(accent.key, mode), mode))">Suggest</button></p>
+            <p v-for="mode in modes" :key="mode" :class="{ warning: ratio(accent.key, mode) < 4.5 }" :data-testid="`${accent.key}-${mode}-contrast`"><AppIcon :name="ratio(accent.key, mode) < 4.5 ? 'alert' : 'check'" :size="13" /><span>{{ mode === 'light' ? 'Light' : 'Dark' }} {{ (Math.floor(ratio(accent.key, mode) * 10) / 10).toFixed(1) }}:1 on cards<span v-if="ratio(accent.key, mode) < 4.5"> · below 4.5:1</span></span></p>
           </div>
         </div>
         <div class="colour-field">
@@ -62,7 +65,7 @@ watch(() => [props.draft.id, props.editable], () => { picker.value = null })
       </div>
       <aside class="previews" aria-label="Live colour preview">
         <p class="eyebrow">Preview · light and dark</p>
-        <section v-for="mode in modes" :key="mode" class="colour-preview" :class="mode" :aria-label="`${mode} colour preview`" :style="{ '--preview-primary': value('primary', mode), '--preview-secondary': value('secondary', mode), '--preview-marker': markerColour(mode) }">
+        <section v-for="mode in modes" :key="mode" class="colour-preview" :class="mode" :aria-label="`${mode} colour preview`" :style="{ ...themeTokens(draft.values, mode), '--preview-primary': roles(value('primary', mode), mode).ink, '--preview-secondary': roles(value('secondary', mode), mode).ink, '--preview-marker': markerColour(mode) }">
           <header><strong>{{ mode === 'light' ? 'Light' : 'Dark' }}</strong><span>Ticket list</span></header>
           <div class="preview-row"><span class="preview-key">AEON-24</span><span>Build the next small thing</span><AppIcon name="star" :size="14" class="preview-star" /></div>
           <div class="preview-row selected"><span class="preview-key">AEON-25</span><span>Weekly workspace check</span><AppIcon name="refresh" :size="14" class="preview-marker" /></div>
@@ -75,7 +78,7 @@ watch(() => [props.draft.id, props.editable], () => { picker.value = null })
   </SettingsCard>
 </template>
 <style scoped>
-.permission-note { color: var(--ink-2); font-size: 12px; margin-bottom: 16px; }
+.permission-note { color: var(--ink-2); font-size: 12px; height: 54px; margin-bottom: 16px; overflow-y: auto; }.permission-note strong { color: var(--ink); }
 .editor-grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 24px; }
 .colour-controls { min-width: 0; }
 .colour-field { padding: 16px 0; border-top: 1px solid var(--line); }
@@ -86,7 +89,7 @@ h3 { font-size: 13px; font-weight: 600; }
 .swatch { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 2px 8px; text-align: left; padding: 8px 10px; min-height: 52px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface-raised); color: var(--ink); }
 .swatch i { width: 20px; height: 20px; border-radius: 50%; grid-row: span 2; box-shadow: inset 0 0 0 1px var(--line-2); }
 .swatch span { font-size: 12px; }.swatch code { font-size: 11px; }
-.derived { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-height: 44px; font-size: 12px; color: var(--ink-2); }
+.derived { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 10px; min-height: 44px; font-size: 12px; color: var(--ink-2); }
 .text-link { padding: 0; min-height: 28px; border: 0; background: none; color: var(--teal-ink); text-decoration: underline; text-underline-offset: 3px; font-size: 12px; }
 .contrast-lines p { display: flex; align-items: center; gap: 6px; min-height: 32px; font-size: 12px; color: var(--ink-2); }
 .contrast-lines p > span { flex: 1; }.contrast-lines svg { flex-shrink: 0; }.contrast-lines .warning { color: var(--warn-ink); }
@@ -104,4 +107,5 @@ h3 { font-size: 13px; font-weight: 600; }
 .preview-progress { padding: 12px; color: var(--preview-primary); }.preview-progress > div { margin-top: 6px; height: 4px; background: rgba(128,128,128,.2); border-radius: 4px; }.preview-progress i { display: block; width: 65%; height: 100%; background: var(--preview-primary); border-radius: 4px; }.preview-link { color: var(--preview-primary); }
 @container (max-width: 640px) { .editor-grid { grid-template-columns: minmax(0, 1fr); } .previews { grid-template-columns: repeat(2, minmax(0, 1fr)); } .previews > p { grid-column: 1 / -1; } }
 @media (max-width: 600px) { .editor-grid, .previews { grid-template-columns: minmax(0, 1fr); }.text-link { min-height: 44px; }.contrast-lines p { min-height: 44px; } }
+@media (pointer: coarse) { .text-link { min-height: 44px; }.contrast-lines p { min-height: 44px; } }
 </style>

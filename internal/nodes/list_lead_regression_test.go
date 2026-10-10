@@ -46,7 +46,7 @@ func (x *stopAfterListQuery) TraceQueryEnd(context.Context, *pgx.Conn, pgx.Trace
 func TestListLeadKeepsTheSortSnapshot(t *testing.T) {
 	p := newPrincipal(t, "lead-snapshot")
 	project := kindBySlug(t, p, "project")
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Snapshot"}`)
 	mix := leadRegressionTicket(t, p, root.ID, kind.ID, "REV-1")
 	only := leadRegressionTicket(t, p, root.ID, kind.ID, "REV-2")
@@ -66,7 +66,7 @@ func TestListLeadKeepsTheSortSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	status, body := callAs(t, New(pool, nil), &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee", "")
+	status, body := callAs(t, New(pool, nil), &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee", "")
 	page := decode[nodePage](t, status, body, http.StatusOK)
 	if hookErr != nil {
 		t.Fatal(hookErr)
@@ -86,7 +86,7 @@ func TestListLeadKeepsTheSortSnapshot(t *testing.T) {
 		t.Errorf("sort/display snapshot diverged: %v", shown)
 	}
 	// A fresh request must see the committed stop, so this is not a stale fixture.
-	next := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee")
+	next := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee")
 	var after []string
 	for _, item := range next.Items {
 		after = append(after, item.LeadWorker.Name)
@@ -102,7 +102,7 @@ func TestListLeadKeepsTheSortSnapshot(t *testing.T) {
 func TestListAssignedLeadUsesTheSameStatement(t *testing.T) {
 	p := newPrincipal(t, "lead-assigned-snapshot")
 	project := kindBySlug(t, p, "project")
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Assigned snapshot"}`)
 	nia := addPrincipalIn(t, p.TenantID, "Nia")
 	raw, _ := json.Marshal(map[string]any{"kind_id": kind.ID, "key": "REV-3", "title": "Assigned", "state": "new", "parent_id": root.ID, "fields": map[string]any{"assignee": nia.ID}})
@@ -124,7 +124,7 @@ func TestListAssignedLeadUsesTheSameStatement(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	status, body := callAs(t, New(pool, nil), &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee", "")
+	status, body := callAs(t, New(pool, nil), &p, http.MethodGet, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee", "")
 	page := decode[nodePage](t, status, body, http.StatusOK)
 	if hookErr != nil {
 		t.Fatal(hookErr)
@@ -144,7 +144,7 @@ func TestListAssignedLeadUsesTheSameStatement(t *testing.T) {
 	if strings.Join(shown, ",") != "Mia,Ada" {
 		t.Errorf("assigned lead left the list statement: %v", shown)
 	}
-	next := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee")
+	next := listPage(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee")
 	var after []string
 	for _, item := range next.Items {
 		after = append(after, item.LeadWorker.Name)
@@ -156,7 +156,7 @@ func TestListAssignedLeadUsesTheSameStatement(t *testing.T) {
 func TestListLeadExactPublicTiesIgnoreHiddenRenames(t *testing.T) {
 	p := newPrincipal(t, "lead-exact-ties")
 	project := kindBySlug(t, p, "project")
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Exact ties"}`)
 	ada := insertNamedAgent(t, p.TenantID, "Ada")
 	zed := insertNamedAgent(t, p.TenantID, "Zed")
@@ -168,7 +168,7 @@ func TestListLeadExactPublicTiesIgnoreHiddenRenames(t *testing.T) {
 		insertLiveSessionStamp(t, p.TenantID, root.ID, ada, ticket.ID, "claude", "worker", "HiddenAda", "working", "busy", at, at)
 		insertLiveSessionStamp(t, p.TenantID, root.ID, zed, ticket.ID, "claude", "worker", "HiddenZed", "working", "busy", at, at)
 	}
-	path := "/api/nodes?within=" + root.ID + "&kind=ticket&sort=assignee&limit=50"
+	path := "/api/nodes?within=" + root.ID + "&kind=work&sort=assignee&limit=50"
 	page := listPage(t, viewer, path)
 	var shown []string
 	bad := 0
@@ -249,7 +249,7 @@ func TestListLeadExactPublicTiesIgnoreHiddenRenames(t *testing.T) {
 func TestListLeadPermissionProjection(t *testing.T) {
 	p := newPrincipal(t, "lead-projection")
 	project := kindBySlug(t, p, "project")
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Projection"}`)
 	ticket := leadRegressionTicket(t, p, root.ID, kind.ID, "PROJ-1")
 	principal := insertNamedAgent(t, p.TenantID, "WithheldPrincipal")
@@ -272,7 +272,7 @@ func TestListLeadPermissionProjection(t *testing.T) {
 		{"names", names, "WithheldPrincipal", false, false, true},
 		{"guest", guest, "Grok agent", false, false, false},
 	} {
-		lead := leadOn(t, tc.p, "/api/nodes?within="+root.ID+"&kind=ticket&sort=assignee", ticket.Key)
+		lead := leadOn(t, tc.p, "/api/nodes?within="+root.ID+"&kind=work&sort=assignee", ticket.Key)
 		if lead == nil {
 			t.Fatalf("%s missing lead", tc.label)
 		}
@@ -299,7 +299,7 @@ func TestListLeadPermissionProjection(t *testing.T) {
 func TestListLeadRestrictedKeyStaysStable(t *testing.T) {
 	p := newPrincipal(t, "lead-stable-key")
 	project := kindBySlug(t, p, "project")
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Stable keys"}`)
 	principal := insertNamedAgent(t, p.TenantID, "Before")
 	viewer := insertPerson(t, p.TenantID, "Project viewer")
@@ -311,7 +311,7 @@ func TestListLeadRestrictedKeyStaysStable(t *testing.T) {
 		ticket := leadRegressionTicket(t, p, root.ID, kind.ID, fmt.Sprintf("KEY-%d", i+1))
 		created := at.Add(fraction)
 		id := insertLiveSessionStamp(t, p.TenantID, root.ID, principal, ticket.ID, "grok", "worker", "Before", "working", "busy", created, at)
-		path := "/api/nodes?within=" + root.ID + "&kind=ticket&sort=assignee"
+		path := "/api/nodes?within=" + root.ID + "&kind=work&sort=assignee"
 		before := leadOn(t, viewer, path, ticket.Key)
 		want := "v\x01grok\x01" + created.Format(time.RFC3339Nano)
 		if before == nil || before.Key != want {
@@ -333,7 +333,7 @@ func TestListLeadRestrictedKeyStaysStable(t *testing.T) {
 func TestListLeadExactNamesUseVisibleSessionKey(t *testing.T) {
 	p := newPrincipal(t, "lead-visible-key")
 	project := kindBySlug(t, p, "project")
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Visible keys"}`)
 	ticket := leadRegressionTicket(t, p, root.ID, kind.ID, "KEY-1")
 	principal := insertNamedAgent(t, p.TenantID, "Ada")
@@ -341,7 +341,7 @@ func TestListLeadExactNamesUseVisibleSessionKey(t *testing.T) {
 	a := insertLiveSessionStamp(t, p.TenantID, root.ID, principal, ticket.ID, "claude", "worker", "Ada", "working", "busy", at, at)
 	b := insertLiveSessionStamp(t, p.TenantID, root.ID, principal, ticket.ID, "claude", "worker", "Ada", "working", "busy", at, at)
 	for _, sort := range []string{"assignee", "-assignee", "updated_at"} {
-		lead := leadOn(t, p, "/api/nodes?within="+root.ID+"&kind=ticket&sort="+sort, ticket.Key)
+		lead := leadOn(t, p, "/api/nodes?within="+root.ID+"&kind=work&sort="+sort, ticket.Key)
 		if lead == nil || lead.Name != "Ada" || lead.Key != "s:"+min(a, b) {
 			t.Fatalf("%s: visible key did not break equal-name tie: %#v", sort, lead)
 		}

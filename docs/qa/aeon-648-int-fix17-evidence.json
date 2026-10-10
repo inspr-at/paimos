@@ -1,0 +1,683 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix17",
+  "recorded_at": "2026-10-05T01:35:18.422981+00:00",
+  "branch": "work/aeon-648-int",
+  "base_commit": "92f6e6499795e60d6768a5f0ea9ef7ff9186a1a1",
+  "review": "review-ci272b.out",
+  "result": "All Go failures retrieved from the referenced CI run are addressed and covered by passing targeted local checks. Full CI and browser completion are not claimed.",
+  "ci_provenance": {
+    "run": 37246669596,
+    "url": "https://github.com/inspr-at/paimos/actions/runs/37246669596",
+    "artifact_attempt": 4,
+    "tested_merge_commit": "3bb64d5d87309dfa457f91c35305c87fd5ba65df",
+    "parents": [
+      "a3ca8c475a94ce1de6da1398182abe3dfe98eb9f",
+      "92f6e6499795e60d6768a5f0ea9ef7ff9186a1a1"
+    ],
+    "tested_and_base_tree": "16297ae36a6e1cdef511987937131bf64f735fc3",
+    "tree_identity_verified": true,
+    "failed_go_jobs": [
+      111576755988,
+      111576756053,
+      111576756094,
+      111576756095,
+      111576756102,
+      111576756106
+    ],
+    "artifact_ids": [
+      11320832861,
+      11320788087,
+      11320477514,
+      11320268186,
+      11320033720,
+      11319854885
+    ],
+    "failed_top_level_tests": 111,
+    "failed_packages": 16,
+    "retrieval": "The whole run was still active, so gh run view --log-failed refused. Retrieved completed job logs and bounded tier-measurement artifacts via gh api. Per-package JSONL files contain the actual test errors; the runner stdout contains only aggregate counts."
+  },
+  "fixes": [
+    {
+      "cause": "Fresh tenants seed the single work kind; obsolete epic/ticket/task fixture lookups returned no rows or silently inserted no nodes.",
+      "change": "Updated only affected fixture lookups to work, retaining node IDs, keys, relationships and assertions. Search now proves 6000 visible and 300 hidden fixture rows; usage fixtures require exactly one inserted work node.",
+      "status": "addressed",
+      "regressions": "Existing CI regressions failed on the exact base tree; all 111 original failed top-level tests are included in the passing final selection."
+    },
+    {
+      "cause": "Demo seeding required obsolete epic/ticket kinds and reported ticket counts by retired kind.",
+      "change": "Create both parent and leaf nodes with work; count current live work leaves in the summary. Extended TestDemoSeedTwice verifies no retired kinds are created, at least eight work parents exist, leaf count matches the summary, and replay retains every original resource/event assertion.",
+      "status": "addressed",
+      "regression": "TestDemoSeedTwice failed locally before the product edit with kind epic is not seeded, then passed along with interruption/retry, journey scope and missing-harness checks."
+    },
+    {
+      "cause": "Unquoted comma in a flow-mapping OpenAPI description parsed as an extra schema key.",
+      "change": "Quoted the existing leaf_node_ids description without changing its wire shape.",
+      "status": "addressed",
+      "regression": "TestOpenAPIPropertyNamesHaveNoSpace fails on the baseline and passes after the quote; all 21 reportercontract checks pass."
+    },
+    {
+      "cause": "Two chat barriers matched the old tenant-lock SQL spelling rather than the shared work admission fence.",
+      "change": "Observe a tenant NO KEY UPDATE waiter blocked by the specific competing backend. Added rejection of any already-held advisory lock; retained project hierarchy availability, revoked-permission reason, event ordering and history assertions.",
+      "status": "addressed",
+      "regression": "Both tests failed locally with the original matcher and pass with the specific-blocker observation. No sleeps, elapsed-time evidence or weaker outcome assertions added."
+    },
+    {
+      "cause": "Rules client fixtures inserted harness sessions without tenant transaction context required by binding guards. Generic forgery inserted zero nodes due to a retired kind lookup.",
+      "change": "Seed client sessions via db.InTenant using the restricted app role and explicit fixture visibility. Forge against work and require SQLSTATE 42501 with the exact reserved storage envelope error.",
+      "status": "addressed",
+      "regression": "Three client tests plus the storage guard test failed locally on baseline and now pass; 34 affected rules tests pass."
+    },
+    {
+      "cause": "Once the relation fixture was repaired, an unprivileged Undo of an absent event returned 404 before the authority check.",
+      "change": "RequireTx admission with AnyProject after tenant/pairing/tree fences, before event lookup. Keep ordinary target checks and causal target-by-target checks in the final transaction. Authorized agent Undo and project-only causal grants remain supported. Documented the admission behavior in OpenAPI.",
+      "status": "addressed",
+      "regression": "New TestUndoChecksAuthorityBeforeEventLookup is ESSENTIAL and fails against the exact 92f6e649 handler through a Go overlay (404 versus required 403); it passes against the final handler. It checks role-without-scope, scope-without-role, authorized unsupported/missing events and unchanged history. TestWorkParentStatusCausalUndo additionally verifies confirmation after replacing workspace grants with a project-only grant. All eight affected relation tests pass."
+    }
+  ],
+  "validation": {
+    "merge": {
+      "live_main": "a3ca8c475a94ce1de6da1398182abe3dfe98eb9f",
+      "main_is_ancestor": true,
+      "pr_mergeable": "MERGEABLE",
+      "merge_required": false
+    },
+    "go": {
+      "unique_passing_top_level_tests": 213,
+      "packages": {
+        "internal/approvals": 11,
+        "internal/attachments": 16,
+        "internal/business/costunits": 4,
+        "internal/business/crm": 13,
+        "internal/chat": 12,
+        "internal/decisiondesk": 17,
+        "internal/demo": 6,
+        "internal/intake": 2,
+        "internal/questions": 21,
+        "internal/relations": 8,
+        "internal/reportercontract": 21,
+        "internal/rules": 34,
+        "internal/rules/doctrine": 18,
+        "internal/search": 3,
+        "internal/usagedashboard": 12,
+        "internal/views": 1,
+        "internal/events": 2,
+        "internal/nodes": 12
+      },
+      "all_original_111_failures_covered": true,
+      "initial_selection_tests": 184,
+      "initial_passed": 183,
+      "initial_failure": "TestRelationsCRUDAndTenantIsolation exposed the additional Undo admission failure; it was fixed, regression-tested and rerun successfully.",
+      "final_relation_tests": 8,
+      "causal_guard_tests": 12,
+      "local_red_tests": 9,
+      "execution": "Sequential targeted package selections (touched-file tests and failed dependent tests), GOMAXPROCS=2, go test -p 2 -count=1, Go 1.26.6 on macOS. Each database test uses a fresh dbtest database and restricted role, cloned from this test binary’s migrated template; the run uses its own newly-created maintenance database.",
+      "limits": "No full just test or hosted Go pass is claimed. remote-test.sh transfers a temporary Git ref, so the user’s explicit no-push instruction prevented use of that runner."
+    },
+    "web_unit": {
+      "tests": 35,
+      "passed": 35,
+      "failed": 0,
+      "skipped": 0,
+      "files": [
+        "web/tests/work.test.ts",
+        "web/tests/journey-work.test.ts",
+        "web/tests/release-membership.test.ts"
+      ],
+      "execution": "Existing dependencies; each bounded Node unit file ran sequentially. No full web unit suite/build was repeated because web source and dependencies are unchanged."
+    },
+    "browser": {
+      "result": "pending",
+      "exit_code": 3,
+      "command": [
+        "npm",
+        "run",
+        "test:remote",
+        "--",
+        "work-integration.spec.ts",
+        "morning-briefing.spec.ts",
+        "journey-imported.spec.ts",
+        "ticket-placement.spec.ts",
+        "--workers=1"
+      ],
+      "reason": "Approved remote browser launcher refuses while OPS-247 bootstrap/launcher are pending. No SSH, dependency/browser installation or local fallback was attempted.",
+      "owner": "coordinator / OPS-247 / hosted Linux Chromium CI"
+    },
+    "static": {
+      "test_tier_regressions": 33,
+      "audit_tests": 33,
+      "audit_ownership": "pass; zero gaps",
+      "migration_policy": "pass; 258 unique numbers",
+      "release_check": "pass",
+      "git_diff_check": "pass",
+      "sql_and_dsar_inventory": "Byte-identical to 92f6e649; no migration or ledger changes. No approved integration behavior was removed."
+    }
+  },
+  "original_failed_tests": [
+    {
+      "package": "internal/approvals",
+      "failed_tests": [
+        "TestApprovals",
+        "TestLiveGrantRejectsBadIDs",
+        "TestListAndGetApprovalAgentName",
+        "TestApprovalAgentNameRequiresExistingNamePermission",
+        "TestProjectScopedApprovalNames",
+        "TestBriefingPendingApprovalsBeforeLimitRegression",
+        "TestApprovalRiskProjection",
+        "TestDecisionRequiresPermissionBeingGranted",
+        "TestDecisionRiskRequiresPersonRole",
+        "TestOptionalDeployTargetRoundTrip"
+      ],
+      "failure_outputs": [
+        "approvals_test.go:291: no rows in result set",
+        "approvals_test.go:622: no rows in result set",
+        "approvals_test.go:637: no rows in result set",
+        "approvals_test.go:722: no rows in result set",
+        "approvals_test.go:779: no rows in result set",
+        "briefing_test.go:10: no rows in result set",
+        "risk_test.go:134: no rows in result set",
+        "risk_test.go:18: no rows in result set",
+        "risk_test.go:96: no rows in result set",
+        "target_test.go:13: no rows in result set"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/intake",
+      "failed_tests": [
+        "TestGeneratedTicketReadsGeneratingRequirementExtensions"
+      ],
+      "failure_outputs": [
+        "extensions_integration_test.go:150: no rows in result set"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/views",
+      "failed_tests": [
+        "TestProjectViewsRoundTripSoftDeleteAndUndo"
+      ],
+      "failure_outputs": [
+        "scope_test.go:40: no rows in result set"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/decisiondesk",
+      "failed_tests": [
+        "TestConcurrentClaimsRetryRecipientAndRevocation",
+        "TestNotificationPointersAndNormalBriefingItem",
+        "TestHeldRequestCanonicalizationDoesNotRepeatNotice",
+        "TestApprovalExpiryWarningAndProjectReferenceAreNotHeld",
+        "TestMixedOrderCountsFanInAndKeyset",
+        "TestRevocationDecisionExpiryAndFinishedWork",
+        "TestPushPolicyAndHTTPBounds",
+        "TestKeyTrimProjectionRequiresManageRightsAndKeepsNativeSource",
+        "TestUndecidableApprovalDoesNotStarveHeldQuestion",
+        "TestUndecidableQuestionDoesNotStarveAuthorizedQuestion",
+        "TestScopeDeniedApprovalReceivesTerminalSkippedClaim",
+        "TestClaimWaitsForHeldOpenDeactivation",
+        "TestClaimWaitsForProjectAccessMutationWithoutTenantInversion",
+        "TestClaimUsesCurrentSourceProjectNotCallerHint",
+        "TestSourceClaimDoesNotScanProjectionAndCoverageIsExplicit",
+        "TestCoverageFailureExplainsLimit",
+        "TestProjectionApprovalLabelRetainsScopeWithoutRationale"
+      ],
+      "failure_outputs": [
+        "projection_test.go:55: no rows in result set"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/reportercontract",
+      "failed_tests": [
+        "TestOpenAPIPropertyNamesHaveNoSpace"
+      ],
+      "failure_outputs": [],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/attachments",
+      "failed_tests": [
+        "TestUploadDedupeVariantsETagIsolationUndoAndOps",
+        "TestLimitSniffAndPatchPrecondition",
+        "TestAttachmentMutationRechecksLiveAuthority",
+        "TestAttachmentWriteHoldsAuthorityUntilCommit",
+        "TestInventoryRetainsProfileAssetsAndHistory",
+        "TestGCWaitsForReusedBlobReferenceCommit",
+        "TestUploadWaitsThroughGCUnlinkAndRecreatesBlob",
+        "TestBlobLifetimeRejectsWrongTenantAndSnapshotIsolation",
+        "TestGCOnlyCollectsOldOrphansForSelectedTenant",
+        "TestBlobLockOrderGuard",
+        "TestHTMLStorageAndInertThumbnail",
+        "TestHTMLPreviewCapabilities",
+        "TestHTMLPreviewProjectIsolationAndRaces",
+        "TestHTMLPreviewDisabledAndSessionRevoked"
+      ],
+      "failure_outputs": [
+        "attachments_test.go:128: no rows in result set",
+        "attachments_test.go:259: no rows in result set",
+        "lifetime_test.go:158: no rows in result set",
+        "lifetime_test.go:209: no rows in result set",
+        "lifetime_test.go:279: no rows in result set",
+        "lifetime_test.go:321: no rows in result set",
+        "lifetime_test.go:379: no rows in result set",
+        "lifetime_test.go:46: no rows in result set",
+        "sandbox_test.go:109: no rows in result set",
+        "sandbox_test.go:232: no rows in result set",
+        "sandbox_test.go:373: no rows in result set",
+        "sandbox_test.go:481: no rows in result set"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/business/costunits",
+      "failed_tests": [
+        "TestCostUnitRates"
+      ],
+      "failure_outputs": [
+        "module_test.go:222: no rows in result set"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/questions",
+      "failed_tests": [
+        "TestExactFingerprintCompatibility",
+        "TestAlwaysApprovedAfterAnywayCanBeReused",
+        "TestConcurrentDuplicateMembershipsAndFanout",
+        "TestAlwaysReuseImmediateAtomicAndRetrySafe",
+        "TestReuseBoundariesAndAnyway",
+        "TestSupersedeWinsConcurrentLookup",
+        "TestReuseCorrectionKeepsProvenance",
+        "TestMatchingFanoutBound",
+        "TestConcurrentReuseCountsUniqueRequestsAndRollback",
+        "TestPermissionRevocationWinsBeforeMatching",
+        "TestAuthenticatedKeyChangesBeforeReuse",
+        "TestAnsweredNewestFirstKeysetAndIsolation",
+        "TestQuestionListRejectsInvalidOrderAndCursor",
+        "TestQuestionLifecycleAndIsolation",
+        "TestQuestionHumanDecisionAndGenericForgery",
+        "TestQuestionInputBoundsAndAttribution",
+        "TestQuestionConcurrentReplayAndAnswer",
+        "TestQuestionRealAgentKeyBoundary",
+        "TestQuestionPermissionFilteredPageAndRollback",
+        "TestQuestionSourceCorrelation"
+      ],
+      "failure_outputs": [
+        "questions_test.go:80: no rows in result set"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/rules/doctrine",
+      "failed_tests": [
+        "TestAnalysisDraftJobAndBeforeAfter",
+        "TestAnalysisEditedProposalMeasuresTheApprovedFile",
+        "TestAnalysisRetriesAnUnrecordedProposal",
+        "TestAnalysisPrivateQuoteBecomesInternalNote",
+        "TestAnalysisDailyAttemptCap",
+        "TestAnalysisWaitsForPrivateGuard",
+        "TestDoctrineInboxLifecycle",
+        "TestDoctrineInboxDraftRetentionIsBounded",
+        "TestDoctrineInboxDraftCleanupRollsBack"
+      ],
+      "failure_outputs": [
+        "analysis_test.go:211: no rows in result set",
+        "analysis_test.go:328: no rows in result set",
+        "analysis_test.go:383: no rows in result set",
+        "analysis_test.go:471: no rows in result set",
+        "analysis_test.go:503: no rows in result set",
+        "analysis_test.go:534: no rows in result set",
+        "inbox_test.go:138: no rows in result set",
+        "inbox_test.go:480: no rows in result set",
+        "inbox_test.go:805: no rows in result set"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/rules",
+      "failed_tests": [
+        "TestBatchBudgetCoversEveryAffectedContext",
+        "TestClientGateFloorAndBlockerCap",
+        "TestClientReportsDoNotBlockEachOther",
+        "TestBudgetSevenDayClientGateAndDelivery",
+        "TestStoreAuthorizationHistoryAndGenericNodeGuards"
+      ],
+      "failure_outputs": [
+        "batch_test.go:528: no rows in result set",
+        "clients_test.go:278: ERROR: unrecognized configuration parameter \"aeon.tenant_id\" (SQLSTATE 42704)",
+        "clients_test.go:316: ERROR: unrecognized configuration parameter \"aeon.tenant_id\" (SQLSTATE 42704)",
+        "clients_test.go:407: ERROR: unrecognized configuration parameter \"aeon.tenant_id\" (SQLSTATE 42704)",
+        "store_test.go:141: generic node forged rule snapshot"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/search",
+      "failed_tests": [
+        "TestLexicalPaginationFiltersAndTenants",
+        "TestSearch6000WithProjectVisibility"
+      ],
+      "failure_outputs": [
+        "search_test.go:47: kind missing",
+        "visibility_perf_test.go:78: member: 0 hits"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/business/crm",
+      "failed_tests": [
+        "TestBindContactPrincipal",
+        "TestBindRejectsClosedGatesWithoutEvents",
+        "TestConcurrentBindIsOneEvent",
+        "TestAINoteRequiresToolGrantAndModelAndNeverApplies",
+        "TestAINoteRejectsRevisionRaceAfterGeneration",
+        "TestHTTPProviderContractAndImport",
+        "TestManualCustomerContactPrimaryAndTenantIsolation",
+        "TestCustomerRevisionNoteDraftAndProjectLink",
+        "TestCRMUndoStaleAndPrimary",
+        "TestCRMDeletionAndProjectUndo",
+        "TestCustomerArchiveListAndUndo",
+        "TestWorkspaceModelRewritesCustomerNoteEndToEnd"
+      ],
+      "failure_outputs": [
+        "module_test.go:101: no rows in result set",
+        "module_test.go:166: no rows in result set",
+        "module_test.go:27: no rows in result set",
+        "note_ai_test.go:151: no rows in result set",
+        "note_ai_test.go:71: no rows in result set",
+        "providers_test.go:20: no rows in result set",
+        "records_test.go:27: no rows in result set",
+        "records_test.go:93: no rows in result set",
+        "undo_test.go:222: no rows in result set",
+        "undo_test.go:267: no rows in result set",
+        "undo_test.go:305: no rows in result set",
+        "workspace_model_test.go:20: no rows in result set"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/chat",
+      "failed_tests": [
+        "TestLateVendorAliasRechecksAccessBeforeHierarchyLock",
+        "TestRegistrationAliasInlineResumeFencesBeforeHierarchyAndEvents"
+      ],
+      "failure_outputs": [
+        "late_alias_test.go:206: timeout: context deadline exceeded",
+        "registration_alias_test.go:351: timeout: context deadline exceeded"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/relations",
+      "failed_tests": [
+        "TestRelationDisjointEdgesCannotCloseCycle",
+        "TestCRMRelationKindsDirectionAndUndo",
+        "TestRelationsCRUDAndTenantIsolation",
+        "TestRefusalsReadAsWords",
+        "TestPaginationValidationAndAtomicity",
+        "TestUndoAuthorizationRestorationAndConflicts",
+        "TestConcurrentUndoExactlyOnce"
+      ],
+      "failure_outputs": [
+        "graph_test.go:18: no rows in result set",
+        "module_test.go:122: no rows in result set",
+        "module_test.go:205: no rows in result set",
+        "module_test.go:268: no rows in result set",
+        "module_test.go:355: no rows in result set",
+        "module_test.go:423: no rows in result set"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/demo",
+      "failed_tests": [
+        "TestDemoSeedTwice",
+        "TestDemoInterruptedRunRollsBackAndRetryConverges",
+        "TestDemoJourneyScopesOnlyExtendNewKey",
+        "TestDemoMissingHarnessRollsBack"
+      ],
+      "failure_outputs": [
+        "seed_test.go:153: kind epic is not seeded",
+        "seed_test.go:533: missing registry harness: kind epic is not seeded",
+        "seed_test.go:57: kind epic is not seeded"
+      ],
+      "final_status": "all pass"
+    },
+    {
+      "package": "internal/usagedashboard",
+      "failed_tests": [
+        "TestDashboardAggregatesVisibleSessionsOnly",
+        "TestDashboardRatesByVoteSnapshot",
+        "TestDashboardRatingsCountStoppedDeliveriesOnly",
+        "TestDashboardWorkFromSessionsAndOutcomes",
+        "TestDashboardWorkTokenCoverageCountsOnlyReportedTokens"
+      ],
+      "failure_outputs": [
+        "dashboard_test.go:275: ERROR: insert or update on table \"harness_sessions\" violates foreign key constraint \"harness_sessions_tenant_id_ticket_node_id_fkey\" (SQLSTATE 23503)",
+        "dashboard_test.go:453: ERROR: insert or update on table \"harness_sessions\" violates foreign key constraint \"harness_sessions_tenant_id_ticket_node_id_fkey\" (SQLSTATE 23503)",
+        "dashboard_test.go:519: ERROR: insert or update on table \"harness_sessions\" violates foreign key constraint \"harness_sessions_tenant_id_ticket_node_id_fkey\" (SQLSTATE 23503)",
+        "work_api_test.go:183: ERROR: insert or update on table \"harness_sessions\" violates foreign key constraint \"harness_sessions_tenant_id_ticket_node_id_fkey\" (SQLSTATE 23503)",
+        "work_api_test.go:93: ERROR: insert or update on table \"harness_sessions\" violates foreign key constraint \"harness_sessions_tenant_id_ticket_node_id_fkey\" (SQLSTATE 23503)"
+      ],
+      "final_status": "all pass"
+    }
+  ],
+  "source_sha256": {
+    "api/openapi.yaml": "dc99155e0bff2f1669a75e84a7550d38f92d5d8247406fb7c1094cd7b832075c",
+    "internal/approvals/approvals_test.go": "f40bc2e2a8e1edff89dd4bb97b7fad22fa01d9b51ed46925e54707e80d39f3c6",
+    "internal/attachments/attachments_test.go": "7f68899f518837b109983a9e5c8b1442a16a02d96729f2d8e716bc4028092f09",
+    "internal/business/costunits/module_test.go": "3bfc0aecf73ea8b876945608faaab621c60381feed889bdf743e0b3fd490f2ae",
+    "internal/business/crm/module_test.go": "e7ff0be57a8a70e318122913f708c2df213f2c4061b31c3a17da8c2eb6dfed3e",
+    "internal/chat/late_alias_test.go": "eb886bd32ff6a9a47a0a62e4203224612c7e4e5c3a9a3b00d5b5f8c7e973a6e7",
+    "internal/chat/registration_alias_test.go": "f833a7bfffca1b8fe48cfe8965e209eeb8eee34a128d00d10a0b815140205d10",
+    "internal/decisiondesk/projection_test.go": "b3333b7cd1d5cab51d6c4792d7fde0f45d772a1bfb2478344f0fa0420772fd42",
+    "internal/decisiondesk/review_regression_test.go": "ac0c8ae9bb3d94ac68366b4fc2c0f13fbc3e66d65e1103bf542f3beabc42c1b6",
+    "internal/demo/seed.go": "f6a9e51b58c3c5b8c0721e4804bf09a55cf9521d22a60abb37b7b96d68e6fed6",
+    "internal/demo/seed_test.go": "a080651dad9e55ff9109b661c4c9198902410656dd655744a7939b26953b0ca4",
+    "internal/events/events_test.go": "1fa9e975af73123e6f78bdc7079e6a338c1e0a5a4c3987d6cfe2809d6cb1b215",
+    "internal/events/module.go": "5e27d3dff07ec3b7316a78436f3abb38f97fdb4634ff8c70645c67f6f7c84012",
+    "internal/intake/extensions_integration_test.go": "f71e6bb59164ec7bd98d2ae4a9c86475e19438ebda26b26b6061719af0de7e63",
+    "internal/nodes/work_status_test.go": "6426dcf41cd80c8cb913d80e13dcfe74b5ed0b4e57ef4c6953b854ff0daa9d75",
+    "internal/questions/questions_test.go": "2a88f7953c56beef6a91718c27244d26c39ae4dbe7abcb0b0321516c4d3f53bf",
+    "internal/relations/concurrency_test.go": "42737217217ae4d47f86f037c3beab06dbdbd5bc163a05234b6c553d214963a2",
+    "internal/relations/graph_test.go": "38d040613e7c298efe291aa5984386b708ccd8d97b45921e1bbc2683f65627b5",
+    "internal/relations/module_test.go": "0b0467b23392df3f546ed34d4bb972de69130c46605d6d77697ce71bdca70ecd",
+    "internal/rules/batch_test.go": "87f685c6fad7c5f2db646cc9cbfb6fcffc80be3e5444912dc46d3aca7748cfc6",
+    "internal/rules/clients_test.go": "00f5a36cfa964502a84c1cf92d0ecefd5cedb500915bebdef70992b95a36c223",
+    "internal/rules/doctrine/analysis_test.go": "8c3a304e25b473b46561207bfffbb3c46ccd16f4c4569aaae69ca24c2ab6afcb",
+    "internal/rules/doctrine/inbox_test.go": "3f699e6b39e1b329c4c2f6b43c697511a5d5ea5df67849edca50bd21aecc969e",
+    "internal/rules/store_test.go": "e8db3f3cee65e7ed59a7b758392ddeaefb853ec78b107c7e76f4ff2de17e5582",
+    "internal/search/search_test.go": "f0a724e3f63bc39196909ec62eb18cc2de1a14fb23e62c3c316e280a5f3819a8",
+    "internal/search/visibility_perf_test.go": "ab9c0231451f418ee42c913817a6e945744001fc7dc88f3a2f220d85c84c901f",
+    "internal/usagedashboard/dashboard_test.go": "3dc41557fd5b48481ca8848f4a2d12360090915602f96e8eac2c40d5759bee53",
+    "internal/views/scope_test.go": "8d75208e6d23bd2e3fe6aa3af7e3ed33eeb780fa81e5e03b2485d6d5b91eedbd",
+    "scripts/ci/go-test-tiers.json": "f51a793e01a49443205b560d272986a3e7a4da3bd0ed86f4ff66346ff52170ca"
+  },
+  "artifacts": [
+    {
+      "path": "web/test-results/aeon-648-int-fix17/ancillary-summary.json",
+      "sha256": "929f97a0a406dda7e3fcd655196523f1984dace6e2cd9ebf98afa0d5bc853750"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/audit-coverage.log",
+      "sha256": "bce6fcf5db972faa18f29daa4cf610c79b1059596467329806bbe389add0ef62"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/audit-tests.log",
+      "sha256": "154a1d0b2433a5ea4c9c86491b2d93f9ee9eb0c9b88eac5dcf21ef2a201b5c85"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/causal-scope-green.jsonl",
+      "sha256": "66cf2f5a086faf25b207fca1bbb9943e9f578efef3b147c2a806f5f14e1825c8"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/causal-scope-summary.json",
+      "sha256": "5ab9d01782f0dc0ee549fa3933605c3b93ef43e05c67b6520efef5e1be456106"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/ci-failures.json",
+      "sha256": "295034c5ca4b178c14e9842dc2d06ceafeea35a27a0a947887825a257a9c210e"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/final-undo-summary.json",
+      "sha256": "c60ed40057d73e1912a05e40dfa330b75da5208f9ccc5e5506aca78111f2948d"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/go-selection.json",
+      "sha256": "43053f8c113f1d817789a6c115e9a61311a513917d059e6d65a0e674478ea90f"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-approvals.jsonl",
+      "sha256": "df729454c4b3e1062c2845d9b22c9634ed3c5342ffb9d0036b4e97df4142e6b0"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-attachments.jsonl",
+      "sha256": "5259c6b6688c65b27e87fd14a48e43344721cd7677890747c20c5e8af32bfaca"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-business-costunits.jsonl",
+      "sha256": "0b646cff28dc8235b123d0e1c2fa2156d7490b4f5b8701e085e9811f4bcb4308"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-business-crm.jsonl",
+      "sha256": "ec59308f34e8b7fb783212e593a579adb5a098c0f64b15f3966efaaaaa5bdd4e"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-chat.jsonl",
+      "sha256": "830b39a6139cf262db33698d0091af44e475be07ff560579d5b0c1ce4578de2d"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-decisiondesk.jsonl",
+      "sha256": "63bcddfb0f287f269bfe38e1097876452c70ff4a10f9b31193ee5de5ac3bf74d"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-demo.jsonl",
+      "sha256": "be55ef91d7a0a7db0c7b5e5c9220d2c19ba361cc6713ac4f8bec415026a49bf7"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-intake.jsonl",
+      "sha256": "ca05ab701af97c8767c0e68b5d7258e16463364fa3cdd77e239255367dd06725"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-questions.jsonl",
+      "sha256": "ff7537986a0cf3dd041f0178e0e839274694674802ea7fe111b4fb3c8677df81"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-relations.jsonl",
+      "sha256": "ec2c9c5d5514bb2311fbd962be846c7e251ef4f5f76a0c5d24e36b00293a9395"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-reportercontract.jsonl",
+      "sha256": "5ef9ee812ad1a4ab267ad458fae49143d6bb8a34625e238e1a6c81da979e3bff"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-rules-doctrine.jsonl",
+      "sha256": "6ce9ea87baaacc6ae885e69aeeb0085d1709645d1483f94fa348fc641b117077"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-rules.jsonl",
+      "sha256": "fa6ceffe8c73c9efe17d2f4b92372e83b3756998445c4e6c5fc9f6a876b21506"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-search.jsonl",
+      "sha256": "644818877e990b6c0dedce493646adfc8817fb64e6e28f6a479a97db5267e5ef"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-usagedashboard.jsonl",
+      "sha256": "e26efdb910c89463366c40c1311724976c1840d80df45ded7c87f8ae6993145a"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-internal-views.jsonl",
+      "sha256": "62a66d25ee5b8ee39309aca322a57e0dbf0fd89ea9c38d704298ea59650bfafd"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/green-summary.json",
+      "sha256": "38bfcb8ceb8ab4ec7815c0a670db554e43b2661e0bfdff61da4e755e457478a7"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/migration-policy.log",
+      "sha256": "bc1d2249cb2c0bb89af89c17f06096c7c8a5cb6da82683a83bc6d79fd267d82c"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/red-internal-events.log",
+      "sha256": "de241fec568021d68af6c0b2501a4cd27b1a43aad254bfcc9b0b59ad81fce877"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/red-summary.json",
+      "sha256": "64f96deedf0b27a580c503798b764d2d3e3475a766ff9d2cfe3260574bf23d46"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/relations-final-green.log",
+      "sha256": "51fa8860a707b6d4bbde9bd7eb9d66acd7c62bc80469be0b367eaaf972ce6105"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/release-check.log",
+      "sha256": "7d6ad2d168c088a97c3f88e513d7fb2ec24eb004bebd48db8fd7b5c7c29c7421"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/test-tier-regressions.log",
+      "sha256": "8f9cf41dfff52224e504cb52c8e0df5b5fe97721ca76619bca94eec2f9ae4ca9"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/undo-final-green.log",
+      "sha256": "c444ea320554129d88c78355ac0b0666913882512344dc733326c8071b6d71f1"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/undo-final-red.log",
+      "sha256": "3e77234db61e7a8134838a43a1e649ce0e93e051e86e7236d78b2f66cbb16eb5"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/undo-green-internal-events.jsonl",
+      "sha256": "21e8d7913f90bd4ef1a0a8175ece42a1848ba2b970dcbc8abe14f9f122af35ad"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/undo-green-internal-nodes.jsonl",
+      "sha256": "1b585287b1f5c397b6d31c8d0d3568d8d53e8f34a5774309fb27ff3b1bd76dc7"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/undo-green-internal-relations.jsonl",
+      "sha256": "6787547b596696f69cf814df0d2165a0e46d11a2140f0aeceee393fb91ae5636"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/undo-green-internal-reportercontract.jsonl",
+      "sha256": "fe2ddb76b35c7f2784c49ebe035c64e782aeae43b6d3dfae55e2b632e7c8ab6d"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/undo-green-summary.json",
+      "sha256": "5aefb14774ce771684306372fcf6a5d938bd982905374fc0b2cd05b7e37138d6"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/web-browser-remote.log",
+      "sha256": "b444829c793d3128f0a9549f928c15df0d69696824eb31396a4a9cd4efe93799"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/web-journey-unit.log",
+      "sha256": "d86f8f55ea0d7222ccdc9729cd19ce856c9d6d51f0c1783131c4a7357efa010d"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/web-release-membership-unit.log",
+      "sha256": "47db4a573f64553fbb7218ff2e2dacab171234cacf0ddca995ca3175ec891156"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix17/web-work-unit.log",
+      "sha256": "2b9244196412a7499897a1ee857515e6838fdbf52fe776924e27002c07058aa2"
+    }
+  ],
+  "safety": {
+    "push": false,
+    "deploy": false,
+    "production_access": false,
+    "shared_ledger_modified": false,
+    "other_worktrees_modified": false,
+    "ticket_status_changed": false,
+    "credentials_read_or_displayed": false,
+    "model_reviews_or_subagents": false,
+    "generated_output_committed": false,
+    "assertions_skipped_or_loosened": false
+  },
+  "remaining": [
+    "Coordinator reruns full hosted CI after their push; this worker does not push or deploy. Browser execution remains with OPS-247/hosted Linux Chromium. Prior reservation attribution/browser residuals remain documented in fix15 evidence."
+  ]
+}

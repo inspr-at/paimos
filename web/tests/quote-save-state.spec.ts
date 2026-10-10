@@ -22,9 +22,41 @@ const saves = (calls: Awaited<ReturnType<typeof setup>>['calls']) => calls.filte
 async function full(page: Page, id: string) {
   await page.goto(`/business/quotes/${id}`)
   await expect(page.locator('.quote-document')).toHaveAttribute('data-quote-ready', 'true')
+  await expect(page.locator('.quote-ws')).toHaveAttribute('data-recovery-ready', 'true')
 }
 const state = (page: Page) => page.locator('.quote-titlebar .save-state')
 const saveButton = (page: Page) => page.getByRole('button', { name: 'Save draft' })
+
+// Pause the recovery database open at its success callback. No transaction is
+// left running, and the real IndexedDB read resumes only when this test says so.
+async function fullWithDeferredRecovery(page: Page, id: string) {
+  await page.addInitScript(() => {
+    if (!/^\/business\/quotes\/[^/]+$/.test(location.pathname) || 'recoveryGate' in window) return
+    const original = indexedDB.open.bind(indexedDB)
+    const gate = { started: false, release: () => {} }
+    ;(window as unknown as { recoveryGate: typeof gate }).recoveryGate = gate
+    const resume = new Promise<void>(resolve => { gate.release = resolve })
+    indexedDB.open = (name, version) => {
+      const request = original(name, version)
+      if (name !== 'aeon-quote-recovery-v1') return request
+      Object.defineProperty(request, 'onsuccess', {
+        set(callback: ((this: IDBRequest, event: Event) => void) | null) {
+          request.addEventListener('success', event => {
+            gate.started = true
+            void resume.then(() => callback?.call(request, event))
+          }, { once: true })
+        },
+      })
+      return request
+    }
+  })
+  await page.goto(`/business/quotes/${id}`)
+  await expect(page.locator('.quote-document')).toHaveAttribute('data-quote-ready', 'true')
+  await expect.poll(() => page.evaluate(() => (window as unknown as { recoveryGate: { started: boolean } }).recoveryGate.started)).toBe(true)
+  await expect(page.locator('.quote-ws')).toHaveAttribute('data-recovery-ready', 'false')
+  await page.evaluate(() => (window as unknown as { recoveryGate: { release(): void } }).recoveryGate.release())
+  await expect(page.locator('.quote-ws')).toHaveAttribute('data-recovery-ready', 'true')
+}
 
 // Leaves an unsaved copy in this tab's recovery store, as an earlier visit would have.
 async function seedRecovery(page: Page, world: QuoteWorld, quoteId: string, options: { baseVersion?: number; title?: string }) {
@@ -174,8 +206,7 @@ test('discarding the work from before an issue leaves the version as it is and d
   expect(saves(calls)).toHaveLength(0)
   await expect(page.getByText('Your unsaved work from before is discarded. The issued version is unchanged.')).toBeVisible()
   await page.goto('/business/quotes')
-  await full(page, Q.issued)
-  await page.waitForTimeout(400)
+  await fullWithDeferredRecovery(page, Q.issued)
   await expect(page.locator('.quote-notices .notice').filter({ hasText: 'You have unsaved work' })).toHaveCount(0)
 })
 
@@ -184,17 +215,15 @@ test('a copy without changes, or from another version’s draft, is never offere
   const { world } = await setup(page)
   // Nothing changed: an issued quote that was only read leaves nothing to restore.
   await seedRecovery(page, world, Q.issued, { baseVersion: 0 })
-  await full(page, Q.issued)
-  await page.waitForTimeout(400)
+  await fullWithDeferredRecovery(page, Q.issued)
   await expect(page.locator('.quote-notices .notice')).toHaveCount(0)
   // From the draft of another version: stale, never shown.
   await seedRecovery(page, world, Q.draft, { baseVersion: 3, title: 'From another version' })
-  await full(page, Q.draft)
-  await page.waitForTimeout(400)
+  await fullWithDeferredRecovery(page, Q.draft)
   await expect(page.getByRole('button', { name: 'Restore my work' })).toHaveCount(0)
   // From this draft: offered.
   await seedRecovery(page, world, Q.draft, { baseVersion: 0, title: 'From this draft' })
-  await full(page, Q.draft)
+  await fullWithDeferredRecovery(page, Q.draft)
   await page.getByRole('button', { name: 'Restore my work' }).click()
   await expect(page.getByRole('textbox', { name: 'Angebotstitel' })).toHaveText('From this draft')
 })

@@ -84,15 +84,16 @@ narrowQuery?.addEventListener('change', onNarrow)
 const accountLabel = (label: string) => narrow.value ? label.split(' · ').slice(0, 2).join(' · ') : label
 const selectedWait = computed(() => catalog.value?.hosts.find(h => h.daemon_id === choice.value.hostId)?.harnesses.find(h => h.harness === choice.value.harness)?.accounts.find(a => a.id === choice.value.accountId)?.wait)
 const mayRunNow = computed(() => permitted.value && session.identity?.principal.kind === 'person')
-const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && !!ticket.value && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
+const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && ticket.value?.is_leaf === true && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
 
 async function search(more = false) {
   const turn = ++searchGeneration
   searching.value = true; searchError.value = ''
   try {
-    const page = await listNodes({ kind: ['ticket'], q: query.value.trim(), limit: 30, sort: '-updated_at', ...(more && nextCursor.value ? { cursor: nextCursor.value } : {}) })
+    const page = await listNodes({ kind: ['work'], shape: ['leaf'], q: query.value.trim(), limit: 30, sort: '-updated_at', ...(more && nextCursor.value ? { cursor: nextCursor.value } : {}) })
     if (turn !== searchGeneration || !visible.value) return
-    tickets.value = more ? [...tickets.value, ...page.items] : page.items
+    const leaves = page.items.filter(item => item.is_leaf === true)
+    tickets.value = more ? [...tickets.value, ...leaves] : leaves
     nextCursor.value = page.next_cursor
   } catch (e) { if (turn === searchGeneration) { searchError.value = message(e); tickets.value = []; nextCursor.value = null } }
   finally { if (turn === searchGeneration) searching.value = false }
@@ -126,6 +127,7 @@ function setFamily(value: string) {
   void loadCatalog()
 }
 function selectTicket(item: WorkNode) {
+  if (item.is_leaf !== true) return
   ticket.value = item
   authorFamily.value = authorFamilyFor(item)
   touch.value = emptyTouch()
@@ -154,8 +156,8 @@ async function open(initial?: WorkNode) {
   if (busy.value) return
   opener = document.activeElement as HTMLElement
   generation++; visible.value = true
-  ticket.value = initial ?? null; query.value = ''; tickets.value = []; nextCursor.value = null
-  authorFamily.value = authorFamilyFor(initial ?? null)
+  ticket.value = initial?.is_leaf === true ? initial : null; query.value = ''; tickets.value = []; nextCursor.value = null
+  authorFamily.value = authorFamilyFor(ticket.value)
   catalog.value = null; catalogGap.value = null; catalogMessage.value = ''
   choice.value = emptyChoice(); touch.value = emptyTouch()
   remember.value = false; remembered.value = ''
@@ -163,10 +165,10 @@ async function open(initial?: WorkNode) {
   error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false
   dialog.value?.showModal()
   void loadCatalog()
-  if (!initial) void search()
+  if (!ticket.value) void search()
   poll.start()
   await nextTick()
-  if (initial) hostSelect.value?.focus()
+  if (ticket.value) hostSelect.value?.focus()
   else searchInput.value?.focus()
 }
 function close() {
@@ -376,7 +378,7 @@ defineExpose({ open })
 </template>
 
 <style scoped>
-.launch-dialog { width: min(600px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: auto; }
+.launch-dialog { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: auto; scrollbar-gutter: stable; }
 .launch-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(5px); }
 .launch-card { padding: 22px 24px 20px; }
 .launch-head { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
@@ -415,7 +417,7 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .bad { color: var(--danger); }
 footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
 footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
-footer .btn { min-height: 44px; }
+@media (pointer: coarse), (max-width: 600px) { footer .btn { min-height: 44px; } }
 .run-result { display: grid; justify-items: center; text-align: center; padding: 14px 0; gap: 12px; outline: none; }
 .run-result h3 { font-size: 25px; letter-spacing: -.5px; }
 .run-result > p:not(.eyebrow) { color: var(--ink-2); font-size: 14px; line-height: 1.6; max-width: 410px; }

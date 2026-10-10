@@ -1,19 +1,48 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
-import { DATE_FIELDS, DATE_PRESETS, DIMENSIONS, GROUPS, type DateField, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { computed, nextTick, ref, watch } from 'vue'
+import { DATE_FIELDS, DATE_PRESETS, heldOptions, offeredDimensions, type DateField, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import type { ColumnId } from '../../lib/columns'
 import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
-import { plural } from '../../lib/work'
+import { plural, type SortKey } from '../../lib/work'
+import type { ProjectSummary } from '../../lib/api'
+import { hiddenStates, hideLabel, type HideState } from '../../lib/hideStates'
+import { statusMeta } from '../../lib/work'
+import HideLabel from './HideLabel.vue'
+import HideOptions from './HideOptions.vue'
 import AppIcon from '../AppIcon.vue'
 import FacetOptions from './FacetOptions.vue'
+import DisplayPanel from './DisplayPanel.vue'
+import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
 
-// Phones: every filter in one sheet, and grouping; the same state as the toolbar.
-const props = withDefaults(defineProps<{ filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null; view?: 'list' | 'outline' | 'graph'; canSave?: boolean }>(), { view: 'list' })
+// Phones and small tablets share every filter and display preference with the toolbar.
+const props = withDefaults(defineProps<{
+  summary?: ProjectSummary | null; filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; loading?: boolean; total: number | null
+  view?: 'list' | 'outline' | 'graph'; canSave?: boolean; density: 'comfortable' | 'compact'; projectHeader?: boolean
+  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
+}>(), { view: 'list' })
 const emit = defineEmits<{
-  toggle: [dimension: Dimension, value: string]; exclude: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]; group: [value: GroupBy]
+  hideStates: [states: HideState[]]; toggle: [dimension: Dimension, value: string]; exclude: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]; group: [value: GroupBy]
   date: [value: DateFilter | null]; opened: []; expandAll: []; collapseAll: []; saveView: [anchor: HTMLElement]
+  sort: [keys: SortKey[]]; density: [value: 'comfortable' | 'compact']; columns: [order: ColumnId[], visible: ColumnId[]]
+  columnsReset: []; expandGroups: []; collapseGroups: []
 }>()
-const dimensions = computed(() => DIMENSIONS.filter(d => props.view !== 'graph' || TICKET_GRAPH_FILTERS.includes(d.key)))
+const hideName = computed(() => hideLabel(props.filters.hideStates))
+const hideNames = computed(() => hiddenStates(props.filters.hideStates).map(state => statusMeta(state).label).join(', '))
+// Advanced filters shown when the sheet opened stay until it closes, also once cleared.
+const kept = ref<Dimension[]>([])
+const dimensions = computed(() => offeredDimensions(props.filters, props.view === 'graph' ? TICKET_GRAPH_FILTERS : undefined, kept.value))
+// The filters appear once their names and counts are in, then every row holds
+// its place until the sheet closes: a late answer updates counts but never adds
+// a row, which would push the sections below it down (AEON-974).
+const shown = ref(false)
+const held = ref<Partial<Record<Dimension, FacetOption[]>> | null>(null)
+watch(() => shown.value && !props.loading ? dimensions.value.map(d => [d.key, props.options(d.key)] as const) : null, entries => {
+  if (!entries) return
+  const next = { ...held.value ?? {} }
+  for (const [key, live] of entries) next[key] = heldOptions(next[key] ?? [], live, !next[key])
+  held.value = next
+})
 const dialog = ref<HTMLDialogElement>()
 const doneButton = ref<HTMLButtonElement>()
 const dateField = ref<DateField>('updated')
@@ -21,12 +50,16 @@ let opener: HTMLElement | null = null
 async function open() {
   opener = document.activeElement as HTMLElement
   dateField.value = props.filters.date?.field ?? 'updated'
+  kept.value = offeredDimensions(props.filters).map(d => d.key)
+  held.value = null
+  shown.value = true
   dialog.value?.showModal()
   emit('opened')
   await nextTick()
   doneButton.value?.focus({ preventScroll: true })
 }
 function close() { dialog.value?.close(); opener?.focus({ preventScroll: true }) }
+function closed() { shown.value = false }
 function backdrop(event: MouseEvent) { if (event.target === dialog.value) close() }
 function datePreset(value: DateFilter['preset']) {
   const current = props.filters.date
@@ -41,7 +74,7 @@ defineExpose({ open, close })
 </script>
 
 <template>
-  <dialog ref="dialog" class="filter-sheet" aria-labelledby="filter-sheet-title" @cancel.prevent="close" @click="backdrop">
+  <dialog ref="dialog" class="filter-sheet" aria-labelledby="filter-sheet-title" @cancel.prevent="close" @click="backdrop" @close="closed">
     <div class="sheet-card">
       <span class="grabber" aria-hidden="true" />
       <header>
@@ -54,27 +87,32 @@ defineExpose({ open, close })
       <div class="sheet-scroll">
         <div class="sheet-row">
           <label class="switch">
-            <input type="checkbox" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
-            <span>Hide closed tickets</span>
+            <input type="checkbox" :aria-label="`${hideName === 'Hide' ? `Hide ${hideNames}` : hideName} tickets`" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
+            <HideLabel :states="filters.hideStates" />
           </label>
         </div>
-        <div v-if="view === 'outline'" class="sheet-row group-row">
-          <p class="eyebrow">Outline</p>
-          <div class="outline-actions">
-            <button type="button" class="btn" @click="emit('expandAll'); close()"><AppIcon name="expand-all" :size="14" />Expand all</button>
-            <button type="button" class="btn" @click="emit('collapseAll'); close()"><AppIcon name="collapse-all" :size="14" />Collapse all</button>
-          </div>
-        </div>
-        <section v-else-if="view !== 'graph'" class="sheet-section">
-          <p class="eyebrow">Group by</p>
-          <div class="chip-grid" role="radiogroup" aria-label="Group by">
-            <button v-for="option in GROUPS" :key="option.value" type="button" role="radio" class="choice" :aria-checked="filters.group === option.value" @click="emit('group', option.value)">{{ option.label }}</button>
-          </div>
+        <HideOptions :states="filters.hideStates" :summary="summary" :show-closed="filters.showClosed" @change="states => emit('hideStates', states)" />
+        <section v-if="view !== 'graph'" class="sheet-section" aria-labelledby="sheet-display-title">
+          <h3 id="sheet-display-title" class="eyebrow">Display</h3>
+          <DisplayPanel
+            sheet :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns"
+            :grouped="view === 'list' && filters.group !== 'none'" :project-header="projectHeader"
+            @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
+            @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
+            @expand-all="emit('expandAll'); close()" @collapse-all="emit('collapseAll'); close()"
+            @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
+          />
         </section>
+        <section v-else-if="projectHeader" class="sheet-section" aria-labelledby="graph-sheet-display-title">
+          <h3 id="graph-sheet-display-title" class="eyebrow">Display</h3>
+          <HeaderRoomyChoice class="graph-header-choice" />
+        </section>
+        <p v-if="!held" class="sheet-loading" role="status">Loading filters…</p>
+        <template v-else>
         <section v-for="dimension in dimensions" :key="dimension.key" class="sheet-section">
           <p class="eyebrow">{{ dimension.title }}</p>
           <FacetOptions
-            :dimension="dimension.key" :options="options(dimension.key)" :selected="filters[dimension.key]"
+            :dimension="dimension.key" :options="held[dimension.key] ?? []" :selected="filters[dimension.key]"
             @toggle="value => emit('toggle', dimension.key, value)" @exclude="value => emit('exclude', dimension.key, value)"
           />
         </section>
@@ -87,6 +125,7 @@ defineExpose({ open, close })
             <button v-for="option in DATE_PRESETS" :key="option.value" type="button" class="choice" :aria-pressed="filters.date?.preset === option.value && filters.date.field === dateField" @click="datePreset(option.value)">{{ option.label }}</button>
           </div>
         </section>
+        </template>
       </div>
       <footer>
         <button ref="doneButton" type="button" class="btn primary done" @click="close">
@@ -100,7 +139,7 @@ defineExpose({ open, close })
 <style scoped>
 .filter-sheet { width: 100vw; max-width: none; height: 100dvh; max-height: 100dvh; margin: auto 0 0; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .filter-sheet::backdrop { background: var(--scrim); }
-.sheet-card { display: flex; flex-direction: column; height: 100%; max-height: 100%; border-radius: 20px 20px 0 0; border-top: 1px solid var(--glass-edge); background: var(--surface-raised); box-shadow: 0 -18px 40px -18px rgba(0, 0, 0, .35); }
+.sheet-card { display: flex; flex-direction: column; height: 100%; max-height: 100%; border-radius: 20px 20px 0 0; border-top: 1px solid var(--glass-edge); background: var(--surface-raised); box-shadow: 0 -18px 40px -18px color-mix(in srgb, var(--shadow-black) 35%, transparent); }
 .grabber { align-self: center; width: 40px; height: 4px; margin-top: 8px; border-radius: 999px; background: var(--line-2); }
 header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 8px 20px; }
 h2 { font-size: 19px; }
@@ -110,10 +149,11 @@ header .btn { height: 44px; }
 .sheet-scroll { flex: 1; min-height: 0; overflow: auto; padding: 0 12px 12px; overscroll-behavior: contain; }
 .sheet-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 0 8px; border-bottom: 1px solid var(--line); }
 .sheet-row .switch { min-height: 44px; font-size: 14.5px; color: var(--ink); }
-.outline-actions { display: flex; gap: 8px; }
-.outline-actions .btn { height: 40px; }
 .sheet-section { padding: 14px 0 8px; border-bottom: 1px solid var(--line); }
 .sheet-section .eyebrow { padding: 0 8px 8px; }
+.graph-header-choice { padding: 6px 8px 8px; }
+.sheet-loading { padding: 14px 8px; font-size: 14px; color: var(--ink-3); }
+.sheet-section :deep(.facet-options) { grid-template-columns: minmax(0, 1fr); }
 .sheet-section :deep(.facet-option) { min-height: 44px; }
 .sheet-section :deep(.facet-main) { font-size: 15px; }
 .chip-grid { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px; }

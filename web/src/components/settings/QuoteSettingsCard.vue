@@ -143,7 +143,7 @@ onMounted(load)
 
 <style scoped>
 .set-skeleton { min-height: 720px; align-content: start; }
-.unsaved { font-size: 12px; font-weight: 600; color: var(--gold-ink); }
+.unsaved { font-size: 12px; font-weight: 600; color: var(--warn-ink); }
 .quote-form { display: grid; gap: 16px; }
 .sender { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 24px; align-items: start; }
 .groups { display: grid; gap: 18px; min-width: 0; }

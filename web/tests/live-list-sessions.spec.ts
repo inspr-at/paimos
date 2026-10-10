@@ -112,27 +112,28 @@ for (const view of ['list', 'outline']) {
     await page.route('**/api/harness-sessions/live**', route => readsFail ? route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":"unavailable"}' }) : route.fallback())
     const errors = watchErrors(page)
     await page.goto(`/p/PHAROS/tickets${view === 'outline' ? '?view=outline' : ''}`)
-    const row = page.locator('#row-n-4'), freshness = page.locator('.list-freshness')
+    // The footer's centre carries what the toolbar's "Live" used to (AEON-785): its dot is hollow amber while updates are paused.
+    const row = page.locator('#row-n-4'), freshness = page.locator('footer.app-footer .sum')
     await page.clock.runFor(1_000)
-    await expect(freshness).toHaveText('Live')
+    await expect(freshness).toHaveAttribute('data-conn', 'on')
     await expect(row.locator('.eta-cell')).toHaveClass(/overdue/)
 
     readsFail = true
     await page.evaluate(() => {
       for (const stream of (window as unknown as { aeon514Streams: { onerror: (() => void) | null }[] }).aeon514Streams) stream.onerror?.()
     })
-    await expect(freshness).toHaveText('Reconnecting…')
+    await expect(freshness).toHaveAttribute('data-conn', 'off')
+    await expect(freshness).toContainText('Updates paused · retrying')
     await expect(row.locator('.ticket-workers')).toHaveClass(/stale/)
     await expect(row.locator('.eta-cell')).toHaveClass(/stale/)
     await expect(row.locator('.eta-cell')).not.toHaveClass(/overdue/)
     await expect(row.locator('.eta-cell .shown')).toHaveText(/Last /)
     await expect(row.locator('.worker-lead')).toHaveAttribute('data-tip', /Showing the last successful update/)
-    await expect(freshness).toHaveAttribute('data-tip', /workers and ETAs may have changed/)
+    await expect(freshness).toHaveAccessibleName(/Live updates paused, retrying/)
     // Timers run only once across this twelve-minute suspension. Clock-gap
     // detection must reconnect even though no visibility event was emitted.
     await page.clock.fastForward(12 * 60_000)
-    await expect(freshness).toHaveText('Updated 12 min ago')
-    await expect(freshness).toHaveClass(/stale/)
+    await expect(freshness).toHaveAttribute('data-conn', 'off')
     await expect(row.locator('.eta-cell')).not.toHaveClass(/overdue/)
 
     data.live.splice(0)
@@ -144,7 +145,7 @@ for (const view of ['list', 'outline']) {
       window.dispatchEvent(new Event('online'))
     })
     await page.clock.runFor(1_000)
-    await expect(freshness).toHaveText('Live')
+    await expect(freshness).toHaveAttribute('data-conn', 'on')
     await expect(row.locator('.ticket-workers')).toHaveCount(0)
     await expect(row.locator('.eta-cell')).toContainText('Done')
     expect(errors).toEqual([])

@@ -153,6 +153,7 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 		t.Fatal(err)
 	}
 	written := make(chan Event, 1)
+	firstPID := make(chan int, 1)
 	release := make(chan struct{})
 	defer func() {
 		select {
@@ -164,6 +165,7 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 	firstDone := make(chan error, 1)
 	go func() {
 		firstDone <- db.InTenant(dbtest.Seed(ctx), d.App, a.TenantID, func(tx pgx.Tx) error {
+			firstPID <- int(tx.Conn().PgConn().PID())
 			e, err := Append(ctx, tx, a, Change{Type: "test.changed", After: map[string]string{"sensitive_content": "snapshot"}})
 			if err != nil {
 				return err
@@ -188,16 +190,24 @@ func TestCounterWaitsForCommitAndNotificationContainsOnlyHint(t *testing.T) {
 		t.Fatal(ctx.Err())
 	}
 	secondDone := make(chan error, 1)
+	secondPID := make(chan int, 1)
 	go func() {
 		secondDone <- db.InTenant(dbtest.Seed(ctx), d.App, a.TenantID, func(tx pgx.Tx) error {
+			secondPID <- int(tx.Conn().PgConn().PID())
 			_, err := Append(ctx, tx, a, Change{Type: "test.changed", After: map[string]string{"x": "second"}})
 			return err
 		})
 	}()
+	var waiter int
 	select {
+	case waiter = <-secondPID:
 	case err := <-secondDone:
-		t.Fatalf("second append passed uncommitted first: %v", err)
-	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("second transaction failed before append: %v", err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if err := dbtest.WaitForBlocked(ctx, d.Admin, waiter, <-firstPID, "INSERT INTO events"); err != nil {
+		t.Fatal(err)
 	}
 	waitCtx, stop := context.WithTimeout(ctx, 50*time.Millisecond)
 	_, err = conn.WaitForNotification(waitCtx)
@@ -371,8 +381,53 @@ func TestSSEHeartbeatAndInvalidResume(t *testing.T) {
 	}
 }
 
+func TestUndoChecksAuthorityBeforeEventLookup(t *testing.T) {
+	d, actor, foreign := fixture(t)
+	event := appendEvents(t, d, actor, 1)[0]
+	mux := http.NewServeMux()
+	New(d.App).Mount(mux)
+	request := func(p tenant.Principal, id int64) *httptest.ResponseRecorder {
+		t.Helper()
+		r := httptest.NewRequest("POST", fmt.Sprintf("/api/events/%d/undo", id), nil)
+		r = r.WithContext(tenant.WithPrincipal(t.Context(), p))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w
+	}
+	// Neither an absent event nor a foreign event may bypass the admission
+	// check. An agent scope alone is insufficient without a live role grant.
+	dbtest.BindRole(t, d, actor.TenantID, actor.ID, "member")
+	foreign.Scopes = []string{"events.undo"}
+	for _, p := range []tenant.Principal{actor, foreign} {
+		for _, id := range []int64{event.ID, event.ID + 1000} {
+			w := request(p, id)
+			if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), `"message":"undo is not permitted"`) {
+				t.Fatalf("unprivileged undo %d: %d %s", id, w.Code, w.Body.String())
+			}
+		}
+	}
+	// Scoped agents remain supported for ordinary Undo. Admission cannot
+	// replace the event lookup or the final resource permission checks.
+	actor.Scopes = []string{"events.undo"}
+	for _, tc := range []struct {
+		id   int64
+		want int
+	}{{event.ID, http.StatusConflict}, {event.ID + 1000, http.StatusNotFound}} {
+		if w := request(actor, tc.id); w.Code != tc.want {
+			t.Fatalf("authorized undo %d: %d %s", tc.id, w.Code, w.Body.String())
+		}
+	}
+	if after := logPosition(t, d, actor); after != event.ID {
+		t.Fatalf("refused undo changed history: %d to %d", event.ID, after)
+	}
+}
+
 func TestUndoAdapterRollbackAndUnknownType(t *testing.T) {
 	d, a, _ := fixture(t)
+	// This test mounts the adapter directly, so supply the authority that the
+	// real route requires and the mutation transaction now rechecks.
+	dbtest.BindRole(t, d, a.TenantID, a.ID, "member")
+	a.Scopes = []string{"events.undo"}
 	event := appendEvents(t, d, a, 1)[0]
 	for i, opts := range [][]Option{nil, {WithUndo("test.changed", func(ctx context.Context, tx pgx.Tx, p tenant.Principal, e Event) (Change, error) {
 		if _, err := tx.Exec(ctx, `UPDATE principals SET name='Should rollback' WHERE id=$1`, p.ID); err != nil {

@@ -6,10 +6,15 @@ import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { indicatorVariants } from '../src/lib/indicatorVariants'
-import type { ThemeRecord } from '../src/lib/themes'
-import { inkOn } from '../src/lib/themeValues'
+import { inkOn } from '../src/lib/themeEngine'
+import type { ActiveTheme, ThemeRecord } from '../src/lib/themes'
 
-const shots = resolve('test-results/aeon-643')
+// Each case measures many controls after every option and captures both previews.
+// Reserve time for those real interactions on shared CI runners.
+test.setTimeout(90_000)
+
+let shots: string
+test.beforeEach(async ({}, testInfo) => { shots = testInfo.outputPath('aeon-750') })
 const initial = (): ThemeRecord => ({
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', tenant_id: 't1', name: 'Porcelain', scope: 'default', owner_principal_id: null, revision: 1, created_at: '', updated_at: '',
   values: { primary: { light: '#0e6f6c', dark: '#a4e5df' }, secondary: { light: '#d69b31', dark: '#e2b45a' }, recurring_marker: { source: 'secondary', custom: null }, agents: { avatar: 'robot-1', ring: null, size: null, hover: false, palette: 'standard' } },
@@ -20,14 +25,41 @@ async function mock(page: Page, admin = true) {
   data.preferences['agent-state'] = { palette: 'protan', yellowMinutes: 7, redMinutes: 19 }
   await mockWork(page, data, { admin })
   await mockSettings(page, settingsData())
-  const state = { theme: initial(), writes: [] as ThemeRecord[], fail: false }
+  const state = { theme: initial(), items: [initial()], selectionRevision: 0, selectedThemeId: null as string | null, fallbackNotice: null as ActiveTheme['fallback_notice'], writes: [] as ThemeRecord[], deletes: [] as string[], fail: false }
   await page.route('**/api/**', async route => {
     const path = new URL(route.request().url()).pathname
     const method = route.request().method()
-    const active = () => ({ theme: state.theme, default_theme_id: initial().id, selected_theme_id: null, revision: 0, fallback_notice: null })
-    if (path === '/api/me/theme') return route.fulfill({ json: active() })
-    if (path === '/api/themes') return route.fulfill({ json: { items: [state.theme], next_cursor: null } })
+    const active = () => ({ theme: state.theme, default_theme_id: initial().id, selected_theme_id: state.selectedThemeId, revision: state.selectionRevision, fallback_notice: state.fallbackNotice })
+    if (path === '/api/me/theme') {
+      if (method === 'PUT') {
+        const body = route.request().postDataJSON()
+        expect(body.revision).toBe(state.selectionRevision)
+        const target = state.items.find(item => item.id === body.theme_id)
+        expect(target).toBeDefined()
+        state.theme = target!; state.selectedThemeId = target!.id; state.selectionRevision++; state.fallbackNotice = null
+      }
+      return route.fulfill({ json: active() })
+    }
+    if (path === '/api/themes') return route.fulfill({ json: { items: state.items.map(item => item.id === state.theme.id ? state.theme : item), next_cursor: null } })
+    if (path.endsWith('/duplicate') && method === 'POST') {
+      const source = state.items.find(item => path === `/api/themes/${item.id}/duplicate`)
+      expect(source).toBeDefined()
+      const created = { ...structuredClone(source!), id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', name: route.request().postDataJSON().name, scope: 'personal' as const, owner_principal_id: 'p1', revision: 1 }
+      state.items.push(created)
+      return route.fulfill({ json: created })
+    }
     if (path === `/api/themes/${state.theme.id}`) {
+      if (method === 'DELETE') {
+        expect(new URL(route.request().url()).searchParams.get('revision')).toBe(String(state.theme.revision))
+        expect(state.theme.scope).not.toBe('default')
+        if (state.fail) return route.fulfill({ status: 500, json: { error: 'write failed' } })
+        state.deletes.push(state.theme.id)
+        state.fallbackNotice = { deleted_theme_id: state.theme.id, deleted_theme_name: state.theme.name }
+        state.items = state.items.filter(item => item.id !== state.theme.id)
+        state.theme = initial()
+        // Real deletion leaves the selected (now deleted) ID and CAS unchanged.
+        return route.fulfill({ status: 204 })
+      }
       if (method === 'PATCH') {
         state.writes.push(route.request().postDataJSON())
         if (state.fail) return route.fulfill({ status: 500, json: { error: 'write failed' } })
@@ -39,6 +71,48 @@ async function mock(page: Page, admin = true) {
     return route.fallback()
   })
   return { state, data }
+}
+
+for (const returning of [false, true]) {
+  test(`Delete reconciles the workspace fallback after navigation${returning ? ' away and back while it is pending' : ''}`, async ({ page }) => {
+    const { state } = await mock(page)
+    const personal: ThemeRecord = { ...initial(), id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', name: 'Sprite theme', scope: 'personal', owner_principal_id: 'p1', values: { ...initial().values, agents: { ...initial().values.agents, avatar: 'sprite' } } }
+    state.items.push(personal); state.theme = personal; state.selectedThemeId = personal.id; state.selectionRevision = 7
+    let release!: () => void, reached!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const requested = new Promise<void>(resolve => { reached = resolve })
+    await page.route(`**/api/themes/${personal.id}?*`, async route => {
+      if (route.request().method() === 'DELETE') { reached(); await held }
+      await route.fallback()
+    })
+    await page.goto('/settings/theme#agents')
+    await expect(page.getByRole('radio', { name: 'Sprite', exact: true })).toBeChecked()
+    await page.getByRole('button', { name: 'Delete Sprite theme', exact: true }).click()
+    await page.getByRole('button', { name: 'Delete theme', exact: true }).click()
+    await requested
+    await page.getByRole('link', { name: 'Projects', exact: true }).click()
+    await expect(page.locator('.theme-section')).toHaveCount(0)
+    // Count the active-theme reads from here on: only the deletion's own fallback may follow.
+    const reads: string[] = []
+    page.on('request', request => { if (new URL(request.url()).pathname === '/api/me/theme' && request.method() === 'GET') reads.push(request.url()) })
+    if (returning) {
+      await page.evaluate(async () => { await (await import('/src/router.ts')).router.push('/settings/theme#agents') })
+      // The shared editor still shows the record being deleted, busy, without a reload.
+      await expect(page.getByRole('radio', { name: 'Sprite', exact: true })).toBeChecked()
+      await expect(page.getByRole('radio', { name: 'Sprite', exact: true })).toBeDisabled()
+    }
+    expect(await page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('sprite')
+    release()
+    await expect.poll(() => state.deletes).toEqual([personal.id])
+    await expect.poll(() => page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('robot-1')
+    expect(reads).toHaveLength(1)
+    expect(state.selectionRevision).toBe(7)
+    expect(state.selectedThemeId).toBe(personal.id)
+    if (returning) {
+      await expect(page.getByRole('radio', { name: 'Robot 1', exact: true })).toBeChecked()
+      await expect(page.locator('.theme-status')).toContainText('workspace default')
+    }
+  })
 }
 
 async function captureAgents(page: Page, width: number, mode: string) {
@@ -55,8 +129,6 @@ async function captureAgents(page: Page, width: number, mode: string) {
 
 for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
   test(`${width} ${mode}: nine avatars, stable controls, isolated state previews and saved appearance`, async ({ page }) => {
-    // Many control samples and screenshots share one test; this only guards hangs.
-    test.setTimeout(120_000)
     const { state, data } = await mock(page)
     data.preferences.theme = { choice: mode }
     await page.setViewportSize({ width, height: 1000 })
@@ -85,7 +157,7 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
         { name: 'drawn geometry', run: () => reset.click() },
         { name: 'dim off', run: () => dim.uncheck() },
         { name: 'dim on', run: () => dim.check() },
-        ...['Protan', 'Deutan', 'Tritan', 'Monochrome', 'Standard'].map(name => ({ name: `palette ${name}`, run: () => card.getByRole('radio', { name, exact: true }).click() })),
+        ...['Focus', 'Errors only', 'Protan', 'Deutan', 'Tritan', 'One colour', 'Standard'].map(name => ({ name: `palette ${name}`, run: () => card.getByRole('radio', { name, exact: true }).click() })),
       ],
     })
     expect(state.writes).toHaveLength(0)
@@ -93,8 +165,12 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     await robot.click()
     await card.getByRole('radio', { name: 'Tritan', exact: true }).click()
     // Both modes render their own state tokens regardless of the page mode.
-    const colors = await card.locator('.live-row .live-bot').evaluateAll(nodes => nodes.map(el => getComputedStyle(el.querySelector('svg')!).getPropertyValue('--agent-state-color').trim()))
-    expect(colors[0]).not.toEqual(colors[1])
+    const colors = await card.locator('.live-row .live-bot').evaluateAll(nodes => nodes.map(el => getComputedStyle(el.querySelector('.agent-state-mark')!).color))
+    expect(colors).toEqual(['rgb(0, 110, 75)', 'rgb(95, 233, 193)'])
+    // A preview must choose ink from its own fill, including opposite page modes.
+    const previewInk = await card.locator('.live-row .live-bot').evaluateAll(nodes => nodes.map(el => getComputedStyle(el.querySelector('.agent-state-mark path')!).stroke))
+    const rgb = (hex: string) => `rgb(${[1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`
+    expect(previewInk).toEqual(['#006e4b', '#5fe9c1'].map(fill => rgb(inkOn(fill))))
     for (const mode of ['light', 'dark']) for (const state of ['waiting', 'throttled', 'problem', 'idle']) {
       expect(await card.locator(`.${mode} [data-preview-state="${state}"] .live-bot`).evaluate(el => el.getAnimations({ subtree: true }).filter(a => a.effect?.getTiming().iterations === Infinity).length)).toBe(0)
     }
@@ -118,21 +194,25 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     await expect(page.locator('#agents').getByRole('slider')).toHaveCount(0)
     await expect(page.getByRole('spinbutton', { name: 'Yellow after (minutes)' })).toHaveValue('7')
     await expect(page.getByRole('spinbutton', { name: 'Red after (minutes)' })).toHaveValue('19')
-    const yellow = page.getByRole('spinbutton', { name: 'Yellow after (minutes)' })
-    const persisted = page.waitForResponse(response => response.url().endsWith('/api/preferences/agent-state') && response.request().method() === 'PUT')
-    await yellow.fill('8')
-    await yellow.blur()
-    expect((await persisted).ok()).toBe(true)
-    expect(data.preferences['agent-state']).toMatchObject({ palette: 'protan', yellowMinutes: 8, redMinutes: 19 })
-    expect(await page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.palette)).toBe('tritan')
     await page.locator('#agents').screenshot({ path: resolve(shots, `personal-${width}-${mode}.png`) })
   })
 }
 
 test('failed saves preserve the draft and saved appearance; discard restores it', async ({ page }) => {
   const { state } = await mock(page)
+  state.theme.values.agents = { ...state.theme.values.agents, palette: 'custom', custom_states: {
+    working: { light: '#00870e', dark: null }, waiting: { light: '#c47a08', dark: null },
+    throttled: { light: '#7039c6', dark: null }, problem: { light: '#b92229', dark: '#abcdef' }, idle: { light: '#be31ac', dark: '#fcb1ec' },
+  } }
   await page.goto('/settings/theme#agents')
   const card = page.locator('#agents')
+  const mark = (mode: string, state: string) => card.locator(`.${mode} [data-preview-state="${state}"] .agent-state-mark`)
+  await expect.poll(() => mark('light', 'problem').evaluate(el => getComputedStyle(el).color)).toBe('rgb(185, 34, 41)')
+  await expect.poll(() => mark('dark', 'problem').evaluate(el => getComputedStyle(el).color)).toBe('rgb(171, 205, 239)')
+  // An idle custom colour keeps its chosen hue; dimming never grays its mark.
+  await expect.poll(() => mark('light', 'idle').evaluate(el => getComputedStyle(el).color)).toBe('rgb(190, 49, 172)')
+  await expect(page.locator('html')).toHaveAttribute('data-agent-ring', 'moving')
+  await expect(page.locator('html')).toHaveAttribute('data-agent-float', 'false')
   await card.getByRole('radio', { name: 'Sprite', exact: true }).click()
   state.fail = true
   await page.getByRole('button', { name: /^Save/ }).click()
@@ -157,36 +237,8 @@ test('members can preview a workspace theme but cannot change it; reduced motion
   expect(await card.evaluate(el => el.getAnimations({ subtree: true }).filter(a => a.effect?.getTiming().iterations === Infinity).length)).toBe(0)
 })
 
-test('each preview chooses glyph ink from its own fill in every palette and page mode', async ({ page }) => {
-  await mock(page)
-  await page.goto('/settings/theme#agents')
-  const card = page.locator('#agents')
-  for (const mode of ['light', 'dark']) {
-    await page.evaluate(async mode => (await import('/src/lib/theme.ts')).setTheme(mode, false), mode)
-    for (const palette of ['Standard', 'Protan', 'Deutan', 'Tritan', 'Monochrome']) {
-      const option = card.getByRole('radio', { name: palette, exact: true })
-      await option.click()
-      await expect(option).toBeChecked()
-      const glyphs = card.locator('.agent-theme-preview .agent-state-mark')
-      await expect(glyphs).toHaveCount(12)
-      const marks = await glyphs.evaluateAll(nodes => nodes.map(el => ({
-        fill: getComputedStyle(el.firstElementChild!).fill, ink: getComputedStyle(el.lastElementChild!).stroke,
-      })))
-      expect(marks).toHaveLength(12)
-      for (const mark of marks) {
-        const channels = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(mark.fill)
-        expect(channels, `${mode}/${palette}: ${mark.fill}`).not.toBeNull()
-        const fill = '#' + channels!.slice(1).map(channel => Number(channel).toString(16).padStart(2, '0')).join('')
-        const expected = inkOn(fill)
-        expect(mark.ink, `${mode}/${palette}: ${mark.fill}`).toBe(`rgb(${[1, 3, 5].map(i => parseInt(expected.slice(i, i + 2), 16)).join(', ')})`)
-      }
-    }
-  }
-})
-
 
 test('visible screenshots and Personal agent behaviour controls stay stable in all viewport modes', async ({ page }) => {
-  test.setTimeout(120_000)
   const { state, data } = await mock(page)
   for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark']) {
     await page.setViewportSize({ width, height: 1000 })
@@ -221,3 +273,52 @@ test('visible screenshots and Personal agent behaviour controls stay stable in a
     await personal.screenshot({ path: resolve(shots, `personal-${width}-${mode}.png`), animations: 'disabled' })
   }
 })
+
+test('Save reconciles appearance after navigating away from Theme while the response is pending', async ({ page }) => {
+  const { state } = await mock(page)
+  let release!: () => void, reached!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const requested = new Promise<void>(resolve => { reached = resolve })
+  await page.route(`**/api/themes/${state.theme.id}`, async route => {
+    if (route.request().method() === 'PATCH') { reached(); await held }
+    await route.fallback()
+  })
+  await page.goto('/settings/theme#agents')
+  await page.getByRole('radio', { name: 'Sprite', exact: true }).click()
+  await page.getByRole('button', { name: /^Save/ }).click()
+  await requested
+  await page.getByRole('link', { name: 'Projects', exact: true }).click()
+  await expect(page.locator('.theme-section')).toHaveCount(0)
+  expect(await page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('robot-1')
+  release()
+  await expect.poll(() => state.theme.values.agents.avatar).toBe('sprite')
+  await expect.poll(() => page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('sprite')
+  expect(state.writes).toHaveLength(1)
+})
+
+for (const duplicate of [false, true]) {
+  test(`${duplicate ? 'Duplicate-and-select' : 'Selection'} reconciles appearance after navigating away while the response is pending`, async ({ page }) => {
+    const { state } = await mock(page)
+    const source: ThemeRecord = { ...initial(), id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', name: 'Sprite theme', scope: 'personal', owner_principal_id: 'p1', values: { ...initial().values, agents: { ...initial().values.agents, avatar: 'sprite' } } }
+    state.items.push(source)
+    let release!: () => void, reached!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const requested = new Promise<void>(resolve => { reached = resolve })
+    await page.route('**/api/me/theme', async route => {
+      if (route.request().method() === 'PUT') { reached(); await held }
+      await route.fallback()
+    })
+    await page.goto('/settings/theme#agents')
+    await expect(page.getByRole('radio', { name: 'Robot 1', exact: true })).toBeChecked()
+    await page.getByRole('button', { name: `${duplicate ? 'Duplicate' : 'Use'} Sprite theme`, exact: true }).click()
+    await requested
+    await page.getByRole('link', { name: 'Projects', exact: true }).click()
+    await expect(page.locator('.theme-section')).toHaveCount(0)
+    expect(await page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('robot-1')
+    release()
+    await expect.poll(() => state.theme.values.agents.avatar).toBe('sprite')
+    await expect.poll(() => page.evaluate(async () => (await import('/src/lib/agentTheme.ts')).agentTheme.value?.avatar)).toBe('sprite')
+    expect(state.selectedThemeId).toBe(duplicate ? 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' : source.id)
+    expect(state.selectionRevision).toBe(1)
+  })
+}

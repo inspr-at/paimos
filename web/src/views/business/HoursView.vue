@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { APIError, getNode, listNodes } from '../../lib/api'
-import { conflictEntry, createEntry, createPeriod, deleteEntry, findEntryEvent, listEntries, listPeriods, undoEntryEvent, updateEntry, type EntryPatch, type TimeEntry, type TimePeriod } from '../../lib/business'
+import { conflictEntry, createEntry, createPeriod, deleteEntry, findEntryEvent, listEntries, listPeriods, PERIOD_HISTORY_START, undoEntryEvent, updateEntry, type EntryPatch, type TimeEntry, type TimePeriod } from '../../lib/business'
 import { command, consume } from '../../lib/commands'
 import { dismiss, toast } from '../../lib/toast'
 import { absoluteTime, plural } from '../../lib/work'
@@ -74,8 +74,8 @@ async function loadWeek() {
   if (!principal) return
   weekState.value = 'loading'
   try {
-    const list = await listPeriods(principal)
     const start = weekStart.value.getTime(), end = weekEnd.value.getTime()
+    const list = await listPeriods(principal, { since: new Date(start).toISOString(), until: new Date(end).toISOString() })
     const inWeek = list.filter(p => Date.parse(p.starts_at) < end && Date.parse(p.ends_at) > start)
     const found = (await Promise.all(inWeek.map(p => listEntries({ period_id: p.id })))).flat()
       .filter(e => Date.parse(e.started_at) >= start && Date.parse(e.started_at) < end)
@@ -129,8 +129,7 @@ function stackAfter(day: Date) {
 }
 async function log(request: LogRequest) {
   const principal = person.value
-  const startMinutes = request.startMinutes ?? stackAfter(request.day)
-  const started = new Date(request.day.getFullYear(), request.day.getMonth(), request.day.getDate(), 0, startMinutes, 0, 0)
+  const started = new Date(request.startedAt)
   const ended = new Date(started.getTime() + request.seconds * 1000)
   if (dayKey(ended) !== dayKey(request.day) && ended.getHours() + ended.getMinutes() > 0) { toast('That entry would run past midnight. Split it across two days.', { tone: 'error' }); return }
   logging.value = true
@@ -337,7 +336,7 @@ const showApproved = ref(false)
 async function loadApprovals() {
   approvalsState.value = 'loading'
   try {
-    const list = await listPeriods()
+    const list = await listPeriods(undefined, { since: PERIOD_HISTORY_START })
     const relevant = list.filter(p => p.state === 'open' || showApproved.value)
     const found = await Promise.all(relevant.map(async p => [p.id, await listEntries({ period_id: p.id })] as const))
     periodEntries.value = new Map(found)
@@ -429,7 +428,7 @@ onMounted(async () => {
   void business.loadCostUnits(); void business.loadPrincipals(); void projects.load()
   if (view.value === 'approvals') void loadApprovals()
   else void loadWeek()
-  if (business.admin) void listPeriods().then(list => { allPeriods.value = list }).catch(() => undefined)
+  if (business.admin && view.value !== 'approvals') void listPeriods(undefined, { since: PERIOD_HISTORY_START }).then(list => { allPeriods.value = list }).catch(() => undefined)
 })
 onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); phoneQuery.removeEventListener('change', onPhone) })
 const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'open' && Date.parse(p.ends_at) <= now).length)
@@ -476,7 +475,7 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
           </template>
         </div>
 
-        <div v-if="canLog && (logOpen || !phone)" class="log-wrap"><LogTimeBar ref="logBar" :days="days" :suggestions="suggestions" :busy="logging" :preset="preset" :quiet="!!editing" @log="log" /></div>
+        <div v-if="canLog && (logOpen || !phone)" class="log-wrap"><LogTimeBar ref="logBar" :days="days" :suggestions="suggestions" :busy="logging" :preset="preset" :default-start-minutes="stackAfter" :quiet="!!editing" @log="log" /></div>
         <div v-else-if="canLog" class="log-closed"><button type="button" class="btn log-open" @click="openLog"><AppIcon name="plus" :size="14" />Log time</button></div>
         <p v-else-if="isAgent" class="agent-note"><AppIcon name="agent" :size="14" />An agent’s time comes from its finished runs, one entry per run.</p>
 
@@ -598,7 +597,7 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
 .summary-skeleton { display: inline-block; width: 260px; }
 .toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 48px; margin-bottom: 12px; }
 .view-seg button { gap: 6px; }
-.badge { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: var(--gold); color: var(--gold-on); font: 700 10px/1 var(--mono); }
+.badge { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: var(--gold); color: var(--surface-highlight); font: 700 10px/1 var(--mono); }
 .person-btn { gap: 7px; }
 .chev { color: var(--ink-3); }
 .week-nav { display: inline-flex; align-items: center; gap: 6px; }
@@ -609,7 +608,7 @@ const waitingCount = computed(() => allPeriods.value.filter(p => p.state === 'op
 .period-strip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-height: 46px; padding: 10px 18px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); }
 .period-strip > svg { color: var(--ink-3); }
 .period-chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-weight: 600; }
-.period-chip.approved { background: rgba(47, 122, 90, .1); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); color: var(--ok); }
+.period-chip.approved { background: var(--ok-bg); box-shadow: inset 0 0 0 1px var(--ok-line); color: var(--ok); }
 .strip-text { color: var(--ink-2); }
 .strip-skel { width: 280px; }
 .link-btn { height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
@@ -677,8 +676,8 @@ tfoot th.c-ticket { font: 500 10px/1 var(--mono); letter-spacing: .12em; text-tr
 .lock-note { display: inline-flex; align-items: center; gap: 6px; }
 .lock-note svg { color: var(--ink-3); }
 .entry.editing { display: block; margin: 0 -8px; padding: 12px 8px 8px; border-radius: 12px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line-2); }
-.conflict { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--ink); font-size: 12.5px; }
-.conflict > svg { flex-shrink: 0; margin-top: 2px; color: var(--gold-ink); }
+.conflict { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; padding: 10px 12px; border-radius: 10px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent); color: var(--ink); font-size: 12.5px; }
+.conflict > svg { flex-shrink: 0; margin-top: 2px; color: var(--warn-ink); }
 .c-text { flex: 1; min-width: 0; line-height: 1.5; }
 .c-text b { font-weight: 650; }
 .e-time { font-size: 12px; color: var(--ink-2); }

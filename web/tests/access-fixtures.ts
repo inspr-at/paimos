@@ -5,8 +5,7 @@
 // contract's rules (last owner, no escalation, roles in use, field reasons), so
 // specs see the answers the real server gives. Register after the work mocks.
 import type { Page, Route } from '@playwright/test'
-import projectSelfPermissions from '../../internal/authz/project_self_permissions.json' with { type: 'json' }
-import builtinAgentExclusions from '../../internal/authz/builtin_agent_exclusions.json' with { type: 'json' }
+import { projectSelfPermissions, builtinAgentExclusions } from '../../internal/authz/permission_data.mjs'
 
 export const ME = '11111111-1111-4111-8111-111111111111'
 export const MIRA = '22222222-2222-4222-8222-222222222222'
@@ -83,7 +82,7 @@ export interface AccessWorld {
   imported: { principal_id: string; name: string; classic_role: string | null; email?: string }[]
   bindings: { principal_id: string; project_id: string; role_id: string }[]
   invites: { id: string; email: string; workspace_role: string | null; project_roles: { project_id: string; role_id: string }[]; status: 'pending' | 'expired' | 'revoked' | 'accepted'; created_by: string; created_at: string; expires_at: string }[]
-  keys: { id: string; principal_id: string; name: string; prefix: string; scopes: string[]; created_at: string; expires_at: string | null; last_used_at: string | null; revoked_at: string | null }[]
+  keys: { full_access?: boolean; created_by_principal_id?: string | null; id: string; principal_id: string; name: string; prefix: string; scopes: string[]; created_at: string; expires_at: string | null; last_used_at: string | null; revoked_at: string | null }[]
   events: { id: number; actor_principal_id: string; type: string; before: unknown; after: unknown; at: string }[]
   projects: Record<string, { key: string; title: string }>
   calls: { method: string; path: string; body: unknown }[]
@@ -434,10 +433,12 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
     // ---------- Audit ----------
     if (path === '/api/audit') {
       if (!need('audit.read')) return fail(route, 403, 'forbidden', 'You need Read the access log.')
-      // Like internal/authz/audit.go: oldest first after ?after=<id>, 50 a page,
-      // names resolved, snapshots under data.
+      // Like internal/authz/audit.go: legacy oldest first after ?after=<id>,
+      // or newest first with order=desc and before, 50 a page.
+      const descending = url.searchParams.get('order') === 'desc'
       const after = Number(url.searchParams.get('after') ?? 0)
-      const items = world.events.filter(e => !after || e.id > after)
+      const before = Number(url.searchParams.get('before') ?? Infinity)
+      const items = world.events.filter(e => descending ? e.id < before : e.id > after).sort((a, b) => descending ? b.id - a.id : a.id - b.id)
       const page = items.slice(0, 50).map(e => {
         const snap = (v: unknown) => (v && typeof v === 'object' ? v as Record<string, unknown> : {})
         const either = Object.keys(snap(e.after)).length ? snap(e.after) : snap(e.before)
@@ -445,7 +446,8 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
         const projectId = typeof either.project_id === 'string' ? either.project_id : ''
         return { id: e.id, type: e.type, at: e.at, actor: principalRef(e.actor_principal_id), subject: subjectId ? principalRef(subjectId) : null, project: projectId ? { id: projectId, key: world.projects[projectId]?.key ?? '' } : null, data: { before: e.before, after: e.after } }
       })
-      return route.fulfill({ json: { items: page, next_after: items.length > 50 ? page.at(-1)!.id : null } })
+      const next = items.length > 50 ? page.at(-1)!.id : null
+      return route.fulfill({ json: { items: page, next_after: descending ? null : next, ...(descending ? { next_before: next } : {}) } })
     }
     // ---------- Agent keys ----------
     if (path === '/api/agent-keys' && method === 'GET') return route.fulfill({ json: { keys: world.keys } })
@@ -459,7 +461,8 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       if (!agentRow) return route.fulfill({ status: 404, json: { error: 'agent not found' } })
       if (agentRow.service) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       if ((agentRow.status ?? 'active') === 'deactivated') return route.fulfill({ status: 409, json: { error: 'agent is deactivated; reactivate it first' } })
-      const scopes = old ? Array.isArray(body.rotation_scopes) ? [...body.rotation_scopes as string[]] : [...old.scopes] : Array.isArray(body.scopes) ? (body.scopes as string[]).map(k => k.replace(/:/g, '.')) : []
+      const fullAccess = typeof body.full_access === 'boolean' ? body.full_access : !!old?.full_access && !Array.isArray(body.rotation_scopes)
+      const scopes = fullAccess ? [] : old ? Array.isArray(body.rotation_scopes) ? [...body.rotation_scopes as string[]] : [...old.scopes] : Array.isArray(body.scopes) ? (body.scopes as string[]).map(k => k.replace(/:/g, '.')) : []
       if (scopes.length > 256 || scopes.some(k => !REGISTRY.find(p => p.key === k)?.agent_grantable)) return route.fulfill({ status: 400, json: { error: 'invalid scopes' } })
       // Shared roles combine workspace and project grants. Rotation also caps
       // generated private roles; project grants cannot restore removed scopes.
@@ -470,7 +473,7 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       const ceiling = new Set([...agentPermissions(agentRole), ...(old && privateRole ? [] : projectScopes)])
       if (scopes.some(k => !mine(world).has(k) || (old || agentRole || bindings.length) && !ceiling.has(k))) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       const prefix = `n${String(nextId++).slice(-3)}`
-      const key = { id: `k-${prefix}`, principal_id: agentRow?.principal_id ?? `agent-${prefix}`, name: old?.name ?? String(body.name), prefix, scopes, created_at: new Date(now).toISOString(), expires_at: (body.expires_at as string | undefined) ?? null, last_used_at: null, revoked_at: null }
+      const key = { id: `k-${prefix}`, principal_id: agentRow?.principal_id ?? `agent-${prefix}`, name: old?.name ?? String(body.name), prefix, scopes, full_access: fullAccess, created_at: new Date(now).toISOString(), expires_at: (body.expires_at as string | undefined) ?? null, last_used_at: null, revoked_at: null }
       if (old) {
         const before = { ...old }
         old.revoked_at = new Date(now).toISOString()
@@ -479,6 +482,17 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       world.keys.unshift(key)
       event('agent_key.created', null, { id: key.id, principal_id: key.principal_id, name: key.name, prefix })
       return route.fulfill({ status: 201, json: { id: key.id, token: `aeon_${prefix}_T0k3nS3cr3tValue`, prefix, name: key.name, expires_at: key.expires_at } })
+    }
+    const adoptMatch = /^\/api\/agent-keys\/([^/]+)\/adopt$/.exec(path)
+    if (adoptMatch && method === 'POST') {
+      if (!need('keys.manage')) return fail(route, 403, 'forbidden', 'You need Manage agent keys.')
+      const key = world.keys.find(k => k.id === adoptMatch[1])
+      if (!key) return route.fulfill({ status: 404, json: { error: 'key not found' } })
+      if (key.created_by_principal_id !== null) return route.fulfill({ status: 409, json: { error: 'key already has a person owner' } })
+      const before = { ...key }
+      key.created_by_principal_id = world.me
+      event('agent_key.adopted', before, { ...key })
+      return route.fulfill({ json: key })
     }
     const scopeMatch = /^\/api\/agent-keys\/([^/]+)\/scopes$/.exec(path)
     if (scopeMatch) {
@@ -507,9 +521,12 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
         const roleBefore = role ? { ...role, permissions: [...role.permissions] } : null
         if (extension && (!need('roles.manage') || !role || role.builtin || role.id !== extension.role_id || extension.add.some(k => !added.includes(k) || !eligible.includes(k)))) return fail(route, 403, 'forbidden', 'Role extension denied.')
         const roleAfter = [...new Set([...agentPermissions(role), ...(extension?.add ?? [])])]
-        const after = [...new Set([...cleaned.filter(k => !removed.includes(k)), ...added])]
+        const fullAccess = typeof body.full_access === 'boolean' ? body.full_access : !!key.full_access
+        if (fullAccess && (added.length || removed.length || extension)) return fail(route, 400, 'invalid', 'Full access cannot include scope deltas.')
+        const after = fullAccess ? [] : [...new Set([...(key.full_access ? [] : cleaned).filter(k => !removed.includes(k)), ...added])]
         if (after.some(k => !eligible.includes(k) || !roleAfter.includes(k))) return fail(route, 403, 'forbidden', 'Scopes exceed live grants.')
         key.scopes = after
+        key.full_access = fullAccess
         if (body.expires_at !== undefined) key.expires_at = body.expires_at as string | null
         if (extension && role) role.permissions = roleAfter
         event('agent_key.scopes_changed', { ...before, ...(extension ? { role: roleBefore } : {}) }, { ...key, ...(extension && role ? { role: { ...role, permissions: [...role.permissions] } } : {}), ...(pruned.length ? { pruned_scopes: pruned } : {}) })

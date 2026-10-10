@@ -13,8 +13,8 @@ import (
 )
 
 // TestTenantTreePairingLockOrder inventories every direct advisory/tenant lock
-// and lock-helper call in these five packages. The shipped order is pairing ->
-// tree -> tenant -> resource rows; access-only writers omit pairing/tree. Keep
+// and lock-helper call in these seven packages. The order is tenant -> tree ->
+// pairing -> resource rows; access-only writers omit pairing/tree. Keep
 // the exact primitive sequences here: checking only callers missed the previous
 // inversions inside shared helpers. New call sites must join this inventory.
 // Alternative branches (recurrence try/blocking, operator/HTTP) appear in source
@@ -24,10 +24,12 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"agentaccounts/module.go:in":                        "pairing.Mutation",
 		"agentaccounts/route.go:reserve":                    "pairing.Lock",
 		"agentaccounts/route.go:ValidateReservedCapacity":   "pairing.Lock",
+		"agentpairing/provision.go:approve":                 "tenant:NO KEY UPDATE pairing.Lock",
 		"agentpairing/module.go:in":                         "pairing.Mutation",
-		"agentpairing/lifecycle.go:Lock":                    "pairing",
-		"agentpairing/lifecycle.go:LockMutation":            "pairing.Lock tree tenant:NO KEY UPDATE",
-		"authz/accept.go:AcceptInvite":                      "tenant:NO KEY UPDATE advisory:alias",
+		"agentpairing/lifecycle.go:Lock":                    "tree.Mutation pairing",
+		"agentpairing/lifecycle.go:LockRead":                "pairing",
+		"agentpairing/lifecycle.go:LockMutation":            "pairing.Lock",
+		"authz/accept.go:AcceptInvite":                      "alias.Lock",
 		"authz/agent_creation.go:createAgent":               "project.Mutation",
 		"authz/aliases.go:linkAlias":                        "access.Mutation",
 		"authz/aliases.go:unlinkAlias":                      "access.Mutation",
@@ -45,24 +47,40 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"authz/operator.go:OperatorBindProjects":            "operator.Ensure",
 		"authz/operator.go:OperatorUnbindProject":           "operator.Ensure",
 		"authz/project_members.go:authorizeProjectMutation": "project.Mutation",
-		"authz/project_members.go:LockProjectMutation":      "tree tenant:UPDATE",
-		"authz/project_members.go:LockProjectWrite":         "tree tenant:SHARE",
+		"authz/project_members.go:LockProjectMutation":      "tree.Mutation",
+		"authz/project_members.go:LockProjectWrite":         "tree.Mutation",
 		"authz/project_members.go:setProjectBindingTx":      "project.Mutation project.Authorize",
 		"authz/project_members.go:removeProjectBindingTx":   "project.Mutation project.Authorize",
-		"recurrences/module.go:lock":                        "tree:try tree tenant:NO KEY UPDATE",
+		"recurrences/module.go:lock":                        "tenant:NO KEY UPDATE tree:try tree",
 		"recurrences/module.go:create":                      "recurrence.lock",
 		"recurrences/module.go:update":                      "recurrence.lock",
 		"recurrences/module.go:setPaused":                   "recurrence.lock",
 		"recurrences/engine.go:RunTenant":                   "recurrence.lock",
 		"recurrences/engine.go:recordFailure":               "recurrence.lock",
 		"recurrences/engine.go:syncPublications":            "recurrence.lock",
+		"recurrences/external.go:receiveExternal":           "recurrence.lock",
 		"recurrences/occurrence.go:ensureActor":             "advisory:recurring-actor",
 		"recurrences/occurrence.go:runNow":                  "recurrence.lock",
 		"operatoractor/actor.go:Ensure":                     "operator.EnsureWithProduction",
-		"operatoractor/actor.go:EnsureWithProduction":       "tree tenant:UPDATE",
+		"operatoractor/actor.go:EnsureWithProduction":       "tree.Mutation",
+
+		"nodes/bulk.go:applyBulk":                     "pairing.Lock",
+		"nodes/module.go:lockTree":                    "tree.Mutation",
+		"nodes/causal_undo.go:undoWorkChild":          "project.Write",
+		"nodes/vocabulary.go:handlePutVocabulary":     "tenant:NO KEY UPDATE",
+		"nodes/nodes.go:updateNode":                   "pairing.Lock",
+		"nodes/nodes.go:deleteNode":                   "pairing.Lock",
+		"nodes/portal_publish.go:armPortalModeration": "project.Write",
+		"portal/market.go:manage":                     "pairing.Mutation",
+		"portal/moderate.go:moderate":                 "pairing.Mutation",
+		"portal/module.go:updateSettings":             "pairing.Mutation",
+		"portal/products.go:publicWriteProduct":       "pairing.Mutation",
+		// The existing scanner labels direct seed-0 advisories "tree";
+		// this key is portal-public-service:<tenant>, after the mutation fence.
+		"portal/public.go:serviceActor": "tree",
 	}
 	got := map[string]string{}
-	for _, pkg := range []string{"agentaccounts", "agentpairing", "authz", "recurrences", "operatoractor"} {
+	for _, pkg := range []string{"agentaccounts", "agentpairing", "authz", "recurrences", "operatoractor", "nodes", "portal"} {
 		files, err := filepath.Glob(filepath.Join("..", pkg, "*.go"))
 		if err != nil || len(files) == 0 {
 			t.Fatalf("inventory %s: files=%d err=%v", pkg, len(files), err)
@@ -89,7 +107,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 	}
 	for site, sequence := range got {
 		if expected, ok := want[site]; !ok || sequence != expected {
-			t.Errorf("%s: lock sequence %q, want %q (pairing -> tree -> tenant)", site, sequence, expected)
+			t.Errorf("%s: lock sequence %q, want %q (tenant -> tree -> pairing)", site, sequence, expected)
 		}
 	}
 	for site := range want {
@@ -98,7 +116,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		}
 	}
 	if reflect.DeepEqual(got, want) {
-		t.Logf("verified %d lock sites across five packages", len(got))
+		t.Logf("verified %d lock sites across seven packages", len(got))
 	}
 }
 
@@ -175,6 +193,8 @@ func lockOrderSequence(t *testing.T, pkg string, body *ast.BlockStmt) []string {
 				}
 			}
 			label := map[string]string{
+				"db.LockTree": "tree.Mutation", "db.LockCurrentTree": "tree.Mutation", "db.LockTenant": "tenant.NO_KEY_UPDATE",
+				"apply.Lock":        "alias.Lock",
 				"agentpairing.Lock": "pairing.Lock", "agentpairing.LockMutation": "pairing.Mutation",
 				"LockProjectMutation": "project.Mutation",
 				"LockProjectWrite":    "project.Write", "authz.LockProjectMutation": "project.Mutation",

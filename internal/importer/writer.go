@@ -28,6 +28,7 @@ type PostgresWriter struct{ Pool *pgxpool.Pool }
 
 func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string) (Report, error) {
 	r := Analyze(s)
+	ctx, batch := newImportEventBatch(ctx)
 	if w.Pool == nil {
 		return r, errors.New("database pool is required")
 	}
@@ -39,6 +40,23 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 		return r, fmt.Errorf("resolve tenant: %w", err)
 	}
 	err = db.InTenant(db.AllProjects(ctx, "classic importer"), w.Pool, tenantID, func(tx pgx.Tx) error {
+		if err := lockImportTree(ctx, tx, tenantID); err != nil {
+			return err
+		}
+		// Lock every existing source row before importUsers can append an event.
+		// Native editors take the same tree fence before any node mutation.
+		rows, err := tx.Query(ctx, `SELECT id FROM nodes WHERE tenant_id=$1::uuid AND fields->'classic'->>'source_id'=$2 ORDER BY id FOR UPDATE`, tenantID, s.SourceID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,42))`, tenantID+":"+s.SourceID); err != nil {
 			return err
 		}
@@ -52,7 +70,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 				return id, nil
 			}
 			var id string
-			prefix := map[string]string{"project": "PRJ", "epic": "EPC", "ticket": "TKT", "task": "TSK", "release": "REL", "sprint": "SPR", "cost_unit": "CU", "memory": "MEM", "runbook": "RUN", "guideline": "GUI", "external_system": "EXT", "related_project": "RPR"}[slug]
+			prefix := map[string]string{"project": "PRJ", "work": "TKT", "release": "REL", "sprint": "SPR", "cost_unit": "CU", "memory": "MEM", "runbook": "RUN", "guideline": "GUI", "external_system": "EXT", "related_project": "RPR"}[slug]
 			if prefix == "" {
 				return "", fmt.Errorf("unsupported classic issue type %q", slug)
 			}
@@ -64,7 +82,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 				return "", err
 			}
 			if tag.RowsAffected() != 0 {
-				if _, err := events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+				if _, err := appendImportEvent(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
 					Type: "import.kind_created", After: map[string]any{"id": id, "slug": slug, "short_prefix": prefix, "source_id": s.SourceID},
 				}); err != nil {
 					return "", err
@@ -229,7 +247,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 				}
 			}
 		}
-		return nil
+		return batch.flush()
 	})
 	if err != nil {
 		return r, err
@@ -247,7 +265,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 
 func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot, conflicts *[]ImportConflict) (string, map[int64]string, error) {
 	// Imports later write tree rows and bindings. Match project writes and
-	// invite/link enrollment: tree, tenant, alias, then principal/resource rows.
+	// invite/link enrollment: tenant, tree, alias, then principal/resource rows.
 	if err := authz.LockProjectMutation(ctx, tx, tenantID); err != nil {
 		return "", nil, err
 	}
@@ -353,7 +371,7 @@ func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot, co
 			if len(before) == 0 {
 				typ = "import.user_created"
 			}
-			if _, err := events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+			if _, err := appendImportEvent(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
 				Type: typ, Before: rawSnapshot(before), After: json.RawMessage(after),
 			}); err != nil {
 				return "", nil, err
@@ -397,7 +415,7 @@ func ensureImportActor(ctx context.Context, tx pgx.Tx, tenantID string) (string,
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'agent','Classic Paimos importer',ARRAY['importer']) RETURNING id`, tenantID).Scan(&actor)
 		if err == nil {
-			_, err = events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+			_, err = appendImportEvent(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
 				Type: "import.actor_created", After: map[string]any{"principal_id": actor},
 			})
 		}
@@ -419,7 +437,7 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 	var oldFields, beforeJSON []byte
 	err = tx.QueryRow(ctx, `SELECT n.id,n.title,n.body,n.state,n.fields,to_jsonb(n),n.kind_id::text,k.slug
 		FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-		WHERE n.tenant_id=$1 AND n.key=$2`, tenantID, key).Scan(&id, &oldTitle, &oldBody, &oldState, &oldFields, &beforeJSON, &oldKindID, &oldKind)
+		WHERE n.tenant_id=$1 AND n.key=$2 FOR UPDATE OF n`, tenantID, key).Scan(&id, &oldTitle, &oldBody, &oldState, &oldFields, &beforeJSON, &oldKindID, &oldKind)
 	created := errors.Is(err, pgx.ErrNoRows)
 	if err != nil && !created {
 		return "", false, false, err
@@ -444,6 +462,17 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 				CurrentKind: oldKind, RequestedKind: requested,
 			})
 			return id, false, false, nil
+		}
+		parent, err := db.WorkStatusParentTx(ctx, tx, id)
+		if err != nil {
+			return "", false, false, err
+		}
+		if parent && state != oldState {
+			classicID, _ := intField(original, "id")
+			*conflicts = appendConflict(*conflicts, ImportConflict{ClassicID: classicID, Key: key, Reason: "parent_status_derived"})
+			// Preserve the canonical state while still importing permitted
+			// content. The source status remains in its classic provenance.
+			state = oldState
 		}
 		var now any
 		var prior any
@@ -481,7 +510,7 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 	if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, tenantID, id).Scan(&afterJSON); err != nil {
 		return "", false, false, err
 	}
-	_, err = events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+	_, err = appendImportEvent(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
 		NodeID: &id, Type: map[bool]string{true: "import.node_created", false: "import.node_updated"}[created],
 		Before: rawSnapshot(beforeJSON), After: json.RawMessage(afterJSON),
 	})
@@ -520,13 +549,21 @@ func appendConflict(existing []ImportConflict, next ImportConflict) []ImportConf
 // can change; timestamps and sibling position are owned by other workflows.
 func importNodeDiverged(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) (bool, error) {
 	var current, imported []byte
-	if err := tx.QueryRow(ctx, `SELECT to_jsonb(n) FROM nodes n WHERE tenant_id=$1 AND id=$2`, tenantID, nodeID).Scan(&current); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT to_jsonb(n) FROM nodes n WHERE tenant_id=$1 AND id=$2 FOR UPDATE`, tenantID, nodeID).Scan(&current); err != nil {
 		return false, err
 	}
-	err := tx.QueryRow(ctx, `SELECT after FROM events WHERE tenant_id=$1 AND node_id=$2 AND type IN ('import.node_created','import.node_updated','import.parent_changed') ORDER BY id DESC LIMIT 1`, tenantID, nodeID).Scan(&imported)
+	imported = pendingNodeBaseline(ctx, nodeID)
+	var err error
+	if len(imported) == 0 {
+		err = tx.QueryRow(ctx, `SELECT after FROM events WHERE tenant_id=$1 AND node_id=$2 AND type IN ('import.node_created','import.node_updated','import.parent_changed') ORDER BY id DESC LIMIT 1`, tenantID, nodeID).Scan(&imported)
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return true, nil
 	}
+	if err != nil {
+		return false, err
+	}
+	parent, err := db.WorkStatusParentTx(ctx, tx, nodeID)
 	if err != nil {
 		return false, err
 	}
@@ -536,6 +573,24 @@ func importNodeDiverged(ctx context.Context, tx pgx.Tx, tenantID, nodeID string)
 	}
 	if err := json.Unmarshal(imported, &baseline); err != nil {
 		return false, err
+	}
+	if parent {
+		baseline["state"] = have["state"]
+	}
+	// The work-kind migration changes kind_id alone, retaining the original
+	// importer snapshot and fields.classic.type. Normalize only the exact
+	// recorded substitution; all person edits still compare to the old baseline.
+	if !reflect.DeepEqual(have["kind_id"], baseline["kind_id"]) {
+		var migrated bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events
+		 WHERE tenant_id=$1 AND node_id=$2 AND type='node.work_kind_migrated'
+		 AND after->>'migration'='AEON-649' AND before->>'kind_id'=$3
+		 AND after->>'kind_id'=$4)`, tenantID, nodeID, baseline["kind_id"], have["kind_id"]).Scan(&migrated); err != nil {
+			return false, err
+		}
+		if migrated {
+			baseline["kind_id"] = have["kind_id"]
+		}
 	}
 	for _, field := range []string{"title", "body", "fields", "kind_id", "parent_id", "deleted_at"} {
 		if !reflect.DeepEqual(have[field], baseline[field]) {
@@ -567,7 +622,7 @@ func setParent(ctx context.Context, tx pgx.Tx, tenantID, actor, childID, parentI
 	if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, tenantID, childID).Scan(&after); err != nil {
 		return false, err
 	}
-	_, err = events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+	_, err = appendImportEvent(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
 		NodeID: &childID, Type: "import.parent_changed",
 		Before: json.RawMessage(before), After: json.RawMessage(after),
 	})
@@ -596,6 +651,9 @@ func importEvent(ctx context.Context, tx pgx.Tx, tenantID, actor, nodeID, typ, s
 		hash := sha256.Sum256(canonical)
 		ref += fmt.Sprintf(":%x", hash[:16])
 	}
+	if batch, ok := ctx.Value(importEventBatchKey{}).(*importEventBatch); ok && batch.refs[typ+":"+ref] {
+		return ref, nil
+	}
 	var exists bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE tenant_id=$1 AND type=$2 AND after ? 'classic_ref' AND after->>'classic_ref'=$3)`, tenantID, typ, ref).Scan(&exists); err != nil {
 		return "", err
@@ -603,7 +661,7 @@ func importEvent(ctx context.Context, tx pgx.Tx, tenantID, actor, nodeID, typ, s
 	if exists {
 		return ref, nil
 	}
-	payload := Record{"classic_ref": ref, "record": record}
+	payload := Record{"classic_ref": ref, "source_id": sourceID, "record": record}
 	// The mapped Aeon type is not a substitute for the classic type. Keep both
 	// the verbatim record and an explicit copy so a later replay can see it
 	// without interpreting the mapped link.
@@ -616,7 +674,7 @@ func importEvent(ctx context.Context, tx pgx.Tx, tenantID, actor, nodeID, typ, s
 	if at == nil {
 		at = classicTime(stringField(record, "changed_at"))
 	}
-	_, err := events.Append(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
+	_, err := appendImportEvent(ctx, tx, tenant.Principal{TenantID: tenantID, ID: actor}, events.Change{
 		NodeID: &nodeID, Type: typ, After: payload, At: at,
 	})
 	return ref, err
@@ -662,4 +720,14 @@ func classicTime(s string) *time.Time {
 		}
 	}
 	return nil
+}
+
+// Shared native lock order: access fence, tree, then individual node rows.
+func lockImportTree(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	var locked string
+	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&locked); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`)
+	return err
 }

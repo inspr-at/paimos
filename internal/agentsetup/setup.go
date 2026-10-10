@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/grokprobe"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/hookcap"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -87,6 +88,8 @@ type RuntimeConfig struct {
 }
 
 type snapshot struct {
+	HookHome           string                `json:"hook_home,omitempty"`
+	HookCapabilities   []hookcap.Capability  `json:"hook_capabilities,omitempty"`
 	LocalAuthKeyID     string                `json:"local_auth_key_id,omitempty"`
 	BoundComputer      string                `json:"bound_computer_id,omitempty"`
 	BoundDaemon        string                `json:"bound_daemon_id,omitempty"`
@@ -118,11 +121,13 @@ type snapshot struct {
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
+	HookCapabilities      []hookcap.Capability     `json:"hook_capabilities,omitempty"`
 	TouchIDConfirmation   string                   `json:"touch_id_confirmation,omitempty"`
 	TouchIDUpgradeCommand string                   `json:"touch_id_upgrade_command,omitempty"`
 	BlockedAccounts       []BlockedAccount         `json:"blocked_accounts,omitempty"`
 	HarnessDetails        map[string]HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses       map[string]string        `json:"harness_statuses,omitempty"`
+	AccountStatuses       map[string]HarnessDetail `json:"account_statuses,omitempty"`
 	VersionStatus         string                   `json:"version_status,omitempty"`
 	AccountingState       string                   `json:"accounting_state,omitempty"`
 	Schema                string                   `json:"schema"`
@@ -156,7 +161,7 @@ type LocalStatus struct {
 
 // SavedOptions exposes only noncredential choices to resume the local command.
 func (e *Engine) SavedOptions() (Options, error) {
-	s, err := e.load()
+	s, err := e.loadSnapshot(true)
 	if err != nil {
 		return Options{}, err
 	}
@@ -182,6 +187,9 @@ type LocalDaemon interface {
 	Status(context.Context, string) (LocalStatus, error)
 }
 type Engine struct {
+	PrepareLedger      func(context.Context, RuntimeConfig) error
+	LeaveLedger        func(context.Context) error
+	Hooks              *HookInstaller
 	Enclave            agentsecurity.Signer
 	Store              *Store
 	API                PairingAPI
@@ -190,6 +198,8 @@ type Engine struct {
 	ClaudeDependencies ClaudeDependencies
 	Now                func() time.Time
 	GrokProbe          func(context.Context, grokprobe.Binding) (grokprobe.Identity, error)
+	// InstallMethod is the detected add-harness entry point (see InstallMethod).
+	InstallMethod string
 }
 type Options struct {
 	Origin, TenantID, TenantSlug, ComputerName, Workspace string
@@ -229,7 +239,7 @@ func (e *Engine) loadSnapshot(readOnly bool) (*snapshot, error) {
 	}
 	var s snapshot
 	if json.Unmarshal(raw, &s) != nil || s.Schema != "aeon.agent-setup.private.v1" || !uuidPattern.MatchString(s.Request.RequestID) || (!s.ComputerCleaned && (!hashPattern.MatchString(string(s.Device)) || !hashPattern.MatchString(string(s.Runtime)))) || !hashPattern.MatchString(string(s.Lifecycle)) {
-		return nil, errors.New("private pairing state corrupt; no authority was restored")
+		return nil, fmt.Errorf("private pairing state %s corrupt; no authority was restored", filepath.Join(e.Store.Path(), snapshotName))
 	}
 	if s.Removed == nil {
 		s.Removed = map[string]bool{}
@@ -244,7 +254,8 @@ func (e *Engine) save(s *snapshot, first bool) error {
 	return e.Store.Write(snapshotName, raw, first)
 }
 func (e *Engine) progress(s *snapshot) Progress {
-	p := Progress{Schema: "aeon.agent-setup.v1", Stage: s.Phase, RequestID: s.Request.RequestID, ComputerID: s.View.ComputerID, Accounts: s.View.Enrollments, LocalProcesses: "unconfirmed"}
+	refreshHookCapabilities(s)
+	p := Progress{HookCapabilities: s.HookCapabilities, Schema: "aeon.agent-setup.v1", Stage: s.Phase, RequestID: s.Request.RequestID, ComputerID: s.View.ComputerID, Accounts: s.View.Enrollments, LocalProcesses: "unconfirmed"}
 	if s.View.ComputerID != "" {
 		p.TouchIDConfirmation = "needs pairing upgrade"
 		if s.Request.Platform != "darwin" {
@@ -441,7 +452,7 @@ func (e *Engine) Begin(ctx context.Context, o Options) (Progress, error) {
 	if publicKey != "" {
 		s.LocalAuthKeyID = Hash([]byte(e.Store.Path())) + "/" + id
 	}
-	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{LocalAuthPublicKey: publicKey, ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs"}}}
+	s.Request = DeviceRequest{RequestID: id, TenantID: o.TenantID, TenantSlug: o.TenantSlug, DeviceHash: Hash([]byte(device)), RuntimeHash: Hash([]byte(runtimeSecret)), LifecycleHash: Hash([]byte(life)), Details: Details{LocalAuthPublicKey: publicKey, ComputerName: o.ComputerName, Platform: o.Platform.OS, Arch: o.Platform.Arch, Workspace: o.Workspace, Capabilities: []string{"managed_runs", LedgerCapability}}}
 	for _, c := range o.Candidates {
 		key, err := uuid()
 		if err != nil {
@@ -583,18 +594,23 @@ func validateView(s *snapshot, v View, request bool) error {
 			return errors.New("invalid enrollment identity")
 		}
 		seen[a.AccountID] = true
+		if a.State != "connected" && a.State != "draining" && a.State != "revoked" {
+			return errors.New("unknown enrollment lifecycle state")
+		}
+		// Revoked enrollments are historical tombstones, not execution
+		// authority. Their old local candidate may no longer exist.
+		if a.State == "revoked" {
+			continue
+		}
 		known := false
 		for _, c := range s.Candidates {
-			if c.Candidate.Key == a.AccountKey && c.Candidate.Harness == a.Harness && c.Candidate.Label == a.Label {
+			if c.Candidate.Key == a.AccountKey && c.Candidate.Harness == a.Harness {
 				known = true
 				break
 			}
 		}
 		if !known {
-			return errors.New("response contains an unapproved account")
-		}
-		if a.State != "connected" && a.State != "draining" && a.State != "revoked" {
-			return errors.New("unknown enrollment lifecycle state")
+			return ErrUnapprovedAccount
 		}
 	}
 	if request && v.ExistingComputerID != s.Request.ExistingComputerID {
@@ -639,11 +655,11 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 			code = "private_storage_failed"
 		}
 		proof := e.proof(s)
-		proof.Progress = reportRelease(s.View, &SetupProgress{State: state, ErrorCode: code})
+		proof.Progress = e.reportInstall(s.View, reportRelease(s.View, &SetupProgress{State: state, ErrorCode: code}))
 		_, _ = e.API.Reconcile(ctx, proof)
 	}()
 	proof := e.proof(s)
-	proof.Progress = reportRelease(s.View, &SetupProgress{State: "provisioning"})
+	proof.Progress = e.reportInstall(s.View, reportRelease(s.View, &SetupProgress{State: "provisioning"}))
 	observed, err := e.API.Reconcile(ctx, proof)
 	if err != nil {
 		return e.progress(s), err
@@ -673,7 +689,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		seen[a.AccountID] = true
 		found := false
 		for _, c := range s.Candidates {
-			if c.Candidate.Key == a.AccountKey && c.Candidate.Harness == a.Harness && c.Candidate.Label == a.Label {
+			if c.Candidate.Key == a.AccountKey && c.Candidate.Harness == a.Harness {
 				if a.Harness == "grok" {
 					v := c.Candidate
 					v.Path, v.Home, v.Identity, v.Grok = c.Path, c.Home, c.Identity, c.Candidate.Grok
@@ -712,6 +728,11 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 	if err := e.Store.Write(RuntimeName, raw, false); err != nil {
 		return e.progress(s), err
 	}
+	if e.PrepareLedger != nil {
+		if err := e.PrepareLedger(ctx, config); err != nil {
+			return e.progress(s), err
+		}
+	}
 	if s.StartService {
 		if e.Services == nil {
 			return e.progress(s), errors.New("service manager unavailable")
@@ -724,6 +745,12 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		if err != nil {
 			return e.progress(s), err
 		}
+	}
+	if err := e.setupHooks(ctx, s, false); err != nil {
+		return e.progress(s), err
+	}
+	if _, err := e.API.Reconcile(ctx, e.proof(s)); err != nil {
+		return e.progress(s), err
 	}
 	s.Phase = "connected"
 	if s.View.Verification.Mode == "one_per_harness" {
@@ -757,7 +784,7 @@ func readRuntimeConfig(s *Store) (RuntimeConfig, error) {
 	}
 	var c RuntimeConfig
 	if json.Unmarshal(raw, &c) != nil || c.Schema != "aeon.agent-runtime.v1" || ValidateOrigin(c.Origin) != nil || !uuidPattern.MatchString(c.TenantID) || !uuidPattern.MatchString(c.PrincipalID) || !uuidPattern.MatchString(c.ComputerID) || c.DaemonID == "" || len(c.DaemonID) > 128 || strings.ContainsAny(c.DaemonID, "/\\\x00\r\n") {
-		return RuntimeConfig{}, errors.New("private runtime configuration invalid")
+		return RuntimeConfig{}, fmt.Errorf("private runtime configuration %s invalid", filepath.Join(s.Path(), RuntimeName))
 	}
 	if s.vault != nil {
 		// Public disk state cannot redirect the signed daemon into disclosing a
@@ -769,7 +796,7 @@ func readRuntimeConfig(s *Store) (RuntimeConfig, error) {
 			return RuntimeConfig{}, err
 		}
 		if paired.ComputerCleaned || c.Origin != paired.Origin || c.TenantID != paired.View.TenantID || c.ComputerID != paired.View.ComputerID || c.PrincipalID != paired.View.PrincipalID || c.DaemonID != paired.View.DaemonID || c.Workspace != paired.Request.Workspace || c.LocalAuthKeyID != paired.LocalAuthKeyID {
-			return RuntimeConfig{}, errors.New("runtime configuration differs from protected pairing")
+			return RuntimeConfig{}, fmt.Errorf("runtime configuration %s differs from protected pairing", filepath.Join(s.Path(), RuntimeName))
 		}
 	}
 	return c, nil
@@ -823,7 +850,7 @@ func ReadRuntime(root string) (RuntimeConfig, secret, error) {
 		return c, "", err
 	}
 	if !regexp.MustCompile(`^aeon_[A-Za-z0-9_-]{1,64}_[0-9a-f]{64}$`).Match(key) {
-		return c, "", errors.New("private runtime credential invalid")
+		return c, "", fmt.Errorf("private runtime credential %s invalid", filepath.Join(root, "runtime.key"))
 	}
 	return c, secret(key), nil
 }

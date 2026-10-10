@@ -8,8 +8,9 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestBRecoveryPromotesReservationBeforeDenial(t *testing.T) {
@@ -148,41 +149,32 @@ func TestBConcurrentQueuedClaimsPromoteOneRecovery(t *testing.T) {
 	resource := bStop(t, f, base, "unnamed")
 	now := base.Add(time.Hour)
 	bAt(t, &f, now, "g2")
-	tracer := &bRaceTracer{held: make(chan struct{}), competing: make(chan struct{}), release: make(chan struct{})}
-	config := appPool.Config()
-	config.ConnConfig.Tracer = tracer
-	pool, err := pgxpool.NewWithConfig(t.Context(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	defer func() {
-		select {
-		case <-tracer.release:
-		default:
-			close(tracer.release)
-		}
-	}()
+	pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
+		return sql == db.TenantFenceSQL
+	})
 	mod := fixedClockModule{Module: New(pool), at: now}
 	statuses := make(chan int, 2)
 	claim := func(run string) {
-		code, body := call(t, mod, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, run, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
+		code, body := bRaceRoute(ctx, mod, f.runner, f.token, routeBody(t, run, "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
 		if code == 409 && !strings.Contains(string(body), "reserved capacity is not eligible: vendor") {
 			t.Errorf("competing claim failed for another reason: %s", body)
 		}
 		statuses <- code
 	}
 	go claim(first)
-	bBarrier(t, tracer.held)
-	go claim(second)
-	bBarrier(t, tracer.competing)
-	close(tracer.release)
+	pid := barrier.Wait(t, ctx)
+	secondDone := make(chan struct{})
+	go func() { claim(second); close(secondDone) }()
+	if lock := dbtest.BlockedOrDone(t, ctx, adminPool, pid, secondDone); lock != "transactionid" {
+		t.Fatalf("second queued claim did not wait on tenant: %q", lock)
+	}
+	barrier.Release()
 	counts := map[int]int{}
 	for range 2 {
 		select {
 		case code := <-statuses:
 			counts[code]++
-		case <-time.After(20 * time.Second):
+		case <-ctx.Done():
 			t.Fatal("queued claims hung")
 		}
 	}

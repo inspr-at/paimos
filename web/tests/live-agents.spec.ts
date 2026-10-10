@@ -1,19 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-184: agents working on a project right now come alive on its card and
 // its list row, say who works on what, and keep the page still otherwise.
-// LIVE_SHOTS=<dir> also writes the design review screenshots there.
+// LIVE_SHOTS=1 enables design evidence under each test’s output directory.
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { mkdirSync } from 'node:fs'
 import { fixtures, liveAgent, mockWork, watchErrors, type Fixtures, type LiveAgentMock } from './work-fixtures'
 import { domAudit } from './ui-audit-rules'
+import { controlStability } from './control-stability'
+import { mockAgentTheme } from './agent-theme-fixtures'
 
 const HAUSV = '33333333-3333-4333-8333-333333333333'
 const CAMY = '44444444-4444-4444-8444-444444444444'
 const COORD = '55555555-5555-4555-8555-555555555555'
 const OPS = '66666666-6666-4666-8666-666666666666'
 
-test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
+test.beforeEach(async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-09-23T12:00:00Z') })
+})
 
 // The fixture's four projects plus a few more, so a card grid fills its rows.
 function world(live: 'busy' | 'none' = 'busy') {
@@ -43,8 +47,8 @@ function busyAgents(): LiveAgentMock[] {
     liveAgent({ project_id: 'p-aeon', session_id: 's-coord', principal_id: COORD, name: 'aeon-coordinator', role: 'coordinator', harness: 'claude' }, 140),
     liveAgent({ project_id: 'p-aeon', session_id: 's-camy', principal_id: CAMY, name: 'camy', harness: 'codex', ticket: { id: 'n-a184', key: 'AEON-184', title: 'Live agents on project cards and rows', project_id: 'p-aeon' } }, 4),
     liveAgent({ project_id: 'p-janus', session_id: 's-janus', principal_id: '77777777-7777-4777-8777-777777777777', name: 'janus-session', phase: 'starting', activity: 'unknown' }, 0.5),
-    liveAgent({ project_id: 'p-ops', session_id: 's-ops', principal_id: OPS, name: 'ops', ticket: { id: 'n-o1', key: 'OPS-212', title: 'Rotate the backup keys on csb1', project_id: 'p-ops' } }, 42),
-    liveAgent({ project_id: 'p-ops', session_id: 's-ops2', principal_id: '88888888-8888-4888-8888-888888888888', name: 'pharos-session', harness: 'claude', ticket: { id: 'n-o2', key: 'OPS-219', title: 'Nightly check for hsb2', project_id: 'p-ops' } }, 8),
+    liveAgent({ project_id: 'p-ops', session_id: 's-ops', principal_id: OPS, name: 'ops', ticket: { id: 'n-o1', key: 'OPS-212', title: 'Rotate the backup keys on prod-1', project_id: 'p-ops' } }, 42),
+    liveAgent({ project_id: 'p-ops', session_id: 's-ops2', principal_id: '88888888-8888-4888-8888-888888888888', name: 'pharos-session', harness: 'claude', ticket: { id: 'n-o2', key: 'OPS-219', title: 'Nightly check for worker-2', project_id: 'p-ops' } }, 8),
     liveAgent({ project_id: 'p-ops', session_id: 's-ops3', principal_id: '99999999-9999-4999-8999-999999999999', name: 'grok-scout', harness: 'grok', ticket: { id: 'n-o3', key: 'OPS-220', title: 'Disk usage report', project_id: 'p-ops' } }, 2),
   ]
 }
@@ -52,6 +56,8 @@ const card = (page: Page, key: string) => page.locator(`.card[data-project-id="$
 const row = (page: Page, id: string) => page.locator(`.project-item[data-project-id="${id}"]`)
 async function cards(page: Page, data: Fixtures, options: Parameters<typeof mockWork>[2] = {}) {
   const calls = await mockWork(page, data, options)
+  const indicator = data.preferences['agent-indicator']
+  if (indicator) await mockAgentTheme(page, { avatar: indicator.style as 'robot-5', hover: indicator.hovering === true })
   await page.goto('/')
   await expect(page.locator('.card').first()).toBeVisible()
   return calls
@@ -85,7 +91,7 @@ test('the chip never moves the card: the same box with and without agents', asyn
   const before = await card(page, 'p-hausv').boundingBox()
   const footBefore = await card(page, 'p-hausv').locator('.card-foot').boundingBox()
   data.live.push(...busyAgents())
-  await page.clock.fastForward(21_000)
+  await page.clock.runFor(21_000)
   await expect(card(page, 'p-hausv').locator('.live-chip')).toBeVisible()
   expect(await card(page, 'p-hausv').boundingBox()).toEqual(before)
   expect(await card(page, 'p-hausv').locator('.card-foot').boundingBox()).toEqual(footBefore)
@@ -182,40 +188,40 @@ test('working and lost-heartbeat agents: polls every 20 seconds and says what ch
   const reads = () => calls.filter(c => c.path === '/api/harness-sessions/live').length
   await expect.poll(reads).toBe(1)
   await expect(page.locator('.live')).toHaveCount(0)
-  const news = page.locator('[aria-live="polite"].sr-only')
+  const news = page.getByRole('region', { name: 'Projects', exact: true }).locator('[aria-live="polite"].sr-only')
   const camy = liveAgent({ project_id: 'p-janus', session_id: 's-j', principal_id: CAMY, name: 'camy', ticket: { id: 'n-j', key: 'JANUS-9', title: 'Sessions', project_id: 'p-janus' } }, 1)
   const nova = liveAgent({ project_id: 'p-janus', session_id: 's-n', principal_id: OPS, name: 'nova', ticket: null }, 0.2)
   data.live.push(camy)
-  await page.clock.fastForward(20_500)
+  await page.clock.runFor(20_500)
   await expect.poll(reads).toBe(2)
   await expect(card(page, 'p-janus').locator('.live-chip')).toBeVisible()
   // News settles for a moment before it is said.
   await expect(news).toHaveText('')
-  await page.clock.fastForward(2_600)
+  await page.clock.runFor(2_600)
   await expect(news).toHaveText('camy started working on Janus.')
   // Within a project too: a second agent joining, one of two leaving, the last one leaving.
   data.live.push(nova)
-  await page.clock.fastForward(20_500)
+  await page.clock.runFor(20_500)
   await expect(card(page, 'p-janus').locator('.live-bot')).toHaveCount(2)
-  await page.clock.fastForward(2_600)
+  await page.clock.runFor(2_600)
   await expect(news).toHaveText('nova started working on Janus.')
   data.live.splice(0, 1)
-  await page.clock.fastForward(23_100)
+  await page.clock.runFor(23_100)
   await expect(card(page, 'p-janus').locator('.live-bot')).toHaveCount(1)
   await expect(news).toHaveText('camy stopped working on Janus.')
   data.live.splice(0)
-  await page.clock.fastForward(23_100)
+  await page.clock.runFor(23_100)
   await expect(card(page, 'p-janus').locator('.live')).toHaveCount(0)
   await expect(news).toHaveText('No agent is working on Janus any more.')
   // A working session past the red threshold stays visible with an honest heartbeat warning.
   data.live.push(liveAgent({ project_id: 'p-site', name: 'late', heartbeat_at: new Date(Date.parse('2026-09-23T12:00:00Z') - 660_000).toISOString() }))
-  await page.clock.fastForward(20_500)
+  await page.clock.runFor(20_500)
   await expect.poll(reads).toBe(6)
   await expect(card(page, 'p-site').locator('.live-bot')).toHaveAttribute('data-state', 'unresponsive')
   await expect(card(page, 'p-site').locator('.live-chip')).toHaveAccessibleName(/no heartbeat/)
   // A hidden tab asks nothing and catches up when shown again.
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
-  await page.clock.fastForward(65_000)
+  await page.clock.runFor(65_000)
   expect(reads()).toBe(6)
   await page.evaluate(() => { Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true }); document.dispatchEvent(new Event('visibilitychange')) })
   await expect.poll(reads).toBe(7)
@@ -247,7 +253,7 @@ test('a server without the read, or a person without access, gets a still page',
   const errors = watchErrors(page)
   const calls = await cards(page, world(), { liveStatus: 403 })
   await expect(page.locator('.card')).toHaveCount(7)
-  await page.clock.fastForward(45_000)
+  await page.clock.runFor(45_000)
   expect(calls.filter(c => c.path === '/api/harness-sessions/live')).toHaveLength(1)
   await expect(page.locator('.live')).toHaveCount(0)
   expect(errors).toEqual([])
@@ -330,6 +336,22 @@ for (const colorScheme of ['light', 'dark'] as const) {
     const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.version-coordinate').exclude('.calendar-version').analyze()
     const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')} — ${n.failureSummary?.split('\n').slice(1, 2).join(' ').trim()}`).join('\n')}`)
     expect(summary, summary.join('\n')).toEqual([])
+    await page.keyboard.press('Escape')
+    for (const width of [390, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 1000 })
+      const chip = card(page, 'p-aeon').locator('.live-chip')
+      await chip.scrollIntoViewIfNeeded()
+      await chip.click()
+      const popup = page.getByRole('dialog', { name: 'Active agents on Aeon' })
+      await expect(popup).toBeVisible()
+      const preferences = popup.getByRole('button', { name: 'Model preferences for Aeon' })
+      const guard = await controlStability(page, { chip, preferences })
+      await guard.check(() => preferences.hover())
+      guard.done()
+      await page.screenshot({ path: test.info().outputPath(`live-popup-${width}-${colorScheme}.png`) })
+      await page.keyboard.press('Escape')
+      await expect(popup).toHaveCount(0)
+    }
   })
 
   test(`a phone shows the live robots on cards and rows without scrolling sideways in ${colorScheme}`, async ({ page }) => {
@@ -380,21 +402,21 @@ for (const reducedMotion of ['reduce', 'no-preference'] as const) {
       const reads = () => calls.filter(c => c.path === '/api/harness-sessions/live').length
       const bot = card(page, 'p-hausv').locator('.live-bot')
       await expect(bot.locator('.glint')).toHaveCount(0)
-      await page.clock.fastForward(20_000)
+      await page.clock.runFor(20_000)
       await expect.poll(reads).toBe(2)
       await expect(bot.locator('.glint')).toHaveCount(0)
       data.live[0]!.heartbeat_at = '2026-09-23T12:00:10Z'
-      await page.clock.fastForward(20_000)
+      await page.clock.runFor(20_000)
       await expect.poll(reads).toBe(3)
       await expect(bot.locator('.glint')).toHaveCount(0)
       Object.assign(data.live[0]!, { activity_note: 'Running tests', activity_note_id: 10, activity_sequence: 7 })
-      await page.clock.fastForward(20_000)
+      await page.clock.runFor(20_000)
       await expect(bot.locator('.glint')).toHaveCount(1)
       const frames = await bot.locator('.glint').evaluate(el => el.getAnimations().flatMap(a => (a.effect as KeyframeEffect).getKeyframes()))
       if (reducedMotion === 'reduce') expect(frames.every(f => !('transform' in f))).toBe(true)
-      await page.clock.fastForward(650)
+      await page.clock.runFor(650)
       await expect(bot.locator('.glint')).toHaveCount(0)
-      await page.clock.fastForward(20_000)
+      await page.clock.runFor(20_000)
       await expect(bot.locator('.glint')).toHaveCount(0)
       await page.getByRole('radio', { name: 'List view' }).click()
       await expect(row(page, 'p-hausv').locator('.live-bot .glint')).toHaveCount(0)
@@ -411,7 +433,7 @@ for (const reducedMotion of ['reduce', 'no-preference'] as const) {
       expect(await fixture.evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
       await indicatorProps(page, { eventPulse: 13 })
       await expect(fixture.locator('.glint')).toHaveCount(0)
-      await page.clock.fastForward(650)
+      await page.clock.runFor(650)
       await expect(fixture.locator('.glint')).toHaveCount(0)
       await indicatorProps(page, { eventPulse: 12 })
       await indicatorProps(page, { eventPulse: 13 })
@@ -482,8 +504,7 @@ test('the pill counts sessions still in progress and keeps each state on its own
   await expect(page).toHaveURL('/p/MIX/MIX-2')
 })
 
-test('long names stay on one line and a long popover still reaches its links', async ({ page }) => {
-  mkdirSync('../.agent-shots', { recursive: true })
+test('long names stay on one line and a long popover still reaches its links', async ({ page }, testInfo) => {
   const data = fixtures()
   const longName = 'Alexandria-the-project-coordinator-with-a-long-name'
   const longKey = 'AEON-LONG-PROJECT-202'
@@ -522,7 +543,7 @@ test('long names stay on one line and a long popover still reaches its links', a
   await expect(chip.locator('.count')).toHaveText('12')
   await expect(chip.locator('.live-bot').first()).toHaveAttribute('data-style', 'robot-5')
   await page.evaluate(() => { for (const animation of document.getAnimations()) { animation.pause(); animation.currentTime = 400 } })
-  await card(page, 'p-long').screenshot({ path: '../.agent-shots/bk14-pill-1600-light.png' })
+  await card(page, 'p-long').screenshot({ path: testInfo.outputPath('bk14-pill-1600-light.png') })
   await chip.click()
   const pop = page.getByRole('dialog', { name: 'Active agents on Long labels' })
   const list = pop.locator('.pop-list')
@@ -533,20 +554,20 @@ test('long names stay on one line and a long popover still reaches its links', a
   await expect(last).toBeInViewport()
   await expect(pop.getByText('stopped-history')).toHaveCount(0)
   await expect(pop.getByRole('link', { name: 'All agents' })).toBeVisible()
-  await page.screenshot({ path: '../.agent-shots/bk14-popover-1600-light.png' })
+  await page.screenshot({ path: testInfo.outputPath('bk14-popover-1600-light.png') })
   await page.keyboard.press('Escape')
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.emulateMedia({ colorScheme: 'dark' })
   await oneLine()
   await page.evaluate(() => { for (const animation of document.getAnimations()) { animation.pause(); animation.currentTime = 400 } })
-  await card(page, 'p-long').screenshot({ path: '../.agent-shots/bk14-pill-390-dark.png' })
+  await card(page, 'p-long').screenshot({ path: testInfo.outputPath('bk14-pill-390-dark.png') })
   await chip.click()
   await expect(pop).toBeVisible()
   expect(await list.evaluate(element => element.scrollHeight > element.clientHeight + 8)).toBe(true)
   await last.scrollIntoViewIfNeeded()
   await expect(last).toBeInViewport()
-  await page.screenshot({ path: '../.agent-shots/bk14-popover-390-dark.png' })
+  await page.screenshot({ path: testInfo.outputPath('bk14-popover-390-dark.png') })
   await page.keyboard.press('Escape')
   await expect(pop).toHaveCount(0)
   await page.getByRole('radio', { name: 'List view' }).click()
@@ -563,25 +584,26 @@ test('stopped records that remain in the feed do not keep the project live', asy
   const active = liveAgent({ project_id: 'p-end', session_id: 'end-live', principal_id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', name: 'nova', ticket: { id: 'n-end', key: 'END-1', title: 'Finish', project_id: 'p-end' } }, 5)
   data.live.push(active, liveAgent({ project_id: 'p-end', session_id: 'end-old', name: 'retired', phase: 'stopped', activity: 'idle', stopped_at: '2026-09-23T10:00:00Z', stop_reason: 'completed' }, 70))
   await cards(page, data)
-  const news = page.locator('[aria-live="polite"].sr-only')
+  const news = page.getByRole('region', { name: 'Projects', exact: true }).locator('[aria-live="polite"].sr-only')
   await expect(card(page, 'p-end').locator('.count')).toHaveCount(0)
   await expect(card(page, 'p-end').getByRole('button', { name: /^1 agent working: nova on END-1/ })).toBeVisible()
   Object.assign(active, { phase: 'stopped', activity: 'idle', stopped_at: '2026-09-23T12:00:00Z', stop_reason: 'completed' })
-  await page.clock.fastForward(20_500)
+  await page.clock.runFor(20_500)
   await expect(card(page, 'p-end').locator('.live')).toHaveCount(0)
-  await page.clock.fastForward(2_600)
+  await page.clock.runFor(2_600)
   await expect(news).toHaveText('No agent is working on Ending any more.')
 })
 
-// ---------- Design review screenshots (LIVE_SHOTS=<dir>) ----------
-const shots = process.env.LIVE_SHOTS ?? ''
+// ---------- Design review screenshots (LIVE_SHOTS=1) ----------
+const shotsEnabled = Boolean(process.env.LIVE_SHOTS)
 test.describe('screenshots', () => {
-  test.skip(!shots, 'LIVE_SHOTS names the folder')
+  test.skip(!shotsEnabled, 'LIVE_SHOTS enables design evidence')
   test.use({ reducedMotion: 'no-preference' })
   for (const colorScheme of ['light', 'dark'] as const) {
     for (const width of [1600, 390]) {
       for (const view of ['cards', 'list'] as const) {
-        test(`shot ${view} ${width} ${colorScheme}`, async ({ page }) => {
+        test(`shot ${view} ${width} ${colorScheme}`, async ({ page }, testInfo) => {
+          const shots = testInfo.outputPath('shots')
           mkdirSync(shots, { recursive: true })
           await page.setViewportSize({ width, height: width > 600 ? 1000 : 2400 })
           await page.emulateMedia({ colorScheme })
@@ -601,7 +623,8 @@ test.describe('screenshots', () => {
         })
       }
     }
-    test(`shot shared states ${colorScheme}`, async ({ page }) => {
+    test(`shot shared states ${colorScheme}`, async ({ page }, testInfo) => {
+      const shots = testInfo.outputPath('shots')
       mkdirSync(shots, { recursive: true })
       await page.emulateMedia({ colorScheme })
       await cards(page, world('none'))
@@ -626,7 +649,8 @@ test.describe('screenshots', () => {
       await page.evaluate(() => { for (const a of document.getAnimations()) { a.pause(); a.currentTime = 150 } })
       await page.locator('#indicator-states').screenshot({ path: `${shots}/la2-states-${colorScheme}.png` })
     })
-    test(`shot popover ${colorScheme}`, async ({ page }) => {
+    test(`shot popover ${colorScheme}`, async ({ page }, testInfo) => {
+      const shots = testInfo.outputPath('shots')
       mkdirSync(shots, { recursive: true })
       await page.setViewportSize({ width: 1600, height: 1000 })
       await page.emulateMedia({ colorScheme })
@@ -641,7 +665,8 @@ test.describe('screenshots', () => {
   test.describe('frames', () => {
     test.use({ deviceScaleFactor: 3 })
     for (const colorScheme of ['light', 'dark'] as const) {
-      test(`shot frames ${colorScheme}`, async ({ page }) => {
+      test(`shot frames ${colorScheme}`, async ({ page }, testInfo) => {
+        const shots = testInfo.outputPath('shots')
         mkdirSync(shots, { recursive: true })
         await page.setViewportSize({ width: 1600, height: 1000 })
         await page.emulateMedia({ colorScheme })

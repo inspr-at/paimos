@@ -383,7 +383,7 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
 .scope-in { font-size: 12px; color: var(--ink-2); }
 .scope-key { font: 600 11.5px/1 var(--mono); letter-spacing: .04em; font-variant-ligatures: none; }
 .scope-x { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--teal-ink); }
-.scope-x:hover { background: rgba(14, 111, 108, .12); }
+.scope-x:hover { background: color-mix(in srgb, var(--primary-line) 12%, transparent); }
 .scope-x:focus-visible { box-shadow: var(--focus-ring); }
 .esc { flex-shrink: 0; }
 .sheet { position: relative; }
@@ -401,7 +401,7 @@ const iconOf = (result: Result): BizIconName => result.type === 'action' ? resul
 .key { flex-shrink: 0; width: 96px; overflow: hidden; text-overflow: ellipsis; font: 500 11.5px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
 .item.active .key { color: var(--teal-ink); }
 .kind { flex-shrink: 0; color: var(--ink-3); }
-.kind.epic { color: var(--gold); }
+.kind.epic { color: var(--kind-parent); }
 .title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desc { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; color: var(--ink-3); }
 .item.ticket .title, .item.knowledge .title { flex: 1 1 auto; }

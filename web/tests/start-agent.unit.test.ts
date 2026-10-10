@@ -9,8 +9,10 @@ import { useAgents } from '../src/stores/agents'
 import { resetPositions } from '../src/lib/position'
 import { wired } from './wire-fixtures'
 import type { WorkNode } from '../src/lib/api'
+import * as Cascade from '../src/lib/accountCascade'
+import { flush, setupSource } from './record-source'
 
-const ticket = { id: 'ticket', key: 'AEON-181', title: 'Start agent', body: 'Build the launch flow.', fields: { acceptance_criteria: 'Queue, then show a managed session.' } } as unknown as WorkNode
+const ticket = { id: 'ticket', key: 'AEON-181', title: 'Start agent', is_leaf: true, body: 'Build the launch flow.', fields: { acceptance_criteria: 'Queue, then show a managed session.' } } as unknown as WorkNode
 const profile = { id: 'model', harness: 'codex', enabled: true } as ModelProfile
 const order = { node_id: 'order', status: 'draft', revision: 3, assignee_principal_id: 'agent', criteria: [] } as WorkOrder
 const queued = { id: 'run', work_order_id: 'order', agent_principal_id: 'agent', model_profile_id: 'model', status: 'queued' } as AgentRun
@@ -60,6 +62,17 @@ function backend(options: { existing?: WorkOrder[]; runs?: AgentRun[]; failPatch
 afterEach(() => vi.unstubAllGlobals())
 
 describe('work-order launch', () => {
+  it('rejects a freshly read parent or unknown shape before any work-order write', async () => {
+    for (const is_leaf of [false, undefined]) {
+      const calls = backend()
+      const fetch = vi.mocked(globalThis.fetch)
+      fetch.mockImplementationOnce(async () => new Response(JSON.stringify({ ...ticket, is_leaf }), { headers: { 'Content-Type': 'application/json' } }))
+      await expect(startAgent(selection, admission())).rejects.toThrow('Select a work leaf before starting an agent.')
+      expect(fetch).toHaveBeenCalledTimes(1)
+      expect(fetch.mock.calls[0]?.[0]).toBe('/api/nodes/ticket')
+      expect(calls).toEqual([])
+    }
+  })
   it('copies ticket content and criteria, readies with revision, then queues the selected agent/profile', async () => {
     const calls = backend()
     expect(await startAgent(selection, admission())).toEqual({ run: queued, reused: false })
@@ -118,6 +131,77 @@ describe('work-order launch', () => {
     const calls = backend({ existing: [order], runs: [{ ...queued, model_profile_id: 'other' }] })
     await expect(startAgent(selection, admission())).rejects.toThrow('already has an active run')
     expect(calls.some(c => c.method !== 'GET')).toBe(false)
+  })
+})
+
+describe('Start Agent leaf selection', () => {
+  const stops: (() => void)[] = []
+  afterEach(() => stops.splice(0).forEach(stop => stop()))
+  function dialogSetup() {
+    vi.stubGlobal('document', { activeElement: null })
+    const listNodes = vi.fn(async (_params: unknown) => ({ items: [ticket, { ...ticket, id: 'parent', is_leaf: false }, { ...ticket, id: 'unknown', is_leaf: undefined }], next_cursor: 'next-page' as string | null }))
+    const launch = vi.fn(async () => { throw new Error('launch captured') })
+    const putPin = vi.fn()
+    const choice = { hostId: 'host', harness: 'codex', accountId: 'account', modelKey: 'model', profileId: 'profile' }
+    const made = setupSource('components/agents/StartAgentDialog.vue', {}, {
+      '../../lib/api': { listNodes },
+      '../../lib/authz': { can: () => true },
+      '../../stores/session': { useSession: () => ({ identity: { principal: { kind: 'person' } } }) },
+      '../../lib/agents': { listPins: async () => [], putPin, deletePin: vi.fn(), message: (e: Error) => e.message },
+      '../../lib/agentRows': {},
+      '../../lib/accountCascade': {
+        ...Cascade,
+        fetchAccountCatalog: async () => ({ catalog: { hosts: [] }, gap: null, message: '' }),
+        fillDefaults: () => ({ ...choice }),
+        presentCascade: () => ({ agentId: 'agent', profileId: 'profile', efforts: [{ value: 'profile' }], models: [{ value: 'model' }], accounts: [{ value: 'account' }], requested: {} }),
+      },
+      '../../lib/position': { writeMark: () => 0, wroteSince: () => false },
+      '../../lib/startAgent': { launchState, staleGrantRejection, startAgent: launch },
+      '../../stores/agents': { useAgents: () => ({ runs: {}, admitRun: vi.fn(), admitRuns: vi.fn(), afterWrite: vi.fn() }) },
+      '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
+    })
+    stops.push(made.stop)
+    return { state: made.state, listNodes, launch, putPin }
+  }
+  it('queries canonical leaves on every page and excludes parents and unknown shapes from mixed results', async () => {
+    const { state, listNodes } = dialogSetup()
+    await state.open(); await flush()
+    expect(state.tickets.value.map((item: WorkNode) => item.id)).toEqual(['ticket'])
+    expect(listNodes).toHaveBeenLastCalledWith({ kind: ['work'], shape: ['leaf'], q: '', limit: 30, sort: '-updated_at' })
+    listNodes.mockResolvedValueOnce({ items: [{ ...ticket, id: 'second-leaf' }, { ...ticket, id: 'second-parent', is_leaf: false }], next_cursor: null })
+    await state.search(true)
+    expect(listNodes).toHaveBeenLastCalledWith({ kind: ['work'], shape: ['leaf'], q: '', limit: 30, sort: '-updated_at', cursor: 'next-page' })
+    expect(state.tickets.value.map((item: WorkNode) => item.id)).toEqual(['ticket', 'second-leaf'])
+    expect(state.nextCursor.value).toBeNull()
+  })
+  it('refuses non-leaf selection and initial targets while keeping confirmed leaves launchable', async () => {
+    const { state, launch } = dialogSetup()
+    for (const is_leaf of [false, undefined]) {
+      const parent = { ...ticket, is_leaf }
+      await state.open(parent); await flush()
+      expect(state.ticket.value).toBeNull()
+      expect(state.canSubmit.value).toBe(false)
+      state.selectTicket(parent); await flush()
+      expect(state.ticket.value).toBeNull()
+      await state.submit()
+      expect(launch).not.toHaveBeenCalled()
+    }
+    state.selectTicket(ticket); await flush()
+    expect(state.ticket.value.id).toBe(ticket.id)
+    expect(state.canSubmit.value).toBe(true)
+    await state.submit()
+    expect(launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ticket: expect.objectContaining({ id: ticket.id }) }), expect.any(Object))
+  })
+  it('rechecks leaf eligibility at submission before remembering an account or launching', async () => {
+    const { state, launch, putPin } = dialogSetup()
+    await state.open(ticket); await flush()
+    expect(state.canSubmit.value).toBe(true)
+    state.remember.value = true
+    state.ticket.value = { ...state.ticket.value, is_leaf: false }
+    expect(state.canSubmit.value).toBe(false)
+    await state.submit()
+    expect(putPin).not.toHaveBeenCalled()
+    expect(launch).not.toHaveBeenCalled()
   })
 })
 

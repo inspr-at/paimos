@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { AccessError, agentScopeCeiling, changeAgentKeyScopes, getAgentKeyScopes, grantablePresetScopes, groupPermissions, keyHint, keyExpiryAfter, selectScopeGroup, matchesScope, MAX_KEY_SCOPES, type Agent, type Role } from '../../lib/access'
+import { AccessError, agentScopeCeiling, changeAgentKeyScopes, getAgentKeyScopes, grantablePresetScopes, groupPermissions, keyHint, keyExpiryAfter, selectScopeGroup, matchesScope, MAX_KEY_SCOPES, fullAccessLabel, type Agent, type Role } from '../../lib/access'
 import { can, myPermissions } from '../../lib/authz'
 import type { AgentKey } from '../../lib/settings'
 import { useAccess } from '../../stores/access'
@@ -20,6 +20,8 @@ const submitModifier = /Mac|iPhone|iPad/.test(navigator.platform) ? 'Cmd' : 'Ctr
 const originalExpiry = ref<string | null>(props.agentKey.expires_at)
 const days = ref(-1)
 const expiryChanged = computed(() => days.value !== -1 && !(days.value === 0 && originalExpiry.value === null))
+const originalFullAccess = ref(props.agentKey.full_access ?? false)
+const fullAccess = ref(originalFullAccess.value)
 const original = ref<string[]>([])
 const selected = ref(new Set<string>())
 const grantable = ref(new Set<string>())
@@ -42,11 +44,11 @@ const groups = computed(() => {
   for (const key of original.value) if (!scopes.some(p => p.key === key)) scopes.push({ key, group: 'Other', description: key, risk: 'low', grantable_at: [], agent_grantable: false })
   return groupPermissions(scopes.filter(p => matchesScope(p, term.value) && (term.value.trim() || showUnavailable.value || grantable.value.has(p.key) || mayExtend(p.key) || original.value.includes(p.key))))
 })
-const added = computed(() => [...selected.value].filter(k => !original.value.includes(k)))
-const removed = computed(() => original.value.filter(k => !selected.value.has(k)))
-const roleAdded = computed(() => [...selected.value].filter(k => !grantable.value.has(k) && mayExtend(k)))
-const invalid = computed(() => [...selected.value].some(k => !grantable.value.has(k) && !mayExtend(k)))
-const changed = computed(() => added.value.length + removed.value.length + roleAdded.value.length > 0 || expiryChanged.value)
+const added = computed(() => fullAccess.value ? [] : [...selected.value].filter(k => !original.value.includes(k)))
+const removed = computed(() => fullAccess.value ? [] : original.value.filter(k => !selected.value.has(k)))
+const roleAdded = computed(() => fullAccess.value ? [] : [...selected.value].filter(k => !grantable.value.has(k) && mayExtend(k)))
+const invalid = computed(() => !fullAccess.value && [...selected.value].some(k => !grantable.value.has(k) && !mayExtend(k)))
+const changed = computed(() => added.value.length + removed.value.length + roleAdded.value.length > 0 || expiryChanged.value || fullAccess.value !== originalFullAccess.value)
 async function load() {
   busy.value = true
   error.value = ''
@@ -54,6 +56,8 @@ async function load() {
     const view = await getAgentKeyScopes(props.agentKey.id)
     originalExpiry.value = view.key.expires_at
     days.value = -1
+    originalFullAccess.value = view.key.full_access ?? false
+    fullAccess.value = originalFullAccess.value
     original.value = view.key.scopes
     selected.value = new Set(view.key.scopes)
     grantable.value = new Set(view.grantable_scopes)
@@ -70,8 +74,8 @@ function toggle(key: string) {
   else if (grantable.value.has(key) || mayExtend(key)) next.add(key)
   selected.value = next
 }
-function preset(keys: string[]) {
-  if (!busy.value && allowed.value) selected.value = new Set(grantablePresetScopes(keys, presetHeld.value, access.registry))
+function preset(keys: string[], full = false) {
+  if (!busy.value && allowed.value) { fullAccess.value = full; selected.value = new Set(full ? [] : grantablePresetScopes(keys, presetHeld.value, access.registry)) }
 }
 function selectGroup(keys: string[], all: boolean) {
   if (!busy.value && allowed.value) selected.value = selectScopeGroup(selected.value, keys, all, presetHeld.value, access.registry)
@@ -95,7 +99,7 @@ async function save() {
   busy.value = true
   error.value = ''
   try {
-    await changeAgentKeyScopes(props.agentKey.id, [...new Set([...added.value, ...roleAdded.value])], removed.value, roleAdded.value.length && agentRole.value ? { role_id: agentRole.value.id, add: roleAdded.value } : undefined, expiryChanged.value ? keyExpiryAfter(days.value) : undefined)
+    await changeAgentKeyScopes(props.agentKey.id, [...new Set([...added.value, ...roleAdded.value])], removed.value, roleAdded.value.length && agentRole.value ? { role_id: agentRole.value.id, add: roleAdded.value } : undefined, expiryChanged.value ? keyExpiryAfter(days.value) : undefined, fullAccess.value !== originalFullAccess.value ? fullAccess.value : undefined)
     emit('saved')
     emit('close')
   } catch (e) {
@@ -106,17 +110,20 @@ onMounted(load)
 </script>
 
 <template>
-  <AccessSheet :title="`Edit scopes for ${agent.name}`" size="center" actions-first submit-shortcut @submit="save" @close="busy || emit('close')">
+  <AccessSheet :title="`Edit scopes for ${agent.name}`" size="center" scale="l" actions-first submit-shortcut @submit="save" @close="busy || emit('close')">
     <div class="body" :aria-busy="busy">
       <p class="note">Changes to <span class="mono">{{ keyHint(agentKey.prefix) }}</span> apply immediately with the same key.</p>
       <template v-if="loaded">
         <KeyLifetime v-model="days" :current="originalExpiry" :disabled="busy || !allowed" />
-        <ScopeCodeField :unavailable="codeUnavailable" :disabled="busy || !allowed" @applied="selected = $event" />
+        <ScopeCodeField :unavailable="codeUnavailable" :disabled="busy || !allowed || fullAccess" @applied="selected = $event" />
         <label class="search-field">
           <AppIcon name="search" :size="14" />
-          <input v-model="term" class="field" type="search" aria-label="Find a scope" placeholder="Find a scope by name, id or group" data-autofocus autocomplete="off" />
+          <input v-model="term" class="field" type="search" aria-label="Find a scope" :disabled="fullAccess" placeholder="Find a scope by name, id or group" data-autofocus autocomplete="off" />
         </label>
         <ScopePresets :held="presetHeld" :registry="access.registry" :disabled="busy || !allowed" @apply="preset" />
+        <button type="button" class="btn sm ghost scope-toggle" :disabled="busy || !allowed || (!selected.size && !fullAccess)" @click="preset([])">Clear</button>
+        <p v-if="fullAccess" class="note">{{ fullAccessLabel() }}. The agent’s role, creator permissions and project access still apply.</p>
+        <template v-else>
         <fieldset class="scopes" :disabled="busy || !allowed">
           <legend>{{ selected.size }} {{ selected.size === 1 ? 'scope' : 'scopes' }}</legend>
           <div v-for="group in groups" :key="group.group" class="scope-group" role="group" :aria-label="group.group">
@@ -126,7 +133,7 @@ onMounted(load)
             </span></div>
             <label v-for="scope in group.items" :key="scope.key" class="scope-row">
               <input type="checkbox" :checked="selected.has(scope.key)" :disabled="!grantable.has(scope.key) && !mayExtend(scope.key) && !selected.has(scope.key)" @change="toggle(scope.key)" />
-              <ScopeDetails :scope="scope"><span v-if="!grantable.has(scope.key)" class="detail">{{ unavailableReason(scope.key) }}</span></ScopeDetails>
+              <ScopeDetails :scope="scope"><span v-if="!grantable.has(scope.key)" class="detail" :title="unavailableReason(scope.key)">{{ unavailableReason(scope.key) }}</span></ScopeDetails>
             </label>
           </div>
           <p v-if="!groups.length" class="note">{{ term ? 'No matching scopes.' : 'No scopes are available for this key.' }}</p>
@@ -135,6 +142,7 @@ onMounted(load)
         <p v-if="!selected.size" class="note">This key will have no access.</p>
         <p v-else-if="invalid" class="note" role="alert">Remove unavailable scopes before saving.</p>
         <p v-if="selected.size > MAX_KEY_SCOPES" class="note" role="alert">Choose at most {{ MAX_KEY_SCOPES }} scopes.</p>
+        </template>
         <p v-if="changed" class="changes" aria-live="polite">{{ added.length }} added · {{ removed.length }} removed{{ expiryChanged ? ' · expiry changed' : '' }}</p>
         <section v-if="roleAdded.length && agentRole" class="role-confirm" aria-label="Confirm role changes" aria-live="polite">
           <h3>Also add to the agent's role?</h3>
@@ -150,8 +158,8 @@ onMounted(load)
     <template #foot>
       <div class="foot">
         <div class="actions">
+          <button type="button" class="btn primary" :disabled="busy || !loaded || !allowed || !changed || invalid || selected.size > MAX_KEY_SCOPES" @click="save"><span class="action-label btn-label"><span>{{ busy && loaded ? 'Saving…' : roleAdded.length ? 'Add to role and save scopes' : 'Save scopes' }}</span><span aria-hidden="true">Add to role and save scopes</span></span><kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
           <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-          <button type="button" class="btn primary" :disabled="busy || !loaded || !allowed || !changed || invalid || selected.size > MAX_KEY_SCOPES" @click="save"><span class="action-label">{{ busy && loaded ? 'Saving…' : roleAdded.length ? 'Add to role and save scopes' : 'Save scopes' }}</span><kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
         </div>
       </div>
     </template>
@@ -164,20 +172,23 @@ onMounted(load)
 .scopes { margin: 0; padding: 0; border: 0; min-width: 0; }
 .scopes legend, .group-h { font: 500 10.5px/1.5 var(--mono); color: var(--ink-3); }
 .scopes legend { margin-bottom: 8px; }
-.scope-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.scope-group { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 20px; row-gap: 4px; }
 .group-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; grid-column: 1 / -1; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .1em; }
 .group-actions { display: flex; gap: 4px; }
 .group-actions .btn { min-width: 44px; }
-.scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 8px; padding: 7px 0; align-items: start; }
+.scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); min-width: 0; gap: 8px; padding: 7px 0; align-items: start; }
 .scope-row input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--teal); }
 .detail { font-size: 11px; color: var(--ink-3); }
 .foot { display: grid; gap: 12px; width: 100%; min-width: 0; }
-.actions { display: flex; justify-content: end; gap: 8px; }
+.actions { display: flex; flex-wrap: wrap; justify-content: start; gap: 8px; }
+@media (max-width: 600px) { .actions { flex-direction: row-reverse; } .actions .btn { flex: 1 1 auto; min-height: 44px; } .actions .keycap { display: none; } }
 .actions .primary { min-width: 0; }
 .action-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
 .actions .keycap { flex-shrink: 0; }
 .role-confirm { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .role-confirm h3 { font-size: 13px; font-weight: 600; }
 .failure .btn, .scope-toggle { justify-self: start; }
+@container access-body (min-width: 600px) { .scope-group { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container access-body (min-width: 900px) { .scope-group { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .scope-group { grid-template-columns: minmax(0, 1fr); } .scope-row { min-height: 44px; align-items: center; } }
 </style>

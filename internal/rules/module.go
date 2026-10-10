@@ -84,7 +84,7 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 			writeFailure(w, fail(400, "invalid_scope", "invalid set UUID"))
 			return
 		}
-		if permission == "rules.publish" && p.Kind != tenant.Person {
+		if permission == "rules.publish" && p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 			writeFailure(w, authz.ErrForbidden)
 			return
 		}
@@ -107,11 +107,13 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 		// work instead: lock and statement timeouts for SQL, explicit checks in
 		// the budget's CPU loops, and InTenant rolls back when fn fails.
 		deadline := time.Now().Add(txTimeout)
+		bootstrap, cancel := context.WithDeadline(r.Context(), deadline)
+		defer cancel()
 		pending := &outcome{}
 		r = r.WithContext(context.WithValue(withDeadline(context.WithoutCancel(r.Context()), deadline), outcomeKey{}, pending))
 		var out any
 		committing := false
-		err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		err = db.InTenantWithBootstrap(r.Context(), bootstrap, m.pool, p.TenantID, func(tx pgx.Tx) error {
 			// Bounded waits and work: a lock that cannot be had in time fails the
 			// request (503) instead of queueing behind or ahead of access changes.
 			// The server enforces the deadline on the whole transaction too:
@@ -119,7 +121,7 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 			// timeout end the session, and with it every lock, at the deadline,
 			// however long the application spends between statements.
 			remaining := fmt.Sprintf("%dms", max(time.Until(deadline).Milliseconds(), 1))
-			if _, err := tx.Exec(r.Context(), `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$2,true),set_config('transaction_timeout',$3,true),set_config('idle_in_transaction_session_timeout',$3,true)`, lockTimeout, statementTimeout, remaining); err != nil {
+			if _, err := tx.Exec(bootstrap, `SELECT set_config('lock_timeout',$1,true),set_config('statement_timeout',$2,true),set_config('transaction_timeout',$3,true),set_config('idle_in_transaction_session_timeout',$3,true)`, lockTimeout, statementTimeout, remaining); err != nil {
 				return err
 			}
 			if err := authz.RequireTx(r.Context(), tx, p, permission, authz.Scope{AnyProject: true}); err != nil {
@@ -137,10 +139,10 @@ func (m *Module) endpoint(permission, unknown string, fn endpoint) http.HandlerF
 				return err
 			}
 			if r.Method != "GET" && r.Method != "HEAD" {
-				if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0)),set_config('aeon.rules_write','on',true)`); err != nil {
+				if err = lockAccess(r.Context(), tx, p.TenantID); err != nil {
 					return err
 				}
-				if err = lockAccess(r.Context(), tx, p.TenantID); err != nil {
+				if _, err = tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0)),set_config('aeon.rules_write','on',true)`); err != nil {
 					return err
 				}
 				// Project visibility was derived when the transaction began; derive
@@ -282,14 +284,11 @@ func expired(ctx context.Context) bool {
 // binding, member and invite mutations in internal/authz) and holds it until
 // commit. Every permission decision of a rules write is made after it, so a
 // concurrent demotion either commits first and is seen, or waits for this
-// write. Order: the tenant advisory lock first, then the row, the same order as
+// write. Order: the tenant row first, then the tree advisory lock, as in
 // authz.lockProjectMutation, so the two never deadlock.
 //
-// NO KEY UPDATE, not UPDATE: it conflicts with the FOR UPDATE that access
-// changes take, but not with the KEY SHARE a foreign key check takes when some
-// other request inserts a row that references the tenant (a knowledge entry,
-// say). Such a request may hold KEY SHARE while it waits for the tenant
-// advisory lock held here; FOR UPDATE would close that cycle into a deadlock.
+// NO KEY UPDATE conflicts with other access fences but permits the KEY SHARE
+// held by foreign-key checks while another writer waits for the tree lock.
 func lockAccess(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	var id string
 	return tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&id)
@@ -317,7 +316,7 @@ func writeFailure(w http.ResponseWriter, err error) {
 		e = &Error{Status: 404, Code: "not_found", Message: "rule resource unavailable"}
 	case errors.As(err, &we):
 		e = &Error{Status: we.Status, Code: "invalid_request", Message: we.Message}
-	case errors.As(err, &pe) && (pe.Code == "55P03" || pe.Code == "57014" || pe.Code == "25P03" || pe.Code == "25P04"), errors.Is(err, context.DeadlineExceeded):
+	case errors.As(err, &pe) && (pe.Code == "55P03" || pe.Code == "57014" || pe.Code == "25P03" || pe.Code == "25P04"), errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		e = &Error{Status: 503, Code: "busy", Message: "the rules store is busy; nothing was changed, try again"}
 	case errors.As(err, &pe) && pe.Code == "23505":
 		e = &Error{Status: 409, Code: "revision_conflict", Message: "rule identity or version already exists"}
@@ -350,7 +349,7 @@ func permission(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Scope, act
 	if err := authz.RequireTx(ctx, tx, p, action, authz.Scope{ProjectID: s.ProjectID, AnyProject: action == "rules.read" && s.ProjectID == ""}); err != nil {
 		return err
 	}
-	if action == "rules.publish" && p.Kind != tenant.Person {
+	if action == "rules.publish" && p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		return authz.ErrForbidden
 	}
 	owner, err := actorOwner(ctx, tx, p)
@@ -426,7 +425,7 @@ func permission(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Scope, act
 	}
 	if action != "rules.read" {
 		if s.Layer == "company" {
-			if p.Kind != tenant.Person {
+			if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 				return authz.ErrForbidden
 			}
 			return authz.RequireTx(ctx, tx, p, "rules.publish", authz.Scope{})

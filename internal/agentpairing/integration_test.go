@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
@@ -30,6 +31,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -77,6 +79,36 @@ func TestComputerCompatibilityUsesItsReportedAgent(t *testing.T) {
 	}
 }
 
+// Risk: Settings offers an add-harness command for an install the machine does
+// not have (AEON-733), or one machine's report leaks into another's view.
+func TestComputerReportsItsInstallMethod(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "connect_only")
+	v := f.redeem(p)
+	if !slices.Contains(v.ServerCapabilities, agentpairing.InstallCapability) {
+		t.Fatal("server does not advertise the install report")
+	}
+	for _, tc := range []struct{ reported, want string }{
+		{"homebrew", "homebrew"},
+		{"nix", "nix"},
+		{"direct", "direct"},
+		{"winget", ""},
+		{"", ""},
+	} {
+		t.Run("reported "+tc.reported, func(t *testing.T) {
+			progress := agentpairing.SetupProgress{State: "connected", InstallMethod: tc.reported}
+			var report agentpairing.View
+			decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", map[string]any{"tenant_id": f.tenantID, "request_id": p.id, "lifecycle_secret": p.lifecycle, "progress": progress}, false, "", 200), &report)
+			var listed agentpairing.View
+			decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &listed)
+			if report.InstallMethod != tc.want || listed.InstallMethod != tc.want || report.SetupState != "connected" {
+				t.Fatalf("install method = %q/%q, want %q", report.InstallMethod, listed.InstallMethod, tc.want)
+			}
+		})
+	}
+}
+
 func nixGuideFixture() *config.PairingNixGuide {
 	return &config.PairingNixGuide{
 		ModuleURL: "https://example.test/instance/module.nix", ServiceOption: "services.aeon.enable",
@@ -85,11 +117,13 @@ func nixGuideFixture() *config.PairingNixGuide {
 }
 
 type fixture struct {
+	messages   []*attachedmsg.Service
 	pairing    *agentpairing.Module
 	t          *testing.T
 	db         *dbtest.DB
 	h          http.Handler
 	tenantID   string
+	tenantSlug string
 	person     string
 	cookie     *http.Cookie
 	profiles   map[string]string
@@ -118,15 +152,19 @@ func uuid(t *testing.T, d *dbtest.DB) string {
 	}
 	return id
 }
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T, messages ...*attachedmsg.Service) *fixture {
 	t.Helper()
-	d := dbtest.Open(t)
-	id, err := tenantbootstrap.Create(t.Context(), d.App, "pairtest", "Pairing test")
+	return newFixtureInTenant(t, dbtest.Open(t), "pairtest", messages...)
+}
+
+func newFixtureInTenant(t *testing.T, d *dbtest.DB, slug string, messages ...*attachedmsg.Service) *fixture {
+	t.Helper()
+	id, err := tenantbootstrap.Create(t.Context(), d.App, slug, "Pairing test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessionKey := []byte(nonce())
-	f := &fixture{t: t, db: d, tenantID: id, profiles: map[string]string{}, sessionKey: sessionKey}
+	f := &fixture{t: t, db: d, tenantID: id, tenantSlug: slug, profiles: map[string]string{}, sessionKey: sessionKey, messages: messages}
 	f.rebuildHandler()
 	login := f.call("POST", "/api/auth/dev-login", map[string]string{"email": "pairing@example.test"}, false, "", 200)
 	cookies := login.Result().Cookies()
@@ -170,17 +208,25 @@ func newFixture(t *testing.T) *fixture {
 // changes. Database rows, signing configuration and modules remain identical.
 func (f *fixture) rebuildHandler() {
 	f.t.Helper()
-	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: f.sessionKey, BootstrapTenantSlug: "pairtest", BootstrapAdminEmail: "pairing@example.test"}, f.db.App)
+	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: f.sessionKey, BootstrapTenantSlug: f.tenantSlug, BootstrapAdminEmail: "pairing@example.test"}, f.db.App)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	pairing := agentpairing.New(f.db.App, origin, "pairtest")
+	pairing := agentpairing.New(f.db.App, origin, f.tenantSlug)
 	if err := pairing.ConfigureAccountLink(f.sessionKey); err != nil {
 		f.t.Fatal(err)
 	}
-	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, pairing, events.New(f.db.App), agentaccounts.New(f.db.App), nodes.New(f.db.App, nil), modelregistry.New(f.db.App), harness.New(f.db.App), workorders.New(f.db.App), agentruns.New(f.db.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
-		return agentaccounts.Settle(ctx, tx, p, r.ID)
+	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, pairing, events.New(f.db.App), agentaccounts.New(f.db.App), nodes.New(f.db.App, nil), modelregistry.New(f.db.App), harness.New(f.db.App), workorders.New(f.db.App), agentruns.New(f.db.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry, pending *[]events.Change) error {
+		return agentaccounts.SettleDeferred(ctx, tx, p, r.ID, pending)
 	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
+	if len(f.messages) > 0 {
+		pairing.SetAttachedMessages(f.messages[0])
+		messaging, err := inbox.NewMessaging(f.db.App, make([]byte, 32), inbox.WithAttachedMessages(f.messages[0]))
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		api.Modules = append(api.Modules, inbox.New(f.db.App, f.messages[0]), messaging)
+	}
 	f.pairing, f.h = pairing, api.Handler()
 }
 
@@ -333,9 +379,23 @@ func TestPairingApprovalRedemptionIsolationAndOneShot(t *testing.T) {
 		t.Fatal("approval falsely reports connected or exposes runtime prefix")
 	}
 	v := f.redeem(p)
+	var creator string
+	var required bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT k.created_by_principal_id::text,k.person_owner_required FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.tenant_id=$1 AND c.id=$2`, f.tenantID, *v.ComputerID).Scan(&creator, &required); err != nil || creator != f.person || !required {
+		t.Fatal("pairing omitted approving person creator or ownership marker")
+	}
+
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	if v.State != "redeemed" || len(v.Enrollments) != 1 {
 		t.Fatal("missing redemption bindings")
+	}
+	// Risk: the verification profile must not freeze the paired account's
+	// harness catalog at enrollment, while its verification binding stays exact.
+	var unpinned bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT a.allowed_model_profile_ids IS NULL AND e.model_profile_id=$2::uuid
+ FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id
+ WHERE a.id=$1`, v.Enrollments[0].AccountID, f.profiles["claude"]).Scan(&unpinned); err != nil || !unpinned {
+		t.Fatalf("pairing pinned model allowance or lost verification profile: %v", err)
 	}
 	retry := f.redeem(p)
 	if retry.RuntimePrefix != v.RuntimePrefix || *retry.Enrollments[0].VerificationRunID != *v.Enrollments[0].VerificationRunID {
@@ -1021,7 +1081,7 @@ func TestPairingExpiredReservationReleasesSlotAndAllowsOngoing(t *testing.T) {
 		t.Fatalf("expiry leaked reservation or invented process: %s %s held=%d started=%v claimed=%v expired=%v", state, holdState, held, started, claimed, expired)
 	}
 	retry := f.redeem(p)
-	if retry.Enrollments[0].VerificationState != "expired" || *retry.Enrollments[0].VerificationRunID != *e.VerificationRunID {
+	if retry.Enrollments[0].VerificationState != "expired" || !retry.Enrollments[0].VerificationExpiredReady || *retry.Enrollments[0].VerificationRunID != *e.VerificationRunID {
 		t.Fatal("expiry projection/retry binding wrong")
 	}
 	f.claim(v, e, key, ids, 409)
@@ -1556,8 +1616,8 @@ func TestPartialAttentionStaysOnReadyHarness(t *testing.T) {
 	proof["progress"] = progress
 	report = agentpairing.View{}
 	decodeResult(t, f.call("POST", "/api/agent-pairing/reconcile", proof, false, "", 200), &report)
-	if report.HarnessDetails["claude"].Reason != "pin_drifted" || len(report.HarnessDetails["claude"].Attention) != 0 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" {
-		t.Fatalf("non-ready attention was stored: %+v", report.HarnessDetails["claude"])
+	if report.HarnessDetails["claude"].Reason != "pin_drifted" || len(report.HarnessDetails["claude"].Attention) != 1 || report.HarnessDetails["claude"].Fix.Command != "aeon-agentd repin --harness claude" {
+		t.Fatalf("blocked account attention was lost: %+v", report.HarnessDetails["claude"])
 	}
 }
 
@@ -1676,4 +1736,28 @@ func (f *fixture) addClaude(p *proposal, computerID, key string) agentpairing.Vi
 	f.submit(q)
 	f.approve(q, "connect_only")
 	return f.redeem(q)
+}
+
+func TestPairingVerificationClaimsWithNullTrace(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.submit(p)
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	e := v.Enrollments[0]
+	var absent bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT trace IS NULL FROM agent_runs WHERE id=$1`, *e.VerificationRunID).Scan(&absent); err != nil {
+		t.Fatal(err)
+	}
+	if !absent {
+		t.Fatal("pairing fixture no longer covers NULL trace")
+	}
+	f.probe(v, e, key, 200)
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	var run agentruns.Run
+	decodeResult(t, f.call("GET", "/api/runs/"+*e.VerificationRunID, nil, false, key, 200), &run)
+	if run.Status != "starting" || run.Purpose != "pairing_verification" || run.RepositoryMutationAllowed {
+		t.Fatal("verification claim lost its read-only contract", run)
+	}
 }

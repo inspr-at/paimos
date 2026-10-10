@@ -1,0 +1,58 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "recurrences.manage"
+  ],
+  "builtin_roles": {
+    "admin": [
+      "recurrences.manage"
+    ],
+    "member": [
+      "recurrences.manage"
+    ],
+    "owner": [
+      "recurrences.manage"
+    ]
+  },
+  "project_decided": {
+    "POST /api/recurrences": true,
+    "POST /api/recurrences/preview": true
+  },
+  "project_filtered": {
+    "GET /api/recurrences": true
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Manage recurrences",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Recurrences",
+      "key": "recurrences.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    }
+  ],
+  "routes": {
+    "DELETE /api/recurrences/{recurrenceId}": "recurrences.manage",
+    "GET /api/recurrences": "nodes.read|recurrences.manage",
+    "GET /api/recurrences/{recurrenceId}": "nodes.read|recurrences.manage",
+    "GET /api/recurrences/{recurrenceId}/history": "nodes.read|recurrences.manage",
+    "GET /api/recurrences/{recurrenceId}/preview": "nodes.read|recurrences.manage",
+    "GET /api/recurrences/{recurrenceId}/releases": "nodes.read|recurrences.manage",
+    "POST /api/recurrences": "recurrences.manage",
+    "POST /api/recurrences/preview": "recurrences.manage",
+    "POST /api/recurrences/{recurrenceId}/events": "recurrences.manage",
+    "POST /api/recurrences/{recurrenceId}/pause": "recurrences.manage",
+    "POST /api/recurrences/{recurrenceId}/resume": "recurrences.manage",
+    "POST /api/recurrences/{recurrenceId}/run-now": "recurrences.manage",
+    "PUT /api/recurrences/{recurrenceId}": "recurrences.manage"
+  },
+  "words": {
+    "resources": {
+      "recurrences": "recurring work"
+    }
+  }
+}

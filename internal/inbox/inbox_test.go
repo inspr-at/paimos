@@ -408,8 +408,8 @@ func insertKey(t *testing.T, d *dbtest.DB, p tenant.Principal, scopes []string, 
 	}
 	prefix = prefix[:48]
 	err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)`, p.TenantID, p.ID, p.Name+"-"+secret, prefix, hashSecret(secret), scopes)
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes,created_by_principal_id)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, p.TenantID, p.ID, p.Name+"-"+secret, prefix, hashSecret(secret), scopes)
 		return err
 	})
 	if err != nil {
@@ -431,26 +431,55 @@ func TestStreamAndPoll(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	srv, mod := serve(t, w.db, w.sender, w.recipient)
-	started := time.Now()
 	status, body := do(t, srv, w.recipient.ID, http.MethodGet, "/api/inbox/messages?wait_ms=0", "", nil)
-	if status != 200 || len(mustJSON[Page](t, body).Items) != 0 || time.Since(started) > time.Second {
-		t.Fatalf("immediate %d %s %s", status, body, time.Since(started))
+	if status != 200 || len(mustJSON[Page](t, body).Items) != 0 {
+		t.Fatalf("immediate %d %s", status, body)
 	}
+	// Pause after LISTEN and the empty page, then send. The real listener must
+	// consume the queued notification; a timeout followed by a read cannot pass.
+	waiting := make(chan struct{}, 1)
+	resume := make(chan struct{})
+	notified := make(chan error, 1)
+	mod.waitNotify = func(ctx context.Context, conn *pgx.Conn, tenantID string, deadline time.Time) error {
+		waiting <- struct{}{}
+		select {
+		case <-resume:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		err := waitTenantNotify(ctx, conn, tenantID, deadline)
+		notified <- err
+		return err
+	}
+	defer func() {
+		select {
+		case <-resume:
+		default:
+			close(resume)
+		}
+	}()
 	found := make(chan Page, 1)
 	go func() {
-		status, body := do(t, srv, w.recipient.ID, http.MethodGet, "/api/inbox/messages?wait_ms=2000", "", nil)
+		status, body := do(t, srv, w.recipient.ID, http.MethodGet, "/api/inbox/messages?wait_ms=30000", "", nil)
 		if status != 200 {
 			found <- Page{}
 			return
 		}
 		found <- mustJSON[Page](t, body)
 	}()
-	time.Sleep(150 * time.Millisecond)
+	select {
+	case <-waiting:
+	case page := <-found:
+		t.Fatalf("long poll returned before waiting: %+v", page)
+	case <-time.After(10 * time.Second):
+		t.Fatal("long poll never entered its notification wait")
+	}
 	status, body = do(t, srv, w.sender.ID, http.MethodPost, "/api/inbox/messages", sendJSON(w.recipient.ID, secretBody, "live", nil, nil), nil)
 	if status != 201 {
 		t.Fatal(status, string(body))
 	}
 	sent := mustJSON[Message](t, body)
+	close(resume)
 	select {
 	case page := <-found:
 		if len(page.Items) != 1 || page.Items[0].ID != sent.ID || page.Items[0].Body != secretBody {
@@ -458,6 +487,9 @@ func TestStreamAndPoll(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("long poll timed out")
+	}
+	if err := <-notified; err != nil {
+		t.Fatalf("long poll read without its notification: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)

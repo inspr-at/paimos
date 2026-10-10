@@ -2,6 +2,10 @@
 # CI-only overlay. The mock supplies discovery for the sign-in redirect;
 # it cannot authenticate users and must never be used for a real installation.
 services:
+  postgres:
+    # OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
+    image: ghcr.io/inspr-at/paimos-ci/pgvector:0.8.6-pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
+
   oidc:
     image: python:3.14-alpine
     command: [python3, /mock/oidc.py]

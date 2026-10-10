@@ -50,7 +50,7 @@ function close(restore = true) {
 }
 async function changeLimits() {
   close(false)
-  await router.push('/settings/workspace#status-autopilot')
+  await router.push('/settings/autopilot#status-autopilot')
   await nextTick()
   const card = document.getElementById('status-autopilot')
   card?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
@@ -102,7 +102,7 @@ const triageWord = computed(() => { const mode = help.value.triage.mode; return 
 </template>
 
 <style scoped>
-.sheet { width: min(860px, calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 48px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.sheet { width: min(var(--dialog-l), calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 48px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .sheet::backdrop { background: var(--scrim); backdrop-filter: blur(3px); }
 .sheet-card { max-height: calc(100dvh - 48px); overflow: auto; overscroll-behavior: contain; padding: 22px 26px 20px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
@@ -135,7 +135,7 @@ h2 { font-size: 19px; }
 .flag-explain { display: grid; gap: 8px; margin-top: 16px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); }
 .flag-explain p { font-size: 13px; line-height: 1.5; }
 .hc-sample { display: inline-flex; align-items: center; gap: 8px; justify-self: start; max-width: 100%; padding: 5px 10px; border-radius: 8px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 28%, transparent); font-size: 12.5px; color: var(--ink); }
-.hc-sample svg { color: var(--gold-ink); }
+.hc-sample svg { color: var(--warn-ink); }
 .hc-sample span { min-width: 0; overflow-wrap: anywhere; }
 .help-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-top: 14px; font-size: 12px; color: var(--ink-3); }
 .help-foot code { padding: 2px 6px; border-radius: 6px; background: var(--code-bg); color: var(--ink-2); font-size: 11.5px; }

@@ -15,6 +15,7 @@ const kernelRule = (patch: Record<string, unknown>) => ({
 })
 
 const READY = {
+  proposals_enabled: true,
   id: 'd0000000-0000-4000-8000-000000000001', repository: 'inspr-at/inspr-modules', visibility: 'public', ref: 'v260922101217.0.0', commit: COMMIT,
   committed_at: '2026-09-22T10:25:19Z', pinned_at: '2026-09-29T08:00:00Z', paths: ['docs/AGENTS-*.md'], url: `https://github.com/inspr-at/inspr-modules/tree/${COMMIT}`,
   state: 'ready', indexed_at: '2026-09-29T08:00:02Z', skipped: [{ path: 'docs/AGENTS-INDEX.md', reason: 'not a doctrine rule file' }],
@@ -307,4 +308,19 @@ test('missing proposal guard gives administrators a reason while doctrine remain
   await doctrine.getByRole('button', { name: /^AGENTS-KERNEL\.md/ }).click()
   await expect(doctrine.getByText('Never print the environment.')).toBeVisible()
   await expect(doctrine.getByRole('button', { name: /Propose/ })).toHaveCount(0)
+})
+
+// R14: proposal controls must follow host policy rather than repository names.
+test('configured private doctrine can be proposed while public packs stay read-only', async ({ page }) => {
+  const privateSource = { ...READY, id: 'd0000000-0000-4000-8000-000000001043', repository: 'example-business-team/agm-doctrine', visibility: 'private', proposals_enabled: true }
+  await setup(page, { manage: true, layer: { sources: [{ ...READY, proposals_enabled: false }, privateSource], proposals_enabled: true } })
+  await page.goto('/settings/agent-rules')
+  const sources = page.locator('.doctrine > .source')
+  await expect(sources).toHaveCount(2)
+  await sources.nth(0).getByRole('button', { name: /^AGENTS-KERNEL\.md/ }).click()
+  await sources.nth(1).getByRole('button', { name: /^AGENTS-KERNEL\.md/ }).click()
+  await expect(sources.nth(0).getByRole('button', { name: /^Propose change/ })).toHaveCount(0)
+  await sources.nth(1).getByRole('button', { name: /^Propose change/ }).first().click()
+  await expect(page.getByRole('dialog', { name: /^Propose change/ })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Propose change', exact: true })).toContainText('agm-doctrine')
 })

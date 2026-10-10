@@ -99,6 +99,8 @@ class CoverageTests(unittest.TestCase):
     def test_original_coverage_gaps_are_owned(self):
         config = load(HERE / 'slices.json')
         expected = {'deploy/compose/compose.yaml': 'S7', 'embed.go': 'S1',
+                    'internal/accountprivacy/privacy.go': 'S1',
+                    'internal/accountprivacy/privacy_test.go': 'S1',
                     'web/embed.go': 'S9', 'web/vite.config.ts': 'S9',
                     'web/tsconfig.app.json': 'S9', 'web/e2e/smoke.spec.ts': 'S9',
                     'web/src/views/Test.vue': 'S8', 'web/src/lib/test.ts': 'S9'}
@@ -116,6 +118,18 @@ class CoverageTests(unittest.TestCase):
         config = load(HERE / 'slices.json')
         for path in ('internal/servicetier/tier.go', 'internal/servicetier/tier_test.go'):
             self.assertEqual(owners(path, config), ['S2'])
+
+    def test_field_schema_belongs_to_domain_a(self):
+        config = load(HERE / 'slices.json')
+        for path in ('internal/fieldschema/schema.go', 'internal/fieldschema/schema_test.go'):
+            with self.subTest(path=path):
+                self.assertEqual(owners(path, config), ['S5'])
+
+    def test_parent_benefits_belong_to_domain_b(self):
+        config = load(HERE / 'slices.json')
+        for name in ('doc.go', 'module.go', 'module_test.go', 'source.go', 'worker.go', 'worker_test.go'):
+            with self.subTest(name=name):
+                self.assertEqual(owners(f'internal/parentbenefits/{name}', config), ['S6'])
 
 
 class MergeTests(unittest.TestCase):

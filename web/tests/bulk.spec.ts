@@ -25,7 +25,7 @@ test('checkbox and Shift-click select a range; one status change for all of them
   await row(page, 'PHAROS-11').hover()
   await row(page, 'PHAROS-11').getByRole('checkbox', { name: 'Select PHAROS-11' }).check()
   await row(page, 'PHAROS-13').click({ modifiers: ['Shift'] })
-  await expect(bulkBar(page)).toContainText('3selected')
+  await expect(bulkBar(page)).toHaveAccessibleName('3 selected tickets')
   await expect(grid(page).locator('tr.ticket-row.selected .key')).toHaveText(['PHAROS-11', 'PHAROS-12', 'PHAROS-13'])
   // Shift-click selects; it never opens the ticket.
   await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
@@ -54,14 +54,14 @@ test('keyboard: x toggles, Shift J grows, Cmd or Ctrl A selects all, s opens the
   // Focusing the list puts the cursor on its first row.
   await grid(page).focus()
   await page.keyboard.press('x')
-  await expect(bulkBar(page)).toContainText('1selected')
+  await expect(bulkBar(page)).toHaveAccessibleName('1 selected ticket')
   await page.keyboard.press('Shift+J')
   await page.keyboard.press('Shift+J')
   await expect(grid(page).locator('tr.ticket-row.selected .key')).toHaveText(['PHAROS-11', 'PHAROS-12', 'PHAROS-13'])
   await page.keyboard.press('x')
-  await expect(bulkBar(page)).toContainText('2selected')
+  await expect(bulkBar(page)).toHaveAccessibleName('2 selected tickets')
   await page.keyboard.press('ControlOrMeta+a')
-  await expect(bulkBar(page)).toContainText('5selected')
+  await expect(bulkBar(page)).toHaveAccessibleName('5 selected tickets')
   await expect(grid(page).getByRole('checkbox', { name: 'Clear the selection' })).toBeChecked()
   await page.keyboard.press('Escape')
   await expect(bulkBar(page)).toHaveCount(0)
@@ -69,12 +69,13 @@ test('keyboard: x toggles, Shift J grows, Cmd or Ctrl A selects all, s opens the
   await page.keyboard.press('s')
   const menu = page.getByRole('menu', { name: 'Status of 1 ticket' })
   await expect(menu).toBeVisible()
-  await page.keyboard.press('5')
+  await expect(menu.getByRole('menuitemradio', { name: 'QA', exact: true }).locator('.digit')).toHaveText('6')
+  await page.keyboard.press('6')
   await expect.poll(() => bulkCalls(calls).length).toBe(1)
   expect(bulkCalls(calls)[0].body).toMatchObject({ state: 'qa' })
 })
 
-test('assignee, priority, labels and epic change in one request each; skipped tickets say why', async ({ page }) => {
+test('assignee, priority, labels and parent change in one request each; stale tickets say why', async ({ page }) => {
   const data = fixtures()
   data.nodes.find(n => n.id === 'n-4')!.fields.tags = [{ name: 'BUG', color: 'red' }]
   const calls = await mockWork(page, data)
@@ -106,13 +107,18 @@ test('assignee, priority, labels and epic change in one request each; skipped ti
   await labels.getByRole('button', { name: 'Apply' }).click()
   await expect(page.getByText('Changed the labels of 2 tickets')).toBeVisible()
   expect(bulkCalls(calls).at(-1)!.body).toEqual({ ids: ['n-2', 'n-4'], tags_add: [{ name: 'release-blocker' }], tags_remove: ['BUG'], if_unmodified_since: revisions('n-2', 'n-4') })
-  // Epic: the picker's No epic takes them out; a task cannot go under an epic and is skipped.
+  // Parent: nesting is unrestricted by the retired kinds. A newer revision
+  // refuses only the stale item and reports why without overwriting it.
   await pick('PHAROS-13')
+  const stale = data.nodes.find(n => n.id === 'n-3')!
+  stale.updated_at = '2026-09-23T13:00:00.000Z'
   await bulkBar(page).getByRole('button', { name: 'Move' }).click()
-  const picker = page.getByRole('dialog', { name: 'Epic for 3 tickets' })
+  const picker = page.getByRole('dialog', { name: 'Parent for 3 tickets' })
   await picker.getByRole('option', { name: /Guarded multi-cloud provisioning/ }).click()
-  await expect(page.getByText('Moved 1 ticket to Guarded multi-cloud provisioning · 1 ticket skipped')).toBeVisible()
-  await expect(page.getByText('PHAROS-13 was skipped: a task cannot sit under an epic')).toBeVisible()
+  await expect(page.getByText('Moved 1 ticket to Guarded multi-cloud provisioning', { exact: true })).toBeVisible()
+  await expect(page.getByText('PHAROS-13 was changed elsewhere meanwhile and kept its newer version.')).toBeVisible()
+  expect(stale.parent_id).toBe('n-2')
+  expect(stale.updated_at).toBe('2026-09-23T13:00:00.000Z')
   expect(bulkCalls(calls).at(-1)!.body).toMatchObject({ parent_id: 'n-epic' })
 })
 

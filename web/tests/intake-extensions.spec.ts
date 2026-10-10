@@ -3,8 +3,8 @@ import { test, expect } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { controlStability } from './control-stability'
 
 const evidence = '  e\u0301\r\n<script>verbatim evidence</script>  '
 const extensions = {
@@ -14,37 +14,6 @@ const extensions = {
 }
 
 for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
-  for (const stage of ['inspire', 'shape', 'requirements'] as const) {
-    test(`${stage} retains extension versions at ${width} ${theme}`, async ({ page }) => {
-      const errors = watchErrors(page)
-      await page.setViewportSize({ width, height: 1000 })
-      await page.emulateMedia({ colorScheme: theme })
-      await mockWork(page, fixtures())
-      const world = journeyWorld(stage)
-      Object.assign(world.intake.drafts[0]!, { extensions })
-      if (stage === 'requirements') Object.assign(world.intake.drafts[0]!, { kind: 'requirement', status: 'accepted', target_node_id: 'q-1' })
-      await mockJourney(page, world)
-      await page.goto('/p/PHAROS/journey')
-      const block = page.getByRole('region', { name: 'Extension data' })
-      await expect(block).toBeVisible()
-      await expect(block.locator('details')).toHaveCount(3)
-      const disclosure = block.getByLabel('x-unregistered.constraints · version 1.2', { exact: true })
-      await disclosure.focus()
-      await page.keyboard.press('Enter')
-      const data = block.getByLabel('x-unregistered.constraints version 1.2 data', { exact: true })
-      await expect(data).toBeVisible()
-      expect(JSON.parse((await data.textContent())!)).toEqual(extensions['x-unregistered.constraints@1'].data)
-      await expect(block.locator('script')).toHaveCount(0)
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      const folder = process.env.EXTENSION_SHOTS
-      if (folder) {
-        await mkdir(folder, { recursive: true })
-        await page.screenshot({ path: join(folder, `${stage}-${width}-${theme}.png`), fullPage: true, animations: 'disabled' })
-        await block.screenshot({ path: join(folder, `${stage}-${width}-${theme}-data.png`), animations: 'disabled' })
-      }
-      expect(errors).toEqual([])
-    })
-  }
   test(`ticket shows originating extension data at ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme })
@@ -75,6 +44,42 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
   })
 }
 
+test('older extension response is discarded after selecting another ticket', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await mockWork(page, fixtures())
+  await page.route('**/api/me/permissions?*', route => {
+    const result = mockEffectivePermissions('admin', 'p-pharos')
+    result.workspace.permissions.push('intake.read')
+    return route.fulfill({ json: result })
+  })
+  let release!: () => void, started!: () => void, finished!: () => void
+  const hold = new Promise<void>(resolve => { release = resolve })
+  const requested = new Promise<void>(resolve => { started = resolve })
+  const delivered = new Promise<void>(resolve => { finished = resolve })
+  await page.route('**/api/projects/p-pharos/intake?*', async route => {
+    const query = new URL(route.request().url()).searchParams
+    if (query.get('node_id') !== 'n-2') return route.fulfill({ json: { sources: [], turns: [], drafts: [] } })
+    if (!query.has('after')) return route.fulfill({ headers: { 'X-Next-Cursor': 'older' }, json: { sources: [], turns: [], drafts: [] } })
+    started()
+    await hold
+    await route.fulfill({ json: { sources: [], turns: [], drafts: [{ id: 'stale-draft', extensions }] } })
+    finished()
+  })
+  await page.goto('/p/PHAROS/PHAROS-12')
+  const workspace = page.getByRole('complementary', { name: 'Ticket details' })
+  await workspace.getByRole('button', { name: 'Show older extension data' }).click()
+  await requested
+  await workspace.getByRole('button', { name: 'Previous ticket', exact: true }).click()
+  await expect(workspace).toContainText('Connect Hetzner Cloud for managed provisioning')
+  const response = page.waitForResponse(r => r.url().includes('/intake?') && new URL(r.url()).searchParams.has('after'))
+  release()
+  await delivered
+  await (await response).finished()
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  await expect(workspace.getByRole('region', { name: 'Extension data' })).toHaveCount(0)
+  await expect(workspace.getByRole('button', { name: 'Show older extension data' })).toHaveCount(0)
+})
+
 test('ticket extension reads respect intake permission', async ({ page }) => {
   await mockWork(page, fixtures(), { readOnly: true })
   let calls = 0
@@ -84,3 +89,42 @@ test('ticket extension reads respect intake permission', async ({ page }) => {
   await expect(page.getByRole('region', { name: 'Extension data' })).toHaveCount(0)
   expect(calls).toBe(0)
 })
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`ticket extension history continues beyond 200 drafts at ${width} ${theme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    await mockWork(page, fixtures())
+    await page.route('**/api/me/permissions?*', route => {
+      const result = mockEffectivePermissions('admin', 'p-pharos')
+      result.workspace.permissions.push('intake.read')
+      return route.fulfill({ json: result })
+    })
+    const queries: URLSearchParams[] = []
+    await page.route('**/api/projects/p-pharos/intake?*', route => {
+      const query = new URL(route.request().url()).searchParams
+      queries.push(query)
+      return query.has('after')
+        ? route.fulfill({ json: { sources: [], turns: [], drafts: [{ id: 'older-draft', extensions }] } })
+        : route.fulfill({ headers: { 'X-Next-Cursor': 'history-page-2' }, json: { sources: [], turns: [], drafts: Array.from({ length: 200 }, (_, i) => ({ id: `draft-${i}` })) } })
+    })
+    await page.goto('/p/PHAROS/PHAROS-12')
+    const workspace = page.getByRole('complementary', { name: 'Ticket details' })
+    const older = workspace.getByRole('button', { name: 'Show older extension data' })
+    await expect(older).toBeVisible()
+    await expect(workspace.getByRole('region', { name: 'Extension data' })).toHaveCount(0)
+    const guard = await controlStability(page, { older })
+    expect((await older.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+    await guard.check(async () => {
+      await older.click()
+      await expect(workspace.getByRole('region', { name: 'Extension data' })).toBeVisible()
+      await expect(older).toBeDisabled()
+      await expect(workspace.getByRole('status').filter({ hasText: 'All extension history loaded.' })).toBeVisible()
+    })
+    guard.done()
+    expect(queries).toHaveLength(2)
+    expect(queries.map(q => q.get('node_id'))).toEqual(['n-2', 'n-2'])
+    expect(queries[1].get('after')).toBe('history-page-2')
+    await page.screenshot({ path: testInfo.outputPath(`history-${width}-${theme}.png`), fullPage: true, animations: 'disabled' })
+  })
+}

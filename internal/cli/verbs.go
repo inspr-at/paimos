@@ -197,7 +197,7 @@ func (rt *runtime) cmdIssueUpdate() *Command {
 			fs.string(&estimate, "estimate-hours", 0, "agent work hours until ready for review (alias of --estimate)")
 			fs.string(&title, "title", 0, "new title")
 			fs.string(&role, "role", 0, "route role: scout, mechanical, build, build-hard, or review-gate")
-			fs.string(&area, "area", 0, "route area: backend, frontend, full-stack, infra, design, or docs")
+			fs.string(&area, "area", 0, "active default or project work-kind slug, including security")
 			fs.string(&complexity, "complexity", 0, "work complexity: S, M, or L")
 			fs.string(&typ, "type", 0, "refuses a different kind; use issue convert")
 			fs.string(&status, "status", 0, "new status")
@@ -506,10 +506,12 @@ func (rt *runtime) cmdModel() *Command {
 	return &Command{
 		Name:  "model",
 		Short: "Model roles",
-		Use:   "model <resolve|prefs>",
+		Use:   "model <resolve|prefs|refresh|report>",
 		subs: []*Command{
 			rt.cmdModelResolve(),
 			rt.cmdModelPrefs(),
+			rt.cmdModelRefresh(),
+			rt.cmdModelReport(),
 		},
 	}
 }
@@ -547,14 +549,14 @@ func (rt *runtime) cmdOnboard() *Command {
 	readingListSize := 10
 	return &Command{
 		Name:  "onboard",
-		Short: "Project briefing",
+		Short: "Project onboarding guide",
 		Use:   "onboard --project KEY",
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key (required)")
 			fs.string(&agent, "agent", 0, "agent name")
 			fs.string(&format, "format", 0, "md or html")
 			fs.string(&outPath, "out", 0, "output file or directory")
-			fs.bool(&check, "check", 0, "compare an existing managed briefing")
+			fs.bool(&check, "check", 0, "compare an existing managed onboarding guide")
 			fs.int(&readingListSize, "reading-list-size", "maximum reading list entries")
 			fs.bool(&includeLow, "include-low", 0, "include low confidence memories")
 		},

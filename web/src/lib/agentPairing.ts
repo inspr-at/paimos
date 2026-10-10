@@ -4,6 +4,7 @@
 // one enrollment. Device, runtime and lifecycle secrets never enter this module.
 // Setup, redemption and tombstone reconciliation stay on the computer.
 
+import { parseHostCapacity, type HostCapacityView } from './hostCapacity.ts'
 import { parseJson } from './json.ts'
 import { api, resilientFetch } from './api.ts'
 import { onAccessChange } from './authz.ts'
@@ -51,7 +52,7 @@ const SETUP_STATES: readonly SetupState[] = ['not_started', 'approved', 'provisi
 const VERIFICATION_STATES: readonly VerificationState[] = ['not_selected', 'queued', 'starting', 'running', 'waiting', 'completed', 'failed', 'cancelled', 'ownership_lost', 'expired', 'unavailable']
 const CONNECTIVITY: readonly Connectivity[] = ['online', 'offline', 'unknown']
 const VERIFICATION_ACTIVE: readonly VerificationState[] = ['queued', 'starting', 'running', 'waiting']
-const VERIFICATION_FAILED: readonly VerificationState[] = ['failed', 'cancelled', 'ownership_lost', 'expired']
+const VERIFICATION_FAILED: readonly VerificationState[] = ['failed', 'cancelled', 'ownership_lost']
 const PAIRING_CODE_KEY = 'aeon.pairingUserCode'
 
 export interface RequestedAccount {
@@ -60,6 +61,7 @@ export interface RequestedAccount {
   label: string
   model_profile_id?: string
   provider?: string
+  config_home_id?: string
 }
 
 /** Server-derived. A missing entry is not a claim that verification works. */
@@ -84,6 +86,9 @@ export interface VerificationTerms {
 }
 
 export interface PairingEnrollment {
+  verified_at?: string
+  verification_expires_at?: string
+  last_used_at?: string
   account_id: string
   account_key: string
   harness: string
@@ -95,6 +100,9 @@ export interface PairingEnrollment {
   active_run_ids: string[]
   /** Actual run result. A verification_run_id alone is not success. */
   verification_state?: VerificationState
+  verification_stalled?: boolean
+  verification_expired_ready?: boolean
+  can_verify?: boolean
   verification_reason?: string
   verification_error?: string | null
   /** Drained only after the computer acknowledges cleanup. Revoke does not infer it. */
@@ -104,11 +112,12 @@ export interface PairingEnrollment {
 }
 
 export type HarnessReason = string
-export interface HarnessFix { kind: 'repin' | 'add_harness' | 'login' | 'restart'; command: string }
-export interface AccountAttention { account_id: string; reason: string }
+export interface HarnessFix { kind: 'repin' | 'add_harness' | 'login' | 'restart' | 'permissions'; command: string }
+export interface AccountAttention { account_id: string; reason: string; reason_detail?: string }
 export interface HarnessDetail {
   state: HarnessStatus
   reason?: HarnessReason
+  reason_detail?: string
   fix?: HarnessFix
   attention_accounts?: AccountAttention[]
   /** Full count of enrolled accounts that need a fix, or a lower bound when an older report stopped at five names. */
@@ -119,6 +128,7 @@ export interface HarnessDetail {
 
 /** Public pairing projection. Secret-bearing keys are not part of this type. */
 export interface PairingView {
+  host_capacity?: HostCapacityView
   local_auth_pinned?: boolean
   request_id: string
   tenant_id: string
@@ -164,6 +174,8 @@ export interface PairingView {
   verification_helper_version?: string
   agent_compatibility?: AgentCompatibility
   agent_release?: { version: string }
+  /** Add-harness entry point agentd reports reaching it: homebrew, nix or direct. Absent when unknown. */
+  install_method?: string
 }
 
 export interface AgentCompatibility {
@@ -463,7 +475,7 @@ export function registerAgentUrl(guide: PairingGuide): string {
 export function defaultSelectedAccountKeys(accounts: readonly RequestedAccount[]): string[] {
   const keys: string[] = []
   for (const group of groupAccounts(accounts).values()) {
-    if (group.length === 1) keys.push(group[0]!.account_key)
+    if (group.length === 1 || group.every(account => !!account.config_home_id) && new Set(group.map(account => account.config_home_id)).size === group.length) keys.push(...group.map(account => account.account_key))
   }
   return keys
 }
@@ -895,6 +907,19 @@ export function describeProgress(view: PairingView | null, now = Date.now()): Pa
   return setupProgress(view)
 }
 
+/** Fixed explanations only: telemetry never supplies vendor error text. */
+export function verificationFailureText(enrollment: Pick<PairingEnrollment, 'verification_stalled' | 'verification_error'>): string {
+  if (enrollment.verification_stalled) return 'The check has not settled after its time limit. The helper must confirm that it stopped before a new check can start.'
+  switch (enrollment.verification_error) {
+    case 'verification_timeout': case 'timed out': return 'The verification timed out. The helper must confirm that it stopped before a new check can start.'
+    case 'reporter_unavailable': return 'The helper could not report this check. Update the helper, then use Verify again. Usage may be incomplete.'
+    case 'app_server_protocol': return 'The helper could not complete the check protocol. Update the helper, then use Verify again.'
+    case 'child_exit_failed': case 'turn_failed': return 'The verification process failed. Check the vendor sign-in, then use Verify again.'
+    case 'vendor_limit': return 'The vendor limit stopped this check. Use Verify again after capacity is available.'
+    default: return 'The verification did not succeed. The account owner can use Verify again.'
+  }
+}
+
 function setupProgress(view: PairingView): PairingProgress {
   const progress = view.setup_state
   if (view.connectivity === 'offline' && progress !== 'login_required' && progress !== 'service_conflict' && progress !== 'setup_failed') {
@@ -906,6 +931,8 @@ function setupProgress(view: PairingView): PairingProgress {
   if (progress === 'service_conflict' || progress === 'setup_failed') {
     return { phase: 'setup', title: progress === 'service_conflict' ? 'Setup found a conflict' : 'Setup did not finish', detail: setupErrorText(view) || 'The computer reported that setup did not finish.', next: 'Resolve it on the computer. Approving again does not replace another service or refill a verification.', renewsAuthority: false }
   }
+  const stalled = view.enrollments.find(item => item.verification_stalled)
+  if (stalled) return { phase: 'verify', title: 'Verification stalled', detail: verificationFailureText(stalled), next: 'Use Verify again to check whether the previous run has settled. It cannot replace unconfirmed work.', renewsAuthority: false }
   const unavailable = view.enrollments.find(item => item.verification_state === 'unavailable' || item.verification_error === 'verification_unavailable')
   if (unavailable) {
     return {
@@ -916,9 +943,9 @@ function setupProgress(view: PairingView): PairingProgress {
       renewsAuthority: false,
     }
   }
-  if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED as readonly string[]).includes(item.verification_state))) {
-    const reason = view.enrollments.find(item => item.verification_error)?.verification_error
-    return { phase: 'verify', title: 'Verification did not succeed', detail: reason || 'The verification run did not succeed.', next: 'The one-time allowance was not refilled. A new verification needs a new pairing approval.', renewsAuthority: false }
+  if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED.includes(item.verification_state) || (item.verification_state === 'expired' && describeEnrollmentStatus(view, item) !== 'Ready')))) {
+    const failed = view.enrollments.find(item => item.verification_error)
+    return { phase: 'verify', title: 'Verification did not succeed', detail: verificationFailureText(failed ?? {}), next: 'The one-time allowance was not refilled. The account owner can use Verify again for a fresh read-only check.', renewsAuthority: false }
   }
   if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state))) {
     return { phase: 'verify', title: 'Verification is running', detail: 'One short read-only run was approved for each selected harness. A later run on the computer is not a verification.', next: 'Ongoing work follows your account approval. This page will not start another verification.', renewsAuthority: false }
@@ -937,9 +964,9 @@ function setupProgress(view: PairingView): PairingProgress {
   }
   const verificationAsked = view.verification?.mode === 'one_per_harness'
   const verificationRelevant = view.enrollments.filter(item => item.state !== 'revoked' && item.verification_state != null && item.verification_state !== 'not_selected')
-  const verificationDone = !verificationAsked || (verificationRelevant.length > 0 && verificationRelevant.every(item => item.verification_state === 'completed'))
+  const verificationDone = !verificationAsked || (verificationRelevant.length > 0 && verificationRelevant.every(item => item.verification_state === 'completed' || (item.verification_state === 'expired' && describeEnrollmentStatus(view, item) === 'Ready')))
   if (progress === 'connected' && verificationDone && view.connectivity === 'online') {
-    return { phase: 'connected', title: 'Connected', detail: 'The computer reported that setup finished, and a recent probe succeeded.', next: 'Add another harness from this computer, or set an ongoing allowance when you want more work.', renewsAuthority: false }
+    return { phase: 'connected', title: 'Connected', detail: verificationRelevant.some(item => item.verification_state === 'expired') ? 'Verification expired. A recent account probe is ready; the old check does not block ongoing work.' : 'The computer reported that setup finished, and a recent probe succeeded.', next: 'Add another harness from this computer, or set an ongoing allowance when you want more work.', renewsAuthority: false }
   }
   if (progress === 'connected' && verificationDone) {
     return { phase: 'setup', title: 'Setup finished', detail: 'The computer reported that setup finished. Current connectivity is unknown.', next: 'Wait for a probe before treating the daemon as online. This page will not start another verification.', renewsAuthority: false }
@@ -1025,8 +1052,37 @@ function harnessCode(value: unknown): string | undefined {
 
 const PIN_REASONS = ['dependency_invalid', 'pin_missing', 'pin_partial', 'pin_drifted', 'pin_invalid', 'pin_unsafe']
 
-function harnessFix(harness: string, reason?: HarnessReason): HarnessFix | undefined {
+// Mirror agentsetup.SafeProbeDetail: raw command output and local paths never
+// become public copy, even when a newer or malformed report supplies them.
+const PROBE_DETAILS = new Set([
+  'the approved account profile is missing',
+  'the approved account profile is not a physical directory',
+  'the approved account profile is not private (requires mode 0700)',
+  'the default Claude profile is not private (requires mode 0700)',
+  'the sign-in command could not start or finish',
+  'the sign-in command returned an unreadable or incomplete answer',
+  'the approved account identity is missing',
+  'the sign-in answer did not identify the account',
+  'the sign-in command exited unsuccessfully',
+])
+const PAIRING_DETAILS = new Set([
+  'the local pairing state could not be read or saved',
+  'the pairing server could not confirm the lifecycle',
+  'the pairing response did not match the approved computer',
+  'the pairing response contains an unapproved account',
+  'the local dispatch fence could not be confirmed',
+  'the approved runtime configuration could not be refreshed',
+])
+function probeDetail(reason: unknown, detail: unknown, harness: string): string | undefined {
+  if (reason === 'pairing_sync_failed') return typeof detail === 'string' && PAIRING_DETAILS.has(detail) ? detail : undefined
+  if (reason === 'login_required' && detail === "the approved account is signed out in the daemon's view") return detail
+  if (detail === 'the default Claude profile is not private (requires mode 0700)' && harness !== 'claude') return undefined
+  return reason === 'probe_failed' && typeof detail === 'string' && PROBE_DETAILS.has(detail) ? detail : undefined
+}
+
+function harnessFix(harness: string, reason?: HarnessReason, detail?: string): HarnessFix | undefined {
   if (!['claude', 'codex', 'cursor', 'grok', 'pi', 'gemini', 'opencode'].includes(harness)) return
+  if (harness === 'claude' && probeDetail(reason, detail, harness) === 'the default Claude profile is not private (requires mode 0700)') return { kind: 'permissions', command: 'chmod 700 "$HOME/.claude"' }
   // repin replaces Claude's shared pins; add-harness renews another harness's blocked pin.
   if (PIN_REASONS.includes(reason ?? '')) {
     return harness === 'claude'
@@ -1046,7 +1102,7 @@ export function harnessRecovery(harness: string, reason: string): HarnessFix | u
 interface AttentionReport { accounts: AccountAttention[]; count: number; truncated: boolean }
 
 function attentionItems(detail: HarnessDetail | undefined): AccountAttention[] {
-  return detail?.state === 'ready' ? detail.attention_accounts ?? [] : []
+  return detail && ['ready', 'blocked', 'login_required'].includes(detail.state) ? detail.attention_accounts ?? [] : []
 }
 
 // Parsed details already carry attention_truncated when a five-name list had no count.
@@ -1061,7 +1117,7 @@ function attentionReport(detail: HarnessDetail | undefined): AttentionReport | u
 function attentionFix(harness: string, items: AccountAttention[]): string {
   const commands: string[] = []
   for (const item of items) {
-    const command = harnessFix(harness, item.reason)?.command ?? ''
+    const command = harnessFix(harness, item.reason, item.reason_detail)?.command ?? ''
     if (command && !commands.includes(command)) commands.push(command)
   }
   return commands.join(' · ')
@@ -1073,10 +1129,27 @@ export function describeHarnessFix(view: HarnessView, harness: string): string {
   if (!detail) return ''
   const attention = attentionItems(detail)
   if (attention.length) return attentionFix(harness, attention)
-  return ['blocked', 'login_required', 'checking'].includes(detail.state) ? harnessFix(harness, detail.reason)?.command ?? '' : ''
+  return ['blocked', 'login_required', 'checking'].includes(detail.state) ? harnessFix(harness, detail.reason, detail.reason_detail)?.command ?? '' : ''
+}
+
+/** Only this account's failure: a ready sibling must not inherit its fix. */
+export function describeEnrollmentDiagnostic(view: HarnessView, enrollment: { account_id: string; harness: string }): { hint: string; command: string } | null {
+  if (view.computer_state !== 'connected') return null
+  const detail = harnessDetail(view, enrollment.harness)
+  const report = attentionReport(detail)
+  const sole = view.enrollments?.filter(item => item.harness === enrollment.harness && item.state !== 'revoked')
+  const item = report ? report.accounts.find(item => item.account_id === enrollment.account_id)
+    : detail && ['blocked', 'login_required'].includes(detail.state) && sole?.length === 1 && sole[0]?.account_id === enrollment.account_id ? detail : undefined
+  if (!item) return null
+  const cause = probeDetail(item.reason, item.reason_detail, enrollment.harness)
+  return {
+    hint: item.reason === 'unsettled_previous_run' ? HARNESS_HINTS.unsettled_previous_run! : cause ? `${harnessDisplayName(enrollment.harness)}: ${item.reason === 'login_required' ? '' : item.reason === 'pairing_sync_failed' ? 'pairing sync failed: ' : 'sign-in check failed: '}${cause}.` : '',
+    command: harnessFix(enrollment.harness, item.reason, cause)?.command ?? '',
+  }
 }
 
 const HARNESS_HINTS: Record<string, string> = {
+  unsettled_previous_run: "Restore the helper's connection to Aeon; settlement reconciliation retries automatically. If the block persists, ask the operator to inspect the previous run and its reservations.",
   repin_pending: 'Retries automatically.',
   cli_unavailable: 'Restore the approved executable, then retry.',
   harness_failed: 'Restore the approved installation, then retry.',
@@ -1097,6 +1170,10 @@ export function describeHarnessHint(view: HarnessView, harness: string): string 
   const accounts = view.enrollments?.filter(item => item.harness === harness && item.state === 'connected') ?? []
   const accountName = accounts.length === 1 && accounts[0]?.label ? accounts[0].label : harnessDisplayName(harness)
   if (detail.reason === 'binding_missing') return `${harnessDisplayName(harness)} was approved but isn't set up on this computer. Add it here or remove it from this computer in ${product()}.`
+  if (detail.reason === 'pairing_sync_failed') {
+    const cause = probeDetail(detail.reason, detail.reason_detail, harness)
+    return `${accountName}: pairing sync failed${cause ? `: ${cause}` : ''}.`
+  }
   if (detail.reason === 'probe_pending') return `${accountName}: waiting for the sign-in and availability check; blocked after 60 seconds.`
   if (detail.reason === 'capacity_capture') return `${accountName}: a short capacity check is in progress; expected within 10 seconds.`
   if (['probe_timeout', 'probe_failed', 'capacity_timeout'].includes(detail.reason ?? '')) return `${accountName}: ${reasonLabel(detail.state, detail.reason).toLowerCase()}.`
@@ -1113,7 +1190,7 @@ export function describeHarnessHint(view: HarnessView, harness: string): string 
 
 function reasonLabel(status: string, reason?: string): string {
   const labels: Record<string, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
-  const reasons: Record<string, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair', binding_missing: 'Approved, not set up here', probe_pending: 'Checking account (up to 60 seconds)', probe_timeout: 'Account check timed out after 60 seconds', probe_failed: 'Account availability check failed', capacity_capture: 'Capturing capacity (up to 10 seconds)', capacity_timeout: 'Capacity capture timed out after 10 seconds' }
+  const reasons: Record<string, string> = { unsettled_previous_run: 'Previous run settlement unconfirmed', pairing_sync_failed: 'Pairing sync failed', repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair', binding_missing: 'Approved, not set up here', probe_pending: 'Checking account (up to 60 seconds)', probe_timeout: 'Account check timed out after 60 seconds', probe_failed: 'Account availability check failed', capacity_capture: 'Capturing capacity (up to 10 seconds)', capacity_timeout: 'Capacity capture timed out after 10 seconds' }
   // A code from a newer daemon is shown raw rather than dropped or guessed.
   if (!HARNESS_STATES.includes(status as typeof HARNESS_STATES[number])) return `Needs attention · ${reason ?? status}`
   if (reason) return reasons[reason] ?? `Needs attention · ${reason}`
@@ -1142,15 +1219,25 @@ export function describeHarnessStatus(view: HarnessView, harness: string): strin
 }
 
 /** Per-enrollment label. A complete attention list names the blocked accounts and leaves the others Ready. An account missing from a truncated list is not Ready. */
-export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string }): string {
+export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string; verification_state?: VerificationState; verification_expired_ready?: boolean; verification_stalled?: boolean }): string {
   if (view.computer_state !== 'connected') return ''
   const detail = harnessDetail(view, enrollment.harness)
   const attention = attentionReport(detail)
-  if (!attention) return describeHarnessStatus(view, enrollment.harness)
-  const hit = attention.accounts.find(item => item.account_id === enrollment.account_id)
-  if (hit) return freshLabel(view, reasonLabel('blocked', hit.reason))
-  if (!attention.truncated && attention.count === attention.accounts.length) return freshLabel(view, 'Ready')
-  return freshLabel(view, 'Needs attention')
+  let status = describeHarnessStatus(view, enrollment.harness)
+  if (attention) {
+    const hit = attention.accounts.find(item => item.account_id === enrollment.account_id)
+    if (hit) return freshLabel(view, reasonLabel('blocked', hit.reason))
+    if (detail?.state !== 'ready' || attention.truncated || attention.count !== attention.accounts.length) return freshLabel(view, 'Needs attention')
+    status = freshLabel(view, 'Ready')
+  }
+  if (status && status !== 'Ready') return status
+  if (enrollment.verification_stalled) return freshLabel(view, 'Verification stalled')
+  if (enrollment.verification_state === 'expired' && enrollment.verification_expired_ready === false) return freshLabel(view, 'Verification failed')
+  const verification = enrollment.verification_state
+  if (verification && VERIFICATION_ACTIVE.includes(verification)) return freshLabel(view, verification === 'queued' ? 'Verification queued' : 'Verifying account')
+  if (verification === 'expired' && status !== 'Ready') return freshLabel(view, 'Verification failed')
+  if (verification && VERIFICATION_FAILED.includes(verification)) return freshLabel(view, 'Verification failed')
+  return status
 }
 
 export function describeComputerStatus(view: Pick<PairingView, 'computer_state' | 'local_cleanup' | 'local_processes' | 'enrollments' | 'setup_state' | 'connectivity' | 'accounting_state'>, hints: { httpStatus?: number; heartbeatMissing?: boolean } = {}): ComputerStatusCopy {
@@ -1209,7 +1296,7 @@ export function pairingStillLive(view: PairingView): boolean {
   const phase = describeProgress(view).phase
   if (phase === 'denied' || phase === 'expired' || phase === 'revoked') return false
   if (view.setup_state === 'setup_failed') return false
-  if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED as readonly string[]).includes(item.verification_state))) return false
+  if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED.includes(item.verification_state) || (item.verification_state === 'expired' && describeEnrollmentStatus(view, item) !== 'Ready')))) return false
   const connected = describeComputerStatus(view).stateLabel === 'Connected'
   const moving = view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state))
   return !(connected && !moving)
@@ -1620,8 +1707,8 @@ function attentionTotal(value: unknown, enrolled: number): number | undefined {
   return value
 }
 
-function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unknown, declaredTruncated: unknown): { accounts: AccountAttention[]; count: number; truncated: boolean } | undefined {
-  if (!Array.isArray(raw) || enrolled.size < 2) return
+function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unknown, declaredTruncated: unknown, harness: string, allowAll = false): { accounts: AccountAttention[]; count: number; truncated: boolean } | undefined {
+  if (!Array.isArray(raw) || enrolled.size < (allowAll ? 1 : 2)) return
   const seen = new Set<string>()
   const items: AccountAttention[] = []
   for (const entry of raw) {
@@ -1631,11 +1718,12 @@ function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unkn
     const reason = harnessCode(item.reason)
     if (!id || !reason || !enrolled.has(id) || seen.has(id)) continue
     seen.add(id)
-    items.push({ account_id: id, reason })
+    const reasonDetail = probeDetail(reason, item.reason_detail, harness)
+    items.push({ account_id: id, reason, ...(reasonDetail ? { reason_detail: reasonDetail } : {}) })
   }
   items.sort((a, b) => a.account_id < b.account_id ? -1 : a.account_id > b.account_id ? 1 : 0)
-  if (items.length === 0 || items.length >= enrolled.size) return
-  const declared = attentionTotal(declaredCount, enrolled.size)
+  if (items.length === 0 || (!allowAll && items.length >= enrolled.size)) return
+  const declared = attentionTotal(declaredCount, enrolled.size + (allowAll ? 1 : 0))
   let count = items.length
   // Five or more names without a total may be the old cap: absence is not readiness.
   // A declared total equal to the list, including exactly five, is complete.
@@ -1644,7 +1732,7 @@ function parseAttention(raw: unknown, enrolled: Set<string>, declaredCount: unkn
     count = declared
     truncated = true
   }
-  if (count >= enrolled.size) return
+  if (!allowAll && count >= enrolled.size) return
   return { accounts: items, count, truncated }
 }
 
@@ -1673,6 +1761,7 @@ function parseView(data: unknown): PairingView {
     local_processes: oneOf(record.local_processes, PROCESS_STATES, 'local_processes'),
     enrollments: enrollments(record.enrollments),
   }
+  if (record.host_capacity != null) view.host_capacity = parseHostCapacity(record.host_capacity)
   if (typeof record.local_auth_pinned === 'boolean') view.local_auth_pinned = record.local_auth_pinned
   if (typeof record.revision === 'number' && Number.isSafeInteger(record.revision) && record.revision >= 0) view.revision = record.revision
   if (typeof record.interval_seconds === 'number' && record.interval_seconds > 0) view.interval_seconds = record.interval_seconds
@@ -1700,13 +1789,14 @@ function parseView(data: unknown): PairingView {
       const reason = harnessCode(item.reason)
       if (item.reason && !reason) continue
       const enrolled = new Set(view.enrollments.filter(entry => entry.harness === harness && entry.state !== 'revoked').map(entry => entry.account_id))
-      const attention = state === 'ready' ? parseAttention(item.attention_accounts, enrolled, item.attention_count, item.attention_truncated) : undefined
+      const attention = ['ready', 'blocked', 'login_required'].includes(state) ? parseAttention(item.attention_accounts, enrolled, item.attention_count, item.attention_truncated, harness, state !== 'ready') : undefined
       // A ready or draining detail keeps no top-level reason. Valid attention
       // still survives a mistaken reason so the partial block stays visible.
       if (['ready', 'draining'].includes(state) && reason && !attention) continue
       const storedReason = ['ready', 'draining'].includes(state) ? undefined : reason
-      const fix = ['blocked', 'login_required', 'checking'].includes(state) ? harnessFix(harness, storedReason) : undefined
-      view.harness_details[harness] = { state, ...(storedReason ? { reason: storedReason } : {}), ...(fix ? { fix } : {}), ...(attention ? { attention_accounts: attention.accounts, attention_count: attention.count, ...(attention.truncated ? { attention_truncated: true } : {}) } : {}) }
+      const reasonDetail = ['blocked', 'login_required'].includes(state) ? probeDetail(storedReason, item.reason_detail, harness) : undefined
+      const fix = ['blocked', 'login_required', 'checking'].includes(state) ? harnessFix(harness, storedReason, reasonDetail) : undefined
+      view.harness_details[harness] = { state, ...(storedReason ? { reason: storedReason } : {}), ...(reasonDetail ? { reason_detail: reasonDetail } : {}), ...(fix ? { fix } : {}), ...(attention ? { attention_accounts: attention.accounts, attention_count: attention.count, ...(attention.truncated ? { attention_truncated: true } : {}) } : {}) }
     }
   }
   if (typeof record.setup_error === 'string' && record.setup_error) view.setup_error = record.setup_error.slice(0, 500)
@@ -1735,6 +1825,8 @@ function parseView(data: unknown): PairingView {
     const version = (record.agent_release as Record<string, unknown>).version
     if (typeof version === 'string' && /^[\w.+-]{1,64}$/.test(version)) view.agent_release = { version }
   }
+  // Advisory: only a known install is kept; anything else reads as not reported.
+  if (record.install_method === 'homebrew' || record.install_method === 'nix' || record.install_method === 'direct') view.install_method = record.install_method
   return view
 }
 
@@ -1746,6 +1838,11 @@ function accounts(value: unknown): RequestedAccount[] {
       account_key: bounded(record.account_key, 'account_key', 128),
       harness: token(record.harness, 'harness'),
       label: bounded(record.label, 'label', 128),
+    }
+    if (record.config_home_id != null) {
+      const home = bounded(record.config_home_id, 'config_home_id', 64)
+      if (!/^[0-9a-f]{64}$/.test(home)) invalid('config_home_id')
+      account.config_home_id = home
     }
     if (record.model_profile_id != null) account.model_profile_id = uuid(record.model_profile_id, 'model_profile_id')
     if (record.provider != null) {
@@ -1770,9 +1867,13 @@ function enrollments(value: unknown): PairingEnrollment[] {
       state: oneOf(record.state, COMPUTER_STATES, 'enrollment.state'),
       local_cleanup: oneOf(record.local_cleanup, CLEANUP_STATES, 'enrollment.local_cleanup'),
       verification_run_id: optionalUuid(record.verification_run_id, 'verification_run_id'),
+      ...(typeof record.can_verify === 'boolean' ? { can_verify: record.can_verify } : {}),
+      ...(typeof record.verification_stalled === 'boolean' ? { verification_stalled: record.verification_stalled } : {}),
+      ...(typeof record.verification_expired_ready === 'boolean' ? { verification_expired_ready: record.verification_expired_ready } : {}),
       active_run_ids: uuidList(record.active_run_ids, 'active_run_ids'),
       ...optionalVerification(record),
     }
+    for (const name of ['verified_at', 'verification_expires_at', 'last_used_at'] as const) if (typeof record[name] === 'string' && Number.isFinite(Date.parse(record[name]))) enrollment[name] = record[name]
     const processes = readProcess(record.local_processes, 'enrollment.local_processes')
     if (processes) enrollment.local_processes = processes
     const accounting = readAccounting(record.accounting_state, 'enrollment.accounting_state')
@@ -1819,15 +1920,20 @@ function groupAccounts(accounts: readonly RequestedAccount[]): Map<string, Reque
 function orderedSelection(accounts: readonly RequestedAccount[], selected: readonly string[]): { ok: true; keys: string[] } | { ok: false; message: string; next: string } {
   const known = new Map(accounts.map(account => [account.account_key, account]))
   const keys: string[] = []
-  const harnesses = new Set<string>()
+  const harnesses = new Map<string, string | undefined>()
+  const homes = new Set<string>()
   for (const account of accounts) {
     if (!selected.includes(account.account_key) || keys.includes(account.account_key)) continue
     const match = known.get(account.account_key)
     if (!match) continue
-    if (harnesses.has(match.harness)) {
-      return { ok: false, message: `Choose one ${match.harness} account.`, next: 'A pairing approves one account for each harness you include.' }
+    if (harnesses.has(match.harness) && (!harnesses.get(match.harness) || !match.config_home_id)) {
+      return { ok: false, message: `Choose one ${match.harness} account without isolation.`, next: 'Several accounts for the same harness require a separate isolated config home for each account.' }
     }
-    harnesses.add(match.harness)
+    if (match.config_home_id && homes.has(match.config_home_id)) {
+      return { ok: false, message: 'Selected accounts share a config home.', next: 'Give each account a separate isolated config home.' }
+    }
+    harnesses.set(match.harness, match.config_home_id)
+    if (match.config_home_id) homes.add(match.config_home_id)
     keys.push(account.account_key)
   }
   if (selected.some(key => !known.has(key))) {

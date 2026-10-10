@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -88,6 +89,9 @@ func addPrincipal(t *testing.T, slug string) tenant.Principal {
 	}
 	var id string
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, tenantID, func(tx pgx.Tx) error {
+		if err := modelprefs.SeedKinds(t.Context(), tx, tenantID); err != nil {
+			return err
+		}
 		return tx.QueryRow(t.Context(), `
 			INSERT INTO principals (tenant_id, kind, name, roles)
 			VALUES ($1, 'person', $2, $3)
@@ -131,6 +135,7 @@ func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []
 }
 
 func TestSchemaAndTagMutationsRequirePersonAdmin(t *testing.T) {
+	t.Run("agent creates seeded tag without kind management", testAgentCreatesSeededTagWithoutKindManagement)
 	admin := newPrincipal(t, "schema-role-test")
 	makePerson := func(name, role string) tenant.Principal {
 		p := tenant.Principal{TenantID: admin.TenantID, Kind: tenant.Person, Name: name, Roles: []string{role}}
@@ -201,6 +206,17 @@ func kindBySlug(t *testing.T, p tenant.Principal, slug string) kindJSON {
 	return kindJSON{}
 }
 
+// Explicit tenant definitions for tests that need multiple distinct kinds.
+// Ordinary work fixtures use the seeded work kind; do not recreate retired
+// starter kinds globally, which would hide migration compatibility failures.
+func customKind(t *testing.T, p tenant.Principal, slug, icon string) kindJSON {
+	t.Helper()
+	status, body := call(t, &p, http.MethodPost, "/api/kinds", fmt.Sprintf(
+		`{"slug":%q,"label":%q,"short_prefix":%q,"icon":%q,"field_schema":{"type":"object","issue_family":true}}`,
+		slug, slug, strings.ToUpper(slug[:3]), icon))
+	return decode[kindJSON](t, status, body, http.StatusCreated)
+}
+
 type storedEvent struct {
 	Type   string
 	NodeID *string
@@ -250,8 +266,15 @@ func TestKindCRUD(t *testing.T) {
 	page := decode[struct {
 		Items []kindJSON `json:"items"`
 	}](t, status, body, http.StatusOK)
-	if len(page.Items) != 12 {
+	if len(page.Items) != 11 {
 		t.Fatalf("starter kinds: %d", len(page.Items))
+	}
+	seeded := map[string]bool{}
+	for _, kind := range page.Items {
+		seeded[kind.Slug] = true
+	}
+	if !seeded["work"] || !seeded["tag"] || seeded["ticket"] || seeded["epic"] || seeded["task"] {
+		t.Fatalf("starter kinds must contain work and tag without retired kinds: %v", seeded)
 	}
 	if page.Items[0].AllowedChildKinds != nil {
 		t.Fatalf("starter allowed children: %#v", page.Items[0].AllowedChildKinds)
@@ -372,8 +395,19 @@ func TestNodeKeysFieldsAndEvents(t *testing.T) {
 	}
 
 	ev := tenantEvents(t, p.TenantID)[baseline:]
-	var created int
+	var created, mappings int
+	var system string
+	if err := adminPool.QueryRow(t.Context(), `SELECT id::text FROM principals WHERE tenant_id=$1 AND kind='agent' AND name='System' AND roles @> '{system}'`, p.TenantID).Scan(&system); err != nil {
+		t.Fatal(err)
+	}
 	for _, event := range ev {
+		if event.Type == "work_context.project_set" {
+			mappings++
+			if event.Actor != system || event.NodeID == nil || event.After == nil {
+				t.Fatalf("project mapping audit %#v", event)
+			}
+			continue
+		}
 		if event.Actor != p.ID {
 			t.Fatalf("actor %#v", event)
 		}
@@ -387,13 +421,16 @@ func TestNodeKeysFieldsAndEvents(t *testing.T) {
 	if created != 4 {
 		t.Fatalf("created events %d in %#v", created, ev)
 	}
+	if mappings != 3 {
+		t.Fatalf("project mapping events %d in %#v", mappings, ev)
+	}
 }
 
 func TestListCursorFiltersAndTree(t *testing.T) {
 	p := newPrincipal(t, "tree")
 	project := kindBySlug(t, p, "project")
-	epic := kindBySlug(t, p, "epic")
-	ticket := kindBySlug(t, p, "ticket")
+	epic := kindBySlug(t, p, "work")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Root"}`)
 	other := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Other"}`)
 	e2 := mustNode(t, p, `{"kind_id":"`+epic.ID+`","title":"E2","parent_id":"`+root.ID+`"}`)
@@ -460,8 +497,8 @@ func TestListCursorFiltersAndTree(t *testing.T) {
 func TestMoveDeleteAndNarrowedKind(t *testing.T) {
 	p := newPrincipal(t, "move")
 	project := kindBySlug(t, p, "project")
-	epic := kindBySlug(t, p, "epic")
-	ticket := kindBySlug(t, p, "ticket")
+	epic := kindBySlug(t, p, "work")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Root"}`)
 	leaf := mustNode(t, p, `{"kind_id":"`+epic.ID+`","title":"Leaf","parent_id":"`+root.ID+`"}`)
 	child := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"Child","parent_id":"`+root.ID+`"}`)

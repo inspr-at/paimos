@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/stagehandoff
+paths:
+  /projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt:
+    post:
+      deprecated: true
+      operationId: reportClassicBatchBuilt
+      summary: Record classic shaped built evidence on the aliased Aeon handoff
+      security: *auth
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: batchId, in: path, required: true, schema: {type: integer, minimum: 1}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '410': {$ref: '#/components/responses/Error'}
+        '200': {description: Classic batch projection from imported provenance, headers: {Aeon-Contract: {$ref: '#/components/headers/BaselineBatchesContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/ClassicBatchBuiltResponse'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    ClassicBatchBuiltResponse:
+      type: object
+      description: Imported classic batch fields are preserved dynamically; Aeon guarantees the progress.next_action override.
+      required: [progress]
+      additionalProperties: true
+      properties:
+        progress:
+          type: object
+          required: [next_action]
+          additionalProperties: true
+          properties:
+            next_action: {type: string, enum: [operator_external_stage_cli]}

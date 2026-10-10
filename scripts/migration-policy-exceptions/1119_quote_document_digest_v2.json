@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1119_quote_document_digest_v2.sql",
+      "sha256": "06e03e067fe0f72c94816a135976bc9c4657911f006ecebc89c9e1587d4a9774",
+      "ticket": "AEON-587",
+      "reason": "Digest-mode widening to the strict superset r4-v1, document-v1 and document-v2. The replacement CHECK removes no historical value; replacement issuance/confirmation functions preserve existing predicates while admitting the canonical v2 document mode. No issued digest, snapshot, link or acceptance evidence is rewritten. DROP CONSTRAINT is conservatively outside the classifier allowlist. This exact-byte declaration requires coordinator review before merge/release and does not waive previous-binary compatibility probes. The previous binary cannot interpret newly issued v2 documents, so app rollback after new v2 issuance must be gated; roll forward or disable quote writes and use a v2-capable binary."
+    }
+  ]
+}

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentcompat"
+	"github.com/inspr-at/paimos/internal/hookcap"
 )
 
 const apiBase = "/api/agent-pairing"
@@ -54,13 +55,14 @@ type DeviceResponse struct {
 	Digest          string    `json:"request_digest"`
 }
 type ProofRequest struct {
-	Progress        *SetupProgress `json:"progress,omitempty"`
-	TenantID        string         `json:"tenant_id"`
-	RequestID       string         `json:"request_id"`
-	DeviceSecret    secret         `json:"device_secret,omitempty"`
-	LifecycleSecret secret         `json:"lifecycle_secret,omitempty"`
-	Cleaned         []string       `json:"cleanup_confirmed_account_ids,omitempty"`
-	ComputerCleaned bool           `json:"computer_cleanup_confirmed,omitempty"`
+	HookCapabilities []hookcap.Capability `json:"hook_capabilities,omitempty"`
+	Progress         *SetupProgress       `json:"progress,omitempty"`
+	TenantID         string               `json:"tenant_id"`
+	RequestID        string               `json:"request_id"`
+	DeviceSecret     secret               `json:"device_secret,omitempty"`
+	LifecycleSecret  secret               `json:"lifecycle_secret,omitempty"`
+	Cleaned          []string             `json:"cleanup_confirmed_account_ids,omitempty"`
+	ComputerCleaned  bool                 `json:"computer_cleanup_confirmed,omitempty"`
 }
 type SetupProgress struct {
 	AgentRelease    *agentcompat.Release     `json:"agent_release,omitempty"`
@@ -68,6 +70,7 @@ type SetupProgress struct {
 	HarnessStatuses map[string]string        `json:"harness_statuses,omitempty"`
 	State           string                   `json:"state"`
 	ErrorCode       string                   `json:"error_code,omitempty"`
+	InstallMethod   string                   `json:"install_method,omitempty"`
 }
 
 // reportRelease uses the normal lifecycle response as capability negotiation.
@@ -108,6 +111,11 @@ type Enrollment struct {
 	ActiveRunIDs       []string `json:"active_run_ids"`
 }
 type View struct {
+	ServerCapabilities []string                 `json:"server_capabilities,omitempty"`
+	LedgerMode         bool                     `json:"ledger_mode"`
+	LedgerGeneration   *string                  `json:"ledger_generation"`
+	LedgerEnrolledAt   *time.Time               `json:"ledger_enrolled_at"`
+	HookCapabilities   []hookcap.Capability     `json:"hook_capabilities,omitempty"`
 	LocalAuthPinned    *bool                    `json:"local_auth_pinned,omitempty"`
 	AgentCompatibility *agentcompat.Result      `json:"agent_compatibility,omitempty"`
 	HarnessDetails     map[string]HarnessDetail `json:"harness_details,omitempty"`
@@ -141,6 +149,7 @@ type View struct {
 	Revision           int64                    `json:"revision"`
 }
 type Guide struct {
+	ServerCapabilities []string            `json:"server_capabilities,omitempty"`
 	AgentCompatibility *agentcompat.Policy `json:"agent_compatibility,omitempty"`
 	InstanceURL        string              `json:"instance_url"`
 	DefaultTenantSlug  string              `json:"default_tenant_slug"`
@@ -159,6 +168,7 @@ type PairingAPI interface {
 type APIError struct {
 	Code       string
 	RetryAfter time.Duration
+	StatusCode int
 }
 
 func (e *APIError) Error() string { return "pairing request failed: " + e.Code }
@@ -203,7 +213,7 @@ func (c HTTPClient) call(ctx context.Context, method, path string, token secret,
 	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	res, err := hc.Do(r)
 	if err != nil {
-		return errors.New("pairing server unreachable; retry the same setup to resume")
+		return &APIError{Code: "unreachable", RetryAfter: 5 * time.Second}
 	}
 	defer res.Body.Close()
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
@@ -227,7 +237,7 @@ func (c HTTPClient) call(ctx context.Context, method, path string, token secret,
 			retry = time.Duration(n) * time.Second
 		}
 		// Remote error text is never displayed: it could reflect capabilities.
-		return &APIError{Code: code, RetryAfter: retry}
+		return &APIError{Code: code, RetryAfter: retry, StatusCode: res.StatusCode}
 	}
 	d := json.NewDecoder(io.LimitReader(res.Body, (128<<10)+1))
 	if d.Decode(out) != nil || d.Decode(&struct{}{}) != io.EOF {
@@ -257,9 +267,9 @@ func (c HTTPClient) Reconcile(ctx context.Context, r ProofRequest) (View, error)
 	// Strict legacy decoding rejects the additive field before any mutation;
 	// retry that request once with only the old lifecycle shape.
 	var apiErr *APIError
-	if r.Progress != nil && r.Progress.AgentRelease != nil && errors.As(e, &apiErr) && apiErr.Code == "invalid_request" {
+	if r.Progress != nil && (r.Progress.AgentRelease != nil || r.Progress.InstallMethod != "") && errors.As(e, &apiErr) && apiErr.Code == "invalid_request" {
 		progress := *r.Progress
-		progress.AgentRelease = nil
+		progress.AgentRelease, progress.InstallMethod = nil, ""
 		r.Progress = &progress
 		e = c.call(ctx, "POST", "/reconcile", "", r, &v)
 	}

@@ -7,8 +7,6 @@
 //   AEON304_SHOTS=<dir> npx playwright test -c playwright.ui.config.ts tests/agents-phone-rows.spec.ts
 //
 // writes <width>-<theme>.png (the sessions card) for review by eye.
-import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import type { HarnessSession } from '../src/lib/agents'
 import { fixtures, me, mockWork } from './work-fixtures'
@@ -65,8 +63,7 @@ const midY = (b: Box) => b.y + b.height / 2
 const midX = (b: Box) => b.x + b.width / 2
 async function capture(page: Page, name: string) {
   if (!shots) return
-  mkdirSync(shots, { recursive: true })
-  await page.locator('.sessions').screenshot({ path: join(shots, `${name}.png`), animations: 'disabled' })
+  await page.locator('.sessions').screenshot({ path: test.info().outputPath(`${name}.png`), animations: 'disabled' })
 }
 
 for (const theme of ['light', 'dark'] as const) for (const width of [375, 390, 430]) {
@@ -100,33 +97,55 @@ for (const theme of ['light', 'dark'] as const) for (const width of [375, 390, 4
       expect(title.y).toBeLessThanOrEqual(avatar.y + 2)
       // The title may wrap to two lines, never more.
       expect(title.height).toBeLessThanOrEqual(lineHeight * 2 + 1)
-      // One execution line and one state line, both in the text column.
+      // The execution and state lines start under the glyph (AEON-784): the fold column keeps the tree.
       expect(exec.y).toBeGreaterThanOrEqual(identity.y + identity.height - 1)
-      expect(exec.height).toBeLessThanOrEqual(22)
-      expect(Math.abs(exec.x - title.x)).toBeLessThanOrEqual(1)
+      // Tier controls now have their own reserved line. The execution copy
+      // still fits one compact line, and the group grows only by that control.
+      const executionCopy = await box(r.locator('.exec-copy'))
+      const tier = await box(r.locator('.phone-tier'))
+      expect(executionCopy.height).toBeLessThanOrEqual(22)
+      expect(tier.y).toBeGreaterThanOrEqual(executionCopy.y + executionCopy.height)
+      const executionIcon = await box(r.locator('.exec-icon'))
+      expect(executionIcon.height).toBeLessThanOrEqual(18)
+      expect(exec.height).toBeLessThanOrEqual(Math.max(executionCopy.height, executionIcon.height) + tier.height + 6.5)
+      expect(Math.abs(exec.x - avatar.x)).toBeLessThanOrEqual(1)
       expect(state.y).toBeGreaterThanOrEqual(exec.y + exec.height - 1)
-      expect(Math.abs(state.x - title.x)).toBeLessThanOrEqual(1)
+      expect(Math.abs(state.x - avatar.x)).toBeLessThanOrEqual(1)
       if (await r.locator('.ticket-chip').count()) {
         const chip = await box(r.locator('.ticket-chip'))
-        expect(Math.abs(midY(chip) - midY(state)), `state and ticket on one line (row ${n})`).toBeLessThanOrEqual(3)
+        // Listening can wrap below the primary state on a narrow row; align
+        // the ticket with the state itself, keeping the original 3px bound.
+        const primaryState = await box(r.locator('.agent-state-label'))
+        expect(primaryState.height).toBeLessThanOrEqual(22)
+        expect(Math.abs(midY(chip) - midY(primaryState)), `state and ticket on one line (row ${n})`).toBeLessThanOrEqual(3)
       }
     }
-    // Long titles use the full width up to the menu before wrapping.
+    // Long titles use the full width up to the first reserved action. Pause
+    // now shares the title line with More, including its idle reservation.
     const lead0 = await box(row(page, 1).locator('.result'))
-    const leadMenu = await box(row(page, 1).locator('.more'))
-    expect(leadMenu.x - (lead0.x + lead0.width)).toBeLessThanOrEqual(16)
+    const leadActions = await box(row(page, 1).locator('.c-actions'))
+    expect(leadActions.x - (lead0.x + lead0.width)).toBeLessThanOrEqual(16)
+    for (const action of await row(page, 1).locator('.c-actions button').all()) {
+      const target = await box(action)
+      expect(target.width).toBeGreaterThanOrEqual(44)
+      expect(target.height).toBeGreaterThanOrEqual(44)
+    }
 
-    // Tree lines run through avatar centres, never through the text column.
+    // Tree lines run in the fold column, 16 px per level (AEON-784), never through glyphs or text.
+    const leadFold = await box(row(page, 1).locator('.tree-fold'))
     const leadAvatar = await box(row(page, 1).locator('.bot'))
     const stem = await box(row(page, 1).locator('.tree-stem'))
-    expect(Math.abs(stem.x - midX(leadAvatar))).toBeLessThanOrEqual(1)
-    expect(stem.y).toBeGreaterThanOrEqual(leadAvatar.y + leadAvatar.height - 1)
+    expect(leadFold.width).toBeGreaterThanOrEqual(44)
+    expect(leadFold.height).toBeGreaterThanOrEqual(44)
+    expect(stem.x).toBeGreaterThanOrEqual(leadFold.x)
+    expect(stem.x).toBeLessThan(leadAvatar.x)
+    expect(stem.y).toBeGreaterThanOrEqual(leadFold.y + leadFold.height - 1)
     for (const [child, parent] of [[2, 1], [4, 1], [5, 4]] as const) {
       const guide = await box(row(page, child).locator('.tree-guide.elbow'))
-      const parentAvatar = await box(row(page, parent).locator('.bot'))
+      const parentStem = await box(row(page, parent).locator('.tree-stem'))
       const childAvatar = await box(row(page, child).locator('.bot'))
       const text = await box(row(page, child).locator('.who'))
-      expect(Math.abs(guide.x - midX(parentAvatar)), `guide of ${child} under its parent's avatar`).toBeLessThanOrEqual(1)
+      expect(Math.abs(guide.x - parentStem.x), `guide of ${child} continues its parent's stem`).toBeLessThanOrEqual(1)
       expect(childAvatar.x - guide.x, `readable indent for ${child}`).toBeGreaterThanOrEqual(8)
       expect(text.x).toBeGreaterThan(guide.x + 8)
     }

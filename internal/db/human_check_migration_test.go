@@ -22,7 +22,7 @@ func TestHumanCheckMigrationUpgradesExistingStrictSchemasUnderRLS(t *testing.T) 
 		}
 	})
 	var ids []string
-	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+	err = migrateLegacyWorkWithHook(t, d, func(name string) error {
 		if name != "1076_ticket_human_check.sql" {
 			return nil
 		}
@@ -73,7 +73,7 @@ func TestHumanCheckMigrationUpgradesExistingStrictSchemasUnderRLS(t *testing.T) 
 			t.Fatal(err)
 		}
 	}
-	if err := db.MigrateWithHook(t.Context(), d.App, func(name string) error { t.Fatalf("replayed migration %s", name); return nil }); err != nil {
+	if err := migrateLegacyWorkWithHook(t, d, func(name string) error { t.Fatalf("replayed migration %s", name); return nil }); err != nil {
 		t.Fatal(err)
 	}
 }

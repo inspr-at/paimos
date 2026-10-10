@@ -5,6 +5,7 @@ package db_test
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -19,6 +20,15 @@ import (
 
 func TestEveryTenantTableHasForcedRLS(t *testing.T) {
 	database := dbtest.Open(t)
+	// This explicitly global capability catalog must contain only deployment
+	// metadata. Pin its shape before exempting it from tenant-row isolation.
+	var capabilityColumns []string
+	if err := database.Admin.QueryRow(t.Context(), `SELECT array_agg(column_name::text ORDER BY column_name) FROM information_schema.columns WHERE table_schema='public' AND table_name='aeon_required_capabilities'`).Scan(&capabilityColumns); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(capabilityColumns, ",") != "capability,since" {
+		t.Fatalf("unexpected global capability columns: %v", capabilityColumns)
+	}
 	rows, err := database.Admin.Query(t.Context(), `
 		SELECT c.relname,
 		       EXISTS(SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped),
@@ -39,7 +49,7 @@ func TestEveryTenantTableHasForcedRLS(t *testing.T) {
 		if err := rows.Scan(&name, &hasTenant, &enabled, &forced, &policies); err != nil {
 			t.Fatal(err)
 		}
-		if name == "tenants" || name == "identities" || name == "schema_migrations" {
+		if name == "tenants" || name == "identities" || name == "schema_migrations" || name == "aeon_required_capabilities" {
 			continue
 		}
 		count++
@@ -76,6 +86,40 @@ func migrationNames(t *testing.T) []string {
 		t.Fatal("no embedded migrations")
 	}
 	return names
+}
+
+// migrateLegacyWorkWithHook keeps cumulative ticket/task schema assertions at
+// the boundary before kind unification. Those fixtures intentionally include
+// incompatible legacy schemas; work_nodes_migration_test.go covers their
+// reconciliation separately. Use the real runner and verify the entire applied
+// prefix so an earlier migration failure or a missing boundary cannot pass.
+func migrateLegacyWorkWithHook(t *testing.T, d *dbtest.DB, before func(string) error) error {
+	t.Helper()
+	names := migrationNames(t)
+	end := sort.SearchStrings(names, workMigration)
+	if end == len(names) || names[end] != workMigration {
+		return fmt.Errorf("missing legacy work boundary %s", workMigration)
+	}
+	err := db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+		if name == workMigration {
+			return beforeWork
+		}
+		if before != nil {
+			return before(name)
+		}
+		return nil
+	})
+	if !errors.Is(err, beforeWork) {
+		return fmt.Errorf("expected stop before %s, got %v", workMigration, err)
+	}
+	var applied string
+	if err := d.App.QueryRow(t.Context(), `SELECT coalesce(string_agg(version, ',' ORDER BY version), '') FROM schema_migrations`).Scan(&applied); err != nil {
+		return err
+	}
+	if want := strings.Join(names[:end], ","); applied != want {
+		return fmt.Errorf("legacy migration prefix = %s, want %s", applied, want)
+	}
+	return nil
 }
 
 func TestMigrationsApplyAndReapply(t *testing.T) {

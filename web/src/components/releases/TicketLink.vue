@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, watchEffect } from 'vue'
+import { computed, inject, watch, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import { brand } from '../../lib/brand'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
@@ -16,8 +16,10 @@ const router = useRouter()
 const peek = inject(TICKET_PEEK, null)
 
 // Asks for its key, and again after an access change dropped the answer.
+watch(() => normalKey(props.ticketKey), (key, _old, onCleanup) => {
+  onCleanup(showingTicketKeys(key))
+}, { immediate: true, flush: 'sync' })
 watchEffect(() => { if (ticketRef(props.ticketKey) === undefined) wantTicketKey(props.ticketKey) })
-onBeforeUnmount(showingTicketKeys())
 const ticket = computed(() => ticketRef(props.ticketKey))
 const href = computed(() => {
   const project = ticket.value ? projects.byId(ticket.value.projectId) : undefined
@@ -49,9 +51,9 @@ function click(event: MouseEvent) {
 
 .chip { height: 24px; }
 .ticket-plain.chip { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); }
-@media (hover: hover) { .ticket-link.chip:hover { box-shadow: inset 0 0 0 1px var(--teal), 0 4px 10px -6px rgba(14, 111, 108, .5); } }
+@media (hover: hover) { .ticket-link.chip:hover { box-shadow: inset 0 0 0 1px var(--teal), 0 4px 10px -6px color-mix(in srgb, var(--primary-line) 50%, transparent); } }
 /* The ticket open beside the history: a filled chip, not an edge mark. */
-.ticket-link.chip[aria-current="true"] { background: var(--teal); box-shadow: inset 0 0 0 1px var(--teal); color: var(--button-ink); }
+.ticket-link.chip[aria-current="true"] { background: var(--primary); box-shadow: inset 0 0 0 1px var(--primary-line); color: var(--primary-on); }
 
 .inline { display: inline-flex; align-items: center; font: 500 11px/1.4 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .ticket-link.inline { margin: 0 -4px; padding: 1px 4px; border-radius: 5px; color: var(--teal-ink); }

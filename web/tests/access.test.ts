@@ -107,6 +107,72 @@ test('built-in agent roles exclude recurrence automation in every key mode; cust
   }
 })
 
+test('built-in ceilings keep shadow admission on the person and off agent keys', () => {
+  const keys = ['engine.admission', 'engine.read', 'engine.manage']
+  const catalog: Permission[] = ceilingParity.registry.map(p => ({ ...P(p.key, 'Access', 'low'), ...p, grantable_at: p.grantable_at as Permission['grantable_at'] }))
+  for (const key of keys) {
+    const permission = ceilingParity.registry.find(p => p.key === key)
+    assert.ok(permission, key)
+    assert.equal(permission.agent_grantable, true)
+    assert.deepEqual(permission.grantable_at, ['workspace', 'project'])
+  }
+  const admin = ceilingParity.cases.find(fixture => fixture.builtin_role === 'admin')
+  const member = ceilingParity.cases.find(fixture => 'project_builtin_roles' in fixture && fixture.project_builtin_roles[0] === 'member')
+  if (!admin || !member) throw new Error('shadow admission ceiling fixtures missing')
+  for (const key of keys) {
+    assert.ok(admin.workspace.includes(key), key)
+    assert.equal(admin.want.includes(key), false, key)
+    assert.equal(member.want.includes(key), false, key)
+  }
+  assert.equal(member.projects[0].includes('engine.manage'), false)
+  assert.ok(member.projects[0].includes('engine.admission') && member.projects[0].includes('engine.read'))
+  const workspace = role('workspace', 'admin', admin.workspace, true)
+  const ceiling = agentScopeCeiling(agent('worker', { workspace_role: workspace }), [workspace], catalog, 'existing')!
+  for (const key of keys) assert.equal(ceiling.has(key), false, key)
+  assert.deepEqual([...ceiling].sort(), admin.want)
+  const custom = role('custom', 'explicit-admission', keys, false)
+  const explicit = agentScopeCeiling(agent('custom', { workspace_role: custom }), [custom], catalog, 'existing')!
+  for (const key of keys) assert.equal(explicit.has(key), true, key)
+})
+
+test('built-in ceilings keep review policy read and leave manage to an explicit custom role', () => {
+  const catalog: Permission[] = ceilingParity.registry.map(p => ({ ...P(p.key, 'Access', 'low'), ...p, grantable_at: p.grantable_at as Permission['grantable_at'] }))
+  const admin = ceilingParity.cases.find(fixture => fixture.builtin_role === 'admin')
+  if (!admin) throw new Error('admin ceiling fixture missing')
+  const workspace = role('workspace', 'admin', admin.workspace, true)
+  const ceiling = agentScopeCeiling(agent('worker', { workspace_role: workspace }), [workspace], catalog, 'existing')!
+  assert.ok(ceiling.has('reviewpolicy.read'), 'built-in agents can read the effective policy')
+  assert.equal(ceiling.has('reviewpolicy.manage'), false, 'built-in agents cannot manage review policy')
+  assert.deepEqual([...ceiling].sort(), admin.want)
+  const custom = role('custom', 'explicit-review', ['reviewpolicy.manage'], false)
+  assert.equal(agentScopeCeiling(agent('custom', { workspace_role: custom }), [custom], catalog, 'existing')!.has('reviewpolicy.manage'), true)
+})
+
+test('account overview ceilings require an explicit workspace grant in every key mode', () => {
+  const scope = 'account.overview.read'
+  const permission = ceilingParity.registry.find(p => p.key === scope)
+  assert.ok(permission, 'shared catalog must include the overview scope')
+  assert.deepEqual(permission.grantable_at, ['workspace'])
+  assert.equal(permission.agent_grantable, true)
+  const catalog: Permission[] = ceilingParity.registry.map(p => ({ ...P(p.key, 'Access', 'low'), ...p, grantable_at: p.grantable_at as Permission['grantable_at'] }))
+  for (const key of ['owner', 'admin', 'member']) {
+    const builtin = role('builtin', key, [scope, 'nodes.read'])
+    const custom = role('custom', 'explicit-overview', [scope], false)
+    const binding = (r: Role) => ({ project_id: 'p', project_key: 'P', project_title: 'Project', role: r })
+    for (const mode of ['create', 'existing', 'rotate'] as const) {
+      for (const worker of [agent('workspace', { workspace_role: builtin }), agent('project', { project_roles: [binding(builtin)] })]) {
+        const ceiling = agentScopeCeiling(worker, [builtin], catalog, mode)!
+        assert.equal(ceiling.has(scope), false, `${key} must not grant overview by default in ${mode}`)
+        assert.deepEqual(grantablePresetScopes('all', ceiling, catalog), ['nodes.read'])
+      }
+      const explicit = agentScopeCeiling(agent('explicit', { workspace_role: custom }), [custom], catalog, mode)!
+      assert.deepEqual(grantablePresetScopes('all', explicit, catalog), [scope])
+      const project = agentScopeCeiling(agent('project', { project_roles: [binding(custom)] }), [custom], catalog, mode)!
+      assert.equal(project.has(scope), false, `project grant must not authorize workspace overview in ${mode}`)
+    }
+  }
+})
+
 test('the Full access note names every person-only class', () => {
   for (const phrase of ['members', 'roles', 'keys', 'settings', 'reading keys', 'access audit log', 'approval decisions', 'rule publishing', 'conversation watching', 'harness force-stop', 'recovery', 'ownership transfer', 'customer portal']) {
     assert.ok(PERSON_ONLY_KEY_NOTE.includes(phrase), phrase)
@@ -222,6 +288,8 @@ test('audit events read as sentences from the server’s shape', () => {
   assert.equal(auditSentence(e('agent_key.scopes_changed', { name: 'worker', scopes: [], expires_at: null }, { name: 'worker', scopes: ['nodes.read'], expires_at: '2026-12-31T00:00:00Z' }), names).text, 'changed scopes and expiry for the key worker; expires 2026-12-31T00:00:00Z')
   assert.equal(auditSentence(e('agent_key.revoked', null, { principal_id: 'x', name: 'deployer', prefix: 'ph4r' }), names).text, 'revoked the key deployer (aeon_ph4r_…)')
   assert.equal(auditSentence(e('something.else', null, {}), names).text, 'something else')
+  assert.equal(auditSentence(e('agent_key.owner_workstation_changed', null, { name: 'workstation', owner_workstation: true }), names).text, 'marked the owner workstation key workstation')
+  assert.equal(auditSentence(e('agent_key.governance_used', null, { key_id: 'key', computer_id: 'computer', action: 'POST /api/roles', step_up: true, outcome: 'admitted' }), names).text, 'used key key on computer computer for POST /api/roles; confirmed locally (admitted)')
   assert.deepEqual(['role.created', 'binding.removed', 'invite.revoked', 'principal.deactivated', 'agent_key.created', 'node.updated'].map(categoryOf), ['roles', 'bindings', 'invites', 'lifecycle', 'keys', null])
 })
 

@@ -7,11 +7,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -58,6 +58,9 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if err := agentpairing.Lock(ctx, tx); err != nil {
 		return RouteResult{}, err
 	}
+	if err := accountuse.LockShared(ctx, tx); err != nil {
+		return RouteResult{}, err
+	}
 	if err := validateEstimates(estimates); err != nil {
 		return RouteResult{}, err
 	}
@@ -84,11 +87,17 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if err := authorizeRoute(ctx, tx, r, p, run.AgentID, run.ID); err != nil {
 		return RouteResult{}, err
 	}
+	if err := agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
+		return RouteResult{}, err
+	}
 	// A person's account choice narrows the daemon's enrolled set; it never
 	// bypasses ownership, probe, capacity or allowance checks. No fallback.
 	if run.RequestedAccountID != nil {
 		if !enrolled[*run.RequestedAccountID] {
 			return RouteResult{}, fail(http.StatusConflict, "requested account is not enrolled by this daemon")
+		}
+		if err := accountuse.RequireRun(ctx, tx, *run.RequestedAccountID, run.ID); err != nil {
+			return RouteResult{}, err
 		}
 		accountIDs = []string{*run.RequestedAccountID}
 		enrolled = map[string]bool{*run.RequestedAccountID: true}
@@ -250,6 +259,13 @@ func rerouteMovedAccount(ctx context.Context, tx pgx.Tx, r *http.Request, p tena
 }
 
 func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, accountID string) error {
+	if err := accountuse.RequireRun(ctx, tx, accountID, run.ID); err != nil {
+		var denied *accountuse.Error
+		if errors.As(err, &denied) && denied.Message == accountuse.NotAllowed {
+			return &httpError{status: 409, code: accountuse.NotAllowed, msg: accountuse.NotAllowed}
+		}
+		return err
+	}
 	a, err := lockAccount(ctx, tx, accountID)
 	if err != nil {
 		return err
@@ -261,8 +277,14 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if err != nil {
 		return err
 	}
-	if run.ProfileID == nil || a.State != "available" || !probeFresh(a, now) ||
-		(a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID)) {
+	if run.ProfileID == nil || a.State != "available" || !probeFresh(a, now) {
+		return fail(http.StatusConflict, "reserved account is not eligible")
+	}
+	allowed, err := AccountAllowsProfile(ctx, tx, a, *run.ProfileID)
+	if err != nil {
+		return err
+	}
+	if !allowed {
 		return fail(http.StatusConflict, "reserved account is not eligible")
 	}
 	eligible, _, err := narrowCandidates(ctx, tx, run, a.Harness, []Account{a})
@@ -307,6 +329,9 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 			return err
 		}
 		if wait != nil {
+			if wait.Code == "daily_limit" || wait.Code == "daily_limit_unknown" {
+				return &httpError{status: http.StatusConflict, code: wait.Code, msg: wait.Code}
+			}
 			return fail(http.StatusConflict, "reserved capacity is not eligible: "+wait.Code)
 		}
 		for _, w := range windows {
@@ -372,6 +397,10 @@ func authorizeRoute(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Pr
 }
 
 func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemonID string, enrolled map[string]bool) (RouteResult, bool, error) {
+	bound, err := computerAccountIDs(ctx, tx, principalID)
+	if err != nil {
+		return RouteResult{}, false, err
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT r.id::text, r.window_id::text, w.unit, a.id::text, a.account_key, a.daemon_id,
 		       a.registered_by_principal_id::text, a.label, a.billing_mode, a.plan, w.pairing_verification, w.ends_at, w.allowance
@@ -393,7 +422,7 @@ func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemon
 		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &ownerDaemonID, &ownerID, &label, &billing, &plan, &window.pairingVerification, &window.EndsAt, &window.Allowance); err != nil {
 			return RouteResult{}, false, err
 		}
-		if ownerDaemonID != daemonID || ownerID != principalID || !enrolled[accountID] {
+		if ownerDaemonID != daemonID || ownerID != principalID && !bound[accountID] || !enrolled[accountID] {
 			return RouteResult{}, false, fail(http.StatusConflict, "run is routed outside daemon enrollment")
 		}
 		window.AccountID, window.Unit = accountID, item.Unit
@@ -433,6 +462,9 @@ type ranked struct {
 	reset          *time.Time
 	slots          int
 	presence       bool
+	soonest        *time.Time
+	posture        string
+	projected      float64
 }
 
 func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harness, profileID, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, map[string]int64, error) {
@@ -441,11 +473,16 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
 		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts
-		WHERE harness = $1 AND daemon_id = $2 AND registered_by_principal_id = $3::uuid
+		WHERE harness = $1 AND daemon_id = $2 AND (registered_by_principal_id = $3::uuid OR EXISTS (
+          SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_computers c
+          ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
+          WHERE e.tenant_id=agent_accounts.tenant_id AND e.account_id=agent_accounts.id
+            AND c.principal_id=$3::uuid AND c.daemon_id=$2 AND c.state='connected' AND e.state='connected'))
 		  AND id::text = ANY($4::text[]) AND state = 'available'
-          AND (allowed_model_profile_ids IS NULL OR $5::uuid = ANY(allowed_model_profile_ids))
+          AND aeon_account_allows_profile(harness,allowed_model_profile_ids,$5::uuid)
+          AND aeon_account_use_allowed(id,$6::uuid)
 		ORDER BY id
-		FOR UPDATE`, harness, daemonID, principalID, accountIDs, profileID)
+		FOR UPDATE`, harness, daemonID, principalID, accountIDs, profileID, run.ID)
 	if err != nil {
 		return Account{}, nil, nil, err
 	}
@@ -491,6 +528,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		return Account{}, nil, nil, err
 	}
 	var picks []ranked
+	dailyReason := ""
 	for _, account := range accounts {
 		slots := slotCount(account, usedSlots, quotaSlots)
 		if !probeFresh(account, now) || slots >= account.MaxParallel {
@@ -522,6 +560,9 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 				return Account{}, nil, nil, err
 			}
 			if wait != nil {
+				if wait.Code == "daily_limit_unknown" || wait.Code == "daily_limit" && dailyReason == "" {
+					dailyReason = wait.Code
+				}
 				continue
 			}
 		}
@@ -554,6 +595,9 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		picks = append(picks, pick)
 	}
 	if len(picks) == 0 {
+		if dailyReason != "" {
+			return Account{}, nil, nil, &httpError{status: http.StatusConflict, code: dailyReason, msg: dailyReason}
+		}
 		return Account{}, nil, nil, fail(http.StatusConflict, "no eligible account")
 	}
 	orderPicks(picks)

@@ -57,17 +57,17 @@ func New(pool *pgxpool.Pool, reg *plugins.Registry) httpapi.Module {
 func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/crm/contacts/{contactId}/principals", m.bind)
 	mux.HandleFunc("GET /api/crm/organisations", m.listCustomers)
-	mux.HandleFunc("POST /api/crm/organisations", m.createCustomer)
+	mux.HandleFunc("POST /api/crm/organisations", events.WithMutationReceipt(m.createCustomer))
 	mux.HandleFunc("GET /api/crm/organisations/{organisationId}", m.getCustomer)
-	mux.HandleFunc("PATCH /api/crm/organisations/{organisationId}", m.updateCustomer)
-	mux.HandleFunc("DELETE /api/crm/organisations/{organisationId}", m.deleteCustomer)
-	mux.HandleFunc("PATCH /api/crm/organisations/{organisationId}/visibility", m.customerVisibility)
+	mux.HandleFunc("PATCH /api/crm/organisations/{organisationId}", events.WithMutationReceipt(m.updateCustomer))
+	mux.HandleFunc("DELETE /api/crm/organisations/{organisationId}", events.WithMutationReceipt(m.deleteCustomer))
+	mux.HandleFunc("PATCH /api/crm/organisations/{organisationId}/visibility", events.WithMutationReceipt(m.customerVisibility))
 	mux.HandleFunc("GET /api/crm/organisations/{organisationId}/contacts", m.listContacts)
-	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/contacts", m.createContact)
+	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/contacts", events.WithMutationReceipt(m.createContact))
 	mux.HandleFunc("GET /api/crm/contacts/{contactId}", m.getContact)
-	mux.HandleFunc("PATCH /api/crm/contacts/{contactId}", m.updateContact)
-	mux.HandleFunc("DELETE /api/crm/contacts/{contactId}", m.deleteContact)
-	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/primary-contact", m.promoteContact)
+	mux.HandleFunc("PATCH /api/crm/contacts/{contactId}", events.WithMutationReceipt(m.updateContact))
+	mux.HandleFunc("DELETE /api/crm/contacts/{contactId}", events.WithMutationReceipt(m.deleteContact))
+	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/primary-contact", events.WithMutationReceipt(m.promoteContact))
 	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/number/reformat", m.reformatNumber)
 	mux.HandleFunc("GET /api/crm/organisations/{organisationId}/related", m.related)
 	mux.HandleFunc("PUT /api/crm/documents/{attachmentId}/metadata", m.putDocumentMetadata)
@@ -77,7 +77,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/note-rewrite", m.draftNote)
 	mux.HandleFunc("GET /api/crm/organisations/{organisationId}/note-ai", m.noteAIStatus)
 	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/note-ai/generate", m.generateNote)
-	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/note-rewrite/{draftId}/apply", m.applyNote)
+	mux.HandleFunc("POST /api/crm/organisations/{organisationId}/note-rewrite/{draftId}/apply", events.WithMutationReceipt(m.applyNote))
 	mux.HandleFunc("GET /api/crm/providers", m.listProviders)
 	mux.HandleFunc("PUT /api/crm/providers/{providerId}/config", m.putProviderConfig)
 	mux.HandleFunc("GET /api/crm/providers/search", m.searchProviders)
@@ -284,6 +284,7 @@ func parseUUID(s string) (string, bool) {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
+	err = providerImportError(err)
 	var he *httpError
 	if errors.As(err, &he) {
 		writeBody(w, he.status, he.code, he.message)
@@ -315,4 +316,17 @@ func writeBody(w http.ResponseWriter, status int, code, message string) {
 		Code    string `json:"code"`
 		Message string `json:"message"`
 	}{code, message})
+}
+
+// A competing import is a normal conflict; unrelated unique violations remain errors.
+func providerImportError(err error) error {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) && pe.Code == "23505" && pe.ConstraintName == "crm_external_identity_unique" {
+		return providerIdentityConflict()
+	}
+	return err
+}
+
+func providerIdentityConflict() error {
+	return &httpError{status: http.StatusConflict, code: "external_identity_conflict", message: "customer already imported from this provider"}
 }

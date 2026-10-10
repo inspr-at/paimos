@@ -45,9 +45,10 @@ var errRate = errors.New("presence updates are too frequent")
 var errInvalid = errors.New("invalid presence request")
 
 type Module struct {
-	pool     *pgxpool.Pool
-	registry *plugins.Registry
-	now      func() time.Time
+	pool        *pgxpool.Pool
+	registry    *plugins.Registry
+	now         func() time.Time
+	streamTicks func() (<-chan time.Time, func())
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -571,35 +572,54 @@ func (m *Module) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	rc := http.NewResponseController(w)
+	defer func() { _ = rc.SetWriteDeadline(time.Time{}) }()
+	// Each event and heartbeat owns a fresh bounded write. No deadline is left
+	// on the connection while the stream waits for its next poll.
+	writeFrame := func(frame string) (err error) {
+		if err = rc.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil && !errors.Is(err, http.ErrNotSupported) {
+			return err
+		}
+		defer func() {
+			clearErr := rc.SetWriteDeadline(time.Time{})
+			if err == nil && clearErr != nil && !errors.Is(clearErr, http.ErrNotSupported) {
+				err = clearErr
+			}
+		}()
+		if _, err = fmt.Fprint(w, frame); err != nil {
+			return err
+		}
+		return rc.Flush()
+	}
 	send := func(kind string, id int64, value any) error {
 		raw, e := json.Marshal(value)
 		if e != nil {
-			return e
-		}
-		if e = rc.SetWriteDeadline(time.Now().Add(5 * time.Second)); e != nil && !errors.Is(e, http.ErrNotSupported) {
 			return e
 		}
 		prefix := ""
 		if id > 0 {
 			prefix = fmt.Sprintf("id: %d\n", id)
 		}
-		if _, e = fmt.Fprintf(w, "%sevent: %s\ndata: %s\n\n", prefix, kind, raw); e != nil {
-			return e
-		}
-		return rc.Flush()
+		return writeFrame(fmt.Sprintf("%sevent: %s\ndata: %s\n\n", prefix, kind, raw))
 	}
 	if send("presence", 0, first) != nil {
 		return
 	}
 	lastPresence, _ := json.Marshal(first)
-	lastKeepalive := time.Now()
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	lastKeepalive := m.now()
+	var ticks <-chan time.Time
+	var stop func()
+	if m.streamTicks != nil {
+		ticks, stop = m.streamTicks()
+	} else {
+		ticker := time.NewTicker(time.Second)
+		ticks, stop = ticker.C, ticker.Stop
+	}
+	defer stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ticker.C:
+		case now := <-ticks:
 			var s snapshot
 			var notices []durableNotice
 			err = m.inQuote(r.Context(), p, id, false, func(tx pgx.Tx) error {
@@ -627,12 +647,12 @@ func (m *Module) stream(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				lastPresence = current
-				lastKeepalive = time.Now()
-			} else if time.Since(lastKeepalive) >= 15*time.Second {
-				if _, err = fmt.Fprint(w, ": keepalive\n\n"); err != nil || rc.Flush() != nil {
+				lastKeepalive = now
+			} else if now.Sub(lastKeepalive) >= 15*time.Second {
+				if writeFrame(": keepalive\n\n") != nil {
 					return
 				}
-				lastKeepalive = time.Now()
+				lastKeepalive = now
 			}
 		}
 	}

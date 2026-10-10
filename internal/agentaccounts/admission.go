@@ -3,11 +3,14 @@ package agentaccounts
 
 import (
 	"context"
+	"errors"
 	"math"
 	"slices"
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/jackc/pgx/v5"
 )
@@ -18,6 +21,8 @@ const vendorStopBackoff = time.Hour
 
 // CapacityWait is advisory. Reserve and claim always recheck the same policy.
 type CapacityWait struct {
+	Context       string     `json:"context,omitempty"`
+	HostReason    string     `json:"host_reason,omitempty"`
 	Code          string     `json:"code"`
 	Until         *time.Time `json:"until,omitempty"`
 	ReadAt        *time.Time `json:"read_at,omitempty"`
@@ -33,6 +38,13 @@ func synthetic(w Window) bool { return w.capacityKind == "refresh" || w.capacity
 // provisional grant is materialized, under the account lock in selectAccount.
 // claiming excludes the run's own slot and preserves its exact one-shot grant.
 func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time.Time, slots int, run runRow, claiming bool) ([]Window, *CapacityWait, error) {
+	// Projections with no run ID retain their existing capacity advice. Every
+	// real managed reservation and claim re-reads daily policy under its fence.
+	if run.Purpose == "managed" && run.ID != "" {
+		if wait, err := dailyStartAccountTx(ctx, tx, a, now); err != nil || wait != nil {
+			return nil, wait, err
+		}
+	}
 	if a.State != "available" {
 		return nil, waitFor("state"), nil
 	}
@@ -131,17 +143,19 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 		s.Override = "sprint"
 		s.OverrideUntil = nil
 	}
-	// Unknown usage cannot enforce a numeric reserve, but the person's clock
-	// and explicit Hold remain real gates. Sprint/Away/Run now retain meaning.
-	if unknownOnly && s.ActiveOverride(now) != "sprint" && s.ActiveOverride(now) != "away" {
-		next := s.NextStart(now, s.OffDays == "normal")
-		if next == nil || next.After(now) {
-			return nil, &CapacityWait{Code: "schedule", Until: next, Timezone: s.Timezone, RunNowAllowed: true}, nil
-		}
-	}
 	if err := applyCapacityPacing(ctx, tx, a, active, now, s); err != nil {
 		return nil, nil, err
 	}
+	policy, err := loadUsagePolicy(ctx, tx, a.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	// A blind grant cannot prove that a configured hard floor remains. Wait
+	// for a numeric window rather than treating unknown usage as headroom.
+	if policy.Floor > 0 && !slices.ContainsFunc(active, func(w Window) bool { return !synthetic(w) }) {
+		return nil, waitFor("reading"), nil
+	}
+	applyUsageFloor(active, policy)
 	learned, err := loadLearning(ctx, tx, a.ID)
 	if err != nil {
 		return nil, nil, err
@@ -191,7 +205,11 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	need := boolInt(!claiming)
 	var hardUntil *time.Time
 	for _, w := range ordered {
-		if w.Allowance-w.Used-w.Reserved >= max(need, w.capacityHold*need) {
+		ceiling := w.Allowance
+		if w.usageCeiling != nil {
+			ceiling = *w.usageCeiling
+		}
+		if ceiling-w.Used-w.Reserved >= max(need, w.capacityHold*need) {
 			continue
 		}
 		end := w.EndsAt
@@ -201,6 +219,14 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	}
 	if hardUntil != nil {
 		return nil, &CapacityWait{Code: "allowance", Until: hardUntil, Timezone: s.Timezone}, nil
+	}
+	// Unknown vendor usage cannot enforce a numeric reserve, but manual caps
+	// and floors above still bind before the person's clock offers Run now.
+	if unknownOnly && s.ActiveOverride(now) != "sprint" && s.ActiveOverride(now) != "away" {
+		next := s.NextStart(now, s.OffDays == "normal")
+		if next == nil || next.After(now) {
+			return nil, &CapacityWait{Code: "schedule", Until: next, Timezone: s.Timezone, RunNowAllowed: true}, nil
+		}
 	}
 	// The Advanced sentence caps on top, like a window set by hand. A percent
 	// rule lowers the returned windows' budgets in place, so fits agrees.
@@ -284,6 +310,37 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 	if err != nil || run.Status != "queued" || run.Purpose != "managed" {
 		return nil, err
 	}
+	return waitForRun(ctx, tx, run)
+}
+
+// WaitForQueueRoute evaluates a prospective worker assignment without writing
+// it. Fair scheduling and actual queue routing use the same account gates.
+func WaitForQueueRoute(ctx context.Context, tx pgx.Tx, id, agent, profile string, account *string) (*CapacityWait, error) {
+	run, err := loadWaitRun(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	// Match queue pickup's requested_account_id replacement and retry fallback.
+	if account == nil {
+		if err := tx.QueryRow(ctx, `SELECT retry_account_id::text FROM agent_runs WHERE id=$1`, id).Scan(&account); err != nil {
+			return nil, err
+		}
+	}
+	run.AgentID, run.ProfileID, run.RequestedAccountID = agent, &profile, account
+	if run.Status != "queued" || run.Purpose != "managed" {
+		return waitFor("state"), nil
+	}
+	return waitForRun(ctx, tx, run)
+}
+
+func waitForRun(ctx context.Context, tx pgx.Tx, run runRow) (*CapacityWait, error) {
+	host, err := agentpairing.HostCapacityForPrincipal(ctx, tx, run.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	if host != nil && host.Reason != "" {
+		return &CapacityWait{Code: "capacity", HostReason: host.Reason}, nil
+	}
 	accounts, err := listAccounts(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -307,10 +364,47 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 		return nil, err
 	}
 	same := []Account{}
+	bound, err := computerAccountIDs(ctx, tx, run.AgentID)
+	if err != nil {
+		return nil, err
+	}
 	for _, a := range accounts {
-		if a.RegisteredBy == run.AgentID && a.Harness == harness && (run.AccountID == nil || a.ID == *run.AccountID) {
+		if (a.RegisteredBy == run.AgentID || bound[a.ID]) && a.Harness == harness && (run.AccountID == nil || a.ID == *run.AccountID) {
 			same = append(same, a)
 		}
+	}
+	contextCandidates := same
+	if run.RequestedAccountID != nil {
+		contextCandidates = keepAccount(contextCandidates, *run.RequestedAccountID)
+	} else {
+		ticket, err := runTicketID(ctx, tx, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		if ticket != "" {
+			var pin *string
+			err := tx.QueryRow(ctx, `SELECT account_id::text FROM account_ticket_pins WHERE ticket_id=$1 AND harness=$2`, ticket, harness).Scan(&pin)
+			if err != nil && !isNoRows(err) {
+				return nil, err
+			}
+			if pin != nil {
+				contextCandidates = keepAccount(contextCandidates, *pin)
+			}
+		}
+	}
+	allowedCount := 0
+	for _, a := range contextCandidates {
+		if err := accountuse.RequireRun(ctx, tx, a.ID, run.ID); err != nil {
+			var denied *accountuse.Error
+			if errors.As(err, &denied) && denied.Message == accountuse.NotAllowed {
+				continue
+			}
+			return nil, err
+		}
+		allowedCount++
+	}
+	if len(contextCandidates) > 0 && allowedCount == 0 {
+		return waitFor("context"), nil
 	}
 	same, residencyEmptied, err := narrowCandidates(ctx, tx, run, harness, same)
 	if err != nil {
@@ -324,7 +418,11 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 		if run.RequestedAccountID != nil && a.ID != *run.RequestedAccountID || run.AccountID != nil && a.ID != *run.AccountID {
 			continue
 		}
-		if a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID) {
+		allowed, err := AccountAllowsProfile(ctx, tx, a, *run.ProfileID)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
 			best = waitFor("models")
 			continue
 		}

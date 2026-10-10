@@ -1,13 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { normaliseState } from './work.ts'
+
 export const benefitTextKeys = ['pill_en', 'pill_de', 'benefit_en', 'benefit_de'] as const
 // Same split as strings.Fields: a non-breaking space is whitespace. Empty is zero words.
 export function pillWords(value: string): number {
   const trimmed = value.trim()
   return trimmed ? trimmed.split(/\s+/u).length : 0
 }
-// Matches ticketbenefits.Completed on the server, not all closed states.
-export function completedTicketState(state: string): boolean {
-  return state === 'done' || state === 'accepted' || state === 'delivered'
+// Mirrors aeon_work_status_category: configured categories override the fixed
+// vocabulary; unknown categories fall back to it. Cancellation is not success.
+export function completedTicketState(state: string, schema?: Record<string, unknown>): boolean {
+  const normal = normaliseState(state)
+  const entries = Array.isArray(schema?.states) ? schema.states : []
+  const configured = entries.find(entry => entry && typeof entry === 'object' && typeof entry.state === 'string' && normaliseState(entry.state) === normal && typeof entry.category === 'string' && entry.category.trim())
+  const category = configured ? normaliseState(configured.category) : ''
+  if (['open', 'doing', 'progress', 'in_progress', 'blocked', 'done', 'cancelled', 'canceled', 'archived'].includes(category)) return category === 'done'
+  return ['done', 'accepted', 'delivered'].includes(normal)
 }
 export function benefitIssues(fields: Record<string, unknown>): string[] {
   const issues: string[] = []

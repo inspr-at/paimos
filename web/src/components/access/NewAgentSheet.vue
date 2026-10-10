@@ -81,7 +81,7 @@ onMounted(() => { void projects.load() })
       </select>
       <div v-if="preset" class="preset-preview">
         <p class="hint">{{ preset.description }} Preview these scopes; apply them in the first key sheet.</p>
-        <p class="mono preset-scopes">{{ presetScopes(preset.scopes, access.registry).join(', ') }}</p>
+        <p v-if="preset.scopes !== 'all'" class="mono preset-scopes">{{ presetScopes(preset.scopes, access.registry).join(', ') }}</p>
       </div>
       <label for="agent-description">Description <span class="optional">optional</span></label>
       <textarea id="agent-description" v-model="description" class="field" rows="2" maxlength="1000" :disabled="busy" placeholder="What this agent does" @input="descriptionEdited = true" />
@@ -125,8 +125,8 @@ onMounted(() => { void projects.load() })
       <p v-if="error" class="error" role="alert">{{ error }}</p>
     </form>
     <template #foot>
+      <button type="submit" form="new-agent-form" class="btn primary" :disabled="busy || !allowed"><AppIcon name="plus" :size="14" /><span class="btn-label"><span>{{ busy ? 'Creating…' : 'Create agent' }}</span><span aria-hidden="true">Create agent</span></span><kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
       <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-      <button type="submit" form="new-agent-form" class="btn primary" :disabled="busy || !allowed"><AppIcon name="plus" :size="14" />{{ busy ? 'Creating…' : 'Create agent' }}<kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
     </template>
   </AccessSheet>
 </template>

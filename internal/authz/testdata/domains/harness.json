@@ -1,0 +1,236 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "harness.control",
+      "harness.force_stop",
+      "harness.manage",
+      "harness.read",
+      "harness.recover",
+      "harness.worker",
+      "harness.write"
+    ],
+    "member": [
+      "harness.control",
+      "harness.read",
+      "harness.worker",
+      "harness.write"
+    ],
+    "owner": [
+      "harness.control",
+      "harness.force_stop",
+      "harness.manage",
+      "harness.read",
+      "harness.recover",
+      "harness.worker",
+      "harness.write"
+    ],
+    "viewer": [
+      "harness.read"
+    ]
+  },
+  "project_filtered": {
+    "DELETE /api/me/leaving-at": true,
+    "GET /api/harness-sessions/live": true,
+    "GET /api/me/agent-pause-settings": true,
+    "GET /api/me/host-labels": true,
+    "GET /api/me/leaving-at": true,
+    "POST /api/harness-sessions/pause": true,
+    "POST /api/harness-sessions/resume": true,
+    "PUT /api/me/agent-pause-settings": true,
+    "PUT /api/me/host-labels": true,
+    "PUT /api/me/leaving-at": true
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Control harness",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Harness",
+      "key": "harness.control",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": false,
+      "description": "Force Stop harness",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Harness",
+      "key": "harness.force_stop",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Manage harness",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Harness",
+      "key": "harness.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read harness",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Harness",
+      "key": "harness.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": false,
+      "description": "Recover harness",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Harness",
+      "key": "harness.recover",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": false,
+      "description": "Watch harness",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Harness",
+      "key": "harness.watch",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Worker harness",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Harness",
+      "key": "harness.worker",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write harness",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Harness",
+      "key": "harness.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "routes": {
+    "DELETE /api/me/leaving-at": "harness.control",
+    "DELETE /api/projects/{projectId}/lead": "harness.control",
+    "GET /api/harness-sessions": "harness.read",
+    "GET /api/harness-sessions/live": "nodes.read",
+    "GET /api/me/agent-pause-settings": "harness.read",
+    "GET /api/me/host-labels": "harness.read",
+    "GET /api/me/leaving-at": "harness.read",
+    "GET /api/model-prices": "harness.read",
+    "GET /api/projects/{projectId}/harness-sessions": "harness.read",
+    "GET /api/projects/{projectId}/harness-sessions/orchestrator": "harness.read",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}": "harness.read",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}": "harness.read",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/lookup": "harness.read",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/managed-settings": "harness.control",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/notifications": "harness.worker",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/provenance": "harness.read",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker": "harness.read",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/recover-agent": "harness.control",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/recover-agent/{requestId}": "harness.read",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/recovery": "harness.read",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts": "harness.read",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/tier": "harness.read",
+    "GET /api/projects/{projectId}/harness-sessions/{sessionId}/usage": "harness.read",
+    "GET /api/projects/{projectId}/instruction-provenance": "harness.read",
+    "GET /api/projects/{projectId}/lead": "harness.read",
+    "GET /api/projects/{projectId}/lead-decisions": "nodes.read",
+    "GET /api/settings/agent-activity": "settings.manage",
+    "GET /api/settings/eta-interval": "settings.manage",
+    "GET /api/settings/heartbeat-lost": "settings.manage",
+    "PATCH /api/projects/{projectId}/harness-sessions/{sessionId}/binding": "harness.write",
+    "POST /api/harness-recoveries/claim": "harness.worker",
+    "POST /api/harness-recoveries/{requestId}/complete": "harness.worker",
+    "POST /api/harness-sessions/pause": "harness.control",
+    "POST /api/harness-sessions/resume": "harness.control",
+    "POST /api/inbox/session-binding": "inbox.send",
+    "POST /api/model-prices": "models.manage",
+    "POST /api/projects/{projectId}/harness-sessions": "harness.write",
+    "POST /api/projects/{projectId}/harness-sessions/pause": "harness.control",
+    "POST /api/projects/{projectId}/harness-sessions/remove-stale": "harness.read",
+    "POST /api/projects/{projectId}/harness-sessions/resume": "harness.control",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/archive": "harness.recover",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/complete-delivery": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop": "harness.force_stop",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/interrupt": "harness.control",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/stop": "harness.control",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/drain": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/lead-decisions": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-context": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/managed-controls": "harness.control",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/model-reports": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/pause": "harness.control",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/pause-plan": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/provenance": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/recover-agent": "harness.control",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/remove": "harness.read",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/reparent": "harness.write",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/requests": "harness.control",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/resume": "harness.control",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/stop": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier": "harness.control",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/ask": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/report": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/requests/{requestId}/decision": "harness.control",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/usage": "harness.worker",
+    "POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield": "harness.worker",
+    "POST /api/projects/{projectId}/lead": "harness.control",
+    "GET /api/projects/{projectId}/lead/candidates": "harness.read",
+    "POST /api/projects/{projectId}/lead/adopt": "harness.control",
+    "POST /api/projects/{projectId}/lead/adopt/cancel": "harness.control",
+    "POST /api/projects/{projectId}/lead/claim": "harness.worker",
+    "POST /api/projects/{projectId}/lead/pause": "harness.control|harness.worker",
+    "POST /api/projects/{projectId}/lead/yield": "harness.worker",
+    "PUT /api/me/agent-pause-settings": "harness.read",
+    "PUT /api/me/host-labels": "harness.read",
+    "PUT /api/me/leaving-at": "harness.control",
+    "PUT /api/nodes/{nodeId}/live-eta": "harness.worker",
+    "PUT /api/projects/{projectId}/harness-sessions/{sessionId}/read-marker": "harness.read",
+    "PUT /api/settings/agent-activity": "settings.manage",
+    "PUT /api/settings/eta-interval": "settings.manage",
+    "PUT /api/settings/heartbeat-lost": "settings.manage"
+  },
+  "words": {
+    "resources": {
+      "harness": "harness sessions"
+    },
+    "special": {
+      "harness.watch": "View live conversations"
+    }
+  }
+}

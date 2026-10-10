@@ -405,11 +405,24 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 				}
 				fields = next
 			}
+			if plan.state != nil {
+				if err := requireLeafStatusWrite(ctx, tx, current.ID); err != nil {
+					if he, ok := err.(*httpError); ok && he.code == "parent_status_derived" {
+						result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Reason: he.msg, Code: he.code})
+						continue
+					}
+					return err
+				}
+			}
 			state := current.State
 			if plan.state != nil {
 				state = *plan.state
 			}
-			if issues := ticketbenefits.Transition(target.kindSlug, current.State, state, fields); len(issues) > 0 {
+			issues, err := benefitTransition(ctx, tx, current.KindID, target.kindSlug, current.State, state, fields)
+			if err != nil {
+				return err
+			}
+			if len(issues) > 0 {
 				result.Skipped = append(result.Skipped, bulkSkip{
 					ID: current.ID, Key: current.Key,
 					Reason: "before done: " + strings.Join(issues, "; "),
@@ -472,6 +485,25 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			return err
 		}
 		result.EventID = &e.ID
+		// Bulk answers feed the same row store as PATCH answers. Load both
+		// queue projections once for the bounded batch (at most maxBulkNodes),
+		// after every mutation. These reads acquire no locks after the counter.
+		ids := make([]string, len(result.Items))
+		for i := range result.Items {
+			ids[i] = result.Items[i].ID
+		}
+		queued, err := workqueue.Load(ctx, tx, ids)
+		if err != nil {
+			return err
+		}
+		stale, err := workqueue.Stale(ctx, tx, ids)
+		if err != nil {
+			return err
+		}
+		for i := range result.Items {
+			result.Items[i].Queued = queued[result.Items[i].ID]
+			result.Items[i].QueueStale = stale[result.Items[i].ID]
+		}
 		return nil
 	})
 	return result, err
@@ -623,7 +655,11 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 			return events.Change{}, events.ErrConflict
 		}
 		old := before.Items[i]
-		if len(ticketbenefits.Transition(kinds[now.ID], now.State, old.State, old.Fields)) > 0 {
+		issues, err := benefitTransition(ctx, tx, now.KindID, kinds[now.ID], now.State, old.State, old.Fields)
+		if err != nil {
+			return events.Change{}, err
+		}
+		if len(issues) > 0 {
 			return events.Change{}, events.ErrConflict
 		}
 		if old.State != now.State || !sameJSON(old.Fields, now.Fields) {

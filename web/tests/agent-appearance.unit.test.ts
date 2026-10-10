@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-beforeEach(() => vi.resetModules())
+beforeEach(async () => {
+  vi.resetModules()
+  const { setPreferenceOwner } = await import('../src/lib/preferences')
+  setPreferenceOwner({ tenant: { id: 'test-tenant' }, principal: { id: 'test-person' } })
+})
 afterEach(() => vi.unstubAllGlobals())
 const response = (value: unknown) => new Response(JSON.stringify({ value }))
 
@@ -20,11 +24,11 @@ it('personal behaviour writes preserve stored accessibility choices while a them
     return response(stored)
   }))
   const { useAgentAppearance } = await import('../src/lib/agentAppearance')
-  const { applyAppearanceTheme } = await import('../src/lib/appearanceTheme')
-  const { PORCELAIN } = await import('../src/lib/themeValues')
+  const { applyTheme } = await import('../src/lib/themeRuntime')
+  const { PORCELAIN } = await import('../src/lib/themeEngine')
   const settings = useAgentAppearance()
   await settings.ready
-  applyAppearanceTheme(PORCELAIN)
+  applyTheme(PORCELAIN)
   expect(settings.choice.value.palette).toBe('standard')
   settings.save({ yellowMinutes: 9 })
   await saved
@@ -46,12 +50,12 @@ it('shares viewer state preferences across surfaces and preserves independent se
   const settings = useAgentAppearance(), cards = useAgentAppearance(), sessions = useAgentAppearance()
   await settings.ready
   expect(fetch).toHaveBeenCalledTimes(1)
-  expect(cards.appearance('stopped')).toMatchObject({ '--agent-state-opacity': '0.7', '--agent-state-saturation': '0' })
+  expect(cards.appearance('stopped')).toMatchObject({ '--agent-state-opacity': 'var(--agent-idle-opacity)', '--agent-idle-opacity': '0.7', '--agent-state-saturation': '1' })
   // The pre-AEON-242 red–green choice reads as Deutan without a write.
   expect(cards.choice.value.palette).toBe('deutan')
-  expect(cards.appearance('working')['--agent-state-color']).toBe('var(--agent-deutan-working)')
+  expect(cards.appearance('working')['--agent-state-color']).toBe('var(--agent-working)')
   settings.save({ palette: 'monochrome', dimInactive: false })
-  expect(sessions.appearance('idle')['--agent-state-opacity']).toBe('1')
+  expect(sessions.appearance('idle')['--agent-idle-opacity']).toBe('1')
   expect(sessions.appearance('working')['--agent-state-saturation']).toBe('0')
   await vi.waitFor(() => expect(writes).toEqual([{ palette: 'monochrome', dimInactive: false, inactiveOpacity: 70, yellowMinutes: 5, redMinutes: 12 }]))
   settings.save({ yellowMinutes: 15 })

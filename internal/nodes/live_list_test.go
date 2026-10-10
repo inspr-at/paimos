@@ -16,7 +16,7 @@ import (
 // applied, so a row that no longer matches is simply absent.
 func TestListIDsNarrowsTheQueryToTheChangedRows(t *testing.T) {
 	p := newPrincipal(t, "live-list-ids")
-	project, ticket := kindBySlug(t, p, "project"), kindBySlug(t, p, "ticket")
+	project, ticket := kindBySlug(t, p, "project"), kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Live"}`)
 	other := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Elsewhere"}`)
 	open := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","parent_id":"`+root.ID+`","title":"Open","state":"new"}`)
@@ -71,7 +71,7 @@ func TestListIDsNarrowsTheQueryToTheChangedRows(t *testing.T) {
 // rest of the batch applies.
 func TestBulkPreconditionsSkipNodesChangedSince(t *testing.T) {
 	p := newPrincipal(t, "live-bulk-precondition")
-	project, ticket := kindBySlug(t, p, "project"), kindBySlug(t, p, "ticket")
+	project, ticket := kindBySlug(t, p, "project"), kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Live"}`)
 	fresh := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","parent_id":"`+root.ID+`","title":"Fresh","state":"new"}`)
 	stale := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","parent_id":"`+root.ID+`","title":"Stale","state":"new"}`)

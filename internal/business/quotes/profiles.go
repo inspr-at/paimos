@@ -18,6 +18,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/business/quotedocument"
+
 	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/plugins/fence"
 )
@@ -25,73 +27,17 @@ import (
 // Profiles are part of the existing business_quotes module and compiled
 // ManifestPlugin. The coordinator mounts quotes.New; this package does not
 // register itself in cmd/aeon or the builtin plugin registry.
-type profileFont struct {
-	Role    string `json:"role"`
-	Family  string `json:"family"`
-	Weight  int    `json:"weight"`
-	Style   string `json:"style"`
-	AssetID string `json:"asset_id"`
-}
-type profilePage struct {
-	WidthMM  string `json:"width_mm"`
-	HeightMM string `json:"height_mm"`
-	TopMM    string `json:"top_mm"`
-	RightMM  string `json:"right_mm"`
-	BottomMM string `json:"bottom_mm"`
-	LeftMM   string `json:"left_mm"`
-}
-type profileColumn struct {
-	Key     string `json:"key"`
-	WidthMM string `json:"width_mm"`
-}
-type profileTable struct {
-	Columns      []profileColumn `json:"columns"`
-	Separator    string          `json:"separator"`
-	RepeatHeader bool            `json:"repeat_header"`
-}
-type profileTotals struct {
-	VAT      string `json:"vat"`
-	Discount string `json:"discount"`
-	NetLabel string `json:"net_label"`
-}
-type profilePayment struct {
-	Position string `json:"position"`
-	Heading  string `json:"heading"`
-}
-type profileAcceptance struct {
-	SignatureColumns int    `json:"signature_columns"`
-	GapMM            string `json:"gap_mm"`
-	LeadMM           string `json:"lead_mm"`
-}
-type profileFooter struct {
-	AssetID          string `json:"asset_id,omitempty"`
-	DotsAssetID      string `json:"dots_asset_id,omitempty"`
-	WidthMM          string `json:"width_mm"`
-	OffsetMM         string `json:"offset_mm"`
-	PageNumberFormat string `json:"page_number_format"`
-}
-type profileDefinition struct {
-	Schema         string            `json:"schema"`
-	LayoutVariant  string            `json:"layout_variant"`
-	Locale         string            `json:"locale"`
-	Fonts          []profileFont     `json:"fonts"`
-	Colors         map[string]string `json:"colors"`
-	Typography     map[string]string `json:"typography"`
-	Page           profilePage       `json:"page"`
-	Cover          map[string]string `json:"cover"`
-	Sections       map[string]string `json:"sections"`
-	PositionsTable profileTable      `json:"positions_table"`
-	Totals         profileTotals     `json:"totals"`
-	PaymentTerms   profilePayment    `json:"payment_terms"`
-	Acceptance     profileAcceptance `json:"acceptance"`
-	Footer         profileFooter     `json:"footer"`
-	Labels         map[string]string `json:"labels"`
-}
-type documentProfileSnapshot struct {
-	ID         string            `json:"id"`
-	Revision   int               `json:"revision"`
-	Definition profileDefinition `json:"definition"`
-}
+type profileFont = quotedocument.Font
+type profilePage = quotedocument.Page
+type profileColumn = quotedocument.Column
+type profileTable = quotedocument.Table
+type profileTotals = quotedocument.Totals
+type profilePayment = quotedocument.Payment
+type profileAcceptance = quotedocument.Acceptance
+type profileFooter = quotedocument.Footer
+type profileDefinition = quotedocument.ProfileDefinition
+type documentProfileSnapshot = quotedocument.ProfileSnapshot
+
 type profileRow struct {
 	ID         string            `json:"id"`
 	Name       string            `json:"name"`
@@ -274,7 +220,7 @@ func readProfile(ctx context.Context, tx pgx.Tx, id string, revision int) (profi
 	if err := json.Unmarshal(raw, &out.Definition); err != nil {
 		return out, err
 	}
-	out.Definition = out.Definition.normalized()
+	out.Definition = out.Definition.Normalized()
 	return out, nil
 }
 func (m *Module) profileList(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +249,7 @@ func (m *Module) profileList(w http.ResponseWriter, r *http.Request) {
 			if err = json.Unmarshal(raw, &item.Definition); err != nil {
 				return err
 			}
-			item.Definition = item.Definition.normalized()
+			item.Definition = item.Definition.Normalized()
 			out = append(out, item)
 		}
 		return rows.Err()
@@ -369,7 +315,7 @@ func (m *Module) profileWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	var out profileRow
 	e = m.tx(r.Context(), p, fence.PermNodesContribute, true, func(tx pgx.Tx) error {
-		in.Definition = in.Definition.normalized()
+		in.Definition = in.Definition.Normalized()
 		if err := validateProfile(r.Context(), tx, in.Definition); err != nil {
 			return err
 		}

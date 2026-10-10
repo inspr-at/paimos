@@ -10,6 +10,17 @@ LOCK TABLE tenants, principals, user_preferences, themes, theme_selections IN SH
 CREATE TEMP TABLE agent_theme_audit (tenant_id uuid NOT NULL, actor_id uuid NOT NULL,
     type text NOT NULL, before jsonb, after jsonb NOT NULL, audience uuid NOT NULL) ON COMMIT DROP;
 
+-- Snapshot explicit effective choices before any backfill writes. A canonical
+-- account inherits a saved alias choice (including explicit default); creating
+-- a saved canonical or lower-UUID alias selection would silently displace it.
+-- Backfills in those groups retain lower-priority physical selections: they
+-- become effective after unlink without replacing the explicit linked choice.
+-- Sessions resolve to the canonical account, so a linked person only ever saw
+-- the canonical account's legacy appearance. Alias backfills are therefore
+-- always lower priority, and a canonical account without any selection row
+-- records its absence (the default it saw) so no alias row wins while linked.
+CREATE TEMP TABLE agent_theme_explicit_groups (tenant_id uuid NOT NULL, canonical_id uuid NOT NULL, PRIMARY KEY(tenant_id,canonical_id)) ON COMMIT DROP;
+
 -- The normal guard requires a canonical owner at creation. A migrated alias
 -- must keep its own immutable owner so unlink restores its own choices. Only
 -- this locked migration bypasses that trigger; all constraints/RLS remain on.
@@ -28,6 +39,9 @@ DECLARE
     style text;
     palette text;
     actor uuid;
+    inherited_explicit boolean;
+    lower_priority boolean;
+    absent uuid;
     prior_tenant text := current_setting('aeon.tenant_id',true);
     prior_system text := current_setting('aeon.system',true);
 BEGIN
@@ -36,7 +50,12 @@ BEGIN
         PERFORM set_config('aeon.tenant_id',target::text,true);
         SELECT config INTO STRICT default_config FROM themes WHERE tenant_id=target AND scope='default';
         actor := aeon_authz_system_actor(target);
-        FOR person IN SELECT p.id FROM principals p WHERE p.tenant_id=target AND p.kind='person'
+        INSERT INTO agent_theme_explicit_groups(tenant_id,canonical_id)
+            SELECT DISTINCT p.tenant_id, coalesce(p.linked_to,p.id) FROM principals p
+            JOIN theme_selections s ON s.tenant_id=p.tenant_id AND s.principal_id=p.id
+            WHERE p.tenant_id=target AND p.kind='person' AND p.status='active'
+                AND s.unsaved_revision IS DISTINCT FROM s.revision;
+        FOR person IN SELECT p.id, coalesce(p.linked_to,p.id) AS canonical_id FROM principals p WHERE p.tenant_id=target AND p.kind='person'
             AND EXISTS (SELECT 1 FROM user_preferences u WHERE u.tenant_id=target AND u.principal_id=p.id
                 AND ((u.key='agent-indicator' AND u.value ?| ARRAY['style','ring','hovering','size'])
                   OR (u.key='agent-state' AND u.value ?| ARRAY['palette','dimInactive','inactiveOpacity'])))
@@ -44,6 +63,8 @@ BEGIN
             SELECT * INTO chosen FROM theme_selections WHERE tenant_id=target AND principal_id=person.id;
             -- A saved theme choice already made through the additive API wins.
             IF FOUND AND chosen.unsaved_revision IS DISTINCT FROM chosen.revision THEN CONTINUE; END IF;
+            inherited_explicit := EXISTS (SELECT 1 FROM agent_theme_explicit_groups WHERE tenant_id=target AND canonical_id=person.canonical_id);
+            lower_priority := inherited_explicit OR person.id <> person.canonical_id;
             prior_choice := jsonb_build_object('principal_id',person.id,'theme_id',chosen.theme_id,
                 'revision',coalesce(chosen.revision,0),'unsaved',true);
             SELECT value INTO indicator FROM user_preferences WHERE tenant_id=target AND principal_id=person.id AND key='agent-indicator';
@@ -63,14 +84,27 @@ BEGIN
             INSERT INTO themes(tenant_id,name,scope,owner_principal_id,config)
                 VALUES(target,'My agent appearance','personal',person.id,jsonb_set(default_config,'{agents}',agent_config)) RETURNING * INTO seeded;
             INSERT INTO theme_selections(tenant_id,principal_id,theme_id,revision,unsaved_revision)
-                VALUES(target,person.id,seeded.id,coalesce(chosen.revision,0)+1,NULL)
-                ON CONFLICT(tenant_id,principal_id) DO UPDATE SET theme_id=EXCLUDED.theme_id,revision=EXCLUDED.revision,unsaved_revision=NULL RETURNING * INTO chosen;
+                VALUES(target,person.id,seeded.id,coalesce(chosen.revision,0)+1,
+                    CASE WHEN lower_priority THEN coalesce(chosen.revision,0)+1 ELSE NULL END)
+                ON CONFLICT(tenant_id,principal_id) DO UPDATE SET theme_id=EXCLUDED.theme_id,revision=EXCLUDED.revision,unsaved_revision=EXCLUDED.unsaved_revision RETURNING * INTO chosen;
             INSERT INTO agent_theme_audit VALUES(target,actor,'theme.created',NULL,
                 jsonb_build_object('id',seeded.id,'tenant_id',target,'name',seeded.name,'scope',seeded.scope,
                     'owner_principal_id',seeded.owner_principal_id,'values',seeded.config,'revision',seeded.revision,
                     'created_at',seeded.created_at,'updated_at',seeded.updated_at),person.id);
             INSERT INTO agent_theme_audit VALUES(target,actor,'theme.selected',prior_choice,
-                jsonb_build_object('principal_id',person.id,'theme_id',chosen.theme_id,'revision',chosen.revision),person.id);
+                jsonb_build_object('principal_id',person.id,'theme_id',chosen.theme_id,'revision',chosen.revision)
+                    || CASE WHEN lower_priority THEN '{"unsaved":true}'::jsonb ELSE '{}'::jsonb END,person.id);
+        END LOOP;
+        FOR absent IN SELECT DISTINCT p.linked_to FROM agent_theme_audit a
+            JOIN principals p ON p.tenant_id=a.tenant_id AND p.id=a.audience
+            WHERE a.tenant_id=target AND a.type='theme.created' AND p.linked_to IS NOT NULL
+                AND NOT EXISTS (SELECT 1 FROM theme_selections s WHERE s.tenant_id=target AND s.principal_id=p.linked_to)
+            ORDER BY 1 LOOP
+            INSERT INTO theme_selections(tenant_id,principal_id,theme_id,revision,unsaved_revision)
+                VALUES(target,absent,NULL,1,1);
+            INSERT INTO agent_theme_audit VALUES(target,actor,'theme.selected',
+                jsonb_build_object('principal_id',absent,'theme_id',NULL,'revision',0,'unsaved',true),
+                jsonb_build_object('principal_id',absent,'theme_id',NULL,'revision',1,'unsaved',true),absent);
         END LOOP;
     END LOOP;
     PERFORM set_config('aeon.tenant_id',coalesce(prior_tenant,''),true);

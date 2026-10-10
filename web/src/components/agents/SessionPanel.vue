@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { displayLanguage } from '../../lib/displayLanguage'
 import { capacityWaitText } from '../../lib/capacityWait'
 import { brand } from '../../lib/brand'
 import { getNode } from '../../lib/api'
@@ -15,7 +16,7 @@ import TicketPeekLink from '../TicketPeekLink.vue'
 import { useRoute, useRouter } from 'vue-router'
 import SessionChat from './SessionChat.vue'
 import SessionTabs from './SessionTabs.vue'
-import { initialTab, saveTab, type SessionTab } from './sessionChat'
+import { capabilityWords, chatCapability, initialTab, saveTab, type SessionTab } from './sessionChat'
 import { useVisualViewport } from '../../lib/visualViewport'
 import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
@@ -23,27 +24,47 @@ import ProvenanceDetail from './ProvenanceDetail.vue'
 import SessionStateEvidence from './SessionStateEvidence.vue'
 import ListeningLabel from './ListeningLabel.vue'
 import SessionRecovery from './SessionRecovery.vue'
+import { useAgentRecovery } from '../../lib/agentRecovery'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
+import SessionPauseActions from './SessionPauseActions.vue'
+import PauseEvidence from './PauseEvidence.vue'
+import FloatingPanel from '../work/FloatingPanel.vue'
+import { pausingSession } from '../../lib/agentPause'
 import LiveWatch from './LiveWatch.vue'
 import { activityOf, currentStep, currentActivity, activityDurations } from './activity'
 import { cleanActivityNote } from '../../lib/activityPrivacy'
 import { metadataChangeText, metadataChanges } from './metadataHistory'
-import EtaCell from '../work/EtaCell.vue'
+import SessionEstimate from './SessionEstimate.vue'
 import DeliveryRating from '../work/DeliveryRating.vue'
 import { etaFromSession } from '../../lib/eta'
 import { quickRemoval } from './sessionActions'
 import { sessionEtaEligible } from './sessionRow'
 import ServiceTierBlock from './ServiceTierBlock.vue'
+import { tierHistoryText, tierRunCostLabel, tierCostAmount } from '../../lib/serviceTier'
 import { useServiceTiers } from '../../stores/serviceTiers'
 const serviceTiers = useServiceTiers()
 
 // One session in the docked panel: who and where, the bound ticket, then two tabs:
 // Overview (now, details, work, runs, provenance) and Messages (thread and composer).
+const actionsAnchor = ref<HTMLElement | null>(null)
+const composing = ref(false)
+function chatFocus(event: FocusEvent) {
+  if ((event.target as HTMLElement).matches('#session-panel-messages textarea')) composing.value = true
+}
+function chatBlur(event: FocusEvent) {
+  // Removing Reply/Edit feedback blurs its button to the body. Keep the
+  // compact frame until focus explicitly leaves this panel.
+  if (event.relatedTarget instanceof Node && !root.value?.contains(event.relatedTarget)) composing.value = false
+}
 const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string }>()
+const agentRecovery = useAgentRecovery(() => props.view?.session.id)
 const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval] }>()
+watch(() => props.view?.session.id, () => { actionsAnchor.value = null; composing.value = false })
 const agents = useAgents()
 const auth = useSession()
+const capability = computed(() => s.value ? chatCapability(s.value) : 'between')
+const capText = computed(() => capabilityWords[displayLanguage()][capability.value])
 const root = ref<HTMLElement>()
 const thread = ref<HTMLElement>()
 const recovery = ref<{ open: () => void }>()
@@ -98,7 +119,15 @@ const timeline = computed(() => activity.value?.agent_activity_mode === 'off' ? 
   return note ? [{ ...item, note }] : []
 }))
 const currentTimeline = computed(() => activity.value?.agent_activity_mode === 'off' ? [] : activityDurations((activity.value?.current_activity_history ?? []).filter(item => activity.value?.agent_activity_mode !== 'tool_activity' || item.source === 'auto'), props.now, s.value?.stopped_at))
-const metadataHistory = computed(() => metadataChanges(s.value?.metadata_history))
+const tierState = computed(() => s.value ? serviceTiers.state(s.value) : undefined)
+const runCost = computed(() => {
+  const cost = tierState.value?.run_cost
+  return cost && run.value && cost.run_id === run.value.id && cost.model === s.value?.model ? cost : undefined
+})
+const metadataHistory = computed(() => [
+  ...metadataChanges(s.value?.metadata_history).map((item, i) => ({ id: `metadata-${i}`, at: item.at, text: metadataChangeText(item) })),
+  ...(tierState.value?.history ?? []).map(item => ({ id: `tier-${item.id}`, at: item.at, text: tierHistoryText(item) })),
+].sort((a, b) => Date.parse(b.at) - Date.parse(a.at)))
 const step = computed(() => {
   if (!props.view) return ''
   return currentActivity(props.view, props.now) || currentStep(props.view)
@@ -146,8 +175,8 @@ onBeforeUnmount(() => phoneMedia.removeEventListener('change', syncPhone))
 const works = (kind: SessionControl['kind']) => !!props.view && !props.controlBlock(props.view, kind)
 const outside = computed(() => !!s.value && s.value.management_mode === 'unmanaged' && s.value.phase !== 'stopped' && !s.value.archived_at)
 const quick = computed(() => !!props.view && quickRemoval(props.view))
-function pickTier() {
-  const view = props.view, anchor = root.value?.querySelector<HTMLElement>('[aria-label="More session actions"]')
+function pickTier(anchor: HTMLElement | null) {
+  const view = props.view
   if (view && anchor) serviceTiers.open(view.session, view.name, anchor)
 }
 function control(kind: SessionControl['kind']) { if (props.view && !props.controlBlock(props.view, kind)) emit('control', props.view, kind) }
@@ -155,13 +184,13 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
 
 <template>
-  <aside ref="root" class="session-panel" aria-label="Session details" tabindex="-1">
+  <aside ref="root" class="session-panel" :class="{ composing }" aria-label="Session details" tabindex="-1" @focusin="chatFocus" @focusout="chatBlur">
     <!-- The identity stays in view while runs and messages scroll below it. -->
     <header class="panel-head">
       <div class="head-top">
         <template v-if="view && !loading">
           <AgentGlyph :view="view" :size="36" />
-          <h2 class="name" :title="view.name">{{ view.name }}</h2>
+          <h2 class="name">{{ view.name }}</h2>
           <AgentStateLabel :state="view.status.state" :label="view.status.label" />
         </template>
         <span class="spacer" />
@@ -171,27 +200,35 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <TicketPeekLink v-if="view.ticket" class="ticket-detail" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title"><span class="ticket-chip">{{ view.ticket.key }}</span><span class="head-ticket">{{ view.ticket.title }}</span></TicketPeekLink>
         <span v-if="ticketState" class="ticket-status">{{ ticketState }}</span>
       </div>
+      <div v-if="view && !loading && !reported?.watch" class="chat-identity">
+        <span class="chat-setup" :title="[view.harness, view.model, view.session.host].filter(Boolean).join(' · ')">{{ view.harness }}<template v-if="view.model"> · {{ view.model }}</template><template v-if="view.session.host"> · {{ view.session.host }}</template></span>
+        <button type="button" class="capability" :class="capability" :data-tip="capText[1]" :aria-label="capText[0]"><AppIcon :name="capability === 'native' ? 'bolt' : capability === 'abort' ? 'alert' : 'queue'" :size="12" /><span>{{ capText[0] }}</span></button>
+      </div>
       <div v-if="view && !loading && !compactControls" class="head-actions">
-        <span class="host-meta">{{ view.harness }}<template v-if="view.session.host"> on {{ view.session.host }}</template></span>
+
         <span class="spacer" />
-        <template v-if="!reported?.watch && !view.session.advertised_capabilities.includes('managed_control_v1')">
-          <button v-if="works('interrupt')" type="button" class="btn sm ghost" data-tip="Stop the current turn" @click="control('interrupt')"><AppIcon name="interrupt" :size="14" />Interrupt</button>
-          <button v-if="works('stop')" type="button" class="btn sm ghost stop" data-tip="End this session" @click="control('stop')"><AppIcon name="halt" :size="14" />Stop</button>
-        </template>
+        <button v-if="agentRecovery.action(view.session)" class="btn sm ghost" type="button" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name)"><AppIcon name="refresh" :size="14" />{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</button>
+        <SessionPauseActions v-if="!reported?.watch" :session="reported || view.session" />
+        <button v-if="!reported?.watch && !view.session.advertised_capabilities.includes('managed_control_v1') && works('interrupt') && !pausingSession(view.session)" class="icon-btn sm flat" type="button" aria-label="More session actions" aria-haspopup="menu" :aria-expanded="!!actionsAnchor" @click="actionsAnchor = $event.currentTarget as HTMLElement"><AppIcon name="more" /></button>
+        <FloatingPanel v-if="actionsAnchor" :anchor="actionsAnchor" align="end" label="More session actions" @close="actionsAnchor = null"><div role="menu"><button class="btn sm ghost" type="button" role="menuitem" @click="control('interrupt'); actionsAnchor = null"><AppIcon name="interrupt" />Interrupt this step</button></div></FloatingPanel>
         <SessionRecovery v-if="!reported?.watch" :session="view.session" />
         <RemoveSessionDialog :session="view.session" :label="view.name" :quick="quick" />
       </div>
-      <p v-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
+      <SessionPauseActions v-if="view && !loading && compactControls && !reported?.watch" :session="reported || view.session" />
       <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" :run-status="view.run?.status">
-        <template v-if="compactControls" #more>
-          <button v-if="view && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="menu-item" :disabled="!!serviceTiers.state(view.session).pending" @click="pickTier"><AppIcon name="gauge" :size="16" /><span class="mi-text">Change tier…</span></button>
+        <template v-if="compactControls" #more="{ anchor }">
+          <button v-if="view && agentRecovery.action(view.session)" type="button" role="menuitem" class="menu-item" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name)"><AppIcon name="refresh" :size="16" /><span class="mi-text">{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</span></button>
+          <button v-if="view && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="menu-item" :disabled="!!serviceTiers.state(view.session).pending" @click="pickTier(anchor)"><AppIcon name="gauge" :size="16" /><span class="mi-text">Change tier…</span></button>
           <button v-if="showRecover" type="button" role="menuitem" class="menu-item" @click="recovery?.open()"><AppIcon name="wrench" :size="16" /><span class="mi-text"><span>Recover</span></span></button>
+          <hr v-if="showRemove" class="menu-sep">
           <button v-if="showRemove" type="button" role="menuitem" class="menu-item" :aria-label="`Remove ${view.name}`" @click="removal?.remove()"><AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quick ? 'Remove' : 'Remove…' }}</span></span></button>
         </template>
       </ManagedSessionControls>
       <SessionRecovery v-if="view && !loading && compactControls" ref="recovery" hide-trigger :session="view.session" />
       <RemoveSessionDialog v-if="view && !loading && compactControls" ref="removal" hide-trigger :session="view.session" :label="view.name" :quick="quick" />
       <SessionTabs v-if="view && !loading && !reported?.watch" :selected="tab" :unread="tab === 'messages' ? 0 : unread" @select="selectTab" />
+      <p v-if="view && !loading && view.session.agent_recovery" class="outside-note">{{ view.session.agent_recovery.detail }}</p>
+      <p v-else-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
     </header>
 
     <!-- Until the first load completes the body stays a placeholder, so runs and
@@ -222,6 +259,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
       <section class="now-block" aria-labelledby="now-title">
         <h3 id="now-title" class="sr-only">Now</h3>
+        <PauseEvidence :session="reported || view.session" :now="now" />
         <p v-if="view.session.archived_at" class="now-meta">Archived registration · process state unknown. No process was stopped by recovery.</p>
         <strong class="now-step">{{ step }}</strong>
         <p class="now-meta">
@@ -231,7 +269,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <template v-else> · no heartbeat yet</template>
         </p>
         <p v-if="view.session.phase !== 'stopped' && !view.session.stopped_at && !view.session.archived_at" class="now-meta now-listen"><ListeningLabel :session="view.session" :now="now" /></p>
-        <p v-if="sessionEtaEligible(view) && (etaFromSession(view.session) || view.session.phase === 'working')" class="now-meta now-eta"><EtaCell align="start" labelled :eta="etaFromSession(view.session)" :now="now" :missing="view.session.phase === 'working'" /></p>
+        <p v-if="sessionEtaEligible(view) && (etaFromSession(view.session) || view.session.phase === 'working')" class="now-meta now-eta"><SessionEstimate labelled :eta="etaFromSession(view.session)" :now="now" :missing="view.session.phase === 'working'" /></p>
         <SessionStateEvidence :view="view" :now="now" />
         <ol v-if="currentTimeline.length" class="activity-timeline" aria-label="Current activity history">
           <li v-for="(item, index) in currentTimeline.slice(0, 6)" :key="`${item.at}-${index}`"><time :datetime="item.at" :title="absoluteTime(item.at)">{{ item.duration }}</time><span>{{ item.text }}</span></li>
@@ -257,8 +295,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <div class="fact"><dt>Harness</dt><dd>{{ setupLine }}</dd></div>
         </dl>
         <ol v-if="metadataHistory.length" class="metadata-history" aria-label="Recent session changes">
-          <li v-for="(item, index) in metadataHistory" :key="`${item.field}-${item.at}-${index}`"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ metadataChangeText(item) }}</span></li>
+          <li v-for="item in metadataHistory" :key="item.id"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ item.text }}</span></li>
         </ol>
+        <p v-if="tierState?.history_truncated" class="muted">Showing the latest 50 tier events.</p>
       </section>
 
       <section v-if="hasWork" class="block" aria-labelledby="work-title">
@@ -278,7 +317,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <div class="metric"><span class="metric-label">Status</span><span class="run-chip" :class="run.wait?.code === 'vendor' ? '' : RUN_OUTCOME[run.status].tone">{{ run.wait?.code === 'vendor' ? 'Throttled' : RUN_OUTCOME[run.status].label }}</span></div>
           <div class="metric"><span class="metric-label">Tokens in</span><b>{{ tokens(run.input_tokens) }}</b></div>
           <div class="metric"><span class="metric-label">Tokens out</span><b>{{ tokens(run.output_tokens) }}</b></div>
-          <div class="metric"><span class="metric-label">Cost</span><b>{{ cost(run.cost_micros) }}</b></div>
+          <div class="metric"><span class="metric-label">Cost</span><b>{{ runCost ? tierCostAmount(runCost) : cost(run.cost_micros) }}</b><small v-if="runCost" class="tier-cost">{{ tierRunCostLabel(runCost) }}</small><small v-if="runCost">{{ runCost.provisional ? 'Provisional token estimate' : 'Token estimate' }} · not billed cost</small><small v-if="runCost && run.cost_micros > 0">Reported cost {{ cost(run.cost_micros) }}</small></div>
         </div>
       </section>
 
@@ -302,7 +341,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
     </div>
     <SessionChat v-if="view && !loading && !reported?.watch" v-show="tab === 'messages'" id="session-panel-messages" :view="view" :now="now" :can-write="canWrite" :active="tab === 'messages'"
-      role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" />
+      :interrupt-block="controlBlock(view, 'interrupt')" role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" @interrupt="control('interrupt')" />
   </aside>
 </template>
 
@@ -321,14 +360,15 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   @keyframes panel-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: none; } }
 }
 .panel-head { flex-shrink: 0; padding: 8px 10px 10px 18px; border-bottom: 1px solid var(--line); }
-.head-top { display: flex; align-items: center; gap: 8px; min-height: 36px; }
-.head-actions { display: flex; align-items: center; gap: 4px; min-width: 0; margin-top: 6px; }
+.head-top { display: flex; align-items: flex-start; gap: 8px; min-height: 36px; }
+/* Actions that no longer fit wrap to a right-aligned second line; none shrinks under its label (AEON-1062). */
+.head-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; min-width: 0; margin-top: 6px; }
 .head-actions .btn { display: inline-flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; }
 .outside-note { margin: 2px 0 0; font-size: 12px; line-height: 1.4; color: var(--ink-3); }
 .host-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; }
-.name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
+.name { min-width: 0; white-space: normal; overflow-wrap: anywhere; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
 .state-text { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
-.state-text.needs { color: var(--gold-ink); }
+.state-text.needs { color: var(--warn-ink); }
 .head-sub { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 6px; padding-right: 8px; font-size: 12.5px; color: var(--ink-2); }
 .head-sub .ticket-detail { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; color: var(--ink); text-decoration: none; }
 .head-sub .ticket-detail:hover .head-ticket { color: var(--teal-ink); }
@@ -358,7 +398,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .metadata-history time { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
 .metadata-history span { overflow-wrap: anywhere; }
 .ticket-status { flex: none; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
-.callout { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 12px 12px 14px; border-radius: 12px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--gold-ink); }
+.callout { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 12px 12px 14px; border-radius: 12px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent); color: var(--warn-ink); }
 .callout-text { display: grid; flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); }
 .callout-text strong { color: var(--ink); font-size: 13px; }
 .facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 12px 20px; margin: 0; }
@@ -370,6 +410,14 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .commits { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
 .commits li { display: flex; gap: 8px; flex-wrap: wrap; }
 .commits code { font: 12px var(--mono); color: var(--ink-2); }
+.chat-identity { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; margin-top: 8px; }
+.chat-setup { min-width: 0; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }
+.capability { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%; min-height: 28px; padding: 3px 9px; border: 0; border-radius: 999px; color: var(--teal-ink); background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); font: 600 12px/1.4 var(--font); cursor: help; text-align: left; }
+.capability svg { flex: none; }
+.capability.queue, .capability.between { color: var(--ink-2); background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--line); }
+.capability.abort { color: var(--warn-ink); background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--warn-line); }
+.capability:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+@media (max-width: 720px) { .capability { min-height: 44px; } }
 .muted { color: var(--ink-3); }
 .evidence { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--chip-teal-bg); color: var(--teal-ink); }
 .project-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
@@ -383,7 +431,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .metric-label { font-size: 11.5px; color: var(--ink-2); }
 .metric b { font: 600 15px/1.2 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
 .run-chip { justify-self: start; display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10.5px/1 var(--mono); letter-spacing: .04em; font-variant-ligatures: none; background: var(--chip-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--chip-line); }
-.run-chip.ok { background: rgba(47, 122, 90, .1); color: color-mix(in oklab, var(--ok), var(--ink) 28%); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); }
+.run-chip.ok { background: var(--ok-bg); color: color-mix(in oklab, var(--ok), var(--ink) 28%); box-shadow: inset 0 0 0 1px var(--ok-line); }
 .run-chip.busy { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .run-chip.bad { background: var(--danger-bg); color: color-mix(in oklab, var(--danger), var(--ink) 28%); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .empty-line { font-size: 13px; color: var(--ink-3); }
@@ -411,10 +459,11 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   /* Up to four quiet controls share one row on phones. */
   .head-actions .btn { flex: 1 1 0; min-width: 0; min-height: 44px; padding-inline: 4px; }
   .head-top .icon-btn { width: 40px; height: 40px; }
-  /* While typing (keyboard open) the thread gets the room: controls and ticket step aside. */
-  .session-panel:has(#session-panel-messages textarea:focus) .head-actions,
-  .session-panel:has(#session-panel-messages textarea:focus) .head-sub,
-  .session-panel:has(#session-panel-messages textarea:focus) .managed-controls { display: none; }
+  /* Compact only after entering the composer. Keep that frame while focus
+     moves to thread actions, so focusing Retry/Copy cannot move the click. */
+  .session-panel.composing .head-actions,
+  .session-panel.composing .head-sub,
+  .session-panel.composing .managed-controls { display: none; }
   .scroll { padding: 16px 18px 24px; }
   .telemetry { grid-template-columns: 1fr 1fr; }
   .run-row { grid-template-columns: 88px minmax(0, 1fr) 56px; }

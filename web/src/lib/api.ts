@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 export interface Identity {
+  full_access?: boolean
   principal: { id: string; name: string; email?: string; kind?: 'person' | 'agent'; roles?: string[] }
   // brand: the workspace's own header brand (AEON-431), absent when unset.
-  tenant: { id: string; name: string; brand?: import('./tenantBrand').TenantBrand }
+  // slug: the workspace's stable short name (also the default CLI instance name).
+  tenant: { id: string; name: string; slug?: string; brand?: import('./tenantBrand').TenantBrand }
   // The signed-in person's external identity; absent for agent keys.
   identity?: { email?: string; display_name?: string } | null
 }
@@ -124,8 +126,19 @@ export interface Kind {
   id: string; slug: string; label: string; short_prefix: string; icon: string
   allowed_child_kinds: string[] | null; field_schema: Record<string, unknown>
 }
+export interface ParentBenefitGeneration {
+  is_parent: boolean
+  status: 'none' | 'queued' | 'running' | 'failed' | 'generated' | 'edited' | 'cancelled'
+  generation: string
+  revision: string
+  generated: boolean
+  error?: string
+}
 export interface WorkNode {
   recurrence?: NodeRecurrence
+  queue_stale?: boolean
+  is_leaf?: boolean; depth?: number; level_name?: string; level_icon?: string
+  work_children_count?: number; status_derived?: boolean
   human_check?: string | null
   estimate?: TicketEstimate
   id: string; key: string; kind_id: string; title: string; body: string
@@ -232,11 +245,15 @@ export interface ListItem extends WorkNode {
 export type Facets = Record<string, Record<string, number>>
 export interface ListPage extends Page<ListItem> { facets?: Facets }
 export interface ListQuery {
+ shape?: string[]; depth?: string[]
+  // Work levels: leaf, else a parent's depth (AEON-974).
+  level?: string[]
   human_check?: string[]
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
   tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]
   date_field?: string; date_from?: string; date_to?: string
-  q?: string; hide_closed?: boolean; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
+  q?: string; hide_closed?: boolean; hide_states?: string[]; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
+  work_state?: string[]; work_bucket?: WorkCountBucket[]
   // Only these nodes (at most 200), every other filter still applied (AEON-326).
   ids?: string[]
 }
@@ -249,7 +266,12 @@ export interface ProjectSummary {
   open: number; in_progress: number; done: number; cancelled?: number; total: number; last_activity: string
   // The people (and agents) most recently active in the project, newest first; absent on older servers.
   people?: ProjectPerson[]
+  archived_count?: number
+  status_counts?: ProjectStatusCount[]
+  status_counts_truncated?: boolean
 }
+export type WorkCountBucket = 'open' | 'in_progress' | 'done' | 'cancelled' | 'archived'
+export interface ProjectStatusCount { state: string; bucket: WorkCountBucket; count: number }
 export interface ProjectPerson { id: string; name: string; kind: 'person' | 'agent'; has_avatar?: boolean }
 function listQuery(params: ListQuery): string {
   const values: Record<string, string | number | boolean | undefined> = {}
@@ -267,12 +289,13 @@ export const listNodes = async (params: ListQuery, options: { signal?: AbortSign
   return stampAt(page, { position, start }, 2)
 }
 // U22 saved views: a project's list state with a name, own or shared (api/openapi.yaml SavedView).
+export type SavedViewMode = 'list' | 'outline' | 'graph'
 export interface SavedView {
   id: string; owner_principal_id: string; project_id: string | null; name: string
-  filters: Record<string, unknown>; sort_keys: string[]; group_by: string; columns: string[]; shared: boolean
+  filters: Record<string, unknown>; sort_keys: string[]; group_by: string; mode: SavedViewMode; columns: string[]; shared: boolean
   created_at: string; updated_at: string; deleted_at: string | null
 }
-export interface ViewWrite { name: string; project_id?: string | null; filters: Record<string, string>; sort_keys: string[]; group_by: string; columns: string[]; shared: boolean }
+export interface ViewWrite { name: string; project_id?: string | null; filters: Record<string, string>; sort_keys: string[]; group_by: string; mode: SavedViewMode; columns: string[]; shared: boolean }
 export const listViews = (projectId: string) => json<{ items: SavedView[] }>(`/views${query({ project_id: projectId })}`)
 export const createView = (body: ViewWrite) => json<SavedView>('/views', 'POST', body)
 export const updateView = (id: string, body: Partial<Omit<ViewWrite, 'project_id'>>) => json<SavedView>(`/views/${idPath(id)}`, 'PATCH', body)

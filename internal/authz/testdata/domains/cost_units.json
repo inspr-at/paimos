@@ -1,0 +1,65 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "cost_units.manage",
+      "cost_units.read",
+      "cost_units.write"
+    ],
+    "member": [
+      "cost_units.read",
+      "cost_units.write"
+    ],
+    "owner": [
+      "cost_units.manage",
+      "cost_units.read",
+      "cost_units.write"
+    ],
+    "viewer": [
+      "cost_units.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Manage cost units",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Cost Units",
+      "key": "cost_units.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read cost units",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Cost Units",
+      "key": "cost_units.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write cost units",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Cost Units",
+      "key": "cost_units.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "cost_units": "cost units"
+    }
+  }
+}

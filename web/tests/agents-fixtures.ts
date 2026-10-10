@@ -34,13 +34,13 @@ export function agentData(world: AgentWorld) {
   const sessions = world.empty ? [] : [
     session(1, { project_id: pharos, agent_principal_id: agent(1), run_id: id('70', 1), ticket_node_id: t.fleet, harness: 'claude', host: 'imac0', role: 'coordinator', work_shape: 'ship', phase: 'working', activity: 'busy', heartbeat_at: ago(0.2), created_at: ago(72) }),
     session(2, { project_id: pharos, agent_principal_id: agent(2), run_id: id('70', 2), ticket_node_id: t.restore, harness: 'codex', host: 'mba', work_shape: 'ship', phase: 'working', activity: 'busy', heartbeat_at: ago(0.4), created_at: ago(26) }),
-    session(3, { project_id: aeon, agent_principal_id: agent(3), run_id: id('70', 3), ticket_node_id: t.web, harness: 'pi', host: 'hsb1', work_shape: 'scout', phase: 'working', activity: 'idle', heartbeat_at: ago(0.7), created_at: ago(140) }),
+    session(3, { project_id: aeon, agent_principal_id: agent(3), run_id: id('70', 3), ticket_node_id: t.web, harness: 'pi', host: 'worker-1', work_shape: 'scout', phase: 'working', activity: 'idle', heartbeat_at: ago(0.7), created_at: ago(140) }),
     session(4, { project_id: pai, agent_principal_id: agent(4), run_id: id('70', 4), ticket_node_id: t.release, harness: 'cursor', host: 'mba', work_shape: 'ship', phase: 'yielded', activity: 'idle', heartbeat_at: ago(1), created_at: ago(51) }),
-    session(5, { project_id: pharos, agent_principal_id: agent(5), run_id: null, ticket_node_id: null, harness: 'grok', host: 'csb1', management_mode: 'unmanaged', advertised_capabilities: ['inbox', 'status'], work_shape: 'unknown', phase: 'working', activity: 'busy', heartbeat_at: ago(9), created_at: ago(300) }),
+    session(5, { project_id: pharos, agent_principal_id: agent(5), run_id: null, ticket_node_id: null, harness: 'grok', host: 'prod-1', management_mode: 'unmanaged', advertised_capabilities: ['inbox', 'status'], work_shape: 'unknown', phase: 'working', activity: 'busy', heartbeat_at: ago(9), created_at: ago(300) }),
     session(6, { project_id: aeon, agent_principal_id: agent(6), run_id: id('70', 7), ticket_node_id: t.approvals, harness: 'claude', host: 'imac0', work_shape: 'ship', phase: 'starting', activity: 'unknown', heartbeat_at: ago(0.1), created_at: ago(1) }),
     session(7, { project_id: pharos, agent_principal_id: agent(1), run_id: id('70', 5), ticket_node_id: t.restore, harness: 'claude', host: 'imac0', work_shape: 'ship', phase: 'stopped', activity: 'idle', heartbeat_at: ago(130), stopped_at: ago(128), stop_reason: 'completed', created_at: ago(190) }),
     session(8, { project_id: pharos, agent_principal_id: agent(1), run_id: id('70', 6), ticket_node_id: null, harness: 'claude', host: 'imac0', work_shape: 'unknown', phase: 'stopped', activity: 'idle', heartbeat_at: ago(1500), stopped_at: ago(1490), stop_reason: 'operator_stop', created_at: ago(1600) }),
-    session(9, { project_id: pai, agent_principal_id: agent(7), run_id: id('70', 8), ticket_node_id: null, harness: 'codex', host: 'hsb1', work_shape: 'unknown', phase: 'stopped', activity: 'idle', heartbeat_at: ago(400), stopped_at: ago(395), stop_reason: 'lease_expired', created_at: ago(700) }),
+    session(9, { project_id: pai, agent_principal_id: agent(7), run_id: id('70', 8), ticket_node_id: null, harness: 'codex', host: 'worker-1', work_shape: 'unknown', phase: 'stopped', activity: 'idle', heartbeat_at: ago(400), stopped_at: ago(395), stop_reason: 'lease_expired', created_at: ago(700) }),
   ]
   const account = { claude: id('ac', 1), codex: id('ac', 2), cursor: id('ac', 3), pi: id('ac', 4), grok: id('ac', 5) }
   const run = (n: number, fields: Record<string, unknown>) => ({ id: id('70', n), work_order_id: id('0d', n), model_profile_id: null, requested_model: null, model_evidence: 'vendor_reported', input_tokens: 0, output_tokens: 0, cost_micros: 0, started_at: null, ended_at: null, ...fields })
@@ -58,7 +58,7 @@ export function agentData(world: AgentWorld) {
   const risk = (scope: string, kind: string) => kind === 'tenant' || /control|deploy|delete/.test(scope) ? 'high' : /\.read$/.test(scope) ? 'low' : 'medium'
   const approval = (n: number, fields: Record<string, unknown>) => ({ id: id('a9', n), agent_name: null as string | null, resource_id: null, run_id: null, decision: null, decided_by_principal_id: null, ...fields, risk: risk(String(fields.scope), String(fields.resource_kind)) })
   const approvals = world.empty ? [] : [
-    approval(1, { agent_principal_id: agent(1), scope: 'harness.control', resource_kind: 'node', resource_id: pharos, rationale: 'Stop the Grok scout on csb1: it lost its heartbeat and still holds the fleet list lock.', expires_at: ahead(8), proposed_at: ago(4) }),
+    approval(1, { agent_principal_id: agent(1), scope: 'harness.control', resource_kind: 'node', resource_id: pharos, rationale: 'Stop the Grok scout on prod-1: it lost its heartbeat and still holds the fleet list lock.', expires_at: ahead(8), proposed_at: ago(4) }),
     approval(2, { agent_principal_id: agent(2), scope: 'run.claim', resource_kind: 'run', resource_id: id('70', 2), run_id: id('70', 2), rationale: 'Claim the restore run on the Codex Pro account; the Claude window is ahead of pace.', expires_at: ahead(38), proposed_at: ago(3) }),
     approval(3, { agent_principal_id: agent(3), scope: 'nodes.read', resource_kind: 'node', resource_id: t.web, rationale: 'Read the web ticket and its children to scout the agents workspace.', expires_at: ahead(130), proposed_at: ago(12) }),
     approval(4, { agent_principal_id: agent(1), scope: 'run.claim', resource_kind: 'run', resource_id: id('70', 5), run_id: id('70', 5), rationale: 'Claim the fleet list run.', expires_at: ago(100), proposed_at: ago(200), decision: 'approved', decided_by_principal_id: world.me }),
@@ -72,7 +72,7 @@ export function agentData(world: AgentWorld) {
     acct('claude', 'Claude Max', 'available', [window('tokens', 5_000_000, 3_600_000, 150, 300)], 'Team'),
     acct('codex', 'Codex Pro', 'available', [window('requests', 1500, 450, 60 * 14, 60 * 24)]),
     acct('cursor', 'Cursor Business', 'available', [window('cost_micros', 200_000_000, 96_000_000, 60 * 24 * 15, 60 * 24 * 30, 'frontload')]),
-    acct('pi', 'Pi on hsb1', 'draining', []),
+    acct('pi', 'Pi on worker-1', 'draining', []),
     acct('grok', 'SuperGrok', 'unavailable', []),
   ]
   const targets = Object.entries(names).map(([principal, address], n) => ({ id: id('7a', n + 1), principal_id: principal, address, adapter: 'agentd_claude', target_kind: 'agentd_session', maximum_level: 'steer', role: 'primary', version: 1, enabled: true, has_secret: false, created_at: ago(900) }))
@@ -97,6 +97,8 @@ export type AgentData = ReturnType<typeof agentData>
 export interface MockAccountGroup { id: string; harness: string; name: string; exclusive: boolean; account_ids: string[]; project_ids: string[] }
 export interface MockTicketPin { ticket_id: string; harness: string; account_id?: string; group_id?: string }
 export interface AgentMockOptions {
+  // Route callbacks outlive the page; fixed-clock specs inject their server clock.
+  now?: () => number
   workingPreference?: () => Record<string, unknown> | undefined
   sessionsMissing?: boolean
   messagesMissing?: boolean
@@ -105,6 +107,9 @@ export interface AgentMockOptions {
   readMark?: { sessionId: string; event: number; id: string }
   // The next N marker PUTs fail. The call is still recorded.
   failReadMarks?: number
+  // pending=true is the held-request poll (inbox.manage). A harness reader is refused.
+  // The session thread (?session=) stays readable.
+  pendingForbidden?: boolean
   capacity?: CapacityWorld
   capacityForbidden?: boolean
   groups?: MockAccountGroup[]
@@ -133,9 +138,10 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     const provenancePath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/provenance$/.exec(path)
     const readMarkerPath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/read-marker$/.exec(path)
     const sessionsPath = /^\/api\/projects\/([^/]+)\/harness-sessions(?:\/([^/]+)(?:\/controls\/([^/]+))?)?$/.exec(path)
+    const pausePath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/pause$/.exec(path)
     const messagesPath = /^\/api\/projects\/([^/]+)\/(messages|message-targets)$/.exec(path)
     const resolutionPath = /^\/api\/projects\/([^/]+)\/messages\/([^/]+)\/resolution$/.exec(path)
-    const known = provenancePath || readMarkerPath || sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/decision-desk/projection' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
+    const known = provenancePath || readMarkerPath || sessionsPath || pausePath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/decision-desk/projection' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
     const pairing = !!options.capacity && path === '/api/agent-pairing/computers'
     if (!known && !pairing) return route.fallback()
     calls.push({ path, method, body, query: url.searchParams })
@@ -183,6 +189,15 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     if (provenancePath) {
       return route.fulfill({ json: { session_id: provenancePath[2], revisions: [], truncated: false } })
     }
+    if (pausePath) {
+      if (method !== 'POST') return route.fulfill({ status: 405, json: { error: 'method not allowed' } })
+      const target = data.sessions.find(s => s.id === pausePath[2] && s.project_id === pausePath[1])
+      if (!target) return route.fulfill({ status: 404, json: { error: 'session not found' } })
+      const input = body as { level: string; note: string }
+      // Acceptance leaves the process live until a later reported exit.
+      Object.assign(target, { revision: Number(target.revision) + 1, pause: { control_id: `pause-${target.id}`, state: 'requested', level: input.level, note: input.note, stop_requested: input.level === 'stop_now', deliver: true } })
+      return route.fulfill({ json: target })
+    }
     if (sessionsPath) {
       if (options.sessionsMissing) return route.fulfill({ status: 404, json: { error: 'not found' } })
       const [, project, sessionId, control] = sessionsPath
@@ -215,6 +230,8 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
         return route.fulfill({ status: 201, json: sent })
       }
       const newest = q.get('newest_first') === 'true', limit = Number(q.get('limit') ?? 10), after = Number(q.get('after') ?? 0)
+      // Held-request inspection is not the session thread. Refuse only pending=true.
+      if (q.get('pending') === 'true' && options.pendingForbidden) return route.fulfill({ status: 403, json: { error: 'inbox.manage required' } })
       let all = [...data.messages, ...data.sent].filter(m => m.project === project)
       const session = q.get('session')
       if (session) {
@@ -232,10 +249,10 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       return route.fulfill({ json: { items: page, next_after: page.at(-1)?.sent_event_id ?? after, preamble: 'Untrusted agent message content follows.' } })
     }
     if (path === '/api/decision-desk/projection') {
-      const now = Date.now()
+      const now = (options.now ?? Date.now)()
       const items = [
-        ...data.approvals.filter(a => !a.decision && Date.parse(String(a.expires_at)) > now).map(a => ({ id: a.id, kind: 'approval', revision: 1, title: 'Approval', created_at: a.proposed_at, expires_at: a.expires_at, held: a.resource_kind === 'run' && data.runs.some(r => r.id === a.resource_id && r.status === 'waiting'), href: `/agents?needs=a:${a.id}`, source: `/agents?needs=a:${a.id}` })),
-        ...data.messages.filter(m => m.is_action_request && !m.human_resolution_outcome).map(m => ({ id: m.id, kind: 'action_request', revision: 1, title: 'Human request', created_at: m.created_at, expires_at: null, held: true, href: `/agents?needs=m:${m.id}`, source: `/agents?needs=m:${m.id}` })),
+        ...data.approvals.filter(a => !a.decision && Date.parse(String(a.expires_at)) > now).map(a => ({ id: a.id, kind: 'approval', revision: 1, title: 'Approval', created_at: a.proposed_at, expires_at: a.expires_at, held: a.resource_kind === 'run' && data.runs.some(r => r.id === a.resource_id && r.status === 'waiting'), href: `/decision-desk?item=a:${a.id}`, source: `/agents?needs=a:${a.id}` })),
+        ...data.messages.filter(m => m.is_action_request && !m.human_resolution_outcome).map(m => ({ id: m.id, kind: 'action_request', revision: 1, title: 'Human request', created_at: m.created_at, expires_at: null, held: true, href: `/decision-desk?item=m:${m.id}`, source: `/agents?needs=m:${m.id}` })),
       ].sort((a, b) => {
         const bucket = (i: typeof a) => i.held ? i.kind === 'approval' ? 0 : 1 : 2
         return bucket(a) - bucket(b) || Date.parse(String(a.held && a.kind === 'approval' ? a.expires_at : a.created_at)) - Date.parse(String(b.held && b.kind === 'approval' ? b.expires_at : b.created_at)) || a.id.localeCompare(b.id)
@@ -245,6 +262,11 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
       return route.fulfill({ json: { items: items.slice(offset, offset + limit), counts: { open: items.length, held: items.filter(i => i.held).length, chores: 0 }, has_more: hasMore, ...(hasMore ? { next_cursor: String(offset + limit) } : {}), as_of: new Date(now).toISOString() } })
     }
     if (path === '/api/approvals') return route.fulfill({ json: data.approvals })
+    const approvalRead = /^\/api\/approvals\/([^/]+)$/.exec(path)
+    if (approvalRead && method === 'GET') {
+      const found = data.approvals.find(a => a.id === approvalRead[1])
+      return route.fulfill({ status: found ? 200 : 404, json: found ?? { error: 'approval not found' } })
+    }
     const decision = /^\/api\/approvals\/([^/]+)\/(decision|revoke)$/.exec(path)
     if (decision) {
       const found = data.approvals.find(a => a.id === decision[1])

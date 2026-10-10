@@ -7,14 +7,17 @@
 // person's reserve on their own schedule, a pool may carry its own, and Away
 // rides on the person's schedule until its date.
 import { defineStore } from 'pinia'
-import { computed } from 'vue'
-import { listPairingComputers, type PairingView } from '../lib/agentPairing'
+import { computed, onScopeDispose } from 'vue'
+import { listPairingComputers, PairingError, type PairingView } from '../lib/agentPairing'
 import {
   activeOverride, buildPools, buildRows, clone, confirmsSave, uncertainFailure, defaultSchedule, listCapacity, listSchedules, putSchedule, sameShape, stripOverride, stripReserve, withReserve,
   type AccountCapacity, type AccountInput, type CapacitySchedule, type GaugePreference, type Override, type Pool, type ReserveMode, type ScheduleOverride,
 } from '../lib/capacity'
 import { usePreference } from '../lib/preferences'
-import { usePolledData } from '../lib/usePolledData'
+import { buildComputerCards } from '../lib/computerAccounts'
+import { initialRefreshStatus, usePolledData } from '../lib/usePolledData'
+import { onReset } from '../lib/position'
+import { onAccessChange } from '../lib/authz'
 import { useAgents } from './agents'
 
 const browserZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' } }
@@ -23,8 +26,14 @@ export const useCapacity = defineStore('capacity', () => {
   const agents = useAgents()
   const capacityRead = usePolledData(listCapacity, [] as AccountCapacity[])
   const schedulesRead = usePolledData(listSchedules, [] as ScheduleOverride[])
-  // Connectivity is optional detail: people without pairing access still see capacity.
-  const computersRead = usePolledData(() => listPairingComputers().catch(() => [] as PairingView[]), [] as PairingView[])
+  // Pairing access is optional. A failed read is not an empty inventory:
+  // preserve the previous snapshot and report the failure to its consumers.
+  const computersRead = usePolledData(() => listPairingComputers().catch(error => {
+    if (error instanceof PairingError && error.status === 403) return [] as PairingView[]
+    throw error
+  }), [] as PairingView[])
+  const computersState = computed(() => computersRead.status.value.state)
+  const computersStale = computed(() => computersRead.stale.value)
   const gaugePref = usePreference<GaugePreference>('agents.capacity.gauge')
   const state = computed(() => capacityRead.status.value.state)
   const loaded = computed(() => capacityRead.status.value.updatedAt !== null)
@@ -34,13 +43,33 @@ export const useCapacity = defineStore('capacity', () => {
   async function load() {
     await Promise.all([capacityRead.refresh(), schedulesRead.refresh(), computersRead.refresh()])
   }
+  // An enrollment write needs a new inventory read, even when polling already
+  // has a pre-write response in flight. Keep its outcome for honest UI feedback.
+  function refreshComputers() {
+    computersRead.invalidate()
+    return computersRead.refresh()
+  }
   const invalidate = () => { capacityRead.invalidate(); schedulesRead.invalidate(); computersRead.invalidate() }
+  // Snapshots belong to one person/workspace and access epoch. Retaining them
+  // across a transient failure is safe only until that ownership is reset.
+  function reset() {
+    invalidate()
+    capacityRead.data.value = []
+    schedulesRead.data.value = []
+    computersRead.data.value = []
+    for (const read of [capacityRead, schedulesRead, computersRead]) read.status.value = initialRefreshStatus()
+  }
+  onScopeDispose(onReset(reset))
+  onScopeDispose(onAccessChange(change => { if (change === 'reset') reset() }))
   // Every write on /agents drops these reads too and reads them again (AEON-402).
-  agents.onWrite({ invalidate, refresh: load })
+  onScopeDispose(agents.onWrite({ invalidate, refresh: load }))
 
   const computerOf = computed(() => {
     const out = new Map<string, PairingView>()
-    for (const computer of computersRead.data.value) for (const e of computer.enrollments ?? []) out.set(e.account_id, computer)
+    for (const computer of computersRead.data.value) {
+      if (computer.computer_state === 'revoked') continue
+      for (const e of computer.enrollments ?? []) if (e.state !== 'revoked') out.set(e.account_id, computer)
+    }
     return out
   })
   const inputs = computed<AccountInput[]>(() => agents.accounts.map(a => {
@@ -54,6 +83,7 @@ export const useCapacity = defineStore('capacity', () => {
     }
   }))
   const rows = computed(() => buildRows(inputs.value, capacityRead.data.value))
+  const accountLines = computed(() => new Map(buildComputerCards({ computers: computersRead.data.value, rows: rows.value, now: agents.now }).flatMap(c => c.accounts.map(a => [a.id, a] as const))))
   /** The raw projection per account: windows, the Advanced limit, API-key spend. */
   const byAccount = computed(() => new Map(capacityRead.data.value.map(c => [c.account_id, c])))
   const pools = computed(() => buildPools(rows.value, agents.now))
@@ -179,8 +209,9 @@ export const useCapacity = defineStore('capacity', () => {
   const setGauge = (next: GaugePreference) => gaugePref.save(next, 0)
 
   return {
-    state, loaded, stale, load, inputs, rows, byAccount, computers: computersRead.data, computersLoaded: computed(() => computersRead.status.value.updatedAt !== null), refreshCapacity: capacityRead.refresh, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
+    state, loaded, stale, load, inputs, rows, accountLines, byAccount, computers: computersRead.data, computersLoaded: computed(() => computersRead.status.value.updatedAt !== null), computersState, computersStale, refreshCapacity: capacityRead.refresh, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
     schedulesLoaded, away, reserveConfirmed, hasUserSchedule, poolReserves, saveKeep, confirmReserve, endAway,
     invalidate,
+    refreshComputers,
   }
 })

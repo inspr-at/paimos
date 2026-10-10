@@ -57,6 +57,10 @@ func NoProjects(ctx context.Context, reason string) context.Context {
 // an explicit service visibility first, else the visibility of the principal
 // in ctx (computed once, in the database, from its bindings), else none.
 func enterTenant(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	// Never inherit verified chat authority into a nested legacy/service query.
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.account_use_capable','on',true),set_config('aeon.chat_session_id','',true),set_config('aeon.chat_role_id','',true),set_config('aeon.chat_conversation_id','',true)`); err != nil {
+		return err
+	}
 	if v, ok := ctx.Value(visibilityKey{}).(visibility); ok {
 		_, err := tx.Exec(ctx, `SELECT set_config($1,$2,true),set_config($3,$4,true),set_config('aeon.principal_ids','',true),set_config('aeon.system','on',true)`,
 			TenantSetting, tenantID, VisibleProjectsSetting, v.value)

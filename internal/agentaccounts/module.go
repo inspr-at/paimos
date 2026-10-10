@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -20,9 +21,10 @@ import (
 
 // Module serves /api/agent-accounts.
 type Module struct {
-	pool       *pgxpool.Pool
-	preview    *previewGuard
-	openRouter openrouter.Catalog
+	pool        *pgxpool.Pool
+	preview     *previewGuard
+	openRouter  openrouter.Catalog
+	resetVendor ResetVendor
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -40,8 +42,12 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("GET /api/agent-accounts/{accountId}/residency-evidence", m.residencyEvidence)
 	handle("PUT /api/agent-accounts/{accountId}/residency-evidence", m.residencyEvidence)
 	handle("GET /api/agent-accounts/readiness", m.readinessList)
+	handle("GET /api/agent-accounts/quota-warnings", m.warningSessions)
+	handle("GET /api/settings/quota-warnings", m.warningSettings)
+	handle("PUT /api/settings/quota-warnings", m.warningSettings)
 	handle("POST /api/agent-accounts/{accountId}/check", m.check)
 	handle("PUT /api/agent-accounts/{accountId}/sharing", m.sharing)
+	handle("PUT /api/agent-accounts/{accountId}/usage-probe", m.usageProbe)
 	handle("PUT /api/agent-accounts/quota-pool", m.quotaPool)
 	handle("PUT /api/agent-accounts/{accountId}/signals", m.signals)
 	handle("GET /api/agent-accounts/{accountId}/statusline", m.statusline)
@@ -49,6 +55,14 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("POST /api/agent-accounts/{accountId}/quota-key", m.quotaKey)
 	handle("GET /api/agent-accounts", m.list)
 	handle("GET /api/agent-accounts/catalog", m.catalog)
+	handle("GET /api/agent-accounts/overview", m.overview)
+	handle("GET /api/agent-accounts/posture", m.postures)
+	handle("PUT /api/agent-accounts/boost", m.writeBoost)
+	handle("PUT /api/agent-accounts/{accountId}/posture", m.writeUsagePolicy)
+	handle("PUT /api/agent-accounts/{accountId}/floor", m.writeUsagePolicy)
+	handle("PUT /api/agent-accounts/{accountId}/reset-policy", m.resetPolicy)
+	handle("POST /api/agent-accounts/{accountId}/resets/use", m.useReset)
+	handle("POST /api/agent-accounts/{accountId}/resets/{actionId}/undo", m.undoReset)
 	handle("GET /api/agent-accounts/groups", m.groups)
 	handle("POST /api/agent-accounts/groups", m.groups)
 	handle("PATCH /api/agent-accounts/groups/{id}", m.group)
@@ -93,6 +107,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
 	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		if err := agentpairing.LockMutation(ctx, tx); err != nil {
+			return err
+		}
+		if err := accountuse.LockShared(ctx, tx); err != nil {
 			return err
 		}
 		return fn(tx)
@@ -300,13 +317,13 @@ func (m *Module) probe(w http.ResponseWriter, r *http.Request) {
 		}
 		reader := p
 		reader.Scopes = scopes
-		if !hasScope(scopes, "account.probe") && (in.Readiness != nil || !hasScope(scopes, "account.manage")) {
+		if !hasScope(scopes, "account.probe") && (in.Readiness != nil || in.MeasurementOnly || !hasScope(scopes, "account.manage")) {
 			return fail(403, "account probe scope required")
 		}
 		// Existing opaque enrollments historically authorize probes by their
 		// live key scope and registering principal. Preserve that protocol;
 		// the additive readiness report also requires current role authority.
-		if in.Readiness != nil {
+		if in.Readiness != nil || in.MeasurementOnly {
 			if err := authz.RequireTx(r.Context(), tx, reader, "account.probe", authz.Scope{}); err != nil {
 				return fail(403, "account probe permission required")
 			}

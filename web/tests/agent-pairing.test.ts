@@ -6,7 +6,7 @@ import { sessionEnded } from '../src/lib/api.ts'
 import {
   DEFAULT_REVIEW_CHOICE, LOOKUP_DEBOUNCE_MS, MIN_POLL_INTERVAL_MS, PUBLIC_PAIRING_GUIDE_PATH, PairingError,
   agentRouteKind, canonicalUserCode, clearPairingClientState, denyPairing,
-  describeComputerStatus, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, describeProgress, harnessRecovery, disconnectComputer, disconnectConfirm, disconnectEnrollment,
+  describeComputerStatus, describeEnrollmentDiagnostic, describeEnrollmentStatus, describeHarnessStatus, describeHarnessFix, describeHarnessHint, describeProgress, harnessRecovery, disconnectComputer, disconnectConfirm, disconnectEnrollment,
   formatVerification, getPairingComputer, getPairingGuide, isPublicPairingGuide, listPairingComputers, lookupPairing,
   pairingEventMatches, pairingEventScope, pairingLiveCopy, pairingPermissions, pairingStillLive, planApproval, planLookup, planPoll,
   registerAgentUrl, sessionFreezeApplies, submitApproval, verificationWarning, defaultSelectedAccountKeys,
@@ -1160,4 +1160,111 @@ test('only incompatible computers display update advice', async () => {
     assert.equal(agentUpdateAdvice(parsed), ['update_required', 'protocol_mismatch'].includes(status) ? advice : '')
   }
   assert.equal(agentUpdateAdvice(view()), '')
+})
+
+
+test('AEON-667: pairing failures retain a safe cause without becoming probe timeouts', async () => {
+  const detail = 'the pairing response contains an unapproved account'
+  const report = view({ computer_state: 'connected', connectivity: 'online', enrollments: [enrollment({ harness: 'claude' })], harness_statuses: { claude: 'blocked' }, harness_details: { claude: { state: 'blocked', reason: 'pairing_sync_failed', reason_detail: detail } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [report] })
+  const parsed = (await listPairingComputers())[0]!
+  assert.equal(parsed.harness_details?.claude?.reason_detail, detail)
+  assert.equal(describeHarnessStatus(parsed, 'claude'), 'Pairing sync failed')
+  assert.match(describeHarnessHint(parsed, 'claude'), /pairing sync failed: the pairing response contains an unapproved account/)
+  assert.equal(describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT, harness: 'claude' })?.hint, `Claude: pairing sync failed: ${detail}.`)
+  assert.equal(describeHarnessFix(parsed, 'claude'), '')
+  report.harness_details!.claude!.reason_detail = '/private/profile: arbitrary error'
+  const rejected = (await listPairingComputers())[0]!
+  assert.equal(rejected.harness_details?.claude?.reason_detail, undefined)
+  assert.equal(describeHarnessHint(rejected, 'claude').includes('/private'), false)
+})
+
+test('AEON-623: safe probe diagnostics survive parsing and select the exact repair', async () => {
+  const detail = 'the default Claude profile is not private (requires mode 0700)'
+  const report = view({ computer_state: 'connected', connectivity: 'online', enrollments: [enrollment({ harness: 'claude' })], harness_statuses: { claude: 'blocked' }, harness_details: { claude: { state: 'blocked', reason: 'probe_failed', reason_detail: detail, fix: { kind: 'restart', command: 'untrusted command' } } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [report] })
+  const parsed = (await listPairingComputers())[0]!
+  assert.equal(parsed.harness_details?.claude?.reason_detail, detail)
+  assert.equal(describeHarnessFix(parsed, 'claude'), 'chmod 700 "$HOME/.claude"')
+  assert.equal(describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT, harness: 'claude' })?.hint, `Claude: sign-in check failed: ${detail}.`)
+  assert.equal(JSON.stringify(parsed).includes('untrusted command'), false)
+  report.harness_details!.claude!.reason_detail = 'arbitrary local command output'
+  const rejected = (await listPairingComputers())[0]!
+  assert.equal(rejected.harness_details?.claude?.reason_detail, undefined)
+  assert.equal(describeHarnessFix(rejected, 'claude'), 'aeon-agentd setup')
+})
+
+test('AEON-623: a ready sibling does not inherit another account probe repair', () => {
+  const report = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { claude: 'ready' }, harness_details: { claude: { state: 'ready', attention_accounts: [{ account_id: ACCOUNT, reason: 'probe_failed', reason_detail: 'the default Claude profile is not private (requires mode 0700)' }], attention_count: 1 } } })
+  assert.equal(describeEnrollmentDiagnostic(report, { account_id: ACCOUNT, harness: 'claude' })?.command, 'chmod 700 "$HOME/.claude"')
+  assert.equal(describeEnrollmentDiagnostic(report, { account_id: ACCOUNT_2, harness: 'claude' }), null)
+  assert.equal(describeEnrollmentStatus(report, { account_id: ACCOUNT_2, harness: 'claude', verification_state: 'queued' }), 'Verification queued')
+  assert.equal(describeEnrollmentStatus(report, { account_id: ACCOUNT_2, harness: 'claude', verification_state: 'failed' }), 'Verification failed')
+})
+
+
+test('AEON-623: two blocked Claude accounts retain their own diagnostics through parsing', async () => {
+  const permission = 'the default Claude profile is not private (requires mode 0700)'
+  const output = 'the sign-in command returned an unreadable or incomplete answer'
+  const report = view({ computer_state: 'connected', harness_statuses: { claude: 'blocked' },
+    enrollments: [ACCOUNT, ACCOUNT_2].map(account_id => enrollment({ account_id, harness: 'claude' })),
+    harness_details: { claude: { state: 'blocked', reason: 'probe_failed', reason_detail: permission, attention_count: 2,
+      attention_accounts: [{ account_id: ACCOUNT, reason: 'probe_failed', reason_detail: permission }, { account_id: ACCOUNT_2, reason: 'probe_failed', reason_detail: output }] } } })
+  globalThis.fetch = async () => new Response(JSON.stringify({ computers: [report] }), { status: 200 })
+  const parsed = (await listPairingComputers())[0]!
+  assert.equal(describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT, harness: 'claude' })?.command, 'chmod 700 "$HOME/.claude"')
+  assert.equal(describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT_2, harness: 'claude' })?.command, 'aeon-agentd setup')
+  assert.match(describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT_2, harness: 'claude' })?.hint ?? '', /unreadable or incomplete/)
+  delete parsed.harness_details!.claude!.attention_accounts
+  assert.equal(describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT_2, harness: 'claude' }), null)
+})
+
+
+test('AEON-623: confirmed sign-out names the daemon view and keeps the login repair', async () => {
+  const detail = "the approved account is signed out in the daemon's view"
+  const report = view({ computer_state: 'connected', enrollments: [enrollment({ harness: 'claude' })], harness_statuses: { claude: 'login_required' }, harness_details: { claude: { state: 'login_required', reason: 'login_required', reason_detail: detail } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [report] })
+  const parsed = (await listPairingComputers())[0]!
+  assert.deepEqual(describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT, harness: 'claude' }), { hint: `Claude: ${detail}.`, command: 'claude auth login' })
+  assert.equal(describeHarnessFix(parsed, 'claude'), 'claude auth login')
+})
+
+test('AEON-623: an account absent from a blocked diagnostic list is not ready', () => {
+  const report = view({ computer_state: 'connected', connectivity: 'online', harness_statuses: { claude: 'blocked' }, harness_details: { claude: { state: 'blocked', reason: 'probe_failed', attention_accounts: [{ account_id: ACCOUNT, reason: 'probe_failed' }], attention_count: 1 } } })
+  assert.equal(describeEnrollmentStatus(report, { account_id: ACCOUNT_2, harness: 'claude' }), 'Needs attention')
+  assert.equal(describeEnrollmentDiagnostic(report, { account_id: ACCOUNT_2, harness: 'claude' }), null)
+})
+
+test('AEON-1041: old settlement gaps name the cause and account-scoped repair', async () => {
+  const report = view({ computer_state: 'connected', connectivity: 'online', enrollments: [ACCOUNT, ACCOUNT_2].map(account_id => enrollment({ account_id, harness: 'claude' })),
+    harness_statuses: { claude: 'ready' }, harness_details: { claude: { state: 'ready', attention_accounts: [{ account_id: ACCOUNT, reason: 'unsettled_previous_run' }], attention_count: 1 } } })
+  globalThis.fetch = async () => jsonResponse({ computers: [report] })
+  const parsed = (await listPairingComputers())[0]!
+  assert.equal(describeEnrollmentStatus(parsed, { account_id: ACCOUNT, harness: 'claude' }), 'Previous run settlement unconfirmed')
+  const diagnostic = describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT, harness: 'claude' })!
+  assert.match(diagnostic.hint, /Restore the helper's connection to Aeon/)
+  assert.match(diagnostic.hint, /inspect the previous run and its reservations/)
+  assert.equal(diagnostic.command, '')
+  assert.equal(describeEnrollmentDiagnostic(parsed, { account_id: ACCOUNT_2, harness: 'claude' }), null)
+  parsed.harness_statuses!.claude = 'blocked'
+  parsed.harness_details!.claude = { state: 'blocked', reason: 'unsettled_previous_run' }
+  assert.match(describeHarnessHint(parsed, 'claude'), /reconciliation retries automatically/)
+})
+
+test('stalled verification preserves offline, login and setup recovery progress', () => {
+  for (const [over, title] of [
+    [{ connectivity: 'offline' }, 'The computer is offline'],
+    [{ setup_state: 'login_required' }, 'Vendor sign-in is needed'],
+    [{ setup_state: 'service_conflict' }, 'Setup found a conflict'],
+    [{ setup_state: 'setup_failed' }, 'Setup did not finish'],
+  ] as const) {
+    const v = view({ state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+      enrollments: [enrollment({ verification_state: 'starting', verification_stalled: true, active_run_ids: [RUN] })], ...over })
+    const progress = describeProgress(v)
+    assert.equal(progress.title, title)
+    assert.equal(progress.renewsAuthority, false)
+    assert.deepEqual(v.enrollments[0].active_run_ids, [RUN])
+  }
+  assert.equal(describeProgress(view({ state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    enrollments: [enrollment({ verification_state: 'starting', verification_stalled: true })] })).title, 'Verification stalled')
 })

@@ -27,7 +27,8 @@ export function collapseMessages(messages: ProjectMessage[]): MessageGroup[] {
     const key = JSON.stringify([message.sender_principal_id, message.recipient_principal_id,
       message.sender_session_id, message.recipient_session_id, message.sender_label, message.from, message.to, message.body,
       message.reply_to, message.delivery_level, message.is_action_request, message.expects_reply,
-      message.reply_obligation, message.human_resolution_outcome, answered.has(message.id)])
+      message.reply_obligation, message.human_resolution_outcome, answered.has(message.id),
+      message.optimistic ? message.id : null, message.send_failed ?? false])
     // Only consecutive duplicates collapse: a repeated answer after a person's
     // next question must stay in its chronological place.
     const previous = groups.at(-1)

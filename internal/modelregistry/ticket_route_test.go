@@ -9,6 +9,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -18,7 +19,12 @@ func TestResolveTicketRoute(t *testing.T) {
 	if code, body := call(t, &p, http.MethodGet, "/api/models", ""); code != http.StatusOK {
 		t.Fatalf("seed: %d %s", code, body)
 	}
+	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
+	minimalAccount(t, p, profileBySlug(profiles, "codex-6-1-sol-high"))
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if err := modelprefs.SeedKinds(t.Context(), tx, p.TenantID); err != nil {
+			return err
+		}
 		var routes, events int
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_role_routes`).Scan(&routes); err != nil {
 			return err

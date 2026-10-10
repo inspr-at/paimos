@@ -4,6 +4,7 @@ export interface FacetChoice { value: string; label: string; count?: number; sta
 </script>
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { vClipTip } from '../../directives/clipTip'
 import type { QuoteStatus } from '../../lib/quotes/list'
 import AppIcon from './BizIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
@@ -39,14 +40,14 @@ function keys(event: KeyboardEvent) {
     <div @keydown="keys">
       <div class="facet-head">
         <p class="eyebrow">{{ label }}</p>
-        <button v-if="selected.length" type="button" class="clear" @click="emit('clear')">Clear</button>
+        <button type="button" class="clear" :style="{ visibility: selected.length ? undefined : 'hidden' }" :disabled="!selected.length" @click="emit('clear')">Clear</button>
       </div>
       <input v-if="options.length > 8" v-model="term" class="field facet-search" :placeholder="`Find ${label.toLowerCase()}…`" :aria-label="`Find ${label.toLowerCase()}`" data-autofocus />
       <div class="options" role="group" :aria-label="label">
         <label v-for="option in shown" :key="option.value" class="option" :class="{ muted: !option.count && !selected.includes(option.value) }">
           <input class="check-box" type="checkbox" :checked="selected.includes(option.value)" @change="emit('toggle', option.value)" />
           <QuoteStatusIcon v-if="option.state" :status="option.state as QuoteStatus" :label="false" />
-          <span class="option-label">{{ option.label }}</span>
+          <span v-clip-tip class="option-label">{{ option.label }}</span>
           <span class="count mono">{{ option.count ?? '' }}</span>
         </label>
       </div>
@@ -61,12 +62,12 @@ function keys(event: KeyboardEvent) {
 .facet-btn.on { color: var(--teal-ink); }
 .facet-end { display: inline-grid; place-items: center; width: 18px; }
 .facet-chevron { color: var(--ink-3); }
-.facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: var(--teal); color: var(--button-ink); font-size: 10.5px; font-weight: 700; }
+.facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: linear-gradient(180deg, var(--primary-hi), var(--primary)); color: var(--primary-on); font-size: 10.5px; font-weight: 700; }
 .facet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; padding: 2px 6px 4px 10px; }
 .clear { height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
 .clear:hover { background: var(--row-selected); }
 .facet-search { height: 30px; margin: 0 0 6px; font-size: 13px; }
-.options { display: grid; gap: 1px; max-height: 300px; overflow: auto; }
+.options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .option { display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 10px; border-radius: 8px; font-size: 13.5px; cursor: pointer; }
 @media (hover: hover) { .option:hover { background: var(--row-hover); } }
 .option:focus-within { background: var(--row-selected); }
@@ -74,4 +75,5 @@ function keys(event: KeyboardEvent) {
 .option-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .count { font-size: 11.5px; color: var(--ink-3); }
 .none { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
+@media (pointer: coarse), (max-width: 720px) { .option { min-height: 44px; } }
 </style>

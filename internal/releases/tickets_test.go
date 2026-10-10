@@ -89,7 +89,7 @@ func ticketSetup(t *testing.T) *ticketFixture {
 		if _, err = tx.Exec(ctx, `INSERT INTO journey_requirements(tenant_id,requirement_node_id,project_node_id,kind,revision) VALUES($1,$2,$3,'functional',1)`, f.person.TenantID, req, f.project); err != nil {
 			return err
 		}
-		if f.feature, err = node("epic", f.project); err != nil {
+		if f.feature, err = node("work", f.project); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `INSERT INTO journey_features(tenant_id,feature_node_id,project_node_id,requirement_node_id) VALUES($1,$2,$3,$4)`, f.person.TenantID, f.feature, f.project, req)
@@ -185,6 +185,40 @@ func TestCreateReleaseTickets(t *testing.T) {
 		if retry.Revision != out.Revision || f.counts() != after {
 			t.Fatal("retry changed state")
 		}
+	}
+}
+
+func TestQuickCreateUnderPlacedParentHonorsExplicitInclusion(t *testing.T) {
+	for _, included := range []bool{false, true} {
+		t.Run(fmt.Sprint(included), func(t *testing.T) {
+			f := ticketSetup(t)
+			leaf := f.existing("work", f.feature, "Existing leaf", "open")
+			placed := membershipOK(t, f.addExisting([]string{f.feature}, 1, false))
+			before := f.counts()
+			body := f.body(int(placed.Walker.Revision), "explicit-inclusion", included, f.feature)
+			out := ticketPlan(t, f.call(f.person, body))
+			var created *Ticket
+			for i := range out.Tickets {
+				if out.Tickets[i].NodeID != leaf {
+					created = &out.Tickets[i]
+				}
+			}
+			if created == nil || created.Included != included {
+				t.Fatalf("explicit inclusion=%v ignored: %+v", included, out.Tickets)
+			}
+			after := f.counts()
+			if after != [5]int64{before[0] + 1, before[1] + 2, before[2] + 1, before[3] + 1, before[4] + 1} {
+				t.Fatalf("quick create revised more than once: %v -> %v", before, after)
+			}
+			retry := ticketPlan(t, f.call(f.person, body))
+			if retry.Revision != out.Revision || f.counts() != after {
+				t.Fatal("replay changed membership or revision")
+			}
+			row := f.readMembership(created.NodeID)[0]
+			if (row.ReleaseID != nil) != included {
+				t.Fatalf("persisted inclusion=%v: %+v", included, row)
+			}
+		})
 	}
 }
 
@@ -293,14 +327,14 @@ func TestCreateReleaseTicketParentAndSchemaRules(t *testing.T) {
 	f := ticketSetup(t)
 	baseline := f.counts()
 	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds='{}' WHERE slug='epic'`)
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET allowed_child_kinds='{}' WHERE slug='work'`)
 		return err
 	})
 	if w := f.call(f.person, f.body(1, "parent", true, f.feature)); w.Code != 409 {
 		t.Fatalf("parent rule %d %s", w.Code, w.Body.String())
 	}
 	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema='{"type":"object","required":["priority"]}' WHERE slug='ticket'`)
+		_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema='{"type":"object","required":["priority"]}' WHERE slug='work'`)
 		return err
 	})
 	if w := f.call(f.person, f.body(1, "schema", true, "")); w.Code != 409 {
@@ -309,4 +343,58 @@ func TestCreateReleaseTicketParentAndSchemaRules(t *testing.T) {
 	if f.counts() != baseline {
 		t.Fatal("validation failure changed state")
 	}
+}
+
+func TestWorkParentStatusReleaseQuickCreate(t *testing.T) {
+	f := ticketSetup(t)
+	dbtest.EnableWorkParentStatus(t, f.db, f.person.TenantID)
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='done' WHERE id=$1`, f.feature)
+		return err
+	})
+	result := ticketPlan(t, f.call(f.person, f.body(1, "work-child", true, f.feature)))
+	if len(result.Tickets) != 1 {
+		t.Fatalf("created tickets %+v", result.Tickets)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var state, slug string
+		if err := tx.QueryRow(t.Context(), `SELECT state FROM nodes WHERE id=$1`, f.feature).Scan(&state); err != nil {
+			return err
+		}
+		if state != "open" {
+			t.Fatalf("quick-create parent state %s", state)
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT k.slug FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE n.id=$1`, result.Tickets[0].NodeID).Scan(&slug); err != nil {
+			return err
+		}
+		if slug != "work" {
+			t.Fatalf("kind %s", slug)
+		}
+		return nil
+	})
+}
+
+// NodeUndoTestFixture exposes the existing fixture only to external integration
+// tests, avoiding a nodes -> workqueue -> statusautopilot -> releases test cycle.
+// Its closures use the same restricted database and assertions as internal tests.
+type NodeUndoTestFixture struct {
+	DB               *dbtest.DB
+	Person           tenant.Principal
+	Project, Feature string
+	Mux              *http.ServeMux
+	Existing         func(string, string, string, string) string
+	AddExisting      func([]string, int, bool) *httptest.ResponseRecorder
+	Tx               func(func(pgx.Tx) error)
+	Request          func(tenant.Principal, string, string, string) *httptest.ResponseRecorder
+}
+
+func NodeUndoFixtureForTest(t *testing.T) NodeUndoTestFixture {
+	t.Helper()
+	f := ticketSetup(t)
+	return NodeUndoTestFixture{DB: f.db, Person: f.person, Project: f.project, Feature: f.feature, Mux: f.mux, Existing: f.existing, AddExisting: f.addExisting, Tx: f.tx, Request: f.request}
+}
+
+func CheckMembershipForTest(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	membershipOK(t, w)
 }

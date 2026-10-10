@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -24,20 +25,24 @@ const (
 
 // Message is one durable inbox row. AckedAt is null until the recipient acks.
 type Message struct {
-	RecipientSessionID   *string `json:"recipient_session_id,omitempty"`
-	SenderSessionID      *string `json:"sender_session_id,omitempty"`
-	SenderLabel          string  `json:"sender_label,omitempty"`
-	frozenSenderLabel    string
-	ID                   string     `json:"id"`
-	SenderPrincipalID    string     `json:"sender_principal_id"`
-	RecipientPrincipalID string     `json:"recipient_principal_id"`
-	Body                 string     `json:"body"`
-	IdempotencyKey       string     `json:"idempotency_key"`
-	ReplyToID            *string    `json:"reply_to_id,omitempty"`
-	ExpiresAt            *time.Time `json:"expires_at,omitempty"`
-	SentEventID          int64      `json:"sent_event_id"`
-	CreatedAt            time.Time  `json:"created_at"`
-	AckedAt              *time.Time `json:"acked_at"`
+	ContentMode                string     `json:"content_mode,omitempty"`
+	MessageGrantID             *string    `json:"message_grant_id,omitempty"`
+	RecipientMessageGeneration *string    `json:"recipient_message_generation,omitempty"`
+	MessageDeadline            *time.Time `json:"message_deadline,omitempty"`
+	RecipientSessionID         *string    `json:"recipient_session_id,omitempty"`
+	SenderSessionID            *string    `json:"sender_session_id,omitempty"`
+	SenderLabel                string     `json:"sender_label,omitempty"`
+	frozenSenderLabel          string
+	ID                         string     `json:"id"`
+	SenderPrincipalID          string     `json:"sender_principal_id"`
+	RecipientPrincipalID       string     `json:"recipient_principal_id"`
+	Body                       string     `json:"body"`
+	IdempotencyKey             string     `json:"idempotency_key"`
+	ReplyToID                  *string    `json:"reply_to_id,omitempty"`
+	ExpiresAt                  *time.Time `json:"expires_at,omitempty"`
+	SentEventID                int64      `json:"sent_event_id"`
+	CreatedAt                  time.Time  `json:"created_at"`
+	AckedAt                    *time.Time `json:"acked_at"`
 }
 
 // Page is a listen result. NextAfter is the sent event id to pass as after.
@@ -71,20 +76,24 @@ func metaFrom(m Message) messageMeta {
 	}
 }
 
-const messageCols = `recipient_session_id::text,sender_session_id::text,coalesce(sender_label,''),id::text, sender_principal_id::text, recipient_principal_id::text,
+const messageCols = `content_mode,message_grant_id::text,recipient_message_generation::text,message_deadline,recipient_session_id::text,sender_session_id::text,coalesce(sender_label,''),id::text, sender_principal_id::text, recipient_principal_id::text,
 	reply_to_id::text, body, idempotency_key, expires_at, sent_event_id, created_at, acked_at`
 
 func scanMessage(row pgx.Row) (Message, error) {
 	var m Message
-	err := row.Scan(&m.RecipientSessionID, &m.SenderSessionID, &m.frozenSenderLabel, &m.ID, &m.SenderPrincipalID, &m.RecipientPrincipalID, &m.ReplyToID,
+	err := row.Scan(&m.ContentMode, &m.MessageGrantID, &m.RecipientMessageGeneration, &m.MessageDeadline, &m.RecipientSessionID, &m.SenderSessionID, &m.frozenSenderLabel, &m.ID, &m.SenderPrincipalID, &m.RecipientPrincipalID, &m.ReplyToID,
 		&m.Body, &m.IdempotencyKey, &m.ExpiresAt, &m.SentEventID, &m.CreatedAt, &m.AckedAt)
 	if m.RecipientSessionID != nil || m.SenderSessionID != nil {
 		m.SenderLabel = m.frozenSenderLabel
+	}
+	if m.ContentMode == "durable" {
+		m.ContentMode = ""
 	}
 	return m, err
 }
 
 type sendInput struct {
+	Generation         string
 	RecipientSessionID *string
 	SenderSessionID    *string
 	Recipient          string
@@ -104,6 +113,7 @@ func (m *module) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
+		Generation           string     `json:"recipient_message_generation"`
 		RecipientSessionID   *string    `json:"recipient_session_id"`
 		SenderSessionID      *string    `json:"sender_session_id"`
 		RecipientPrincipalID string     `json:"recipient_principal_id"`
@@ -129,7 +139,8 @@ func (m *module) handleSend(w http.ResponseWriter, r *http.Request) {
 		failure(w, err)
 		return
 	}
-	msg, err := m.send(r.Context(), p, in)
+	in.Generation = body.Generation
+	msg, err := m.send(attachedmsg.BrowserContext(r, m.attached.Origin(), p), p, in)
 	if err != nil {
 		failure(w, err)
 		return
@@ -169,8 +180,23 @@ func normalizeSend(p tenant.Principal, recipient, body, key string, reply *strin
 }
 
 func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Message, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if handled, msg, _, err := m.tryAttached(ctx, p, "", attachedInput{Expires: in.Expires, Recipient: in.Recipient, Body: in.Body, Key: in.Key, Generation: in.Generation, Session: in.RecipientSessionID, SenderSession: in.SenderSessionID, Reply: in.ReplyTo}); handled || err != nil {
+		return msg, err
+	}
 	var out Message
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := attachedmsg.Lock(ctx, tx); err != nil {
+			return err
+		}
+		if m.attached.Enabled() {
+			if request, err := attachedmsg.AttachmentForSend(ctx, tx, in.Recipient, in.RecipientSessionID); err != nil {
+				return err
+			} else if request != "" {
+				return attachedmsg.Fail(409, "attached_consent_required")
+			}
+		}
 		// UUIDs are fixed width, so this key aliases only when the idempotency
 		// key itself collides. Postgres text cannot store a NUL separator.
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 22))`,
@@ -179,7 +205,7 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		}
 		existing, err := scanMessage(tx.QueryRow(ctx, `SELECT `+messageCols+`
 			FROM inbox_messages
-			WHERE sender_principal_id = $1::uuid AND idempotency_key = $2
+			WHERE chat_thread_id IS NULL AND sender_principal_id = $1::uuid AND idempotency_key = $2
 			FOR UPDATE`, p.ID, in.Key))
 		if err == nil {
 			if !sameSend(existing, in) {
@@ -211,7 +237,7 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 		if in.ReplyTo != nil {
 			var visible bool
 			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM inbox_messages
-				WHERE id = $1::uuid AND (sender_principal_id = $2::uuid OR recipient_principal_id = $2::uuid))`,
+				WHERE chat_thread_id IS NULL AND id = $1::uuid AND (sender_principal_id = $2::uuid OR recipient_principal_id = $2::uuid))`,
 				*in.ReplyTo, p.ID).Scan(&visible); err != nil {
 				return err
 			}
@@ -219,32 +245,72 @@ func (m *module) send(ctx context.Context, p tenant.Principal, in sendInput) (Me
 				return errNotFound
 			}
 		}
-		var id string
-		if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
-			return err
-		}
-		ev, err := events.Append(ctx, tx, p, events.Change{Type: "inbox.sent", After: messageMeta{
-			ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: in.Recipient,
-			ReplyToID: in.ReplyTo, IdempotencyKey: in.Key, ExpiresAt: in.Expires,
-		}})
-		if err != nil {
-			return err
-		}
-		out, err = scanMessage(tx.QueryRow(ctx, `INSERT INTO inbox_messages (
-			tenant_id, id, sender_principal_id, recipient_principal_id, reply_to_id,
-			sent_event_id, body, idempotency_key, expires_at,recipient_session_id,sender_session_id,sender_label)
-			VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9,$10::uuid,$11::uuid,$12)
-			RETURNING `+messageCols,
-			p.TenantID, id, p.ID, in.Recipient, in.ReplyTo, ev.ID, in.Body, in.Key, in.Expires, in.RecipientSessionID, in.SenderSessionID, senderLabel))
-		if err != nil {
-			return mapWrite(err)
-		}
-		if err := enqueueWakes(ctx, tx, p, out); err != nil {
-			return err
-		}
-		return insertReceipt(ctx, tx, p, out.ID, "queued", receiptTarget{}, "", "")
+		out, err = AcceptMessageTx(ctx, tx, p, Acceptance{
+			RecipientPrincipalID: in.Recipient, RecipientSessionID: in.RecipientSessionID,
+			SenderSessionID: in.SenderSessionID, SenderLabel: senderLabel,
+			Body: in.Body, IdempotencyKey: in.Key, ReplyToID: in.ReplyTo, ExpiresAt: in.Expires,
+		})
+		return err
 	})
 	return out, err
+}
+
+// Acceptance contains the already authorized, normalized fields of a new inbox
+// message. ProjectID scopes its sent event when an internal service knows the
+// project; ordinary principal messages keep their existing node-less event.
+type Acceptance struct {
+	RecipientPrincipalID string
+	RecipientSessionID   *string
+	SenderSessionID      *string
+	SenderLabel          string
+	Body                 string
+	IdempotencyKey       string
+	ReplyToID            *string
+	ExpiresAt            *time.Time
+	ProjectID            *string
+}
+
+// AcceptMessageTx shares atomic acceptance between the ordinary send path and
+// internal services: sent event, message, wakes and queued receipt/deadline.
+// The caller must authorize under its access-change fence, serialize/check
+// idempotency, and lock every existing FK parent and session BEFORE its first
+// event append. This function acquires no existing-row locks. Any error must
+// roll back the caller's transaction. Terminal failure notices intentionally
+// use their separate receipt-free path so failures cannot recurse.
+func AcceptMessageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Acceptance) (Message, error) {
+	if in.Body == "" || len(in.Body) > maxBodyRunes*utf8.UTFMax || strings.ContainsRune(in.Body, 0) || utf8.RuneCountInString(in.Body) > maxBodyRunes {
+		return Message{}, badRequest("invalid body")
+	}
+	if in.IdempotencyKey == "" || len(in.IdempotencyKey) > maxKeyRunes*utf8.UTFMax || strings.ContainsRune(in.IdempotencyKey, 0) || utf8.RuneCountInString(in.IdempotencyKey) > maxKeyRunes {
+		return Message{}, badRequest("invalid idempotency_key")
+	}
+	var id string
+	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
+		return Message{}, err
+	}
+	ev, err := events.Append(ctx, tx, p, events.Change{NodeID: in.ProjectID, Type: "inbox.sent", After: messageMeta{
+		ID: id, SenderPrincipalID: p.ID, RecipientPrincipalID: in.RecipientPrincipalID,
+		ReplyToID: in.ReplyToID, IdempotencyKey: in.IdempotencyKey, ExpiresAt: in.ExpiresAt,
+	}})
+	if err != nil {
+		return Message{}, err
+	}
+	out, err := scanMessage(tx.QueryRow(ctx, `INSERT INTO inbox_messages (
+		tenant_id, id, sender_principal_id, recipient_principal_id, reply_to_id,
+		sent_event_id, body, idempotency_key, expires_at,recipient_session_id,sender_session_id,sender_label)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7, $8, $9,$10::uuid,$11::uuid,$12)
+		RETURNING `+messageCols,
+		p.TenantID, id, p.ID, in.RecipientPrincipalID, in.ReplyToID, ev.ID, in.Body, in.IdempotencyKey, in.ExpiresAt, in.RecipientSessionID, in.SenderSessionID, in.SenderLabel))
+	if err != nil {
+		return Message{}, mapWrite(err)
+	}
+	if err := enqueueWakes(ctx, tx, p, out); err != nil {
+		return Message{}, err
+	}
+	if err := insertReceipt(ctx, tx, p, out.ID, "queued", receiptTarget{}, "", ""); err != nil {
+		return Message{}, err
+	}
+	return out, nil
 }
 
 func sameSend(m Message, in sendInput) bool {
@@ -332,7 +398,7 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 		// recipient and session are immutable, so an unlocked read picks the lock.
 		var recipient, sender string
 		var session *string
-		err := tx.QueryRow(ctx, `SELECT recipient_principal_id::text,sender_principal_id::text,recipient_session_id::text FROM inbox_messages WHERE id=$1::uuid`, id).Scan(&recipient, &sender, &session)
+		err := tx.QueryRow(ctx, `SELECT recipient_principal_id::text,sender_principal_id::text,recipient_session_id::text FROM inbox_messages WHERE content_mode='durable' AND chat_thread_id IS NULL AND id=$1::uuid`, id).Scan(&recipient, &sender, &session)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -350,7 +416,7 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 			return err
 		}
 		current, err := scanMessage(tx.QueryRow(ctx, `SELECT `+messageCols+`
-			FROM inbox_messages WHERE id = $1::uuid FOR UPDATE`, id))
+			FROM inbox_messages WHERE chat_thread_id IS NULL AND id = $1::uuid FOR UPDATE`, id))
 		if err != nil {
 			return err
 		}
@@ -369,7 +435,7 @@ func (m *module) ack(ctx context.Context, p tenant.Principal, id string) (Messag
 		before := metaFrom(current)
 		updated, err := scanMessage(tx.QueryRow(ctx, `UPDATE inbox_messages
 			SET acked_at = clock_timestamp(), acked_by_principal_id = $2::uuid
-			WHERE id = $1::uuid AND acked_at IS NULL
+			WHERE chat_thread_id IS NULL AND id = $1::uuid AND acked_at IS NULL
 			RETURNING `+messageCols, id, p.ID))
 		if err != nil {
 			return mapWrite(err)

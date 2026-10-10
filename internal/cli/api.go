@@ -3,9 +3,11 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -19,6 +21,10 @@ import (
 )
 
 type apiNode struct {
+	IsLeaf    *bool             `json:"is_leaf,omitempty"`
+	Depth     int               `json:"depth,omitempty"`
+	LevelName string            `json:"level_name,omitempty"`
+	LevelIcon string            `json:"level_icon,omitempty"`
 	Queued    *workqueue.Queued `json:"queued,omitempty"`
 	Warnings  []string          `json:"warnings,omitempty"`
 	ID        string            `json:"id"`
@@ -78,7 +84,7 @@ func explicitIssueFamily(raw json.RawMessage) (marked, ok bool) {
 
 func seededIssueName(name string) bool {
 	switch name {
-	case "epic", "ticket", "task":
+	case "work", "epic", "ticket", "task":
 		return true
 	default:
 		return false
@@ -94,6 +100,18 @@ type kindTable struct {
 	byID   map[string]apiKind
 }
 
+// Old type names are aliases only on migrated workspaces; non-work kinds
+// and UUIDs are never remapped. The canonical ID is the workspace's work kind.
+func (t kindTable) issueKind(slug string) (apiKind, bool) {
+	if issueKinds[slug] {
+		if k, ok := t.bySlug["work"]; ok {
+			return k, true
+		}
+	}
+	k, ok := t.bySlug[slug]
+	return k, ok
+}
+
 func (t kindTable) slug(id string) string {
 	if k, ok := t.byID[id]; ok {
 		return k.Slug
@@ -102,6 +120,9 @@ func (t kindTable) slug(id string) string {
 }
 
 func (rt *runtime) api() (*client.Client, error) {
+	if rt.personClient != nil {
+		return rt.personClient, nil
+	}
 	inst, err := rt.resolve()
 	if err != nil {
 		return nil, err
@@ -120,7 +141,7 @@ func (rt *runtime) doCtx(ctx context.Context, method, path string, body, dest an
 }
 
 func (rt *runtime) doHeaders(method, path string, body, dest any, headers map[string]string) error {
-	return rt.doHeadersCtx(context.Background(), method, path, body, dest, headers)
+	return rt.doHeadersCtx(rt.context(), method, path, body, dest, headers)
 }
 
 func (rt *runtime) doHeadersCtx(ctx context.Context, method, path string, body, dest any, headers map[string]string) error {
@@ -132,7 +153,7 @@ func (rt *runtime) doHeadersCtx(ctx context.Context, method, path string, body, 
 		return err
 	}
 	if err := c.DoWithHeaders(ctx, method, path, body, dest, headers); err != nil {
-		return rt.fail(err, c.Token)
+		return rt.fail(err, c.SessionToken, c.Token)
 	}
 	return nil
 }
@@ -150,7 +171,7 @@ func (rt *runtime) ticketWebURL(key string) string {
 }
 
 func (rt *runtime) loadKinds() (kindTable, error) {
-	return rt.loadKindsCtx(context.Background())
+	return rt.loadKindsCtx(rt.context())
 }
 
 func (rt *runtime) loadKindsCtx(ctx context.Context) (kindTable, error) {
@@ -174,7 +195,7 @@ func (rt *runtime) loadKindsCtx(ctx context.Context) (kindTable, error) {
 }
 
 func (rt *runtime) kind(slug string) (apiKind, error) {
-	return rt.kindCtx(context.Background(), slug)
+	return rt.kindCtx(rt.context(), slug)
 }
 
 func (rt *runtime) kindCtx(ctx context.Context, slug string) (apiKind, error) {
@@ -182,7 +203,7 @@ func (rt *runtime) kindCtx(ctx context.Context, slug string) (apiKind, error) {
 	if err != nil {
 		return apiKind{}, err
 	}
-	k, ok := table.bySlug[slug]
+	k, ok := table.issueKind(slug)
 	if !ok {
 		return apiKind{}, rt.fail(fmt.Errorf("node kind %q is not configured", slug), "")
 	}
@@ -198,7 +219,7 @@ func cloneValues(q url.Values) url.Values {
 }
 
 func (rt *runtime) walkNodes(q url.Values, stop func(apiNode) bool) ([]apiNode, error) {
-	return rt.walkNodesCtx(context.Background(), q, stop)
+	return rt.walkNodesCtx(rt.context(), q, stop)
 }
 
 func (rt *runtime) walkNodesCtx(ctx context.Context, q url.Values, stop func(apiNode) bool) ([]apiNode, error) {
@@ -207,6 +228,7 @@ func (rt *runtime) walkNodesCtx(ctx context.Context, q url.Values, stop func(api
 		q.Set("limit", "200")
 	}
 	var all []apiNode
+	seen := map[string]bool{q.Get("cursor"): true}
 	for page := 0; page < 50; page++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -226,19 +248,30 @@ func (rt *runtime) walkNodesCtx(ctx context.Context, q url.Values, stop func(api
 			}
 		}
 		if body.NextCursor == nil || strings.TrimSpace(*body.NextCursor) == "" {
-			break
+			return all, nil
+		}
+		if seen[*body.NextCursor] {
+			return nil, fmt.Errorf("incomplete node listing: repeated cursor")
+		}
+		seen[*body.NextCursor] = true
+		if page == 49 {
+			return nil, errors.New("node listing exceeds 10000 items; narrow the scope")
 		}
 		q.Set("cursor", *body.NextCursor)
 	}
-	return all, nil
+	return nil, fmt.Errorf("incomplete node listing: exceeds 50 pages")
 }
 
 func (rt *runtime) nodeByKey(key string) (apiNode, error) {
+	return rt.nodeByKeyCtx(rt.context(), key)
+}
+
+func (rt *runtime) nodeByKeyCtx(ctx context.Context, key string) (apiNode, error) {
 	key = strings.TrimSpace(key)
 	var found *apiNode
 	// q matches keys first (exact and prefix), so the key's node is in the
 	// first page instead of a walk over every node in the tenant.
-	_, err := rt.walkNodes(url.Values{"q": {key}}, func(n apiNode) bool {
+	_, err := rt.walkNodesCtx(ctx, url.Values{"q": {key}}, func(n apiNode) bool {
 		if n.Key == key {
 			found = &n
 			return true
@@ -250,7 +283,7 @@ func (rt *runtime) nodeByKey(key string) (apiNode, error) {
 	}
 	if found == nil {
 		var resolved apiNode
-		if err := rt.do(http.MethodGet, "/api/node-keys/"+url.PathEscape(key), nil, &resolved); err != nil {
+		if err := rt.doCtx(ctx, http.MethodGet, "/api/node-keys/"+url.PathEscape(key), nil, &resolved); err != nil {
 			return apiNode{}, rt.fail(fmt.Errorf("issue %q not found", key), "")
 		}
 		return resolved, nil
@@ -267,7 +300,7 @@ func keyPrefix(key string) string {
 }
 
 func (rt *runtime) projectNode(ref string) (apiNode, error) {
-	return rt.projectNodeCtx(context.Background(), ref)
+	return rt.projectNodeCtx(rt.context(), ref)
 }
 
 func (rt *runtime) projectNodeCtx(ctx context.Context, ref string) (apiNode, error) {
@@ -306,7 +339,7 @@ func fieldMap(raw json.RawMessage) map[string]any {
 		return map[string]any{}
 	}
 	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil || m == nil {
+	if err := decodeExactJSON(raw, &m); err != nil || m == nil {
 		return map[string]any{}
 	}
 	return m
@@ -347,24 +380,38 @@ func (rt *runtime) readText(inline, file, name string) (string, error) {
 	if file == "" {
 		return inline, nil
 	}
+	var raw []byte
+	var err error
 	if file == "-" {
-		raw, err := io.ReadAll(io.LimitReader(rt.stdin, 1<<20))
+		raw, err = readBounded(rt.stdin, 1<<20)
 		if err != nil {
 			return "", fmt.Errorf("read stdin: %w", err)
 		}
-		if len(raw) == 1<<20 {
-			return "", usagef("--%s-file is too long", name)
+	} else {
+		raw, err = readBoundedFile(file, 1<<20)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", file, err)
 		}
-		return string(raw), nil
-	}
-	raw, err := os.ReadFile(file)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", file, err)
 	}
 	if len(raw) > 1<<20 {
 		return "", usagef("--%s-file is too long", name)
 	}
 	return string(raw), nil
+}
+
+// readBounded reads one overflow byte so callers can accept the exact limit
+// and reject larger inputs before converting or decoding them.
+func readBounded(r io.Reader, max int64) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(r, max+1))
+}
+
+func readBoundedFile(path string, max int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return readBounded(f, max)
 }
 
 func newUUIDv4() (string, error) {
@@ -405,4 +452,30 @@ func clipRunes(s string, n int, ellipsis string) string {
 		return ellipsis
 	}
 	return string(r[:n]) + ellipsis
+}
+
+// decodeExactJSON preserves numeric tokens in objects that may be written back.
+func decodeExactJSON(raw []byte, dest any) error {
+	d := json.NewDecoder(bytes.NewReader(raw))
+	d.UseNumber()
+	if err := d.Decode(dest); err != nil {
+		return err
+	}
+	var extra any
+	if d.Decode(&extra) != io.EOF {
+		return fmt.Errorf("expected one JSON value")
+	}
+	return nil
+}
+
+func fieldNumber(value any) (float64, bool) {
+	switch n := value.(type) {
+	case float64:
+		return n, true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	default:
+		return 0, false
+	}
 }

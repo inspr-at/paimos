@@ -211,7 +211,7 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 	}
 	var approved, models bool
 	if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id WHERE e.account_id=$1 AND (e.state<>'connected' OR c.state<>'connected' OR q.state<>'redeemed' OR e.ongoing_approved_at IS NULL)),
-        EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$2 AND ($3::uuid[] IS NULL OR id=ANY($3::uuid[])))`, a.ID, a.Harness, a.AllowedProfileIDs).Scan(&approved, &models); err != nil {
+        EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$2 AND aeon_account_allows_profile($2,$3::uuid[],id))`, a.ID, a.Harness, a.AllowedProfileIDs).Scan(&approved, &models); err != nil {
 		return AccountReadiness{}, err
 	}
 	if !approved {
@@ -230,6 +230,19 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 			t := *fact.ReadingAt
 			in.CheckedAt = &t
 		}
+	}
+	if c := a.OpenRouterCredits; c != nil {
+		resource, err := localReadinessResource(ctx, tx, a)
+		if err != nil {
+			return AccountReadiness{}, err
+		}
+		f := ReadinessFact{ReadinessFactWrite: ReadinessFactWrite{ResourceID: resource, WindowKey: "key_cap", Source: "provider", ObservedAt: c.ObservedAt, ReadingAt: &c.ObservedAt, CreditState: "unknown", Remaining: c.KeyRemaining(), StopKind: "none"}}
+		if f.Remaining != nil && *f.Remaining == 0 {
+			f.CreditState = "exhausted"
+			f.StopKind = "unnamed"
+			f.DenialReason = "key_cap_exhausted"
+		}
+		in.Facts = append(in.Facts, f)
 	}
 	// Use the exact read-only reserve policy, including fact-only budgets,
 	// learned holds, shared ledgers and current early/automatic recovery intent.

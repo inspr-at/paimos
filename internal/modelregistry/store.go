@@ -4,15 +4,17 @@ package modelregistry
 
 import (
 	"context"
-	"encoding/json"
+	"math"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/modelactivation"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -33,6 +35,10 @@ func (d Display) FullName() string { return strings.TrimSpace(d.DisplayName + " 
 
 // Profile is one immutable model pin.
 type Profile struct {
+	Source   string     `json:"source"`
+	Note     string     `json:"note"`
+	RetireAt *time.Time `json:"retire_at"`
+	Retired  bool       `json:"retired"`
 	Display
 	EffortLevel *int      `json:"effort_level"`
 	Provider    string    `json:"provider"`
@@ -60,6 +66,9 @@ type Route struct {
 }
 
 type profileWrite struct {
+	Source                string `json:"-"`
+	Note                  string `json:"note"`
+	RegisteredEffortLevel *int   `json:"-"`
 	Display
 	Slug    string `json:"slug"`
 	Version string `json:"version"`
@@ -75,56 +84,79 @@ func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, eventType st
 	return err
 }
 
-func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
 	var n int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
-		return err
+		return nil, err
 	}
 	if n > 0 {
-		return ensureAdditionalCatalog(ctx, tx, p)
+		changes, err := prepareAdditionalCatalog(ctx, tx, p)
+		if err != nil {
+			return nil, err
+		}
+		upgraded, err := prepareCatalogUpgrade(ctx, tx, p)
+		return append(changes, upgraded...), err
 	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id', true), 0))`); err != nil {
-		return err
+	if err := catalogLock(ctx, tx); err != nil {
+		return nil, err
 	}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
-		return err
+		return nil, err
 	}
 	if n > 0 {
-		return ensureAdditionalCatalog(ctx, tx, p)
+		changes, err := prepareAdditionalCatalog(ctx, tx, p)
+		if err != nil {
+			return nil, err
+		}
+		upgraded, err := prepareCatalogUpgrade(ctx, tx, p)
+		return append(changes, upgraded...), err
 	}
 	profiles := catalogProfiles()
 	ids := make(map[string]string, len(profiles))
+	disabled := make(map[string]bool, len(profiles))
 	seeded := make([]Profile, 0, len(profiles))
 	for _, profile := range profiles {
-		row, err := insertProfile(ctx, tx, p.TenantID, profileWrite{
+		row, err := insertActivatedProfile(ctx, tx, p, profileWrite{
 			Slug: profile.Slug, Version: profile.Version, Harness: profile.Harness,
 			Family: profile.Family, Model: profile.Model, Effort: profile.Effort, Tier: profile.Tier,
-		})
+		}, true, modelactivation.ShippedCatalog)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		ids[profile.Slug] = row.ID
+		disabled[profile.Slug] = !row.Enabled
 		seeded = append(seeded, row)
 	}
 	routes := make([]Route, 0)
 	for _, route := range defaultRoutes(profiles) {
 		id := ids[route.Slug]
 		if id == "" {
-			return fail(http.StatusInternalServerError, "catalog route is missing its profile")
+			return nil, fail(http.StatusInternalServerError, "catalog route is missing its profile")
+		}
+		if disabled[route.Slug] {
+			continue
 		}
 		stored := Route{Role: route.Role, Priority: route.Priority, ProfileID: id, State: "available"}
 		if err := insertRoute(ctx, tx, p.TenantID, stored); err != nil {
-			return err
+			return nil, err
 		}
 		routes = append(routes, stored)
 	}
-	return writeEvent(ctx, tx, p, evSeeded, nil, struct {
+	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2) ON CONFLICT (tenant_id) DO UPDATE SET catalog_version=EXCLUDED.catalog_version`, p.TenantID, CatalogVersion); err != nil {
+		return nil, err
+	}
+	return []events.Change{{Type: evSeeded, After: struct {
 		Profiles []Profile `json:"profiles"`
 		Routes   []Route   `json:"routes"`
-	}{seeded, routes})
+	}{seeded, routes}}}, nil
 }
 
-func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
+// Discovery records a pin without granting it to wildcard accounts.
+func insertObservedProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
+	return insertActivatedProfile(ctx, tx, tenant.Principal{TenantID: tenantID}, in, false, "")
+}
+
+func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite, enabled bool, cause modelactivation.Cause) (Profile, error) {
 	var out Profile
 	overrides := map[string]string{}
 	if in.DisplayName != "" {
@@ -136,41 +168,82 @@ func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWr
 	if in.ModelVersion != "" {
 		overrides["model_version"] = in.ModelVersion
 	}
-	raw, err := json.Marshal(overrides)
-	if err != nil {
-		return out, err
-	}
-	err = tx.QueryRow(ctx, `
-		INSERT INTO model_profiles
-			(tenant_id, slug, version, harness, family, model, effort, tier, enabled, display_overrides)
-		VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, true, $9::jsonb)
-		RETURNING id::text, slug, version, harness, family, model, effort, tier, enabled, created_at`,
-		tenantID, in.Slug, in.Version, in.Harness, in.Family, in.Model, in.Effort, in.Tier, string(raw)).
-		Scan(&out.ID, &out.Slug, &out.Version, &out.Harness, &out.Family, &out.Model, &out.Effort, &out.Tier, &out.Enabled, &out.CreatedAt)
+	stored, err := modelactivation.Activate(ctx, tx, p, modelactivation.Pin{
+		Slug: in.Slug, Version: in.Version, Harness: in.Harness, Family: in.Family,
+		Model: in.Model, Effort: in.Effort, Tier: in.Tier, Enabled: enabled,
+		DisplayOverrides: overrides, Source: profileSource(in.Source), Note: in.Note,
+		RegisteredEffortLevel: in.RegisteredEffortLevel, Permission: "models.manage",
+	}, cause)
+	out = Profile{ID: stored.ID, Slug: stored.Slug, Version: stored.Version, Harness: stored.Harness,
+		Family: stored.Family, Model: stored.Model, Effort: stored.Effort, Tier: stored.Tier,
+		Enabled: stored.Enabled, CreatedAt: stored.CreatedAt}
 	if err == nil {
 		err = tx.QueryRow(ctx, `SELECT model_display->>'display_name',model_display->>'short_name',model_display->>'model_version',effort_level,provider
-			FROM model_profile_display WHERE tenant_id=$1::uuid AND profile_id=$2::uuid`, tenantID, out.ID).
+			FROM model_profile_display WHERE tenant_id=$1::uuid AND profile_id=$2::uuid`, p.TenantID, out.ID).
 			Scan(&out.DisplayName, &out.ShortName, &out.ModelVersion, &out.EffortLevel, &out.Provider)
 	}
 	if out.Harness == "gemini" {
 		out.EffortLevel = harnesslaunch.GeminiEffortLevel(out.Effort)
 	}
+	out.Source, out.Note = profileSource(in.Source), in.Note
+	if in.RegisteredEffortLevel != nil {
+		out.EffortLevel = in.RegisteredEffortLevel
+	}
 	return out, err
+}
+func profileSource(source string) string {
+	if source == "manual" {
+		return "manual"
+	}
+	return "auto"
+}
+
+// Only these constant identifiers enter SQL; the caller's role is never SQL.
+func roleRoutesTable(role string) string {
+	if role == "review-gate-security" {
+		return "model_security_role_routes"
+	}
+	return "model_role_routes"
 }
 
 func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) error {
 	_, err := tx.Exec(ctx, `
-		INSERT INTO model_role_routes (tenant_id, role, priority, profile_id, state, reason, valid_until)
+		INSERT INTO `+roleRoutesTable(route.Role)+` (tenant_id, role, priority, profile_id, state, reason, valid_until)
 		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7)`,
 		tenantID, route.Role, route.Priority, route.ProfileID, route.State, route.Reason, route.ValidUntil)
 	return err
 }
 
 func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider
+	return listProfilesLimit(ctx, tx, 0)
+}
+
+func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, error) {
+	query := `
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.note,''),
+ (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
+ EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
-		ORDER BY p.slug, p.version, p.id`)
+		ORDER BY p.slug, p.version, p.id`
+	if limit > 0 {
+		return readProfiles(ctx, tx, query+` LIMIT $1`, limit)
+	}
+	return readProfiles(ctx, tx, query)
+}
+
+// listPickerProfiles bounds editor metadata before decoding and excludes retired revisions.
+func listPickerProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
+	return readProfiles(ctx, tx, `
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.note,''),
+ (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
+ EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
+		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+		WHERE NOT EXISTS (SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
+		ORDER BY p.slug, p.version, p.id LIMIT 257`)
+}
+
+func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]Profile, error) {
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +251,7 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	out := []Profile{}
 	for rows.Next() {
 		var profile Profile
-		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider); err != nil {
+		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Note, &profile.RetireAt, &profile.Retired); err != nil {
 			return nil, err
 		}
 		if profile.Harness == "gemini" {
@@ -192,7 +265,7 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT role, priority, profile_id::text, state, reason, valid_until
-		FROM model_role_routes
+		FROM (`+agentaccounts.ModelRoleRoutesSQL+`) routes
 		ORDER BY role, priority, profile_id`)
 	if err != nil {
 		return nil, err
@@ -210,6 +283,10 @@ func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
 }
 
 func validateProfile(in profileWrite) error {
+	if !boundedText(in.Note, 80) || strings.ContainsAny(in.Note, "\x00\r\n") {
+		return fail(400, "invalid model note")
+	}
+
 	for _, field := range []struct {
 		value string
 		max   int
@@ -255,18 +332,24 @@ func validateProfile(in profileWrite) error {
 	return nil
 }
 
-func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite) (Profile, error) {
+func normalizeProfileWrite(in profileWrite) profileWrite {
 	in.Slug = strings.TrimSpace(in.Slug)
 	in.Version = strings.TrimSpace(in.Version)
 	in.Model = strings.TrimSpace(in.Model)
 	in.Effort = strings.TrimSpace(in.Effort)
+	return in
+}
+
+func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite) (Profile, error) {
+	in = normalizeProfileWrite(in)
+	in.Source = "manual"
 	if err := validateProfile(in); err != nil {
 		return Profile{}, err
 	}
-	if err := ensureCatalog(ctx, tx, p); err != nil {
+	if err := requireCatalog(ctx, tx); err != nil {
 		return Profile{}, err
 	}
-	out, err := insertProfile(ctx, tx, p.TenantID, in)
+	out, err := insertActivatedProfile(ctx, tx, p, in, true, modelactivation.Person)
 	if err != nil {
 		return Profile{}, err
 	}
@@ -276,22 +359,24 @@ func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profil
 	return out, nil
 }
 
+// replaceRoutes is the transaction-injected legacy fixture helper. Production
+// writes enter through Module.replace with final authority and shared fences.
 func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming []Route, now time.Time) ([]Route, error) {
-	if incoming == nil {
-		return nil, fail(http.StatusBadRequest, "routes must be an array")
-	}
-	if err := ensureCatalog(ctx, tx, p); err != nil {
+	if err := routeBounds(incoming); err != nil {
 		return nil, err
 	}
-	normalized, err := normalizeRoutes(incoming, now)
+	if err := requireCatalog(ctx, tx); err != nil {
+		return nil, err
+	}
+	before, err := boundedStoredRoutes(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	normalized, err := normalizeStoredRoutes(incoming, before, now, false)
 	if err != nil {
 		return nil, err
 	}
 	if err := profilesExist(ctx, tx, normalized); err != nil {
-		return nil, err
-	}
-	before, err := listRoutes(ctx, tx)
-	if err != nil {
 		return nil, err
 	}
 	if routesEqual(before, normalized) {
@@ -300,18 +385,46 @@ func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming 
 	if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes`); err != nil {
 		return nil, err
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
+		return nil, err
+	}
 	for _, route := range normalized {
 		if err := insertRoute(ctx, tx, p.TenantID, route); err != nil {
 			return nil, err
 		}
 	}
-	if err := writeEvent(ctx, tx, p, evRoutes, before, normalized); err != nil {
+	after, err := boundedStoredRoutes(ctx, tx)
+	if err != nil {
 		return nil, err
 	}
-	return normalized, nil
+	if err := writeEvent(ctx, tx, p, evRoutes, before, after); err != nil {
+		return nil, err
+	}
+	return after, nil
 }
 
 func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {
+	out, err := normalizeRouteStructure(incoming)
+	if err != nil {
+		return nil, err
+	}
+	for _, route := range out {
+		if route.State != "available" && !route.ValidUntil.After(now) {
+			return nil, fail(http.StatusBadRequest, "suppression requires a future expiry")
+		}
+	}
+	return out, nil
+}
+
+// Structural checks run before standalone setup. Expiry and profile existence
+// remain authoritative in the final transaction.
+func normalizeRouteStructure(incoming []Route) ([]Route, error) {
+	if incoming == nil {
+		return nil, fail(http.StatusBadRequest, "routes must be an array")
+	}
 	seenPriority := map[string]bool{}
 	seenProfile := map[string]bool{}
 	out := make([]Route, 0, len(incoming))
@@ -321,6 +434,9 @@ func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {
 		}
 		if route.Priority < 1 {
 			return nil, fail(http.StatusBadRequest, "priority must be positive")
+		}
+		if route.Priority > math.MaxInt32 {
+			return nil, fail(http.StatusBadRequest, "priority exceeds storage range")
 		}
 		if !uuidRE.MatchString(route.ProfileID) {
 			return nil, fail(http.StatusBadRequest, "invalid profile id")
@@ -346,7 +462,7 @@ func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {
 			if route.Reason == "" || len(route.Reason) > 512 || strings.ContainsAny(route.Reason, "\x00\r\n") {
 				return nil, fail(http.StatusBadRequest, "suppression requires a reason")
 			}
-			if route.ValidUntil == nil || !route.ValidUntil.After(now) {
+			if route.ValidUntil == nil {
 				return nil, fail(http.StatusBadRequest, "suppression requires a future expiry")
 			}
 		}
@@ -421,4 +537,14 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+// flushCatalogChanges runs after the caller's final resource operation.
+func flushCatalogChanges(ctx context.Context, tx pgx.Tx, p tenant.Principal, changes []events.Change) error {
+	for _, change := range changes {
+		if _, err := events.Append(ctx, tx, p, change); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -46,7 +46,7 @@ async function remove() {
 </script>
 
 <template>
-  <AccessSheet :title="`Delete ${role.name}?`" size="center" @close="emit('close')">
+  <AccessSheet :title="`Delete ${role.name}?`" size="center" scale="s" @close="emit('close')">
     <div class="body">
       <ul class="points">
         <li><AppIcon name="info" :size="13" /><span>The role goes for good; built-in roles and other custom roles stay.</span></li>
@@ -79,6 +79,6 @@ async function remove() {
 .label { font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 select.field { appearance: auto; }
 .error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--danger); }
-.danger-solid { color: var(--danger-on); border-color: transparent; background: var(--danger); box-shadow: 0 0 0 1px rgba(168, 66, 60, .5), 0 8px 18px -10px rgba(168, 66, 60, .7); }
-.danger-solid:hover { filter: brightness(1.05); background: var(--danger); }
+.danger-solid { color: var(--surface-highlight); border-color: transparent; background: linear-gradient(180deg, var(--danger-hi), var(--danger-fill)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger-fill) 50%, transparent), 0 8px 18px -10px color-mix(in srgb, var(--danger-fill) 70%, transparent); }
+.danger-solid:hover { filter: brightness(1.05); background: linear-gradient(180deg, var(--danger-hi), var(--danger-fill)); }
 </style>

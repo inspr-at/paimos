@@ -1,0 +1,17 @@
+{
+  "ticket": "AEON-648",
+  "finding": "fix3-P3",
+  "owner": "coordinator / AEON-655",
+  "recorded_at": "2026-10-04T20:41:19.595805+00:00",
+  "reservation_status": "missing",
+  "expected_line": "1238 AEON-655 (work vocabulary)",
+  "ledger": "/private/tmp/claude-501/-Users-markus-Code-aithema/af3ab8bf-63f6-4fb5-bccf-086eb11c043e/scratchpad/aeon/migration-ledger.txt",
+  "ledger_sha256": "849007af43ae78c35d917d5ed4ff9399c5aee06a19cc70c7562497356e9b71c9",
+  "matching_lines": [],
+  "migration": "internal/db/migrations/1238_work_vocabulary.sql",
+  "migration_sha256": "27eaf2c0851a1b633ae7f070a9f5283d3d1b7a3eace74a792bed4dace5c789c4",
+  "migration_provenance": "d15114c1a98d24c72448ee5caea712416bc6a7c9 P0.7: unify work surfaces and validate vocabulary (AEON-655)",
+  "worker_action": "Attached exact reservation and unchanged migration evidence for coordinator; did not append another ticket ownership to the shared ledger.",
+  "coordinator_action": "Append the reservation under AEON-655 ownership and attach the resulting ledger line/hash; no SQL rewrite or renumbering.",
+  "resolved": false
+}

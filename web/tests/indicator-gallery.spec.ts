@@ -88,35 +88,3 @@ test('reduced motion has no loops and event feedback changes only opacity', asyn
   expect(await page.locator('.robot-4 .pleased').first().evaluate(node => getComputedStyle(node).opacity)).toBe('0')
   await expect(glint).toHaveCount(0, { timeout: 1500 })
 })
-
-test('working motion and event glint visual beats', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'no-preference' })
-  await gallery(page)
-  const directory = resolve('..', '.agent-shots')
-  await mkdir(directory, { recursive: true })
-  // Freeze actual CSS animations at two points to inspect hand alignment and
-  // glances without timing-dependent captures on a busy shared workstation.
-  for (const time of [0, 450]) {
-    await page.locator(newRobots).evaluateAll((nodes, at) => {
-      for (const node of nodes) for (const animation of node.getAnimations({ subtree: true })) {
-        animation.pause()
-        const delay = Number(animation.effect?.getTiming().delay ?? 0)
-        animation.currentTime = at - delay
-      }
-    }, time)
-    await page.screenshot({ path: resolve(directory, `iv2-motion-${time}.png`), fullPage: true })
-  }
-  for (const theme of ['Light', 'Dark']) {
-    await page.getByRole('button', { name: theme, exact: true }).click()
-    await page.getByRole('button', { name: 'Send event', exact: true }).click()
-    await page.locator(newRobots).evaluateAll(nodes => {
-      for (const node of nodes) for (const animation of node.getAnimations({ subtree: true })) {
-        if (animation.effect?.getTiming().iterations === 1) {
-          animation.pause()
-          animation.currentTime = 180
-        }
-      }
-    })
-    await page.screenshot({ path: resolve(directory, `iv2-event-${theme.toLowerCase()}.png`), fullPage: true })
-  }
-})

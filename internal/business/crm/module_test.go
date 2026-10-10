@@ -266,7 +266,7 @@ func setup(t *testing.T) fixture {
 		if _, err = insertKind(t, tx, f.admin.TenantID, Organisation, "ORG"); err != nil {
 			return err
 		}
-		taskKind, err := kindID(t, tx, f.admin.TenantID, "task")
+		taskKind, err := kindID(t, tx, f.admin.TenantID, "work")
 		if err != nil {
 			return err
 		}

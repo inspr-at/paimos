@@ -1,0 +1,76 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/delivery
+paths:
+  /projects/{projectId}/delivery-settings:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectDeliverySettings
+      description: 'Reads effective settings with project overrides over tenant defaults. Requires delivery.read.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putProjectDeliverySettings
+      description: 'Sets required checks and deadline durations in minutes. Requires delivery.manage; empty project settings inherit tenant defaults. Does not change GitHub behaviour.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+      responses:
+        '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/metrics:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectDeliveryMetrics
+      description: 'Requires delivery.read on the project; an invisible project is absent (404). Computes the Project Arion delivery numbers (the original ten and the v5 readings: time to first green per commit, required checks green, confirmed flakes and suspects, inferred ejections, runner wait, preflight red rate, review audits and escaped defects) for the repository linked to the project, from GitHub App events, the backfill and reported facts. Every metric names its source and definition; windows without samples are no_data and windows before complete coverage are partial, never zero. Windows of 7, 30, 90, 180 and 365 whole UTC days end today; each names its coverage and the window just before it; 90 and 180 days are bucketed by week and 365 by calendar month in series. Nothing is extrapolated.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Delivery metrics', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetrics'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/metrics/backfill:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: backfillProjectDeliveryMetrics
+      description: 'Requires delivery.manage. Runs one bounded backfill step (at most about 40 GitHub reads with the App installation token) from the stored cursor and stores workflow runs and pull requests idempotently. A fresh backfill also lists ci-preflight.yml. Once the runs and pulls are in, further steps are the jobs pass: each reads every job conclusion of first attempts that still lack a complete job map (the required checks of every project sharing the repository, and the worst runner wait). A run whose jobs GitHub could not return stays unfinished, the cursor stays in phase jobs, and retry_at names when to call again. A caller stops only when state is done. Nothing readable at all returns 502. restart begins a new backfill over days (1 to 90, default 30). A failed GitHub read writes nothing and returns 502; a concurrent step or source change returns 409.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricsBackfillInput'}}}}
+      responses:
+        '200': {description: 'Backfill position after this step', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricsBackfill'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/metrics/facts:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reportProjectDeliveryMetricFacts
+      description: 'Requires delivery.manage. Reports facts PAIMOS cannot observe itself: review verdicts of gates that post no aeon/review status, merge rounds (scripted or model), releases (merge queue to live), review audits (a merged pull request re-reviewed by a second model, with the highest severity of its findings) and escaped defects (a bug or incident ticket linked as caused by a merged pull request or a release). Keys are idempotent per kind; a repeated key corrects the earlier report. At most 100 facts per call.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricFactsInput'}}}}
+      responses:
+        '200': {description: 'Stored facts', content: {application/json: {schema: {type: object, additionalProperties: false, required: [stored], properties: {stored: {type: integer, minimum: 0}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/metrics/source:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: putProjectDeliveryMetricSource
+      description: 'Requires delivery.manage. Links the project to the GitHub repository whose delivery it measures, with the CI and nightly workflow files. Changing any of them starts the backfill over. Does not change GitHub.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricSourceInput'}}}}
+      responses:
+        '200': {description: 'Metric source', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetricSource'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:

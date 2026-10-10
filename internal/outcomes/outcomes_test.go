@@ -201,6 +201,12 @@ func testOutcomeCapture(t *testing.T, d *dbtest.DB) {
 		t.Fatalf("core events %d %v", leaked, err)
 	}
 
+	// Completion assertions above retain the legacy trigger. Journey now admits
+	// Work only; migrate the same record before checking release history.
+	inTenant(t, d, person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id=(SELECT id FROM node_kinds WHERE tenant_id=$1 AND slug='work') WHERE id=$2`, person.TenantID, ticket)
+		return err
+	})
 	release, second := insertNode(t, d, person, "release", "CAP-3", "September release", &project), insertNode(t, d, person, "release", "CAP-4", "October release", &project)
 	inTenant(t, d, person, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1,$2)`, person.TenantID, project); err != nil {
@@ -244,7 +250,7 @@ func testOutcomeCapture(t *testing.T, d *dbtest.DB) {
 		t.Fatalf("publication titles: %v", titles)
 	}
 
-	again := insertNode(t, d, person, "ticket", "CAP-5", "Ship once", &project)
+	again := insertNode(t, d, person, "work", "CAP-5", "Ship once", &project)
 	third := insertNode(t, d, person, "release", "CAP-6", "November release", &project)
 	inTenant(t, d, person, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number) VALUES($1,$2,$3,3)`, person.TenantID, third, project); err != nil {
@@ -294,7 +300,7 @@ func TestOutcomeWorkInterval(t *testing.T) {
 	markerOnly := insertNode(t, d, person, "ticket", "TIM-5", "Marker session", &project)
 	future := insertNode(t, d, person, "ticket", "TIM-6", "Future start", &project)
 	unparsed := insertNode(t, d, person, "ticket", "TIM-7", "Unparsed start", &project)
-	published := insertNode(t, d, person, "ticket", "TIM-8", "Published with a session", &project)
+	published := insertNode(t, d, person, "work", "TIM-8", "Published with a session", &project)
 
 	insertState(t, d, person, marked, "2019-01-01T00:00:00Z")
 	inTenant(t, d, person, func(tx pgx.Tx) error {
@@ -543,6 +549,13 @@ func insertNode(t *testing.T, d *dbtest.DB, p tenant.Principal, kind, key, title
 	t.Helper()
 	var id string
 	inTenant(t, d, p, func(tx pgx.Tx) error {
+		// Keep explicit legacy fixtures after new tenants stopped seeding Ticket.
+		if kind == "ticket" {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,field_schema)
+				VALUES($1,'ticket','Ticket','TKT','ticket','{"type":"object","issue_family":true}') ON CONFLICT (tenant_id,slug) DO NOTHING`, p.TenantID); err != nil {
+				return err
+			}
+		}
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
 			SELECT $1,id,$2,$3,$4 FROM node_kinds WHERE tenant_id=$1 AND slug=$5
 			RETURNING nodes.id::text`, p.TenantID, key, title, parent, kind).Scan(&id)
@@ -559,7 +572,7 @@ func inTenant(t *testing.T, d *dbtest.DB, p tenant.Principal, fn func(pgx.Tx) er
 
 func agentKey(t *testing.T, d *dbtest.DB, tenantID, name string, scopes []string) (string, string) {
 	t.Helper()
-	_, id, token, err := auth.OperatorCreateAgentKey(t.Context(), d.App, tenantID, name, "", scopes, nil)
+	_, id, token, err := auth.OperatorCreateAgentKey(t.Context(), d.App, tenantID, name, "", scopes, nil, dbtest.KeyPerson(t, d.App, tenantID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -702,4 +715,57 @@ func decodePage(t *testing.T, raw []byte) []outcome {
 		t.Fatalf("decode %s: %v", raw, err)
 	}
 	return page.Outcomes
+}
+
+func TestOutcomeHistoryAndRecordingAfterWorkMigration(t *testing.T) {
+	d := dbtest.Open(t)
+	person := newPerson(t, d, "outcomes-work-migration")
+	project := insertNode(t, d, person, "project", "MIG-1", "Migration", nil)
+	ticket := insertNode(t, d, person, "ticket", "MIG-2", "Preserve history", &project)
+	mod, err := auth.New(auth.Config{SessionKey: bytes.Repeat([]byte{7}, 32)}, d.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, token := agentKey(t, d, person.TenantID, "migration-writer", []string{"nodes.read", "outcome.read", "outcome.write"})
+	api := outcomesAPI{t: t, auth: mod, mod: New(d.App)}
+	body := `{"kind":"review_verdict","ticket":"MIG-2","payload":{"verdict":"ok","summary":"Existing review"}}`
+	before := api.call(token, http.MethodPost, "/api/outcomes", body, "migration-review")
+	if before.Code != http.StatusCreated {
+		t.Fatalf("legacy record: %d %s", before.Code, before.Body.String())
+	}
+	history := decodeOutcome(t, before.Body.Bytes())
+	inTenant(t, d, person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id=(SELECT id FROM node_kinds WHERE slug='work' AND tenant_id=$1) WHERE id=$2`, person.TenantID, ticket)
+		return err
+	})
+	for _, ref := range []string{ticket, "MIG-2"} {
+		got := api.call(token, http.MethodGet, "/api/outcomes?ticket_node_id="+ref, "", "")
+		if got.Code != http.StatusOK {
+			t.Fatalf("migrated history %s: %d %s", ref, got.Code, got.Body.String())
+		}
+		rows := decodePage(t, got.Body.Bytes())
+		if len(rows) != 1 || rows[0].ID != history.ID || rows[0].TicketNodeID != ticket || string(rows[0].Payload) != string(history.Payload) {
+			t.Fatalf("migration lost history: %+v", rows)
+		}
+	}
+	replay := api.call(token, http.MethodPost, "/api/outcomes", body, "migration-review")
+	if replay.Code != http.StatusOK || decodeOutcome(t, replay.Body.Bytes()).ID != history.ID {
+		t.Fatalf("migrated replay: %d %s", replay.Code, replay.Body.String())
+	}
+	got := api.call(token, http.MethodPost, "/api/outcomes", `{"kind":"fix_round","ticket":"MIG-2","payload":{"round":2,"summary":"New work result"}}`, "migration-fix-round")
+	if got.Code != http.StatusCreated || decodeOutcome(t, got.Body.Bytes()).TicketNodeID != ticket {
+		t.Fatalf("work record: %d %s", got.Code, got.Body.String())
+	}
+	_, readOnly := agentKey(t, d, person.TenantID, "migration-reader", []string{"nodes.read", "outcome.read"})
+	if got := api.call(readOnly, http.MethodPost, "/api/outcomes", body, "read-only-review"); got.Code != http.StatusForbidden {
+		t.Fatalf("read-only work record: %d %s", got.Code, got.Body.String())
+	}
+	foreign := newPerson(t, d, "outcomes-work-foreign")
+	_, foreignToken := agentKey(t, d, foreign.TenantID, "foreign", []string{"nodes.read", "outcome.read", "outcome.write"})
+	if got := api.call(foreignToken, http.MethodGet, "/api/outcomes?ticket_node_id="+ticket, "", ""); got.Code != http.StatusNotFound {
+		t.Fatalf("foreign work history: %d %s", got.Code, got.Body.String())
+	}
+	if got := api.call(foreignToken, http.MethodPost, "/api/outcomes", body, "foreign-review"); got.Code != http.StatusNotFound {
+		t.Fatalf("foreign work record: %d %s", got.Code, got.Body.String())
+	}
 }

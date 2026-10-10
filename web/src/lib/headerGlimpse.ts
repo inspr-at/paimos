@@ -12,8 +12,11 @@ import { fetchTicketGraph, type TicketGraph } from './ticketGraph.ts'
 // matches. No module or plugin wiring is required; both APIs already exist.
 export async function loadTicketGraphContext(projectId: string, filters: ListFilters, signal: AbortSignal): Promise<{ data: TicketGraph; visible: TicketGraph }> {
   signal = AbortSignal.any([signal, AbortSignal.timeout(20_000)])
-  const data = await fetchTicketGraph(projectId, filters.showClosed, signal)
-  if (!hasFilters(filters) || !data.nodes.length) return { data, visible: data }
+  // Graph categories are spelling-based; a kind can put Accepted in Open or
+  // QA in Done. Keep all topology and let the shared list policy decide Hide
+  // membership, including the default five choices and Reset.
+  const data = await fetchTicketGraph(projectId, true, signal)
+  if ((!hasFilters(filters) && filters.showClosed) || !data.nodes.length) return { data, visible: data }
   const remaining = new Set(data.nodes.map(node => node.id)), matches = new Set<string>()
   let cursor: string | undefined
   const seen = new Set<string>()
@@ -49,7 +52,7 @@ export interface GlimpseBox { x: number; y: number; width: number; height: numbe
 // The backdrop spans the header; these measured islands stay completely clear,
 // including icons and controls beside the text. Resize and content observers
 // keep the mask current when a stage, saved view or docked panel changes shape.
-export const GLIMPSE_CLEAR_SELECTOR = '.title-line > *, .description, .head-stats, .project-tabs, .view-bar .view-tab, .view-bar .tab, .view-bar .changes, .toolbar-wrap'
+export const GLIMPSE_CLEAR_SELECTOR = '.title-line > *, .description, .head-stats .stat, .head-stats .q-warn, .head-stats .progress-line, .head-stats .group-count, .head-stats .status-count, .header-activity > *, .project-tabs, .project-navigation a, .project-navigation button, .project-navigation label, .view-bar .view-tab, .view-bar .tab, .view-bar .changes, .toolbar-wrap'
 
 export function glimpseOverlaps(a: GlimpseBox, b: GlimpseBox, gap = 0): boolean {
   return a.x < b.x + b.width + gap && a.x + a.width + gap > b.x

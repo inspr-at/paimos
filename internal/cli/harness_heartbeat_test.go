@@ -36,8 +36,11 @@ type hbCall struct {
 
 func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *httptest.Server {
 	t.Helper()
+	var mu sync.Mutex
 	project := map[string]any{"id": transcriptProjectID, "key": "PRJ-1", "kind_id": "project-kind", "title": "AEON", "fields": map[string]any{"project_key": "AEON"}}
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
 		t.Helper()
 		var body map[string]any
 		raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
@@ -963,8 +966,8 @@ func TestRunHeartbeatTerminalStatusExits(t *testing.T) {
 			if len(hbWhere(calls, http.MethodPost, "/stop")) != 0 {
 				t.Fatal("terminal generation was stopped again")
 			}
-			if strings.Contains(stderr.String(), "will not resume") {
-				t.Fatalf("first run explained a closed generation: %s", stderr.String())
+			if !strings.Contains(stderr.String(), "will not resume") {
+				t.Fatalf("first run did not report the closed generation: %s", stderr.String())
 			}
 			before := len(calls)
 			err = rt.runHeartbeat(context.Background(), heartbeatTestOptions(dir), heartbeatDeps{alive: func(int) bool { return true }})

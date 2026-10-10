@@ -77,6 +77,11 @@ func TestEffectiveRouteMatrix(t *testing.T) {
 		{"customer", "POST /api/quotes/{quoteId}/versions/{version}/accept", true},
 		{"customer", "GET /api/quotes", false},
 		{"customer", "GET /api/me/profile", true},
+		// Queue entry requires node visibility; the handler separately fences
+		// write permission and receipt ownership inside the final transaction.
+		{"owner", "POST /api/queue/{nodeId}/undo", true},
+		{"member", "POST /api/queue/{nodeId}/undo", true},
+		{"customer", "POST /api/queue/{nodeId}/undo", false},
 	} {
 		check(tc.role, people[tc.role], tc.route, tc.allow)
 	}

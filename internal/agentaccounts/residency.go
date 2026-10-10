@@ -5,7 +5,6 @@ import (
 	"context"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/jackc/pgx/v5"
-	"slices"
 	"time"
 )
 
@@ -81,10 +80,20 @@ func QualifyingAccountIDs(ctx context.Context, tx pgx.Tx, profileID, harness, pr
 	if err != nil {
 		return nil, err
 	}
-	accounts = applyFence(accounts, fences, projectID)
+	accounts, err = applyUse(ctx, tx, applyFence(accounts, fences, projectID), projectID)
+	if err != nil {
+		return nil, err
+	}
 	kept := []Account{}
 	for _, a := range accounts {
-		if a.Harness == harness && (a.AllowedProfileIDs == nil || slices.Contains(a.AllowedProfileIDs, profileID)) {
+		if a.Harness != harness {
+			continue
+		}
+		allowed, err := AccountAllowsProfile(ctx, tx, a, profileID)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
 			kept = append(kept, a)
 		}
 	}
@@ -106,38 +115,47 @@ func QualifyingAccountIDs(ctx context.Context, tx pgx.Tx, profileID, harness, pr
 	return ids, nil
 }
 
-// ResidencyRouteCount counts account/profile routes with valid residency and
-// model allowance. Capacity is transient and does not change this evidence
-// count. Load account metadata once for the whole editor view.
-func ResidencyRouteCount(ctx context.Context, tx pgx.Tx, profiles map[string]string, projectID, requirement string, now time.Time) (int, error) {
+// ResidencyProfileRouteCounts shares the same account read and harness fences
+// across picker choices. It is advisory evidence, never a reservation decision.
+func ResidencyProfileRouteCounts(ctx context.Context, tx pgx.Tx, profiles map[string]string, projectID, requirement string, now time.Time) (map[string]int, error) {
 	accounts, err := listAccounts(ctx, tx)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	count := 0
+	counts := make(map[string]int, len(profiles))
 	byHarness := map[string][]Account{}
 	for profileID, harness := range profiles {
 		candidates, loaded := byHarness[harness]
 		if !loaded {
 			fs, err := loadFences(ctx, tx, harness)
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
-			candidates = applyFence(accounts, fs, projectID)
+			candidates, err = applyUse(ctx, tx, applyFence(accounts, fs, projectID), projectID)
+			if err != nil {
+				return nil, err
+			}
 			byHarness[harness] = candidates
 		}
 		for _, a := range candidates {
-			if a.Harness != harness || a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, profileID) {
+			if a.Harness != harness {
+				continue
+			}
+			allowed, err := AccountAllowsProfile(ctx, tx, a, profileID)
+			if err != nil {
+				return nil, err
+			}
+			if !allowed {
 				continue
 			}
 			class, err := ResidencyClass(ctx, tx, a, profileID, now)
 			if err != nil {
-				return 0, err
+				return nil, err
 			}
 			if modelprefs.Strictness(class) >= modelprefs.Strictness(requirement) {
-				count++
+				counts[profileID]++
 			}
 		}
 	}
-	return count, nil
+	return counts, nil
 }

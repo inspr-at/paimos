@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/hooknote"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -43,7 +44,7 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	accounts := []agentd.EnrolledAccount{}
 	for _, a := range c.Accounts {
 		block, isBlocked := blocked[a.AccountID]
-		accounts = append(accounts, agentd.EnrolledAccount{ID: a.AccountID, Key: a.Key, Harness: a.Harness, DependencyBlocked: isBlocked, PinReason: block.Reason, PinFix: block.Fix.Kind})
+		accounts = append(accounts, agentd.EnrolledAccount{ID: a.AccountID, Key: a.Key, Harness: a.Harness, VerifiedIdentity: a.Identity, DependencyBlocked: isBlocked, PinReason: block.Reason, PinFix: block.Fix.Kind})
 		if isBlocked {
 			continue
 		}
@@ -128,6 +129,25 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	return accounts, adapters, nil
 }
 
+// publishHookPeer writes the public daemon pin the hook dials. The pin is
+// a kernel observation of this process, including PIDVersion, independent of
+// the service's cwd. An unusable pin fails serve instead of being published.
+func publishHookPeer(store *agentsetup.Store) error {
+	self, err := hooknote.ObserveDaemonSelf()
+	if err != nil {
+		return err
+	}
+	pin := hooknote.PinFrom(self)
+	if !pin.Valid() {
+		return errors.New("daemon peer pin unavailable")
+	}
+	peer, err := json.Marshal(pin)
+	if err != nil {
+		return err
+	}
+	return store.Write("hook-peer.json", peer, false)
+}
+
 func servePaired(root string, capacityInterval time.Duration) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -140,26 +160,26 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	if err != nil {
 		var tooLong *agentsetup.SocketPathLengthError
 		if errors.As(err, &tooLong) {
-			return fmt.Errorf("%w Use a shorter --setup-root.", err)
+			return fmt.Errorf("resolve daemon socket in %s: %w Use a shorter --setup-root.", state, err)
 		}
-		return err
+		return fmt.Errorf("resolve daemon socket in %s: %w", state, err)
 	}
 	c, err := agentsetup.ReadRuntimeConfig(root)
 	if err != nil {
-		return err
+		return fmt.Errorf("load runtime configuration %s: %w", filepath.Join(root, agentsetup.RuntimeName), err)
 	}
 	// The independent lifecycle proof must be usable before runtime Me. A
 	// revoked key cannot prevent cold-start tombstone discovery/fencing.
 	permitted, err := pairedPreflight(ctx, root, c.Origin, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("paired lifecycle preflight %s: %w", root, err)
 	}
 	if !permitted {
 		return nil
 	} // successful intentional exit; helper owns cleanup
 	c, key, err := agentsetup.ReadRuntime(root)
 	if err != nil {
-		return err
+		return fmt.Errorf("load paired runtime %s: %w", root, err)
 	}
 	accounts, adapters, err := pairedAdapters(c)
 	if err != nil {
@@ -174,19 +194,36 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	}
 	stepUps, stepErr := pairedStepUp(root, c, remote)
 	if stepErr != nil {
-		slog.Warn("Touch ID step-up disabled; check pairing status")
+		slog.Warn("Touch ID step-up disabled; check pairing status", "error", stepErr)
 	} else {
 		defer stepUps.Close()
 	}
-	s, err := agentd.NewSupervisor(ctx, agentd.Config{StepUps: stepUps, CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1},
-		PollDiagnostic: func(reason string) { slog.Warn("agentd polling diagnostic", "reason", reason) }})
+	logStore, err := agentsetup.OpenStore(state, true)
 	if err != nil {
 		return err
+	}
+	defer logStore.Close()
+	diagnostic := verificationLog(logStore)
+	s, err := agentd.NewSupervisor(ctx, agentd.Config{VerificationDiagnostic: diagnostic, StepUps: stepUps, CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1},
+		PollDiagnostic: func(reason string) {
+			slog.Warn("agentd polling diagnostic", "reason", reason)
+			diagnostic("", "", "poll_blocked", reason)
+		}})
+	if err != nil {
+		return fmt.Errorf("initialize daemon state %s: %w", state, err)
 	}
 	defer s.Close(context.Background())
 	if s.TenantID() != c.TenantID || s.PrincipalID() != c.PrincipalID {
 		return errors.New("runtime identity differs from approved pairing")
 	}
+	ledgerConfig, err := ledgerConfig(root, c)
+	if err != nil {
+		return err
+	}
+	if err = s.RefreshLedger(ctx, ledgerConfig); err != nil {
+		return fmt.Errorf("ledger enrollment unconfirmed: %w", err)
+	}
+	diagnostic("", "", "daemon_ready", "")
 	watches, err := pairedAttach(root, c, remote)
 	if err != nil {
 		slog.Warn("attach disabled; restart agentd after updating agentd or Aeon to retry", "error", err)
@@ -201,7 +238,7 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	}
 	local, err := agentd.ServePairedLocal(s, socket, watches)
 	if err != nil {
-		return err
+		return fmt.Errorf("start local daemon socket %s: %w", socket, err)
 	}
 	defer local.Close()
 	store, err := agentsetup.OpenStore(state, false)
@@ -210,6 +247,9 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	}
 	raw, _ := json.Marshal(agentsetup.ControlReference{Socket: socket, DaemonID: c.DaemonID, Generation: s.Generation()})
 	err = store.Write("control.json", raw, false)
+	if err == nil {
+		err = publishHookPeer(store)
+	}
 	store.Close()
 	if err != nil {
 		return err
@@ -221,6 +261,7 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	stopping := false
+	diagnostics := pairedDiagnostics{}
 	for {
 		if stopping || ctx.Err() != nil {
 			stopping = true
@@ -241,17 +282,9 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 		}
 		// Lifecycle reconciliation is required before every fresh dispatch;
 		// the independent tombstone proof still works after key revocation.
-		err = syncPairing(op, root, c.Origin, s)
-		if err == nil {
-			next, _, readErr := agentsetup.ReadRuntime(root)
-			if readErr == nil {
-				// Claude repins and dependency repairs hold only Claude;
-				// identity or binding changes still stop the daemon.
-				c, readErr = pollPairedRuntime(op, s, root, c, next)
-				if errors.Is(readErr, errStopDaemon) {
-					stopping = true
-				}
-			}
+		c, err = pairedPollIteration(op, s, root, c, &diagnostics)
+		if errors.Is(err, errStopDaemon) {
+			stopping = true
 		}
 		cancel()
 		select {
@@ -260,6 +293,56 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 		case <-ticker.C:
 		}
 	}
+}
+
+// The vocabulary bounds both log contents and the lifetime deduplication set.
+// Repeated failures remain visible in status without flooding service stderr.
+type pairedDiagnostics struct{ seen map[string]bool }
+
+func (d *pairedDiagnostics) report(s *agentd.Supervisor, detail string, err error) {
+	detail = agentsetup.SafePairingDetail(detail)
+	s.SetPairingFailure(detail)
+	cause := agentsetup.PairingFailureCause(err)
+	key := detail + ":" + cause
+	if detail == "" || d.seen[key] {
+		return
+	}
+	if d.seen == nil {
+		d.seen = map[string]bool{}
+	}
+	d.seen[key] = true
+	slog.Warn("agentd pairing diagnostic", "reason", agentsetup.PairingSyncFailed, "cause", detail, "first_cause", cause, "retryable", agentsetup.PairingRetryable(err))
+}
+
+func pairedPollIteration(ctx context.Context, s *agentd.Supervisor, root string, c agentsetup.RuntimeConfig, diagnostics *pairedDiagnostics) (agentsetup.RuntimeConfig, error) {
+	// Reserve time for account health checks even if lifecycle HTTP times out.
+	op, cancel := context.WithTimeout(ctx, 5*time.Second)
+	err := syncPairing(op, root, c.Origin, s)
+	cancel()
+	if err != nil {
+		diagnostics.report(s, agentsetup.PairingFailureDetail(err), err)
+		if agentsetup.PairingRetryable(err) {
+			return c, errors.Join(err, s.ProbeOnce(ctx))
+		}
+		return c, err
+	}
+	config, configErr := ledgerConfig(root, c)
+	if configErr != nil {
+		return c, configErr
+	}
+	if ledgerErr := s.RefreshLedger(ctx, config); ledgerErr != nil {
+		return c, ledgerErr
+	}
+	next, _, err := agentsetup.ReadRuntime(root)
+	if err != nil {
+		diagnostics.report(s, agentsetup.PairingRuntimeUnavailable, err)
+		return c, err
+	}
+	current, err := pollPairedRuntime(ctx, s, root, c, next)
+	if err != nil {
+		diagnostics.report(s, agentsetup.PairingRuntimeUnavailable, err)
+	}
+	return current, err
 }
 
 func restartPairedClaude(ctx context.Context, s pairedRuntimeSupervisor, old, next agentsetup.RuntimeConfig, adapters []agentd.Adapter) error {
@@ -366,6 +449,7 @@ func adaptersExceptClaude(adapters []agentd.Adapter) []agentd.Adapter {
 }
 
 type pairedRuntimeSupervisor interface {
+	SetPairingFailure(string)
 	SetHarnessHoldWithReason(string, string, string)
 	RefreshAccounts([]agentd.EnrolledAccount, []agentd.Adapter) error
 	PinHealthMatches([]agentd.EnrolledAccount) bool
@@ -382,6 +466,7 @@ var errStopDaemon = errors.New("paired daemon must stop")
 func pollPairedRuntime(ctx context.Context, s pairedRuntimeSupervisor, root string, c, next agentsetup.RuntimeConfig) (agentsetup.RuntimeConfig, error) {
 	current, err := refreshPairedRuntime(ctx, s, root, c, next)
 	if err == nil {
+		s.SetPairingFailure("")
 		_ = s.PollOnce(ctx)
 	}
 	return current, err
@@ -508,8 +593,22 @@ func syncPairing(ctx context.Context, root, origin string, s *agentd.Supervisor)
 		return err
 	}
 	defer store.Close()
-	e := agentsetup.Engine{Store: store, API: agentsetup.HTTPClient{Origin: origin}, Local: localPairing{root: root, supervisor: s}}
+	e := agentsetup.Engine{Store: store, API: agentsetup.HTTPClient{Origin: origin}, Local: localPairing{root: root, supervisor: s}, InstallMethod: installMethod()}
 	return e.SyncFences(ctx)
+}
+
+// installMethod reports which add-harness entry point reaches this daemon, so
+// Settings can offer the matching command. Empty when none provably does.
+func installMethod() string {
+	executable, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return agentsetup.InstallMethod(executable, home)
 }
 
 // pairedPreflight injects the public lifecycle transport in cold-start tests.
@@ -522,7 +621,7 @@ func pairedPreflight(ctx context.Context, root, origin string, api agentsetup.Pa
 	if api == nil {
 		api = agentsetup.HTTPClient{Origin: origin}
 	}
-	e := agentsetup.Engine{Store: store, API: api, Local: localPairing{root: root}}
+	e := agentsetup.Engine{Store: store, API: api, Local: localPairing{root: root}, InstallMethod: installMethod()}
 	if err = e.SyncFences(ctx); err != nil {
 		return false, err
 	}

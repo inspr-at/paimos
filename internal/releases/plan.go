@@ -13,7 +13,7 @@ import (
 
 func replace(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, release string, in planInput) (Walker, error) {
 	var out Walker
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
+	if err := lockMembership(ctx, tx, p, project); err != nil {
 		return out, err
 	}
 	var isPerson bool

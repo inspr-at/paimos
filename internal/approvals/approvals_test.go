@@ -22,6 +22,49 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
+func TestGetApprovalKeepsNativeSourceAndHistoryVisibility(t *testing.T) {
+	f := newFixture(t)
+	w := f.do(f.agentA, f.wide, "POST", "/api/approvals", proposalJSON("nodes.read", "node", &f.nodeA, nil))
+	if w.Code != 201 {
+		t.Fatalf("propose: %d %s", w.Code, w.Body.String())
+	}
+	var created Approval
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+	path := "/api/approvals/" + created.ID
+	w = f.do(f.personA, "", "GET", path, "")
+	if w.Code != 200 {
+		t.Fatalf("read: %d %s", w.Code, w.Body.String())
+	}
+	var read Approval
+	if err := json.Unmarshal(w.Body.Bytes(), &read); err != nil {
+		t.Fatal(err)
+	}
+	if read.ID != created.ID || read.Scope != created.Scope || read.Decision != nil {
+		t.Fatalf("source changed: %+v", read)
+	}
+	if w = f.do(f.personA, "", "POST", path+"/decision", `{"decision":"denied","reason":"No grant"}`); w.Code != 200 {
+		t.Fatalf("deny: %d %s", w.Code, w.Body.String())
+	}
+	w = f.do(f.personA, "", "GET", path, "")
+	if w.Code != 200 {
+		t.Fatalf("history: %d %s", w.Code, w.Body.String())
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &read); err != nil {
+		t.Fatal(err)
+	}
+	if read.Decision == nil || *read.Decision != "denied" {
+		t.Fatal("native history lost")
+	}
+	if w = f.do(f.agentB, f.tokenB, "GET", path, ""); w.Code != 404 {
+		t.Fatalf("foreign source exposed: %d %s", w.Code, w.Body.String())
+	}
+	if w = f.do(f.personB, "", "GET", path, ""); w.Code != 404 {
+		t.Fatalf("foreign tenant exposed: %d %s", w.Code, w.Body.String())
+	}
+}
+
 func TestScopeWithinKey(t *testing.T) {
 	cases := []struct {
 		scope  string
@@ -103,12 +146,12 @@ func newFixture(t *testing.T) *fixture {
 	f.empty = insertKey(t, f.db.Admin, f.agentA, []string{}, false)
 	f.revoked = insertKey(t, f.db.Admin, f.agentA, []string{"run.claim"}, true)
 	f.tokenB = insertKey(t, f.db.Admin, f.agentB, []string{"run", "nodes.read", "approvals.read", "harness.read"}, false)
-	f.nodeA = insertNode(t, f.db.Admin, f.tenantA, "ticket", "TKT-1", "Target")
-	f.deleted = insertNode(t, f.db.Admin, f.tenantA, "ticket", "TKT-2", "Gone")
+	f.nodeA = insertNode(t, f.db.Admin, f.tenantA, "work", "TKT-1", "Target")
+	f.deleted = insertNode(t, f.db.Admin, f.tenantA, "work", "TKT-2", "Gone")
 	if _, err := f.db.Admin.Exec(ctx, `UPDATE nodes SET deleted_at = now() WHERE id = $1::uuid`, f.deleted); err != nil {
 		t.Fatal(err)
 	}
-	f.nodeB = insertNode(t, f.db.Admin, f.tenantB, "ticket", "TKT-1", "Foreign")
+	f.nodeB = insertNode(t, f.db.Admin, f.tenantB, "work", "TKT-1", "Foreign")
 	order := insertNode(t, f.db.Admin, f.tenantA, "work_order", "WOR-1", "Order")
 	if _, err := f.db.Admin.Exec(ctx, `
 		INSERT INTO work_orders (tenant_id, node_id, requested_by_principal_id, assignee_principal_id, status)
@@ -168,8 +211,8 @@ func insertKey(t *testing.T, pool *pgxpool.Pool, p tenant.Principal, scopes []st
 		scopes = []string{}
 	}
 	if _, err := pool.Exec(t.Context(), `
-		INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes, revoked_at)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7)`,
+		INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes, revoked_at,created_by_principal_id)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`,
 		p.TenantID, p.ID, p.Name, prefix, hex.EncodeToString(sum[:]), scopes, revokedAt); err != nil {
 		t.Fatal(err)
 	}
@@ -782,7 +825,7 @@ func TestProjectScopedApprovalNames(t *testing.T) {
 	ticket := func(project, key string) string {
 		t.Helper()
 		var id string
-		if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,kind_id,key,title) SELECT $1::uuid,$2::uuid,id,$3,$3 FROM node_kinds WHERE tenant_id=$1::uuid AND slug='ticket' RETURNING id::text`, f.tenantA, project, key).Scan(&id); err != nil {
+		if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,kind_id,key,title) SELECT $1::uuid,$2::uuid,id,$3,$3 FROM node_kinds WHERE tenant_id=$1::uuid AND slug='work' RETURNING id::text`, f.tenantA, project, key).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		return id

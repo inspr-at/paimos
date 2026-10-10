@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"time"
@@ -21,8 +22,12 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentdwire"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/runkind"
 	"github.com/inspr-at/paimos/internal/sessionrequest"
@@ -61,6 +66,7 @@ var (
 	errOwnerGone               = errors.New("owner process is not alive")
 	errHeartbeatTerminal       = errors.New("heartbeat generation is closed")
 	errHeartbeatAlreadyStopped = errors.New("heartbeat generation is already stopped")
+	errHeartbeatStopRequested  = errors.New("heartbeat stop requested by server")
 	errHeartbeatStopBound      = errors.New("heartbeat stop retry bound reached")
 	errHeartbeatStopRejected   = errors.New("heartbeat stop was rejected")
 	errHeartbeatBusy           = errors.New("heartbeat state is already in use")
@@ -81,6 +87,7 @@ type heartbeatDeps struct {
 }
 
 type heartbeatOptions struct {
+	ReconnectSocket   string
 	OwnedStop         bool
 	LinkAccountID     string
 	LinkSetupRoot     string
@@ -131,8 +138,9 @@ type heartbeatOptions struct {
 }
 
 type heartbeatCommit struct {
-	SHA     string
-	Subject string
+	SHA                                    string
+	Subject                                string
+	LinesAdded, LinesDeleted, FilesChanged *int64
 }
 
 func (rt *runtime) harnessRunHeartbeat() *Command {
@@ -146,6 +154,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 		Use:   "harness run-heartbeat --owner-pid PID --state-dir DIR --project KEY --agent NAME --harness KIND",
 		addFlags: func(fs *flagSet) {
 			o.Capacity.flags(fs)
+			fs.string(&o.ReconnectSocket, "reconnect-socket", 0, "paired daemon socket for this existing heartbeat/inbox hook; no process control")
 			fs.int(&o.OwnerPID, "owner-pid", "process id whose exit stops the session")
 			fs.int(&o.Interval, "interval", "seconds between beats (default 50)")
 			fs.string(&o.StateDir, "state-dir", 0, "private directory for registration and resume")
@@ -195,6 +204,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			if err := o.prepare(); err != nil {
 				return err
 			}
+			o.discoverReconnectSocket()
 			ctx, stop := signalContext()
 			defer stop()
 			return rt.runHeartbeat(ctx, o, heartbeatDeps{})
@@ -265,6 +275,9 @@ func (o *heartbeatOptions) prepare() error {
 		}
 	}
 	o.normalize()
+	if o.ReconnectSocket != "" && (o.Management != "unmanaged" || !validUUID(o.SourceSession) || o.Harness != "claude" || !filepath.IsAbs(o.ReconnectSocket)) {
+		return usagef("--reconnect-socket requires an absolute paired socket, an unmanaged Claude session and --source-session with the installed inbox hook")
+	}
 	if o.OwnerPID <= 0 {
 		return usagef("--owner-pid must be a positive process id")
 	}
@@ -442,6 +455,15 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 		}
 		err := rt.heartbeatBeat(ctx, o, dep, session)
 		switch {
+		case errors.Is(err, errHeartbeatStopRequested):
+			// A PID observer owns only its reporting lifetime. Signalling is
+			// reserved for the launcher that owns and fences its exact child.
+			session.stopReason = "stopped"
+			if err := finish(); err != nil {
+				return err
+			}
+			fmt.Fprintf(rt.stderr, "heartbeat: session %s is stopped; observed owner process exit is unconfirmed\n", session.id)
+			return nil
 		case errors.Is(err, errHeartbeatTerminal):
 			rememberSettlement(session)
 			if serr := saveHeartbeatSession(session); serr != nil {
@@ -449,6 +471,7 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 				return serr
 			}
 			releaseSessionIndex(session)
+			explainClosedHeartbeat(rt, session)
 			return nil
 		case err != nil && ctx.Err() != nil:
 			return finish()
@@ -881,6 +904,9 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if o.OwnedStop {
 		body["advertised_capabilities"] = []string{"status", "owned_stop_v1"}
 	}
+	if o.ReconnectSocket != "" {
+		body["advertised_capabilities"] = append(body["advertised_capabilities"].([]string), "inbox")
+	}
 	putText(body, "generator", o.Generator, true)
 	putText(body, "command", o.CommandLabel, true)
 	putText(body, "display_label", label, haveLabel)
@@ -1174,6 +1200,11 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	modelUpdate := putHeartbeatModel(ctx, o, session, body)
 
+	if model, ok := body["model"].(string); ok && model != "" {
+		if effort, ok := body["reasoning_effort"].(string); ok && modelreport.ValidTuple(model, effort) {
+			body["model_reports"] = []modelreport.Observation{{ReportID: modelreport.EvidenceID(session.id + "/advertised/" + model + "/" + effort), Harness: o.Harness, Model: model, Effort: effort, Status: "advertised"}}
+		}
+	}
 	putText(body, "account_label", heartbeatText(o.AccountLabel, 128), true)
 	putText(body, "brief", heartbeatText(o.Brief, 240), true)
 	putText(body, "worktree", heartbeatText(o.Worktree, 512), true)
@@ -1232,17 +1263,24 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	commits := heartbeatCommits(ctx, o, dep, &session.disk)
 	if len(commits) > 0 {
-		items := make([]map[string]string, 0, len(commits))
+		items := make([]map[string]any, 0, len(commits))
 		for _, c := range commits {
-			items = append(items, map[string]string{"sha": c.SHA, "subject": c.Subject})
+			item := map[string]any{"sha": c.SHA, "subject": c.Subject}
+			if c.LinesAdded != nil && c.LinesDeleted != nil && c.FilesChanged != nil {
+				item["lines_added"], item["lines_deleted"], item["files_changed"] = *c.LinesAdded, *c.LinesDeleted, *c.FilesChanged
+			}
+			items = append(items, item)
 		}
 		body["commits"] = items
 	}
 	path := harnessPath(projectID, session.id) + "/heartbeat"
 	var response struct {
-		Mode     string                    `json:"agent_activity_mode"`
-		Warnings []harness.EstimateWarning `json:"warnings"`
-		Pause    *harness.Pause            `json:"pause"`
+		ID        string                    `json:"id"`
+		Phase     string                    `json:"phase"`
+		StoppedAt *time.Time                `json:"stopped_at"`
+		Mode      string                    `json:"agent_activity_mode"`
+		Warnings  []harness.EstimateWarning `json:"warnings"`
+		Pause     *harness.Pause            `json:"pause"`
 	}
 	postBeat := func() error {
 		err := rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, &response)
@@ -1267,12 +1305,22 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	if err != nil && heartbeatStatus(err) == http.StatusConflict {
 		var status struct {
-			ActivitySequence int64 `json:"activity_sequence"`
+			ActivitySequence int64      `json:"activity_sequence"`
+			ID               string     `json:"id"`
+			Phase            string     `json:"phase"`
+			StoppedAt        *time.Time `json:"stopped_at"`
 		}
-		if readErr := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); readErr == nil && status.ActivitySequence >= session.disk.Sequence {
-			session.disk.Sequence = status.ActivitySequence + 1
-			body["activity_sequence"] = session.disk.Sequence
-			err = postBeat()
+		if readErr := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); readErr == nil {
+			if strings.EqualFold(status.ID, session.id) && (status.StoppedAt != nil || status.Phase == "stopped") {
+				session.disk.Sequence--
+				markHeartbeatTerminal(session, "stopped")
+				return errHeartbeatTerminal
+			}
+			if status.ActivitySequence >= session.disk.Sequence {
+				session.disk.Sequence = status.ActivitySequence + 1
+				body["activity_sequence"] = session.disk.Sequence
+				err = postBeat()
+			}
 		}
 	}
 	if heartbeatTerminalStatus(err) {
@@ -1284,6 +1332,34 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if err != nil {
 		session.disk.Sequence--
 		return err
+	}
+	if response.ID != "" && !strings.EqualFold(response.ID, session.id) {
+		return errors.New("heartbeat response belongs to another generation")
+	}
+	if strings.EqualFold(response.ID, session.id) && (response.StoppedAt != nil || response.Phase == "stopped") {
+		markHeartbeatTerminal(session, "stopped")
+		return errHeartbeatTerminal
+	}
+	if dep.stopOwned == nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.Deliver {
+		return errHeartbeatStopRequested
+	}
+
+	if o.ReconnectSocket != "" {
+		indexed, _, result := lookupSessionIndex(strings.ToLower(o.SourceSession))
+		if result != sessionIndexBound || indexed != session.id {
+			return errors.New("heartbeat reported, but the live inbox hook binding is unavailable")
+		}
+		active, apiErr := rt.api()
+		if apiErr != nil {
+			return apiErr
+		}
+		local := agentdwire.Client{Socket: o.ReconnectSocket, TokenFile: o.ReconnectSocket + ".token"}
+		hookCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		hookErr := local.BindAttachedHook(hookCtx, agentd.AttachedHookRequest{Origin: strings.TrimRight(active.BaseURL, "/"), ProjectID: projectID, SessionID: session.id, Harness: o.Harness, Lease: session.lease, OwnerPID: o.OwnerPID, Sequence: session.disk.Sequence, Activity: o.Activity})
+		cancel()
+		if hookErr != nil {
+			return errors.New("heartbeat reported, but paired reconnect binding was refused")
+		}
 	}
 	if dep.stopOwned != nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.StopExpiresInMS > 0 && response.Pause.StopExpiresInMS <= 45000 {
 		deadline := beatStarted.Add(time.Duration(response.Pause.StopExpiresInMS) * time.Millisecond)
@@ -1880,4 +1956,26 @@ func addTokens(a, b int64) (int64, bool) {
 		return 0, false
 	}
 	return a + b, true
+}
+
+// A normal attached heartbeat with the existing source-session inbox hook
+// discovers only the known owner-only paired socket. No home scan, credential
+// file or foreign registration is used. The daemon/server verify instance and
+// principal before advertising recovery; older or absent daemons fail closed.
+func (o *heartbeatOptions) discoverReconnectSocket() {
+	if o.ReconnectSocket != "" || o.Management != "unmanaged" || o.Harness != "claude" || !validUUID(o.SourceSession) {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	root, err := agentsetup.DefaultStateRoot(goruntime.GOOS, home, os.Getenv("XDG_STATE_HOME"))
+	if err != nil {
+		return
+	}
+	local, err := agentdwire.OpenClient(filepath.Join(root, "daemon"))
+	if err == nil {
+		o.ReconnectSocket = local.Socket
+	}
 }

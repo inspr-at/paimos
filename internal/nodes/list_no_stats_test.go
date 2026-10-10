@@ -21,7 +21,7 @@ import (
 func TestListWithoutStatistics(t *testing.T) {
 	p := newPrincipal(t, "no-list-stats")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
 	if _, err := testDB.Admin.Exec(t.Context(), `ALTER TABLE nodes SET (autovacuum_enabled=false)`); err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func TestListWithoutStatistics(t *testing.T) {
 		}
 	}
 	page, err := New(appPool, nil).(*Module).listNodes(db.WithReadStatementTimeout(ctx, 2*time.Second), p.TenantID, q)
-	if err != nil || len(page.Items) != 50 || page.Facets["kind"]["ticket"] != 2058 {
+	if err != nil || len(page.Items) != 50 || page.Facets["kind"]["work"] != 2058 {
 		t.Fatalf("list without statistics: %v, items=%d, facets=%v", err, len(page.Items), page.Facets)
 	}
 }

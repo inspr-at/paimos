@@ -39,6 +39,8 @@ func New(pool *pgxpool.Pool, events Writer) httpapi.Module {
 // Mount registers kind and node routes. Paths are the full /api paths the
 // server mux expects.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/settings/work-vocabulary", m.handleGetVocabulary)
+	mux.HandleFunc("PUT /api/settings/work-vocabulary", m.handlePutVocabulary)
 	mux.HandleFunc("GET /api/status/help", m.handleStatusHelp)
 	mux.HandleFunc("GET /api/kinds", m.handleListKinds)
 	mux.HandleFunc("POST /api/kinds", m.requirePermission("kinds.manage", m.handleCreateKind))
@@ -53,6 +55,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/nodes/lookup", m.handleLookupNodes)
 	mux.HandleFunc("GET /api/nodes/tree", m.handleTree)
 	mux.HandleFunc("GET /api/node-keys/{key}", m.handleGetNodeByKey)
+	mux.HandleFunc("GET /api/nodes/{nodeId}/work-lifecycle", m.handleWorkLifecycle)
+	mux.HandleFunc("POST /api/nodes/{nodeId}/work-lifecycle", m.handleWorkLifecycle)
+	mux.HandleFunc("POST /api/nodes/{nodeId}/work-lifecycle/{actionId}/continue", m.handleWorkLifecycle)
+	mux.HandleFunc("DELETE /api/nodes/{nodeId}/work-lifecycle/{actionId}", m.handleWorkLifecycle)
 	mux.HandleFunc("GET /api/nodes/{nodeId}", m.handleGetNode)
 	mux.HandleFunc("PATCH /api/nodes/{nodeId}", m.handleUpdateNode)
 	mux.HandleFunc("DELETE /api/nodes/{nodeId}", m.handleDeleteNode)
@@ -84,9 +90,8 @@ func (m *Module) tx(ctx context.Context, tenantID string, fn func(context.Contex
 	})
 }
 
-// lockTree serializes tree edits for this tenant on the same advisory key the
-// node trigger uses, so position assignment and cycle checks cannot race.
+// lockTree serializes tree edits on the node trigger's advisory key. The
+// shared entry takes the FK-compatible tenant fence before tree and pairing.
 func lockTree(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id', true), 0))`)
-	return err
+	return db.LockCurrentTree(ctx, tx)
 }

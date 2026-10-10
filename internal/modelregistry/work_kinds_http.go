@@ -19,21 +19,29 @@ import (
 
 type workKind struct {
 	modelprefs.Kind
-	ArchivedAt *time.Time `json:"archived_at,omitempty"`
+	TicketCount int64      `json:"ticket_count"`
+	ArchivedAt  *time.Time `json:"archived_at,omitempty"`
 }
 type workKindPage struct {
 	Items      []workKind `json:"items"`
 	NextCursor *string    `json:"next_cursor"`
 }
 type workKindWrite struct {
-	Label     string `json:"label"`
-	Hint      string `json:"hint"`
-	ProjectID string `json:"project_id"`
+	WordsDe   *modelprefs.KindText `json:"words_de"`
+	Label     string               `json:"label"`
+	Hint      string               `json:"hint"`
+	ProjectID string               `json:"project_id"`
+	Examples  []string             `json:"examples"`
+	Labels    []string             `json:"labels"`
+	Position  *int                 `json:"position"`
 }
 type workKindPatch struct {
-	Label    *string `json:"label"`
-	Hint     *string `json:"hint"`
-	Position *int    `json:"position"`
+	WordsDe  *modelprefs.KindText `json:"words_de"`
+	Label    *string              `json:"label"`
+	Hint     *string              `json:"hint"`
+	Position *int                 `json:"position"`
+	Examples *[]string            `json:"examples"`
+	Labels   *[]string            `json:"labels"`
 }
 
 func kindSlug(label string) string {
@@ -61,7 +69,7 @@ func kindSlug(label string) string {
 }
 func kindScan(ctx context.Context, tx pgx.Tx, id string) (workKind, error) {
 	var k workKind
-	err := tx.QueryRow(ctx, `SELECT id::text,slug,label,hint,project_id::text,system,position,archived_at FROM work_kinds WHERE id=$1`, id).Scan(&k.ID, &k.Slug, &k.Label, &k.Hint, &k.ProjectID, &k.System, &k.Position, &k.ArchivedAt)
+	err := tx.QueryRow(ctx, `SELECT id::text,slug,coalesce(label_override,label),hint,project_id::text,system,position,archived_at,coalesce(examples,'{}'),coalesce(labels,'{}'),`+modelprefs.KindWordsDeSQL+`,(SELECT count(*) FROM nodes n WHERE n.tenant_id=work_kinds.tenant_id AND n.deleted_at IS NULL AND n.fields->>'area'=work_kinds.slug AND (work_kinds.project_id IS NULL OR n.project_id=work_kinds.project_id)) FROM work_kinds WHERE id=$1`, id).Scan(&k.ID, &k.Slug, &k.Label, &k.Hint, &k.ProjectID, &k.System, &k.Position, &k.ArchivedAt, &k.Examples, &k.Labels, &k.WordsDe, &k.TicketCount)
 	return k, err
 }
 func (m *Module) listWorkKinds(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +83,11 @@ func (m *Module) listWorkKinds(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
+	language := q.Get("lang")
+	if language != "" && language != "en" && language != "de" {
+		writePreferenceError(w, prefFail(400, "invalid_language"))
+		return
+	}
 	limit := 100
 	if q.Get("limit") != "" {
 		limit, err = strconv.Atoi(q.Get("limit"))
@@ -105,16 +118,17 @@ func (m *Module) listWorkKinds(w http.ResponseWriter, r *http.Request) {
 		if err := readableProject(ctx, tx, p, project); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id::text,slug,label,hint,project_id::text,system,position,archived_at FROM work_kinds WHERE (project_id IS NULL OR project_id=$1::uuid) AND ($2 OR archived_at IS NULL) AND ($3::uuid IS NULL OR id>$3::uuid) ORDER BY id LIMIT $4`, optionalUUID(project), archived, optionalUUID(cursor), limit+1)
+		rows, err := tx.Query(ctx, `SELECT id::text,slug,coalesce(label_override,label),hint,project_id::text,system,position,archived_at,coalesce(examples,'{}'),coalesce(labels,'{}'),`+modelprefs.KindWordsDeSQL+`,(SELECT count(*) FROM nodes n WHERE n.tenant_id=work_kinds.tenant_id AND n.deleted_at IS NULL AND n.fields->>'area'=work_kinds.slug AND (work_kinds.project_id IS NULL OR n.project_id=work_kinds.project_id)) FROM work_kinds WHERE (project_id IS NULL OR project_id=$1::uuid) AND ($2 OR archived_at IS NULL) AND ($3::uuid IS NULL OR id>$3::uuid) ORDER BY id LIMIT $4`, optionalUUID(project), archived, optionalUUID(cursor), limit+1)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
 			var k workKind
-			if err := rows.Scan(&k.ID, &k.Slug, &k.Label, &k.Hint, &k.ProjectID, &k.System, &k.Position, &k.ArchivedAt); err != nil {
+			if err := rows.Scan(&k.ID, &k.Slug, &k.Label, &k.Hint, &k.ProjectID, &k.System, &k.Position, &k.ArchivedAt, &k.Examples, &k.Labels, &k.WordsDe, &k.TicketCount); err != nil {
 				return err
 			}
+			k.SelectDisplayWords(language)
 			out.Items = append(out.Items, k)
 		}
 		if len(out.Items) > limit {
@@ -139,6 +153,10 @@ func (m *Module) writeWorkKind(w http.ResponseWriter, r *http.Request) {
 		writePreferenceError(w, prefFail(403, "person_required"))
 		return
 	}
+	if err := workBody(w, r); err != nil {
+		writePreferenceError(w, err)
+		return
+	}
 	id := r.PathValue("kindId")
 	if id != "" && !uuidRE.MatchString(id) {
 		writePreferenceError(w, prefFail(400, "invalid_kind_id"))
@@ -150,12 +168,32 @@ func (m *Module) writeWorkKind(w http.ResponseWriter, r *http.Request) {
 	if id == "" {
 		err = decodeJSON(w, r, &in)
 		in.Label = strings.TrimSpace(in.Label)
-		if err == nil && (in.Label == "" || !boundedText(in.Label, 60) || !boundedText(in.Hint, 120) || (in.ProjectID != "" && !uuidRE.MatchString(in.ProjectID))) {
+		if err == nil && (in.Label == "" || !boundedText(in.Label, 40) || !boundedText(in.Hint, 120) || (in.ProjectID != "" && !uuidRE.MatchString(in.ProjectID))) {
 			err = prefFail(422, "invalid_kind")
 		}
 	} else if r.Method == http.MethodPatch {
 		err = decodeJSON(w, r, &patch)
-		if err == nil && (patch.Label == nil && patch.Hint == nil && patch.Position == nil || patch.Label != nil && (strings.TrimSpace(*patch.Label) == "" || !boundedText(*patch.Label, 60)) || patch.Hint != nil && !boundedText(*patch.Hint, 120) || patch.Position != nil && (*patch.Position < -1000000 || *patch.Position > 1000000)) {
+		if err == nil && (patch.Label == nil && patch.Hint == nil && patch.Position == nil && patch.Examples == nil && patch.Labels == nil && patch.WordsDe == nil || patch.Label != nil && (strings.TrimSpace(*patch.Label) == "" || !boundedText(*patch.Label, 40)) || patch.Hint != nil && !boundedText(*patch.Hint, 120) || patch.Position != nil && (*patch.Position < -1000000 || *patch.Position > 1000000)) {
+			err = prefFail(422, "invalid_kind")
+		}
+	}
+	if err == nil {
+		examples, labels := in.Examples, in.Labels
+		if patch.Examples != nil {
+			examples = *patch.Examples
+		}
+		if patch.Labels != nil {
+			labels = *patch.Labels
+		}
+		err = validateKindLists(examples, labels)
+		wordsDe := in.WordsDe
+		if patch.WordsDe != nil {
+			wordsDe = patch.WordsDe
+		}
+		if err == nil && wordsDe != nil {
+			err = validateKindTranslation(wordsDe)
+		}
+		if in.Position != nil && (*in.Position < -1000000 || *in.Position > 1000000) {
 			err = prefFail(422, "invalid_kind")
 		}
 	}
@@ -188,7 +226,7 @@ func (m *Module) writeWorkKind(w http.ResponseWriter, r *http.Request) {
 		if err := authorizePreference(ctx, tx, p, level, project, nil); err != nil {
 			return err
 		}
-		if before != nil && before.System != nil {
+		if before != nil && before.System != nil && r.Method != http.MethodPatch {
 			return prefFail(422, "system_kind")
 		}
 		ev := "work_kind.updated"
@@ -227,7 +265,7 @@ func (m *Module) writeWorkKind(w http.ResponseWriter, r *http.Request) {
 			if slug == "" {
 				return prefFail(409, "slug_taken")
 			}
-			if err := tx.QueryRow(ctx, `INSERT INTO work_kinds(tenant_id,slug,label,hint,project_id,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING id::text`, p.TenantID, slug, in.Label, in.Hint, optionalUUID(project), p.ID).Scan(&id); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO work_kinds(tenant_id,slug,label,hint,project_id,created_by,examples,labels,position,words_de) VALUES($1,$2,$3,$4,$5,$6,$7,$8,coalesce($9,0),$10) RETURNING id::text`, p.TenantID, slug, in.Label, in.Hint, optionalUUID(project), p.ID, nonNilStrings(in.Examples), nonNilStrings(in.Labels), in.Position, in.WordsDe).Scan(&id); err != nil {
 				return err
 			}
 			ev = "work_kind.created"
@@ -242,7 +280,15 @@ func (m *Module) writeWorkKind(w http.ResponseWriter, r *http.Request) {
 			if patch.Position != nil {
 				position = *patch.Position
 			}
-			if _, err := tx.Exec(ctx, `UPDATE work_kinds SET label=$2,hint=$3,position=$4 WHERE id=$1`, id, label, hint, position); err != nil {
+			examples, labels := before.Examples, before.Labels
+			if patch.Examples != nil {
+				examples = *patch.Examples
+			}
+			if patch.Labels != nil {
+				labels = *patch.Labels
+			}
+			// Store editable system wording beside the released immutable identity.
+			if _, err := tx.Exec(ctx, `UPDATE work_kinds SET label=CASE WHEN system IS NULL THEN $2 ELSE label END,label_override=CASE WHEN system IS NOT NULL THEN $2 ELSE NULL END,hint=$3,position=$4,examples=$5,labels=$6,words_de=coalesce($7,words_de) WHERE id=$1`, id, label, hint, position, nonNilStrings(examples), nonNilStrings(labels), patch.WordsDe); err != nil {
 				return err
 			}
 		} else if r.Method == http.MethodDelete {
@@ -261,6 +307,7 @@ func (m *Module) writeWorkKind(w http.ResponseWriter, r *http.Request) {
 			if _, err := tx.Exec(ctx, `UPDATE work_kinds SET archived_at=NULL WHERE id=$1`, id); err != nil {
 				return err
 			}
+			ev = "work_kind.restored"
 		}
 		var err error
 		out, err = kindScan(ctx, tx, id)
@@ -279,4 +326,40 @@ func (m *Module) writeWorkKind(w http.ResponseWriter, r *http.Request) {
 		status = 201
 	}
 	httpapi.WriteJSON(w, status, out)
+}
+
+func nonNilStrings(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+func validateKindLists(examples, labels []string) error {
+	if len(examples) > 3 || len(labels) > 32 {
+		return prefFail(422, "invalid_kind")
+	}
+	for _, example := range examples {
+		if strings.TrimSpace(example) == "" || !boundedText(example, 120) {
+			return prefFail(422, "invalid_kind")
+		}
+	}
+	seen := map[string]bool{}
+	for _, label := range labels {
+		if strings.TrimSpace(label) == "" || !boundedText(label, 48) || seen[label] {
+			return prefFail(422, "invalid_kind")
+		}
+		seen[label] = true
+	}
+	return nil
+}
+
+func validateKindTranslation(words *modelprefs.KindText) error {
+	words.Label = strings.TrimSpace(words.Label)
+	if words.Label == "" || !boundedText(words.Label, 60) || strings.TrimSpace(words.Hint) == "" || !boundedText(words.Hint, 120) || words.Examples == nil {
+		return prefFail(422, "invalid_kind_translation")
+	}
+	if err := validateKindLists(words.Examples, nil); err != nil {
+		return prefFail(422, "invalid_kind_translation")
+	}
+	return nil
 }

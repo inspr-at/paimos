@@ -7,7 +7,7 @@ import { resilientFetch } from '../lib/api'
 
 // A public catalog for one tenant. The page asks only for that portal, keeps
 // the ballot cookie on a vote, and never renders a field the server did not name.
-const props = defineProps<{ tenantSlug: string }>()
+const props = defineProps<{ tenantSlug: string; productSlug?: string }>()
 
 interface PortalFeature {
   key: string
@@ -66,6 +66,15 @@ const FILTERS = [
   { id: 'declined', label: 'Declined' },
 ] as const
 
+interface Participation {
+  policy: 'disabled' | 'legacy' | 'registered'
+  voting_enabled: boolean
+  wish_intake_enabled: boolean
+  corrections_enabled: boolean
+}
+const participation = ref<Participation | null>(null)
+let loadRevision = 0
+const productBinding = ref('')
 const loading = ref(true)
 const missing = ref(false)
 const error = ref('')
@@ -107,18 +116,26 @@ const visibleCatalog = computed(() => {
   return filter.value ? items.filter(item => item.status === filter.value) : items
 })
 
-const base = computed(() => `/api/public/portal/${encodeURIComponent(props.tenantSlug)}`)
+const pageBase = computed(() => `/portal/${encodeURIComponent(props.tenantSlug)}${props.productSlug ? `/products/${encodeURIComponent(props.productSlug)}` : ''}`)
+const base = computed(() => `/api/public/portal/${encodeURIComponent(props.tenantSlug)}${props.productSlug ? `/products/${encodeURIComponent(props.productSlug)}` : ''}`)
 
 function votesLabel(count: number) {
   return `${count} ${count === 1 ? 'vote' : 'votes'}`
 }
 
 async function load() {
+  const revision = ++loadRevision
+  const address = base.value
+  participation.value = null
+  productBinding.value = ''
   loading.value = true
   error.value = ''
   missing.value = false
   voteError.value = ''
   voted.value = {}
+  busy.value = ''
+  wishing.value = false
+  correcting.value = false
   filter.value = ''
   wishTitle.value = ''
   wishSummary.value = ''
@@ -133,7 +150,8 @@ async function load() {
   correctionSent.value = false
   correctionError.value = ''
   try {
-    const response = await resilientFetch(base.value, { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
+    const response = await resilientFetch(address, { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' })
+    if (revision !== loadRevision || address !== base.value) return
     if (response.status === 404) {
       missing.value = true
       doc.value = null
@@ -141,14 +159,31 @@ async function load() {
       return
     }
     if (!response.ok) throw new Error('unavailable')
-    doc.value = await response.json() as PortalDocument
+    const document = await response.json() as PortalDocument
+    if (revision !== loadRevision || address !== base.value) return
+    const binding = response.headers.get('X-Portal-Binding') ?? ''
+    doc.value = document
+    if (document.product && /^[0-9a-f-]{36}:[1-9][0-9]*$/.test(binding)) {
+      try {
+        const policyResponse = await resilientFetch(`${address}/participation`, { credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', headers: { 'X-Portal-Binding': binding } })
+        const policy = policyResponse.ok ? await policyResponse.json() as Participation : null
+        if (revision !== loadRevision || address !== base.value) return
+        // Missing/invalid policy never enables an input control.
+        participation.value = policyResponse.headers.get('X-Portal-Binding') === binding && policy && ['disabled', 'legacy', 'registered'].includes(policy.policy) && typeof policy.voting_enabled === 'boolean' && typeof policy.wish_intake_enabled === 'boolean' && typeof policy.corrections_enabled === 'boolean' ? policy : null
+        productBinding.value = participation.value ? binding : ''
+      } catch {
+        if (revision !== loadRevision || address !== base.value) return
+        participation.value = null
+      }
+    }
     setPageTitle(doc.value.product?.title || 'Product portal')
   } catch {
+    if (revision !== loadRevision || address !== base.value) return
     error.value = 'The portal could not be loaded.'
     doc.value = null
     setPageTitle('Product portal')
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
@@ -171,6 +206,10 @@ function sinceLabel(version: string | undefined) {
 }
 
 async function sendCorrection() {
+  if (!participation.value?.corrections_enabled) return
+  const address = base.value
+  const revision = loadRevision
+  const binding = productBinding.value
   const competitor = correctionCompetitor.value.trim()
   const aspect = correctionAspect.value.trim()
   const statement = correctionStatement.value.trim()
@@ -178,12 +217,12 @@ async function sendCorrection() {
   correcting.value = true
   correctionError.value = ''
   try {
-    const response = await resilientFetch(`${base.value}/corrections`, {
+    const response = await resilientFetch(`${address}/corrections`, {
       method: 'POST',
       credentials: 'same-origin',
       cache: 'no-store',
       referrerPolicy: 'no-referrer',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Portal-Binding': binding },
       body: JSON.stringify({
         competitor,
         aspect,
@@ -192,6 +231,9 @@ async function sendCorrection() {
         website: correctionSite.value,
       }),
     })
+    if (revision !== loadRevision || address !== base.value) return
+    if (response.status === 403 || response.status === 401) { participation.value = null; throw new Error('Participation is currently unavailable.') }
+    if (response.status === 409) { participation.value = null; throw new Error('The product changed. Reload the catalog before sending again.') }
     if (response.status === 429) throw new Error('Too many corrections from this network. Try again in a minute.')
     if (response.status === 404) throw new Error('This portal is not taking corrections.')
     if (!response.ok) throw new Error('The correction was not sent.')
@@ -202,9 +244,10 @@ async function sendCorrection() {
     correctionSource.value = ''
     correctionSite.value = ''
   } catch (cause) {
+    if (revision !== loadRevision || address !== base.value) return
     correctionError.value = cause instanceof Error ? cause.message : 'The correction was not sent.'
   } finally {
-    correcting.value = false
+    if (revision === loadRevision) correcting.value = false
   }
 }
 
@@ -213,20 +256,27 @@ function toggleFilter(id: string) {
 }
 
 async function sendWish() {
+  if (!participation.value?.wish_intake_enabled) return
+  const address = base.value
+  const revision = loadRevision
+  const binding = productBinding.value
   const title = wishTitle.value.trim()
   const summary = wishSummary.value.trim()
   if (!title || !summary || wishing.value) return
   wishing.value = true
   wishError.value = ''
   try {
-    const response = await resilientFetch(`${base.value}/wishes`, {
+    const response = await resilientFetch(`${address}/wishes`, {
       method: 'POST',
       credentials: 'same-origin',
       cache: 'no-store',
       referrerPolicy: 'no-referrer',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Portal-Binding': binding },
       body: JSON.stringify({ title, summary, website: website.value }),
     })
+    if (revision !== loadRevision || address !== base.value) return
+    if (response.status === 403 || response.status === 401) { participation.value = null; throw new Error('Participation is currently unavailable.') }
+    if (response.status === 409) { participation.value = null; throw new Error('The product changed. Reload the catalog before sending again.') }
     if (response.status === 429) throw new Error('Too many wishes from this network. Try again in a minute.')
     if (response.status === 404) throw new Error('This portal is not taking wishes.')
     if (!response.ok) throw new Error('The wish was not sent.')
@@ -235,39 +285,49 @@ async function sendWish() {
     wishSummary.value = ''
     website.value = ''
   } catch (cause) {
+    if (revision !== loadRevision || address !== base.value) return
     wishError.value = cause instanceof Error ? cause.message : 'The wish was not sent.'
   } finally {
-    wishing.value = false
+    if (revision === loadRevision) wishing.value = false
   }
 }
 
 async function vote(wish: PortalWish) {
+  if (!participation.value?.voting_enabled) return
+  const address = base.value
+  const revision = loadRevision
+  const binding = productBinding.value
   if (busy.value || voted.value[wish.key]) return
   busy.value = wish.key
   voteError.value = ''
   try {
-    const response = await resilientFetch(`${base.value}/wishes/${encodeURIComponent(wish.key)}/votes`, {
+    const response = await resilientFetch(`${address}/wishes/${encodeURIComponent(wish.key)}/votes`, {
       method: 'POST',
       credentials: 'same-origin',
       cache: 'no-store',
       referrerPolicy: 'no-referrer',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Portal-Binding': binding },
       body: '{}',
     })
+    if (revision !== loadRevision || address !== base.value) return
+    if (response.status === 403 || response.status === 401) { participation.value = null; throw new Error('Participation is currently unavailable.') }
+    if (response.status === 409) { participation.value = null; throw new Error('The product changed. Reload the catalog before sending again.') }
     if (response.status === 429) throw new Error('Too many votes from this network. Try again in a minute.')
     if (response.status === 404) throw new Error('This wish is not open for votes.')
     if (!response.ok) throw new Error('The vote was not saved.')
     const body = await response.json() as { votes?: number }
+    if (revision !== loadRevision || address !== base.value || !doc.value?.wishes.includes(wish)) return
     if (typeof body.votes === 'number') wish.votes = body.votes
     voted.value = { ...voted.value, [wish.key]: true }
   } catch (cause) {
+    if (revision !== loadRevision || address !== base.value) return
     voteError.value = cause instanceof Error ? cause.message : 'The vote was not saved.'
   } finally {
-    busy.value = ''
+    if (revision === loadRevision) busy.value = ''
   }
 }
 
-watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
+watch(() => [props.tenantSlug, props.productSlug], () => { void load() }, { immediate: true })
 </script>
 
 <template>
@@ -295,8 +355,8 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
         <h1>{{ doc.product.title }}</h1>
         <p v-if="doc.product.summary" class="lead">{{ doc.product.summary }}</p>
         <nav v-if="doc.release_history || doc.roadmap" class="jumps" aria-label="Portal">
-          <router-link v-if="doc.roadmap" class="jump" :to="`/portal/${tenantSlug}/roadmap`">What's coming</router-link>
-          <router-link v-if="doc.release_history" class="jump" :to="`/portal/${tenantSlug}/releases`">Releases</router-link>
+          <router-link v-if="doc.roadmap" class="jump" :to="`${pageBase}/roadmap`">What's coming</router-link>
+          <router-link v-if="doc.release_history" class="jump" :to="`${pageBase}/releases`">Releases</router-link>
         </nav>
 
         <section v-if="paceFigures.length" class="block" aria-labelledby="pace-heading">
@@ -332,7 +392,8 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
 
         <section class="block" aria-labelledby="wishes-heading">
           <h2 id="wishes-heading">Wishes</h2>
-          <p class="quiet">One vote from this browser. No account and no name.</p>
+          <p v-if="participation?.voting_enabled" class="quiet">One vote from this browser. No account and no name.</p>
+          <p v-else class="quiet" role="status">Participation is currently unavailable. The catalog remains open for reading.</p>
           <p v-if="voteError" class="alert" role="alert">{{ voteError }}</p>
           <p v-if="!doc.wishes.length" class="quiet">No published wishes yet.</p>
           <ul v-else class="wishes">
@@ -343,6 +404,7 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
                 <p class="count">{{ votesLabel(wish.votes) }}</p>
               </div>
               <button
+                v-if="participation?.voting_enabled"
                 class="vote"
                 type="button"
                 :disabled="!!voted[wish.key] || busy === wish.key"
@@ -354,16 +416,16 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
               </button>
             </li>
           </ul>
-          <form v-if="!wishSent" class="wish-form" @submit.prevent="sendWish">
+          <form v-if="participation?.wish_intake_enabled && !wishSent" class="wish-form" @submit.prevent="sendWish">
             <label>Title<input v-model="wishTitle" class="field" name="title" required maxlength="300" autocomplete="off" /></label>
             <label>Summary<textarea v-model="wishSummary" class="field" name="summary" required maxlength="4000" rows="3" autocomplete="off" /></label>
             <div class="hp" aria-hidden="true">
               <label>Website<input v-model="website" type="text" tabindex="-1" autocomplete="off" name="website" /></label>
             </div>
-            <p v-if="wishError" class="alert" role="alert">{{ wishError }}</p>
             <button class="vote" type="submit" :disabled="wishing || !wishTitle.trim() || !wishSummary.trim()"><AppIcon name="send" :size="14" />{{ wishing ? 'Sending…' : 'Send wish' }}</button>
           </form>
-          <p v-else class="quiet" role="status">Sent for review.</p>
+          <p v-if="wishError" class="alert" role="alert">{{ wishError }}</p>
+          <p v-if="wishSent" class="quiet" role="status">Sent for review.</p>
         </section>
 
         <section v-if="comparison.length" class="block" aria-labelledby="comparison-heading">
@@ -384,7 +446,7 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
               </div>
             </article>
           </div>
-          <form v-if="!correctionSent" class="wish-form" @submit.prevent="sendCorrection">
+          <form v-if="participation?.corrections_enabled && !correctionSent" class="wish-form" @submit.prevent="sendCorrection">
             <h3>Correction</h3>
             <p class="quiet">A factual correction and the public page it comes from. No name.</p>
             <label>Competitor<input v-model="correctionCompetitor" class="field" name="competitor" required maxlength="80" autocomplete="off" /></label>
@@ -394,13 +456,13 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
             <div class="hp" aria-hidden="true">
               <label>Website<input v-model="correctionSite" type="text" tabindex="-1" autocomplete="off" name="website" /></label>
             </div>
-            <p v-if="correctionError" class="alert" role="alert">{{ correctionError }}</p>
             <button class="vote" type="submit" :disabled="correcting || !correctionCompetitor.trim() || !correctionAspect.trim() || correctionStatement.trim().length < 8"><AppIcon name="send" :size="14" />{{ correcting ? 'Sending…' : 'Send correction' }}</button>
           </form>
-          <p v-else class="quiet" role="status">Sent.</p>
+          <p v-if="correctionError" class="alert" role="alert">{{ correctionError }}</p>
+          <p v-if="correctionSent" class="quiet" role="status">Sent.</p>
         </section>
         <footer class="colophon">
-          <a class="colophon-link" :href="`/portal/${tenantSlug}/llms.txt`">llms.txt</a>
+          <a class="colophon-link" :href="`${pageBase}/llms.txt`">llms.txt</a>
         </footer>
       </template>
     </div>
@@ -453,7 +515,7 @@ h2 { margin: 0 0 8px; font: 650 22px/1.2 var(--serif); letter-spacing: -0.02em; 
   min-width: 0;
   border-radius: 16px;
   background: var(--surface-raised);
-  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(20, 40, 40, 0.04);
+  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-color) 4%, transparent);
 }
 .figure { flex: 1 1 160px; padding: 16px 18px; }
 .figure strong { display: block; font: 650 28px/1.1 var(--serif); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
@@ -482,7 +544,7 @@ h2 { margin: 0 0 8px; font: 650 22px/1.2 var(--serif); letter-spacing: -0.02em; 
   min-width: 0;
   border-radius: 16px;
   background: var(--surface-raised);
-  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(20, 40, 40, 0.04);
+  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-color) 4%, transparent);
 }
 .card { padding: 18px; }
 .card-top, .wish { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 16px; }

@@ -35,6 +35,7 @@ var attachRefusalCodes = []string{
 	"attach_draining",
 	"attach_enrollment_unavailable",
 	"attach_registration_lost",
+	"attach_poll_key_unknown",
 	"attach_pairing_unavailable",
 	"attach_scope_changed",
 	"attach_computer_limit",
@@ -175,6 +176,9 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
+		if path == "/v1/attached-hook" && res.StatusCode == 404 {
+			return ErrAttachedHookUnavailable
+		}
 		if path == "/v1/step-up" {
 			raw, readErr := io.ReadAll(io.LimitReader(res.Body, 769))
 			hint := strings.TrimSpace(string(raw))
@@ -202,7 +206,17 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 		}
 		return errors.New("local lifecycle request rejected")
 	}
-	d := json.NewDecoder(io.LimitReader(res.Body, 64<<10))
+	limit := int64(64 << 10)
+	if in, ok := body.(agentd.AttachedHookRequest); ok && path == "/v1/attached-hook" && in.Operation == "pull" {
+		// Drain returns at most one message: 65,536 Unicode characters,
+		// up to six JSON bytes per character, plus delivery metadata.
+		limit = 512 << 10
+	}
+	payload, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
+	if err != nil || int64(len(payload)) > limit {
+		return errors.New("invalid local lifecycle response")
+	}
+	d := json.NewDecoder(bytes.NewReader(payload))
 	d.DisallowUnknownFields()
 	if d.Decode(dest) != nil || d.Decode(&struct{}{}) != io.EOF {
 		return errors.New("invalid local lifecycle response")
@@ -280,4 +294,45 @@ func validAttachDiagnostic(text string) bool {
 		}
 	}
 	return true
+}
+
+func (c Client) BindAttachedHook(ctx context.Context, in agentd.AttachedHookRequest) error {
+	return c.lifecycleRequest(ctx, "POST", "/v1/attached-hook", in, &struct{}{})
+}
+
+var ErrAttachedHookUnavailable = errors.New("no live paired hook binding")
+
+func (c Client) PullAttachedHook(ctx context.Context, session string) ([]agentd.HarnessDelivery, error) {
+	var out []agentd.HarnessDelivery
+	err := c.lifecycleRequest(ctx, "POST", "/v1/attached-hook", agentd.AttachedHookRequest{Operation: "pull", SessionID: session}, &out)
+	return out, err
+}
+func (c Client) CompleteAttachedHook(ctx context.Context, session string, delivery agentd.HarnessDelivery) error {
+	var out []agentd.HarnessDelivery
+	return c.lifecycleRequest(ctx, "POST", "/v1/attached-hook", agentd.AttachedHookRequest{Operation: "complete", SessionID: session, DeliveryID: delivery.ID, Cursor: delivery.Cursor}, &out)
+}
+
+func (c Client) ImportLedger(ctx context.Context, config agentd.LedgerConfig) error {
+	var out struct {
+		Imported bool `json:"imported"`
+	}
+	if err := c.lifecycleRequest(ctx, "POST", "/v1/ledger/import", config, &out); err != nil {
+		return err
+	}
+	if !out.Imported {
+		return errors.New("ledger import unconfirmed")
+	}
+	return nil
+}
+func (c Client) LeaveLedger(ctx context.Context) error {
+	var out struct {
+		Left bool `json:"left"`
+	}
+	if err := c.lifecycleRequest(ctx, "POST", "/v1/ledger/leave", nil, &out); err != nil {
+		return err
+	}
+	if !out.Left {
+		return errors.New("ledger leave unconfirmed")
+	}
+	return nil
 }

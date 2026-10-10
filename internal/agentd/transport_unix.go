@@ -4,9 +4,11 @@
 package agentd
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/hooknote"
 )
 
 // LocalServer exposes fenced local control through an owner-only Unix socket.
@@ -29,9 +32,15 @@ type LocalServer struct {
 	release   func()
 	closeOnce sync.Once
 	closeErr  error
+	hooks     *hooknote.Server
 }
 
-func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*LocalServer, error) {
+func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ *LocalServer, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			resultErr = fmt.Errorf("start local socket %s: %w", socket, resultErr)
+		}
+	}()
 	if s == nil || !filepath.IsAbs(socket) {
 		return nil, errors.New("invalid local socket")
 	}
@@ -72,23 +81,23 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	tokenFile := socket + ".token"
 	f, err := os.OpenFile(tokenFile, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create socket token %s: %w", tokenFile, err)
 	}
 	tokenInfo, err = f.Stat()
 	if err != nil {
 		_ = f.Close()
-		return nil, err
+		return nil, fmt.Errorf("stat socket token %s: %w", tokenFile, err)
 	}
 	if _, err = f.WriteString(token); err != nil {
 		_ = f.Close()
-		return nil, err
+		return nil, fmt.Errorf("write socket token %s: %w", tokenFile, err)
 	}
 	if err = f.Sync(); err != nil {
 		_ = f.Close()
-		return nil, err
+		return nil, fmt.Errorf("sync socket token %s: %w", tokenFile, err)
 	}
 	if err = f.Close(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("close socket token %s: %w", tokenFile, err)
 	}
 	listener, err = net.Listen("unix", socket)
 	if err != nil {
@@ -102,7 +111,9 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	if err != nil {
 		return nil, err
 	}
+	hooks := hooknote.NewServer()
 	mux := http.NewServeMux()
+	mux.Handle("POST /v1/inbox-hook", hooks)
 	if s.stepUps != nil {
 		mux.HandleFunc("GET /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
 		mux.HandleFunc("POST /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
@@ -151,6 +162,56 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		_ = json.NewEncoder(w).Encode(out)
 	})
 	if len(attachments) == 1 && attachments[0] != nil {
+
+		s.recoveryMu.Lock()
+		s.attachedHookVerifier = attachments[0]
+		s.recoveryMu.Unlock()
+		mux.HandleFunc("POST /v1/attached-hook", func(w http.ResponseWriter, r *http.Request) {
+			if !authorized(r, token) {
+				http.Error(w, "unauthorized", 403)
+				return
+			}
+			// Binding reporting is not watch consent. Require the unchanged
+			// kernel peer; no browser, TTY or user-supplied helper PID grants it.
+			peer, ok := r.Context().Value(attachPeerKey{}).(attachObservation)
+			if !ok {
+				http.Error(w, "kernel peer required", 403)
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, 4096)
+			d := json.NewDecoder(r.Body)
+			d.DisallowUnknownFields()
+			var in AttachedHookRequest
+			if d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
+				http.Error(w, "invalid hook binding", 400)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+
+			if in.Operation != "" {
+				out, err := s.serviceAttachedHook(ctx, peer, in)
+				if err != nil {
+					code := 409
+					if errors.Is(err, ErrNotOwned) {
+						code = 404
+					}
+					http.Error(w, "attached hook unavailable", code)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "no-store")
+				_ = json.NewEncoder(w).Encode(out)
+				return
+			}
+			if s.bindAttachedHook(ctx, peer, in) != nil {
+				http.Error(w, "attached hook binding refused", 409)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = w.Write([]byte("{}"))
+		})
 		mux.HandleFunc("POST /v1/attach", func(w http.ResponseWriter, r *http.Request) { attachments[0].serve(w, r, token) })
 	}
 	mux.HandleFunc("GET /v1/account-environment", func(w http.ResponseWriter, r *http.Request) {
@@ -204,6 +265,44 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(status)
 	})
+	mux.HandleFunc("POST /v1/ledger/import", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 8192)
+		d := json.NewDecoder(r.Body)
+		d.DisallowUnknownFields()
+		var config LedgerConfig
+		if d.Decode(&config) != nil || d.Decode(&struct{}{}) != io.EOF {
+			http.Error(w, "invalid ledger handover", 400)
+			return
+		}
+		if err := s.EnableLedger(r.Context(), config); err != nil {
+			http.Error(w, "ledger handover unconfirmed", 409)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"imported": true})
+	})
+	mux.HandleFunc("POST /v1/ledger/leave", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 2)
+		raw, err := io.ReadAll(r.Body)
+		if err != nil || len(raw) != 0 {
+			http.Error(w, "invalid ledger leave", 400)
+			return
+		}
+		if err := s.LeaveLedger(r.Context()); err != nil {
+			http.Error(w, "ledger leave unconfirmed", 409)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{"left": true})
+	})
 	mux.HandleFunc("GET /v1/status", func(w http.ResponseWriter, r *http.Request) {
 		if !authorized(r, token) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -233,8 +332,8 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(receipt)
 	})
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ConnContext: attachConnContext}
-	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, cleanup: cleanup}
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ConnContext: localConnContext}
+	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, cleanup: cleanup, hooks: hooks}
 	local.release = func() {
 		_ = lock.Close()
 		_ = dir.Close()
@@ -242,6 +341,19 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (*L
 	go func() { _ = server.Serve(listener) }()
 	complete = true
 	return local, nil
+}
+
+func localConnContext(ctx context.Context, c net.Conn) context.Context {
+	return hooknote.Annotate(attachConnContext(ctx, c), c)
+}
+
+// SetHookPeer installs the attached-note source. The socket token is not
+// consulted for this route. A nil source stays unavailable and releases nothing.
+func (l *LocalServer) SetHookPeer(src hooknote.NoteSource, grants *hooknote.Registry) {
+	if l == nil || l.hooks == nil {
+		return
+	}
+	l.hooks.Set(src, grants)
 }
 
 func authorized(r *http.Request, token string) bool {

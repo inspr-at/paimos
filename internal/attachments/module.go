@@ -70,6 +70,7 @@ func New(pool *pgxpool.Pool, store Store) *Module { return &Module{Pool: pool, S
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/nodes/{nodeId}/attachments", m.upload)
 	mux.HandleFunc("GET /api/nodes/{nodeId}/attachments", m.list)
+	mux.HandleFunc("GET /api/attachments/{id}", m.get)
 	mux.HandleFunc("PATCH /api/attachments/{id}", m.patch)
 	mux.HandleFunc("DELETE /api/attachments/{id}", m.remove)
 	mux.HandleFunc("GET /api/attachments/{id}/content", m.content)
@@ -88,6 +89,34 @@ func (m *Module) principal(w http.ResponseWriter, r *http.Request, permission st
 	}
 	return p, true
 }
+
+func (m *Module) get(w http.ResponseWriter, r *http.Request) {
+	p, ok := m.principal(w, r, "attachments.read")
+	if !ok {
+		return
+	}
+	id := r.PathValue("id")
+	if !uuid(id) {
+		apierr(w, bad(400, "invalid attachment id"))
+		return
+	}
+	var a Attachment
+	err := db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := authz.RequireTx(r.Context(), tx, p, "attachments.read", authz.Scope{AnyProject: true}); err != nil {
+			return err
+		}
+		var err error
+		a, err = readAttachment(r.Context(), tx, p.TenantID, id)
+		return err
+	})
+	if err != nil {
+		apierr(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store, private")
+	httpapi.WriteJSON(w, http.StatusOK, a)
+}
+
 func apierr(w http.ResponseWriter, err error) {
 	if errors.Is(err, authz.ErrForbidden) {
 		httpapi.WriteError(w, 403, "permission denied")
@@ -121,6 +150,14 @@ func liveNode(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) error {
 		return pgx.ErrNoRows
 	}
 	return nil
+}
+
+func readAttachment(ctx context.Context, tx pgx.Tx, tenantID, id string) (Attachment, error) {
+	a, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM attachments WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, tenantID, id))
+	if err == nil {
+		err = liveNode(ctx, tx, tenantID, a.NodeID)
+	}
+	return a, err
 }
 
 // requireNodeWrite runs after LockProjectWrite, in the transaction that

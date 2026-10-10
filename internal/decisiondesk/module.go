@@ -35,6 +35,7 @@ type Item struct {
 	CreatedAt time.Time  `json:"created_at"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	Held      bool       `json:"held"`
+	CanDecide bool       `json:"can_decide"`
 	Href      string     `json:"href"`
 	Source    string     `json:"source"`
 	Bucket    int        `json:"-"`
@@ -148,7 +149,7 @@ func validID(id string) bool {
 }
 
 func validKind(kind string) bool {
-	return kind == "question" || kind == "approval" || kind == "action_request" || kind == "doctrine"
+	return kind == "question" || kind == "approval" || kind == "action_request" || kind == "doctrine" || kind == "key_trim" || kind == "stepup" || kind == "tier_request" || kind == "account_matrix"
 }
 
 func (m *Module) Read(ctx context.Context, p tenant.Principal, limit int, after *cursor) (Page, error) {

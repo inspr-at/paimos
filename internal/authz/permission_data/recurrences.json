@@ -1,0 +1,11 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "recurrences.manage"
+  ],
+  "words": {
+    "resources": {
+      "recurrences": "recurring work"
+    }
+  }
+}

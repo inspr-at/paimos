@@ -76,14 +76,44 @@ func (m *Module) pullChanged(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
+	err = m.HandlePullChange(ctx, raw)
+	if err != nil {
+		w.WriteHeader(http.StatusBadGateway)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// HandlePullChange is the common core used by both authenticated webhook routes.
+// It preserves the old base-change invalidation and publication semantics.
+func (m *Module) HandlePullChange(ctx context.Context, raw []byte) error {
+	app, ok := m.publisher.(*GitHubApp)
+	if !ok || !app.Configured(app.Config.TenantID, app.Config.Repository) {
+		return nil
+	}
+	var envelope struct {
+		Action string     `json:"action"`
+		Pull   pullChange `json:"pull_request"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return err
+	}
+	if envelope.Action != "edited" && envelope.Action != "synchronize" && envelope.Action != "reopened" {
+		return nil
+	}
+	changed := envelope.Pull
+	if changed.Number < 1 || !reviewgate.ValidSHA(changed.Head.SHA) || !reviewgate.ValidSHA(changed.Base.SHA) || changed.Base.Repo.FullName != app.Config.Repository {
+		return nil
+	}
+	tenantID, repository := app.Config.TenantID, app.Config.Repository
 	// One latest status owner for the signalled head. This path shares only
 	// that head's publication lock, never the dirty reporter's global lock.
 	var v Review
-	err = db.InTenant(db.AllProjects(ctx, "authenticated review binding change"), m.pool, app.Config.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(db.AllProjects(ctx, "authenticated review binding change"), m.pool, tenantID, func(tx pgx.Tx) error {
 		var id string
 		err := tx.QueryRow(ctx, `SELECT v.work_order_id::text FROM work_order_reviews v
 		 WHERE v.repository=$1 AND v.head_sha=$2 AND v.pull_request=$3 AND v.github_status<>'unconfigured' AND `+latestStatusOwner,
-			app.Config.Repository, event.Pull.Head.SHA, event.Pull.Number).Scan(&id)
+			repository, changed.Head.SHA, changed.Number).Scan(&id)
 		if err != nil {
 			return err
 		}
@@ -91,21 +121,17 @@ func (m *Module) pullChanged(w http.ResponseWriter, r *http.Request) {
 		return err
 	})
 	if err == pgx.ErrNoRows {
-		w.WriteHeader(http.StatusNoContent)
-		return
+		return nil
 	}
 	if err == nil {
-		conn, e := m.pool.Acquire(ctx)
+		conn, release, e := db.Acquire(ctx, m.pool)
 		if e != nil {
 			err = e
 		} else {
-			err = m.publishReview(ctx, conn, app.Config.TenantID, v, &event.Pull)
-			conn.Release()
+			err = m.publishReview(ctx, conn, tenantID, v, &changed)
+			release()
 		}
 	}
-	if err != nil {
-		w.WriteHeader(http.StatusBadGateway)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
+
+	return err
 }

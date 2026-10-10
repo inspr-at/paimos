@@ -140,7 +140,7 @@ const isItem = computed(() => s.value.list === 'bullet' || s.value.list === 'num
 .tool { display: grid; place-items: center; width: 34px; height: 30px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--ink-2); }
 .toggles .tool { width: 36px; }
 @media (hover: hover) { .tool:hover:not(:disabled) { color: var(--ink); background: var(--row-hover); } }
-.tool[aria-pressed="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .14), inset 0 0 0 1px var(--glass-edge); }
+.tool[aria-pressed="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 14%, transparent), inset 0 0 0 1px var(--glass-edge); }
 .tool[aria-pressed="mixed"] { color: var(--teal-ink); background: var(--row-selected); }
 .tool:focus-visible { box-shadow: var(--focus-ring); }
 .tool:disabled { color: var(--ink-3); opacity: .6; cursor: not-allowed; }

@@ -62,14 +62,44 @@ rejects missing, expired, future-dated or superseded evidence. The additive tabl
 does not change existing account rows or grant any account residency by default.
 
 Migration 1104's tenant-loop seed and replacement area-schema helper require an
-exact-byte exception in `scripts/migration-policy-exceptions.json`. The new
+exact-byte exception in `scripts/migration-policy-exceptions/`. The new
 slug pattern includes every previous area, and current Go area validation stays
 unchanged. Coordinator review and previous-binary compatibility CI remain
 required before merge/release. Before rolling back below this fence, set all
 residency requirements to `any` or pause dispatch; older binaries cannot enforce
 these stamps.
 
+AEON-580's unchanged `1116_owner_workstation.sql` has an exact-byte exception
+for its validated key constraints and replacement approval guard. Existing keys
+retain their defaults; the marked-key decision path keeps self-approval refused.
+The exception is a draft-CI review artifact. Coordinator review and the existing
+previous-binary compatibility gate remain required before merge/release.
+
+AEON-1022's `1304_delivery_flow_release_record.sql` adds two nullable columns to
+`delivery_flow_items` (the qualification evidence reference and the rollback
+class); previous binaries never write them. `1305_delivery_flow_step_keys.sql`
+replaces the `step_key` check of `delivery_flow_steps` with its strict superset
+(the 23 released keys plus `rehearsal` and `catalogue`) in one transaction. Every
+key a previous binary writes still passes, so the replacement is rollback-safe
+by digest; `DROP CONSTRAINT` is outside the expand-safe allowlist, so the file
+carries an exact-byte exception and a case module that pins the key list.
+
 ## Expand and contract (AEON-415)
+
+AEON-587 uses 1119 for the shared `document-v2` digest and 1123 to move the
+issue event FK and event-type/actor check to commit. Quote completeness, current
+draft state, totals and append-only issue evidence still validate on insertion.
+The importer predicts issue event IDs while holding the tenant/tree/quote locks,
+inserts issues and changes state, then appends events in the final flush. Any
+counter drift, missing event or invalid event evidence rolls the transaction
+back. Native writers that already append before inserting remain compatible.
+Neither migration changes a stored digest or historical snapshot. V1 readers
+retain the frozen importer field order and map-shaped prose alongside native
+v1 verification. Pre-baseline mappings bootstrap only without a later native
+event, recording both the pre-update and final snapshots as new import events.
+Both migrations have exact-byte policy exceptions requiring coordinator review
+and previous-binary compatibility CI before merge/release; a rollback below
+1119 still requires a v2-capable reader once any v2 quote has been issued.
 
 Ship schema changes in two releases. The expansion release adds the replacement
 table or column, backfills data, and moves readers and writers while retaining
@@ -139,13 +169,49 @@ domain types, `MATCH FULL`, referential-action suffixes and any other unsafe
 ALTER action.
 
 Merged but unreleased contract steps must not be disguised as expansion or
-added to historical grandfathering. `scripts/migration-policy-exceptions.json`
-is a separate, explicit review artifact naming each file, its SHA-256, owning
-ticket and rollout reason. The guard prints every exception, rejects malformed
+added to historical grandfathering. `scripts/migration-policy-exceptions/`
+contains one `NNNN_name.json` review artifact per migration, naming its exact SQL
+filename, SHA-256, owning ticket and rollout reason. Each file uses the existing
+`aeon.migration-policy-exceptions.v1` schema with exactly one `exceptions` entry.
+The checker discovers and sorts these files, then assembles the v1 manifest in
+memory; no combined ledger or generated index is committed. The guard prints
+every exception, rejects malformed
 or duplicate entries and changed/removed files, and retains number uniqueness
 and published/baseline immutability checks. An exception does not make its SQL
 expand-safe and does not skip runtime compatibility. Coordinator review of
 each exception is required before merge/release; workers only measure draft CI.
+
+Migration-specific checker tests live in
+`scripts/check-migrations-cases/NNNN_name.mjs`, matching the SQL filename. The
+existing `node --test scripts/check-migrations.test.mjs` entry point discovers
+and imports every case module, so CI commands stay unchanged. Add new checks to
+that migration's module rather than extending a central case list. A case file
+without its SQL migration, a mismatched exception filename, a duplicate record,
+malformed input or missing directory fails closed. The generic classifier,
+release-evidence and immutability tests remain in the entry point.
+
+AEON-985's conversion can be rechecked against its legacy commit:
+
+```sh
+node scripts/check-migrations-proof.mjs --base-ref 79348b98ca1e10e861784fcfd8e3360e1585f8df
+```
+
+This conversion-only oracle requires the base Git objects and fails if they are
+missing. It compares every assembled exception field, all 37 original test
+names and assertion bodies (normalizing only relocated paths, the loader call
+and the two file lists), and the unchanged policy decision function. Do not run
+it as a permanent gate for later migrations: new records and test cases are
+expected to change these sets. The directory regression tests and existing
+migration guard remain the ongoing checks. Reverting AEON-985 restores the
+ledger and tests together; there is no database migration or dependent runtime
+schema change.
+
+Conversion validation at `e6a8d1c19`: the dump proof passed for all 27 exception
+records and 37 original cases; all 38 migration tests passed. The full
+`internal/db` suite passed on build-6, and the locked remote
+`ci-static --merge-main` run passed all 40 checks with zero skips. The local
+static/planner regressions (294 tests) and ownership audit (33 tests) also
+passed. No origin push, deployment or worker-run review gate was performed.
 
 The sole initial exception, AEON-397's `1054_confirmed_quota_pools.sql`, replaces
 the reservation guard immediately. Existing accounts start unconfirmed, so
@@ -211,3 +277,445 @@ transaction after 1100 releases its exclusive lock; 1102 builds the unique conte
 index with the first-line `aeon:no-transaction` marker. The runner accepts exactly
 one concurrent index statement per marked file, including unique indexes, and
 checks uniqueness before reusing a valid unrecorded index.
+
+AEON-619 (1138) adds tenant-RLS product settings and per-product project links.
+It records the previously selected product as the explicit default, preserves
+published products in `legacy` participation, and binds existing browser ballots
+to their original product. New products are unpublished with participation
+`disabled`; registered activation is refused until B3+B8+B7's reviewed gate.
+Legacy portal/pacing tables and response fields remain. The old pace row mirrors
+into its bound product link; new writes keep the default's legacy adapter current.
+The tenant-loop backfill and mirror delete have an exact-byte policy exception
+for coordinator review. DSAR inventory is absent at this base; these new settings
+and link identifiers are tenant metadata, while ballot hashes remain pseudonymous
+personal data under the existing vote-table contract.
+
+AEON-619 fix round 2 keeps migration 1138 branch-only and updates its exact-byte
+exception for coordinator review. Nested and soft-deleted products are backfilled
+unpublished with participation disabled. Becoming an eligible root through move,
+restore or kind change registers settings idempotently; later moves and restores
+preserve the existing slug, default choice and participation settings.
+
+Catalog and participation responses expose `X-Portal-Binding` (`product UUID:settings
+revision`) without adding JSON fields. The public page echoes this binding on its
+policy read and every wish, correction and vote. Final writes compare it under the
+tenant/tree/product fences and return 409 without writing if the displayed product
+or settings revision changed. Older clients may omit it. Portal input decoders
+run before transaction locks and retain their byte limits, with a 10-second body
+read deadline; transactional authorization still runs under the tenant fence.
+
+Fix-round verification: regression-only commit `ccc537dd` keeps the production
+code at `090e1f87` and reproduces stale submissions, locked body reads, missing
+move registration and dormant backfill. The four new browser regressions also
+fail on that baseline. Fixed code at `9128e3b7` passes the remote portal suite,
+web build/lint and 1,332 web unit tests. The affected node/database/HTTP and strict
+reporter-contract suites pass at `4f31a2d2`; the migration guard and all 24 checker
+tests pass. The targeted local portal spec passes all 13 tests with no remaining
+owned processes. Remote browsers remain disabled pending OPS-247, so Linux
+Chromium and previous-binary runtime compatibility remain coordinator gates.
+These are local worker results, not merge, release, deployment or activation
+approval. No approved design decision was changed.
+
+AEON-619 lock-order round merged `origin/main` (`d94153bf`) normally at
+`1dd63b88`, then replaced branch-added tenant-before-tree fences with main's
+canonical helpers. Portal management, moderation, settings and public writes
+use `agentpairing.LockMutation` (pairing → tree → tenant); node tree/moderation
+entry points use `authz.LockProjectMutation` (tree → tenant, pairing first where
+required). Authorization remains inside the final fenced transaction, resource
+rows follow the fences, and the event counter remains last. The split portal
+locks and redundant intake tree acquisition were removed. Migration 1138 and
+its policy exception are unchanged in this round. Generic draft endpoints are
+not present in B1; stacked packages consume these shared entry-point fixes.
+
+Barrier regressions at `54df3190` reproduce tenant ownership while waiting for
+tree (`55P03` from a separate NOWAIT probe) on 13 node/admin/public paths, and
+detect missing tree serialization on two additional paths. Fixed code at
+`78e7597e` passes all 17 cases, checking durable mutations and exactly one
+matching audit event after the pairing fence resumes. The approved remote
+runner passes uncached nodes, portal, authz, agentpairing, agentruns and inbox
+suites, including `TestProjectWritesSerializeWithPairingTreeBeforeTenant`.
+The existing lock inventory now includes nodes and portal; its scanner and
+prior assertions are preserved. Evidence is retained locally in
+`tmp/aeon619-lock/negative-remote.log`, `positive-remote.log` and
+`static-lock-guard.log`. These are worker checks; consolidated review, push,
+merge and release remain coordinator work. No origin push or deployment ran.
+
+AEON-619 final repair round replaces the two node entry-point mutation fences
+with main's `authz.LockProjectWrite`. Its tenant SHARE lock excludes authority
+writes while permitting tenant FK key-share checks by concurrent comments and
+events. Pairing still precedes tree where required, tree precedes tenant, and
+authorization remains in the final write transaction. The lock inventory changes
+only the two node-helper expectations; shared helpers and their guards stay intact.
+No migration, policy exception, API contract or approved design decision changes.
+
+Regression-only commit `3b502ad4` preserves production code from `7b6a6e94`.
+Its two real HTTP comment/update and comment/delete cases pause after node SHARE
+and tenant-fence acquisition, then use PostgreSQL's wait graph to establish the
+edit's node-row wait before resuming the comment's tenant-referencing append.
+The approved remote run fails both cases on that baseline (update 409, delete
+500 with PostgreSQL `40P01`); the missing durable edit is also asserted.
+Repair `a782c0bd` passes both cases in the permitted single-package local check,
+including exactly one durable comment and edit audit event per case. Evidence:
+`tmp/aeon619-fix3/negative-remote.log` and `positive-targeted-local.log`.
+
+The approved remote runner exits 0 at `a782c0bd` for uncached full nodes, portal,
+authz, agentpairing, activity, events, relations and workqueue suites, followed
+by the web build, lint and all 1,396 web tests (655 Node tests and 741 Vitest
+tests; no Node skips). This includes the earlier pairing/tree barriers and the
+lock inventory's negative controls. The regression source is byte-identical to
+the failing baseline; shared helpers, three other main guards, contract,
+migration 1138 and its policy exception are unchanged. Retained evidence:
+`tmp/aeon619-fix3/positive-remote.log` and `preserved-artifacts.json`.
+
+The approved browser runner refuses the four portal specs with exit 3 because
+OPS-247's bootstrap and launcher remain pending (`remote-browser.log`). Linux
+Chromium verification remains a coordinator gate; no browser gate was bypassed
+and no origin push, deployment, model CLI or ticket status change ran. These
+results record worker validation, not merge or release approval.
+
+AEON-613 fix5 reserves **1147** for quota warning settings and durable receipts,
+replacing unpublished migration 1136. The current shared ledger assigns
+1136/1137 to AEON-615 and reserves the whole 1139–1146 block for other tickets.
+The replacement reservations are recorded on AEON-613 before renaming; the
+coordinator must mirror 1147/1148 to the shared ledger because workers may
+author only inside their own repository. The settings/receipt SQL is unchanged.
+
+DSAR integration (AEON-490): this branch has no `internal/dsar/inventory.json`.
+Classify `quota_warning_settings` as metadata, located by `(tenant_id)`.
+Classify `account_quota_warnings` as personal quota telemetry (resource/window
+identity, reading time, remaining percentage, reset, threshold and recovery),
+located by `(tenant_id,id)`, when merging with the inventory branch. These
+records contain no credentials, local paths or raw vendor responses.
+
+AEON-613 fix5 reserves **1148** for `account_quota_warning_observations`,
+replacing unpublished migration 1137. This stores the latest measured
+quota/window state, including healthy readings, separately from notification
+receipts in 1147. Only its filename and receipt-migration comment change.
+The reservation is recorded on AEON-613; the coordinator must mirror it to the
+shared ledger under the same ownership boundary. Existing receipts remain
+unchanged, and current availability resumes with the next fresh measurement.
+The first fenced write seeds its watermark from retained receipt reading and
+recovery times. A historical recovery with no retained healthy percentage stays
+unknown; it never synthesizes a quota figure. A newer measured observation
+replaces it, while delayed readings remain blocked across reset transitions.
+Classify this table as personal quota telemetry, located by
+`(tenant_id,quota_key,window_key)`, when integrating the DSAR inventory.
+
+AEON-649 reserves **1215** from its coordinator-assigned 1215–1224 range for
+`1215_one_work_kind.sql`. Its same-transaction runner hook reconciles legacy
+work schemas under FORCE RLS, validates existing fields against the merged
+schema, rewrites allowed-child references and substitutes the work kind on
+live and deleted epic/ticket/task nodes. Keys, IDs, parent links, timestamps,
+status, fields, estimates and release-note settings stay unchanged. Historical
+sessions, Decision Desk nodes/projections and journey memberships retain their
+IDs and references. One append-only `node.work_kind_migrated` snapshot per
+changed node records the old kind and the backup-only rollback policy.
+
+Property definitions and state categories must agree wherever they overlap;
+required sets must agree across kinds. Incompatible constraints, a pre-existing
+reserved `work` slug, invalid historical fields or fields over the bounded
+1 MiB validation limit stop the entire migration with tenant/node identifiers,
+without exposing field values. Reconcile explicitly, then retry. A live work
+parent with a bound session, queued/active claim or running child work order
+also stops the migration and reports up to 100 keys. Only live work children
+make a parent; stopped historical sessions and non-work children do not block.
+
+This is a maintenance migration, not an expand-safe upgrade. The exact-byte
+policy exception is a coordinator review artifact. Release 122 must be
+published and the merge/work queues drained; stop writers, verify an
+instance-specific pre-upgrade database/files backup by restoring it elsewhere,
+and deploy the completed work-node chain before AEON-596 ship adoption.
+The worker does not approve, push or deploy it. New naming and derived status
+remain downstream features behind AEON-429; this package changes no UI.
+
+The migration takes pairing → tree → tenant → resource locks before publishing
+any events. The tenant table fence prevents concurrent seeding, and maintenance
+table locks freeze sessions, runs and work orders. The tree validator is disabled
+only while substituting kind IDs, so tombstones under deleted parents migrate;
+it is restored before event publication in the same transaction, including on
+rollback. Other validators, RLS and the append-only event guard remain active.
+No resource mutation or resource lock follows the final event-counter pass.
+
+Local drill: with `aeon-dev-db` running, execute the targeted
+`TestWorkNodesVerifiedBackupRestoreDrill` test in `internal/db`, using the local
+`AEON_TEST_DATABASE_URL`. It creates synthetic disposable databases, retains a
+custom-format archive and SHA-256 evidence at `tmp/aeon-649-wn/`, compares every
+public table plus starter/tree-function digest, and migrates the restored old
+schema with an ordinary non-bypass role. The already-installed pgvector
+extension is excluded from the archive and supplied by the recovery bootstrap.
+This proves the local fixture round trip, not a production restore. Rollback
+restores the matching old database/files backup and exact old binary; per-node
+Undo and running an old binary against the migrated database are unsupported.
+Importer replay keeps `fields.classic.type` and normalizes only the exact recorded
+kind substitution, so person edits still conflict. Existing classic journey
+ticket membership semantics use retained provenance, including stored import
+events during relation backfill; broader parent/leaf release placement belongs
+to AEON-652. No permanent tables or columns are added for DSAR classification.
+
+## AEON-650 reservation and activation
+
+**1225** is the engine migration in AEON-650's coordinator-reserved **1225–1229**
+range. The coordinator must append `1225 AEON-650 (work parent status engine)`
+to its shared ledger; the worker does not author outside its worktree. Slots
+1226–1229 remain unused. No permanent user-data tables or columns are added.
+
+The engine defaults OFF with no AEON-429 table/override and honors tenant ON,
+project OFF, and null inheritance using the exact AEON-429 storage contract.
+Register `work-parent-status` in that package's catalog and provision System
+before activation, in a committed transaction while the flag is OFF. It refuses
+missing actors rather than acquiring a principal-link lock after an event
+counter. Every flagged work write must enter `db.InTenant`; grouped operations
+use `db.InTransaction`. SQL guards cover imports, requirements, quick-create,
+bulk, move, delete, restore, Undo and category updates. Changed children schedule
+both ancestor chains; final derivation reads locked canonical rows and emits at
+most one transition per parent. Retention has a separate audit event.
+
+Capacity counts live work rows and checks the final tree before commit; crossing
+creates, restores or kind conversions roll back. Tombstones do not consume the
+live-row limit. If an already enabled tenant exceeds it, entry leaves derivation
+inactive and restores caller visibility, allowing reads and feature disablement
+while the work-write guard fails closed. Causal Undo independently fences access
+changes when the flag is disabled, and reads confirmation before transaction
+entry. Ordinary Undo also takes its tree fence before its event fence across
+activation. Cause snapshots are bounded on expanded JSON size in Postgres before
+transfer. Kind conversion away from the last work child emits retention evidence
+with the conversion cause. Cause references stay in private metadata and are
+exposed only through the visibility-checked event envelope; legacy snapshots
+are redacted on read.
+
+The migration does not backfill statuses or enable flags. Initial reconciliation
+is caused by child changes or state-category configuration changes. Before any
+rollout, the coordinator validates the AEON-429 integration and whole chain,
+including the parent UI, under AEON-649's maintenance/verified-backup gate. See
+the root README for the API contract, explicit bounds and read-serialization
+tradeoff. This worker neither pushes nor deploys.
+
+AEON-619 merge-main round incorporates release-122 `origin/main` (`068611ab`)
+into reviewed branch head `769876fd` with a normal local merge. Both route maps
+and README sections are retained. Git-blob checks preserve all 282 main-only
+and 31 branch-only changed files; the shared OpenAPI preserves 1,036 path and
+component entries from both parents. The automatic migration-checker merge
+retains the quota reservation regression and portal exception assertions.
+Migration 1138, its exact-byte exception and the canonical lock helpers are
+unchanged; the guard confirms 232 unique migration numbers against published
+release `v261003095616.0.0`.
+
+Sequential local checks pass for authz, portal, nodes, agentpairing, db, auth,
+httpapi and reportercontract, including lock-order and concurrent-comment FK
+regressions. Web build/lint, all 1,469 unit tests (686 Node, 783 Vitest), 25
+migration-checker tests and all 24 tests across the four portal browser specs
+pass. Admin/roadmap initially hit ambiguous locators matching the hidden status
+help sheet; only their test locators were scoped, with all assertions retained,
+and those two specs pass on rerun. Each browser run leaves zero owned processes.
+The first authz attempt preceded creation of its maintenance database; the
+subsequent package run passes, and that worker-owned database is now removed.
+Evidence: `tmp/aeon619-merge-main/summary.json`, `preservation.json` and retained
+logs. Main's release metadata and presentation pin are retained. No feature
+changes were authored. build-6 was not accessed under the explicit hold; no
+ticket status change, push or deployment ran. Consolidated approval and release
+remain coordinator work.
+
+AEON-563's `1118_desk_matching.sql` adds an expression index over exact Q&A
+fingerprints and nullable per-asker source decision/revision pointers. Existing
+question/answer shapes and immutable human revisions remain available to older
+binaries. Question writes lock tenant, tree, authenticated key, question and
+decision before appending the event; access, key scopes and active decision state
+are checked inside that transaction. Matching preserves every membership's
+original input, ticket, session and reserved reply root. Reuse increments the
+source count once per membership and adds only inbox/comment effects due now;
+ask callers identify their new membership by its original request ID.
+P3 must use each pending effect's deadline rather than the source answer's human
+grace deadline. Corrections retain the original per-asker reuse pointers. Active
+Always publication and post-dispatch corrections remain P4/P3 responsibilities.
+
+AEON-503-simple reserves `1243_run_waiting_measurement.sql` for nullable
+`agent_runs.waiting_ms`. It sorts after release 123's 1240 using the coordinator's
+reserved number; work-node migrations keep their published filenames. The
+migration preserves legacy run fields, estimate snapshots and outcomes exactly.
+No historical timing is reconstructed. The field is personal agent-run timing
+telemetry, located by `(tenant_id,id)`; add this classification to the DSAR
+inventory when that independently owned inventory lands (absent on this base).
+
+AEON-619 release-123 merge-main round retains latest main `9d81acc6` in normal
+local merge `0045620f`, after preserving the inherited pending main merge as
+`d0eebb41`. The three conflicts retain both README sections, all exact-byte
+migration exceptions and their explicit test expectations. Preservation checks
+confirm 296 main-only and 32 branch-only files byte-for-byte, 1,056 OpenAPI
+entries, both route maps and 239 unique migration numbers. Main's CI workflow
+and shard manifest are unchanged; all four portal specs already have entries.
+
+Local checks pass: 25 migration-checker tests, the migration guard against
+`v261003095616.0.0`, OpenAPI reporter-contract tests, strict 12-shard coverage
+and all 13 public-portal browser tests with zero remaining owned processes.
+The approved remote runner returned exit 3 before code transfer because
+Mailina was the console user. Affected-package Go validation remains pending
+for the coordinator on the approved remote lane or hosted CI; these local
+checks do not claim that validation. Evidence is retained in
+`tmp/aeon619-merge-main/summary-r123.json`, `preservation-r123.json` and the
+`r123-*` logs. No feature change, origin push, deployment, migration renumbering,
+ticket status change or model review ran.
+
+AEON-503 merge-main round retains `origin/main` `4d7e7de34` in normal merge
+`3276ad4051`, preserving both migration README sections, both OpenAPI change
+sets and all route permissions. That earlier round retained the original
+reservation; fix round 3 renumbers the same SQL to 1243, after the released 1240
+migration. Independent preservation checks retained 23 branch and
+123 main files byte-for-byte, including main's deletions. Twelve unlisted Go
+cases are explicitly NIGHTLY, with post-gate provenance so the tier regression
+continues checking every legacy classification.
+
+Approved remote validation on build-6 passed all eleven affected Go packages
+(including OpenAPI reporter-contract checks), 26 migration-checker tests, the
+241-migration guard against `v261003095616.0.0`, 33 tier tests, web typecheck,
+lint and build, and 27 focused web tests across three files. The guard's missing
+remote release tag was supplied only in an isolated test repository using the
+verified release commit; shared release refs were unchanged. Go and migration
+tests ran at `3276ad4051`; the tier regression fix and remaining checks ran at
+`540a25677b`. Full repository and browser suites were not run in this scoped
+round. No feature behavior changed, migration was renumbered, origin push,
+deployment or model review ran.
+
+Migration 1230 also admits `status_autopilot.undone` to project-visible events,
+under the same target and referenced-node visibility checks. This lets another
+person's leaf Undo refresh aggregates when the parent status is unchanged.
+
+The exact-byte policy records for 1225 and 1230 pin their owning tickets and
+source commits in `scripts/migration-policy-exceptions/`. They expose the
+non-allowlisted function bodies, helper replacements and event-policy widening
+for the coordinator's consolidated review; they are not evidence that byte
+approval or previous-binary compatibility has passed. The owner-accepted
+AEON-648 concept and Q17 rollout remain binding: release 122 first, drained
+queues, stopped writers and an instance-specific verified backup/restore under
+AEON-649, plus AEON-429 activation integration and whole-chain validation.
+The static guard passing grants no merge, activation or deployment approval.
+
+## AEON-653 release placement and recurring leaves
+
+Coordinator-reserved **1233–1234** belong only to AEON-653. The coordinator
+records their individual purposes in its shared ledger; workers author only in
+their own worktree. Migration 1233 adds `work_parent_releases`: tenant, parent,
+project and release UUIDs are metadata, located by `(tenant_id,parent_node_id)`.
+The DSAR inventory does not exist in this stack or its local origin/main;
+classify these four columns and 1237's retained membership projection when
+integrating AEON-490's inventory. The retained object stores journey UUIDs,
+source, position, estimate and scope/access flags as metadata at the same locator.
+
+`ticket_node_ids` accepts parents and leaves. Placement expands work edges in
+the same project and deduplicates overlapping roots, with at most 100 roots,
+1000 resulting leaves and a separate 50,000-node traversal bound; intermediate
+parents do not count against the leaf limit. Excess rolls back. Parent
+intent is separate from release membership. Future leaves inherit the nearest
+placed ancestor's release only while it is planning. Otherwise they remain
+unassigned, become Backlog and carry `release_inheritance_note=parent_release_closed`.
+A fresh inherited leaf advances project/release revisions, invalidating stale
+plans and Undo. Undo restores both leaf membership and parent intent, only while
+its fenced result is current. Membership reads report actual distinct leaf
+releases, not intent, and return bounded leaf identities for honest client counts.
+Scopes stop at non-work children and nested projects; caller RLS stays active.
+
+Migration 1234 normalizes stored recurrence template references to work and
+increments definition revisions without rewriting occurrence receipts or prior
+sessions. REST keeps epic/ticket/task template aliases. Each occurrence creates
+a work leaf; the existing AEON-650 engine reopens its parent when
+`work-parent-status` is enabled through AEON-429. Parent Done is never a
+recurrence trigger. Historical sessions and Decision Desk IDs are untouched.
+
+Migration 1237 (AEON-653 fix2) reconciles current planning membership on work
+creation, moves, restoration and deletion. A leaf becoming a parent keeps its
+placement and the complete bounded membership projection as intent and leaves
+the live member set. Returning to leaf restores feature, position, source,
+estimate and scope/access flags; Undo follows the same reconciliation path.
+Explicit membership changes synchronize retained intent, including plan
+removal to backlog and compensating Undo, so subsequent children follow the
+latest choice. A current parent intent row, including explicit backlog, takes
+precedence over historical membership when future children inherit placement.
+Undo restores the previous intent or removes it; without intent, inheritance
+falls back to the preserved membership and its release-open check.
+Changing parent placement invalidates its retained scope approval,
+including an ordinary move back to the original release. Membership events capture that
+flag so compensating Undo can restore the prior approval; restoration also
+requires fresh scope review when older retained metadata names another release.
+Other retained planning metadata stays intact. Released/frozen member rows
+and stored note snapshots remain unchanged. Live walkers, current-release journey
+calculations and new note captures exclude parents. Quick-create applies explicit inclusion
+even after automatic inheritance and advances each revision once. Membership
+reads additionally return `assigned_leaf_count`; clients compare it with current
+leaf identities before confirming that a replay placed the entire subtree.
+
+Integration seams: the existing release-note capture helper and manifest
+backfill accept work leaves (AEON-596 P3/P6); immutable published snapshots stay
+unchanged. System recurrence queue entry explicitly checks leaf shape before
+using the legacy readiness helper (AEON-652), pending its consolidated lifecycle
+changes. Review both seams when merging siblings. Neither migration enables the
+rollout flag. Whole-chain acceptance, verified backup/rollback, push and deployment
+remain the coordinator's gates; this worker performs local checks and commits.
+
+## AEON-503 fix round 3
+
+Merged release-123 `origin/main` `73f40e0d8` in `2f17041d6`, preserving the
+updated Decision Desk documentation and both additive API changes. The combined
+session response adds optional commit counts to the published contract, so its
+header and schema pin now use `harness-session/2.8` (verified as a minor change).
+Every main test classification remains intact; explicit post-gate inventories
+preserve strict legacy tier assertions rather than exempting all NIGHTLY rows.
+
+`54449ea46` renumbers the unchanged waiting-measurement SQL to the coordinator's
+reserved `1243`, after release 123's `1240`. All 258 published SQL files remain
+byte-for-byte unchanged. The migration-order regression passes here and fails
+against `8e0e29c1`'s migration layout specifically because 1213 precedes 1240.
+The real Postgres upgrade test seeds two tenants before the work-kind upgrade,
+proves the waiting column is still absent at the release-123 boundary, preserves
+active time and exact historical snapshot/outcome bytes, and rejects reapplication.
+
+Local validation passed that database regression, reporter-contract tests,
+33 migration-checker tests, the 259-file guard against `v261005070923.0.0`,
+34 strict tier tests, and 19 focused web tests in usage-dashboard, usageWork and
+estimates. The approved remote Go runner transferred committed `54449ea46` but
+returned exit 3 because Colima was down, before running any package tests; its
+early refusal also bypasses its normal remote worktree cleanup. The remote
+browser launcher refused because OPS-247 bootstrap is pending. Broader affected
+Go suites, Linux Chromium and the previous-binary runtime compatibility probe
+remain unverified in this round and need the coordinator's working test lane or
+hosted CI. No assertions were loosened, origin push, deployment, ticket status
+change or model review ran.
+
+AEON-740 reserves **1259** for owner-bound parent queue snapshots, replacing
+the colliding unpublished 1258 reservation (AEON-734). `parent_queue_snapshots`
+contains personal work activity (`owner_id`, captured node identities/revisions,
+queue results and creation time), located by `(tenant_id,id)`. Classify it as
+personal in the AEON-490 DSAR inventory when that package is integrated;
+`internal/dsar/inventory.json` is absent from this branch and its pinned
+`origin/main`. Snapshots contain no credentials, prompts or account details.
+
+AEON-740 fix round 2 keeps this schema unchanged: the bounded JSON payload also
+retains server-held depth-first continuation cursors with exact sibling positions
+and ancestry. The API returns only `continuation_available`, never cursor paths;
+`continuation_of` refers to an owned snapshot of the same parent. Each capture
+creates independent explicit membership, and application rechecks canonical
+`aeon_work_busy` after identical shared-queue membership replay.
+
+
+## AEON-729 tier A
+
+1264 adds `work_escalations`, located by `(tenant_id,ticket_node_id)`.
+Classify it as personal work activity when AEON-490's DSAR inventory is
+integrated (the inventory is absent on this branch): episode/outcome/question
+and profile identities, round and CI attempt fingerprints, retry count, bounded
+cost holds and revisions. No raw findings, prompts or account identifiers are
+stored. Events retain episode transitions. Existing writers are unaffected.
+
+The AEON-601 adapter is `escalation.ReserveTx`: call under tenant/pairing/tree
+fences in the final retry transaction, then retain ordinary reservation/claim
+and host-load admission. A nonnil rejection with nil error must commit and be
+returned as the conflict (budget exhaustion creates one Decision Desk question,
+not another run). Other errors roll back, including the cost hold. Managed
+retry creation already uses this adapter; ticket-aware registry resolution
+consumes the same episode. Three distinct fix rounds, recurring canonical
+finding fingerprints, or two distinct CI execution IDs for one named check
+trigger tier A. Outcome producers must supply increasing rounds, SHA-256
+finding fingerprints and CI attempt UUIDs. Only a latest verified exact-range
+cross-family `review_id` can resolve the episode on `ok`. A bare reported `ok`
+does not reset the budget. Unknown vendor room waits; manual caps and provisional
+windows are not room evidence. Account/harness/dial/host gates, generation
+ownership, human answers and release activation remain their existing owners'
+responsibility; this package performs no autonomous launch or release.

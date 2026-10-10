@@ -17,6 +17,8 @@ test('catalog wait validation rejects broken and arbitrary reasons', () => {
   assert.equal(isCapacityWait({ code: 'schedule', until: 'garbage', run_now_allowed: true }), false)
   assert.equal(isCapacityWait({ code: 'raw vendor text', run_now_allowed: true }), false)
   assert.equal(isCapacityWait({ code: 'hold', run_now_allowed: false }), true)
+  assert.equal(isCapacityWait({ code: 'context', run_now_allowed: false }), true)
+  assert.equal(isCapacityWait({ code: 'context', context: {}, run_now_allowed: false }), false)
 })
 
 

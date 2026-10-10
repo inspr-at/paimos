@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strconv"
 	"time"
 
@@ -55,6 +56,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/pause", m.pause)
 	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/resume", m.resume)
 	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/run-now", m.runNow)
+	mux.HandleFunc("POST /api/recurrences/{recurrenceId}/events", m.receiveExternal)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/preview", m.preview)
 }
 func principal(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
@@ -119,21 +121,12 @@ func authorizeDefinition(ctx context.Context, tx pgx.Tx, p tenant.Principal, in 
 			}
 		}
 	}
-	return nil
+	return authorizeSources(ctx, tx, p, in)
 }
 
-// Match existing node and project-membership writers: tenant tree, tenant access
-// fence, node/record rows, then event counter. A non-key fence does not block the
-// tenant FK share locks. The worker uses try-locks to yield to foreground work.
+// Tenant access fence precedes tree and resource rows. Try mode yields rather
+// than waiting behind either foreground fence; FK share locks remain compatible.
 func lock(ctx context.Context, tx pgx.Tx, tenantID string, try bool) (bool, error) {
-	if try {
-		var got bool
-		if err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, tenantID).Scan(&got); err != nil || !got {
-			return false, err
-		}
-	} else if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID); err != nil {
-		return false, err
-	}
 	var id string
 	query := `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`
 	if try {
@@ -146,8 +139,15 @@ func lock(ctx context.Context, tx pgx.Tx, tenantID string, try bool) (bool, erro
 	if err != nil {
 		return false, err
 	}
-	return true, nil
+	if try {
+		var got bool
+		err := tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))`, tenantID).Scan(&got)
+		return got, err
+	}
+	_, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, tenantID)
+	return err == nil, err
 }
+
 func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
 	if !ok {
@@ -182,7 +182,7 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		template, _ := json.Marshal(in.Template)
 		trigger, _ := json.Marshal(in.Trigger)
 		out, err = scanRecurrence(tx.QueryRow(r.Context(), `INSERT INTO recurrences(tenant_id,project_id,parent_id,template,trigger,queue_each,overlap_policy,catch_up_policy,next_at,event_cursor,created_by_principal_id,created_at,updated_at,active_since)
-   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,(SELECT coalesce(max(id),0) FROM events WHERE type='release.published'),$10,$11,$11,$11) RETURNING `+recurrenceColumns, p.TenantID, in.ProjectID, in.ParentID, template, trigger, in.QueueEach, in.OverlapPolicy, in.CatchUpPolicy, next, p.ID, now))
+   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,(SELECT coalesce(max(id),0) FROM events WHERE ($5::jsonb->>'kind'='event' AND $5::jsonb->>'event'<>'release.published') OR type='release.published'),$10,$11,$11,$11) RETURNING `+recurrenceColumns, p.TenantID, in.ProjectID, in.ParentID, template, trigger, in.QueueEach, in.OverlapPolicy, in.CatchUpPolicy, next, p.ID, now))
 		if err != nil {
 			return err
 		}
@@ -309,7 +309,7 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		if comparable.StartDate == "" {
 			comparable.StartDate = before.Trigger.StartDate
 		}
-		if comparable == before.Trigger {
+		if reflect.DeepEqual(comparable, before.Trigger) {
 			in.Trigger = before.Trigger
 		}
 		if err = in.Input.normalize(now); err != nil {
@@ -327,13 +327,13 @@ func (m *Module) update(w http.ResponseWriter, r *http.Request) {
 		next := before.NextAt
 		cursor := before.EventCursor
 		active := before.ActiveSince
-		if in.Trigger != before.Trigger {
+		if !reflect.DeepEqual(in.Trigger, before.Trigger) {
 			active = now
 			next, err = nextTime(in.Trigger, now)
 			if err != nil {
 				return err
 			}
-			if err = tx.QueryRow(r.Context(), `SELECT coalesce(max(id),0) FROM events WHERE type='release.published'`).Scan(&cursor); err != nil {
+			if err = tx.QueryRow(r.Context(), `SELECT coalesce(max(id),0) FROM events WHERE ($1='event' AND $2<>'release.published') OR type='release.published'`, in.Trigger.Kind, in.Trigger.Event).Scan(&cursor); err != nil {
 				return err
 			}
 		}
@@ -402,7 +402,7 @@ func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused, retir
 			if err != nil {
 				return err
 			}
-			if err = tx.QueryRow(r.Context(), `SELECT coalesce(max(id),0) FROM events WHERE type='release.published'`).Scan(&cursor); err != nil {
+			if err = tx.QueryRow(r.Context(), `SELECT coalesce(max(id),0) FROM events WHERE ($1='event' AND $2<>'release.published') OR type='release.published'`, before.Trigger.Kind, before.Trigger.Event).Scan(&cursor); err != nil {
 				return err
 			}
 		}

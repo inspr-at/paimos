@@ -4,7 +4,11 @@ package modelregistry
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"time"
+
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -31,12 +35,25 @@ type preferenceViewRow struct {
 	Complex     preferenceEffective `json:"complex"`
 }
 type preferenceView struct {
-	Residency struct {
+	Choices             []preferenceChoice `json:"choices"`
+	ChoicesTruncated    bool               `json:"choices_truncated"`
+	ResolutionTruncated bool               `json:"resolution_truncated"`
+	Residency           struct {
 		modelprefs.ResidencyResult
 		QualifyingRoutes int `json:"qualifying_routes"`
 	} `json:"residency"`
 	Rows    []preferenceViewRow `json:"rows"`
 	Changes int                 `json:"changes"`
+}
+
+type preferenceChoice struct {
+	Profile         Profile `json:"profile"`
+	Line            string  `json:"line"`
+	ModelVersion    string  `json:"model_version"`
+	Retired         bool    `json:"retired"`
+	ReviewLadder    bool    `json:"review_ladder"`
+	ReviewReason    string  `json:"review_reason"`
+	ResidencyRoutes int     `json:"residency_routes"`
 }
 type preferenceDocument struct {
 	Revision          int64                       `json:"revision"`
@@ -49,7 +66,12 @@ type preferenceDocument struct {
 }
 
 func (m *Module) preferenceDocument(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) (preferenceDocument, error) {
-	person := modelprefs.PrefsPerson(ctx, tx, p)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	person, err := currentPreferencePerson(ctx, tx, p)
+	if err != nil {
+		return preferenceDocument{}, err
+	}
 	out := preferenceDocument{PersonID: person, Levels: map[string]*preferenceLevel{"project": nil}, Views: map[string]*preferenceView{"project": nil}, Can: map[string]bool{}, ResidencyLockMode: "warn"}
 	kinds, err := visibleKinds(ctx, tx, project)
 	if err != nil {
@@ -64,30 +86,22 @@ func (m *Module) preferenceDocument(ctx context.Context, tx pgx.Tx, p tenant.Pri
 	if err != nil {
 		return out, err
 	}
-	profiles, err := listProfiles(ctx, tx)
+	profiles, err := listPickerProfiles(ctx, tx)
 	if err != nil {
 		return out, err
 	}
+	truncated := len(profiles) > 256
+	if truncated {
+		profiles = profiles[:256]
+	}
+	reviewProfiles, err := pickerReviewProfiles(ctx, tx, profiles)
+	if err != nil {
+		return out, err
+	}
+	catalog := &preferencePreviewCatalog{}
 	routeProfiles := map[string]string{}
-	retiredRows, err := tx.Query(ctx, `SELECT profile_id::text FROM model_profile_retirements`)
-	if err != nil {
-		return out, err
-	}
-	retired := map[string]bool{}
-	for retiredRows.Next() {
-		var id string
-		if err := retiredRows.Scan(&id); err != nil {
-			retiredRows.Close()
-			return out, err
-		}
-		retired[id] = true
-	}
-	retiredRows.Close()
-	if err := retiredRows.Err(); err != nil {
-		return out, err
-	}
 	for _, profile := range profiles {
-		if profile.Enabled && !retired[profile.ID] {
+		if profile.Enabled {
 			routeProfiles[profile.ID] = profile.Harness
 		}
 	}
@@ -101,7 +115,7 @@ func (m *Module) preferenceDocument(ctx context.Context, tx pgx.Tx, p tenant.Pri
 		}
 		out.Levels[s.Level] = &level
 		out.Revision += s.Revision
-		view := &preferenceView{Rows: []preferenceViewRow{}}
+		view := &preferenceView{Rows: []preferenceViewRow{}, ChoicesTruncated: truncated}
 		view.Residency.ResidencyResult = modelprefs.ResolveResidency(chain[:i+1])
 		view.Changes = len(level.Rows)
 		if s.Residency != nil {
@@ -127,9 +141,26 @@ func (m *Module) preferenceDocument(ctx context.Context, tx pgx.Tx, p tenant.Pri
 		}
 		// Count account/profile routes, not profiles. No evidence means EU/local
 		// has zero routes, even for a locally installed vendor CLI.
-		view.Residency.QualifyingRoutes, err = agentaccounts.ResidencyRouteCount(ctx, tx, routeProfiles, previewProject, view.Residency.Value, now)
+		counts, countErr := agentaccounts.ResidencyProfileRouteCounts(ctx, tx, routeProfiles, previewProject, view.Residency.Value, now)
+		err = countErr
 		if err != nil {
 			return out, err
+		}
+		for _, count := range counts {
+			view.Residency.QualifyingRoutes += count
+		}
+		view.Choices = make([]preferenceChoice, 0, len(profiles))
+		for _, profile := range profiles {
+			_, line, version := ProfileLine(profile)
+			reason := ""
+			if !reviewProfiles[profile.ID] {
+				reason = "Outside the review ladder"
+			} else if (profile.Tier != "strong" && profile.Tier != "frontier") || profile.Effort != "xhigh" {
+				reason = "Reviews require strong or frontier models at extra high effort"
+			} else if capability := agentverification.For(profile.Harness, "darwin", "arm64"); !capability.Supported {
+				reason = capability.Reason
+			}
+			view.Choices = append(view.Choices, preferenceChoice{Profile: profile, Line: line, ModelVersion: version, ReviewLadder: reviewProfiles[profile.ID], ReviewReason: reason, ResidencyRoutes: counts[profile.ID]})
 		}
 		resolvedCells := map[string]WorkResolution{}
 		for _, kind := range kinds {
@@ -161,7 +192,12 @@ func (m *Module) preferenceDocument(ctx context.Context, tx pgx.Tx, p tenant.Pri
 				cacheKey := q.Role + bucket + string(cacheCell)
 				resolved, hit := resolvedCells[cacheKey]
 				if !hit {
-					resolved, err = ResolveWork(ctx, tx, preview, q, now)
+					resolved, err = resolveWorkWithCatalog(ctx, tx, preview, q, now, catalog)
+					if errors.Is(err, errPreferencePreviewIncomplete) {
+						resolved = WorkResolution{Trace: PreferenceTrace{Blocked: errPreferencePreviewIncomplete.Error()}}
+						view.ResolutionTruncated = true
+						err = nil
+					}
 					if err != nil {
 						return out, err
 					}

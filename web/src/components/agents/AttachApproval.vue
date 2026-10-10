@@ -19,7 +19,7 @@ const identity = useSession()
 const agents = useAgents()
 const copy = computed(() => attachCopy(brand.value.short_name))
 // A decision changes what /agents lists as waiting; the page refreshes it.
-const props = defineProps<{ now: number }>()
+const props = defineProps<{ now: number; hideTrigger?: boolean }>()
 const emit = defineEmits<{ changed: [result: AttachReview, declined: boolean] }>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('account.manage'))
 // Nothing here awaits outside an identity scope (AEON-440). `link` belongs to the
@@ -160,7 +160,7 @@ function keys(event: KeyboardEvent) {
   else if (event.key === 'ArrowLeft') { event.preventDefault(); move(roundIndex.value - 1) }
   else if (event.key === 'ArrowRight') { event.preventDefault(); move(roundIndex.value + 1) }
 }
-defineExpose({ show, sync })
+defineExpose({ show, sync, open })
 function lookup() {
   const normalized = code.value.replace(/[\s-]/g, '')
   if (busy.value) return Promise.resolve()
@@ -205,7 +205,7 @@ onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
 
 <template>
   <template v-if="allowed">
-    <button class="btn attach-session" type="button" @click="open"><AppIcon name="eye" :size="15" />{{ copy.attachSession }}</button>
+    <button v-if="!hideTrigger" class="btn attach-session" type="button" @click="open"><AppIcon name="eye" :size="15" />{{ copy.attachSession }}</button>
     <dialog ref="dialog" class="desk-dlg" aria-labelledby="attach-title" @keydown="keys" @cancel.prevent="escape" @click="event => { if (event.target === dialog) close() }">
       <div class="desk">
         <header class="desk-top">
@@ -299,8 +299,8 @@ onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
 .desk-acts.at-bottom { display: none; }
 .desk-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 42px; padding: 0 18px; border: 0; border-radius: 999px; font-size: 13.5px; font-weight: 650; white-space: nowrap; }
 .desk-btn.ghost { width: 128px; border: 1px solid var(--glass-edge); background: var(--btn-bg); box-shadow: var(--shadow-btn); }
-.desk-btn.primary { width: 212px; background: linear-gradient(180deg, #f1d18f, #d69b31); color: #2a1c04; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .55), 0 8px 18px -10px var(--scrim); }
-.desk-btn.primary .keycap { color: #2a1c04; background: rgba(255, 255, 255, .35); }
+.desk-btn.primary { width: 212px; background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); color: var(--primary-on); box-shadow: inset 0 1px 0 var(--glass-edge), 0 8px 18px -10px var(--scrim); }
+.desk-btn.primary .keycap { color: var(--primary-on); background: color-mix(in srgb, var(--primary-on) 16%, transparent); }
 .desk-btn:disabled { opacity: .4; }
 .desk-x { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); }
 .desk-btn:focus-visible, .desk-x:focus-visible { box-shadow: var(--focus-ring); }
@@ -310,7 +310,7 @@ onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
 .memo-head:not(:has(.stamp-slot)) { grid-template-columns: minmax(0, 1fr); }
 .memo-headtext { display: grid; gap: 10px; min-width: 0; }
 .memo-kind { display: flex; align-items: center; gap: 7px; font: 600 10.5px/1.4 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--teal-ink); }
-.memo-kind.held, .park, .soon { color: var(--gold-ink); }
+.memo-kind.held, .park, .soon { color: var(--warn-ink); }
 h2, .memo-q { margin: 0; font: 500 24px/1.25 var(--serif); letter-spacing: -.016em; overflow-wrap: anywhere; }
 .memo-q { font-size: 18px; }
 p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-2); }

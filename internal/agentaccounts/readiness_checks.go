@@ -47,7 +47,7 @@ type checkGapError struct {
 
 func (e *checkGapError) Error() string { return "check minimum gap" }
 
-// inReadinessWrite takes pairing, tree, then the tenant authorization fence
+// inReadinessWrite takes the tenant authorization fence, pairing, then tree
 // before account/resource locks. Every write rechecks RequireTx in this transaction.
 func (m *Module) inReadinessWrite(ctx context.Context, p tenant.Principal, fn func(pgx.Tx) error) error {
 	return m.in(ctx, p.TenantID, fn)

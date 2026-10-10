@@ -5,6 +5,7 @@
 // whole record and carries its revision; the server refuses a stale one with
 // 409. Undo goes through the event log. Free of Vue for unit tests.
 import { api, listNodes } from './api.ts'
+import { captureToastOwner } from './toast.ts'
 import type { RowAction } from './rowActions.ts'
 
 export interface Address { street: string; postal_code: string; city: string; country: string; freeform: string }
@@ -14,9 +15,10 @@ export interface CustomerFields {
   billing_address: Address | null; visiting_address: Address | null; hourly_rate_minor: number | null; lp_rate_minor: number | null
   external_provider: string; external_id: string; external_url: string
 }
-export interface Customer extends CustomerFields { id: string; key: string; name: string; revision: number; customer_no: string | null; primary_contact_node_id: string | null; archived?: boolean }
+export interface MutationReceipt { event_ids?: readonly string[] }
+export interface Customer extends CustomerFields, MutationReceipt { id: string; key: string; name: string; revision: number; customer_no: string | null; primary_contact_node_id: string | null; archived?: boolean }
 export interface ContactFields { email: string; phone: string; role: string; note: string; external_provider: string; external_id: string; external_url: string }
-export interface Contact extends ContactFields { id: string; key: string; organisation_node_id: string; name: string; revision: number; primary: boolean }
+export interface Contact extends ContactFields, MutationReceipt { id: string; key: string; organisation_node_id: string; name: string; revision: number; primary: boolean }
 export interface Cooperation { engagement: string; ownership: string; environment_responsibility: string; sla: string; report_contract: string; revision: number }
 export interface RelatedProject { id: string; key: string; title: string; state: string; cooperation: Cooperation; cooperation_revision: number }
 export interface RelatedQuote { id: string; offer_no: string | null; state: string; archived: boolean }
@@ -39,13 +41,16 @@ export class CRMError extends Error {
   constructor(status: number, code: string, message: string) { super(message); this.status = status; this.code = code }
 }
 async function send<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  const current = captureToastOwner()
   const response = await api(`/crm${path}`, body === undefined ? { method } : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!response.ok) {
     const error = await response.json().catch(() => ({}))
     const message = typeof error?.message === 'string' ? error.message : typeof error?.error === 'string' ? error.error : ''
     throw new CRMError(response.status, typeof error?.code === 'string' ? error.code : '', plainError(response.status, message))
   }
-  return response.status === 204 ? (undefined as T) : await response.json() as T
+  const data = response.status === 204 ? {} : await response.json()
+  const eventIds = mutationEventIds(response, current)
+  return (eventIds && data && typeof data === 'object' && !Array.isArray(data) ? { ...data, event_ids: eventIds } : data) as T
 }
 // What went wrong, as people say it.
 export function plainError(status: number, message: string) {
@@ -81,11 +86,25 @@ export const createCustomer = (write: CustomerWrite) => send<Customer>('/organis
 // Archiving hides a customer from lists and pickers; its quotes, projects and hours stay.
 export const setCustomerArchived = (id: string, expectedRevision: number, archived: boolean) => send<Customer>(`/organisations/${seg(id)}/visibility`, 'PATCH', { expected_revision: expectedRevision, archived })
 export const updateCustomer = (id: string, write: CustomerWrite, expectedRevision: number) => send<Customer>(`/organisations/${seg(id)}`, 'PATCH', { ...write, expected_revision: expectedRevision })
-export const deleteCustomer = (id: string) => send<void>(`/organisations/${seg(id)}`, 'DELETE')
-export const listContacts = (id: string) => send<Contact[]>(`/organisations/${seg(id)}/contacts`)
+export const deleteCustomer = (id: string) => send<MutationReceipt>(`/organisations/${seg(id)}`, 'DELETE')
+export async function listContacts(id: string): Promise<Contact[]> {
+  const out: Contact[] = []
+  const seen = new Set<string>()
+  let cursor = ''
+  for (let page = 0; page < 20; page++) {
+    const response = await api(`/crm/organisations/${seg(id)}/contacts?limit=100${cursor ? `&after_id=${seg(cursor)}` : ''}`)
+    if (!response.ok) throw new CRMError(response.status, '', plainError(response.status, ''))
+    out.push(...await response.json() as Contact[])
+    cursor = response.headers.get('X-Next-Cursor') ?? ''
+    if (!cursor) return out
+    if (seen.has(cursor)) throw new Error('Contact paging did not advance.')
+    seen.add(cursor)
+  }
+  throw new Error('More than 2,000 contacts. Narrow the customer selection.')
+}
 export const createContact = (orgId: string, write: ContactWrite) => send<Contact>(`/organisations/${seg(orgId)}/contacts`, 'POST', write)
 export const updateContact = (id: string, write: ContactWrite, expectedRevision: number) => send<Contact>(`/contacts/${seg(id)}`, 'PATCH', { ...write, expected_revision: expectedRevision })
-export const deleteContact = (id: string) => send<void>(`/contacts/${seg(id)}`, 'DELETE')
+export const deleteContact = (id: string) => send<MutationReceipt>(`/contacts/${seg(id)}`, 'DELETE')
 export const makePrimary = (orgId: string, contactId: string, expectedRevision: number) => send<Customer>(`/organisations/${seg(orgId)}/primary-contact`, 'POST', { contact_node_id: contactId, expected_revision: expectedRevision })
 export const getRelated = (id: string) => send<Related>(`/organisations/${seg(id)}/related`)
 export const setDocumentMetadata = (doc: RelatedDocument, data: Pick<RelatedDocument, 'title' | 'category' | 'status' | 'valid_from' | 'valid_until'>) => send<RelatedDocument>(`/documents/${seg(doc.attachment_id)}/metadata`, 'PUT', { ...data, expected_revision: doc.revision })
@@ -116,26 +135,24 @@ export async function contactDirectory(): Promise<Map<string, ContactCard>> {
   return out
 }
 
-// ---------- Undo through the event log ----------
-// The newest change of `types` on `nodeId` that is not itself an undo.
-export async function latestEvent(nodeId: string, types: string[]): Promise<number | null> {
-  let after = 0, found: number | null = null
-  for (let page = 0; page < 50; page++) {
-    const response = await api(`/events?node_id=${seg(nodeId)}&limit=200${after ? `&after=${after}` : ''}`)
-    if (!response.ok) return found
-    const body = await response.json() as { items?: { id: number; type: string; undo_of: number | null }[]; next_after?: number | null }
-    for (const event of body.items ?? []) if (types.includes(event.type) && event.undo_of == null) found = Number(event.id)
-    if (!body.next_after) break
-    after = Number(body.next_after)
-  }
-  return found
+// ---------- Undo through the exact accepted mutation ----------
+const receiptOwners = new WeakMap<readonly string[], () => boolean>()
+export function mutationEventIds(response: Response, current = captureToastOwner()): readonly string[] | undefined {
+  const raw = response.headers.get('x-aeon-event-ids')
+  if (!raw || raw.length > 22528 || !/^[1-9][0-9]{0,18}(,[1-9][0-9]{0,18})*$/.test(raw)) return undefined
+  const ids = raw.split(',')
+  if (ids.length > 1024 || new Set(ids).size !== ids.length) return undefined
+  const frozen = Object.freeze(ids)
+  receiptOwners.set(frozen, current)
+  return frozen
 }
-// Undo the newest matching change of each step, in order (a restored contact
-// before the primary choice that pointed away from it).
-export async function undoLatest(steps: { node: string; types: string[] }[]): Promise<void> {
-  for (const step of steps) {
-    const id = await latestEvent(step.node, step.types)
-    if (id == null) throw new Error('There is nothing to undo.')
+// Receipt order reverses append order, restoring dependent records before the
+// primary choice that pointed away from them. Never replace a missing receipt
+// (including a lost mutation response) with a lookup of the latest event.
+export async function undoEvents(eventIds: readonly string[] | undefined): Promise<void> {
+  if (!eventIds?.length) throw new Error('The exact change receipt is unavailable, so this change cannot be undone. Reload to check the record.')
+  for (const id of eventIds) {
+    if (receiptOwners.get(eventIds)?.() === false) throw new Error('Sign-in changed. This earlier change cannot be undone from this session.')
     const response = await api(`/events/${id}/undo`, { method: 'POST' })
     if (!response.ok) throw new Error(response.status === 409 ? 'It changed again since, so it cannot be undone.' : response.status === 403 ? 'Only a workspace admin can undo this.' : 'Undo did not work. Please try again.')
   }
@@ -370,21 +387,33 @@ export function layoutWidths(ids: ColumnId[], tableWidth: number, sized: Partial
 }
 
 // ---------- Note proposals: a line diff ----------
-export type DiffLine = { kind: 'same' | 'add' | 'remove'; text: string }
+export type DiffLine = { kind: 'same' | 'add' | 'remove' | 'summary'; text: string }
+export const DIFF_CELL_BUDGET = 250_000
+export const DIFF_LINE_BUDGET = 2_000
 export function lineDiff(before: string, after: string): DiffLine[] {
+  // Bound text before splitting, and matrix work before allocating. Reviews
+  // explain omitted detail instead of freezing the render thread.
+  if (before.length + after.length > 1_000_000) return [{ kind: 'summary', text: 'Text is too large for a line comparison. Review the two full versions.' }]
   const a = before ? before.split('\n') : [], b = after ? after.split('\n') : []
-  const n = a.length, m = b.length
-  const lcs = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1])
-  const out: DiffLine[] = []
+  let start = 0, endA = a.length, endB = b.length
+  while (start < endA && start < endB && a[start] === b[start]) start++
+  while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) { endA--; endB-- }
+  const n = endA - start, m = endB - start
+  if ((n + 1) * (m + 1) > DIFF_CELL_BUDGET || a.length + b.length > DIFF_LINE_BUDGET) {
+    return [{ kind: 'summary', text: n || m ? `Large comparison: ${n} lines before and ${m} lines after in the changed region; ${start} common leading and ${a.length - endA} common trailing lines. Review the two full versions.` : `The text is identical (${a.length} lines).` }]
+  }
+  const lcs = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1))
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) lcs[i][j] = a[start + i] === b[start + j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1])
+  const out: DiffLine[] = a.slice(0, start).map(text => ({ kind: 'same', text }))
   let i = 0, j = 0
   while (i < n && j < m) {
-    if (a[i] === b[j]) { out.push({ kind: 'same', text: a[i] }); i++; j++ }
-    else if (lcs[i + 1][j] >= lcs[i][j + 1]) out.push({ kind: 'remove', text: a[i++] })
-    else out.push({ kind: 'add', text: b[j++] })
+    if (a[start + i] === b[start + j]) { out.push({ kind: 'same', text: a[start + i] }); i++; j++ }
+    else if (lcs[i + 1][j] >= lcs[i][j + 1]) out.push({ kind: 'remove', text: a[start + i++] })
+    else out.push({ kind: 'add', text: b[start + j++] })
   }
-  while (i < n) out.push({ kind: 'remove', text: a[i++] })
-  while (j < m) out.push({ kind: 'add', text: b[j++] })
+  while (i < n) out.push({ kind: 'remove', text: a[start + i++] })
+  while (j < m) out.push({ kind: 'add', text: b[start + j++] })
+  out.push(...a.slice(endA).map(text => ({ kind: 'same' as const, text })))
   return out
 }
 export const diffCounts = (lines: DiffLine[]) => ({ added: lines.filter(l => l.kind === 'add').length, removed: lines.filter(l => l.kind === 'remove').length })

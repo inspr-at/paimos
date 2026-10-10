@@ -30,6 +30,7 @@ func TestReporterRoutesDeclareHeaderBeforeAuthentication(t *testing.T) {
 		{"classic built", "POST", "/api/projects/00000000-0000-4000-8000-000000000001/baseline-batches/batches/1/built-receipt", reportercontract.BaselineBatches, stagehandoff.New(nil, nil).Mount},
 		{"journey", "GET", "/api/projects/00000000-0000-4000-8000-000000000001/journey", reportercontract.Journey, journey.New(nil).Mount},
 		{"approvals list", "GET", "/api/approvals", reportercontract.Approvals, approvals.New(nil).Mount},
+		{"approvals get", "GET", "/api/approvals/00000000-0000-4000-8000-000000000001", reportercontract.Approvals, approvals.New(nil).Mount},
 		{"approvals propose", "POST", "/api/approvals", reportercontract.Approvals, approvals.New(nil).Mount},
 		{"approvals decision", "POST", "/api/approvals/00000000-0000-4000-8000-000000000001/decision", reportercontract.Approvals, approvals.New(nil).Mount},
 		{"approvals revoke", "POST", "/api/approvals/00000000-0000-4000-8000-000000000001/revoke", reportercontract.Approvals, approvals.New(nil).Mount},

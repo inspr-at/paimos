@@ -18,10 +18,9 @@ const destination = computed(() => ({ path: `/p/${encodeURIComponent(props.recur
   <span v-else class="recurring-pill" role="img" tabindex="0" :aria-label="label" :title="label" :data-tip="label"><span class="recurring-pill-mark" aria-hidden="true"><RecurrenceGlyph :size="8" /></span>{{ recurringWord(locale) }}</span>
 </template>
 <style scoped>
-.recurring-pill { display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 6px; min-height: 26px; max-width: 100%; padding: 3px 9px; border-radius: 999px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--recurring-marker) 35%, transparent); background: var(--recurring-marker-wash); color: var(--ink); font-size: 12px; font-weight: 600; text-decoration: none; }
-.recurring-pill-mark { display: grid; place-items: center; flex: none; width: 12px; height: 12px; border-radius: 50%; background: var(--recurring-marker); color: var(--recurring-marker-ink); }
-.recurring-pill svg { flex: none; }
-a.recurring-pill:hover { background: color-mix(in srgb, var(--recurring-marker) 15%, transparent); }
-.recurring-pill:focus-visible { outline: 1px solid var(--recurring-marker); outline-offset: 3px; }
+.recurring-pill { display: inline-flex; align-items: center; justify-content: center; flex: none; gap: 6px; min-height: 26px; max-width: 100%; padding: 3px 9px; border-radius: 999px; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--marker) 35%, transparent); background: color-mix(in srgb, var(--marker) 10%, transparent); color: var(--ink); font-size: 12px; font-weight: 600; text-decoration: none; }
+.recurring-pill-mark { display: grid; place-items: center; flex: none; width: 12px; height: 12px; color: var(--marker-on); background: var(--marker); border-radius: 50%; }
+a.recurring-pill:hover { background: color-mix(in srgb, var(--marker) 15%, transparent); }
+.recurring-pill:focus-visible { outline: 1px solid var(--marker); outline-offset: 3px; }
 @media (pointer: coarse) { .recurring-pill { min-height: 44px; } }
 </style>

@@ -16,6 +16,7 @@ const renderers = Object.fromEntries(availableVariants.map(variant => [
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { Harness } from '../../lib/agents'
 import type { LiveBotState } from '../../lib/liveAgents'
+import { agentPreviewTokens } from '../../lib/themeEngine'
 import { STATE_LABEL } from '../../lib/agentSignals'
 import { agentStateAppearance, useAgentAppearance } from '../../lib/agentAppearance'
 import type { AgentThemeAppearance } from '../../lib/agentTheme'
@@ -37,7 +38,7 @@ const indicator = computed(() => resolveIndicatorStyle(normalizeAgentIndicator({
 const ring = computed(() => indicatorRing(indicator.value, drawn.value.ring))
 const artScale = computed(() => indicatorArtScale(indicator.value, drawn.value.size))
 const { appearance } = useAgentAppearance()
-const stateAppearance = computed(() => props.themeAgents ? agentStateAppearance(props.state, normalizeAgentState({ palette: props.themeAgents.palette, dimInactive: props.themeAgents.dim_inactive, inactiveOpacity: props.themeAgents.inactive_opacity })) : appearance(props.state))
+const stateAppearance = computed(() => props.themeAgents ? { ...agentPreviewTokens(props.themeAgents), ...agentStateAppearance(props.state, normalizeAgentState({ palette: props.themeAgents.palette, dimInactive: props.themeAgents.dim_inactive, inactiveOpacity: props.themeAgents.inactive_opacity })) } : appearance(props.state))
 const seed = computed(() => `${props.id}:${props.index}`)
 const style = computed(() => ({ '--size': `${props.size}px`, '--lag': `${-(props.index * .53 + ((parseInt(props.id.slice(0, 2), 16) || 0) % 7) * .31).toFixed(2)}s` }))
 const pulse = ref(0)
@@ -69,7 +70,7 @@ onBeforeUnmount(() => clearTimeout(clear))
 <style scoped>
 .live-bot { position: relative; display: inline-grid; place-items: center; flex-shrink: 0; width: var(--size); height: var(--size); vertical-align: middle; }
 .indicator-art { display: grid; place-items: center; width: 100%; height: 100%; }
-.event-caption { position: absolute; top: calc(100% + 3px); left: 50%; translate: -50% 0; white-space: nowrap; font: 500 10px/1.2 var(--font); color: var(--gold-ink); pointer-events: none; animation: event-opacity .6s ease-out both; }
+.event-caption { position: absolute; top: calc(100% + 3px); left: 50%; translate: -50% 0; white-space: nowrap; font: 500 10px/1.2 var(--font); color: var(--secondary-ink); pointer-events: none; animation: event-opacity .6s ease-out both; }
 @media (prefers-reduced-motion: no-preference) {
   /* The original robots float their faces inside stationary disks. */
   .hovering.working.lead:not([data-style="robot-1"], [data-style="robot-5"]) .indicator-art { animation: indicator-hover 2.4s ease-in-out infinite; animation-delay: var(--lag); }

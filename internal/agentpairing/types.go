@@ -10,12 +10,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/jackc/pgx/v5/pgconn"
 	"io"
 	"log/slog"
 	"net/http"
 	"path"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -23,9 +24,13 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/hookcap"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // CoordinatorPermissions is the CLI coordinator key ceiling (AEON-327).
@@ -37,19 +42,25 @@ var CoordinatorPermissions = authz.CoordinatorKeyScopes
 const VerificationTask = "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."
 const VerificationSeconds = 60
 
-var RuntimePermissions = []string{"run.read", "run.claim", "run.telemetry", "work_orders.read", "work_orders.write", "nodes.read", "models.read", "account.read", "account.route", "account.probe", "harness.read", "harness.write", "harness.worker"}
+var RuntimePermissions = []string{"run.read", "run.claim", "run.telemetry", "work_orders.read", "work_orders.write", "nodes.read", "models.read", "models.report", "models.refresh", "account.read", "account.route", "account.probe", "harness.read", "harness.write", "harness.worker"}
 var uuidRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 var hashRE = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var accountRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 var providerRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 type Choice struct {
-	AccountKey string `json:"account_key"`
-	Harness    string `json:"harness"`
-	Label      string `json:"label"`
-	ProfileID  string `json:"model_profile_id,omitempty"`
-	Provider   string `json:"provider,omitempty"`
+	// ConfigHomeID is an opaque, computer-local identifier for an isolated
+	// config home. Paths, identities and home contents stay on the computer.
+	ConfigHomeID string `json:"config_home_id,omitempty"`
+	AccountKey   string `json:"account_key"`
+	Harness      string `json:"harness"`
+	Label        string `json:"label"`
+	ProfileID    string `json:"model_profile_id,omitempty"`
+	Provider     string `json:"provider,omitempty"`
 }
+
+const maxComputerAccounts = 32
+
 type Details struct {
 	LocalAuthPublicKey string   `json:"local_auth_public_key,omitempty"`
 	ComputerName       string   `json:"computer_name"`
@@ -76,16 +87,18 @@ type SetupProgress struct {
 	HarnessStatuses map[string]string                   `json:"harness_statuses,omitempty"`
 	State           string                              `json:"state"`
 	ErrorCode       string                              `json:"error_code,omitempty"`
+	InstallMethod   string                              `json:"install_method,omitempty"`
 }
 
 type proofRequest struct {
-	Progress        *SetupProgress `json:"progress,omitempty"`
-	TenantID        string         `json:"tenant_id"`
-	RequestID       string         `json:"request_id"`
-	DeviceSecret    string         `json:"device_secret,omitempty"`
-	LifecycleSecret string         `json:"lifecycle_secret,omitempty"`
-	Cleaned         []string       `json:"cleanup_confirmed_account_ids,omitempty"`
-	ComputerCleaned bool           `json:"computer_cleanup_confirmed,omitempty"`
+	HookCapabilities []hookcap.Capability `json:"hook_capabilities,omitempty"`
+	Progress         *SetupProgress       `json:"progress,omitempty"`
+	TenantID         string               `json:"tenant_id"`
+	RequestID        string               `json:"request_id"`
+	DeviceSecret     string               `json:"device_secret,omitempty"`
+	LifecycleSecret  string               `json:"lifecycle_secret,omitempty"`
+	Cleaned          []string             `json:"cleanup_confirmed_account_ids,omitempty"`
+	ComputerCleaned  bool                 `json:"computer_cleanup_confirmed,omitempty"`
 }
 type Verification struct {
 	Policy         string    `json:"policy"`
@@ -99,25 +112,38 @@ type Verification struct {
 	Task           string    `json:"task"`
 }
 type Enrollment struct {
-	LocalProcesses     string   `json:"local_processes"`
-	AccountingState    string   `json:"accounting_state"`
-	VerificationState  string   `json:"verification_state"`
-	VerificationError  string   `json:"verification_error"`
-	VerificationReason string   `json:"verification_reason,omitempty"`
-	AccountID          string   `json:"account_id"`
-	AccountKey         string   `json:"account_key"`
-	Harness            string   `json:"harness"`
-	Label              string   `json:"label"`
-	ProfileID          string   `json:"model_profile_id"`
-	State              string   `json:"state"`
-	Cleanup            string   `json:"local_cleanup"`
-	VerificationRunID  *string  `json:"verification_run_id"`
-	ActiveRunIDs       []string `json:"active_run_ids"`
+	VerifiedAt               *time.Time `json:"verified_at,omitempty"`
+	VerificationExpiresAt    *time.Time `json:"verification_expires_at,omitempty"`
+	LastUsedAt               *time.Time `json:"last_used_at,omitempty"`
+	VerificationStalled      bool       `json:"verification_stalled"`
+	CanVerify                bool       `json:"can_verify"`
+	LocalProcesses           string     `json:"local_processes"`
+	AccountingState          string     `json:"accounting_state"`
+	VerificationExpiredReady bool       `json:"verification_expired_ready"`
+	VerificationState        string     `json:"verification_state"`
+	VerificationError        string     `json:"verification_error"`
+	VerificationReason       string     `json:"verification_reason,omitempty"`
+	AccountID                string     `json:"account_id"`
+	AccountKey               string     `json:"account_key"`
+	Harness                  string     `json:"harness"`
+	Label                    string     `json:"label"`
+	ProfileID                string     `json:"model_profile_id"`
+	State                    string     `json:"state"`
+	Cleanup                  string     `json:"local_cleanup"`
+	VerificationRunID        *string    `json:"verification_run_id"`
+	ActiveRunIDs             []string   `json:"active_run_ids"`
 }
 type View struct {
+	ServerCapabilities        []string                            `json:"server_capabilities"`
+	LedgerMode                bool                                `json:"ledger_mode"`
+	LedgerGeneration          *string                             `json:"ledger_generation"`
+	LedgerEnrolledAt          *time.Time                          `json:"ledger_enrolled_at"`
+	HookCapabilities          []hookcap.Capability                `json:"hook_capabilities,omitempty"`
+	HostCapacity              *hostcapacity.View                  `json:"host_capacity,omitempty"`
 	LocalAuthPinned           *bool                               `json:"local_auth_pinned,omitempty"`
 	AgentRelease              agentcompat.Release                 `json:"agent_release"`
 	AgentCompatibility        agentcompat.Result                  `json:"agent_compatibility"`
+	InstallMethod             string                              `json:"install_method,omitempty"`
 	HarnessDetails            map[string]agentsetup.HarnessDetail `json:"harness_details,omitempty"`
 	HarnessStatuses           map[string]string                   `json:"harness_statuses,omitempty"`
 	VerificationCapabilities  map[string]VerificationCapability   `json:"verification_capabilities"`
@@ -178,6 +204,10 @@ func WriteError(w http.ResponseWriter, err error) {
 	}
 	if e.Status == 429 {
 		w.Header().Set("Retry-After", "5")
+		var recovery *attachRecoveryLimited
+		if errors.As(err, &recovery) {
+			w.Header().Set("Retry-After", strconv.Itoa(recovery.retryAfter))
+		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	body := map[string]string{"error": e.Message, "code": e.Code}
@@ -217,28 +247,57 @@ func validateDevice(in deviceRequest) error {
 	if !uuidRE.MatchString(in.RequestID) || (in.TenantID == "") == (in.TenantSlug == "") || in.TenantID != "" && !uuidRE.MatchString(in.TenantID) || !hashRE.MatchString(in.DeviceHash) || !hashRE.MatchString(in.RuntimeHash) || !hashRE.MatchString(in.LifecycleHash) || in.DeviceHash == in.RuntimeHash || in.DeviceHash == in.LifecycleHash || in.RuntimeHash == in.LifecycleHash {
 		return fail(400, "invalid_request", "distinct commitments, request UUID and exactly one tenant selector required")
 	}
-	if !safeText(in.ComputerName, 128) || !safeText(in.Workspace, 1024) || !path.IsAbs(in.Workspace) || path.Clean(in.Workspace) != in.Workspace || in.Workspace == "/" || (in.Platform != "darwin" && in.Platform != "linux") || (in.Arch != "arm64" && in.Arch != "amd64") || len(in.Capabilities) != 1 || in.Capabilities[0] != "managed_runs" || len(in.Accounts) < 1 || len(in.Accounts) > 7 {
+	if !safeText(in.ComputerName, 128) || !safeText(in.Workspace, 1024) || !path.IsAbs(in.Workspace) || path.Clean(in.Workspace) != in.Workspace || in.Workspace == "/" || (in.Platform != "darwin" && in.Platform != "linux") || (in.Arch != "arm64" && in.Arch != "amd64") || !validDeviceCapabilities(in.Capabilities) || len(in.Accounts) < 1 || len(in.Accounts) > maxComputerAccounts {
 		return fail(400, "invalid_request", "invalid computer, folder, capabilities or account selection")
 	}
-	seen := map[string]bool{}
-	seenAccounts := map[string]bool{}
-	for _, a := range in.Accounts {
-		if !accountRE.MatchString(a.AccountKey) || !safeText(a.Label, 128) || a.ProfileID != "" && !uuidRE.MatchString(a.ProfileID) || seen[a.Harness] || seenAccounts[a.AccountKey] {
-			return fail(400, "invalid_request", "choose exactly one identified account per harness")
-		}
-		switch a.Harness {
-		case "claude", "codex", "cursor", "grok", "pi", "gemini", "opencode":
-		default:
-			return fail(400, "invalid_request", "unsupported harness")
-		}
-		seen[a.Harness] = true
-		if a.Provider != "" && (a.Harness != "pi" || !providerRE.MatchString(a.Provider)) {
-			return fail(400, "invalid_request", "invalid pi provider binding")
-		}
-		seenAccounts[a.AccountKey] = true
+	if err := validateAccountChoices(in.Accounts); err != nil {
+		return err
 	}
 	if in.ExistingComputerID != "" && (!uuidRE.MatchString(in.ExistingComputerID) || !hashRE.MatchString(in.ExistingProof)) || in.ExistingComputerID == "" && in.ExistingProof != "" {
 		return fail(400, "invalid_request", "existing computer proof required")
 	}
 	return nil
+}
+
+func validateAccountChoices(accounts []Choice) error {
+	if len(accounts) > maxComputerAccounts {
+		return fail(400, "invalid_request", "at most 32 accounts per computer")
+	}
+	seen := map[string]string{}
+	seenAccounts := map[string]bool{}
+	seenHomes := map[string]bool{}
+	for _, a := range accounts {
+		if !accountRE.MatchString(a.AccountKey) || !safeText(a.Label, 128) || a.ProfileID != "" && !uuidRE.MatchString(a.ProfileID) || seenAccounts[a.AccountKey] || a.ConfigHomeID != "" && !hashRE.MatchString(a.ConfigHomeID) {
+			return fail(400, "invalid_request", "each account needs a unique account key and a valid isolated config-home identifier")
+		}
+		if home, exists := seen[a.Harness]; exists && (home == "" || a.ConfigHomeID == "") {
+			return fail(400, "invalid_request", "several accounts for a harness require a separate isolated config home for each; without isolation choose one account")
+		}
+		if a.ConfigHomeID != "" && seenHomes[a.ConfigHomeID] {
+			return fail(400, "invalid_request", "each account needs its own isolated config home")
+		}
+		if !slices.Contains(agentverification.Harnesses(), a.Harness) {
+			return fail(400, "invalid_request", "unsupported harness")
+		}
+		seen[a.Harness] = a.ConfigHomeID
+		if a.ConfigHomeID != "" {
+			seenHomes[a.ConfigHomeID] = true
+		}
+		if a.Provider != "" && (a.Harness != "pi" || !providerRE.MatchString(a.Provider)) {
+			return fail(400, "invalid_request", "invalid pi provider binding")
+		}
+		seenAccounts[a.AccountKey] = true
+	}
+	return nil
+}
+
+// The old one-capability request remains valid outside ledger-mode tenants.
+func validDeviceCapabilities(capabilities []string) bool {
+	if len(capabilities) < 1 || len(capabilities) > 2 || !slices.Contains(capabilities, "managed_runs") {
+		return false
+	}
+	if len(capabilities) == 1 {
+		return true
+	}
+	return slices.Contains(capabilities, LedgerCapability)
 }

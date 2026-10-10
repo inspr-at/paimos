@@ -5,31 +5,32 @@ import { grantablePresetScopes, KEY_SCOPE_PRESETS, PERSON_ONLY_KEY_NOTE, presetS
 import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ held: Set<string>; registry: Permission[]; disabled?: boolean; preferred?: string }>()
-const emit = defineEmits<{ apply: [scopes: string[]] }>()
+const emit = defineEmits<{ apply: [scopes: string[], fullAccess: boolean] }>()
 const presets = computed(() => KEY_SCOPE_PRESETS.map(preset => ({ ...preset, scopes: presetScopes(preset.scopes, props.registry), allowed: grantablePresetScopes(preset.scopes, props.held, props.registry) })))
 </script>
 
 <template>
   <div class="presets" aria-label="Scope presets">
     <div class="preset-actions">
-      <button v-for="preset in presets" :key="preset.id" type="button" class="btn sm" :aria-label="`Apply ${preset.label}`" :disabled="disabled || !preset.allowed.length" @click="emit('apply', grantablePresetScopes(preset.scopes, held, registry))">{{ preset.label }}</button>
+      <button v-for="preset in presets" :key="preset.id" type="button" class="btn sm" :aria-label="`Apply ${preset.label}`" :disabled="disabled || !preset.allowed.length" @click="emit('apply', preset.id === 'full-access' ? [] : grantablePresetScopes(preset.scopes, held, registry), preset.id === 'full-access')">{{ preset.label }}</button>
     </div>
     <p class="person-only">{{ PERSON_ONLY_KEY_NOTE }}</p>
     <details v-for="preset in presets" :key="preset.id" class="preset" :open="preferred === preset.id">
-      <summary><AppIcon name="chevron-right" :size="12" class="chevron" /><span>{{ preset.label }} <span class="count">{{ preset.allowed.length }}/{{ preset.scopes.length }} available</span></span></summary>
+      <summary><AppIcon name="chevron-right" :size="12" class="chevron" /><span>{{ preset.label }} <span v-if="preset.id !== 'full-access'" class="count">{{ preset.allowed.length }}/{{ preset.scopes.length }} available</span></span></summary>
       <p>{{ preset.description }}</p>
-      <ul>
+      <ul v-if="preset.id !== 'full-access'">
         <li v-for="key in preset.scopes" :key="key"><code>{{ key }}</code><span v-if="!preset.allowed.includes(key)" class="unavailable">Unavailable under current permissions</span></li>
       </ul>
-      <p v-if="preset.allowed.length < preset.scopes.length">Only available scopes will be selected. The agent’s role and project access stay as they are.</p>
+      <p v-if="preset.id !== 'full-access' && preset.allowed.length < preset.scopes.length">Only available scopes will be selected. The agent’s role and project access stay as they are.</p>
     </details>
   </div>
 </template>
 
 <style scoped>
 .presets { display: grid; gap: 8px; min-width: 0; }
-.preset-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-.preset-actions .btn { min-height: 36px; padding-inline: 6px; white-space: nowrap; }
+/* Presets keep their labels' width and wrap as a group (AEON-730). */
+.preset-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset-actions .btn { white-space: nowrap; }
 .person-only { font-size: 12px; line-height: 1.5; color: var(--ink-3); }
 .preset { min-width: 0; padding-block: 6px; border-bottom: 1px solid var(--line); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 summary { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 600; list-style: none; }

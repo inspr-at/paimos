@@ -15,12 +15,10 @@ import (
 
 	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
-	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/harness"
-	"github.com/inspr-at/paimos/internal/journey"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
@@ -56,15 +54,30 @@ func TestDemoSeedTwice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Already || first.Projects != 3 || first.Tickets < 40 || first.Stage != "build" {
+	if first.Already || first.Projects != 3 || first.Tickets < 40 || first.Stage != "" {
 		t.Fatalf("summary %+v", first)
+	}
+	if missing := scalar(t, database, id, `SELECT count(*) FROM agent_keys k LEFT JOIN principals p ON p.tenant_id=k.tenant_id AND p.id=k.created_by_principal_id WHERE p.id IS NULL OR p.kind<>'person'`); missing != 0 {
+		t.Fatalf("demo keys missing person creator: %d", missing)
+	}
+	if legacy := scalar(t, database, id, `SELECT count(*) FROM node_kinds WHERE slug IN ('epic','ticket','task')`); legacy != 0 {
+		t.Fatalf("demo recreated %d retired work kinds", legacy)
+	}
+	parents := scalar(t, database, id, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+	 WHERE k.slug='work' AND n.deleted_at IS NULL AND EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+	 WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')`)
+	leaves := scalar(t, database, id, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+	 WHERE k.slug='work' AND n.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+	 WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')`)
+	if parents < 8 || leaves != first.Tickets {
+		t.Fatalf("demo work hierarchy: %d parents, %d leaves, summary %+v", parents, leaves, first)
 	}
 	after := seedRows(t, database, first.TenantID)
 	if slices.Equal(before, after) {
 		t.Fatal("seed wrote no resources")
 	}
 	events := scalar(t, database, first.TenantID, `SELECT count(*) FROM events`)
-	tickets := scalar(t, database, first.TenantID, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='ticket' AND n.deleted_at IS NULL`)
+	tickets := scalar(t, database, first.TenantID, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='work' AND n.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')`)
 	kinds := scalar(t, database, first.TenantID, `SELECT count(DISTINCT k.slug) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.deleted_at IS NULL AND k.slug IN ('runbook','guideline','memory','external_system','related_project')`)
 	knowledge := scalar(t, database, first.TenantID, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.deleted_at IS NULL AND k.slug IN ('runbook','guideline','memory','external_system','related_project')`)
 	agents := scalar(t, database, first.TenantID, `SELECT count(*) FROM principals WHERE kind='agent' AND name IN ('Lumen Scribe','Harbor Clerk','Glass Scout')`)
@@ -82,17 +95,42 @@ func TestDemoSeedTwice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !second.Already || second.Projects != first.Projects || second.Tickets != first.Tickets || second.Stage != "build" {
+	if !second.Already || second.Projects != first.Projects || second.Tickets != first.Tickets || second.Stage != "" {
 		t.Fatalf("second summary %+v", second)
 	}
 	if again := scalar(t, database, first.TenantID, `SELECT count(*) FROM events`); again != events {
 		t.Fatalf("second seed wrote events: %d to %d", events, again)
 	}
-	if again := scalar(t, database, first.TenantID, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='ticket' AND n.deleted_at IS NULL`); again != tickets {
+	if again := scalar(t, database, first.TenantID, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='work' AND n.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')`); again != tickets {
 		t.Fatalf("tickets changed %d to %d", tickets, again)
 	}
 	if replay := seedRows(t, database, first.TenantID); !slices.Equal(after, replay) {
 		t.Fatal("replay changed seeded nodes, keys, bindings, principals, or events")
+	}
+}
+
+func TestDemoCatalogPreparationRollsBackWithSeed(t *testing.T) {
+	t.Setenv("AEON_ENV", "dev")
+	database := dbtest.Open(t)
+	id, err := tenantbootstrap.Create(t.Context(), database.App, "catalog-rollback-demo", "Catalog rollback demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := seedRows(t, database, id)
+	injected := errors.New("injected catalog bootstrap failure")
+	reached := false
+	_, err = seedWithHook(t.Context(), database.App, "catalog-rollback-demo", func(step string) error {
+		if step == "work" {
+			reached = true
+			return injected
+		}
+		return nil
+	})
+	if !reached || !errors.Is(err, injected) {
+		t.Fatalf("catalog-dependent seed did not reach the rollback barrier: reached=%v err=%v", reached, err)
+	}
+	if after := seedRows(t, database, id); !slices.Equal(before, after) {
+		t.Fatal("failed seed retained catalog, principal, work or event changes")
 	}
 }
 
@@ -137,42 +175,6 @@ func interruptedSeed(t *testing.T, interruptAt string) {
 	}
 }
 
-func TestDemoJourneyScopesOnlyExtendNewKey(t *testing.T) {
-	t.Setenv("AEON_ENV", "dev")
-	database := dbtest.Open(t)
-	ctx := t.Context()
-	tenantID, err := tenantbootstrap.Create(ctx, database.App, "keys-demo", "Keys Demo")
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldKey, principalID, _, err := auth.OperatorCreateAgentKey(ctx, database.App, tenantID, "Lumen Scribe", "", []string{"nodes.read"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Seed(ctx, database.App, "keys-demo"); err != nil {
-		t.Fatal(err)
-	}
-	var oldScopes, newScopes []string
-	var newKey, eventKey string
-	err = db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT scopes FROM agent_keys WHERE id=$1::uuid`, oldKey).Scan(&oldScopes); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(ctx, `SELECT id::text,scopes FROM agent_keys WHERE principal_id=$1::uuid AND id<>$2::uuid`, principalID, oldKey).Scan(&newKey, &newScopes); err != nil {
-			return err
-		}
-		return tx.QueryRow(ctx, `SELECT after->>'key_id' FROM events WHERE type='agent_key.scopes_extended'`).Scan(&eventKey)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(oldScopes, []string{"nodes.read"}) || !slices.Contains(newScopes, "journey.requirements") || !slices.Contains(newScopes, "journey.build") || eventKey != newKey {
-		t.Fatalf("old scopes %v, new scopes %v, new key %s, event key %s", oldScopes, newScopes, newKey, eventKey)
-	}
-}
-
-// seedRows compares row contents, including IDs, keys, scopes, and event
-// snapshots. Counts alone would miss changed or duplicated resources.
 func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 	t.Helper()
 	queries := []string{
@@ -189,7 +191,7 @@ func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 	// probes, allowance windows, approvals, journeys or historical evidence.
 	for _, table := range []string{
 		"node_relations", "agent_accounts", "account_allowance_windows", "account_reservations",
-		"model_profiles", "model_role_routes", "approval_requests", "approval_decisions", "agent_runs", "run_telemetry",
+		"model_profiles", "model_role_routes", "model_security_role_routes", "approval_requests", "approval_decisions", "agent_runs", "run_telemetry",
 		"work_orders", "work_criteria", "work_evidence", "agent_delivery_votes",
 		"harness_sessions", "harness_instruction_provenance", "harness_instruction_provenance_items",
 		"journey_projects", "journey_releases", "journey_requirements", "journey_features", "journey_tickets", "journey_gates", "journey_action_receipts",
@@ -323,13 +325,10 @@ func assertShowcaseState(t *testing.T, database *dbtest.DB, tenantID string) {
 func assertCaptureState(t *testing.T, database *dbtest.DB, tenantID string) {
 	t.Helper()
 	var admin tenant.Principal
-	var ticket, glass, project, sessionID, scribeID string
+	var ticket, project, sessionID, scribeID string
 	err := db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
 		admin.TenantID, admin.Kind = tenantID, tenant.Person
 		if err := tx.QueryRow(t.Context(), `SELECT id::text,name FROM principals WHERE name='Demo Operator'`).Scan(&admin.ID, &admin.Name); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM nodes WHERE key='NGLASS-1'`).Scan(&glass); err != nil {
 			return err
 		}
 		return tx.QueryRow(t.Context(), `SELECT s.id::text,s.project_id::text,s.ticket_node_id::text,s.agent_principal_id::text FROM harness_sessions s WHERE s.harness='codex'`).Scan(&sessionID, &project, &ticket, &scribeID)
@@ -342,25 +341,8 @@ func assertCaptureState(t *testing.T, database *dbtest.DB, tenantID string) {
 		t.Fatal(err)
 	}
 	assertHarnessMix(t, api, admin)
-	view, err := (&seeder{api: api, admin: admin}).journeyView(glass)
-	if err != nil || view.Stage != "requirements" || view.RequirementsScope == "" {
-		t.Fatalf("pending journey: %+v, error %v", view, err)
-	}
-	if n := scalar(t, database, tenantID, `SELECT count(*) FROM approval_requests a JOIN nodes n ON n.id=a.resource_id AND n.tenant_id=a.tenant_id WHERE n.key='NGLASS-1' AND a.scope LIKE 'journey.requirements.%' AND a.expires_at>now() AND NOT EXISTS (SELECT 1 FROM approval_decisions d WHERE d.request_id=a.id AND d.tenant_id=a.tenant_id)`); n != 1 {
-		t.Fatal("missing pending revision-bound gate")
-	}
-	var gateView journey.Journey
-	if err := api.do(admin, "", http.MethodGet, "/api/projects/"+glass+"/journey", nil, http.StatusOK, &gateView, nil); err != nil {
-		t.Fatal(err)
-	}
-	gateVisible := false
-	for _, stage := range gateView.Stages {
-		if stage.Key == "requirements" && stage.GateOfferID != nil && stage.GateOfferState == "pending" && stage.GateScope == view.RequirementsScope {
-			gateVisible = true
-		}
-	}
-	if !gateVisible {
-		t.Fatal("GateApprovals has no pending requirements offer")
+	if n := scalar(t, database, tenantID, `SELECT count(*) FROM journey_gates`); n != 0 {
+		t.Fatal("demo initialized retired gates")
 	}
 	var session harness.Session
 	path := "/api/projects/" + project + "/harness-sessions/" + sessionID
@@ -504,6 +486,41 @@ func TestDemoProfileSelectsEnabledHarness(t *testing.T) {
 	}
 }
 
+// The desk grant is one profile. Successor qualification would otherwise
+// publish every newer version of the alphabetically first Grok pin.
+func TestDemoProfilePinsLeafSuccessor(t *testing.T) {
+	profiles := []modelregistry.Profile{
+		{ID: "grok-45-high", Enabled: true, Harness: "grok", Family: "xai", Model: "grok-4.5", Effort: "high"},
+		{ID: "grok-46-xhigh", Enabled: true, Harness: "grok", Family: "xai", Model: "grok-4.6", Effort: "xhigh"},
+		{ID: "build-fast", Enabled: true, Harness: "grok", Family: "xai", Model: "grok-4.7-build-fast", Effort: "high"},
+		{ID: "grok-47-xhigh", Enabled: true, Harness: "grok", Family: "xai", Model: "grok-4.7", Effort: "xhigh"},
+		{ID: "grok-47-high", Enabled: true, Harness: "grok", Family: "xai", Model: "grok-4.7", Effort: "high"},
+		{ID: "grok-48-disabled", Enabled: false, Harness: "grok", Family: "xai", Model: "grok-4.8", Effort: "high"},
+		{ID: "other-family", Enabled: true, Harness: "grok", Family: "other", Model: "grok-9", Effort: "high"},
+		{ID: "sol-6", Enabled: true, Harness: "codex", Family: "openai", Model: "gpt-6-sol", Effort: "medium"},
+		{ID: "sol-61", Enabled: true, Harness: "codex", Family: "openai", Model: "gpt-6.1-sol", Effort: "medium"},
+		{ID: "fable", Enabled: true, Harness: "claude", Family: "anthropic", Model: "fable", Effort: "high"},
+		{ID: "fable-5", Enabled: true, Harness: "claude", Family: "anthropic", Model: "claude-fable-5", Effort: "high"},
+	}
+	got, err := (&seeder{}).demoProfile(profiles, "grok")
+	if err != nil || got.ID != "grok-47-high" {
+		t.Fatalf("grok grant = %+v, %v", got, err)
+	}
+	onlyNewerEffort := append([]modelregistry.Profile{}, profiles[:4]...)
+	got, err = (&seeder{}).demoProfile(onlyNewerEffort, "grok")
+	if err != nil || got.ID != "grok-47-xhigh" {
+		t.Fatalf("leaf effort = %+v, %v", got, err)
+	}
+	got, err = (&seeder{}).demoProfile(profiles, "codex")
+	if err != nil || got.ID != "sol-61" {
+		t.Fatalf("codex grant = %+v, %v", got, err)
+	}
+	got, err = (&seeder{}).demoProfile(profiles, "claude")
+	if err != nil || got.ID != "fable" {
+		t.Fatalf("alias grant = %+v, %v", got, err)
+	}
+}
+
 func TestDemoMissingHarnessRollsBack(t *testing.T) {
 	t.Setenv("AEON_ENV", "dev")
 	database := dbtest.Open(t)
@@ -514,7 +531,12 @@ func TestDemoMissingHarnessRollsBack(t *testing.T) {
 	// An incomplete registry must not borrow another harness's profile or
 	// commit Scribe's completed history before finding Claude unavailable.
 	// Pins are immutable, so create this state rather than updating a pin.
+	// Pin the current catalog: an older catalog would intentionally upgrade
+	// and fill in the missing harness before the demo accesses it.
 	err = db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2)`, tenantID, modelregistry.CatalogVersion); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled)
 			VALUES($1::uuid,'demo-enabled-codex','1','codex','openai','test-model','high','standard',true),
 			      ($1::uuid,'demo-disabled-claude','1','claude','anthropic','test-model','high','standard',false)`, tenantID)

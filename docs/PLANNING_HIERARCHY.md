@@ -8,7 +8,12 @@ A node has a tenant, an immutable key, a kind, a title, a body, a JSON fields ob
 
 Kinds belong to the tenant. The slug is immutable because parent rules name it. The label, short prefix, icon, allowed child slugs, and JSON Schema for `fields` are configuration. A null child list permits any child. An empty list permits none. Narrowing the list affects new children only. Existing children stay movable and deletable.
 
-New tenants start with project, epic, ticket, task, release, memory, runbook, and guideline. Later modules add kinds such as work_order, requirement, and the business kinds (cost_unit, organisation, contact, quote) when those features are configured. `external_system` and `related_project` are created on first use.
+New tenants start with project, work, release, memory, runbook, and guideline.
+Nesting and leaf shape decide whether work is presented as an epic, ticket or
+task; those names no longer require separate kinds. Later modules add kinds such
+as work_order, requirement, and the business kinds (cost_unit, organisation,
+contact, quote) when those features are configured. `external_system` and
+`related_project` are created on first use.
 
 State is a non-empty string chosen by the tenant. The product screens treat `new` and `backlog` as open, `in_progress` as doing, `done` as finished, and `cancelled` as dropped. Knowledge uses its own trio: active is stored as `backlog`, proposed as `proposed`, and archived as `cancelled`.
 
@@ -22,29 +27,19 @@ Relations are directed links between two live nodes: `blocks`, `relates`, `imple
 
 ## Releases
 
-A release is a node of kind `release`. The journey projection in `journey_releases` records its sequence, state, and optional version. States used by the journey include `planning`, `building`, `candidate`, `deploying`, `refused`, `access`, `released`, and `superseded`. Creating a release and moving it between those states belongs to the journey actions, not to a free-form edit of the node. The release walker (`GET /api/projects/{id}/releases/{releaseId}/walker`) lists features and tickets selected into that release. A plan PUT stores the ordered ticket set. Ticket nodes can also exist in the project backlog without being in a release.
+A release is a node of kind `release`. Existing legacy-named release tables
+retain sequence, state, membership and published history during retirement.
+`POST /api/projects/{id}/releases` atomically opens a planning release and adds
+existing work, with a bounded ticket set and an idempotency key. It requires a
+person with release and node write permissions. No stage, gate or handoff runs.
+The release walker and membership APIs continue to read and edit planning work.
+`GET /api/projects/{id}/releases` returns at most 100 records, newest first;
+`truncated` signals another page, fetched with the last record's number as
+`before_number`. The picker refuses to infer availability from a partial list.
 
-## Journey stages
+## Retired Flow
 
-Each project has one journey. The stage is derived. It is not a field a client can set. The eight stages, in order, are:
-
-1. Inspire
-2. Shape
-3. Requirements
-4. Plan
-5. Build
-6. Deploy
-7. Access
-8. Live
-
-Derivation reads an accepted brief, the human Shape decision, the agreed requirements revision, the current release, human gate decisions, and terminal stage-handoff results. A heartbeat, a timer, or a stage string from the client does not move the rail. The personal profile skips Shape after a brief is confirmed. Professional and enterprise profiles add budget and, for enterprise, a separate reviewer. Access is skipped only when the release has no explicit access change.
-
-Human gates are approval requests on the project or release node (`journey.shape`, the revision-bound requirements scope, `journey.build`, `journey.candidate`, `journey.deploy`, `journey.access`). An agent proposes. A person decides. The journey action checks that live approval and then writes its own event. Functional requirements are requirement nodes. Agreement creates one epic per requirement and can generate tickets from accepted suggestions. A manual ticket that changes agreed scope stays marked until requirements are agreed again.
-
-`GET /api/projects/{projectId}/journey` returns the stage, the single next action, and whether that action is available. The first person action initializes a missing projection.
-
-## Knowledge
-
-Knowledge entries are ordinary nodes: runbook, guideline, memory, external system, and related project. The CLI type uses a hyphen (`external-system`). The kind slug uses an underscore (`external_system`). `fields.slug` is the stable name, matching `^[a-z][a-z0-9_-]*$`, at most 64 characters, unique among live entries of that type in the project.
-
-`GET /api/knowledge` lists them. `GET /api/knowledge/graph?project_id=<project-uuid>` requires the project ID and builds a graph from directed relations and mentions in bodies: wiki links of the form `[[slug]]`, local Markdown knowledge links such as `[guide](/p/PRJ-1/knowledge/memory/adr-001)`, and code slugs. The Markdown path must include the knowledge type, and its project segment must match the project's node key, classic key or prefix, or ID. Arbitrary or external Markdown links are not mentions. Same-kind slugs in the project win over other kinds. The graph is a read. It does not write an event. Creating, editing, or deleting an entry does, as `knowledge.created`, `knowledge.updated`, or `knowledge.deleted`.
+The eight-stage INSPR Flow is retired by AEON-723. Its view, actions, gates,
+handoffs and external-stage CLI are removed. Historical data stays in place;
+compatibility HTTP routes return authenticated 410 errors. A later contract-phase
+change will migrate shared release storage before removing dormant Flow data.

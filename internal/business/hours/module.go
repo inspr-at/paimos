@@ -85,6 +85,18 @@ func (m *Module) Mount(mux *http.ServeMux) {
 				if entry, ok := v.(Entry); ok && err == nil {
 					w.Header().Set("ETag", entryTag(entry))
 				}
+				if page, ok := v.(listPage[Entry]); ok {
+					if page.next != "" {
+						w.Header().Set("X-Next-Cursor", page.next)
+					}
+					v = page.items
+				}
+				if page, ok := v.(listPage[Period]); ok {
+					if page.next != "" {
+						w.Header().Set("X-Next-Cursor", page.next)
+					}
+					v = page.items
+				}
 				return v, err
 			})(w, r)
 		})

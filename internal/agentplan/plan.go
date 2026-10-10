@@ -80,8 +80,9 @@ func (l *Limit) UnmarshalJSON(raw []byte) error {
 }
 
 type Plan struct {
-	Total  int              `json:"total"`
-	Limits map[string]Limit `json:"limits"`
+	Total  int                      `json:"total"`
+	Limits map[string]Limit         `json:"limits"`
+	Daily  map[string]DailySettings `json:"daily,omitempty"`
 }
 
 func Default() Plan {
@@ -121,6 +122,14 @@ func (p Plan) Validate() error {
 			return err
 		}
 	}
+	for harness, settings := range p.Daily {
+		if HarnessLabel(harness) == "" {
+			return errors.New("unknown harness in daily plan")
+		}
+		if err := settings.Validate(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -139,10 +148,16 @@ func Decode(raw []byte) (Plan, string, error) {
 	}
 	_, total := fields["total"]
 	_, limits := fields["limits"]
-	if total || limits {
+	_, daily := fields["daily"]
+	_, legacyCap := fields["cap"]
+	_, legacyView := fields["view"]
+	_, legacyArea := fields["area"]
+	_, legacyModel := fields["model"]
+	if total || limits || daily && !legacyCap && !legacyView && !legacyArea && !legacyModel {
 		var in struct {
-			Total  *int             `json:"total"`
-			Limits map[string]Limit `json:"limits"`
+			Total  *int                     `json:"total"`
+			Limits map[string]Limit         `json:"limits"`
+			Daily  map[string]DailySettings `json:"daily"`
 		}
 		if err := strictJSON(raw, &in); err != nil {
 			return Plan{}, "", err
@@ -153,17 +168,21 @@ func Decode(raw []byte) (Plan, string, error) {
 		if value, exists := fields["limits"]; exists && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 			return Plan{}, "", errors.New("limits must be a JSON object")
 		}
-		p := Plan{Total: *in.Total, Limits: in.Limits}
+		if value, exists := fields["daily"]; exists && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			return Plan{}, "", errors.New("daily must be a JSON object")
+		}
+		p := Plan{Total: *in.Total, Limits: in.Limits, Daily: in.Daily}
 		if p.Limits == nil {
 			p.Limits = map[string]Limit{}
 		}
 		return p, "plan", p.Validate()
 	}
 	var old struct {
-		Cap   *int               `json:"cap"`
-		View  string             `json:"view"`
-		Area  map[string]float64 `json:"area"`
-		Model map[string]float64 `json:"model"`
+		Cap   *int                     `json:"cap"`
+		View  string                   `json:"view"`
+		Area  map[string]float64       `json:"area"`
+		Model map[string]float64       `json:"model"`
+		Daily map[string]DailySettings `json:"daily"`
 	}
 	if err := strictJSON(raw, &old); err != nil {
 		return Plan{}, "", err
@@ -172,13 +191,17 @@ func Decode(raw []byte) (Plan, string, error) {
 		return Plan{}, "", errors.New("invalid legacy working view")
 	}
 	p := Default()
+	p.Daily = old.Daily
+	if value, exists := fields["daily"]; exists && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+		return Plan{}, "", errors.New("daily must be a JSON object")
+	}
 	if value, exists := fields["cap"]; exists {
 		if old.Cap == nil || *old.Cap < 1 || *old.Cap > 12 || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
 			return Plan{}, "", errors.New("legacy cap must be an integer from 1 to 12")
 		}
 		p.Total = *old.Cap
 	}
-	return p, "legacy", nil
+	return p, "legacy", p.Validate()
 }
 
 func strictJSON(raw []byte, out any) error {
@@ -196,7 +219,12 @@ func strictJSON(raw []byte, out any) error {
 // CanStart checks a snapshot, including counts above a newly lowered plan.
 // Callers must serialize competing starts and check account room separately.
 // Every harness contributes to the total, even when that harness is now Off.
-func CanStart(plan Plan, running map[string]int, harness string) (bool, string) {
+func CanStart(plan Plan, running map[string]int, harness string, daily ...DailyDecision) (bool, string) {
+	for _, setting := range plan.Daily {
+		if setting.Validate() != nil {
+			return false, "daily_limit_unknown"
+		}
+	}
 	if err := plan.Validate(); err != nil {
 		return false, "invalid plan"
 	}
@@ -226,6 +254,12 @@ func CanStart(plan Plan, running map[string]int, harness string) (bool, string) 
 				return false, fmt.Sprintf("%s at its limit", label)
 			}
 		}
+	}
+	if len(daily) > 1 || len(daily) == 0 && len(plan.Daily) > 0 {
+		return false, "daily_limit_unknown"
+	}
+	if len(daily) == 1 && daily[0].Reason != "" {
+		return false, daily[0].Reason
 	}
 	return true, ""
 }

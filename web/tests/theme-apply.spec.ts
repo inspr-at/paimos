@@ -1,13 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
-import { join } from 'node:path'
 import { fixtures, mockWork, watchErrors, liveAgent } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
-import { contrastRatio, DARK_CARD, LIGHT_CARD, PORCELAIN, deriveDark, inkOn, type ThemeValues } from '../src/lib/themeValues'
+import { colourContrast as contrastRatio, CARD_COLOURS, PORCELAIN, deriveDark, inkOn, roles } from '../src/lib/themeEngine'
+import { AGENT_PALETTES } from '../src/lib/agentPalettes'
+import type { ThemeValues } from '../src/lib/themes'
+const LIGHT_CARD = CARD_COLOURS.light, DARK_CARD = CARD_COLOURS.dark
 import { mockSettings, settingsData } from './settings-fixtures'
 
-const shots = join(process.cwd(), 'test-results', 'aeon-644')
+let shotPath: (name: string) => string
+test.beforeEach(async ({}, testInfo) => { shotPath = name => testInfo.outputPath('aeon-644', name) })
+const themeRecord = (values: ThemeValues) => ({ id: 'personal', tenant_id: 't1', name: 'Personal', scope: 'personal', owner_principal_id: 'p-person', revision: 1, created_at: '', updated_at: '', values })
+const activeTheme = (values: ThemeValues) => ({ theme: themeRecord(values), default_theme_id: 'default', selected_theme_id: 'personal', revision: 1, fallback_notice: null })
 const values = (): ThemeValues => ({ ...structuredClone(PORCELAIN), agents: { ...PORCELAIN.agents, palette: 'tritan' }, primary: { light: '#8547b0', dark: null }, secondary: { light: '#bf3d6d', dark: '#f08db1' } })
 async function setup(page: Page) {
   await page.addInitScript(() => { Object.defineProperty(navigator, 'language', { get: () => 'de-AT' }) })
@@ -17,13 +22,15 @@ async function setup(page: Page) {
   data.nodes.find(n => n.id === 'n-1')!.title = 'Regelmäßige Prüfung der umfangreichen Zugangsberechtigungen und der Website'
   data.live.push(liveAgent({ project_id: 'p-pharos', principal_id: 'p-agent', name: 'Farbenprüfung', ticket: { id: 'n-1', key: 'PHAROS-11', title: 'Farbenprüfung', project_id: 'p-pharos' } }))
   await mockWork(page, data)
+  // Main restores through the shared editor, so both bounded reads need fixtures.
+  await page.route('**/api/themes?**', route => route.fulfill({ json: { items: [themeRecord(PORCELAIN)], next_cursor: null } }))
   return errors
 }
 async function apply(page: Page, theme: ThemeValues) {
   await page.evaluate(async theme => {
-    const path = '/src/lib/appearanceTheme.ts'
+    const path = '/src/lib/themeRuntime.ts'
     const module = await import(/* @vite-ignore */ path)
-    module.applyAppearanceTheme(theme)
+    module.applyTheme(theme)
   }, theme)
 }
 async function modeChoice(page: Page, choice: 'light' | 'dark') {
@@ -40,7 +47,7 @@ test('extreme saved accents keep personal appearance links readable in both mode
   const chosen = values()
   chosen.primary = { light: '#ffffff', dark: '#000000' }
   chosen.secondary = { light: '#fefefe', dark: '#010101' }
-  await page.route('**/api/me/theme', route => route.fulfill({ json: { theme: { values: chosen }, fallback_notice: null } }))
+  await page.route('**/api/me/theme', route => route.fulfill({ json: activeTheme(chosen) }))
   await page.goto('/settings/personal#agents')
   const link = page.getByRole('link', { name: 'Avatar, motion, size and state colours in Theme' })
   await expect(link).toBeVisible()
@@ -50,7 +57,7 @@ test('extreme saved accents keep personal appearance links readable in both mode
       await modeChoice(page, mode)
       const tokens = await page.locator('html').evaluate(el => {
         const style = getComputedStyle(el)
-        return ['--teal', '--teal-ink', '--gold-ink', '--warn'].map(name => style.getPropertyValue(name).trim())
+        return ['--primary', '--primary-ink', '--secondary-ink'].map(name => style.getPropertyValue(name).trim())
       })
       expect(tokens[0]).toBe(mode === 'light' ? '#ffffff' : '#000000')
       for (const text of tokens.slice(1)) expect(contrastRatio(text!, mode === 'light' ? LIGHT_CARD : DARK_CARD)).toBeGreaterThanOrEqual(4.5)
@@ -64,13 +71,22 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: mode })
     const errors = await setup(page), chosen = values()
-    await page.route('**/api/me/theme', route => route.fulfill({ json: { theme: { values: chosen }, fallback_notice: null } }))
+    await page.route('**/api/me/theme', route => route.fulfill({ json: activeTheme(chosen) }))
     await page.goto('/p/PHAROS?sort=key&group=none')
     const row = page.locator('#row-n-1'), marker = row.locator('.recurrence-dot')
+    const modeControl = width === 390 ? page.getByRole('button', { name: /^Account for/ }) : page.getByRole('button', { name: /Switch to .* theme/ })
+    async function toggleMode() {
+      await modeControl.click()
+      if (width === 390) {
+        await page.getByRole('menuitem', { name: /Switch to .* theme/ }).click()
+        await page.keyboard.press('Escape')
+      }
+    }
     await expect(marker).toBeVisible()
     const isDark = mode === 'dark', primary = isDark ? deriveDark(chosen.primary.light) : chosen.primary.light
+    const primaryFill = roles(primary, mode).fill
     expect(await page.locator('html').evaluate(el => getComputedStyle(el).getPropertyValue('--teal').trim())).toBe(primary)
-    await expectStableControls({ controls: { 'ticket row': row, 'recurring mark': marker, 'mode button': page.getByRole('button', { name: /Switch to .* theme/ }) }, interactions:
+    await expectStableControls({ controls: { 'ticket row': row, 'recurring mark': marker, 'mode button': modeControl }, interactions:
       (['primary', 'secondary', 'neutral', 'custom'] as const).map(source => ({ name: `saved ${source} marker`, run: async () => {
         chosen.recurring_marker = { source, custom: '#8547b0' }
         await apply(page, chosen)
@@ -79,23 +95,23 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
         expect(colour).toEqual({ fill: cssRgb(expected), ink: cssRgb(inkOn(expected)), width: 12 })
       } })),
     })
-    await expectStableControls({ controls: { 'mode button': page.getByRole('button', { name: /Switch to .* theme/ }), 'ticket row': row }, interactions: [{ name: 'mode switch on list', run: async () => {
-      await page.getByRole('button', { name: /Switch to .* theme/ }).click()
+    await expectStableControls({ controls: { 'mode button': modeControl, 'ticket row': row }, interactions: [{ name: 'mode switch on list', run: async () => {
+      await toggleMode()
       await expect(page.locator('html')).toHaveAttribute('data-theme', isDark ? 'light' : 'dark')
     } }, { name: 'restore list mode', run: async () => {
-      await page.getByRole('button', { name: /Switch to .* theme/ }).click()
+      await toggleMode()
       await expect(page.locator('html')).toHaveAttribute('data-theme', mode)
     } }] })
     const button = page.getByRole('button', { name: 'New ticket', exact: true })
-    expect(await button.evaluate(el => getComputedStyle(el).color)).toBe(cssRgb(inkOn(primary)))
+    expect(await button.evaluate(el => getComputedStyle(el).color)).toBe(cssRgb(inkOn(primaryFill)))
     const mark = page.locator('.agent-state-mark').first()
     await expect(mark).toBeVisible()
     await expect(mark).toHaveAttribute('data-mark', 'working')
-    const stateFill = isDark ? '#4fdca5' : '#0f6b3c'
+    const stateFill = AGENT_PALETTES.find(p => p.id === 'tritan')![mode][0]!
     expect(await mark.locator('circle').evaluate(el => getComputedStyle(el).fill)).toBe(cssRgb(stateFill))
     expect(await mark.locator('path').evaluate(el => getComputedStyle(el).stroke)).toBe(cssRgb(inkOn(stateFill)))
-    mkdirSync(shots, { recursive: true })
-    await page.screenshot({ path: join(shots, `list-${width}-${mode}.png`) })
+    mkdirSync(shotPath(''), { recursive: true })
+    await page.screenshot({ path: shotPath(`list-${width}-${mode}.png`) })
     await page.reload()
     await expect(marker).toBeVisible()
     expect((await markerColours(page)).width).toBe(12)
@@ -112,7 +128,7 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
       await modeChoice(page, mode)
       await expect(page.locator('html')).toHaveAttribute('data-theme', mode)
     } }] })
-    await page.screenshot({ path: join(shots, `ticket-${width}-${mode}.png`) })
+    await page.screenshot({ path: shotPath(`ticket-${width}-${mode}.png`) })
     expect(errors).toEqual([])
   })
 }
@@ -123,25 +139,25 @@ test('a reload waits for the saved colours before rendering the app', async ({ p
   let release!: () => void, requested!: () => void
   const barrier = new Promise<void>(resolve => { release = resolve })
   const called = new Promise<void>(resolve => { requested = resolve })
-  await page.route('**/api/me/theme', async route => { requested(); await barrier; await route.fulfill({ json: { theme: { values: chosen }, fallback_notice: null } }) })
+  await page.route('**/api/me/theme', async route => { requested(); await barrier; await route.fulfill({ json: activeTheme(chosen) }) })
   await page.goto('/p/PHAROS?sort=key&group=none', { waitUntil: 'domcontentloaded' })
   await called
   expect(await page.locator('#app').evaluate(el => el.childElementCount)).toBe(0)
   expect(await page.locator('body').evaluate(el => getComputedStyle(el).backgroundImage)).toBe('none')
   release()
   await expect(page.locator('#row-n-1')).toBeVisible()
-  expect(await page.locator('html').evaluate(el => el.style.getPropertyValue('--teal'))).toBe(chosen.primary.light)
+  expect(await page.locator('html').evaluate(el => getComputedStyle(el).getPropertyValue('--teal').trim())).toBe(chosen.primary.light)
 })
 
 test('system mode follows the OS without losing the chosen colours', async ({ page }) => {
   await setup(page)
   const chosen = values()
   await page.emulateMedia({ colorScheme: 'light' })
-  await page.route('**/api/me/theme', route => route.fulfill({ json: { theme: { values: chosen }, fallback_notice: null } }))
+  await page.route('**/api/me/theme', route => route.fulfill({ json: activeTheme(chosen) }))
   await page.goto('/p/PHAROS?sort=key&group=none')
   await expect(page.locator('#row-n-1')).toBeVisible()
   await page.emulateMedia({ colorScheme: 'dark' })
-  await expect.poll(() => page.locator('html').evaluate(el => el.style.getPropertyValue('--teal'))).toBe(deriveDark(chosen.primary.light))
+  await expect.poll(() => page.locator('html').evaluate(el => getComputedStyle(el).getPropertyValue('--teal').trim())).toBe(deriveDark(chosen.primary.light))
   await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.+/)
 })
 
@@ -151,7 +167,7 @@ test('system mode follows the OS without losing the chosen colours', async ({ pa
 test('waiting glyph ink survives the robot clock styles in both modes', async ({ page }) => {
   await setup(page)
   const chosen = values()
-  await page.route('**/api/me/theme', route => route.fulfill({ json: { theme: { values: chosen }, fallback_notice: null } }))
+  await page.route('**/api/me/theme', route => route.fulfill({ json: activeTheme(chosen) }))
   await page.goto('/p/PHAROS?sort=key&group=none')
   await expect(page.locator('#row-n-1')).toBeVisible()
   await page.evaluate(async () => {
@@ -164,7 +180,7 @@ test('waiting glyph ink survives the robot clock styles in both modes', async ({
   await expect(mark).toHaveAttribute('data-mark', 'waiting')
   for (const mode of ['light', 'dark'] as const) {
     await modeChoice(page, mode)
-    const fill = mode === 'light' ? '#b84a08' : '#f5ae52'
+    const fill = AGENT_PALETTES.find(p => p.id === 'tritan')![mode][1]!
     expect(await mark.locator('circle').evaluate(el => getComputedStyle(el).fill)).toBe(cssRgb(fill))
     expect(await mark.locator('path').evaluate(el => getComputedStyle(el).stroke)).toBe(cssRgb(inkOn(fill)))
   }

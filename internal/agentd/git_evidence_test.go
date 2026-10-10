@@ -3,7 +3,9 @@
 package agentd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,16 +13,77 @@ import (
 	"testing"
 )
 
+// Observe real Git children, including receive-pack in the bare destination.
+// Checking only the caller's configuration misses local transports that clear
+// command-scoped configuration before starting the receiving process.
+func TestEvidenceRepoDoesNotStartAutomaticMaintenance(t *testing.T) {
+	root, git := evidenceRepo(t)
+	trace := filepath.Join(t.TempDir(), "git-trace.json")
+	t.Setenv("GIT_TRACE2_EVENT", trace)
+	origin, work := filepath.Join(root, "origin.git"), filepath.Join(root, "work")
+	git(root, "init", "--bare", "-b", "main", origin)
+	git(root, "clone", "-q", origin, work)
+	git(work, "commit", "--allow-empty", "-m", "base")
+	git(work, "push", "-q", "origin", "HEAD:main")
+	git(work, "fetch", "-q", "origin")
+	f, err := os.Open(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	decoder := json.NewDecoder(f)
+	sawReceiver := false
+	for {
+		var event struct {
+			Event string   `json:"event"`
+			Argv  []string `json:"argv"`
+		}
+		if err := decoder.Decode(&event); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if event.Event != "child_start" {
+			continue
+		}
+		for _, arg := range event.Argv {
+			if arg == "maintenance" || arg == "gc" {
+				t.Errorf("fixture started automatic maintenance: %v", event.Argv)
+			}
+			if strings.Contains(arg, "git-receive-pack") {
+				sawReceiver = true
+			}
+		}
+	}
+	if !sawReceiver {
+		t.Fatal("trace did not observe the bare push receiver")
+	}
+}
+
 func evidenceRepo(t *testing.T) (string, func(dir string, args ...string)) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is unavailable")
+	}
+	// Persist these settings in every init/clone, including bare destinations:
+	// local receive-pack clears command-scoped configuration. Detached Git
+	// maintenance can otherwise keep writing after CombinedOutput returns and
+	// race TempDir cleanup even when no collection is needed.
+	template := t.TempDir()
+	// Keep the usual metadata directory for attribute/graft attack fixtures.
+	if err := os.Mkdir(filepath.Join(template, "info"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	config := "[gc]\n\tauto = 0\n\tautoDetach = false\n[maintenance]\n\tauto = false\n\tautoDetach = false\n"
+	if err := os.WriteFile(filepath.Join(template, "config"), []byte(config), 0o600); err != nil {
+		t.Fatal(err)
 	}
 	git := func(dir string, args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull,
+			"GIT_TEMPLATE_DIR="+template,
 			"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com")
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
