@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,6 +58,8 @@ func heartbeatFixture(t *testing.T, calls *[]hbCall, status, inbox string) *http
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
 			_, _ = w.Write([]byte(`{"items":[{"id":"project-kind","slug":"project"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/lookup":
+			_ = json.NewEncoder(w).Encode(project)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{project}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/models":
@@ -912,6 +915,8 @@ func hbServer(t *testing.T, calls *[]hbCall, handle func(r *http.Request, body m
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
 			_, _ = w.Write([]byte(`{"items":[{"id":"project-kind","slug":"project"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/projects/lookup":
+			_ = json.NewEncoder(w).Encode(project)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{project}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/models":
@@ -1965,10 +1970,15 @@ func TestReadLimitedLineHonorsCancelAndBudget(t *testing.T) {
 
 func TestHeartbeatBeatLookupHonorsCancellation(t *testing.T) {
 	var calls []hbCall
-	slow := false
+	var block atomic.Bool
+	entered := make(chan struct{})
+	released := make(chan struct{})
 	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
-		if slow && r.URL.Path == "/api/nodes" {
-			time.Sleep(250 * time.Millisecond)
+		if block.Load() && r.URL.Path == "/api/projects/lookup" {
+			close(entered)
+			<-r.Context().Done()
+			close(released)
+			return true
 		}
 		return false
 	})
@@ -1980,18 +1990,26 @@ func TestHeartbeatBeatLookupHonorsCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer session.hold.release()
-	slow = true
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	block.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	started := time.Now()
-	err = rt.heartbeatBeat(ctx, opts, heartbeatDeps{}, &session)
-	elapsed := time.Since(started)
-	if err == nil {
-		t.Fatal("deadline did not return an error")
+	done := make(chan error, 1)
+	go func() { done <- rt.heartbeatBeat(ctx, opts, heartbeatDeps{}, &session) }()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("lookup did not reach the cancellation barrier")
 	}
-	if elapsed > 150*time.Millisecond {
-		t.Fatalf("20 ms cancellation took %v in project lookup", elapsed)
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "context canceled") {
+			t.Fatalf("canceled lookup returned %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("canceled beat did not return")
 	}
+	<-released
 }
 
 func TestFinalUsageDrainsBacklog(t *testing.T) {
