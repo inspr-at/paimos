@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/modelactivation"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -21,8 +22,7 @@ var v2Ladders = map[string][]string{
 }
 
 func catalogLock(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id', true), 0))`)
-	return err
+	return modelactivation.Lock(ctx, tx)
 }
 
 func prepareCatalogUpgrade(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
@@ -65,11 +65,13 @@ func prepareCatalogUpgrade(ctx context.Context, tx pgx.Tx, p tenant.Principal) (
 		if conflict {
 			continue
 		}
-		profile, err := insertProfile(ctx, tx, p.TenantID, profileWrite{Slug: seed.Slug, Version: seed.Version, Harness: seed.Harness, Family: seed.Family, Model: seed.Model, Effort: seed.Effort, Tier: seed.Tier})
+		profile, err := insertActivatedProfile(ctx, tx, p, profileWrite{Slug: seed.Slug, Version: seed.Version, Harness: seed.Harness, Family: seed.Family, Model: seed.Model, Effort: seed.Effort, Tier: seed.Tier}, true, modelactivation.ShippedCatalog)
 		if err != nil {
 			return nil, err
 		}
-		ids[seed.Slug] = profile.ID
+		if profile.Enabled {
+			ids[seed.Slug] = profile.ID
+		}
 		added = append(added, profile)
 	}
 	now, err := dbNow(ctx, tx)
