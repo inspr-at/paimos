@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import BizIcon from '../business/BizIcon.vue'
+import KeyCap from '../KeyCap.vue'
 import { LAYER_LABEL, LAYERS, putBudget, rulesMessage, type LayerName, type RuleBudgetView, type RuleBudgetBlocker } from '../../lib/rules'
 
 // The workspace budget for one session file (AEON-314): a total and optional
@@ -9,6 +10,7 @@ import { LAYER_LABEL, LAYERS, putBudget, rulesMessage, type LayerName, type Rule
 const props = defineProps<{ view: RuleBudgetView; canManage: boolean }>()
 const emit = defineEmits<{ saved: [view: RuleBudgetView] }>()
 const editing = ref(false)
+const budgetForm = ref<HTMLFormElement | null>(null)
 const busy = ref(false)
 const error = ref('')
 const total = ref('')
@@ -21,6 +23,7 @@ const validEstimate = computed(() => Number.isSafeInteger(proposedBytes.value) &
 const tokens = computed(() => Math.ceil(proposedBytes.value / 4))
 const deliveredBytes = (client: RuleBudgetBlocker) => Math.min(validEstimate.value ? proposedBytes.value : props.view.max_bytes, client.max_session_file_bytes)
 const tipLanguage = ref<'en' | 'de'>('en')
+const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const tips = {
   en: [
     'Keep always-on rules small: start around 4–16 KB; long preambles dilute attention (context rot) and cost tokens in every session.',
@@ -55,6 +58,7 @@ function start() {
   editing.value = true
 }
 async function save() {
+  if (busy.value) return
   const max = whole(total.value)
   if (!(max >= props.view.min_bytes && max <= props.view.ceiling_bytes)) { error.value = `The budget is between ${fmt(props.view.min_bytes)} and ${fmt(props.view.ceiling_bytes)} bytes.`; return }
   const layers: Partial<Record<LayerName, number>> = {}
@@ -72,10 +76,28 @@ async function save() {
     editing.value = false
   } catch (cause) { error.value = rulesMessage(cause) } finally { busy.value = false }
 }
+
+function onKeydown(event: KeyboardEvent) {
+  if (!editing.value || event.isComposing) return
+  if (event.key === 'Enter' && (mac ? event.metaKey : event.ctrlKey) && !event.altKey && !event.shiftKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    void save()
+  } else if (event.key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+    event.preventDefault()
+    event.stopPropagation()
+    const target = event.target
+    if (target instanceof HTMLElement && target.matches('input, textarea, select, [contenteditable="true"]')) {
+      budgetForm.value?.focus()
+    } else if (!busy.value) {
+      editing.value = false
+    }
+  }
+}
 </script>
 
 <template>
-  <section class="budget-section" aria-labelledby="rules-budget-title">
+  <section class="budget-section" aria-labelledby="rules-budget-title" @keydown="onKeydown">
     <div class="head">
       <div class="titles">
         <h3 id="rules-budget-title">Budget</h3>
@@ -84,6 +106,20 @@ async function save() {
       </div>
       <button v-if="canManage && !editing" type="button" class="btn sm ghost" @click="start">Change</button>
     </div>
+    <form v-if="editing" ref="budgetForm" class="form" tabindex="-1" :aria-busy="busy" @submit.prevent="save">
+      <div class="buttons">
+        <button type="button" class="btn sm ghost" :disabled="busy" aria-keyshortcuts="Escape" @click="editing = false">Cancel <span class="keys" aria-hidden="true"><KeyCap k="Esc" /></span></button>
+        <button type="submit" class="btn sm primary" :disabled="busy" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'">Save budget <span class="keys" aria-hidden="true"><KeyCap k="mod" /><KeyCap k="enter" /></span></button>
+      </div>
+      <label class="fld total"><span>Total <span class="opt">bytes</span></span>
+        <input v-model="total" class="field" inputmode="numeric" autocomplete="off" :disabled="busy" aria-describedby="rules-budget-range">
+        <span id="rules-budget-range" class="range">{{ fmt(view.min_bytes) }} to {{ fmt(view.ceiling_bytes) }}<template v-if="view.default_bytes !== view.ceiling_bytes">; default {{ fmt(view.default_bytes) }}</template></span>
+      </label>
+      <label v-for="layer in LAYERS" :key="layer" class="fld"><span>{{ LAYER_LABEL[layer] }}</span>
+        <input v-model="caps[layer]" class="field" inputmode="numeric" autocomplete="off" :disabled="busy" placeholder="No cap">
+      </label>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
+    </form>
     <details v-if="canManage && view.blocking_clients?.length" class="compatibility">
       <summary><BizIcon name="chevron-right" :size="12" class="chev" /><span>Client delivery <span class="opt">· {{ blockingCount }}</span></span></summary>
       <p>Clients active in the last seven days receive up to these amounts; whole rules may use fewer bytes.</p>
@@ -102,20 +138,6 @@ async function save() {
       <p v-if="proposedBytes > 128000" class="warning strong">Every agent session starts with this much context; it costs tokens and money.</p>
       <p v-else-if="proposedBytes > 64000" class="warning">Large always-on files use more context; consider loading details on demand.</p>
     </div>
-    <form v-if="editing" class="form" @submit.prevent="save" @keydown.esc.prevent="editing = false">
-      <label class="fld total"><span>Total <span class="opt">bytes</span></span>
-        <input v-model="total" class="field" inputmode="numeric" autocomplete="off" :aria-describedby="'rules-budget-range'">
-        <span id="rules-budget-range" class="range">{{ fmt(view.min_bytes) }} to {{ fmt(view.ceiling_bytes) }}<template v-if="view.default_bytes !== view.ceiling_bytes">; default {{ fmt(view.default_bytes) }}</template></span>
-      </label>
-      <label v-for="layer in LAYERS" :key="layer" class="fld"><span>{{ LAYER_LABEL[layer] }}</span>
-        <input v-model="caps[layer]" class="field" inputmode="numeric" autocomplete="off" placeholder="No cap">
-      </label>
-      <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <div class="buttons">
-        <button type="button" class="btn sm ghost" :disabled="busy" @click="editing = false">Cancel</button>
-        <button type="submit" class="btn sm primary" :disabled="busy">{{ busy ? 'Saving…' : 'Save budget' }}</button>
-      </div>
-    </form>
     <details v-if="editing" class="tip">
       <summary><BizIcon name="chevron-right" :size="12" class="chev" /><span>Tip <span class="opt">· Keep the kernel small</span></span></summary>
       <div class="tip-heading">
@@ -166,5 +188,6 @@ h3 { margin: 0; font-size: 14px; font-weight: 650; }
 .range { color: var(--ink-3); font-size: 11.5px; font-weight: 450; }
 .error { grid-column: 1 / -1; margin: 0; color: var(--danger); font-size: 12.5px; }
 .buttons { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+.buttons .keys { display: inline-flex; align-items: center; gap: 2px; opacity: .7; }
 @media (max-width: 760px) { .form { grid-template-columns: repeat(2, minmax(0, 1fr)); } .total { grid-column: 1 / -1; } }
 </style>

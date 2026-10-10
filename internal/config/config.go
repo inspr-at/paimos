@@ -13,17 +13,23 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/doctrinerepo"
 )
 
 // Config is the process configuration for `paimos serve`.
 type Config struct {
-	Addr            string
-	DatabaseURL     string
-	Env             string // "dev" or "prod"
-	StatusAutopilot string // Deployment cap: "off", "suggest" or "on".
-	PublicURL       string
+	AttachedMessages               bool // disabled by default; also requires single-instance qualification
+	AttachedMessagesSingleInstance bool
+	PhonePush                      *PhonePushConfig
+	Addr                           string
+	DatabaseURL                    string
+	Env                            string // "dev" or "prod"
+	StatusAutopilot                string // Deployment cap: "off", "suggest" or "on".
+	PublicURL                      string
 	// Deployment-owned exact host:port exceptions for an operator-local
 	// Aithema service. Empty by default; never writable by tenants.
 	AithemaOperatorLocalServices []string
@@ -47,6 +53,10 @@ type Config struct {
 	// keys, one credential file and <ref>.allowlist.json per reference
 	// (AEON_DOCTRINE_CREDENTIALS_DIR, AEON-318). Aeon stores only the names.
 	DoctrineCredentialsDir string
+	DoctrineMirrorDir      string
+	DoctrineDefaultSource  bool
+	// DoctrineRepositories is validated deployment-owned proposal policy.
+	DoctrineRepositories *doctrinerepo.Pair
 	// PairingNixGuide is deployment-admin-owned public guidance. There is no
 	// tenant or pairing-peer write path; absent configuration hides the block.
 	PairingNixGuide *PairingNixGuide
@@ -69,6 +79,7 @@ type Config struct {
 	ReviewAppKeyFile        string
 	ReviewAppTenantID       string
 	ReviewAppRepository     string
+	ReviewWebhookSecret     []byte // Host-owned HMAC key; never logged or tenant-writable.
 }
 
 // FromEnv reads AEON_* variables. Empty optional values take their defaults.
@@ -77,17 +88,20 @@ type Config struct {
 // file (host-generated secret) so it never appears in the environment.
 func FromEnv() (Config, error) {
 	cfg := Config{
-		Addr:                getenv("AEON_ADDR", ":8080"),
-		DatabaseURL:         os.Getenv("AEON_DATABASE_URL"),
-		Env:                 getenv("AEON_ENV", "dev"),
-		PublicURL:           os.Getenv("AEON_PUBLIC_URL"),
-		WebDir:              os.Getenv("AEON_WEB_DIR"),
-		BootstrapTenantSlug: getenv("AEON_BOOTSTRAP_TENANT_SLUG", "inspr"),
-		BootstrapTenantName: getenv("AEON_BOOTSTRAP_TENANT_NAME", "INSPR"),
-		FilesDir:            getenv("AEON_FILES_DIR", "data/files"),
-		HTMLSandboxOrigin:   os.Getenv("AEON_HTML_SANDBOX_ORIGIN"),
+		AttachedMessages:               os.Getenv("AEON_ATTACHED_MESSAGES") == "true",
+		AttachedMessagesSingleInstance: os.Getenv("AEON_ATTACHED_MESSAGES_SINGLE_INSTANCE") == "true",
+		Addr:                           getenv("AEON_ADDR", ":8080"),
+		DatabaseURL:                    os.Getenv("AEON_DATABASE_URL"),
+		Env:                            getenv("AEON_ENV", "dev"),
+		PublicURL:                      os.Getenv("AEON_PUBLIC_URL"),
+		WebDir:                         os.Getenv("AEON_WEB_DIR"),
+		BootstrapTenantSlug:            getenv("AEON_BOOTSTRAP_TENANT_SLUG", "inspr"),
+		BootstrapTenantName:            getenv("AEON_BOOTSTRAP_TENANT_NAME", "INSPR"),
+		FilesDir:                       getenv("AEON_FILES_DIR", "data/files"),
+		HTMLSandboxOrigin:              os.Getenv("AEON_HTML_SANDBOX_ORIGIN"),
 		// Only the directory path is read here; a token is read at fetch time.
 		DoctrineCredentialsDir:  os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
+		DoctrineMirrorDir:       os.Getenv("AEON_DOCTRINE_MIRROR_DIR"),
 		DoctrineAppID:           os.Getenv("AEON_DOCTRINE_APP_ID"),
 		DoctrineInstallationID:  os.Getenv("AEON_DOCTRINE_INSTALLATION_ID"),
 		DoctrineAppKeyRef:       os.Getenv("AEON_DOCTRINE_APP_KEY_REF"),
@@ -107,6 +121,30 @@ func FromEnv() (Config, error) {
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("AEON_DATABASE_URL is required")
+	}
+	publicRepository, publicSet := os.LookupEnv("AEON_DOCTRINE_PUBLIC_REPOSITORY")
+	if !publicSet {
+		publicRepository = doctrinerepo.DefaultPublic
+	}
+	privateRepository, privateSet := os.LookupEnv("AEON_DOCTRINE_PRIVATE_REPOSITORY")
+	if !privateSet {
+		privateRepository = doctrinerepo.DefaultPrivate
+	}
+	repositories, repositoryErr := doctrinerepo.Parse(publicRepository, privateRepository)
+	if repositoryErr != nil {
+		return Config{}, repositoryErr
+	}
+	cfg.DoctrineRepositories = &repositories
+	cfg.DoctrineDefaultSource = privateSet && cfg.DoctrineAppTenantID != ""
+	if cfg.DoctrineMirrorDir != "" && !filepath.IsAbs(cfg.DoctrineMirrorDir) {
+		return Config{}, fmt.Errorf("AEON_DOCTRINE_MIRROR_DIR must be an absolute host directory")
+	}
+	if file := os.Getenv("AEON_REVIEW_WEBHOOK_SECRET_FILE"); file != "" {
+		secret, err := reviewWebhookSecret(file)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.ReviewWebhookSecret = secret
 	}
 	var modeErr error
 	cfg.StatusAutopilot, modeErr = StatusAutopilotMode()
@@ -151,6 +189,10 @@ func FromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	cfg.PhonePush, err = phonePushFromFile(os.Getenv("AEON_PHONE_PUSH_VAPID_FILE"))
+	if err != nil {
+		return Config{}, err
+	}
 	cfg.LinkKey, err = LinkKeyFromEnv()
 	if err != nil {
 		return Config{}, err
@@ -163,6 +205,32 @@ func FromEnv() (Config, error) {
 		cfg.DatabaseURL = u
 	}
 	return cfg, nil
+}
+
+func reviewWebhookSecret(file string) ([]byte, error) {
+	invalid := errors.New("AEON_REVIEW_WEBHOOK_SECRET_FILE requires a private physical file with 32–4096 bytes")
+	physical, err := filepath.EvalSymlinks(file)
+	if err != nil || !filepath.IsAbs(file) || physical != file {
+		return nil, invalid
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return nil, invalid
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return nil, invalid
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, 4097))
+	if err != nil || len(raw) > 4096 {
+		return nil, invalid
+	}
+	secret := strings.TrimSpace(string(raw))
+	if len(secret) < 32 {
+		return nil, invalid
+	}
+	return []byte(secret), nil
 }
 
 // StatusAutopilotMode is also read by transactional publication hooks, which

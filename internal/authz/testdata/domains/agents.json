@@ -1,0 +1,41 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "agents.plan.read"
+    ],
+    "guest": [
+      "agents.plan.read"
+    ],
+    "member": [
+      "agents.plan.read"
+    ],
+    "owner": [
+      "agents.plan.read"
+    ],
+    "viewer": [
+      "agents.plan.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Read the person's agent start plan and running counts",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Agents",
+      "key": "agents.plan.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "words": {
+    "resources": {
+      "agents": "agents"
+    },
+    "special": {
+      "agents.plan.read": "See their agent start plan"
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "releases.deploy",
+      "releases.read",
+      "releases.write"
+    ],
+    "guest": [
+      "releases.read"
+    ],
+    "member": [
+      "releases.read",
+      "releases.write"
+    ],
+    "owner": [
+      "releases.deploy",
+      "releases.read",
+      "releases.write"
+    ],
+    "viewer": [
+      "releases.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Deploy releases",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Releases",
+      "key": "releases.deploy",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read releases",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Releases",
+      "key": "releases.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write releases",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Releases",
+      "key": "releases.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "routes": {
+    "GET /api/projects/{projectId}/release-memberships": "releases.read",
+    "GET /api/projects/{projectId}/releases": "releases.read",
+    "GET /api/projects/{projectId}/releases/{releaseId}/note-snapshot": "releases.read",
+    "GET /api/projects/{projectId}/releases/{releaseId}/ticket-options": "releases.read",
+    "GET /api/projects/{projectId}/releases/{releaseId}/walker": "releases.read",
+    "POST /api/projects/{projectId}/releases": "releases.write",
+    "POST /api/projects/{projectId}/releases/{releaseId}/membership": "releases.write",
+    "POST /api/projects/{projectId}/releases/{releaseId}/tickets": "releases.write",
+    "PUT /api/projects/{projectId}/releases/{releaseId}/plan": "releases.write"
+  },
+  "words": {
+    "resources": {
+      "releases": "releases"
+    }
+  }
+}

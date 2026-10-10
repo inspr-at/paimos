@@ -3,12 +3,48 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { mkdtempSync, mkdirSync, symlinkSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { checkMigrations, contractMarker, destructive, publishedMigrations, splitSQL } from './check-migrations.mjs';
+import { checkMigrations, contractMarker, destructive, loadMigrationExceptions, publishedMigrations, splitSQL } from './check-migrations.mjs';
 
 const marker = '-- aeon:contract-phase AEON-415 expanded-in=v260930115354.0.0 expansion-migration=0001_tenants.sql\n';
+
+const migrationExceptionFiles = () => readdirSync(new URL('./migration-policy-exceptions/', import.meta.url)).sort().map(name => name.replace(/\.json$/, '.sql'));
+
+test('AEON-698 historical migration reads preserve exact bytes with two Git launches', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-698-migration-batch-'));
+  const migrations = join(directory, 'internal/db/migrations');
+  mkdirSync(migrations, {recursive: true});
+  const git = (...args) => execFileSync('git', args, {cwd: directory, encoding: 'utf8'}).trim();
+  git('init', '-q');
+  const expected = new Map(Array.from({length: 8}, (_, i) => [
+    `000${i}_fixture.sql`, i === 0 ? '' : `-- Grüße ${i}\r\nSELECT 'blob 123\\n';${i % 2 ? '\n' : ''}`,
+  ]));
+  for (const [name, sql] of expected) writeFileSync(join(migrations, name), sql);
+  writeFileSync(join(migrations, 'README.txt'), 'not SQL');
+  git('add', '.');
+  const tree = git('write-tree');
+  const cwd = process.cwd(), original = childProcess.execFileSync, calls = [];
+  try {
+    process.chdir(directory);
+    childProcess.execFileSync = (bin, args, options) => {
+      calls.push({bin, args});
+      return original(bin, args, options);
+    };
+    syncBuiltinESMExports();
+    assert.deepEqual(publishedMigrations(tree), expected, 'empty, multibyte, CRLF and unterminated SQL stay byte-exact');
+    assert.equal(calls.length, 2, 'Git launch count must not grow with the migration count');
+    assert.ok(calls.every(call => call.bin === 'git'));
+    assert.deepEqual(calls[1].args, ['cat-file', '--batch']);
+  } finally {
+    childProcess.execFileSync = original;
+    syncBuiltinESMExports();
+    process.chdir(cwd);
+  }
+});
 
 test('duplicate numbers fail even with different names and SQL', () => {
   const problems = checkMigrations(new Map([['1050_first.sql', 'SELECT 1;'], ['1050_second.sql', 'SELECT 2;']]));
@@ -255,15 +291,6 @@ test('a validated foreign key may include a newly added NULL column in the same 
   ]) assert.equal(destructive(sql), true, sql);
 });
 
-test('1056 is expand-safe without allowing replacements or opaque RLS blocks', () => {
-  const sql = readFileSync(new URL('../internal/db/migrations/1056_intake_replacements.sql', import.meta.url), 'utf8');
-  assert.equal(destructive(sql), false);
-  assert.deepEqual(checkMigrations(new Map([['1056_intake_replacements.sql', sql]])), []);
-  assert.equal(destructive(sql.replace('requester_principal_id uuid,', 'requester_principal_id uuid DEFAULT gen_random_uuid(),')), true);
-  assert.equal(destructive('CREATE OR REPLACE FUNCTION f() RETURNS void LANGUAGE plpgsql AS $$ BEGIN RETURN; END; $$;'), true);
-  assert.equal(destructive("CREATE TABLE extra(id text); DO $$ BEGIN EXECUTE 'ALTER TABLE extra ENABLE ROW LEVEL SECURITY'; END $$;"), true);
-});
-
 test('contract exceptions pin exact filenames and bytes with a ticket and reason', () => {
   const name = '1054_contract.sql', sql = 'CREATE OR REPLACE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;';
   const entry = {file: name, sha256: createHash('sha256').update(sql).digest('hex'), ticket: 'AEON-415', reason: 'Explicit contract behavior change for coordinator review.'};
@@ -288,105 +315,62 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
   assert.match(checkMigrations(new Map([[name, sql]]), new Map(), null, {baseline, exceptions: manifest([entry])}).join('\n'), /pre-policy migration changed/);
 });
 
-test('integration exceptions pin the merged contract, run-kind and briefing expansions', () => {
-  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
-  assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql']);
-  const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
-  assert.ok(entry);
-  assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
-  const runKinds = manifest.exceptions.find(entry => entry.file === '1066_run_kinds.sql');
-  assert.ok(runKinds);
-  assert.equal(runKinds.file, '1066_run_kinds.sql');
-  assert.equal(runKinds.ticket, 'AEON-501');
-  const briefing = manifest.exceptions.find(entry => entry.file === '1087_briefing_autopilot_visibility.sql');
-  assert.ok(briefing);
-  assert.equal(briefing.file, '1087_briefing_autopilot_visibility.sql');
-  assert.equal(briefing.ticket, 'AEON-454');
-  const runKindSQL = readFileSync(new URL('../internal/db/migrations/' + runKinds.file, import.meta.url), 'utf8');
-  assert.equal(runKinds.sha256, createHash('sha256').update(runKindSQL).digest('hex'));
-  assert.match(runKinds.reason, /strict superset/);
-
-  assert.equal(entry.ticket, 'AEON-397');
-  assert.match(entry.reason, /contract|unconfirmed|person/i);
-  const source = execFileSync('git', ['show', `${entry.sourceCommit}:internal/db/migrations/${entry.file}`], {encoding: 'utf8'});
-  assert.ok(source);
-  assert.equal(entry.sha256, createHash('sha256').update(source).digest('hex'));
-  assert.equal(readFileSync(new URL(`../internal/db/migrations/${entry.file}`, import.meta.url), 'utf8'), source);
-  assert.equal(destructive(source), true);
-});
-
-test('AIT-89 storage-bound relaxation has an explicit pinned coordinator-review exception', () => {
-  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
-  const entry = manifest.exceptions.find(entry => entry.file === '1100_aithema_pending_content.sql');
-  assert.equal(entry.ticket, 'AEON-483');
-  assert.match(entry.reason, /coordinator review before merge\/release/);
-  assert.match(entry.reason, /does not.*skip previous-binary compatibility/);
-  const source = readFileSync(new URL(`../internal/db/migrations/${entry.file}`, import.meta.url), 'utf8');
-  assert.equal(entry.sha256, createHash('sha256').update(source).digest('hex'));
-  assert.equal(destructive(source), true);
-  assert.match(source, /octet_length\(original_bytes\) <= 1048576/);
-  assert.match(source, /contract = 'aithema\.spec\.snapshot'/);
-  assert.match(source, /contract = 'aithema\.journal\.record' AND kind = 'pending_op\.content'/);
-  const statements = splitSQL(source);
-  const drops = statements.filter(sql => /DROP CONSTRAINT/.test(sql));
-  assert.deepEqual(drops, ['ALTER TABLE aithema_journal_records\n    DROP CONSTRAINT aithema_journal_records_original_bytes_check']);
-  assert.equal(destructive(statements.filter(sql => !drops.includes(sql)).join(';')), false);
-  assert.match(source, /\) NOT VALID;/);
-  assert.doesNotMatch(source, /VALIDATE CONSTRAINT|CREATE UNIQUE INDEX/);
-  assert.match(source, /total BETWEEN 1048577 AND 16777216/);
-  const validation = readFileSync(new URL('../internal/db/migrations/1101_aithema_content_bytes_validate.sql', import.meta.url), 'utf8');
-  assert.equal(destructive(validation), false);
-  assert.match(validation, /VALIDATE CONSTRAINT aithema_journal_records_content_bytes_check/);
-  const index = readFileSync(new URL('../internal/db/migrations/1102_aithema_content_address.sql', import.meta.url), 'utf8');
-  assert.equal(destructive(index), false);
-  assert.ok(index.startsWith('-- aeon:no-transaction\n'));
-  assert.equal(splitSQL(index).length, 1);
-  assert.match(index, /CREATE UNIQUE INDEX CONCURRENTLY/);
-
-});
-
 test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
   const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
-  const exceptions = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  const exceptions = loadMigrationExceptions();
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ['1054_confirmed_quota_pools.sql', '1066_run_kinds.sql', '1087_briefing_autopilot_visibility.sql', '1088_more_harnesses.sql', '1100_aithema_pending_content.sql', '1104_work_kinds.sql']);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), migrationExceptionFiles());
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
 
-test('briefing visibility expansion preserves every existing restriction', () => {
-  const original = readFileSync(new URL('../internal/db/migrations/0823_event_reference_visibility.sql', import.meta.url), 'utf8');
-  const expanded = readFileSync(new URL('../internal/db/migrations/1087_briefing_autopilot_visibility.sql', import.meta.url), 'utf8');
-  const addition = "OR type IN ('status_autopilot.changed', 'status_autopilot.skipped')";
-  assert.equal(expanded.split(addition).length, 2);
-  const condition = sql => sql.slice(sql.indexOf('USING ((SELECT aeon_visible_all())')).replace(/\s+/g, ' ').trim();
-  // Removing exactly the two admitted types recovers the original policy.
-  assert.equal(condition(expanded.replace(addition, '')), condition(original));
-  const name = '1087_briefing_autopilot_visibility.sql';
-  const exceptions = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
-  const entry = exceptions.exceptions.find(e => e.file === name);
-  assert.ok(entry);
-  const files = new Map(exceptions.exceptions.map(e => [e.file, readFileSync(new URL(`../internal/db/migrations/${e.file}`, import.meta.url), 'utf8')]));
-  files.set(name, expanded.replace(addition, "OR type LIKE 'status_autopilot.%'"));
-  assert.match(checkMigrations(files, new Map(), null, {exceptions}).join('\n'), /1087_briefing_autopilot_visibility.sql: exception migration changed/);
+// Keep CI's existing entry point; adding a migration check only adds its file.
+test('AEON-985 exception files assemble deterministically and fail closed on duplicates, orphans and malformed inputs', () => {
+  const sql = 'CREATE OR REPLACE FUNCTION f() RETURNS int LANGUAGE sql AS $$ SELECT 1 $$;';
+  const entry = {file: '1001_first.sql', sha256: createHash('sha256').update(sql).digest('hex'), ticket: 'AEON-985', reason: 'Fixture contract evidence.'};
+  const second = {...entry, file: '1002_second.sql'};
+  const manifest = exceptions => ({schema: 'aeon.migration-policy-exceptions.v1', exceptions});
+  const fixture = records => {
+    const directory = mkdtempSync(join(tmpdir(), 'aeon-985-exceptions-'));
+    for (const [name, value] of records) writeFileSync(join(directory, name), JSON.stringify(value));
+    return directory;
+  };
+  const directory = fixture([['1002_second.json', manifest([second])], ['1001_first.json', manifest([entry])]]);
+  const assembled = loadMigrationExceptions(directory);
+  assert.deepEqual(assembled, manifest([entry, second]), 'discovery order must not alter the legacy manifest or its fields');
+  const files = new Map([[entry.file, sql], [second.file, sql]]);
+  assert.deepEqual(checkMigrations(files, new Map(), null, {exceptions: assembled}), []);
+  assert.match(checkMigrations(new Map([[entry.file, sql]]), new Map(), null, {exceptions: assembled}).join('\n'), /1002_second.sql: exception migration removed/);
+  assert.match(checkMigrations(new Map([[entry.file, sql + '\n'], [second.file, sql]]), new Map(), null, {exceptions: assembled}).join('\n'), /1001_first.sql: exception migration changed/);
+  assert.throws(() => loadMigrationExceptions(fixture([['1001_first.json', manifest([entry])], ['1002_second.json', manifest([entry])]])), /duplicate migration exception/);
+  assert.throws(() => loadMigrationExceptions(fixture([['1001_first.json', manifest([second])]])), /matching migration filename/);
+  assert.throws(() => loadMigrationExceptions(fixture([['unexpected.json', manifest([entry])]])), /expected one migration exception file/);
+  for (const value of [null, {}, {schema: 'unknown', exceptions: [entry]}, manifest([]), manifest([entry, second])]) {
+    assert.throws(() => loadMigrationExceptions(fixture([['1001_first.json', value]])), /invalid migration exception manifest/);
+  }
+  const invalid = loadMigrationExceptions(fixture([['1001_first.json', manifest([{...entry, sha256: 'bad'}])]]));
+  const problems = checkMigrations(new Map([[entry.file, sql]]), new Map(), null, {exceptions: invalid}).join('\n');
+  assert.match(problems, /invalid migration exception/);
+  assert.match(problems, /1001_first.sql: non-allowlisted/);
+  const malformed = fixture([]);
+  writeFileSync(join(malformed, '1001_first.json'), '{');
+  assert.throws(() => loadMigrationExceptions(malformed), SyntaxError);
+  const nested = fixture([]);
+  mkdirSync(join(nested, '1001_first.json'));
+  assert.throws(() => loadMigrationExceptions(nested), /expected one migration exception file/);
+  const linked = fixture([]);
+  symlinkSync(join(directory, '1001_first.json'), join(linked, '1001_first.json'));
+  assert.throws(() => loadMigrationExceptions(linked), /expected one migration exception file/);
+  assert.throws(() => loadMigrationExceptions(join(directory, 'absent')), {code: 'ENOENT'});
 });
 
-test('1088 stages every widened check before definition-selected drops', () => {
-  const sql = readFileSync(new URL('../internal/db/migrations/1088_more_harnesses.sql', import.meta.url), 'utf8');
-  const adds = [...sql.matchAll(/ALTER TABLE (\w+) ADD CONSTRAINT (\w+)\s+CHECK ([\s\S]*?);/g)];
-  assert.equal(adds.length, 10);
-  for (const [, table, constraint, check] of adds) {
-    assert.match(check, /NOT VALID$/);
-    const validate = `ALTER TABLE ${table} VALIDATE CONSTRAINT ${constraint};`;
-    assert.ok(sql.includes(validate), `missing ${validate}`);
-    assert.ok(sql.indexOf(validate) < sql.indexOf('DROP CONSTRAINT'), 'drop before validation');
-  }
-  assert.match(sql, /pg_get_constraintdef/);
-  assert.doesNotMatch(sql, /DROP CONSTRAINT work_order_reviews_check/);
-  assert.match(sql, /reviewer_profile_id IS NULL/);
-  assert.match(sql, /reviewer_family IS NULL/);
-});
+const caseDirectory = new URL('./check-migrations-cases/', import.meta.url);
+for (const entry of readdirSync(caseDirectory, {withFileTypes: true}).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+  if (!entry.isFile() || !/^\d{4}_[a-z0-9_]+\.mjs$/.test(entry.name)) throw new Error(`${entry.name}: expected migration case NNNN_name.mjs`);
+  const migration = new URL(`../internal/db/migrations/${entry.name.replace(/\.mjs$/, '.sql')}`, import.meta.url);
+  readFileSync(migration); // An orphan check must fail even if its body forgets to read SQL.
+  await import(new URL(entry.name, caseDirectory));
+}

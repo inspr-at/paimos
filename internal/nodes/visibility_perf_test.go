@@ -22,7 +22,7 @@ import (
 func TestList6000WithProjectVisibility(t *testing.T) {
 	member := newPrincipal(t, "visible-large-list")
 	project := kindBySlug(t, member, "project")
-	ticket := kindBySlug(t, member, "ticket")
+	ticket := kindBySlug(t, member, "work")
 	root := mustNode(t, member, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
 	other := mustNode(t, member, `{"kind_id":"`+project.ID+`","title":"Other project"}`)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, member.TenantID, func(tx pgx.Tx) error {
@@ -70,7 +70,7 @@ func TestList6000WithProjectVisibility(t *testing.T) {
 			status, body := call(t, &who.p, http.MethodGet, path, "")
 			elapsed := time.Since(start)
 			page := decode[nodePage](t, status, body, http.StatusOK)
-			if len(page.Items) != 50 || page.NextCursor == nil || page.Facets["kind"]["ticket"] != 6000 {
+			if len(page.Items) != 50 || page.NextCursor == nil || page.Facets["kind"]["work"] != 6000 {
 				t.Fatalf("%s large list: %d, %#v", who.name, len(page.Items), page.Facets)
 			}
 			if fastest == 0 || elapsed < fastest {

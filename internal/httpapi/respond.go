@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // WriteJSON writes v as JSON with the given status.
@@ -26,4 +28,14 @@ func WriteError(w http.ResponseWriter, status int, message string) {
 
 func handleNotFound(w http.ResponseWriter, _ *http.Request) {
 	WriteError(w, http.StatusNotFound, "not found")
+}
+
+// RetiredFlow preserves authenticated route compatibility without touching storage.
+func RetiredFlow(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if _, ok := tenant.PrincipalFrom(r.Context()); !ok {
+		WriteError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	WriteError(w, http.StatusGone, "The INSPR Flow is retired.")
 }

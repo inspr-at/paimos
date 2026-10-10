@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/questions
+paths:
+  /projects/{projectId}/questions:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: askQuestion
+      description: >-
+        Requires questions.ask and questions.read in an accessible project. Authenticated principal
+        is the asker; an optional session must be that principal's active generation in this project.
+        Ask writes revalidate current project permissions and authenticated key activity/scopes
+        inside the final transaction under access/key locks.
+        Request IDs are scoped to tenant/project/asker. An identical retry returns the same question;
+        changed input returns 409. anyway_reason deliberately skips reuse and merging, never permissions.
+        Exact ordinary Q&A matches may join an open question or an active Always answer in the same
+        tenant/project/ticket scope. Option IDs and all option text must agree; option order may differ.
+        Context, findings, blocked work and effective outcome must agree. Source-linked requests and
+        requirement/doctrine suggestions never participate. No similarity-based answer is inferred.
+        Reused memberships carry From the record provenance and immediate inbox/comment deadlines;
+        no additional outcome effect or human-answer grace is created. Always publication belongs to P4.
+        Each matching item accepts at most 100 askers; a full item starts a separate question.
+        An anyway question stays separate while open; a later human-approved Always can be reused.
+        Returns immediately. No inbox send, outcome materialization or permission grant occurs here.
+        Inputs are UTF-8, NUL-free and bounded in bytes as well as by the schema (body at most 64 KiB).
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/QuestionInput'}
+      responses:
+        '201': {description: Stored asker membership in a fresh or matching question, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '200': {description: Idempotent replay, content: {application/json: {schema: {$ref: '#/components/schemas/Question'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {description: 'Project, ticket, blocked work or source not accessible'}
+        '409': {description: 'code replay_conflict or session_ended'}
+        '413': {description: Body exceeds 64 KiB}
+    get:
+      operationId: listQuestions
+      description: Questions in this project with current questions.read permission. Defaults to stable oldest-first creation order. For state=answered, order=desc uses newest current answer first (answer created_at, then question ID), with bounded keyset pagination via next_cursor. Agents see only questions they asked and only their own membership.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: state, in: query, schema: {type: string, enum: [open, answered]}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: offset, in: query, schema: {type: integer, minimum: 0, maximum: 100000, default: 0}}
+        - {name: order, in: query, schema: {type: string, enum: [asc, desc], default: asc}, description: desc requires state=answered and offset=0.}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 512}, description: 'Opaque next_cursor from order=desc. Bound to tenant, principal and project; permissions are rechecked on every page. Requires state=answered and order=desc.'}
+      responses:
+        '200': {description: Visible questions, content: {application/json: {schema: {$ref: '#/components/schemas/QuestionPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+components:

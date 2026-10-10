@@ -27,8 +27,8 @@ defineProps<{ eyebrow: string; title: string; tone?: 'calm' | 'problem' }>()
   -webkit-backdrop-filter: blur(20px) saturate(1.15); backdrop-filter: blur(20px) saturate(1.15);
 }
 .status-card::after { content: ''; position: absolute; left: 12%; right: 12%; top: 0; height: 1px; background: linear-gradient(90deg, transparent, var(--glass-edge), var(--aqua), var(--glass-edge), transparent); opacity: .8; }
-.mark-halo { display: inline-grid; place-items: center; width: 72px; height: 72px; margin-bottom: 18px; border-radius: 20px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim), 0 14px 32px -16px rgba(14, 111, 108, .55), 0 0 40px -10px rgba(164, 229, 223, .9); }
-.problem .mark-halo { box-shadow: 0 0 0 1px var(--danger-line), 0 14px 32px -16px rgba(168, 66, 60, .45), 0 0 40px -12px rgba(232, 192, 122, .8); }
+.mark-halo { display: inline-grid; place-items: center; width: 72px; height: 72px; margin-bottom: 18px; border-radius: 20px; background: var(--brand-plate); box-shadow: 0 0 0 1px var(--glass-rim), 0 14px 32px -16px color-mix(in srgb, var(--primary-line) 55%, transparent), 0 0 40px -10px color-mix(in srgb, var(--primary-tint) 90%, transparent); }
+.problem .mark-halo { box-shadow: 0 0 0 1px var(--danger-line), 0 14px 32px -16px color-mix(in srgb, var(--danger-fill) 45%, transparent), 0 0 40px -12px color-mix(in srgb, var(--gold) 80%, transparent); }
 .eyebrow { margin: 0; }
 h1 { margin: 10px 0 12px; font-size: clamp(26px, 5vw, 32px); }
 .status-body { display: grid; gap: 8px; font-size: 14px; color: var(--ink-2); }

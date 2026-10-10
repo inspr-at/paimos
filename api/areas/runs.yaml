@@ -1,0 +1,171 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/agentruns
+paths:
+  /runs:
+    get:
+      operationId: listAgentRuns
+      description: Newest first by created_at and ID. Filters intersect; agents can read only their own runs with run.read. Cursor binds tenant, principal and filters. A session selects its explicitly bound run.
+      parameters:
+        - {name: session, in: query, schema: {type: string, format: uuid}}
+        - {name: agent, in: query, schema: {type: string, format: uuid}}
+        - {name: work_order, in: query, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+      responses:
+        '200':
+          description: Run page
+          headers:
+            Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}
+                  next_cursor: {type: [string, 'null']}
+        '400': {description: Invalid filter or cursor}
+        '401': {description: Authentication required}
+        '403': {description: Scope required or another agent requested}
+  /runs/queued:
+    get:
+      operationId: listQueuedRuns
+      description: Agent daemon sees queued runs for its principal only. Polling is a fallback when webhook wakes are missed. The daemon poll omits per-run wait; people read it on the run.
+      security: [{agentKey: []}]
+      parameters:
+        - {$ref: '#/components/parameters/Limit'}
+        - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Advertise no_tools_v1 to receive review runs. Legacy daemons receive ordinary runs only.}
+      responses:
+        '200': {description: Queued runs, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /runs/{runId}:
+    get:
+      operationId: getAgentRun
+      security: *auth
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Run, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /runs/{runId}/cancel:
+    post:
+      operationId: cancelAgentRun
+      summary: Cancel a queued run (AEON-402)
+      description: Person with run.create permission and work-order edit access only. A queued run ends as cancelled and its capacity reservations are released in the same transaction (run.cancelled). A run that already started is never changed (409); repeating a cancel returns the cancelled run.
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Cancelled run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /runs/{runId}/capacity-override:
+    post:
+      operationId: runNowOnce
+      summary: Let a queued managed run skip its schedule and reserve once
+      description: Person with run.create permission and work-order edit access only. Vendor, account, approval, freshness and concurrency fences still apply.
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [capacity_override], properties: {capacity_override: {type: string, const: now}}}}}}
+      responses:
+        '200': {description: Updated run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /runs/{runId}/claim:
+    post:
+      operationId: claimAgentRun
+      description: Fenced daemon claim after account reservation. The caller must be the assigned agent or hold an approved run.claim grant for this run. Same generation is idempotent; a different live generation conflicts. A queued managed reservation with obsolete measured capacity is revalidated against current admission; a resource-scoped recovery permit is required only while a recoverable stop remains. Manual and pairing expiry still bind. Current person-confirmed sibling resources carry the same authority at reservation and claim. When the exact stored reservation set belongs to an obsolete quota pool or routing group, a queued managed claim atomically releases its holds and account slot and returns 409. A daemon observing that queued run without an account must discard its journaled route and route again before claiming. Invalid reservation IDs never release a hold. For an authenticated owning daemon, a revoked pairing enrollment returns 410 enrollment_revoked before reservation checks, including when disconnect has already released the queued holds.
+      security: [{agentKey: []}]
+      parameters:
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: X-Aeon-Review-Policy, in: header, schema: {type: string, enum: [no_tools_v1]}, description: Required for review claims. Ordinary run claims are unchanged.}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunClaim'}}}}
+      responses:
+        '200': {description: Claimed run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '410': {$ref: '#/components/responses/Error'}
+  /runs/{runId}/handoff:
+    get:
+      operationId: getWorkerHandoff
+      description: Read the durable lead assignment for a run. Requires current run.read and project access. Returns content-free ticket/order revisions, brief digest, opaque worktree identity and receipts; no paths, prompts, account details or worker leases. launch_unknown never authorizes retry. Lead succession does not transfer an active writer.
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Durable assignment, content: {application/json: {schema: {$ref: '#/components/schemas/WorkerHandoff'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /runs/{runId}/telemetry:
+    post:
+      operationId: reportRunTelemetry
+      description: "Daemon reports monotonic sequence numbers; exact duplicate is idempotent and divergent replay conflicts. Telemetry is content-free. Totals, run status and event update atomically; budget excess blocks further dispatch. Model-only or error-only status and turn reports may precede started after a successful claim; an omitted status preserves the current run state. After observing local exit, a daemon may settle a rejected outbox with a fresh minimal finished/failed report using reporter_unavailable; rejected usage remains unconfirmed, never invented. The bounded report is decoded before catalog preparation. Eligible build completion, usage settlement, budget blocking, review resources and their ordered events commit together. Identical accepted sequence replay does not settle or queue twice; divergent replay is refused before setup. Lead assignments require local process evidence on finished reports. Unconfirmed ownership_lost remains fenced; a later finished exited report from the same authenticated daemon may reconcile it. No lead-generation change transfers the writer."
+      security: [{agentKey: []}]
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunTelemetry'}}}}
+      responses:
+        '200': {description: Run, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    RunClaim:
+      type: object
+      required: [daemon_id, daemon_generation, reservation_ids]
+      properties:
+        daemon_id: {type: string, minLength: 1, maxLength: 128}
+        daemon_generation: {type: string, minLength: 1, maxLength: 128}
+        reservation_ids: {type: array, items: {type: string, format: uuid}, description: Required and nonempty for a normal claim; empty for verification refusal.}
+        handoff:
+          allOf: [{$ref: '#/components/schemas/WorkerPickup'}]
+          description: Required for a lead-routed assignment. Accepts the exact frozen brief and revisions with a host-local opaque worktree identity. Claim commits launch_unknown only after every pickup and reservation check succeeds, before any local process launch. A replay must retain this pickup and daemon generation; response loss is recovered through the existing durable daemon journal, never a second launch.
+        verification_unavailable:
+          type: string
+          enum: [adapter_unsupported, binding_incomplete, local_binding_missing]
+          description: Fail an owned unclaimed pairing verification without launching it. Requires its owning computer principal and enrolled daemon; managed and already claimed runs are rejected. Idempotent for the same refusal. Records verification_error=verification_unavailable and verification_reason, and releases reserved allowance.
+    RunTelemetry:
+      type: object
+      description: "A status report requires status, effective_model or a recognized error_code. Model and error evidence preserve the current run state when status is omitted. Empty status reports remain invalid."
+      required: [sequence, kind]
+      properties:
+        process_state: {type: string, enum: [not_attempted, exited, unconfirmed], description: Content-free local journal proof on finished reports for lead assignments. not_attempted is allowed only before a launch receipt; unconfirmed never releases the writer fence. Legacy runs may omit this field.}
+        service_tier: {$ref: '#/components/schemas/ServiceTier'}
+        sequence: {type: integer, format: int64, minimum: 1}
+        kind: {type: string, enum: [started, heartbeat, turn, tool, usage, status, finished]}
+        status: {type: string, enum: [starting, running, waiting, completed, failed, cancelled, ownership_lost]}
+        input_tokens_delta: {type: integer, format: int64, minimum: 0}
+        output_tokens_delta: {type: integer, format: int64, minimum: 0}
+        cached_input_tokens_delta: {type: integer, format: int64, minimum: 0, maximum: 1000000000000}
+        reasoning_tokens_delta: {type: integer, format: int64, minimum: 0, maximum: 1000000000000, description: Reasoning output in this report. Not added to cost.}
+        cost_micros_delta: {type: integer, format: int64, minimum: 0}
+        tool_count_delta: {type: integer, minimum: 0}
+        turn_count_delta: {type: integer, minimum: 0}
+        effective_model: {type: string}
+        model_evidence: {type: string, enum: [unverified, vendor_reported]}
+        error_code: {type: string, enum: [event_stream_bound, app_server_protocol, child_exit_failed, turn_failed, child_stop_failed, ownership_lost, reporter_unavailable, workspace_conflict, decision_refused, vendor_limit]}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Present only when reported by the vendor.}
+        limit_resets_at: {type: string, format: date-time, description: Present only when reported by the vendor.}
+        review_range:
+          type: object
+          description: Optional exact range produced by a completed builder run. Automatically requests an independent review of that run's parent work leaf (or legacy ticket/task), subject to the caller's existing work_orders.write and run.create permissions. Reviewer runs cannot request recursive reviews.
+          required: [repository, base_sha, head_sha]
+          properties:
+            repository: {type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'}
+            base_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+            head_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+        git_commits:
+          type: array
+          maxItems: 20
+          description: Optional commit evidence of this run, as non-merge commits on the first-parent history of its final HEAD that neither its launch commit, the default branch as it was at launch, nor the remote default branch at the end contains (at most 20, newest first). The server derives committed or no_commit from these, from the run's harness session commits, and from this run's work evidence. Local git never yields merged.
+          items:
+            type: object
+            required: [sha, subject]
+            properties:
+              sha: {type: string, pattern: '^[0-9a-f]{7,40}$'}
+              subject: {type: string, minLength: 1, maxLength: 200}
+              parents: {type: integer, minimum: 0, maximum: 64, description: Parent count from git. Optional. A merge commit has at least two.}
+              on_default_branch: {type: boolean, description: 'Optional and ignored. Kept for compatibility; merged comes from forge or release evidence, never from local git.'}
+    WorkerPickup:
+      type: object
+      additionalProperties: false
+      required: [ticket_revision, work_order_revision, brief_sha256, worktree_id]
+      properties:
+        ticket_revision: {type: string, format: date-time}
+        work_order_revision: {type: integer, format: int64, minimum: 1}
+        brief_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        worktree_id: {type: string, pattern: '^[a-f0-9]{64}$', description: 'Domain-separated digest of stable host identity and physical workspace, independent of daemon or tenant selection. No filesystem path or credential.'}

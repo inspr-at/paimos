@@ -25,7 +25,7 @@ func TestRunKindsRegisterBeatAndAggregate(t *testing.T) {
 		{"codex", "model", "gpt-fixture", 20}, {"media", "generator", "higgsfield/kling3_0", 40}, {"terminal", "command", "ffmpeg", 90},
 	} {
 		lease := "child-lease-" + uid()
-		body := map[string]any{"agent_principal_id": f.agent.ID, "harness": tc.harness, "host": "mbp2606", "role": "worker", "management_mode": "unmanaged", "parent_harness_session_id": lead, "ticket_node_id": f.ticket, "work_shape": "ship", "harness_session_ref": "child-ref-" + uid(), "worker_lease": lease, tc.field: tc.label}
+		body := map[string]any{"agent_principal_id": f.agent.ID, "harness": tc.harness, "host": "build-6", "role": "worker", "management_mode": "unmanaged", "parent_harness_session_id": lead, "ticket_node_id": f.ticket, "work_shape": "ship", "harness_session_ref": "child-ref-" + uid(), "worker_lease": lease, tc.field: tc.label}
 		w := f.call(f.agent, "POST", base, body, "")
 		expect(t, w, 201)
 		child := decode(t, w)
@@ -94,7 +94,7 @@ func TestProcessRunValidation(t *testing.T) {
 		{"generator": ""}, {"generator": strings.Repeat("x", 121)}, {"generator": "veo\n3"}, {"generator": "veo<script>"},
 		{"parent_harness_session_id": nil}, {"ticket_node_id": nil}, {"role": "coordinator"}, {"model": "claude"}, {"command": "ffmpeg"},
 	} {
-		body := map[string]any{"agent_principal_id": f.agent.ID, "harness": "media", "generator": "higgsfield/kling3_0", "host": "mbp2606", "role": "worker", "management_mode": "unmanaged", "parent_harness_session_id": lead, "ticket_node_id": f.ticket, "work_shape": "ship", "harness_session_ref": "invalid-ref-" + uid(), "worker_lease": "invalid-lease-" + uid()}
+		body := map[string]any{"agent_principal_id": f.agent.ID, "harness": "media", "generator": "higgsfield/kling3_0", "host": "build-6", "role": "worker", "management_mode": "unmanaged", "parent_harness_session_id": lead, "ticket_node_id": f.ticket, "work_shape": "ship", "harness_session_ref": "invalid-ref-" + uid(), "worker_lease": "invalid-lease-" + uid()}
 		for k, v := range change {
 			body[k] = v
 		}

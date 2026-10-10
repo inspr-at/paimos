@@ -32,7 +32,7 @@ func TestPublicRoadmapOmittedHideFlag(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		insertNode(t, d, harbour, key, "ticket", title, "", "open", project, string(raw))
+		insertNode(t, d, harbour, key, "work", title, "", "open", project, string(raw))
 	}
 	base := func(pill string, hide any, present bool) map[string]any {
 		fields := map[string]any{

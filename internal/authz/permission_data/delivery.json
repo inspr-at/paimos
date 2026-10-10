@@ -1,0 +1,15 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "delivery.manage",
+    "delivery.route"
+  ],
+  "words": {
+    "resources": {
+      "delivery": "delivery status"
+    },
+    "special": {
+      "delivery.route": "Record and read shadow delivery routes"
+    }
+  }
+}

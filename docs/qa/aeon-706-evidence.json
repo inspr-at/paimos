@@ -1,0 +1,468 @@
+{
+  "ticket": "AEON-706",
+  "scope": "Queued plan actions and late plan/add-ticket results bound to captured project, release and load generation.",
+  "ownership": {
+    "tracker": "ppm",
+    "worker_marker": "Coordinator marker verified on AEON-706 before edits",
+    "branch": "work/aeon-706-planbind",
+    "release_gates": "Coordinator owned; no worker model reviews, push, merge or deployment"
+  },
+  "changes": [
+    "Explicit owner passed to plan writes and ticket creation; expected_revision remains server precondition.",
+    "Queued writes recheck owner and editability before transport; stale operations resolve false/null.",
+    "Owner generations fence GET/write adoption, rollback, conflict reload, refresh callbacks and scope disposal, including same-release reload and A-B-A navigation.",
+    "Project/release navigation resets feature memory, add-ticket drafts and picker visibility; every owner generation still resets pending chain/busy state. Same-record refreshes preserve drafts, picker and partial selection, pruning obsolete membership. Late results cannot clear a new owner busy state or drafts.",
+    "Release selection invalidates synchronously; after-save project refresh uses captured project. Foreign membership walkers cannot trigger success feedback."
+  ],
+  "validation": [
+    {
+      "command": "node node_modules/vitest/vitest.mjs run tests/plan-owner.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+      "phase": "before fix",
+      "result": "All first six regression tests failed against original source; assertions were retained."
+    },
+    {
+      "command": "node node_modules/vitest/vitest.mjs run tests/plan-owner.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+      "phase": "after fix",
+      "result": "20 passed, 0 failed. Deferred promises establish interleavings; no sleeps or elapsed-time assertions. Actual PlanStage setup/watchers exercised in a non-DOM Vue host."
+    },
+    {
+      "command": "npm run typecheck",
+      "result": "passed"
+    },
+    {
+      "command": "node node_modules/eslint/bin/eslint.js src/lib/useJourneyData.ts src/lib/usePlan.ts src/components/journey/JourneyView.vue src/components/journey/PlanStage.vue",
+      "result": "passed"
+    },
+    {
+      "command": "python3 -m unittest discover -s scripts/audit",
+      "result": "33 passed. New web test file is covered by S9 web/tests/**; no ownership-map modification required."
+    },
+    {
+      "command": "Native targeted Vitest collection + scripts/test-tiers/core.mjs validate(strict) and full/push selection",
+      "result": "20 exact classifications; 17 ESSENTIAL record-identity/permission cases and 3 GATED-FULL positive/current-owner controls; all 20 selected by full/push."
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "limits": [
+    "Focused web validation only; full just test, build and browser suites remain coordinator/hosted-CI gates. No layout/CSS changes or browser geometry claims.",
+    "No Go source or migration changes; remote Go runner not invoked. No pushes (including temporary remote refs), production access, merges or deployment."
+  ],
+  "tests": [
+    "drops a queued toggle when the selected release changes before dispatch",
+    "drops a queued toggle when its project changes and comes back synchronously",
+    "rechecks editability immediately before a queued write",
+    "discards a late plan success without refreshing the newly selected release",
+    "discards a late plan conflict without rollback toast or stale refresh",
+    "resets partial feature selection memory for a different release owner",
+    "serializes same-owner toggles using the preceding saved revision",
+    "a same-release reload invalidates an in-flight write and queued successor",
+    "an old save cannot clear the busy state or block writes for a new owner",
+    "only the latest walker load can install a result after release A B A navigation",
+    "rolls back a current-owner transport failure and surfaces its real error",
+    "reloads a current-owner conflict from its captured release",
+    "drops an explicitly captured ticket creation owner before dispatch after navigation",
+    "a late ticket creation result cannot replace another project or refresh its work",
+    "adopts current-owner ticket creation and refreshes work for that project",
+    "discards a plan result after its view scope is disposed",
+    "the ticket form preserves a new release draft and busy state after an old success",
+    "the ticket form discards late failure feedback after release navigation",
+    "the ticket form rechecks editability before submitting its captured draft",
+    "a foreign-release membership result cannot patch the plan or report success"
+  ],
+  "fix_round_2": {
+    "baseline": "bc5ecb1d7",
+    "findings_fixed": [
+      "Same-release refresh erased unsaved title, feature and picker state.",
+      "Same-release refresh erased partial selection memory and broke the some → all → none → previous partial cycle."
+    ],
+    "changes": [
+      "Keep record-owned draft/picker/memory state across generation-only refreshes; retain navigation resets and stale-request fences.",
+      "Prune remembered IDs against the refreshed feature membership and remove vanished features.",
+      "Use the existing loaded-once stage pattern for release-list reads; refreshing releases no longer unmounts PlanStage and destroys its draft. Initial/project-navigation loading still waits for release data."
+    ],
+    "regression_evidence": [
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/plan-owner.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "before": "Against bc5ecb1d7 source: four new behavior regressions failed at exact draft/memory preservation assertions; 21 tests passed, including the new project-navigation reset control.",
+        "after": "25 passed; all pre-fix assertions retained. Deferred ticket creation tests prove generation and busy-state fences during same-record refresh."
+      },
+      {
+        "command": "npm test -- tests/journey.spec.ts --grep 'the plan: ticked|a stale plan write|Plan adds a ticket|adding a ticket on a server' --workers=1 --retries=0",
+        "before_stage_retention_fix": "Strengthened feature-cycle test failed because the real stage unmounted during release-list refresh and erased the draft; other three targeted browser cases passed.",
+        "after": "4 passed. Feature-cycle case waits for each real walker GET refresh before asserting unchanged draft/feature and restored partial selection. Supervised local macOS bundled Chromium; zero browser/owned processes remained after shutdown."
+      },
+      {
+        "command": "npm run typecheck",
+        "result": "passed after final source edits"
+      },
+      {
+        "command": "node node_modules/eslint/bin/eslint.js src/lib/usePlan.ts src/components/journey/PlanStage.vue src/components/journey/JourneyView.vue",
+        "result": "passed"
+      },
+      {
+        "command": "python3 -m unittest discover -s scripts/audit",
+        "result": "33 passed; existing source/test files retain their ownership slices."
+      },
+      {
+        "command": "Native focused Vitest collection + strict tier validation + full/push selection",
+        "result": "25 collected/classified: 22 ESSENTIAL, 3 GATED-FULL; all 25 selected by full/push."
+      },
+      {
+        "command": "git diff --check",
+        "result": "passed"
+      },
+      {
+        "command": "git fetch origin main && git merge-tree --write-tree --name-only HEAD origin/main",
+        "result": "Latest origin/main fetched; merge simulation completed without conflicts, so the conditional merge-main instruction did not require a merge."
+      }
+    ],
+    "limits": [
+      "Specific fix-round instructions require local focused tests and forbid build-6; remote-test.sh was not invoked despite the generic remote-first line.",
+      "Full just test/build/unit/browser suites and Linux CI-equivalent Chromium remain coordinator CI gates. No affected Go package, API, migration, visual design, template, CSS or keyboard change.",
+      "Local commit only: no push, deploy, merge, production access, model review or ticket-status changes."
+    ],
+    "new_tests": [
+      "same-release save refreshes preserve ticket drafts and the open picker",
+      "same-release refreshes preserve the partial selection through the feature cycle",
+      "same-release refreshes fence old ticket creation without erasing drafts or current busy state",
+      "same-release refreshes prune removed tickets and features from partial selection memory",
+      "project navigation clears drafts picker and selection memory even for the same release id"
+    ]
+  },
+  "fix_round_3": {
+    "baseline": "dc5440778",
+    "findings_fixed": [
+      "Retained Add existing picker captured ownership only when a result arrived, allowing an older response to replace revision 20 with revision 8 and emit success.",
+      "A same-release refresh inserted a 560px skeleton above the retained form, moving its controls by 570px."
+    ],
+    "changes": [
+      "Picker captures project/release/load generation, release label and expected revision before the first confirmation; all dispatch, move retry, adoption and error feedback paths recheck that owner.",
+      "Added callback carries its captured owner into patchWalker and the project refresh; stale callbacks leave picker visibility, data and feedback alone.",
+      "Busy spans person confirmations so a second click cannot dispatch a duplicate action.",
+      "Retain loaded form, tickets and decision column during same-release refresh; aria-busy supplies loading feedback without inserting layout. Initial loads retain their skeleton.",
+      "Render retained walker content only when its project/release matches the current owner; navigation never presents another record as loaded."
+    ],
+    "regression_evidence": [
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/plan-owner.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "before": "Two new negative behavior regressions fail against dc5440778 at revision 20 versus 8 and foreign-record retained content assertions.",
+        "after": "28 passed, 0 failed, including captured-owner success and existing queued-write/draft/memory fences."
+      },
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/existing-ticket-picker.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "before": "Six new behavior regressions fail against dc5440778: stale primary/retry success, initial/move confirmation dispatch after refresh, stale error feedback, and duplicate pending confirmation. Existing leaf-count assertions also gain the captured owner in the callback contract.",
+        "after": "12 passed, 0 failed. Actual picker SFC action exercised with deferred promises and mocked person confirmations; current failure remains visible and success leaf counts remain exact."
+      },
+      {
+        "command": "npm test -- tests/journey.spec.ts --grep 'the retained plan controls|the plan: ticked|a stale plan write|Plan adds a ticket|adding a ticket on a server' --workers=1 --retries=0",
+        "before": "All six new refresh geometry cases fail unchanged on dc5440778: title.y shifts by 570px versus the 0.5px limit at 390/1024/1440px, in light and dark.",
+        "after": "10 passed. Shared controlStability guard samples positive-size named actions, form selectors/groups, feature selector/row and ticket selector/row before, during deferred GET and after completion; horizontal overflow guarded. Long German draft preserved. macOS bundled headless Chromium, one worker. Supervision reports after=0, remaining_processes=0."
+      },
+      {
+        "command": "npm run typecheck",
+        "result": "passed"
+      },
+      {
+        "command": "node web/node_modules/eslint/bin/eslint.js web/src/components/journey/PlanStage.vue web/src/components/journey/ExistingTicketPicker.vue",
+        "result": "passed"
+      },
+      {
+        "command": "python3 -m unittest discover -s scripts/audit",
+        "result": "33 passed. No new source files or slice changes; generated Python cache moved to ignored test-results."
+      },
+      {
+        "command": "Native focused Vitest --no-staticParse collection and Playwright --list plus strict tier validation and full/push selection",
+        "result": "46 collected/classified: 36 ESSENTIAL, 5 GATED-FULL, 5 existing NIGHTLY. All 16 new cases (14 ESSENTIAL, 2 GATED-FULL) selected by full and push; existing classifications retained."
+      },
+      {
+        "command": "git fetch origin main && git merge-tree --write-tree --name-only HEAD origin/main",
+        "result": "Newest origin/main fetched; merge simulation has no conflicts, so no conditional merge required."
+      },
+      {
+        "command": "git diff --check",
+        "result": "passed"
+      }
+    ],
+    "screenshots": [
+      "web/test-results/aeon-706-planbind/refresh-390-light.png",
+      "web/test-results/aeon-706-planbind/refresh-390-dark.png",
+      "web/test-results/aeon-706-planbind/refresh-1024-light.png",
+      "web/test-results/aeon-706-planbind/refresh-1024-dark.png",
+      "web/test-results/aeon-706-planbind/refresh-1440-light.png",
+      "web/test-results/aeon-706-planbind/refresh-1440-dark.png"
+    ],
+    "ownership": "Verified ppm account: tenant INSPR, principal workstation-agents (agent); coordinator builder markers for aeon-706-planbind verified on AEON-706 before edits. No status changes.",
+    "design": "Existing PAIMOS components and layout retained; no visual redesign or approved-decision conflict. Needs Opus design for any future new layout.",
+    "limits": [
+      "Specific brief requires local targeted tests and forbids build-6. remote-test.sh uses temporary pushed refs, so was not invoked under the user no-push instruction. No affected Go packages.",
+      "Focused macOS Chromium evidence only; CI-equivalent Linux Chromium, full just test/build/unit/browser suites and consolidated release review remain coordinator gates.",
+      "Local commit only; no pushes, remote-test host access, production access, deployments, ticket-status changes, model review gates or version changes."
+    ]
+  },
+  "fix_round_4": {
+    "baseline": "19c446c3",
+    "findings_fixed": [
+      "Retained existing-ticket picker sent the options response revision from before a same-release owner refresh and could not recover from revision conflicts."
+    ],
+    "changes": [
+      "Watch the captured ready plan owner; invalidate older option reads when ownership becomes unavailable or changes, then reload bounded ticket options for the new owner generation.",
+      "Bind option data and expected revision to their captured owner. Block Add while options are pending, failed or belong to a stale generation, including keyboard/programmatic action paths.",
+      "Keep selections across refresh and filters; update selected tickets returned by the refreshed page with current availability/title/move details and prune those that can no longer be selected. Selections outside the bounded filtered page remain retained; server membership authorization and revision checks remain authoritative.",
+      "On a current-owner revision conflict, reload options without reporting success or automatically retrying the write. A subsequent person action uses the refreshed revision and reconciled selection; failed reloads expose their error and block stale resubmission.",
+      "Correct phone picker max-width to match its existing card width: the browser default capped the dialog 18px narrower than the card. Existing layout retained; no new visual design or keyboard behavior."
+    ],
+    "regression_evidence": [
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/existing-ticket-picker.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "before": "On unchanged 19c446c3 source, all seven new cases fail at explicit revision 20 vs 7, refreshed selection, blocked dispatch, stale options adoption or failed-recovery assertions; existing 12 cases pass.",
+        "after": "19 passed, 0 failed after final source restoration. Deferred promises and reactive owner changes establish interleavings; no sleeps and no weakened assertions."
+      },
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/plan-owner.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "result": "28 passed, 0 failed; prior record/generation, queued-write, draft and partial-selection protections remain intact."
+      },
+      {
+        "command": "npm test -- tests/release-picker.spec.ts --grep 'retained existing picker.*(390 light|1440 light)|existing picker recovers' --workers=1 --retries=0 --timeout=5000",
+        "before": "Representative phone, desktop refresh and conflict-recovery cases fail against 19c446c3 with final fixtures/assertions: 18px horizontal overflow; no refreshed options response after the walker GET; no recovery options response after a 409. Timeouts only guard missing responses."
+      },
+      {
+        "command": "npm test -- tests/release-picker.spec.ts --grep 'retained existing picker|existing picker recovers|Plan adds three existing|existing parent picker|a ticket in another' --workers=1 --retries=0",
+        "after": "15 passed, 0 failed. Six new light/dark cases at 390/1024/1440px prove retained selection submits revision 20; shared stability guard samples positive-size Add/Cancel/search/selectors/filter-group/list/clicked-row across selection and owner refresh, plus phone frame and horizontal overflow. Conflict recovery sends [7,20] without false success. Eight existing leaf-count/move/positive controls pass. Bundled headless macOS Chromium; after=0 and remaining_processes=0."
+      },
+      {
+        "command": "npm run typecheck",
+        "result": "passed"
+      },
+      {
+        "command": "node node_modules/eslint/bin/eslint.js src/components/journey/ExistingTicketPicker.vue",
+        "result": "passed"
+      },
+      {
+        "command": "python3 -m unittest discover -s scripts/audit",
+        "result": "33 passed. No new code files or ownership-map changes."
+      },
+      {
+        "command": "Native focused Vitest --no-staticParse and Playwright --list collection + strict tier validation/full-push selection",
+        "result": "87 exact classifications across the two unit files and release-picker spec; all 49 gated cases selected by full/push. All 14 new regressions ESSENTIAL; existing classifications unchanged."
+      },
+      {
+        "command": "git fetch origin main; git merge-tree --write-tree --name-only HEAD origin/main",
+        "result": "Newest origin/main fetched; no conflicts in merge simulation. Conditional merge not required."
+      },
+      {
+        "command": "git diff --check",
+        "result": "passed"
+      }
+    ],
+    "screenshots": [
+      "web/test-results/aeon-706-planbind/picker-refresh-390-light.png",
+      "web/test-results/aeon-706-planbind/picker-refresh-390-dark.png",
+      "web/test-results/aeon-706-planbind/picker-refresh-1024-light.png",
+      "web/test-results/aeon-706-planbind/picker-refresh-1024-dark.png",
+      "web/test-results/aeon-706-planbind/picker-refresh-1440-light.png",
+      "web/test-results/aeon-706-planbind/picker-refresh-1440-dark.png"
+    ],
+    "ownership": "Verified ppm account: INSPR tenant, workstation-agents agent; coordinator builder markers for aeon-706-planbind present on AEON-706. No ticket-status changes.",
+    "design": "Existing PAIMOS picker reused; no conflict with approved decisions. Needs Opus design for future new layouts.",
+    "limits": [
+      "Specific brief requires local targeted tests and forbids build-6, and direct user instruction forbids pushes. remote-test.sh pushes a temporary ref and uses build-6, so it was not invoked. No Go packages, contracts, migrations or versions changed.",
+      "Focused macOS Chromium evidence only. CI-equivalent Linux Chromium, full just test/build/unit/browser suites and consolidated release review remain coordinator gates.",
+      "Local commit only; no pushes, deploys, production access, model review gates, destructive git or changes outside this worktree."
+    ]
+  },
+  "merge_main_round": {
+    "baseline": "f50c641001ed928bd79e2576cc53b0a0d2f824d7",
+    "reviewed_head": "fe24ee58ca209c7377dcde3002e96d2f8610d52b",
+    "main": "ce67524cf904525ead694170ba6c4d841a40687f",
+    "merge": "Newest origin/main was already the second parent of coordinator merge f50c64100. git merge origin/main -m \"AEON-706: merge main\" reported Already up to date; no redundant merge or feature change.",
+    "ownership": "Verified ppm tenant INSPR / workstation-agents, gh markus-barta, assigned branch and coordinator worker markers on AEON-706. Ticket status and release gates remain coordinator-owned.",
+    "audit": [
+      "Inspected all 12 files in the coordinator merge. Main-only files match main exactly; both branch supplied-inventory behavior and main cached native collection behavior remain in the overlapping planner and test files.",
+      "All three manifests exactly match the semantic three-way merge of both parents and their common base. Canonical formatting and unique identities checked; no dropped or duplicated rows.",
+      "Reviewed plan source, owner/picker unit regressions and journey/release-picker specs are unchanged from gated head fe24ee58c. No OpenAPI or migration edits, migration collisions or version changes."
+    ],
+    "validation": [
+      {
+        "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+        "result": "169 passed; includes manifest and standalone merge-driver parity regressions."
+      },
+      {
+        "command": "node --test web/scripts/aeon-681-ci.test.mjs",
+        "result": "7 passed; supplied-inventory reuse, native gate/selector coverage and main collect-once regression all pass. Existing unrelated unclassified native cases warn; no classifications changed."
+      },
+      {
+        "command": "node --test web/scripts/ci-web-shard.test.mjs",
+        "result": "25 passed, including strict Settings registration validation."
+      },
+      {
+        "command": "GOTOOLCHAIN=local GOMAXPROCS=2 go test -p 2 ./internal/reportercontract/ -count=1",
+        "result": "passed; the single small local Go package permitted by worker-common. Includes main response-description regression and OpenAPI pins/property checks."
+      },
+      {
+        "command": "node --test scripts/check-migrations.test.mjs",
+        "result": "33 passed."
+      },
+      {
+        "command": "node scripts/check-migrations.mjs --base-ref v261005070923.0.0",
+        "result": "passed: 266 unique migration numbers; immutable published/grandfathered/exception files retained. Base verified as a published non-draft, non-prerelease via gh release view."
+      },
+      {
+        "command": "node scripts/test-tiers/cli.mjs manifests --check",
+        "result": "passed; all three manifests canonical."
+      },
+      {
+        "command": "python3 -B -m unittest discover -s scripts/audit",
+        "result": "33 passed."
+      },
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/plan-owner.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "result": "28 passed."
+      },
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/existing-ticket-picker.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "result": "19 passed."
+      },
+      {
+        "command": "git fetch origin main; git merge-base --is-ancestor origin/main HEAD; git diff --check",
+        "result": "passed; final fetch still resolves ce67524cf, included by coordinator merge f50c64100."
+      }
+    ],
+    "limits": [
+      "The direct user instruction forbids pushes. remote-test.sh and ci-static-locked.sh/ci-static-remote.sh push temporary refs, so neither was invoked. Worker-common also forbids full local Go/static fallback; full node scripts/ci-static.mjs --merge-main and remote/hosted CI remain unverified coordinator gates. No claim that the full static gate is green.",
+      "Focused local checks only. Browser execution/full suites remain coordinator gates; no layout or browser geometry claims.",
+      "No pushes, deployments, production access, model reviews, ticket-status changes, hook bypasses or amendments."
+    ]
+  },
+  "fix_round_7": {
+    "baseline": "44a681f435a5ffedcbae0b7874f82615a7ef8a4e",
+    "review": "brief typo review-review-static292.out.out resolved to qa/review-static292.out",
+    "main": "def5b385e",
+    "merge": "eb3cc7c4d: merged newest fetched origin/main cleanly on assigned branch; main already includes PR #292. No release merge, push or deployment.",
+    "findings_fixed": [
+      "The supplied static report ends with eight missing-classification warnings; native collection found 34 missing Settings routing cases plus one missing workspace-named login case in those same files.",
+      "Added 34 GATED-FULL routing entries, matching the existing routing tier, and one ESSENTIAL login entry, matching the existing login tier. All existing manifest rows and classifications are preserved.",
+      "Added two strict native-registration regressions to the existing shard-test file. They expand parameterized routing registrations and reject missing/stale manifest rows or omission from full PR/merge-group selection."
+    ],
+    "regression_evidence": {
+      "before": "Both new tests fail with Tier manifest drift against the exact 44a681f4 web-test-tiers.json, identifying 34 routing cases and one login case. The native collectors, validator and collected test source files are unchanged from 44a681f4. The manifest was restored in finally; no assertions were weakened.",
+      "after": "27 shard tests pass, including both regressions; all 35 routing and three login registrations are classified and selected by full PR and merge-group gates."
+    },
+    "interruption_investigation": {
+      "reported": "The static report cancels aeon-681-ci.test.mjs and ci-web-shard.test.mjs near 120 seconds with kill EPERM; it reports 31 static checks passed, not a complete green gate.",
+      "observed": "Unmodified shard file: 25 passed in 0.84 seconds. Native planner file: seven passed in 62.98 seconds with zero cancellation or failure. The reported interruption did not reproduce in standalone focused runs. No timeout, assertion or failure-handling policy was loosened.",
+      "remaining": "The full locked remote static gate is unverified; standalone passes are not evidence that the combined static run is green."
+    },
+    "validation": [
+      {
+        "command": "node --test web/scripts/ci-web-shard.test.mjs",
+        "result": "27 passed."
+      },
+      {
+        "command": "node --test web/scripts/aeon-681-ci.test.mjs",
+        "result": "7 passed; run before adding the classifications."
+      },
+      {
+        "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+        "result": "170 passed."
+      },
+      {
+        "command": "Targeted Vitest runs, one file and one worker at a time, retry=0",
+        "result": "settings-routing: 35 passed; plan-owner: 28 passed; existing-ticket-picker: 19 passed."
+      },
+      {
+        "command": "node --test web/tests/agent-login.test.ts",
+        "result": "3 passed."
+      },
+      {
+        "command": "python3 -B -m unittest discover -s scripts/audit",
+        "result": "33 passed; no new source files or source-ownership changes."
+      },
+      {
+        "command": "GOTOOLCHAIN=local GOMAXPROCS=2 go test -p 2 ./internal/reportercontract/ -count=1",
+        "result": "Passed; single small local package checks the OpenAPI changes imported from main."
+      },
+      {
+        "command": "node scripts/test-tiers/cli.mjs manifests --check; node web/scripts/ci-web-shard.mjs --check --strict",
+        "result": "Passed: canonical manifests and 81 gated/166 ungated browser specs accounted for."
+      },
+      {
+        "command": "git diff --check; compare plan sources, unit tests and browser specs with 44a681f4",
+        "result": "Passed; plan product behavior and all existing plan regression assertions are unchanged."
+      }
+    ],
+    "ownership": "Verified ppm tenant INSPR, workstation-agents principal, gh markus-barta and the coordinator builder marker on AEON-706 before edits. Ticket status and release approval remain coordinator-owned.",
+    "limits": [
+      "Direct user instruction forbids pushes and deployments. remote-test.sh and the locked static helper push temporary remote refs, so neither was invoked. Full local static/Go fallback is also forbidden by worker-common. No full ci-static --merge-main, remote Go, full web suite or Linux Chromium result is claimed.",
+      "No new product, UI, layout, API, migration or version change beyond the authorized upstream main merge. No conflict with approved design decisions. Browser execution was not repeated for this classification-only fix.",
+      "Native planning still reports unrelated pre-existing unclassified registrations in agents-working.unit.test.ts and settings-owner.unit.test.ts. They are outside the supplied report findings and remain unchanged.",
+      "No pushes, deploys, production writes, model review gates, ticket-status changes, secret reads, hook bypasses or amendments."
+    ]
+  },
+  "fix_round_8": {
+    "baseline": "7324f7a04",
+    "review": "Brief typo review-review-static330.out.out resolved to qa/review-static330.out; report contains seven missing Go classifications and no product behavior findings or lows.",
+    "main": "2c36963df",
+    "merge": "c37fdb7dd: newest fetched origin/main merged cleanly on assigned branch before fixes. Main supplied the three workorders and shared-runtime classifications using the explicit NIGHTLY post-gate policy.",
+    "findings_fixed": [
+      "All seven reported Go registrations are explicitly classified. Three remaining release-builder tests added as NIGHTLY with matching postGateCases through the canonical native source collector/classify command.",
+      "All 4013 existing classifications and policy metadata are unchanged; main owns the four inherited classifications. No established case was demoted and the required CI gate is unchanged.",
+      "Two regression cases check exact registration coverage, strict scoped validation, retained post-gate policy and nightly/all selection while preserving full PR, merge-group and push scope."
+    ],
+    "regression_evidence": {
+      "before": "Both final regression cases fail on the exact 7324f7a0 go-test-tiers.json at the missing explicit-classification assertion; 0 pass, 2 fail. The merged manifest was restored in finally. The builder case also fails on merged main before adding the remaining three rows.",
+      "after": "The same two cases pass with unchanged assertions. Deferred/browser/product tests were not changed.",
+      "log": "tmp/test-tiers/aeon-706-fix8-before.txt"
+    },
+    "ownership": "Verified ppm INSPR tenant / workstation-agents principal, gh markus-barta, assigned branch and current coordinator builder marker on AEON-706 before edits. Ticket status and release gates remain coordinator-owned.",
+    "design": "Classification-only fix; no new product behavior, layout, API, migration or version change beyond the authorized upstream merge. No conflict with approved design decisions.",
+    "validation": [
+      {
+        "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+        "result": "175 passed, 0 failed, 0 skipped; includes both regressions and existing gate-preservation checks. Log: tmp/test-tiers/aeon-706-fix8-tiers.txt."
+      },
+      {
+        "command": "node --test web/scripts/ci-web-shard.test.mjs",
+        "result": "27 passed, 0 failed, 0 skipped, including native routing and login registration checks."
+      },
+      {
+        "command": "python3 -B -m unittest discover -s scripts/audit",
+        "result": "33 passed; no new source files or ownership-map changes."
+      },
+      {
+        "command": "GOTOOLCHAIN=local GOMAXPROCS=2 go test -p 2 ./internal/reportercontract/ -count=1",
+        "result": "Passed. The single permitted small local Go package validates OpenAPI changes and response pins imported from main."
+      },
+      {
+        "command": "collectGo() source inventory + validate(goManifest, inventory.tests, strict=true)",
+        "result": "4016 source registrations classified; 436 ESSENTIAL, 3289 GATED-FULL, 291 NIGHTLY. Zero missing/stale entries. All seven reported registrations are active and explicitly NIGHTLY. Evidence: tmp/test-tiers/aeon-706-fix8-source-inventory.json. This does not run full native go test -list ./... compilation/parity."
+      },
+      {
+        "command": "Focused Vitest runs, one file/worker at a time, retry=0",
+        "result": "plan-owner.unit.test.ts: 28 passed; existing-ticket-picker.unit.test.ts: 19 passed."
+      },
+      {
+        "command": "node scripts/test-tiers/cli.mjs manifests --check; node web/scripts/ci-web-shard.mjs --check --strict",
+        "result": "Passed: all three manifests canonical; 82 gated and 166 ungated browser specs explicitly accounted for."
+      },
+      {
+        "command": "Exact manifest data comparison against local merged HEAD",
+        "result": "All 4013 prior classifications and all policy metadata preserved; exactly three NIGHTLY rows and their matching postGateCases added."
+      },
+      {
+        "command": "git merge-base --is-ancestor 2c36963df HEAD; git diff --check",
+        "result": "Passed; latest main fetched before work is included, and whitespace checks pass."
+      }
+    ],
+    "follow_ups": [
+      "None from the supplied static report; all seven missing classifications resolved. Remote/full static gates remain coordinator-owned validation, listed under limits."
+    ],
+    "limits": [
+      "The direct user instruction forbids all pushes and deployments. remote-test.sh and ci-static-locked.sh/ci-static-remote.sh push temporary refs, so they were not invoked. The full local static/Go fallback is forbidden by worker-common; the full ci-static --merge-main, remote Go/full web suites and Linux Chromium remain unverified coordinator gates.",
+      "Local focused checks only; no claim of full native go test -list ./... parity or browser geometry verification.",
+      "No pushes, deployments, production writes, model review gates, ticket-status changes, credential reads, hook bypasses or amendments."
+    ]
+  }
+}

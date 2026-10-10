@@ -163,6 +163,20 @@ export async function getPeriod(periodId: string): Promise<{ period: TimePeriod;
   const { data, response } = await send<TimePeriod>(`/time-periods/${id(periodId)}`)
   return { period: period(data), digest: response.headers.get('X-Entries-SHA256') ?? '' }
 }
+// A review is one proven entry set. Sandwich the entry read between period
+// digests; a concurrent mutation invalidates the whole read, never just the hash.
+export interface PeriodSnapshot { period: TimePeriod; entries: TimeEntry[]; digest: string }
+export async function getPeriodSnapshot(periodId: string, io = { getPeriod, listEntries }): Promise<PeriodSnapshot> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const before = await io.getPeriod(periodId)
+    const entries = await io.listEntries({ period_id: periodId })
+    const after = await io.getPeriod(periodId)
+    if (before.period.id === periodId && after.period.id === periodId && before.digest && before.digest === after.digest && before.period.revision === after.period.revision && entries.every(e => e.period_id === periodId)) {
+      return { period: after.period, entries, digest: after.digest }
+    }
+  }
+  throw new Error('Entries are changing. Try again to review a consistent period.')
+}
 export const createPeriod = async (body: { principal_id: string; starts_at: string; ends_at: string }) => period(await call<TimePeriod>('/time-periods', 'POST', body))
 export const approvePeriod = async (periodId: string, revision: number, digest: string) =>
   period(await call<TimePeriod>(`/time-periods/${id(periodId)}/approve`, 'POST', { expected_revision: revision, expected_entries_sha256: digest }))

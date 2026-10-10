@@ -22,7 +22,7 @@ import (
 func TestPolishedNodeList(t *testing.T) {
 	p := newPrincipal(t, "polished")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	create := func(kind, key, title, state, parent string, fields map[string]any) nodeJSON {
 		t.Helper()
 		if fields == nil {
@@ -57,17 +57,18 @@ func TestPolishedNodeList(t *testing.T) {
 	if len(within.Items) != 3 || within.Items[0].ID != a.ID || within.Items[1].ID != c.ID || within.Items[2].ID != b.ID {
 		t.Fatalf("natural key order/within: %#v", within.Items)
 	}
-	if within.Facets["state"]["new"] != 1 || within.Facets["kind"]["ticket"] != 3 || within.Facets["priority"]["high"] != 1 || within.Facets["assignee"][p.ID] != 1 || within.Facets["assignee"]["none"] != 2 {
+	// State counts include leaves only; other facets retain all listed rows.
+	if within.Facets["state"]["new"] != 0 || within.Facets["state"]["qa"] != 1 || within.Facets["state"]["done"] != 1 || within.Facets["kind"]["work"] != 3 || within.Facets["priority"]["high"] != 1 || within.Facets["assignee"][p.ID] != 1 || within.Facets["assignee"]["none"] != 2 {
 		t.Fatalf("facets: %#v", within.Facets)
 	}
 	row := within.Items[0]
-	if row.KindSlug != "ticket" || row.KindLabel != "Ticket" || row.Priority == nil || *row.Priority != "high" || row.Assignee == nil || row.Assignee.ID != p.ID || row.Parent == nil || row.Parent.ID != root.ID || row.ChildrenCount != 1 || row.Project == nil || row.Project.ID != root.ID {
+	if row.KindSlug != "work" || row.KindLabel != "Work item" || row.Priority == nil || *row.Priority != "high" || row.Assignee == nil || row.Assignee.ID != p.ID || row.Parent == nil || row.Parent.ID != root.ID || row.ChildrenCount != 1 || row.Project == nil || row.Project.ID != root.ID {
 		t.Fatalf("projection: %#v", row)
 	}
 	if within.Items[1].Parent == nil || within.Items[1].Parent.ID != a.ID || within.Items[1].Project == nil || within.Items[1].Project.ID != root.ID {
 		t.Fatalf("deep projection: %#v", within.Items[1])
 	}
-	if got := get("/api/nodes?kind=ticket&kind=project&state=new,qa&priority=high&priority=medium&within=" + root.ID); len(got.Items) != 2 {
+	if got := get("/api/nodes?kind=work&kind=project&state=new,qa&priority=high&priority=medium&within=" + root.ID); len(got.Items) != 2 {
 		t.Fatalf("list filters: %#v", got.Items)
 	}
 	if got := get("/api/nodes?assignee=" + p.ID); len(got.Items) != 1 || got.Items[0].ID != a.ID {
@@ -127,7 +128,7 @@ func TestPolishedNodeList(t *testing.T) {
 	}
 	status, body := call(t, &p, http.MethodGet, "/api/projects", "")
 	projects := decode[projectPage](t, status, body, http.StatusOK)
-	if len(projects.Items) != 1 || projects.Items[0].ID != root.ID || projects.Items[0].Total != 3 || projects.Items[0].Open != 1 || projects.Items[0].InProgress != 1 || projects.Items[0].Done != 1 || projects.Items[0].LastActivity.IsZero() {
+	if len(projects.Items) != 1 || projects.Items[0].ID != root.ID || projects.Items[0].Total != 2 || projects.Items[0].Open != 0 || projects.Items[0].InProgress != 1 || projects.Items[0].Done != 1 || projects.Items[0].LastActivity.IsZero() {
 		t.Fatalf("projects: %#v", projects.Items)
 	}
 	status, body = call(t, &p, http.MethodGet, "/api/projects?include_archived=true", "")
@@ -146,12 +147,14 @@ func TestPolishedNodeList(t *testing.T) {
 	}
 }
 
-// Every row names its nearest epic: a ticket its own, a task its ticket's.
+// The legacy epic field names the nearest Work or Epic ancestor.
 func TestListNearestEpic(t *testing.T) {
 	p := newPrincipal(t, "nearest-epic")
+	customKind(t, p, "epic", "epic")
+	customKind(t, p, "task", "task")
 	project := kindBySlug(t, p, "project")
 	epicKind := kindBySlug(t, p, "epic")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	task := kindBySlug(t, p, "task")
 	create := func(kind, key, parent string) nodeJSON {
 		t.Helper()
@@ -168,20 +171,23 @@ func TestListNearestEpic(t *testing.T) {
 	taskInEpic := create(task.ID, "EP-4", inEpic.ID)
 	loose := create(ticket.ID, "EP-5", root.ID)
 	looseTask := create(task.ID, "EP-6", loose.ID)
+	workChild := create(ticket.ID, "EP-7", inEpic.ID)
+	workGrandchild := create(ticket.ID, "EP-8", workChild.ID)
+	legacyTaskChild := create(task.ID, "EP-9", taskInEpic.ID)
 	status, body := call(t, &p, http.MethodGet, "/api/nodes?within="+root.ID+"&sort=key", "")
 	page := decode[nodePage](t, status, body, http.StatusOK)
 	epics := map[string]*listEpic{}
 	for _, item := range page.Items {
 		epics[item.ID] = item.Epic
 	}
-	for _, id := range []string{inEpic.ID, taskInEpic.ID} {
-		if got := epics[id]; got == nil || got.ID != epic.ID || got.Key != "EP-2" || got.Title != "EP-2" {
-			t.Fatalf("epic of %s: %#v", id, got)
+	for id, want := range map[string]nodeJSON{inEpic.ID: epic, taskInEpic.ID: inEpic, looseTask.ID: loose, workChild.ID: inEpic, workGrandchild.ID: workChild, legacyTaskChild.ID: inEpic} {
+		if got := epics[id]; got == nil || got.ID != want.ID || got.Key != want.Key || got.Title != want.Title {
+			t.Fatalf("nearest work/epic of %s: %#v, want %s", id, got, want.ID)
 		}
 	}
-	for _, id := range []string{epic.ID, loose.ID, looseTask.ID} {
+	for _, id := range []string{epic.ID, loose.ID} {
 		if got, ok := epics[id]; !ok || got != nil {
-			t.Fatalf("%s should list without an epic: %#v (listed %v)", id, got, ok)
+			t.Fatalf("%s should list without a work/epic parent: %#v (listed %v)", id, got, ok)
 		}
 	}
 	if !strings.Contains(string(body), `"epic":null`) {
@@ -204,9 +210,37 @@ func assertTenantEmpty(t *testing.T, p tenant.Principal, path string) {
 }
 
 func TestList6000Performance(t *testing.T) {
+	testList6000Performance(t)
+}
+
+func TestList6000PerformanceWithStaleKindStatistics(t *testing.T) {
+	newPrincipal(t, "previous-list-kind-statistics")
+	if _, err := appPool.Exec(t.Context(), `ANALYZE node_kinds`); err != nil {
+		t.Fatal(err)
+	}
+	p, path := testList6000Performance(t)
+	status, body := call(t, &p, http.MethodGet, path, "")
+	page := decode[nodePage](t, status, body, http.StatusOK)
+	if len(page.Items) != 50 || page.NextCursor == nil || page.Facets["kind"]["work"] != 6000 {
+		t.Fatal("stale-statistics fixture lost its 6000 tickets or selected page")
+	}
+	ids := make([]string, len(page.Items))
+	for i, item := range page.Items {
+		ids[i] = item.ID
+	}
+	plan := logPagePlanningPerformancePlan(t, p, ids)
+	found, rows, visits := planningSubtreeWork(plan, false)
+	t.Logf("page subtree rows=%.0f, node visits=%.0f", rows, visits)
+	if !found || rows != float64(len(ids)) || visits > float64(2*len(ids)) {
+		t.Fatalf("page subtree work: found=%t rows=%.0f visits=%.0f, want %d roots and at most %d node visits", found, rows, visits, len(ids), 2*len(ids))
+	}
+}
+
+func testList6000Performance(t *testing.T) (tenant.Principal, string) {
+	t.Helper()
 	p := newPrincipal(t, "large-list")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Large project"}`)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,key,kind_id,title,fields,state,parent_id,position)
@@ -234,7 +268,7 @@ func TestList6000Performance(t *testing.T) {
 		status, body := call(t, &p, http.MethodGet, path, "")
 		elapsed := time.Since(start)
 		page := decode[nodePage](t, status, body, http.StatusOK)
-		if len(page.Items) != 50 || page.NextCursor == nil || page.Facets["kind"]["ticket"] != 6000 {
+		if len(page.Items) != 50 || page.NextCursor == nil || page.Facets["kind"]["work"] != 6000 {
 			t.Fatalf("large list result: %d, %#v", len(page.Items), page.Facets)
 		}
 		if fastest == 0 || elapsed < fastest {
@@ -249,6 +283,7 @@ func TestList6000Performance(t *testing.T) {
 		limit = 600 * time.Millisecond
 	}
 	if fastest >= limit {
+		logListPerformancePlans(t, p, path)
 		t.Fatalf("6000-node list exceeded %s: %s", limit, fastest)
 	}
 	start := time.Now()
@@ -293,6 +328,7 @@ func TestList6000Performance(t *testing.T) {
 			}
 		}
 	}
+	return p, path
 }
 
 // Project summaries name the people most recently active in each project: the
@@ -301,7 +337,7 @@ func TestList6000Performance(t *testing.T) {
 func TestProjectSummaryRecentPeople(t *testing.T) {
 	p := newPrincipal(t, "recent-people")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	main := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Main"}`)
 	child := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"Child","parent_id":"`+main.ID+`"}`)
 	grandchild := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"Grandchild","parent_id":"`+child.ID+`"}`)

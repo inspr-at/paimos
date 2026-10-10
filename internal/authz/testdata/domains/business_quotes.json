@@ -1,0 +1,32 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "routes": {
+    "DELETE /api/quote-profiles/{profileId}": "quotes.write",
+    "DELETE /api/quotes/{quoteId}": "quotes.delete",
+    "GET /api/quote-profiles": "quotes.read",
+    "GET /api/quote-profiles/assets/{assetId}": "quotes.read",
+    "GET /api/quote-profiles/{profileId}": "quotes.read",
+    "GET /api/quotes": "quotes.read",
+    "GET /api/quotes/settings": "settings.manage",
+    "GET /api/quotes/{quoteId}": "quotes.read|quotes.portal_read",
+    "GET /api/quotes/{quoteId}/draft": "quotes.read",
+    "GET /api/quotes/{quoteId}/versions": "quotes.read",
+    "GET /api/quotes/{quoteId}/versions/{version}": "quotes.read|quotes.portal_read",
+    "GET /api/quotes/{quoteId}/versions/{version}/export": "quotes.read|quotes.portal_read",
+    "PATCH /api/quote-profiles/{profileId}": "quotes.write",
+    "PATCH /api/quotes/settings": "settings.manage",
+    "PATCH /api/quotes/{quoteId}/draft": "quotes.write",
+    "PATCH /api/quotes/{quoteId}/visibility": "quotes.write",
+    "POST /api/quote-profiles": "quotes.write",
+    "POST /api/quote-profiles/assets": "quotes.write",
+    "POST /api/quote-profiles/{profileId}/undo": "quotes.write",
+    "POST /api/quotes": "quotes.write",
+    "POST /api/quotes/{quoteId}/draft/branch": "quotes.write",
+    "POST /api/quotes/{quoteId}/duplicate": "quotes.write",
+    "POST /api/quotes/{quoteId}/finalize": "quotes.write",
+    "POST /api/quotes/{quoteId}/versions": "quotes.write",
+    "POST /api/quotes/{quoteId}/versions/{version}/accept": "quotes.accept|quotes.portal_accept",
+    "POST /api/quotes/{quoteId}/versions/{version}/issue": "quotes.issue",
+    "PUT /api/quotes/{quoteId}/profile": "quotes.write"
+  }
+}

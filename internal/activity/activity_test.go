@@ -74,7 +74,7 @@ func (f *fixture) addNode(key string) string {
 	f.t.Helper()
 	var id string
 	f.tx(func(tx pgx.Tx) error {
-		return tx.QueryRow(f.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,$2,'Ticket','new' FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING id::text`, f.p.TenantID, key).Scan(&id)
+		return tx.QueryRow(f.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,$2,'Ticket','new' FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, f.p.TenantID, key).Scan(&id)
 	})
 	return id
 }
@@ -377,6 +377,55 @@ func TestCommentLifecycleAuthorizationIsolationAndConcurrency(t *testing.T) {
 }
 
 func TestTimelineAtImportScale(t *testing.T) {
+	f, want := setupTimelineImportScale(t)
+	// Repeated first-page reads and full traversal must return exactly the
+	// requested ticket's items, regardless of unrelated imported event volume.
+	for range 10 {
+		page := f.page("?limit=20")
+		assertTimelineItems(t, page.Items, want[:20])
+		if page.NextCursor == nil {
+			t.Fatal("first scale page is missing its continuation cursor")
+		}
+	}
+	query := "?limit=20"
+	for offset := 0; offset < len(want); offset += 20 {
+		page := f.page(query)
+		end := min(offset+20, len(want))
+		assertTimelineItems(t, page.Items, want[offset:end])
+		if end == len(want) {
+			if page.NextCursor != nil {
+				t.Fatal("last scale page has a cursor")
+			}
+		} else {
+			if page.NextCursor == nil {
+				t.Fatal("scale page is missing its continuation cursor")
+			}
+			query = "?limit=20&cursor=" + url.QueryEscape(*page.NextCursor)
+		}
+	}
+}
+
+func assertTimelineItems(t *testing.T, got, want []Item) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("timeline item count: got %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		actual, expected := got[i], want[i]
+		// Postgres may serialize an equivalent timestamp with the connection's
+		// timezone offset. Compare instants independently of time.Location.
+		actual.At, expected.At = actual.At.UTC(), expected.At.UTC()
+		if !reflect.DeepEqual(actual, expected) {
+			t.Fatalf("timeline item %d: got %+v, want %+v", i, actual, expected)
+		}
+	}
+}
+
+// setupTimelineImportScale seeds 27,422 unrelated imported events and a
+// same-ticket history of 240 imported snapshots and 30 Markdown comments.
+// The first history snapshot is a baseline; the other 239 are visible changes.
+func setupTimelineImportScale(t *testing.T) (*fixture, []Item) {
+	t.Helper()
 	f := setup(t)
 	noise := f.addNode("ACT-2")
 	f.tx(func(tx pgx.Tx) error {
@@ -386,24 +435,57 @@ func TestTimelineAtImportScale(t *testing.T) {
 		 FROM generate_series(1,27422) n`, f.p.TenantID, noise, f.p.ID)
 		return err
 	})
-	base := time.Now().Add(-time.Hour)
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	want := make([]Item, 0, 269)
+	previous := "new"
+	for i := range 240 {
+		state := "new"
+		if i%2 == 1 {
+			state = "done"
+		}
+		at := base.Add(time.Duration(i) * time.Second)
+		id := f.event("import.history", at, nil, history(strconv.Itoa(i+1), record{
+			"status": state, "description": strings.Repeat("Historical content ", 30),
+		}))
+		if i > 0 {
+			from, to := previous, state
+			want = append(want, Item{ID: id, At: at, Type: "change", Author: Author{Name: "Classic writer"},
+				Changes: []FieldChange{{Field: "status", From: &from, To: &to}}})
+		}
+		previous = state
+	}
 	for i := range 30 {
-		f.event("comment.created", base.Add(time.Duration(i)*time.Second), nil, commentSnapshot{Body: strings.Repeat("A realistic Markdown comment. ", 100)})
+		at := base.Add(time.Duration(240+i) * time.Second)
+		body := fmt.Sprintf("Comment %d: %s", i, strings.Repeat("A realistic Markdown comment. ", 100))
+		id := f.event("comment.created", at, nil, commentSnapshot{Body: body})
+		want = append(want, Item{ID: id, At: at, Type: "comment", Author: Author{ID: &f.p.ID, Name: f.p.Name}, BodyMarkdown: &body})
 	}
-	var max time.Duration
-	for range 10 {
-		start := time.Now()
-		if page := f.page("?limit=20"); len(page.Items) != 20 || page.NextCursor == nil {
-			t.Fatal("invalid scale page")
+	for i, j := 0, len(want)-1; i < j; i, j = i+1, j-1 {
+		want[i], want[j] = want[j], want[i]
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var targetRows, unrelatedRows int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FILTER (WHERE node_id=$2),count(*) FILTER (WHERE node_id=$3)
+		 FROM events WHERE tenant_id=$1`, f.p.TenantID, f.node, noise).Scan(&targetRows, &unrelatedRows); err != nil {
+			return err
 		}
-		if took := time.Since(start); took > max {
-			max = took
+		if targetRows != 270 || unrelatedRows != 27422 {
+			t.Fatalf("scale fixture rows: target=%d unrelated=%d", targetRows, unrelatedRows)
 		}
-	}
-	t.Logf("27422 unrelated import rows, maximum handler latency over 10 requests: %s", max)
-	if max >= 100*time.Millisecond {
-		t.Fatalf("activity exceeds 100ms: %s", max)
-	}
+		// Check the available node-scoped access path without depending on
+		// planner costs, machine speed or a particular EXPLAIN plan choice.
+		var definition, predicate string
+		if err := tx.QueryRow(t.Context(), `SELECT pg_get_indexdef(indexrelid),pg_get_expr(indpred,indrelid)
+		 FROM pg_index WHERE indexrelid='events_node_idx'::regclass AND indrelid='events'::regclass
+		 AND indisvalid AND indisready`).Scan(&definition, &predicate); err != nil {
+			return err
+		}
+		if !strings.Contains(definition, "(tenant_id, node_id, id)") || predicate != "(node_id IS NOT NULL)" {
+			t.Fatalf("unexpected node index: %s WHERE %s", definition, predicate)
+		}
+		return nil
+	})
+	return f, want
 }
 
 func TestHistorySourcesDoNotMix(t *testing.T) {

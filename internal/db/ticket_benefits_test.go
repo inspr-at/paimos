@@ -23,7 +23,7 @@ func TestTicketBenefitMigrationPreservesHistoryAndCustomSchema(t *testing.T) {
 		}
 	})
 	var ids []string
-	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+	err = migrateLegacyWorkWithHook(t, d, func(name string) error {
 		if name != "0896_ticket_benefits.sql" {
 			return nil
 		}
@@ -94,7 +94,7 @@ func TestTicketBenefitMigrationPreservesHistoryAndCustomSchema(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
+	if err := migrateLegacyWorkWithHook(t, d, nil); err != nil {
 		t.Fatal("reapply:", err)
 	}
 }

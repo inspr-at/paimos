@@ -2,12 +2,17 @@
 package attachments
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"image"
 	"image/color"
 	"image/png"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -39,7 +44,7 @@ func setup(t *testing.T) (*dbtest.DB, tenant.Principal, string) {
 			return err
 		}
 		var kind, node string
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='ticket'`, p.TenantID).Scan(&kind); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='work'`, p.TenantID).Scan(&kind); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) VALUES($1,'ATT-1',$2,'Ticket') RETURNING id::text`, p.TenantID, kind).Scan(&node); err != nil {
@@ -74,6 +79,7 @@ func TestAttachmentRoutesRejectCustomersAndAgents(t *testing.T) {
 	for _, route := range []struct{ method, path string }{
 		{"GET", "/api/nodes/" + id + "/attachments"},
 		{"POST", "/api/nodes/" + id + "/attachments"},
+		{"GET", "/api/attachments/" + id},
 		{"PATCH", "/api/attachments/" + id},
 		{"DELETE", "/api/attachments/" + id},
 		{"GET", "/api/attachments/" + id + "/content"},
@@ -124,6 +130,110 @@ func multipartFile(t *testing.T, name string, body []byte) (string, *bytes.Buffe
 	}
 	return mw.FormDataContentType(), &b
 }
+
+func fixtureGzipArchive(t *testing.T) []byte {
+	t.Helper()
+	var b bytes.Buffer
+	gz := gzip.NewWriter(&b)
+	tw := tar.NewWriter(gz)
+	body := []byte("archive contents\n")
+	if err := tw.WriteHeader(&tar.Header{Name: "note.txt", Mode: 0600, Size: int64(len(body))}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return b.Bytes()
+}
+
+// Risk: recognized gzip archives must retain their compressed bytes and obey
+// the same upload limit as other downloads, without decoding or extraction.
+func TestStorageGzipPreservesBytesAndLimit(t *testing.T) {
+	body := fixtureGzipArchive(t)
+	tid := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	store := Store{FilesDir: t.TempDir(), MaxSize: int64(len(body))}
+	staged, err := store.Stage(t.Context(), tid, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer staged.Close()
+	sum := sha256.Sum256(body)
+	if staged.ContentType != "application/x-gzip" || staged.Size != int64(len(body)) || staged.SHA256 != hex.EncodeToString(sum[:]) || staged.Image || staged.Width != 0 || staged.Height != 0 || len(staged.variants) != 0 {
+		t.Fatalf("gzip storage metadata %+v, variants %d", staged.Prepared, len(staged.variants))
+	}
+	got, err := io.ReadAll(staged.original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatal("staged gzip bytes changed")
+	}
+	store.MaxSize--
+	if staged, err := store.Stage(t.Context(), tid, bytes.NewReader(body)); err == nil {
+		staged.Close()
+		t.Fatal("oversized gzip accepted")
+	} else if want := "file exceeds " + strconv.FormatInt(store.MaxSize, 10) + " bytes"; err.Error() != want {
+		t.Fatalf("gzip limit: got %v, want %q", err, want)
+	}
+}
+
+// Risk: accepting archives must not expose their contents inline or extract
+// files; HTTP downloads must preserve the archive and its isolation headers.
+func TestGzipAttachmentUploadAndIsolatedDownload(t *testing.T) {
+	d, p, node := setup(t)
+	body := fixtureGzipArchive(t)
+	store := Store{FilesDir: t.TempDir(), MaxSize: int64(len(body))}
+	mux := http.NewServeMux()
+	New(d.App, store).Mount(mux)
+	ct, b := multipartFile(t, "archive.tar.gz", body)
+	w := request(t, mux, p, "POST", "/api/nodes/"+node+"/attachments", ct, b)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("gzip upload %d %s", w.Code, w.Body.String())
+	}
+	var items []Attachment
+	if err := json.Unmarshal(w.Body.Bytes(), &items); err != nil || len(items) != 1 {
+		t.Fatalf("gzip upload JSON %v %s", err, w.Body.String())
+	}
+	a := items[0]
+	sum := sha256.Sum256(body)
+	if a.Name != "archive.tar.gz" || a.ContentType != "application/x-gzip" || a.Size != int64(len(body)) || a.SHA256 != hex.EncodeToString(sum[:]) || a.Width != nil || a.Height != nil {
+		t.Fatalf("gzip attachment %+v", a)
+	}
+	w = request(t, mux, p, "GET", "/api/attachments/"+a.ID+"/content", "", nil)
+	if w.Code != http.StatusOK || !bytes.Equal(w.Body.Bytes(), body) {
+		t.Fatalf("gzip download %d: archive bytes changed", w.Code)
+	}
+	disposition, params, err := mime.ParseMediaType(w.Header().Get("Content-Disposition"))
+	if err != nil || disposition != "attachment" || params["filename"] != a.Name {
+		t.Fatalf("gzip disposition %q: %v", w.Header().Get("Content-Disposition"), err)
+	}
+	if w.Header().Get("Content-Type") != "application/x-gzip" || w.Header().Get("Content-Length") != strconv.Itoa(len(body)) || w.Header().Get("Content-Encoding") != "" || w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Content-Security-Policy") != "default-src 'none'; sandbox" {
+		t.Fatalf("gzip download headers %v", w.Header())
+	}
+	files := 0
+	err = filepath.WalkDir(store.FilesDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !entry.IsDir() {
+			files++
+			if entry.Name() != a.SHA256 || !entry.Type().IsRegular() {
+				t.Errorf("archive produced an unexpected file: %s", path)
+			}
+		}
+		return nil
+	})
+	if err != nil || files != 1 {
+		t.Fatalf("archive storage: files %d, error %v", files, err)
+	}
+}
+
 func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	d, p, node := setup(t)
 	store := Store{FilesDir: t.TempDir(), MaxSize: 1 << 20}
@@ -144,6 +254,11 @@ func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	a := items[0]
 	if a.Name != "image.png" || a.Width == nil || *a.Width != 640 || a.Height == nil || *a.Height != 400 {
 		t.Fatalf("attachment %+v", a)
+	}
+	w = request(t, mux, p, "GET", "/api/attachments/"+a.ID, "", nil)
+	var metadata Attachment
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &metadata) != nil || metadata.ID != a.ID || metadata.NodeID != node || metadata.SHA256 != a.SHA256 || metadata.Name != a.Name || metadata.Size != int64(len(body)) {
+		t.Fatalf("metadata %d %s", w.Code, w.Body.String())
 	}
 	for _, v := range []string{"original", "thumb", "preview"} {
 		f, err := store.Open(p.TenantID, a.SHA256, v)
@@ -200,6 +315,10 @@ func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	if w.Code != 404 {
 		t.Fatalf("cross tenant %d", w.Code)
 	}
+	w = request(t, mux, foreign, "GET", "/api/attachments/"+a.ID, "", nil)
+	if w.Code != 404 {
+		t.Fatalf("cross tenant metadata %d", w.Code)
+	}
 	w = request(t, mux, p, "DELETE", "/api/attachments/"+a.ID, "", nil)
 	if w.Code != 204 {
 		t.Fatalf("delete %d %s", w.Code, w.Body.String())
@@ -207,6 +326,10 @@ func TestUploadDedupeVariantsETagIsolationUndoAndOps(t *testing.T) {
 	w = request(t, mux, p, "GET", "/api/attachments/"+a.ID+"/content", "", nil)
 	if w.Code != 404 {
 		t.Fatalf("deleted content %d", w.Code)
+	}
+	w = request(t, mux, p, "GET", "/api/attachments/"+a.ID, "", nil)
+	if w.Code != 404 {
+		t.Fatalf("deleted metadata %d", w.Code)
 	}
 	var eventID int64
 	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, p.TenantID, func(tx pgx.Tx) error {

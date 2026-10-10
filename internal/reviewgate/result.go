@@ -63,7 +63,12 @@ func ValidRepository(s string) bool {
 	return true
 }
 func ValidFamily(s string) bool {
-	return s == "openai" || s == "anthropic" || s == "xai" || s == "cursor" || s == "google" || s == "local"
+	for _, family := range ValidFamilies() {
+		if s == family {
+			return true
+		}
+	}
+	return false
 }
 
 // Parse accepts only the final nonempty verdict line. Earlier verdicts in
@@ -111,12 +116,23 @@ func Parse(output string) Result {
 }
 
 // Gate never treats a completed process or an unverified model as approval.
-func Gate(status, modelEvidence string, effectiveModel *string, b Binding, result Result) (bool, string) {
+func Gate(status, modelEvidence string, effectiveModel *string, b Binding, result Result, policies ...FamilyPolicy) (bool, string) {
+	policy := DefaultFamilyPolicy()
+	if len(policies) > 1 {
+		return false, "Review family policy is invalid."
+	}
+	if len(policies) == 1 {
+		policy = policies[0]
+	}
 	if b.ReviewerFamily == nil || b.ProfileID == nil {
 		return false, "No eligible reviewer from another family is available."
 	}
-	if !ValidFamily(*b.ReviewerFamily) || *b.ReviewerFamily == b.AuthorFamily {
-		return false, "The author family cannot review itself."
+	familyOK, reason := policy.Decision(b.AuthorFamily, *b.ReviewerFamily)
+	if !familyOK {
+		if len(policies) == 0 && ValidFamily(*b.ReviewerFamily) && *b.ReviewerFamily == b.AuthorFamily {
+			return false, "The author family cannot review itself."
+		}
+		return false, reason
 	}
 	if status != "completed" {
 		return false, "Review " + status + "; the gate stays closed."
@@ -130,7 +146,10 @@ func Gate(status, modelEvidence string, effectiveModel *string, b Binding, resul
 	if result.Verdict != "ok" {
 		return false, "Changes are required before this commit range can pass review."
 	}
-	return true, "This commit range passed independent review."
+	if len(policies) == 0 {
+		return true, "This commit range passed independent review."
+	}
+	return true, reason
 }
 
 // CommitRange is bounded, content-free evidence supplied by a builder daemon.
@@ -157,4 +176,9 @@ func ModelMatches(requested, effective string) bool {
 		return strings.HasPrefix(effective, "claude-"+requested+"-")
 	}
 	return false
+}
+
+// ValidFamilies is the server registry shared by policy validation and editors.
+func ValidFamilies() []string {
+	return []string{"openai", "anthropic", "xai", "cursor", "google", "local"}
 }

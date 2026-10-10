@@ -29,15 +29,15 @@ const guardTLDR = "Copper notebooks stay hidden underground."
 
 func seedPrivateGuard(t *testing.T, f doctrineFixture, m *Module, actor tenant.Principal) SourceView {
 	t.Helper()
-	f.fake.commit(privateRepository, fixtureCommit, map[string]string{
+	f.fake.commit(m.repositories.Private(), fixtureCommit, map[string]string{
 		"docs/AGENTS-KERNEL-PRIVATE.md":        "# Private\n\n## Planning\n<!-- aeon-rule: copper -->\n- " + guardRule + "\n  Why: The silver ledger contains nine emerald diagrams beside the northern window.\n",
 		"docs/AGENTS-KERNEL-PRIVATE.tldr.yaml": "rules:\n  copper:\n    en: " + guardTLDR + "\n    de: Kupferne Notizen bleiben heute verborgen.\n  unmatched:\n    en: Reserved observatory protocol stays sealed.\n",
 	}, "main")
-	allowCredential(t, m.credentials.Dir, "guard-read", actor.TenantID, privateRepository)
+	allowCredential(t, m.credentials.Dir, "guard-read", actor.TenantID, m.repositories.Private())
 	if err := os.WriteFile(filepath.Join(m.credentials.Dir, "guard-read"), []byte("fixtureGuardRead319"), 0600); err != nil {
 		t.Fatal("write fixture credential")
 	}
-	return *find(f.layer(actor, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: privateRepository, Visibility: "private", Ref: "main", CredentialRef: "guard-read"}), privateRepository)
+	return *find(f.layer(actor, "POST", "/api/rules/doctrine/sources", SourceInput{Repository: m.repositories.Private(), Visibility: "private", Ref: "main", CredentialRef: "guard-read"}), m.repositories.Private())
 }
 
 func publicProposalFixture(t *testing.T) (doctrineFixture, *proposalForge, *Module, tenant.Principal, ProposalInput) {
@@ -83,8 +83,8 @@ func TestPrivateQuoteNormalization(t *testing.T) {
 			t.Fatalf("public edit rejected: %v", err)
 		}
 	}
-	for _, text := range []string{"hsb\u200b1", "ｈｓｂ１", "barta\u200b.cm", "h\u034fsb1", "hsb\ufe0f1", "\u04bbsb1", "barta.\u0441m", "pm.b\u0430rta", "inspr\u2011doctrine\u2011private", "inspr\u2013doctrine\u2013private", "inspr\u2212doctrine\u2212private"} {
-		if guardPublic(publicRepository, text) == nil {
+	for _, text := range []string{"hsb\u200b" + "424242", "ｈｓｂ４２４２４２", "barta\u200b.cm", "h\u034fsb" + "424242", "hsb\ufe0f" + "424242", "\u04bbsb" + "424242", "barta.\u0441m", "pm.b\u0430rta", "inspr\u2011doctrine\u2011private", "inspr\u2013doctrine\u2013private", "inspr\u2212doctrine\u2212private"} {
+		if New(nil, Options{}).guardPublic(publicRepository, text) == nil {
 			t.Errorf("normalized pattern missed: %q", text)
 		}
 	}
@@ -106,7 +106,7 @@ func TestPublicGuardOnlyChangedText(t *testing.T) {
 	rule := Render(publicRepository, fixtureCommit, false, files)[0].Rules[0]
 	in := ProposalInput{Path: path, RuleKey: rule.Key, RuleSHA: rule.SHA256, Source: strings.Replace(rule.Source, "Run tests.", "Run tests before merging.", 1), Explanation: "Clarify validation."}
 	in.TLDR.EN = "Validate before merging."
-	if _, err := editRule(Source{Repository: publicRepository, Commit: fixtureCommit}, files, in); err != nil {
+	if _, err := New(nil, Options{}).editRule(Source{Repository: publicRepository, Commit: fixtureCommit}, files, in); err != nil {
 		t.Fatalf("unchanged content blamed: %v", err)
 	}
 }
@@ -630,7 +630,7 @@ func TestPublicProposalRejectsNonLatin(t *testing.T) {
 		// The generated skeleton does not transliterate an arbitrary alphabet
 		// (the legacy Greek probe even substitutes Gamma for Latin y). Such
 		// text must fail the public-script gate before any quotation lookup.
-		if guardPublic(publicRepository, text) == nil && guardPrivateQuotes(corpus, nil, text) == nil {
+		if New(nil, Options{}).guardPublic(publicRepository, text) == nil && guardPrivateQuotes(corpus, nil, text) == nil {
 			t.Fatal("lookalike quotation accepted by both public guards")
 		}
 	}
@@ -808,8 +808,8 @@ func TestLatinLookalikeFoldAndIdentity(t *testing.T) {
 		t.Fatal("dotted capital I did not fold")
 	}
 	variants := []string{
-		"hsb1", "HSB1", "һsb1", "Һsb1", "Нsb1", "Ηsb1", "hѕb1", "hsь1", "hsΒ1",
-		"hsb١", "hsb१", "hsb\U0001d7cf", "hsb¹", "hsb 1",
+		"hsb" + "424242", "HSB" + "424242", "һsb" + "424242", "Һsb" + "424242", "Нsb" + "424242", "Ηsb" + "424242", "hѕb" + "424242", "hsь" + "424242", "hsΒ" + "424242",
+		"hsb٤٢٤٢٤٢", "hsb४२४२४२", "hsb\U0001d7d2\U0001d7d0\U0001d7d2\U0001d7d0\U0001d7d2\U0001d7d0", "hsb⁴²⁴²⁴²", "hsb " + "424242",
 		"barta.cm", "barta.сm", "barta.ϲm", "barta.ᴄm", "barta․cm", "bartaꓸcm", "barta．cm", "barta։cm",
 		"pm.barta", "pm.bаrta", "pm.ьarta", "ρm.barta", "pm.bɑrta",
 		"inspr-doctrine-private", "inspr‑doctrine‑private", "inspr‐doctrine‐private",
@@ -819,15 +819,15 @@ func TestLatinLookalikeFoldAndIdentity(t *testing.T) {
 		"іnspr-doctrine-private", "ınspr-doctrine-private", "inspr-dօctrine-private", "inspr-doϲtrine-private",
 		"inspr-doctrine-private\u00a0",
 		"markus@", "mаrkus@",
-		"/Users/x", "pm.bɑrta", "ʜsb1", "ınspr-doctrine-private", "markus@barta.cm",
-		"mark\u0301us@", "hs\u0332b1", "／Users／", "∕Users∕", "⁄Users⁄",
+		"/Users/x", "pm.bɑrta", "ʜsb" + "424242", "ınspr-doctrine-private", "markus@barta.cm",
+		"mark\u0301us@", "hs\u0332b" + "424242", "／Users／", "∕Users∕", "⁄Users⁄",
 	}
 	if len(variants) != 56 {
 		t.Fatalf("identity corpus has %d variants", len(variants))
 	}
 	missed := 0
 	for _, text := range variants {
-		if guardPublic(publicRepository, "Deploy to "+text+" now.") == nil {
+		if New(nil, Options{}).guardPublic(publicRepository, "Deploy to "+text+" now.") == nil {
 			t.Logf("synthetic identity missed: %q -> %q", text, normalizeProposalText(text))
 			missed++
 		}
@@ -836,7 +836,7 @@ func TestLatinLookalikeFoldAndIdentity(t *testing.T) {
 		t.Fatalf("identity variants missed %d of %d", missed, len(variants))
 	}
 	for _, text := range []string{"Run the public test suite.", "Öffentliche Regeln bleiben gültig.", "Use ² and ½ beside the ℹ️ note."} {
-		if guardPublic(publicRepository, text) != nil {
+		if New(nil, Options{}).guardPublic(publicRepository, text) != nil {
 			t.Fatalf("benign public text refused: %q", text)
 		}
 	}

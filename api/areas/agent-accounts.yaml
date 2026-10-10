@@ -1,0 +1,1589 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+  /agent-accounts:
+    get:
+      operationId: listAgentAccounts
+      description: Opaque local accounts. Details require ownership or owner sharing; otherwise allowance windows are empty and quota fields are masked. include_checks is enrolling-daemon-only and adds pending revision/generation-bound checks and resource memberships. No credential material.
+      parameters: [{name: include_checks, in: query, schema: {type: boolean, default: false}}]
+      security: [{session: []}]
+      responses:
+        '200': {description: Accounts, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentAccount'}}}}}
+    post:
+      operationId: registerAgentAccount
+      description: An authenticated daemon with account.manage scope registers an opaque local account key. AEON records the registering agent principal and never accepts credential material.
+      security: [{agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountWrite'}}}}
+      responses:
+        '201': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/boost:
+    put:
+      operationId: putAccountBoost
+      summary: Set Boost today on the person's accounts
+      description: "Person account.manage and canonical owner only. Atomically writes every current canonical-owned account inside the mutation fence. The body lists exactly the privacy-visible owned accounts, with the policy and binding revisions captured on screen. Accounts withheld by owner-sharing are updated from the locked row's stored revision, omitted from accounts, and reported only as withheld_count. Boost adds N/100 to pacing, never to vendor allowance; hard floors, Hold and safety guards still apply. Ends at 23:59 in the supplied IANA local timezone, computed by the server clock. Zero clears it. At most 1024 accounts and a five-second deadline."
+      tags: [agent-accounts]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [boost_percent, timezone, accounts]
+              properties:
+                boost_percent: {type: integer, enum: [0, 10, 20, 30]}
+                timezone: {type: string, minLength: 1, maxLength: 128}
+                accounts:
+                  type: array
+                  minItems: 0
+                  maxItems: 1024
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [account_id, revision, binding_revision]
+                    properties:
+                      account_id: {type: string, format: uuid}
+                      revision: {type: integer, minimum: 0}
+                      binding_revision: {type: integer, minimum: 0}
+      responses:
+        '200':
+          description: "Visible owned account policies. Withheld owned accounts are saved and omitted."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accounts]
+                properties:
+                  accounts: {type: array, items: {$ref: '#/components/schemas/AccountUsagePolicy'}}
+                  withheld_count: {type: integer, minimum: 0, description: "Canonical-owned accounts updated from their stored revisions because owner-sharing withheld them. Omitted when zero."}
+                  withheld_boost_until: {type: [string, 'null'], format: date-time, description: "Shared expiry of a nonzero withheld boost. Absent when withheld_count is zero or the boost is cleared."}
+        '400': {description: "Invalid boost, timezone or account list."}
+        '403': {description: "Current person owner and account.manage required."}
+        '409': {description: "Visible account list, policy or binding changed; reload before retrying."}
+  /agent-accounts/capacity:
+    get:
+      operationId: listAccountCapacity
+      summary: Current observed capacity and schedule pacing per account
+      description: Person account.read permission. Separate from the legacy account contract. Manual active windows and the account's Advanced limit cap on top of these readings (AEON-384); both bind.
+      responses:
+        '200': {description: Capacity, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountCapacity'}}}}}
+        '403': {description: Person account.read permission required}
+  /agent-accounts/capacity/next:
+    get:
+      operationId: nextCapacityAccount
+      summary: Next eligible accounts in the router's order, without reserving them
+      description: Person account.read permission, or a workspace-authorized agent with account.read. Paired agents and probe-only keys see only their own accounts. Order is soonest long-window reset, larger available cap, then account ID. Rechecks approval, probe, model grants, vendor truth, schedule, reserve and concurrency. Advisory only. No config path or credential is returned; --env resolves through the authenticated local agentd socket.
+      security: &auth [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
+        - {name: daemon_id, in: query, schema: {type: string, maxLength: 128}}
+        - {name: model_profile_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Ordered advice, content: {application/json: {schema: {$ref: '#/components/schemas/CapacityNext'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/capacity/preview:
+    post:
+      operationId: previewAccountCapacity
+      summary: Capacity paced with a draft schedule, without saving it
+      description: Person account.read permission. Returns the same projection as listAccountCapacity, paced on the schedule each account would follow after saving the draft as the person's schedule with carry_overrides (the same server rule) - deliberate pool or account schedules stay, entries that only carry Sprint/Hold or their own Keep for you follow the draft, ended overrides fall away. A drafted Away (override away with override_until) previews until its date; drafted Sprint and Hold are ignored. pool_reserves drafts each pool's own Keep for you. Nothing is stored. Rate limited per person, bounded in concurrency, time and integration work.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [schedule]
+              properties:
+                schedule: {$ref: '#/components/schemas/CapacitySchedule'}
+                pool_reserves:
+                  type: array
+                  maxItems: 8
+                  description: Drafted Keep for you per pool (AEON-375), at most one entry per pool. An empty reserve drops the pool's own choice so it follows the person's.
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [pool, reserve]
+                    properties:
+                      pool: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
+                      reserve: {type: string, enum: ["", auto, fixed, off]}
+                      reserve_percent: {type: number, minimum: 10, maximum: 80, multipleOf: 5, description: Required with fixed; omitted otherwise.}
+      responses:
+        '200': {description: Capacity, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountCapacity'}}}}}
+        '400': {description: Invalid schedule}
+        '403': {description: Person account.read permission required}
+        '408': {description: The request body did not arrive within the preview deadline}
+        '413': {description: Too many long capacity windows to preview at once (bounded integration work)}
+        '429': {description: Per-person preview rate exceeded; see Retry-After}
+        '503': {description: Previews busy or the preview deadline passed; see Retry-After}
+  /agent-accounts/capacity/schedule:
+    get:
+      operationId: listCapacitySchedules
+      summary: Current person's default, pool and account schedule overrides
+      responses:
+        '200': {description: Schedules, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CapacityScheduleOverride'}}}}}
+    put:
+      operationId: putCapacitySchedule
+      summary: Set current person's default, pool or account schedule
+      description: Person account.manage permission required. Pacing is enforced for measured windows using the pairing owner schedule (for unpaired accounts, the first person to save an account schedule establishes its schedule owner). Account override wins over the account's group, then pool (harness), then user default, then built-in default. Keep for you (reserve) resolves separately - the most specific explicit reserve wins, Auto when none is set - so a pool, group or account entry without one follows the person's. Away is set on the user scope only (400 elsewhere), must end within a year and reaches every pool without an override of its own in force. Hold may carry override_until within 31 days (until tomorrow's hours, for 2 hours); without it Hold lasts until resumed. Times are local to the explicit IANA timezone; week is Monday first. Shifts and hourly blocks replace work hours while nights is enabled. Null schedule removes an override. A group scope names group_id and leaves account_id empty.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/CapacityScheduleOverride'}}}}
+      responses:
+        '204': {description: Schedule saved}
+        '400': {description: Invalid schedule}
+        '403': {description: Person account.manage permission required}
+  /agent-accounts/catalog:
+    get:
+      operationId: getAgentAccountCatalog
+      description: Tenant-scoped host → harness → account → model → effort cascade derived from enrolled accounts, owner probes, allowance windows and the existing model registry. Availability is advisory; routing reserves atomically. Legacy null account profile policy inherits the tenant harness catalog, not provider entitlements. Empty explicit grants offer no models.
+      security: [{session: []}]
+      parameters:
+        - {name: role, in: query, schema: {type: string, default: build, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
+        - {name: author_family, in: query, description: Required for review-gate; that family is excluded., schema: {type: string, enum: [openai, anthropic, xai, cursor, google, local]}}
+      responses:
+        '200': {description: Cascade and defaults, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountCatalog'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/groups:
+    get:
+      operationId: listAccountGroups
+      summary: Groups that split a vendor pool
+      description: Person account.read. A group is one vendor, its member accounts, and an optional project fence. Project IDs include only live projects visible to the caller.
+      responses:
+        '200': {description: Groups, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountGroup'}}}}}
+    post:
+      operationId: createAccountGroup
+      summary: Keep selected accounts separate
+      description: Person account.manage. Exclusive requires at least one project. A fenced project routes only inside the group. An exclusive group's other work waits rather than using its members.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroupWrite'}}}}
+      responses:
+        '201': {description: Group, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroup'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /agent-accounts/groups/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+    patch:
+      operationId: updateAccountGroup
+      description: Person account.manage. account_ids, when present, replaces account membership. project_ids, when present, replaces only the caller-visible live project membership; hidden memberships remain intact. Omit a list to leave it.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroupWrite'}}}}
+      responses:
+        '200': {description: Group, content: {application/json: {schema: {$ref: '#/components/schemas/AccountGroup'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteAccountGroup
+      summary: Return the group's accounts to the vendor pool
+      description: Person account.manage. Members lose the group. The group's schedule rows are removed.
+      responses:
+        '204': {description: Group removed}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/overview:
+    get:
+      operationId: listAccountOverview
+      summary: "Every enrolled account and its capacity values"
+      description: "Tenant-scoped, read-only keyset pages. People need account.read; agent keys need the explicit account.overview.read scope and a custom-role grant, excluded from built-in agent defaults. Current owner-sharing masking applies, including private peers in shared pools. No vendor identity, account key, config-home path or contents, or credentials. Routing is advice; reservation and claim recheck all admission rules. Work is bounded to 1024 current accounts and 4096 windows per tenant with a five-second deadline; larger projections fail explicitly."
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+        - {name: after, in: query, schema: {type: string, format: uuid}, description: "Last account_id from the previous page; accounts are ordered by UUID."}
+      responses:
+        '200': {description: "Account values", content: {application/json: {schema: {$ref: '#/components/schemas/AccountOverviewPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /agent-accounts/pins:
+    get:
+      operationId: listAccountPins
+      description: Person account.read. Pins for one live ticket visible to the caller; invisible tickets return an empty list.
+      parameters: [{name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Pins, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AccountTicketPin'}}}}}
+    put:
+      operationId: putAccountPin
+      summary: Remember an account or a group for this ticket
+      description: Person run.create and nodes.write in the visible ticket's project. Exactly one of account_id or group_id. A pin narrows routing and never crosses a project fence.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountTicketPin'}}}}
+      responses:
+        '204': {description: Pin saved}
+        '400': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteAccountPin
+      description: Person run.create and nodes.write in the visible ticket's project.
+      parameters:
+        - {name: ticket_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
+      responses:
+        '204': {description: Pin removed}
+  /agent-accounts/posture:
+    get:
+      operationId: listAccountPostures
+      description: "Small, tenant-scoped guard projection of owner posture, floors and active Boost today, without windows, owner details or credentials. Requires account.read, including a live explicit key scope for agents. Only owner-authorized or usage-shared accounts are included; sharing is rechecked at the response boundary. At most 100 accounts per keyset page, with a five-second deadline. Order follows routing advice; Max out uses the soonest active reset. Expired or rebound boosts read as zero and null."
+      parameters:
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, grok, pi, cursor, gemini, opencode]}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200': {description: "Postures", content: {application/json: {schema: {type: object, required: [accounts, has_more, as_of], properties: {accounts: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AccountPosture'}}, has_more: {type: boolean}, next_cursor: {type: string, format: uuid}, as_of: {type: string, format: date-time}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /agent-accounts/quota-pool:
+    put:
+      operationId: confirmAccountQuotaPool
+      summary: Confirm that selected accounts use the same vendor login
+      description: Person account.manage required. Only the explicitly selected accounts share quota; confirmation removes unnamed members of the same fingerprint and harness from the pool. Matching signals from later enrollments never join automatically. All accounts must report the supplied nonempty fingerprint and use the same harness. A changed signal clears that account's confirmation. Set confirmed to false to remove only the selected accounts from the pool.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [account_ids, quota_fingerprint, confirmed]
+              properties:
+                account_ids: {type: array, minItems: 1, maxItems: 256, uniqueItems: true, items: {type: string, format: uuid}}
+                quota_fingerprint: {type: string, pattern: '^[a-f0-9]{64}$'}
+                confirmed: {type: boolean, description: Confirmation requires at least two accounts; removal may name one account.}
+      responses:
+        '204': {description: Confirmation saved or removed}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {description: An account no longer reports the selected fingerprint or uses another harness}
+  /agent-accounts/quota-warnings:
+    get:
+      summary: Affected active sessions with fresh measured low-quota warnings
+      operationId: listQuotaWarningSessions
+      security: [{session: []}, {agentKey: []}]
+      tags: [Agents]
+      parameters:
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200':
+          description: Project-filtered session warnings. Unshared peers see limited availability only, without severity, thresholds, windows, or numbers.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_after]
+                properties:
+                  items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/QuotaWarningSession'}}
+                  next_after: {type: [string, 'null'], format: uuid}
+        '400': {description: Invalid cursor or limit}
+        '403': {description: Account read permission required}
+  /agent-accounts/readiness:
+    get:
+      operationId: listAgentAccountReadiness
+      summary: Availability and nullable measurements, never launch authority
+      description: Requires account.read. Unknown usage never throttles and carries usage_unknown_reserve_not_enforceable. Model/project admission remains authoritative. Owners and the enrolling daemon see details; teammates see availability only unless the owner shares. No administrator bypass. Keyset paginated, at most 100 accounts per page.
+      security: *auth
+      parameters:
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: Readiness page, content: {application/json: {schema: {$ref: '#/components/schemas/AccountReadinessPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /agent-accounts/route:
+    post:
+      operationId: reserveAgentAccount
+      description: Atomically select an eligible account enrolled on the requesting daemon for a queued run and reserve allowance. Routing orders fitting accounts by soonest long-window reset, then larger available cap and account ID; concurrency reservations spread parallel work across accounts; fail closed when estimates are absent or no account fits. Queued retries recheck account state, probe, enabled profile and grants. If the reserved account leaves its routing fence or loses quota-pool confirmation, release its hold and slot and reroute within the current fence. When no replacement is eligible, return 409 with code account_moved_out_of_group or quota_pool_changed and leave the run unreserved. The daemon resolves the opaque key to its local credential.
+      security: [{agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRouteRequest'}}}}
+      responses:
+        '200': {description: Selected account, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRoute'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /agent-accounts/runs/{runId}/target:
+    post:
+      operationId: setRunAccountTarget
+      summary: Move a queued run to an account or a group
+      description: Person run.create, and the caller can edit the work order. Only while the run is queued and has no account yet. account_id sets the existing requested-account pin. group_id clears that pin and stores a group target. Exactly one of the two.
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                account_id: {type: string, format: uuid}
+                group_id: {type: string, format: uuid}
+      responses:
+        '204': {description: Target saved}
+        '409': {description: Run is not awaiting an account}
+  /agent-accounts/use:
+    get:
+      operationId: useAccount
+      summary: Resolve a harness label or account id to door ids for the local agent
+      description: Specify exactly one of label or account_id. Person account.read, or the same agent authority as capacity next. Returns ids, labels and the quota fingerprint only. No path, home, socket or credential. The shell export is printed by aeon use from the local agentd.
+      parameters:
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
+        - {name: label, in: query, schema: {type: string, maxLength: 128}}
+        - {name: account_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Doors of one quota, content: {application/json: {schema: {$ref: '#/components/schemas/AccountUse'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Several distinct quotas share that label}
+  /agent-accounts/{accountId}:
+    patch:
+      operationId: updateAgentAccount
+      description: Admin can drain, disable or reactivate an account. Draining preserves current owned runs and blocks new reservations.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [state], properties: {state: {type: string, enum: [available, draining, unavailable]}}}}}}
+      responses:
+        '200': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/archive:
+    post:
+      operationId: archiveAgentAccount
+      summary: Remove an account from the workspace's lists (AEON-402)
+      description: Person with account.manage only. A paired binding is disconnected first; queued runs bound to the account are cancelled and release their capacity holds. The account becomes unavailable and leaves the account list, capacity and the ready count; runs, readings and audit events stay (account.archived). Refused while a run is starting, running or waiting on the account. Repeating it returns the archived account. Accounts whose paired computer binding is revoked leave the person-facing lists the same way.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Archived account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/capacity/approve:
+    post:
+      operationId: approveOngoingObservedCapacity
+      summary: Approve ongoing managed work using observed account capacity
+      description: Person account.manage permission required. Records ongoing-use approval after pairing approval, including before helper redemption, without creating a manual allowance window. Dispatch still requires redeemed pairing, a fresh probe, model grants and capacity admission. Accounts without readings use the provisional first-run policy. Ingesting a reading never grants this approval.
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Ongoing use approved}
+        '403': {description: Person account.manage permission required}
+        '404': {description: Account not found}
+  /agent-accounts/{accountId}/check:
+    post:
+      operationId: requestAgentAccountCheck
+      summary: Request one revision-bound refresh
+      description: Person owner plus account.manage only. Idempotency keys are persisted; changing a key while pending coalesces to the same check. A persisted 60-second minimum gap applies across callers and restarts. Check now may request one early recovery for an unnamed or provider-confirmed money stop, deduplicated with automatic recovery; this endpoint never grants launch authority or clears a stop. Revocation, relinking and daemon-generation changes invalidate pending checks. Audits contain actor, account/revision and check ID, never vendor diagnostics.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheckWrite'}}}}
+      responses:
+        '202': {description: Accepted or idempotently reused check, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheck'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Binding/revision stale or conflicting idempotency key, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '410': {description: Enrollment revoked; outstanding checks are invalidated}
+        '429': {description: Minimum gap, headers: {Retry-After: {schema: {type: integer, minimum: 1}}}, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheckRetry'}}}}
+  /agent-accounts/{accountId}/floor:
+    put:
+      operationId: putAccountUsageFloor
+      description: "Person account.manage and workspace model_prefs.manage only. Sets a permanent reserve on the account’s quota; confirmed siblings use the strictest floor. Sprint, Max out and Run now cannot bypass it. Checked under the access-change fence with the current binding and policy revision."
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [floor_percent, revision, binding_revision], properties: {floor_percent: {type: integer, minimum: 0, maximum: 80}, revision: {type: integer, minimum: 0}, binding_revision: {type: integer, minimum: 0}}}}}}
+      responses:
+        '200': {description: "Saved policy", content: {application/json: {schema: {$ref: '#/components/schemas/AccountUsagePolicy'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/label:
+    put:
+      operationId: renameAgentAccount
+      summary: Rename an account
+      description: Person account.manage permission. Changes only the display label (Settings, inline rename); plan, host label and model grants stay exactly as they are, including a legacy null grant policy. Audited; an identical label is a no-op.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [label]
+              properties:
+                label: {type: string, minLength: 1, maxLength: 128}
+      responses:
+        '200': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/limit:
+    put:
+      operationId: putAccountLimit
+      summary: Set the Advanced limit of an account
+      description: 'Person account.manage permission. One sentence per account - "Let agents use at most <amount> <unit> of this account per <period>" - in the account owner''s schedule timezone. It caps on top of readings, pacing and Keep for you and never replaces them. percent sums positive reading deltas across vendor resets within the owner calendar period, including the person''s use; the largest total across vendor window kinds and buckets binds. Synthetic refresh runs obey the same cap. Admission atomically counts measured usage plus outstanding per-run estimates (one run, learned request/token/cost estimates or conservative defaults). Missing cost telemetry retains its estimate. cost_micros requires priced run accounting; unsupported accounts return 422 unsupported_limit_unit. A run may finish above its estimate. A reached limit waits with code allowance until the period ends, and Run now does not skip it. An identical sentence is a no-op; a different one replaces the old, which stays as history.'
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLimitWrite'}}}}
+      responses:
+        '200': {description: The limit now in force, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLimitRule'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {description: 'unsupported_limit_unit - this account does not report priced run usage.', content: {application/json: {schema: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string, const: unsupported_limit_unit}}}}}}
+    delete:
+      operationId: removeAccountLimit
+      summary: Remove the Advanced limit of an account
+      description: Person account.manage permission. Idempotent; the removed rule stays as history.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: No limit}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/metadata:
+    put:
+      operationId: replaceAgentAccountMetadata
+      description: Replace display metadata and explicit model-profile grants. Requires account.manage for a person or a scoped registering agent key. IDs must reference this tenant's enabled profiles for the account harness and match a pi account's configured provider/model. Change that binding through the person-only model endpoint; empty grants still revoke dispatch. No credentials, home paths or provider identities. Audited and idempotent.
+      security: *auth
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccountMetadataWrite'}}}}
+      responses:
+        '200': {description: Account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/model:
+    put:
+      operationId: setPiAccountModel
+      summary: Choose the model for new pi runs
+      description: Requires a person with account.manage. Provider is fixed by local enrollment. Saves an immutable registry profile and replaces this account's profile grant; active runs retain their model. OpenRouter's public catalog is cached with a bounded timeout; unknown or unreachable slugs are saved with unknown status. No credentials are accepted.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [model]
+              properties:
+                model: {type: string, minLength: 1, maxLength: 116, description: 'Provider model ID; OpenRouter uses vendor/model[:variant].'}
+      responses:
+        '200': {description: Saved account, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/reset-policy:
+    parameters:
+      - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: setAccountResetPolicy
+      summary: Set the owning person's reset policy
+      description: "Owner plus live account.manage only. Uses the floor's revision and binding_revision, under the access fence. Defaults to suggest. Auto consent is bound to the owner and enrollment; relinking never inherits it. Does not spend a credit."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reset_policy, revision, binding_revision]
+              properties:
+                reset_policy: {type: string, enum: [suggest, auto_before_expiry]}
+                revision: {type: integer, minimum: 0}
+                binding_revision: {type: integer, minimum: 0}
+      responses:
+        '200': {description: "Current policy and reset advice", content: {application/json: {schema: {$ref: '#/components/schemas/AccountResetState'}}}}
+        '400': {description: "Invalid policy"}
+        '403': {description: "Owner account management required"}
+        '409': {description: "Policy or binding changed"}
+  /agent-accounts/{accountId}/resets/use:
+    parameters:
+      - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: useAccountReset
+      summary: Spend one vendor-reported reset credit
+      description: "Owner plus live account.manage. Fresh vendor count, consent, binding and window are checked under the final write fence. confirmed is required when the vendor cannot undo. A configured adapter must deduplicate the durable action ID. No adapter returns 422. A 502 outcome may have spent the credit and blocks retries until reconciliation. Success writes account.reset_used last and returns the fresh window."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_count, binding_revision]
+              properties:
+                expected_count: {type: integer, minimum: 1, maximum: 32}
+                binding_revision: {type: integer, minimum: 0}
+                confirmed: {type: boolean, default: false}
+      responses:
+        '200': {description: "Vendor-confirmed fresh window", content: {application/json: {schema: {$ref: '#/components/schemas/AccountResetResult'}}}}
+        '400': {description: "Invalid action"}
+        '403': {description: "Owner account management required"}
+        '409': {description: "Stale count, binding, pending action, or inline confirmation required"}
+        '422': {description: "Vendor reset execution unavailable"}
+        '502': {description: "Vendor outcome unknown; reconciliation required before retry"}
+  /agent-accounts/{accountId}/resets/{actionId}/undo:
+    parameters:
+      - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: actionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: undoAccountReset
+      summary: Undo a reset while the vendor allows it
+      description: "Owner plus live account.manage, same binding, succeeded action and vendor undo_until required. The vendor must actually restore the credit and return its fresh window; local quota is never fabricated. Uncertain Undo blocks further spending."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [binding_revision]
+              properties:
+                binding_revision: {type: integer, minimum: 0}
+      responses:
+        '200': {description: "Vendor-confirmed Undo", content: {application/json: {schema: {$ref: '#/components/schemas/AccountResetResult'}}}}
+        '400': {description: "Invalid action"}
+        '403': {description: "Owner account management required"}
+        '404': {description: "Reset action not found"}
+        '409': {description: "Action, binding or Undo deadline changed"}
+        '422': {description: "Vendor reset execution unavailable"}
+        '502': {description: "Vendor outcome unknown; reconciliation required before retry"}
+  /agent-accounts/{accountId}/posture:
+    put:
+      operationId: putAccountPosture
+      description: "Person account.manage and current canonical account owner only. Null posture follows the owner’s personal setting. Authorization, ownership and binding revision are checked inside the fenced write. One revision and audit event; no paid usage or credit purchase."
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [posture, revision, binding_revision], properties: {posture: {type: [string, 'null'], enum: [careful, balanced, maxout, null]}, revision: {type: integer, minimum: 0}, binding_revision: {type: integer, minimum: 0}}}}}}
+      responses:
+        '200': {description: "Saved policy", content: {application/json: {schema: {$ref: '#/components/schemas/AccountUsagePolicy'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/probe:
+    post:
+      operationId: reportAgentAccountProbe
+      description: The registering agent principal reports a bounded local identity/availability probe for its daemon. The daemon ID must match the account; no credential material is sent. Routing requires a recent successful probe.
+      security: [{agentKey: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountProbe'}}}}
+      responses:
+        '200': {description: Account availability, content: {application/json: {schema: {$ref: '#/components/schemas/AgentAccount'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409':
+          description: 'Stale readiness check or binding. On the first report after a daemon generation change, the heartbeat commits and the stale check and its facts are rejected; refresh pending work before retrying.'
+          headers:
+            X-Aeon-Write-Committed:
+              schema: {type: boolean}
+              description: 'True only when the heartbeat committed despite rejecting the old-generation readiness completion.'
+          content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}
+  /agent-accounts/{accountId}/quota-key:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    post:
+      operationId: getTenantQuotaKey
+      description: Registering agents with account.probe only. Stable tenant HMAC key for local fingerprinting; never log, journal, pass to children or include in public projections. No vendor credentials involved.
+      security: *auth
+      responses:
+        '200':
+          description: Private key; Cache-Control no-store
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [key]
+                properties:
+                  key: {type: string, contentEncoding: base64}
+  /agent-accounts/{accountId}/readings:
+    parameters:
+      - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: ingestCapacityReadings
+      summary: Report allowlisted quota observations for an owned account
+      description: Requires agent key scope account.probe and the account registering principal. Does not grant ongoing pairing approval. Duplicate observations are idempotent; older reports cannot replace newer current windows. Stale or fully reset observations permit one provisional 1% refresh job; a new measured snapshot is required before another.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [readings]
+              properties:
+                readings: {description: "Full normalized snapshot per source; missing buckets retire previous windows without deleting history. An empty array requires a dollar budget or explicit vendor reset report.", type: array, minItems: 0, maxItems: 32, items: {$ref: '#/components/schemas/CapacityReading'}}
+                usage_probe: {type: boolean, description: "Host usage probe; requires current owner consent and binding_revision."}
+                binding_revision: {type: integer, minimum: 0}
+                resets: {$ref: '#/components/schemas/AccountResetReport'}
+                budget: {$ref: '#/components/schemas/CapacityBudget'}
+      responses:
+        '204': {description: Observations recorded}
+        '400': {description: Invalid reading}
+        '403': {description: Scope or ownership mismatch}
+    get:
+      operationId: listCapacityReadings
+      description: Person account.read permission, or the registering agent with account.probe scope. Paired keys may read only accounts enrolled by their own computer. Used by idle capture to respect the latest observation across daemon restarts; lookup failures fall back to locally persisted successful capture times.
+      summary: Most recent 200 observations for an account
+      responses:
+        '200': {description: Readings, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/CapacityReading'}}}}}
+        '403': {description: Scope or pairing ownership mismatch}
+  /agent-accounts/{accountId}/residency-evidence:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    get:
+      operationId: getAgentAccountResidencyEvidence
+      summary: Read the account's recorded residency evidence
+      description: Requires account.read. People can inspect workspace evidence; agent keys must be the account's paired host identity. Missing evidence returns 404. Expired or superseded evidence remains inspectable but does not qualify a route.
+      security: *auth
+      responses:
+        '200': {description: Recorded evidence, content: {application/json: {schema: {$ref: '#/components/schemas/AccountResidencyEvidenceRecord'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putAgentAccountResidencyEvidence
+      summary: Replace host-owned account residency evidence
+      description: Requires account.manage for the linked owning person, or account.probe for the connected paired host's bound runtime key. Workspace admins and agent key creators are not owners by implication. Authorization is repeated under the tenant and pairing locks in the write transaction. Each write emits account.residency_evidence_updated. Evidence covers only the listed model profiles and current account binding; a host, owner, provider or model change invalidates it. No proof reference is fetched by the server.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountResidencyEvidence'}}}}
+      responses:
+        '200': {description: Saved evidence, content: {application/json: {schema: {$ref: '#/components/schemas/AccountResidencyEvidenceRecord'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '410': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/sharing:
+    put:
+      operationId: setAgentAccountUsageSharing
+      summary: Owner opts quota details into workspace sharing
+      description: Person owner plus account.manage only, revision checked under the access fence and audited. Defaults to false. Relinking resets sharing. Owners retain sharing control after computer or ongoing-use revocation; sharing never grants execution authority. Sharing covers quota detail, credits, reset times and bounded check errors on accounts, capacity, history, advice and events/SSE. It does not delegate checks.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [binding_revision, share_usage]
+              properties:
+                binding_revision: {type: integer, minimum: 0}
+                share_usage: {type: boolean}
+      responses:
+        '204': {description: Sharing saved}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/signals:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    put:
+      operationId: reportAccountSignals
+      description: Only the registering agent may publish reading support and the tenant-keyed quota fingerprint. Never accepts a vendor identity, email, path or credential.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountSignals'}}}}
+      responses:
+        '204': {description: Accepted}
+  /agent-accounts/{accountId}/statusline:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    get:
+      operationId: getAccountStatusline
+      description: Registering agent reads explicit human consent. A read writes no settings.
+      security: *auth
+      responses:
+        '200': {description: Consent, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
+    put:
+      operationId: setAccountStatusline
+      description: A person may opt in only for a Claude account enrolled on a computer they approved, or a workspace owner or admin may opt in for any Claude account. account.manage alone is not enough. The enrolled daemon applies the change locally and preserves a status line it did not install.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
+      responses:
+        '200': {description: Consent, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
+  /agent-accounts/{accountId}/usage-probe:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    put:
+      operationId: setAccountUsageProbe
+      summary: Owner consent to host usage probes
+      description: "Requires the owning person with account.manage and the current binding revision. Uses unofficial provider endpoints; they may change or stop. You are responsible for following your provider's terms. Consent grants no execution or sharing authority."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [binding_revision, enabled]
+              properties:
+                binding_revision: {type: integer, minimum: 0}
+                enabled: {type: boolean}
+      responses:
+        '204': {description: "Consent saved"}
+        '400': {description: "Invalid request"}
+        '403': {description: "Owning person required"}
+        '409': {description: "Account binding changed"}
+  /agent-accounts/{accountId}/windows:
+    post:
+      operationId: createAccountWindow
+      description: Admin sets a bounded allowance and pacing policy for the CLI and older clients. Overlapping windows of one unit are rejected. The window caps on top of readings, pacing and Keep for you; it no longer replaces them (AEON-384). The web app offers the Advanced limit instead.
+      security: [{session: []}]
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AllowanceWindowWrite'}}}}
+      responses:
+        '201': {description: Window, content: {application/json: {schema: {$ref: '#/components/schemas/AllowanceWindow'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/windows/{windowId}:
+    delete:
+      operationId: removeAccountWindow
+      summary: Remove a limit set by hand
+      description: Person account.manage permission. The manual window stops capping; its row, usage and reservations stay, so nothing is lost and running work settles as before. Windows read from the vendor and pairing verifications are not removable (404).
+      security: [{session: []}]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: windowId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204': {description: Removed}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/windows/{windowId}/repeat:
+    post:
+      operationId: repeatAccountWindow
+      summary: Make a limit set by hand repeat
+      description: Person account.manage permission. Turns a manual window into the account's Advanced limit - its allowance and unit per the period its length matches (up to 36 hours a day, up to 10 days a week, else a month) - and hides the window in the same transaction. Its original cap stays binding until expiry. An existing Advanced limit is preserved and returns 409.
+      security: [{session: []}]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: windowId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: The limit now in force, content: {application/json: {schema: {$ref: '#/components/schemas/AccountLimitRule'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {description: 'unsupported_limit_unit - this account does not report priced run usage.', content: {application/json: {schema: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string, const: unsupported_limit_unit}}}}}}
+components:
+  schemas:
+    AccountCapacity:
+      type: object
+      required: [account_id, schedule, windows]
+      properties:
+        budget: {$ref: '#/components/schemas/CapacityBudget'}
+        account_id: {type: string, format: uuid}
+        routing: {$ref: '#/components/schemas/CapacityRouting'}
+        learning: {$ref: '#/components/schemas/CapacityLearning'}
+        ongoing_use_approved: {type: boolean, description: True for unpaired accounts or a separately approved connected pairing; readings never change this approval}
+        probe_failure: {type: string, enum: [auth_failed, unavailable], description: 'Why the last probe failed; absent after a successful probe. Only auth_failed means the account needs a new sign-in.'}
+        limiting_reset: {type: string, format: date-time, description: 'Earliest reset of the account''s current measured windows (including 5-hour windows); a Sprint in scope ends at the earliest of these.'}
+        awaiting_reading: {type: boolean, description: 'True after a recovery run cleared a denial and no later reading has arrived. Current windows are omitted until the next run measures capacity.'}
+        details_redacted: {type: boolean, description: True when the owner has not shared quota detail; ignore the placeholder schedule.}
+        schedule: {$ref: '#/components/schemas/CapacitySchedule'}
+        quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
+        group_id: {type: string, format: uuid}
+        group_name: {type: string}
+        host_label: {type: string}
+        hosts: {type: array, items: {type: string}, description: Host chips when several doors share one quota. Slots are not summed across those doors.}
+        same_quota_as: {type: string, format: uuid, description: The freshest door of this quota. Windows for the single gauge come from that door.}
+        windows:
+          type: array
+          items:
+            type: object
+            required: [reading, starts_at, allowance, remaining_percent, freshness, pacing]
+            properties:
+              reading: {$ref: '#/components/schemas/CapacityReading'}
+              starts_at: {type: string, format: date-time}
+              allowance: {type: number, const: 100}
+              remaining_percent: {type: number}
+              freshness: {type: string, enum: [fresh, aging, stale, expired]}
+              usage_today_known: {type: boolean, description: False when no exact schedule-boundary observation exists; never infers daily usage from tokens}
+              pacing: {$ref: '#/components/schemas/CapacityPacing'}
+        limit:
+          description: The account's Advanced limit (AEON-384) with what it counted this period. Absent when none is set.
+          allOf:
+            - {$ref: '#/components/schemas/AccountLimitRule'}
+            - type: object
+              required: [used, period_end]
+              properties:
+                used: {type: number, minimum: 0, description: Measured usage plus outstanding estimates in the owner calendar period; percent retains positive deltas across vendor resets.}
+                period_end: {type: string, format: date-time, description: When the period ends and the count starts again.}
+        cost_limit_supported: {type: boolean, description: True only when this account reports priced run usage; only then may cost_micros limits be set.}
+        spend_month_usd: {type: string, pattern: '^[0-9]+\.[0-9]{2}$', description: 'List-price spend this local month, in dollars, for an account whose usage is billed by API key. Absent for subscriptions. An estimate, not a billed charge.'}
+    AccountCatalogChoice:
+      type: object
+      required: [id, label, plan, registered_by_principal_id, state, last_probe_at, last_probe_ok, available, unavailable_reasons, remaining_fraction, windows, models, default_model_profile_id]
+      properties:
+        wait: {$ref: '#/components/schemas/CapacityWait'}
+        id: {type: string, format: uuid}
+        label: {type: string}
+        plan: {type: string}
+        registered_by_principal_id: {type: string, format: uuid}
+        state: {type: string, enum: [available, draining, unavailable]}
+        last_probe_at: {type: [string, 'null'], format: date-time}
+        last_probe_ok: {type: [boolean, 'null']}
+        available: {type: boolean, description: 'Advisory state, probe, capacity, model and ledger headroom eligibility; not proof of measured usage. A provisional account may be available under existing queue policy.'}
+        unavailable_reasons: {type: array, items: {type: string, enum: [state, probe, capacity, allowance, models]}}
+        remaining_fraction: {type: [number, 'null'], minimum: 0, maximum: 1, description: 'Minimum (allowance-used-reserved)/allowance across active windows, clamped at zero. Null if any active window is provisional, has no positive allowance, or no active windows exist. Unknown usage is never measured zero or 100 percent remaining.'}
+        default_model_profile_id: {type: [string, 'null'], format: uuid, description: First eligible existing role route; null when the role has no eligible route.}
+        windows:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/AllowanceWindow'}
+              - type: object
+                required: [remaining, pace_remaining]
+                properties:
+                  remaining: {type: integer, format: int64, minimum: 0, description: 'Ledger headroom max(0, allowance-used-reserved). When provisional, this is not measured provider allowance remaining.'}
+                  pace_remaining: {type: integer, format: int64, minimum: 0, description: 'Nonnegative paced ledger headroom. When provisional, this does not establish measured usage or remaining allowance.'}
+        models:
+          type: array
+          items:
+            type: object
+            required: [model, family, efforts]
+            properties:
+              model: {type: string}
+              family: {type: string}
+              efforts:
+                type: array
+                items:
+                  type: object
+                  required: [effort, model_profile_id, version]
+                  properties:
+                    effort: {type: string}
+                    model_profile_id: {type: string, format: uuid}
+                    version: {type: string}
+    AccountCheck:
+      type: object
+      required: [id, account_id, actor_principal_id, binding_revision, daemon_generation, state, requested_at, retry_at, early_recovery_requested]
+      properties:
+        id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        actor_principal_id: {type: string, format: uuid}
+        binding_revision: {type: integer, minimum: 0}
+        daemon_generation: {type: [string, 'null'], maxLength: 128}
+        state: {type: string, enum: [pending, completed, invalidated]}
+        requested_at: {type: string, format: date-time}
+        retry_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time, description: Pending captures expire five minutes after requested_at; expired captures are not polled or accepted and a new idempotency key requests a fresh capture.}
+        early_recovery_requested: {type: boolean, description: Intent only; package B consumes a resource/wait permit atomically with automatic recovery.}
+        result: {$ref: '#/components/schemas/ReadinessCheckResult'}
+    AccountCheckRetry:
+      type: object
+      required: [error, code, retry_at]
+      properties:
+        error: {type: string}
+        code: {type: string, const: check_gap}
+        retry_at: {type: string, format: date-time}
+    AccountCheckWrite:
+      type: object
+      additionalProperties: false
+      required: [binding_revision, idempotency_key]
+      properties:
+        binding_revision: {type: integer, minimum: 0}
+        idempotency_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'}
+    AccountGroup:
+      type: object
+      required: [id, harness, name, exclusive, account_ids, project_ids]
+      properties:
+        id: {type: string, format: uuid}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        exclusive: {type: boolean}
+        account_ids: {type: array, items: {type: string, format: uuid}}
+        project_ids: {type: array, items: {type: string, format: uuid}}
+    AccountGroupWrite:
+      type: object
+      additionalProperties: false
+      properties:
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
+        name: {type: string, minLength: 1, maxLength: 80}
+        exclusive: {type: boolean}
+        account_ids: {type: array, items: {type: string, format: uuid}}
+        project_ids: {type: array, items: {type: string, format: uuid}}
+    AccountLimitProperties:
+      type: object
+      required: [amount, unit, period]
+      description: 'Let agents use at most <amount> <unit> of this account per <period>.'
+      properties:
+        amount: {type: integer, format: int64, minimum: 1, maximum: 1000000000000000, description: At most 100 for percent. Money is in cost_micros.}
+        unit: {type: string, enum: [percent, runs, requests, tokens, cost_micros]}
+        period: {type: string, enum: [day, week, month], description: 'Local calendar day, week (Monday first) or month of the account owner''s schedule timezone.'}
+    AccountLimitRule:
+      allOf:
+        - {$ref: '#/components/schemas/AccountLimitProperties'}
+        - type: object
+          required: [id, account_id, created_at]
+          properties:
+            id: {type: string, format: uuid}
+            account_id: {type: string, format: uuid}
+            from_window_id: {type: string, format: uuid, description: Present when made from a manual window with Make this repeat.}
+            created_at: {type: string, format: date-time}
+    AccountLimitWrite:
+      type: object
+      additionalProperties: false
+      allOf:
+        - {$ref: '#/components/schemas/AccountLimitProperties'}
+      properties:
+        amount: {}
+        unit: {}
+        period: {}
+    AccountOverview:
+      type: object
+      additionalProperties: false
+      required: [account_id, provider, harness, label, host_label, daemon_id, state, billing_mode, windows, routable, details_redacted]
+      properties:
+        account_id: {type: string, format: uuid}
+        provider: {type: string, description: "Configured provider, or the native harness provider; empty when unknown."}
+        harness: {type: string}
+        label: {type: string}
+        host_label: {type: string}
+        daemon_id: {type: string}
+        owner_person_id: {type: string, format: uuid}
+        owner_person_name: {type: string}
+        state: {type: string, enum: [available, draining, unavailable]}
+        billing_mode: {type: string, enum: [unknown, subscription, api]}
+        usage_policy: {$ref: '#/components/schemas/AccountUsagePolicy'}
+        windows: {type: array, maxItems: 4096, items: {$ref: '#/components/schemas/AccountOverviewWindow'}}
+        schedule: {$ref: '#/components/schemas/CapacitySchedule'}
+        limit: {$ref: '#/components/schemas/AccountLimitRule'}
+        quota_pool_fingerprint: {type: string, description: "Confirmed shared-pool membership only; matching vendor signals alone do not join accounts."}
+        routing: {$ref: '#/components/schemas/CapacityRouting'}
+        routable: {type: boolean, description: "Advisory admission and slot eligibility, never launch authority or proof of measured room. A redacted row is always false and is not quota headroom."}
+        wait: {$ref: '#/components/schemas/CapacityWait'}
+        details_redacted: {type: boolean, description: "Windows, schedule, limit, pool membership and routing withheld by current owner-sharing policy. A redacted row also reports routable false and a wait whose code is state."}
+        boost_withheld: {type: boolean, description: "Canonical-owned account whose usage policy is withheld. Boost today updates it from the stored revision and the client must not send its id."}
+        resets: {$ref: '#/components/schemas/AccountResetCreditsOrNull'}
+        reset_policy: {type: string, enum: [suggest, auto_before_expiry]}
+        reset_plan: {$ref: '#/components/schemas/AccountResetPlanOrNull'}
+        reset_revision: {type: integer, minimum: 0}
+        binding_revision: {type: integer, minimum: 0}
+        reset_undo_supported: {type: boolean}
+    AccountResetCredits:
+      type: object
+      additionalProperties: false
+      required: [count, expires_at, source]
+      properties:
+        count: {type: integer, minimum: 0, maximum: 32}
+        expires_at: {type: array, maxItems: 32, items: {type: string, format: date-time}, description: "One expiry per spendable credit, in ascending order; equal expiries are separate credits."}
+        source: {type: string, const: vendor}
+    AccountResetCreditsOrNull:
+      oneOf:
+        - {$ref: '#/components/schemas/AccountResetCredits'}
+        - {type: 'null'}
+    AccountResetReport:
+      type: object
+      additionalProperties: false
+      required: [count, expires_at, source, read_at, binding_revision, undo_supported]
+      properties:
+        count: {type: integer, minimum: 0, maximum: 32}
+        expires_at: {type: array, maxItems: 32, items: {type: string, format: date-time}}
+        source: {type: string, const: vendor}
+        read_at: {type: string, format: date-time}
+        binding_revision: {type: integer, minimum: 0}
+        undo_supported: {type: boolean}
+      description: "Explicit vendor data reported by the bound daemon through the existing account.probe scope, with current usage-probe consent. Max 32 credits, each expiring within 367 days. Older/equal reports cannot replace current data. Stale or rebound reports read as null."
+    AccountResetPlan:
+      type: object
+      additionalProperties: false
+      required: [planned_at, raised_pace_points, raised_pace_until]
+      properties:
+        planned_at: {type: string, format: date-time}
+        raised_pace_points: {type: number, minimum: 0, maximum: 50}
+        raised_pace_until: {type: string, format: date-time}
+      description: "Advice from the current window's learned burn. The plan waits for near-exhaustion and leaves five minutes before credit expiry. Natural window resets before expiry give no plan. Only fresh daemon captures with owner opt-in can spend automatically; reads never spend. Raised pace is active only after vendor success and remains bounded by floors and explicit Boost today."
+    AccountResetPlanOrNull:
+      oneOf:
+        - {$ref: '#/components/schemas/AccountResetPlan'}
+        - {type: 'null'}
+    AccountResetState:
+      type: object
+      additionalProperties: false
+      required: [account_id, reset_policy, revision, binding_revision, resets, reset_plan, undo_supported]
+      properties:
+        account_id: {type: string, format: uuid}
+        reset_policy: {type: string, enum: [suggest, auto_before_expiry]}
+        revision: {type: integer, minimum: 0}
+        binding_revision: {type: integer, minimum: 0}
+        resets: {$ref: '#/components/schemas/AccountResetCreditsOrNull'}
+        reset_plan: {$ref: '#/components/schemas/AccountResetPlanOrNull'}
+        undo_supported: {type: boolean}
+    AccountResetResult:
+      type: object
+      additionalProperties: false
+      required: [action_id, account_id, window, resets, undo_until]
+      properties:
+        action_id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        window: {$ref: '#/components/schemas/CapacityReading'}
+        resets: {$ref: '#/components/schemas/AccountResetReport'}
+        undo_until: {type: [string, 'null'], format: date-time}
+    AccountOverviewLearning:
+      type: object
+      additionalProperties: false
+      required: [burn_percent_per_hour, samples]
+      properties:
+        limit_tokens: {type: number, exclusiveMinimum: 0, description: "Learned full-window token capacity, absent without a token conversion."}
+        burn_percent_per_hour: {type: number, minimum: 0}
+        samples: {type: integer, minimum: 0}
+    AccountOverviewPage:
+      type: object
+      additionalProperties: false
+      required: [accounts, as_of, has_more]
+      properties:
+        as_of: {type: string, format: date-time}
+        accounts: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AccountOverview'}}
+        has_more: {type: boolean}
+        next_cursor: {type: string, format: uuid}
+    AccountOverviewWindow:
+      type: object
+      additionalProperties: false
+      required: [window_kind, bucket, starts_at, resets_at, unit, allowance, used, reserved, freshness, source]
+      properties:
+        window_kind: {type: string, description: "Vendor kind, manual, fact, refresh or blind."}
+        bucket: {type: string}
+        starts_at: {type: string, format: date-time}
+        resets_at: {type: string, format: date-time}
+        read_at: {type: string, format: date-time}
+        unit: {type: string}
+        allowance: {type: integer}
+        used: {type: number}
+        reserved: {type: integer}
+        used_percent: {type: number, minimum: 0, maximum: 100}
+        freshness: {type: string, enum: [fresh, aging, stale, expired, unknown]}
+        source: {type: string, enum: [vendor_reported, learned, manual, synthetic]}
+        pacing: {$ref: '#/components/schemas/CapacityPacing'}
+        learned: {$ref: '#/components/schemas/AccountOverviewLearning'}
+    AccountPosture:
+      type: object
+      required: [id, label, order, posture, floor_percent, boost_percent, boost_until, keep_for_you_percent]
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string}
+        order: {type: integer, minimum: 0, description: "Routing rank; zero means currently unavailable."}
+        posture: {type: string, enum: [careful, balanced, maxout]}
+        floor_percent: {type: integer, minimum: 0, maximum: 80}
+        boost_percent: {type: integer, enum: [0, 10, 20, 30]}
+        boost_until: {type: [string, 'null'], format: date-time}
+        keep_for_you_percent: {type: number, minimum: 0, maximum: 80}
+    AccountProbe:
+      type: object
+      required: [daemon_id, daemon_generation, available]
+      properties:
+        readiness: {$ref: "#/components/schemas/ReadinessReport"}
+        measurement_only: {type: boolean, default: false, description: 'Scoped daemon measurement or generation heartbeat. Preserves last_probe_at, last_probe_ok, failure and legacy credit snapshot under the account write fence. Readiness reports require the generation already established by a measurement-only heartbeat without readiness; available and failure remain compatibility fields and do not update health in this mode.'}
+        daemon_id: {type: string, minLength: 1, maxLength: 128}
+        daemon_generation: {type: string, minLength: 1, maxLength: 128}
+        available: {type: boolean}
+        host_label: {type: string, maxLength: 128, description: Optional display-only host name reported by the owner daemon; fills an empty label without overwriting configured metadata.}
+        openrouter_credits: {$ref: '#/components/schemas/OpenRouterCredits'}
+        failure: {type: string, enum: [auth_failed, unavailable], description: 'Only with available=false. auth_failed only when the vendor status command confirmed this account is signed out; identity mismatch and every other failure are unavailable (the default when omitted). Only confirmed sign-out asks for another login. Bounded daemon lifecycle reasons may distinguish identity_mismatch, timeout, protocol and launch_failed, without changing these historical probe categories or uploading vendor identity or diagnostics. A version response alone never establishes signed-in readiness.'}
+    AccountReadiness:
+      type: object
+      required: [account_id, state, can_try, reason_codes, display_reason, checked_at, next_attempt_at, measured_usage, details_redacted]
+      properties:
+        account_id: {type: string, format: uuid}
+        state: {type: string, enum: [ready, unknown, blocked]}
+        can_try: {type: boolean, description: Advisory; reserve and claim recheck all model/project gates.}
+        reason_codes: {type: array, items: {type: string}, description: Stable ordered reasons; usage_unknown_reserve_not_enforceable never means Ready. Unshared peers receive only available/unavailable.}
+        display_reason: {type: string}
+        checked_at: {type: [string, 'null'], format: date-time}
+        next_attempt_at: {type: [string, 'null'], format: date-time}
+        check_result: {allOf: [{$ref: "#/components/schemas/ReadinessCheckResult"}], description: The account owner and registering daemon may see their own capture result even when pooled quota measurements remain withheld.}
+        measured_usage: {type: [array, 'null'], maxItems: 32, items: {$ref: '#/components/schemas/ReadinessFact'}}
+        details_redacted: {type: boolean}
+    AccountReadinessPage:
+      type: object
+      required: [items, next_after]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AccountReadiness'}}
+        next_after: {type: [string, 'null'], format: uuid}
+    AccountResidencyEvidence:
+      type: object
+      additionalProperties: false
+      required: [model_profile_ids, inference_countries, storage_countries, log_countries, local_execution, verified_at, expires_at, proof_ref]
+      description: Host attestation, not an automated compliance certification. Country sets use uppercase ISO 3166-1 alpha-2 codes. EU and local require all three nonempty sets to contain only EU member countries; local additionally requires explicit operator-local execution. Both classes require a covered profile, a proof reference, verified_at no later than now and expires_at strictly after now. The validity interval from verified_at to expires_at must be positive and at most 400 days. Optional retention and training declarations are recorded without changing the residency class.
+      properties:
+        model_profile_ids: {type: array, minItems: 1, maxItems: 256, uniqueItems: true, items: {type: string, format: uuid}}
+        inference_countries: {type: array, maxItems: 249, uniqueItems: true, items: {type: string, pattern: '^[A-Z]{2}$'}}
+        storage_countries: {type: array, maxItems: 249, uniqueItems: true, items: {type: string, pattern: '^[A-Z]{2}$'}}
+        log_countries: {type: array, maxItems: 249, uniqueItems: true, items: {type: string, pattern: '^[A-Z]{2}$'}}
+        local_execution: {type: boolean}
+        retention_days: {type: [integer, 'null'], minimum: 0, maximum: 36500}
+        training_opt_out: {type: [boolean, 'null']}
+        verified_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        proof_ref: {type: string, minLength: 1, maxLength: 1024, description: Opaque reference to proof documents; never credentials or signed access URLs.}
+    AccountResidencyEvidenceRecord:
+      type: object
+      required: [account_id, evidence, recorded_by, recorded_at, binding_current]
+      properties:
+        account_id: {type: string, format: uuid}
+        evidence: {$ref: '#/components/schemas/AccountResidencyEvidence'}
+        recorded_by: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        binding_current: {type: boolean, description: False after the account's ownership or provider route changes; such evidence never qualifies a route.}
+    AccountRoute:
+      type: object
+      required: [account_id, account_key, account_label, daemon_id, reservations]
+      properties:
+        account_id: {type: string, format: uuid}
+        account_key: {type: string}
+        account_label: {type: string}
+        billing_mode: {type: string, enum: [unknown, api, subscription]}
+        subscription_label: {type: string}
+        daemon_id: {type: string}
+        reservations:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [reservation_id, window_id, unit]
+            properties:
+              reservation_id: {type: string, format: uuid}
+              window_id: {type: string, format: uuid}
+              unit: {type: string, enum: [requests, tokens, cost_micros, percent]}
+    AccountRouteRequest:
+      type: object
+      required: [run_id, daemon_id, account_ids, estimated_units]
+      properties:
+        run_id: {type: string, format: uuid}
+        daemon_id: {type: string, minLength: 1, maxLength: 128}
+        account_ids:
+          type: array
+          description: IDs of locally enrolled accounts available to the requesting daemon.
+          minItems: 1
+          maxItems: 256
+          items: {type: string, format: uuid}
+        estimated_units:
+          type: object
+          description: Required estimates for every configured active unit; omit only units with no active window.
+          propertyNames: {enum: [requests, tokens, cost_micros]}
+          additionalProperties: {type: integer, format: int64, minimum: 1}
+    AccountSignals:
+      type: object
+      additionalProperties: false
+      required: [reading_support, quota_fingerprint]
+      properties:
+        reading_support: {type: string, enum: [every_5_min, first_run, statusline, none]}
+        quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$', description: Self-reported hint only; never authorizes quota pooling. Empty until a stable non-email vendor account ID is verified.}
+    AccountTicketPin:
+      type: object
+      additionalProperties: false
+      required: [ticket_id, harness]
+      properties:
+        ticket_id: {type: string, format: uuid}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
+        account_id: {type: string, format: uuid}
+        group_id: {type: string, format: uuid}
+    AccountUsagePolicy:
+      type: object
+      required: [account_id, posture, source, floor_percent, own_floor_percent, revision, binding_revision, can_set_posture, can_set_floor]
+      properties:
+        account_id: {type: string, format: uuid}
+        posture: {type: string, enum: [careful, balanced, maxout]}
+        source: {type: string, enum: [account, person, workspace, schedule]}
+        floor_percent: {type: integer, minimum: 0, maximum: 80}
+        own_floor_percent: {type: integer, minimum: 0, maximum: 80}
+        revision: {type: integer, minimum: 0}
+        binding_revision: {type: integer, minimum: 0}
+        can_set_posture: {type: boolean}
+        can_set_floor: {type: boolean}
+        boost_percent: {type: integer, enum: [0, 10, 20, 30]}
+        boost_until: {type: [string, 'null'], format: date-time}
+    AccountUse:
+      type: object
+      required: [accounts]
+      properties:
+        accounts:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [account_id, daemon_id, harness, label, host_label, quota_fingerprint]
+            properties:
+              account_id: {type: string, format: uuid}
+              daemon_id: {type: string}
+              harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
+              label: {type: string}
+              host_label: {type: string}
+              quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
+    AgentAccount:
+      allOf:
+        - {$ref: '#/components/schemas/AgentAccountWrite'}
+        - type: object
+          required: [id, registered_by_principal_id, state, created_at]
+          properties:
+            pending_check: {$ref: "#/components/schemas/AccountCheck"}
+            readiness_resources: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ReadinessResource"}}
+            share_usage: {type: boolean, description: "Owner-controlled quota sharing, false until opted in."}
+            usage_probe_enabled: {type: boolean, description: "Read usage with this CLI's own login. Off until the owner opts in for this binding."}
+            usage_budget: {$ref: '#/components/schemas/CapacityBudget'}
+            details_redacted: {type: boolean}
+            owner_person_id: {type: string, format: uuid, description: Person who explicitly confirmed an ownership code; absent while unlinked. Independent of pairing and ongoing-use approval.}
+            owner_person_name: {type: string}
+            linked_at: {type: string, format: date-time}
+            link_revision: {type: integer, minimum: 0}
+            ongoing_use_approved: {type: boolean, description: True for an unpaired account or an explicitly approved connected pairing enrollment. State and other dispatch fences still apply.}
+            reading_support: {type: string, enum: [every_5_min, first_run, statusline, none]}
+            quota_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$'}
+            quota_pool_fingerprint: {type: string, pattern: '^([a-f0-9]{64})?$', description: Nonempty only after a person confirms this account for the pool.}
+            statusline_enabled: {type: boolean}
+            statusline_opt_in: {type: string, enum: [own, workspace], description: Present when this person may change the status line. own means they approved the paired computer. workspace means they are a workspace owner or admin and did not. Omitted when they cannot opt in.}
+            id: {type: string, format: uuid}
+            registered_by_principal_id: {type: string, format: uuid}
+            state: {type: string, enum: [available, draining, unavailable]}
+            last_probe_at: {type: [string, 'null'], format: date-time}
+            last_probe_ok: {type: [boolean, 'null']}
+            created_at: {type: string, format: date-time}
+            billing_mode: {type: string, enum: [unknown, api, subscription], default: unknown, description: Person-declared billing for this account.}
+            plan: {type: string}
+            host_label: {type: string}
+            provider: {type: string, description: Pi provider fixed by the approved local enrollment.}
+            model: {type: string, description: Pi provider model ID for new runs.}
+            model_status: {type: string, enum: [known, unknown, unchecked]}
+            model_data_note: {type: boolean, description: Stealth or free OpenRouter model; may log prompts and outputs.}
+            openrouter_credits: {$ref: '#/components/schemas/OpenRouterCredits'}
+            group_id: {type: string, format: uuid}
+            group_name: {type: string}
+            allowed_model_profile_ids:
+              type: [array, 'null']
+              description: Null preserves legacy tenant-harness catalog policy. Explicit arrays restrict model/effort pins; empty blocks new reservations.
+              items: {type: string, format: uuid}
+            windows: {type: array, items: {$ref: '#/components/schemas/AllowanceWindow'}}
+    AgentAccountCatalog:
+      type: object
+      required: [as_of, role, hosts]
+      properties:
+        as_of: {type: string, format: date-time}
+        role: {type: string}
+        hosts:
+          type: array
+          items:
+            type: object
+            required: [daemon_id, label, harnesses]
+            properties:
+              daemon_id: {type: string, description: Stable opaque daemon enrollment identifies the host; never a hostname supplied at launch.}
+              label: {type: string}
+              harnesses:
+                type: array
+                items:
+                  type: object
+                  required: [harness, accounts, default_account_id]
+                  properties:
+                    harness: {type: string}
+                    default_account_id: {type: [string, 'null'], format: uuid, description: 'Eligible account with greatest known minimum remaining fraction; UUID breaks ties. Null when no eligible account has fully measured active windows. Provisional accounts remain manually selectable under existing queue policy, but are not ranked as measured allowance.'}
+                    accounts: {type: array, items: {$ref: '#/components/schemas/AccountCatalogChoice'}}
+    AgentAccountMetadataWrite:
+      type: object
+      additionalProperties: false
+      required: [label, plan, host_label, allowed_model_profile_ids]
+      properties:
+        billing_mode: {type: string, enum: [unknown, api, subscription], description: 'Person with account.manage only. Omission preserves the saved value; unknown is the initial value. Never inferred from the account label or plan name.'}
+        label: {type: string, minLength: 1, maxLength: 128}
+        plan: {type: string, maxLength: 128}
+        host_label: {type: string, maxLength: 128}
+        allowed_model_profile_ids: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, format: uuid}}
+    AgentAccountWrite:
+      type: object
+      required: [account_key, harness, daemon_id, label]
+      properties:
+        account_key: {type: string, minLength: 1, maxLength: 128}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
+        daemon_id: {type: string, minLength: 1, maxLength: 128}
+        label: {type: string, minLength: 1, maxLength: 128}
+        max_parallel_runs: {type: integer, minimum: 1}
+    AllowanceWindow:
+      allOf:
+        - type: object
+          required: [starts_at, ends_at, unit, allowance, pace_model]
+          properties:
+            starts_at: {type: string, format: date-time}
+            ends_at: {type: string, format: date-time}
+            unit: {type: string, enum: [requests, tokens, cost_micros, percent]}
+            allowance: {type: integer, format: int64, minimum: 1}
+            pace_model: {type: string, enum: [steady, frontload, unrestricted]}
+            burst_ratio: {type: number, minimum: 0, maximum: 1}
+        - type: object
+          required: [id, account_id, used, reserved, provisional]
+          properties:
+            id: {type: string, format: uuid}
+            account_id: {type: string, format: uuid}
+            used: {type: integer, format: int64}
+            reserved: {type: integer, format: int64}
+            provisional: {type: boolean, description: "True when this window has no measured usage for its unit, or at least one settled reservation lacked measured usage. Zero-valued legacy telemetry is treated as unknown."}
+            set_by_you: {type: boolean, description: 'True for a manual window set by a person (the old Settings form, pairing or the CLI), which caps on top of readings. Absent for windows read from the vendor. Removed windows are not listed.'}
+    AllowanceWindowWrite:
+      type: object
+      required: [starts_at, ends_at, unit, allowance, pace_model]
+      properties:
+        starts_at: {type: string, format: date-time}
+        ends_at: {type: string, format: date-time}
+        unit: {type: string, enum: [requests, tokens, cost_micros]}
+        allowance: {type: integer, format: int64, minimum: 1}
+        pace_model: {type: string, enum: [steady, frontload, unrestricted]}
+        burst_ratio: {type: number, minimum: 0, maximum: 1, default: 0.1}
+    CapacityBudget:
+      type: object
+      additionalProperties: false
+      required: [currency, source, read_at, key_usage_usd]
+      properties:
+        currency: {type: string, const: USD}
+        source: {type: string, const: agentd}
+        read_at: {type: string, format: date-time}
+        key_usage_usd: {type: number, minimum: 0, maximum: 1000000000000}
+        key_limit_usd: {type: [number, 'null'], minimum: 0, maximum: 1000000000000}
+        key_remaining_usd: {type: [number, 'null'], minimum: 0, maximum: 1000000000000}
+        balance_usd: {type: [number, 'null'], minimum: 0, maximum: 1000000000000, description: "Account balance when /credits accepts this key; null means unknown."}
+    CapacityEvidence:
+      type: object
+      additionalProperties: false
+      required: [kind, samples]
+      properties:
+        kind: {type: string, enum: [runs, tokens, limit_hits, drift]}
+        samples: {type: integer, minimum: 1}
+    CapacityLearning:
+      type: object
+      description: Tenant-local observations only. Suggestions never change a schedule without a person saving it. No paths or vendor text.
+      required: [windows, tokens, cost_micros, runs, limit_hits]
+      properties:
+        tokens: {type: integer, minimum: 0, description: "Observed managed and token-only session consumption in the current known cycle, or since observation began."}
+        cost_micros: {type: integer, minimum: 0}
+        runs: {type: integer, minimum: 0}
+        limit_hits: {type: integer, minimum: 0}
+        presence_until: {type: string, format: date-time}
+        away_suggested: {type: boolean}
+        sleeps_at_night: {type: boolean}
+        suggested_hours:
+          type: object
+          required: [start, end, days]
+          properties:
+            start: {type: number, minimum: 0, maximum: 23.5}
+            end: {type: number, minimum: 0.5, maximum: 24}
+            days: {type: integer, minimum: 5}
+        correction:
+          type: object
+          required: [points, at]
+          properties:
+            points: {type: number, description: Positive means the estimate was too optimistic.}
+            at: {type: string, format: date-time}
+        windows:
+          type: array
+          items:
+            type: object
+            required: [window_kind, bucket, run_count, work_days]
+            properties:
+              window_kind: {type: string, enum: [5h, weekly, monthly, other]}
+              bucket: {type: string}
+              run_count: {type: integer, minimum: 0}
+              run_percent: {type: number, minimum: 0, maximum: 100}
+              hold_percent: {type: number, minimum: 1, maximum: 25}
+              plus_minus: {type: number, minimum: 0}
+              percent_per_million_tokens: {type: number, minimum: 0}
+              percent_per_hour: {type: number, minimum: 0}
+              auto_reserve_percent: {type: number, minimum: 10, maximum: 60}
+              work_days: {type: integer, minimum: 0}
+    CapacityNext:
+      type: object
+      required: [harness, accounts, parallel_runs]
+      properties:
+        harness: {type: string}
+        parallel_runs: {type: integer, minimum: 0}
+        wait: {$ref: '#/components/schemas/CapacityWait'}
+        accounts:
+          type: array
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/CapacityRouting'}
+              - type: object
+                required: [account_id, account_label, daemon_id, harness]
+                properties:
+                  account_id: {type: string, format: uuid}
+                  account_label: {type: string}
+                  daemon_id: {type: string}
+                  harness: {type: string}
+    CapacityPacing:
+      type: object
+      required: [usable_hours, percent_per_hour, suggested_today_percent]
+      properties:
+        usable_hours: {type: number}
+        percent_per_hour: {type: number}
+        suggested_today_percent: {type: number, description: Remaining share of the current schedule day}
+        available_now_percent: {type: number, description: 'Enforced remaining allowance in the active schedule band: min(paced share, remaining - reserve_effective_percent). Zero outside work bands unless Sprint or Away is active.'}
+        budget_percent: {type: number}
+        used_today_percent: {type: number, description: Observed usage since the schedule boundary when usage_today_known is true; otherwise since the first sample available in the period}
+        tonight_percent: {type: number}
+        period_start: {type: string, format: date-time}
+        period_end: {type: string, format: date-time}
+        finish: {type: string, format: date-time}
+        allow_off: {type: boolean}
+        unused: {type: boolean}
+        ahead: {type: boolean}
+        reserve_percent: {type: number, description: 'Keep for you level R for this window: auto (30 until learned), the fixed share, or 0 when off.'}
+        reserve_effective_percent: {type: number, description: 'R_eff now: what agents leave the person of this window. 0 under Sprint, Away and Run now once, and when no work hours remain before the reset.'}
+        drift_percent: {type: number, minimum: 0, description: Pessimistic usage since an aging reading; already subtracted from available_now_percent.}
+        would_expire_percent: {type: number, minimum: 0, description: Remaining capacity the learned throughput cannot consume in scheduled hours.}
+        reserve_until: {type: string, format: date-time, description: 'End of the person''s last work band before the reset, after which the reserve is gone. Absent when reserve_effective_percent is 0.'}
+    CapacityRate:
+      description: Off (0), full (1), or adjustable reduced pace (0.1 to 0.9).
+      anyOf:
+        - {type: number, enum: [0, 1]}
+        - {type: number, minimum: 0.1, maximum: 0.9}
+    CapacityReading:
+      type: object
+      additionalProperties: false
+      required: [window_kind, window_minutes, used_percent, resets_at, source, read_at]
+      properties:
+        window_kind: {type: string, enum: [5h, weekly, monthly, other]}
+        bucket: {type: string, maxLength: 64, description: 'Vendor bucket, e.g. codex or seven_day_opus; empty means general quota'}
+        window_minutes: {type: integer, minimum: 1, maximum: 527040}
+        used_percent: {type: number, minimum: 0, maximum: 100}
+        resets_at: {type: string, format: date-time}
+        plan: {type: string, maxLength: 128}
+        source: {type: string, enum: [harness, agentd, estimate]}
+        read_at: {type: string, format: date-time}
+        ordinary_usage_allowed: {type: boolean, description: Vendor authority; false forbids dispatch even when percent remains}
+        run_id: {type: string, format: uuid}
+        phase: {type: string, enum: [start, update, end]}
+        plus_minus: {type: number, minimum: 0, maximum: 100, description: Uncertainty in percentage points; display only at three points or more.}
+        evidence: {$ref: '#/components/schemas/CapacityEvidence'}
+    CapacityRouting:
+      type: object
+      required: [rank, available_slots]
+      properties:
+        rank: {type: integer, minimum: 0, description: One-based server order within the harness; zero means currently ineligible.}
+        available_slots: {type: integer, minimum: 0, description: Additional runs that fit all windows and the concurrency limit right now.}
+        resets_at: {type: string, format: date-time, description: Soonest current weekly or monthly reset; falls back to a shorter window only when no long window exists.}
+        cap_percent: {type: number, minimum: 0, description: Smallest normalized available cap across all binding windows.}
+        same_quota_as: {type: string, format: uuid, description: Set on an extra door of a quota whose slots are already counted on another account.}
+        wait: {$ref: '#/components/schemas/CapacityWait'}
+    CapacitySchedule:
+      type: object
+      additionalProperties: false
+      required: [timezone, week, off_days, nights, model, night, shifts, blocks]
+      properties:
+        timezone: {type: string, description: IANA timezone; defaults to the person profile timezone}
+        override_until: {type: string, format: date-time, description: 'Sprint expires at this reset, populated by the server from the earliest current reset in scope. Away requires it (its date); Hold may carry it (a dated hold). The override ends at this instant.'}
+        override: {type: string, enum: ["", sprint, hold, away], description: 'Sprint uses remaining quota until reset; Hold prevents measured-capacity routing; Away (user scope) is a Sprint bounded by override_until, across resets, with no reserve. Manual windows and the Advanced limit still cap on top.'}
+        reserve: {type: string, enum: ["", auto, fixed, off], description: 'Keep for you (AEON-375): how much of every window agents leave the person while they work, shrinking as a reset comes close (R_eff = R x min(1, H_you/H_ref)). Omitted or empty inherits the next scope up; on the user scope it means auto (30% until learned). off reproduces release 11 pacing.'}
+        reserve_percent: {type: number, minimum: 10, maximum: 80, multipleOf: 5, description: The fixed reserve level R; present only with reserve fixed.}
+        week:
+          type: array
+          minItems: 7
+          maxItems: 7
+          description: Monday first; at least one day on. Local hours use a half-hour grid.
+          items:
+            type: object
+            additionalProperties: false
+            required: [on, start, end]
+            properties:
+              on: {type: boolean}
+              start: {type: number, minimum: 0, maximum: 23.5, multipleOf: 0.5}
+              end: {type: number, minimum: 0.5, maximum: 24, multipleOf: 0.5}
+        off_days: {type: string, enum: [rest, expire, normal], default: expire}
+        nights: {type: boolean, default: false}
+        model: {type: string, enum: [daynight, shifts, blocks], default: daynight}
+        night:
+          type: object
+          additionalProperties: false
+          required: [start, end, k]
+          properties:
+            start: {type: number, minimum: 0, maximum: 23.5, multipleOf: 0.5}
+            end: {type: number, minimum: 0, maximum: 23.5, multipleOf: 0.5}
+            k: {type: number, minimum: 0.1, maximum: 1}
+        shifts:
+          type: object
+          additionalProperties: false
+          required: [early, late, night, k]
+          properties:
+            early: {type: number, minimum: 0, maximum: 23.5, multipleOf: 0.5}
+            late: {type: number, minimum: 0, maximum: 23.5, multipleOf: 0.5}
+            night: {type: number, minimum: 0, maximum: 23.5, multipleOf: 0.5}
+            k: {type: array, minItems: 3, maxItems: 3, items: {$ref: '#/components/schemas/CapacityRate'}}
+        blocks: {type: array, minItems: 24, maxItems: 24, items: {$ref: '#/components/schemas/CapacityRate'}}
+    CapacityScheduleOverride:
+      type: object
+      additionalProperties: false
+      required: [scope, schedule]
+      properties:
+        scope: {type: string, enum: [user, pool, account, group]}
+        pool: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
+        account_id: {type: string, format: uuid}
+        group_id: {type: string, format: uuid, description: Set when scope is group. The schedule sits between the account and the vendor pool.}
+        schedule:
+          anyOf:
+            - {$ref: '#/components/schemas/CapacitySchedule'}
+            - {type: 'null'}
+        carry_overrides: {type: boolean, description: 'PUT with scope user only. In one transaction, pool and account entries that only carry Sprint/Hold on top of the previous person schedule follow the new schedule (ended overrides are removed); deliberate pool or account schedules stay.'}
+    OpenRouterCredits:
+      type: object
+      additionalProperties: false
+      required: [observed_at]
+      description: Safe local GET /api/v1/key projection. Missing amounts are unknown; these are dollar credits, not a renewable capacity window.
+      properties:
+        observed_at: {type: string, format: date-time}
+        usage: {type: [number, 'null'], minimum: 0}
+        limit: {type: [number, 'null'], minimum: 0}
+        remaining: {type: [number, 'null'], minimum: 0}
+    QuotaWarningSession:
+      type: object
+      required: [session_id, project_id, account_id, availability, details_redacted]
+      properties:
+        session_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        availability: {type: string, const: limited}
+        details_redacted: {type: boolean}
+        severity: {type: string, enum: [early, urgent]}
+        remaining_percent: {type: number, minimum: 0, maximum: 50}
+        threshold_percent: {type: integer, minimum: 1, maximum: 50}
+        window_key: {type: string, maxLength: 128}
+        resets_at: {type: [string, 'null'], format: date-time}
+    ReadinessCheckResult:
+      type: string
+      description: Identity mismatch blocks work and is distinct from confirmed sign-out (authentication_failed). Timeout, protocol and launch_failed are measurement failures; they do not establish sign-out or clear an earlier identity failure.
+      enum: [success, unsupported, timeout, protocol, launch_failed, identity_mismatch, authentication_failed]
+    ReadinessFact:
+      allOf:
+        - {$ref: '#/components/schemas/ReadinessFactFields'}
+        - type: object
+          properties:
+            reading_error: {$ref: '#/components/schemas/ReadinessCheckResult'}
+            reading_age_seconds: {type: [integer, 'null'], minimum: 0}
+            backoff_step: {type: integer, minimum: 0, maximum: 3}
+            next_attempt_at: {type: [string, 'null'], format: date-time}
+            wait_id: {type: [string, 'null'], format: uuid}
+            early_recovery_used: {type: boolean}
+            failure_count: {type: integer, minimum: 0}
+            check_next_attempt_at: {type: [string, "null"], format: date-time}
+    ReadinessFactFields:
+      type: object
+      required: [resource_id, window_key, source, observed_at, credit_state]
+      properties:
+        resource_id: {type: string, format: uuid, description: Must already be a current resource membership; daemon reports cannot invent shared identities.}
+        window_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]*$'}
+        source: {type: string, enum: [agentd, harness, provider]}
+        observed_at: {type: string, format: date-time, description: Observation of this fact. A null check cannot move the retained hard stop's evidence time or postpone acceptance of a newer same-window room reading.}
+        resets_at: {type: [string, 'null'], format: date-time}
+        reading_at: {type: [string, 'null'], format: date-time}
+        used_percent: {type: [number, 'null'], minimum: 0, maximum: 100}
+        credit_state: {type: string, enum: [unknown, available, exhausted], default: unknown}
+        remaining: {type: [number, 'null'], minimum: 0, description: Measured remaining amount for this resource. A declared zero key cap is exhausted even if the provider omits remaining; a null key cap does not describe total balance.}
+        stop_kind: {type: string, enum: [none, named_reset, unnamed, money_402], default: none}
+        denial_reason: {type: string, enum: ['', vendor_denied, quota_exhausted, key_cap_exhausted, money_exhausted]}
+    ReadinessFactWrite:
+      allOf: [{$ref: "#/components/schemas/ReadinessFactFields"}]
+      unevaluatedProperties: false
+    ReadinessReport:
+      type: object
+      additionalProperties: false
+      required: [binding_revision, result]
+      description: Automatic reports without check_id may replay durable observations older than 24 hours while their binding and resource membership remain current. Original observation and reading times are preserved; replay does not renew freshness or replace newer facts. Manual reports retain the 24-hour observation bound and their check generation and expiry fences.
+      properties:
+        check_id: {type: string, format: uuid, description: Omitted for automatic captures including daemon restart; a supplied check ID remains fenced to its original generation and expiry.}
+        binding_revision: {type: integer, minimum: 0}
+        result: {$ref: '#/components/schemas/ReadinessCheckResult'}
+        facts: {type: array, maxItems: 32, items: {$ref: '#/components/schemas/ReadinessFactWrite'}}
+    ReadinessResource:
+      type: object
+      required: [id, kind, binding_revision]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [subscription_quota, key_cap, shared_balance, endpoint_concurrency]}
+        binding_revision: {type: integer, minimum: 0}
+    StatuslineConsent:
+      type: object
+      additionalProperties: false
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+        plan: {type: string, maxLength: 240, readOnly: true}

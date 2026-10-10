@@ -1,0 +1,8 @@
+scripts/ci/go-test-tiers.json merge=tiers
+scripts/ci/web-test-tiers.json merge=tiers
+web/ci-web-shards.json merge=tiers
+internal/authz/builtin_agent_exclusions.json merge=registries
+internal/authz/permission_labels.json merge=registries
+internal/auth/testdata/key_scope_ceiling.json merge=registries
+internal/dsar/inventory.json merge=registries
+internal/authz/testdata/builtin_agent_exclusions.json merge=registries

@@ -65,6 +65,7 @@ func (s *Sweeper) SweepLocked(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	defer conn.Release()
+	ctx = db.WithConnection(ctx, s.pool, conn)
 	var locked bool
 	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, sweeperLockKey).Scan(&locked); err != nil || !locked {
 		return 0, err
@@ -77,7 +78,7 @@ func (s *Sweeper) SweepLocked(ctx context.Context) (int, error) {
 			_ = conn.Conn().Close(unlockCtx)
 		}
 	}()
-	ids, err := s.tenantIDs(ctx)
+	ids, err := s.tenantIDs(ctx, conn)
 	if err != nil {
 		return 0, err
 	}
@@ -94,8 +95,8 @@ func (s *Sweeper) SweepLocked(ctx context.Context) (int, error) {
 }
 
 // tenantIDs reads the tenant registry, which has no tenant_id and no RLS.
-func (s *Sweeper) tenantIDs(ctx context.Context) ([]string, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+func (s *Sweeper) tenantIDs(ctx context.Context, conn *pgxpool.Conn) ([]string, error) {
+	rows, err := conn.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -143,7 +144,7 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
  LEFT JOIN harness_sessions rs ON rs.tenant_id=m.tenant_id AND rs.id=m.recipient_session_id
  LEFT JOIN inbox_compat_messages c ON c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id
  LEFT JOIN inbox_message_deliveries d ON d.tenant_id=c.tenant_id AND d.message_id=c.id
- WHERE r.state='queued' AND r.deliver_by IS NOT NULL AND m.acked_at IS NULL
+ WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND r.state='queued' AND r.deliver_by IS NOT NULL AND m.acked_at IS NULL
    AND NOT coalesce(d.state='pending' AND d.lease_until>clock_timestamp(),false)
    AND NOT EXISTS(SELECT 1 FROM harness_deliveries h WHERE h.message_id=m.id AND h.completed_at IS NULL AND h.released_at IS NULL AND h.leased_at>clock_timestamp()-interval '2 minutes')
    AND (r.deliver_by<=clock_timestamp()
@@ -224,7 +225,7 @@ func (s *Sweeper) healBatch(ctx context.Context, tenantID, scope string) (int, e
 	err := db.InTenant(ctx, s.pool, tenantID, func(tx pgx.Tx) error {
 		n = 0
 		rows, err := tx.Query(ctx, `SELECT m.id::text FROM inbox_receipts r JOIN inbox_messages m ON m.tenant_id=r.tenant_id AND m.id=r.message_id
- WHERE r.state='queued' AND `+scope+` AND m.acked_at IS NOT NULL LIMIT $1`, sweepBatch)
+ WHERE m.chat_thread_id IS NULL AND r.state='queued' AND `+scope+` AND m.acked_at IS NOT NULL LIMIT $1`, sweepBatch)
 		if err != nil {
 			return err
 		}

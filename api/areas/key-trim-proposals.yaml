@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/auth
+paths:
+  /key-trim-proposals:
+    get:
+      operationId: listKeyTrimProposals
+      summary: Read protected key trim approval memos
+      description: Person only, keys.manage. Reads recheck current scopes and recent use and expose blocked_reason. Bounded keyset pagination; no key material.
+      security: [{session: []}]
+      parameters:
+        - {name: state, in: query, schema: {type: string, enum: [pending, decided], default: pending}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+        - {name: cursor, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: A page of approval memos
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, has_more]
+                properties:
+                  items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/KeyTrimProposal'}}
+                  has_more: {type: boolean}
+                  next_cursor: {type: string, format: uuid}
+        '400': {description: Invalid query}
+        '403': {description: Signed-in person with key management rights required}
+  /key-trim-proposals/{proposalId}/decision:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: decideKeyTrimProposal
+      summary: Approve or decline a key trim as a person
+      description: >-
+        Person only, keys.manage rechecked in the final tenant-fenced transaction.
+        Approval rechecks expiry, key activity, live editor/agent/creator ceilings,
+        snapshot digest and recent use, atomically applies the candidate set and
+        retains the original set. Decline closes without changing scopes. Exact
+        actor/request_id/decision/digest replay never reapplies or audits twice.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, expected_digest, decision]
+              properties:
+                request_id: {type: string, format: uuid}
+                expected_digest: {type: string, pattern: '^[0-9a-f]{64}$', description: 'Scope snapshot digest, never a credential hash'}
+                decision: {type: string, enum: [approve, decline]}
+      responses:
+        '200':
+          description: Decision recorded or replayed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KeyTrimProposal'}
+        '400': {description: Invalid input}
+        '403': {description: Person key-management or live grant authority denied}
+        '404': {description: Proposal not found in this tenant}
+        '409': {description: 'Proposal expired, scopes changed, key inactive, recent use, or conflicting decision'}
+  /key-trim-proposals/{proposalId}/restore:
+    parameters:
+      - {name: proposalId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: restoreKeyTrimProposal
+      summary: Restore the previous scope set for thirty days
+      description: Person only, keys.manage and live editor/agent/original-creator ceilings. CAS against the applied candidate digest; never overwrites intervening edits. Exact replay does not reapply. Audits agent_key.scopes_changed with the original set and no key material.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, expected_digest]
+              properties:
+                request_id: {type: string, format: uuid}
+                expected_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+      responses:
+        '200':
+          description: Previous scopes restored or exact replay
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KeyTrimProposal'}
+        '400': {description: Invalid input}
+        '403': {description: Person key-management or live grant authority denied}
+        '404': {description: Proposal not found in this tenant}
+        '409': {description: 'Restore window closed, scopes changed, key inactive, or conflicting replay'}
+components:

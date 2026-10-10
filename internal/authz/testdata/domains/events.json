@@ -1,0 +1,101 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "events.subscribe"
+  ],
+  "builtin_roles": {
+    "admin": [
+      "events.read",
+      "events.subscribe",
+      "events.undo",
+      "events.undo_other"
+    ],
+    "guest": [
+      "events.read"
+    ],
+    "member": [
+      "events.read",
+      "events.subscribe",
+      "events.undo"
+    ],
+    "owner": [
+      "events.read",
+      "events.subscribe",
+      "events.undo",
+      "events.undo_other"
+    ],
+    "viewer": [
+      "events.read"
+    ]
+  },
+  "project_filtered": {
+    "GET /api/events": true,
+    "GET /api/events/activity": true,
+    "GET /api/events/stream": true
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Read events",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Events",
+      "key": "events.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Subscribe to authorized change hints (explicit custom agent grant)",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Events",
+      "key": "events.subscribe",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Undo events",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Events",
+      "key": "events.undo",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Undo Other events",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Events",
+      "key": "events.undo_other",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    }
+  ],
+  "routes": {
+    "GET /api/events": "events.read",
+    "GET /api/events/activity": "events.read",
+    "GET /api/events/stream": "events.read",
+    "GET /api/events/subscribe": "events.subscribe",
+    "GET /api/events/{eventId}/undo-preview": "events.undo",
+    "POST /api/events/{eventId}/undo": "events.undo"
+  },
+  "words": {
+    "resources": {
+      "events": "history"
+    },
+    "special": {
+      "events.subscribe": "Subscribe to authorized changes"
+    }
+  }
+}

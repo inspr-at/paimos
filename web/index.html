@@ -4,10 +4,40 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/brand/aeon-icon.svg">
+    <link rel="manifest" href="/manifest.webmanifest">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <title>Loading</title>
   </head>
   <body>
+    <script id="aeon-theme-boot" nonce="__AEON_THEME_NONCE__">
+      // Cache derived CSS only. Authentication later binds or clears its owner.
+      try {
+        var raw = localStorage.getItem('aeon.theme.v1');
+        var cached = raw && raw.length <= 32768 ? JSON.parse(raw) : null;
+        // Generated custom properties only: no URLs, imports, selectors or arbitrary rules.
+        var blocks = cached && typeof cached.css === 'string' && /^:root, :root\[data-theme="light"\] \{ ([^{}]*) \}\n:root\[data-theme="dark"\] \{ ([^{}]*) \}\n@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme="light"\]\) \{ ([^{}]*) \} \}$/.exec(cached.css);
+        var declaration = /^--[a-z][a-z0-9-]*: (.+)$/;
+        // Consume one token at a time; malformed numeric runs cannot trigger regex backtracking.
+        var valueToken = /#[0-9a-fA-F]{3,6}|[0-9.]+(?:px|deg|%)?|color-mix|in|srgb|transparent|linear-gradient|radial-gradient|circle|at|[(), +\-]/y;
+        var safe = blocks && blocks.slice(1).every(function (block) {
+          var parts = block.trim().split(';');
+          return parts.length <= 64 && parts.pop() === '' && parts.every(function (part) {
+            var match = declaration.exec(part.trim());
+            if (!match) return false;
+            valueToken.lastIndex = 0;
+            while (valueToken.lastIndex < match[1].length) if (!valueToken.exec(match[1])) return false;
+            return true;
+          });
+        });
+        if (safe && typeof cached.principal === 'string' && cached.principal.length > 0 && cached.principal.length <= 256) {
+          var style = document.createElement('style');
+          style.id = 'aeon-theme';
+          style.nonce = document.currentScript.nonce;
+          style.textContent = cached.css;
+          document.head.appendChild(style);
+        } else if (raw) localStorage.removeItem('aeon.theme.v1');
+      } catch (_) { /* storage can be unavailable or corrupt */ }
+    </script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

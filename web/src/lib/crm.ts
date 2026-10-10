@@ -5,6 +5,7 @@
 // whole record and carries its revision; the server refuses a stale one with
 // 409. Undo goes through the event log. Free of Vue for unit tests.
 import { api, listNodes } from './api.ts'
+import { captureToastOwner } from './toast.ts'
 import type { RowAction } from './rowActions.ts'
 
 export interface Address { street: string; postal_code: string; city: string; country: string; freeform: string }
@@ -14,9 +15,10 @@ export interface CustomerFields {
   billing_address: Address | null; visiting_address: Address | null; hourly_rate_minor: number | null; lp_rate_minor: number | null
   external_provider: string; external_id: string; external_url: string
 }
-export interface Customer extends CustomerFields { id: string; key: string; name: string; revision: number; customer_no: string | null; primary_contact_node_id: string | null; archived?: boolean }
+export interface MutationReceipt { event_ids?: readonly string[] }
+export interface Customer extends CustomerFields, MutationReceipt { id: string; key: string; name: string; revision: number; customer_no: string | null; primary_contact_node_id: string | null; archived?: boolean }
 export interface ContactFields { email: string; phone: string; role: string; note: string; external_provider: string; external_id: string; external_url: string }
-export interface Contact extends ContactFields { id: string; key: string; organisation_node_id: string; name: string; revision: number; primary: boolean }
+export interface Contact extends ContactFields, MutationReceipt { id: string; key: string; organisation_node_id: string; name: string; revision: number; primary: boolean }
 export interface Cooperation { engagement: string; ownership: string; environment_responsibility: string; sla: string; report_contract: string; revision: number }
 export interface RelatedProject { id: string; key: string; title: string; state: string; cooperation: Cooperation; cooperation_revision: number }
 export interface RelatedQuote { id: string; offer_no: string | null; state: string; archived: boolean }
@@ -39,13 +41,16 @@ export class CRMError extends Error {
   constructor(status: number, code: string, message: string) { super(message); this.status = status; this.code = code }
 }
 async function send<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  const current = captureToastOwner()
   const response = await api(`/crm${path}`, body === undefined ? { method } : { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!response.ok) {
     const error = await response.json().catch(() => ({}))
     const message = typeof error?.message === 'string' ? error.message : typeof error?.error === 'string' ? error.error : ''
     throw new CRMError(response.status, typeof error?.code === 'string' ? error.code : '', plainError(response.status, message))
   }
-  return response.status === 204 ? (undefined as T) : await response.json() as T
+  const data = response.status === 204 ? {} : await response.json()
+  const eventIds = mutationEventIds(response, current)
+  return (eventIds && data && typeof data === 'object' && !Array.isArray(data) ? { ...data, event_ids: eventIds } : data) as T
 }
 // What went wrong, as people say it.
 export function plainError(status: number, message: string) {
@@ -81,7 +86,7 @@ export const createCustomer = (write: CustomerWrite) => send<Customer>('/organis
 // Archiving hides a customer from lists and pickers; its quotes, projects and hours stay.
 export const setCustomerArchived = (id: string, expectedRevision: number, archived: boolean) => send<Customer>(`/organisations/${seg(id)}/visibility`, 'PATCH', { expected_revision: expectedRevision, archived })
 export const updateCustomer = (id: string, write: CustomerWrite, expectedRevision: number) => send<Customer>(`/organisations/${seg(id)}`, 'PATCH', { ...write, expected_revision: expectedRevision })
-export const deleteCustomer = (id: string) => send<void>(`/organisations/${seg(id)}`, 'DELETE')
+export const deleteCustomer = (id: string) => send<MutationReceipt>(`/organisations/${seg(id)}`, 'DELETE')
 export async function listContacts(id: string): Promise<Contact[]> {
   const out: Contact[] = []
   const seen = new Set<string>()
@@ -99,7 +104,7 @@ export async function listContacts(id: string): Promise<Contact[]> {
 }
 export const createContact = (orgId: string, write: ContactWrite) => send<Contact>(`/organisations/${seg(orgId)}/contacts`, 'POST', write)
 export const updateContact = (id: string, write: ContactWrite, expectedRevision: number) => send<Contact>(`/contacts/${seg(id)}`, 'PATCH', { ...write, expected_revision: expectedRevision })
-export const deleteContact = (id: string) => send<void>(`/contacts/${seg(id)}`, 'DELETE')
+export const deleteContact = (id: string) => send<MutationReceipt>(`/contacts/${seg(id)}`, 'DELETE')
 export const makePrimary = (orgId: string, contactId: string, expectedRevision: number) => send<Customer>(`/organisations/${seg(orgId)}/primary-contact`, 'POST', { contact_node_id: contactId, expected_revision: expectedRevision })
 export const getRelated = (id: string) => send<Related>(`/organisations/${seg(id)}/related`)
 export const setDocumentMetadata = (doc: RelatedDocument, data: Pick<RelatedDocument, 'title' | 'category' | 'status' | 'valid_from' | 'valid_until'>) => send<RelatedDocument>(`/documents/${seg(doc.attachment_id)}/metadata`, 'PUT', { ...data, expected_revision: doc.revision })
@@ -130,26 +135,24 @@ export async function contactDirectory(): Promise<Map<string, ContactCard>> {
   return out
 }
 
-// ---------- Undo through the event log ----------
-// The newest change of `types` on `nodeId` that is not itself an undo.
-export async function latestEvent(nodeId: string, types: string[]): Promise<number | null> {
-  let after = 0, found: number | null = null
-  for (let page = 0; page < 50; page++) {
-    const response = await api(`/events?node_id=${seg(nodeId)}&limit=200${after ? `&after=${after}` : ''}`)
-    if (!response.ok) return found
-    const body = await response.json() as { items?: { id: number; type: string; undo_of: number | null }[]; next_after?: number | null }
-    for (const event of body.items ?? []) if (types.includes(event.type) && event.undo_of == null) found = Number(event.id)
-    if (!body.next_after) break
-    after = Number(body.next_after)
-  }
-  return found
+// ---------- Undo through the exact accepted mutation ----------
+const receiptOwners = new WeakMap<readonly string[], () => boolean>()
+export function mutationEventIds(response: Response, current = captureToastOwner()): readonly string[] | undefined {
+  const raw = response.headers.get('x-aeon-event-ids')
+  if (!raw || raw.length > 22528 || !/^[1-9][0-9]{0,18}(,[1-9][0-9]{0,18})*$/.test(raw)) return undefined
+  const ids = raw.split(',')
+  if (ids.length > 1024 || new Set(ids).size !== ids.length) return undefined
+  const frozen = Object.freeze(ids)
+  receiptOwners.set(frozen, current)
+  return frozen
 }
-// Undo the newest matching change of each step, in order (a restored contact
-// before the primary choice that pointed away from it).
-export async function undoLatest(steps: { node: string; types: string[] }[]): Promise<void> {
-  for (const step of steps) {
-    const id = await latestEvent(step.node, step.types)
-    if (id == null) throw new Error('There is nothing to undo.')
+// Receipt order reverses append order, restoring dependent records before the
+// primary choice that pointed away from them. Never replace a missing receipt
+// (including a lost mutation response) with a lookup of the latest event.
+export async function undoEvents(eventIds: readonly string[] | undefined): Promise<void> {
+  if (!eventIds?.length) throw new Error('The exact change receipt is unavailable, so this change cannot be undone. Reload to check the record.')
+  for (const id of eventIds) {
+    if (receiptOwners.get(eventIds)?.() === false) throw new Error('Sign-in changed. This earlier change cannot be undone from this session.')
     const response = await api(`/events/${id}/undo`, { method: 'POST' })
     if (!response.ok) throw new Error(response.status === 409 ? 'It changed again since, so it cannot be undone.' : response.status === 403 ? 'Only a workspace admin can undo this.' : 'Undo did not work. Please try again.')
   }

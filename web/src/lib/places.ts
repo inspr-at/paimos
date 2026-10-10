@@ -1,19 +1,21 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The three places of the header, in order of use, and the g-sequences that go
-// there (g p, g a, g b). Free of Vue for unit tests.
+// The places of the header, in order of use, and their g-sequences
+// (g p, g d, g a, g b). Free of Vue for unit tests.
 
-export type PlaceId = 'projects' | 'agents' | 'business'
-export interface Place { id: PlaceId; label: string; to: string; key: 'p' | 'a' | 'b' }
+export type PlaceId = 'projects' | 'desk' | 'agents' | 'business'
+export interface Place { id: PlaceId; label: string; to: string; key: 'p' | 'd' | 'a' | 'b' }
 export const PLACES: readonly Place[] = [
   { id: 'projects', label: 'Projects', to: '/', key: 'p' },
+  { id: 'desk', label: 'Decision Desk', to: '/decision-desk', key: 'd' },
   { id: 'agents', label: 'Agents', to: '/agents', key: 'a' },
   { id: 'business', label: 'Business', to: '/business', key: 'b' },
 ]
 
 // Which place a page belongs to; settings and the like belong to none.
 export function placeOf(path: string): PlaceId | null {
-  if (path === '/' || path === '/briefing' || path.startsWith('/p/') || path === '/knowledge' || path === '/releases' || path.startsWith('/releases/')) return 'projects'
+  if (path === '/' || path.startsWith('/p/') || path === '/knowledge' || path === '/tickets' || path === '/releases' || path.startsWith('/releases/')) return 'projects'
   if (path === '/agents' || path.startsWith('/agents/')) return 'agents'
+  if (path === '/decision-desk') return 'desk'
   if (path === '/business' || path.startsWith('/business/')) return 'business'
   return null
 }

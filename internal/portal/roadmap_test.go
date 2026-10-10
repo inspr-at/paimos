@@ -77,7 +77,7 @@ func TestPublicRoadmapFeed(t *testing.T) {
 
 	project := insertNode(t, d, harbour, "PRJ-1", "project", "SECRET-PROJECT-NAME", "SECRET-PROJECT-BODY", "open", "", "{}")
 	otherProject := insertNode(t, d, harbour, "PRJ-2", "project", "SECRET-OTHER-PROJECT", "SECRET-OTHER-BODY", "open", "", "{}")
-	epic := insertNode(t, d, harbour, "EPC-1", "epic", "SECRET-EPIC", "", "open", project, "{}")
+	epic := insertNode(t, d, harbour, "EPC-1", "work", "SECRET-EPIC", "", "open", project, "{}")
 	linkPace(t, d, harbour, project)
 
 	add := func(key, title, state, parent string, fields map[string]any) string {
@@ -86,7 +86,7 @@ func TestPublicRoadmapFeed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return insertNode(t, d, harbour, key, "ticket", title, "", state, parent, string(raw))
+		return insertNode(t, d, harbour, key, "work", title, "", state, parent, string(raw))
 	}
 	approved := func(pill string, tags any) map[string]any {
 		return map[string]any{
@@ -182,7 +182,7 @@ func TestPublicRoadmapFeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	insertNode(t, d, other, "TKT-1", "ticket", "SECRET-FOREIGN", "", "open", "", string(rawForeign))
+	insertNode(t, d, other, "TKT-1", "work", "SECRET-FOREIGN", "", "open", "", string(rawForeign))
 
 	relAssigned := insertNode(t, d, harbour, "REL-4", "release", "SECRET-RELEASE-TITLE", "", "open", project, "{}")
 	publishRelease(t, d, harbour, project, relAssigned, 4, "planning", "", 0, []string{assignedID})

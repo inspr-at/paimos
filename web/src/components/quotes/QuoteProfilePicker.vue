@@ -94,7 +94,7 @@ function keys(event: KeyboardEvent) {
 .picker-chev { flex-shrink: 0; color: var(--ink-3); }
 .standard-mark { display: grid; place-items: center; flex-shrink: 0; width: 18px; height: 18px; border-radius: 4px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-2); color: var(--ink-3); }
 .standard-mark.big { width: 22px; height: 30px; }
-.newer-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--gold); box-shadow: 0 0 0 2px var(--surface-raised-2); }
+.newer-dot { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--secondary-line); box-shadow: 0 0 0 2px var(--surface-raised-2); }
 /* Narrow title bars: the sheet alone, with the newer-revision dot on its corner. */
 .compact .picker-name, .compact .picker-chev { display: none; }
 .compact.picker, .compact.frozen-profile { position: relative; width: 32px; padding: 0; justify-content: center; }

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -21,6 +22,11 @@ import (
 
 // Account is an opaque local enrollment. AccountKey is not a vendor credential.
 type Account struct {
+	UsageProbeEnabled    bool                `json:"usage_probe_enabled"`
+	UsageBudget          *capacity.Budget    `json:"usage_budget,omitempty"`
+	ShareUsage           bool                `json:"share_usage"`
+	PendingCheck         *AccountCheck       `json:"pending_check,omitempty"`
+	ReadinessResources   []ReadinessResource `json:"readiness_resources,omitempty"`
 	OwnerPersonID        *string             `json:"owner_person_id,omitempty"`
 	OwnerPersonName      string              `json:"owner_person_name,omitempty"`
 	LinkedAt             *time.Time          `json:"linked_at,omitempty"`
@@ -58,11 +64,15 @@ type Account struct {
 	CreatedAt         time.Time  `json:"created_at"`
 	Windows           []Window   `json:"windows"`
 	daemonGeneration  *string
+	residencyEvidence *ResidencyEvidence
 }
 
 // Window is one allowance bound for a single unit.
 type Window struct {
 	// Internal routing metadata; never accepted from or serialized to user APIs.
+	usageCeiling        *int64
+	usagePosture        string
+	recoveryPermits     []recoveryPermit
 	pairingVerification bool
 	capacityReadAt      *time.Time
 	capacityAllowed     bool

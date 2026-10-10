@@ -15,7 +15,7 @@ import (
 func (rt *runtime) cmdKeys() *Command {
 	var add, remove []string
 	var sessionFile, rawURL string
-	return &Command{Name: "keys", Short: "Manage agent key scopes as a person", Use: "keys scopes <key-id> --add SCOPE [--remove SCOPE]",
+	command := &Command{Name: "keys", Short: "Show and manage agent keys", Use: "keys <show|scopes|adopt|owner-workstation>",
 		subs: []*Command{{Name: "scopes", Short: "Change scopes without rotating a key", Use: "keys scopes <key-id> [--add SCOPE] [--remove SCOPE] [--session-file PATH] [--url URL]", minArgs: 1, maxArgs: 1,
 			Long: "Requires a person with keys.manage. Pass an existing aeon_session cookie value through --session-file (or - for stdin); it is never stored or printed. Otherwise configured agent credentials are used and the server refuses agent callers. Scopes may be comma-separated; changes are atomic and audited.",
 			addFlags: func(fs *flagSet) {
@@ -92,4 +92,6 @@ func (rt *runtime) cmdKeys() *Command {
 			},
 		}},
 	}
+	command.subs = append(command.subs, rt.cmdKeyShow(), rt.cmdKeyAdopt(), rt.cmdOwnerWorkstation())
+	return command
 }

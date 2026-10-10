@@ -74,6 +74,14 @@ func orderedChain(raw []byte) ([]Scope, error) {
 	return out, nil
 }
 func LoadChain(ctx context.Context, tx pgx.Tx, personID *string, projectID string) ([]Scope, error) {
+	cache, _ := ctx.Value(chainCacheKey{}).(map[string][]Scope)
+	key := projectID + "|"
+	if personID != nil {
+		key += *personID
+	}
+	if chain, ok := cache[key]; ok {
+		return chain, nil
+	}
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT `+scopesJSON+` FROM (SELECT `+CanonicalPersonSQL("$1")+` AS person_id,
  (SELECT n.id FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
@@ -81,17 +89,33 @@ func LoadChain(ctx context.Context, tx pgx.Tx, personID *string, projectID strin
 	if err != nil {
 		return nil, err
 	}
-	return orderedChain(raw)
+	chain, err := orderedChain(raw)
+	if err == nil && cache != nil {
+		cache[key] = chain
+	}
+	return chain, err
+}
+
+type chainCacheKey struct{}
+
+// WithChainCache is for one read-only transaction. Callers must discard it
+// before a preference write or another transaction; the scopes are immutable.
+func WithChainCache(ctx context.Context) context.Context {
+	return context.WithValue(ctx, chainCacheKey{}, map[string][]Scope{})
 }
 
 type Kind struct {
-	ID        string  `json:"id"`
-	Slug      string  `json:"slug"`
-	Label     string  `json:"label"`
-	Hint      string  `json:"hint"`
-	ProjectID *string `json:"project_id,omitempty"`
-	System    *string `json:"system,omitempty"`
-	Position  int     `json:"position"`
+	WordsDe      *KindText `json:"words_de,omitempty"`
+	DisplayWords *KindText `json:"display_words,omitempty"`
+	ID           string    `json:"id"`
+	Slug         string    `json:"slug"`
+	Label        string    `json:"label"`
+	Hint         string    `json:"hint"`
+	ProjectID    *string   `json:"project_id,omitempty"`
+	System       *string   `json:"system,omitempty"`
+	Position     int       `json:"position"`
+	Examples     []string  `json:"examples"`
+	Labels       []string  `json:"labels"`
 }
 
 func LookupKind(ctx context.Context, tx pgx.Tx, area, projectID string) (Kind, bool, error) {
@@ -109,7 +133,18 @@ func LookupKind(ctx context.Context, tx pgx.Tx, area, projectID string) (Kind, b
 	return kind, kind.Slug != area, err
 }
 func SeedKinds(ctx context.Context, tx pgx.Tx, tenantID string) error {
-	_, err := tx.Exec(ctx, `SELECT aeon_seed_work_kinds($1::uuid)`, tenantID)
+	// Replay and bootstrap before migration 1276 still have aeon_seed_work_kinds.
+	// A missing function aborts the transaction. Naming the missing function in
+	// the same statement fails at parse time, so choose the call before invoking it.
+	var board bool
+	if err := tx.QueryRow(ctx, `SELECT to_regprocedure('aeon_seed_model_board_kinds(uuid)') IS NOT NULL`).Scan(&board); err != nil {
+		return err
+	}
+	query := `SELECT aeon_seed_work_kinds($1::uuid)`
+	if board {
+		query = `SELECT aeon_seed_model_board_kinds($1::uuid)`
+	}
+	_, err := tx.Exec(ctx, query, tenantID)
 	return err
 }
 func Requirement(ctx context.Context, tx pgx.Tx, personID *string, projectID, ticketRequirement string) (string, error) {
@@ -130,6 +165,11 @@ func requirementTrace(ctx context.Context, tx pgx.Tx, personID *string, projectI
 		return "", RequirementTrace{}, err
 	}
 	trace := RequirementTrace{PersonID: personID, Residency: ResolveResidency(chain)}
+	floor, err := BoardResidencyFloor(ctx, tx, personID)
+	if err != nil {
+		return "", trace, err
+	}
+	trace.Residency.Value = Strictest(trace.Residency.Value, floor)
 	return Strictest(trace.Residency.Value, ticketRequirement), trace, nil
 }
 
@@ -164,9 +204,9 @@ func OrderRequirementTrace(ctx context.Context, tx pgx.Tx, orderID string, perso
   JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid
   UNION ALL SELECT n.id,n.parent_id,n.project_id,n.fields,k.slug,up.depth+1 FROM up
   JOIN nodes n ON n.id=up.parent_id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-  WHERE up.slug<>'ticket' AND up.depth<32)
+  WHERE up.slug NOT IN ('work','ticket') AND up.depth<32)
  SELECT (SELECT project_id::text FROM up ORDER BY depth LIMIT 1),
- coalesce((SELECT fields FROM up WHERE slug='ticket' ORDER BY depth LIMIT 1),'{}'::jsonb)`, orderID).Scan(&project, &fields)
+ coalesce((SELECT fields FROM up WHERE slug IN ('work','ticket') ORDER BY depth LIMIT 1),'{}'::jsonb)`, orderID).Scan(&project, &fields)
 	if err != nil {
 		return "", RequirementTrace{}, err
 	}
@@ -196,13 +236,13 @@ func RunRequirement(ctx context.Context, tx pgx.Tx, runID string) (RunPolicy, er
    JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE r.id=$1::uuid
    UNION ALL SELECT n.id,n.parent_id,n.project_id,n.fields,k.slug,up.depth+1 FROM up
    JOIN nodes n ON n.id=up.parent_id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-   WHERE up.slug<>'ticket' AND up.depth<32), keys AS (
-   SELECT `+CanonicalPersonSQL("r.prefs_person_id")+` AS person_id,
+   WHERE up.slug NOT IN ('work','ticket') AND up.depth<32), keys AS (
+   SELECT `+CanonicalPersonSQL("coalesce(r.trace->'work_placement'->'preference_of'->>'person',r.prefs_person_id::text)")+` AS person_id,
    (SELECT n.id FROM up JOIN nodes n ON n.id=up.project_id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
     WHERE k.slug='project' AND n.deleted_at IS NULL ORDER BY up.depth LIMIT 1) AS project_id,
    r.residency,r.prefs_person_id FROM agent_runs r WHERE r.id=$1::uuid)
   SELECT coalesce(keys.residency,'any'),keys.prefs_person_id::text,keys.person_id::text,
-   coalesce((SELECT fields FROM up WHERE slug='ticket' ORDER BY depth LIMIT 1),'{}'::jsonb),`+scopesJSON+` FROM keys`, runID).
+   coalesce((SELECT fields FROM up WHERE slug IN ('work','ticket') ORDER BY depth LIMIT 1),'{}'::jsonb),`+scopesJSON+` FROM keys`, runID).
 			Scan(&stamp, &out.PersonID, &out.CanonicalPersonID, &fields, &raw)
 	})
 	if err != nil {
@@ -212,7 +252,11 @@ func RunRequirement(ctx context.Context, tx pgx.Tx, runID string) (RunPolicy, er
 	if err != nil {
 		return out, err
 	}
-	out.Residency = Strictest(stamp, Strictest(ResolveResidency(chain).Value, PlacementFields(fields).Residency))
+	floor, err := BoardResidencyFloor(ctx, tx, out.CanonicalPersonID)
+	if err != nil {
+		return out, err
+	}
+	out.Residency = Strictest(floor, Strictest(stamp, Strictest(ResolveResidency(chain).Value, PlacementFields(fields).Residency)))
 	return out, nil
 }
 
@@ -220,6 +264,17 @@ func RunRequirement(ctx context.Context, tx pgx.Tx, runID string) (RunPolicy, er
 // belong to 502b. It serializes writers and durably re-stamps active runs before
 // returning. Caller and audit actor remain the session principal.
 func SaveScope(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Scope) (Scope, error) {
+	s, err := SaveScopeOnly(ctx, tx, p, s)
+	if err != nil {
+		return s, err
+	}
+	_, err = Restamp(ctx, tx, p, s)
+	return s, err
+}
+
+// SaveScopeOnly lets an atomic editor write finish its rows before restamping
+// runs and taking the event counter (the final lock in the transaction).
+func SaveScopeOnly(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Scope) (Scope, error) {
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-prefs:'||current_setting('aeon.tenant_id'),0))`); err != nil {
 		return s, err
 	}
@@ -232,7 +287,6 @@ func SaveScope(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Scope) (Sco
 	if err != nil {
 		return s, err
 	}
-	_, err = Restamp(ctx, tx, p, s)
 	return s, err
 }
 func PutRow(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scope, kindID string, row Row) error {
@@ -258,36 +312,93 @@ type RestampedRun struct {
 	AccountID, ProfileID  *string
 }
 
-// Restamp includes pre-link starter ids through the canonical lookup. It never
-// stops a turn; callers can report starting/running accounts outside the fence.
-func Restamp(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scope) ([]RestampedRun, error) {
-	out := []RestampedRun{}
-	err := withRoutingVisibility(ctx, tx, func() error {
-		rows, err := tx.Query(ctx, `SELECT r.id::text,r.status,r.account_id::text,r.model_profile_id::text,coalesce(r.residency,'any')
+// activeScopeRuns locks the bounded active set before any updates or events.
+func activeScopeRuns(ctx context.Context, tx pgx.Tx, scope Scope) ([]RestampedRun, error) {
+	rows, err := tx.Query(ctx, `SELECT r.id::text,r.status,r.account_id::text,r.model_profile_id::text,coalesce(r.residency,'any')
    FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
    WHERE r.status IN ('queued','starting','running','waiting') AND r.purpose='managed' AND
-   ($1='default' OR ($1='person' AND `+CanonicalPersonSQL("r.prefs_person_id")+`=$2::uuid)
-    OR ($1='project' AND n.project_id=$3::uuid)) ORDER BY r.id`, scope.Level, scope.PersonID, scope.ProjectID)
+   ($1='default' OR ($1='person' AND `+CanonicalPersonSQL("coalesce(r.trace->'work_placement'->'preference_of'->>'person',r.prefs_person_id::text)")+`=$2::uuid)
+    OR ($1='project' AND n.project_id=$3::uuid)) ORDER BY r.id LIMIT 10001 FOR NO KEY UPDATE OF r`, scope.Level, scope.PersonID, scope.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	var runs []RestampedRun
+	for rows.Next() {
+		var r RestampedRun
+		if err = rows.Scan(&r.ID, &r.Status, &r.AccountID, &r.ProfileID, &r.Residency); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		runs = append(runs, r)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(runs) > 10000 {
+		return nil, &ScopeTooLarge{}
+	}
+	return runs, nil
+}
+
+// SnapshotRunRequirements records the effective floor before a preference write.
+// This prevents a loosening from catching up a stale stamp after a person link.
+func SnapshotRunRequirements(ctx context.Context, tx pgx.Tx, scope Scope) (map[string]string, error) {
+	before := map[string]string{}
+	err := withRoutingVisibility(ctx, tx, func() error {
+		runs, err := activeScopeRuns(ctx, tx, scope)
 		if err != nil {
 			return err
 		}
-		var runs []RestampedRun
-		for rows.Next() {
-			var r RestampedRun
-			if err = rows.Scan(&r.ID, &r.Status, &r.AccountID, &r.ProfileID, &r.Residency); err != nil {
-				rows.Close()
+		for _, run := range runs {
+			policy, err := RunRequirement(ctx, tx, run.ID)
+			if err != nil {
 				return err
 			}
-			runs = append(runs, r)
+			before[run.ID] = policy.Residency
 		}
-		rows.Close()
-		if err = rows.Err(); err != nil {
+		return nil
+	})
+	return before, err
+}
+
+// Restamp includes pre-link starter ids through the canonical lookup. It never
+// stops a turn; callers can report starting/running accounts outside the fence.
+func Restamp(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scope) ([]RestampedRun, error) {
+	return RestampAfter(ctx, tx, p, scope, nil)
+}
+
+// RestampAfter only advances a stamp when the write tightens the previous live
+// requirement. A nil snapshot preserves the internal catch-up operation.
+func RestampAfter(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scope, before map[string]string) ([]RestampedRun, error) {
+	out, changes, err := RestampAfterDeferred(ctx, tx, scope, before)
+	if err != nil {
+		return nil, err
+	}
+	for _, change := range changes {
+		if _, err := events.Append(ctx, tx, p, change); err != nil {
+			return nil, fmt.Errorf("record restamp: %w", err)
+		}
+	}
+	return out, nil
+}
+
+// RestampAfterDeferred leaves the event counter to the outer preference writer.
+func RestampAfterDeferred(ctx context.Context, tx pgx.Tx, scope Scope, before map[string]string) ([]RestampedRun, []events.Change, error) {
+	out := []RestampedRun{}
+	changes := []events.Change{}
+	err := withRoutingVisibility(ctx, tx, func() error {
+		runs, err := activeScopeRuns(ctx, tx, scope)
+		if err != nil {
 			return err
 		}
 		for _, r := range runs {
 			policy, err := RunRequirement(ctx, tx, r.ID)
 			if err != nil {
 				return err
+			}
+			if old, ok := before[r.ID]; ok && Strictness(policy.Residency) <= Strictness(old) {
+				continue
 			}
 			if Strictness(policy.Residency) <= Strictness(r.Residency) {
 				continue
@@ -298,12 +409,10 @@ func Restamp(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scope) ([
     status IN ('queued','starting','running','waiting')`, r.ID, Stamp(r.Residency)); err != nil {
 				return err
 			}
-			if _, err = events.Append(ctx, tx, p, events.Change{Type: "run.residency_restamped", Before: map[string]string{"run_id": r.ID, "residency": before}, After: map[string]string{"run_id": r.ID, "residency": r.Residency}}); err != nil {
-				return fmt.Errorf("record restamp: %w", err)
-			}
+			changes = append(changes, events.Change{Type: "run.residency_restamped", Before: map[string]string{"run_id": r.ID, "residency": before}, After: map[string]string{"run_id": r.ID, "residency": r.Residency}})
 			out = append(out, r)
 		}
 		return nil
 	})
-	return out, err
+	return out, changes, err
 }

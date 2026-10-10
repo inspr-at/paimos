@@ -65,15 +65,15 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
 .orbit-track, .core, .facet, .trail { stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; fill: none; }
 .core, .facet { stroke-width: calc(1.5px * var(--art-stroke, 1)); }
 .orbit-track { opacity: .3; stroke-width: 1; }
-.core { fill: color-mix(in srgb, currentColor 9%, var(--surface-raised, #fffefa)); }
+.core { fill: color-mix(in srgb, currentColor 9%, var(--surface-raised)); }
 .facet { opacity: .85; }
 .light-facet { fill: currentColor; opacity: .1; }
 .trail { opacity: .4; stroke-linecap: round; }
-.point { fill: currentColor; stroke: var(--surface-raised, #fffefa); stroke-width: 1; }
+.point { fill: currentColor; stroke: var(--surface-raised); stroke-width: 1; }
 .satellite { transform-origin: 16px 16px; }
-.clock { fill: var(--surface-raised, #fffefa); stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.clock { fill: var(--surface-raised); stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .clock path { fill: none; }
-.glint { fill: #c9a24a; stroke: var(--surface-raised, #fffefa); stroke-width: .6; transform-origin: 16px 4px; animation: orbit-flash .6s ease-out both; }
+.glint { fill: var(--secondary-line); stroke: var(--surface-raised); stroke-width: .6; transform-origin: 16px 4px; animation: orbit-flash .6s ease-out both; }
 @media (prefers-reduced-motion: no-preference) {
   .ring-moving.working.lead .satellite { animation: orbit-turn 6s linear infinite; animation-delay: var(--phase); }
   .lead .glint { animation-name: orbit-spark; }

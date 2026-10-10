@@ -18,7 +18,7 @@ import (
 
 // cmdMessagingTell is selected by the coordinator entry point RunMessaging.
 func (rt *runtime) cmdMessagingTell() *Command {
-	var project, message, messageFile, level, reply, thread, key, recipientSession, senderSession string
+	var project, message, messageFile, level, reply, thread, key, recipientSession, senderSession, sessionCookieFile string
 	var expectsReply, action bool
 	return &Command{Name: "tell", Short: "Send a durable message or inspect its receipt", Use: "tell <harness:agent|principal-uuid> --project KEY -m TEXT | tell status <message-uuid>", minArgs: 1, maxArgs: 1,
 		subs: []*Command{{Name: "status", Short: "Read your message's push receipt", Use: "tell status <message-uuid>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
@@ -43,6 +43,7 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			fs.string(&recipientSession, "recipient-session", 0, "exact recipient session UUID")
 			fs.string(&senderSession, "sender-session", 0, "your session UUID (defaults to the current Aeon or harness binding)")
 			fs.string(&reply, "reply-to", 0, "exact counterpart message UUID")
+			fs.string(&sessionCookieFile, "session-cookie-file", 0, "person session cookie file (requires --reply-to; omits bearer authentication)")
 			fs.string(&thread, "thread", 0, "conversation thread ID")
 			fs.string(&key, "idempotency-key", 0, "stable retry key (generated if omitted)")
 			fs.bool(&expectsReply, "expects-reply", 0, "keep a durable obligation until a counterpart reply")
@@ -77,6 +78,14 @@ func (rt *runtime) cmdMessagingTell() *Command {
 			if len(key) > 128 || strings.ContainsRune(key, 0) {
 				return usagef("invalid --idempotency-key")
 			}
+			if sessionCookieFile != "" {
+				if reply == "" || rt.agentName != "" {
+					return usagef("--session-cookie-file requires --reply-to without agent attribution")
+				}
+				if err := rt.usePersonSession(sessionCookieFile); err != nil {
+					return err
+				}
+			}
 			p, err := rt.projectNode(project)
 			if err != nil {
 				return err
@@ -86,7 +95,7 @@ func (rt *runtime) cmdMessagingTell() *Command {
 				return err
 			}
 			explicitSenderSession := senderSession != ""
-			if !explicitSenderSession {
+			if !explicitSenderSession && rt.personClient == nil {
 				senderSession, err = rt.ambientSenderSession(context.Background(), p.ID, me.Principal.ID)
 				if err != nil {
 					return rt.fail(err, "")
@@ -116,6 +125,13 @@ func (rt *runtime) cmdMessagingTell() *Command {
 				if explicitSenderSession {
 					return rt.fail(fmt.Errorf("send with --sender-session (must be your active session in the target project): %w", err), "")
 				}
+				return err
+			}
+			if sent.Status == "pending" && sent.QuestionID != "" {
+				if rt.jsonOut {
+					return rt.printJSON(sent)
+				}
+				_, err = fmt.Fprintf(rt.stdout, "stored: reply pending (10-second edit window)\nquestion: %s\nanswer revision: %d\nstatus: ask status %s\n", sent.QuestionID, sent.AnswerRevision, sent.QuestionID)
 				return err
 			}
 			receipt, receiptErr := rt.tellReceipt(sent.ID)
@@ -185,7 +201,7 @@ func (rt *runtime) cmdMessagingListen() *Command {
 	var as, project, deliver, after, poll, sessionID, targetRefFile string
 	var follow, ack bool
 	limit := 10
-	return &Command{Name: "listen", Short: "Read your project inbox", Use: "listen --project KEY [--as harness:agent] [--ack]", maxArgs: 0, addFlags: func(fs *flagSet) {
+	return &Command{Name: "listen", Short: "Read your project inbox", Use: "listen --project KEY [--as harness:agent] [--ack] | listen --project KEY --session UUID --deliver codex|claude_resume --target-ref-file PATH --follow", maxArgs: 0, addFlags: func(fs *flagSet) {
 		fs.string(&sessionID, "session", 0, "read only this session plus principal-wide broadcasts")
 		fs.string(&as, "as", 0, "own harness:agent, name or UUID")
 		fs.string(&project, "project", 'p', "project key (required)")
@@ -194,7 +210,7 @@ func (rt *runtime) cmdMessagingListen() *Command {
 		fs.string(&deliver, "deliver", 0, "local transport adapter")
 		fs.string(&targetRefFile, "target-ref-file", 0, "exact local harness reference for --session --deliver")
 		fs.string(&poll, "poll-interval", 0, "delivery retry backoff (default 2s)")
-		fs.bool(&follow, "follow", 0, "long-poll until interrupted")
+		fs.bool(&follow, "follow", 0, "long-poll until interrupted; --session --deliver wakes an idle unmanaged session")
 		fs.bool(&ack, "ack", 0, "acknowledge each successfully printed message")
 	}, run: func(args []string) error {
 		if sessionID != "" && !validUUID(sessionID) {

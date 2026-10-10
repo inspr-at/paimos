@@ -3,6 +3,9 @@
 # Read-only image pull; every container/network belongs to this disposable run.
 set -euo pipefail
 
+# OPS-287: GHCR mirror of the Docker Hub image; refresh with mirror-ci-images.yml
+pgvector_image="${PGVECTOR_IMAGE:-ghcr.io/inspr-at/paimos-ci/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11}"
+
 for tool in docker python3 go; do
   command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }
 done
@@ -37,7 +40,7 @@ echo "Previous image: $image_id"
 docker network create "$network" >/dev/null
 docker run -d --name "$db" --network "$network" -p 127.0.0.1::5432 \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=aeon \
-  pgvector/pgvector:pg18 >/dev/null
+  "$pgvector_image" >/dev/null
 ready=0
 for _ in {1..60}; do
   if docker exec "$db" pg_isready -h 127.0.0.1 -U postgres -d postgres >/dev/null 2>&1; then ready=1; break; fi
@@ -60,20 +63,7 @@ start_previous() {
     -e "AEON_DATABASE_URL=postgres://aeon:aeon@$db:5432/aeon?sslmode=disable" \
     "$image_id" >/dev/null
   base="http://$(docker port "$app" 8080/tcp)"
-  python3 - "$base" <<'PY'
-import json, sys, time, urllib.error, urllib.request
-base = sys.argv[1]
-for _ in range(60):
-    try:
-        with urllib.request.urlopen(base + '/api/ready', timeout=2) as response:
-            if response.status == 200 and json.load(response) == {'status': 'ready'}:
-                break
-    except (OSError, ValueError):
-        pass
-    time.sleep(1)
-else:
-    raise SystemExit('Previous release did not become ready; compatibility gate failed')
-PY
+  python3 scripts/migration-compat-probe.py wait-ready --base "$base"
 }
 
 start_previous
@@ -88,6 +78,7 @@ AEON_ENV=dev AEON_DATABASE_URL="postgres://aeon:aeon@$db_address/aeon?sslmode=di
   GOMAXPROCS=2 go run -p 2 ./scripts/migrate-candidate.go
 start_previous
 python3 scripts/migration-compat-probe.py check --base "$base" --state "$tmp/state.json" --version "${tag#v}"
+python3 scripts/migration-compat-probe.py account-use --base "$base" --state "$tmp/state.json" --version "${tag#v}" --database-container "$db"
 echo "Migration compatibility passed: $tag on the candidate schema"
 if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
   printf 'Previous release %s; registry image %s; loaded image %s served health, ready, SPA and authenticated read APIs after candidate migrations.\n' \

@@ -11,11 +11,14 @@ import (
 	"math/big"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -32,6 +35,7 @@ type watchPollKey struct {
 	hash         string
 	protocol     int
 	proofVersion int
+	messages     bool
 }
 
 func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in attachwatch.DeviceRequest) error {
@@ -56,6 +60,9 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 		return fail(429, "rate_limited", "daemon registration capacity reached")
 	}
 	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+		if authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{}) != nil {
+			return fail(403, "forbidden", "paired daemon required")
+		}
 		_, principal, _, _, proof, err := attachComputer(ctx, tx, in.ComputerID)
 		if err != nil || principal != p.ID || subtle.ConstantTimeCompare([]byte(proof), []byte(digest(in.DeviceProof))) != 1 {
 			return fail(403, "forbidden", "computer proof rejected")
@@ -88,7 +95,7 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 		if m.watchKeys.keys == nil {
 			m.watchKeys.keys = make(map[string]watchPollKey)
 		}
-		m.watchKeys.keys[key] = watchPollKey{hash: digest(in.PollKey), protocol: protocol, proofVersion: in.LocalConsentProofVersion}
+		m.watchKeys.keys[key] = watchPollKey{hash: digest(in.PollKey), protocol: protocol, proofVersion: in.LocalConsentProofVersion, messages: in.MessageProtocol == attachedmsg.Protocol}
 	}
 	return err
 }
@@ -108,8 +115,8 @@ func (m *Module) attachLimit(ctx context.Context, tenantID, bucket string, max i
 	err := db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `INSERT INTO harness_attach_limits(tenant_id,bucket,attempts) VALUES($1,$2,1)
  ON CONFLICT(tenant_id,bucket) DO UPDATE SET
- attempts=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-interval '10 minutes' THEN 1 ELSE harness_attach_limits.attempts+1 END,
- starts_at=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-interval '10 minutes' THEN clock_timestamp() ELSE harness_attach_limits.starts_at END RETURNING attempts`, tenantID, bucket).Scan(&n)
+ attempts=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-($3::integer * interval '1 second') THEN 1 ELSE harness_attach_limits.attempts+1 END,
+ starts_at=CASE WHEN harness_attach_limits.starts_at<clock_timestamp()-($3::integer * interval '1 second') THEN clock_timestamp() ELSE harness_attach_limits.starts_at END RETURNING attempts`, tenantID, bucket, int(attachwatch.AttemptWindow/time.Second)).Scan(&n)
 	})
 	if err != nil {
 		return err
@@ -153,8 +160,8 @@ func attachScope(ctx context.Context, tx pgx.Tx, tenantID, owner string, s attac
 	if authz.RequireTx(ctx, tx, p, "harness.write", authz.Scope{ProjectID: s.ProjectID}) != nil {
 		return attachFailure(403, "forbidden", "owner delegation no longer valid", attachwatch.RefusalTicket)
 	}
-	var ticketOK, enrollmentOK bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id JOIN nodes t ON t.tenant_id=p.tenant_id AND t.project_id=p.id WHERE p.id=$1 AND k.slug='project' AND p.deleted_at IS NULL AND t.id=$2 AND t.deleted_at IS NULL), EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$3 AND e.state='connected' AND a.harness=$4)`, s.ProjectID, s.TicketID, s.ComputerID, s.Harness).Scan(&ticketOK, &enrollmentOK)
+	var ticketOK, enrollmentOK, draining bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes p JOIN node_kinds k ON k.tenant_id=p.tenant_id AND k.id=p.kind_id JOIN nodes t ON t.tenant_id=p.tenant_id AND t.project_id=p.id WHERE p.id=$1 AND k.slug='project' AND p.deleted_at IS NULL AND t.id=$2 AND t.deleted_at IS NULL), EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$3 AND e.state='connected' AND a.harness=$4), EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$3 AND e.state='draining' AND a.harness=$4)`, s.ProjectID, s.TicketID, s.ComputerID, s.Harness).Scan(&ticketOK, &enrollmentOK, &draining)
 	if err != nil {
 		return err
 	}
@@ -162,7 +169,13 @@ func attachScope(ctx context.Context, tx pgx.Tx, tenantID, owner string, s attac
 		return attachFailure(409, "conflict", "project, ticket or harness enrollment changed", attachwatch.RefusalTicket)
 	}
 	if !enrollmentOK {
-		return fail(409, "conflict", "project, ticket or harness enrollment changed")
+		// An existing OS process does not carry attach authority. Drain preserves
+		// owned work for settlement, but cannot grant a new session/consent lease.
+		cause := attachwatch.RefusalEnrollment
+		if draining {
+			cause = attachwatch.RefusalDraining
+		}
+		return attachFailure(409, "conflict", "project, ticket or harness enrollment changed", cause)
 	}
 	return nil
 }
@@ -218,6 +231,10 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, fail(400, "invalid_request", "invalid local confirmation proof"))
 		return
 	}
+	if len(in.MessageLocalAuthSignature) > 144 || in.MessageLocalAuthNonce != "" && !attachwatch.LocalAuthNonceValid(in.MessageLocalAuthNonce) || in.Operation != "message_activate" && (in.MessageLocalAuthSignature != "" || in.MessageLocalAuthNonce != "") {
+		WriteError(w, fail(400, "invalid_request", "invalid messaging confirmation proof"))
+		return
+	}
 	if in.Operation == "register" {
 		if err := m.registerWatchKey(r.Context(), p, in); err != nil {
 			WriteError(w, err)
@@ -231,12 +248,20 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	m.watchKeys.RLock()
 	defer m.watchKeys.RUnlock()
 	expected := m.watchKeys.keys[p.TenantID+"/"+in.ComputerID]
-	if !hashRE.MatchString(in.PollKey) || expected.hash == "" || subtle.ConstantTimeCompare([]byte(expected.hash), []byte(digest(in.PollKey))) != 1 {
+	if expected.hash == "" && hashRE.MatchString(in.PollKey) {
+		WriteError(w, m.unknownWatchKey(r.Context(), p, in))
+		return
+	}
+	if !hashRE.MatchString(in.PollKey) || subtle.ConstantTimeCompare([]byte(expected.hash), []byte(digest(in.PollKey))) != 1 {
 		WriteError(w, fail(403, "forbidden", "daemon poll key rejected"))
 		return
 	}
 	if !uuidRE.MatchString(in.RequestID) {
 		WriteError(w, fail(400, "invalid_request", "invalid attach request"))
+		return
+	}
+	if in.Operation == "message_request" || in.Operation == "message_activate" || in.Operation == "message_observed" || in.Operation == "message_offer" || in.Operation == "message_receipt" || in.Operation == "message_validate" {
+		m.messageDevice(w, r, p, in, expected)
 		return
 	}
 	if in.Operation != "request" && in.Operation != "poll" && in.Operation != "detach" && in.Operation != "exited" {
@@ -260,8 +285,13 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			// gives repair guidance to an authenticated principal for its own
 			// retained computer row and registered, memory-only poll key.
 			var retainedPrincipal, state string
-			if errors.Is(err, pgx.ErrNoRows) && tx.QueryRow(ctx, `SELECT principal_id::text,state FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&retainedPrincipal, &state) == nil && retainedPrincipal == p.ID && state == "revoked" {
-				return attachFailure(403, "forbidden", "computer proof rejected", attachwatch.RefusalPairing)
+			if errors.Is(err, pgx.ErrNoRows) && tx.QueryRow(ctx, `SELECT principal_id::text,state FROM agent_pairing_computers WHERE id=$1`, in.ComputerID).Scan(&retainedPrincipal, &state) == nil && retainedPrincipal == p.ID {
+				switch state {
+				case "revoked":
+					return attachFailure(403, "forbidden", "computer proof rejected", attachwatch.RefusalPairing)
+				case "draining":
+					return attachFailure(403, "forbidden", "computer proof rejected", attachwatch.RefusalDraining)
+				}
 			}
 			return fail(403, "forbidden", "computer proof rejected")
 		}
@@ -295,7 +325,7 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			if err = tx.QueryRow(ctx, `SELECT count(*) FROM harness_attach_requests WHERE computer_id=$1 AND ((state IN ('pending','approved') AND expires_at>clock_timestamp()) OR (state='active' AND lease_until>clock_timestamp()))`, in.ComputerID).Scan(&n); err != nil {
 				return err
 			}
-			if n >= 8 {
+			if n >= attachwatch.ComputerMax {
 				return fail(429, "rate_limited", "computer attach limit reached")
 			}
 			v, _, code, e := loadAttach(ctx, tx, in.RequestID)
@@ -338,7 +368,12 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			}
 			out, _, _, err = loadAttach(ctx, tx, in.RequestID)
 			out.UserCode = code
-			return err
+			if err != nil {
+				return err
+			}
+			// The committed event wakes phone delivery. Keep registration proofs,
+			// the one-time code and the process snapshot out of its payload.
+			return appendEvent(ctx, tx, p, events.Change{Type: "harness.attach_requested", After: map[string]string{"request_id": in.RequestID, "owner_id": owner}})
 		}
 		var approvedOwner string
 		out, approvedOwner, _, err = loadAttach(ctx, tx, in.RequestID)
@@ -549,13 +584,35 @@ func (m *Module) attachApprove(w http.ResponseWriter, r *http.Request, p tenant.
 func (m *Module) attachRevoke(w http.ResponseWriter, r *http.Request, p tenant.Principal) {
 	m.attachDecision(w, r, p, "", "", true)
 }
+
+// DecideAttachVerified reuses owner, enrollment, immutable consent and local Mac
+// confirmation checks. A phone passkey never substitutes for the daemon proof.
+func (m *Module) DecideAttachVerified(ctx context.Context, p tenant.Principal, id, d, consentDigest string, revoke bool, verify func(pgx.Tx, attachwatch.View) error) (attachwatch.View, error) {
+	if verify == nil || p.Kind != tenant.Person {
+		return attachwatch.View{}, fail(403, "forbidden", "fresh person verification required")
+	}
+	if err := authz.RequirePattern(authz.BindPool(ctx, m.pool), "POST /api/agent-pairing/attach/{requestId}/approve", authz.Scope{}); err != nil {
+		return attachwatch.View{}, fail(403, "forbidden", "account management permission required")
+	}
+	return m.decideAttach(ctx, p, id, d, consentDigest, revoke, verify)
+}
+
 func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant.Principal, d, consentDigest string, revoke bool) {
+	out, err := m.decideAttach(r.Context(), p, r.PathValue("requestId"), d, consentDigest, revoke, nil)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	reply(w, out)
+}
+
+func (m *Module) decideAttach(ctx context.Context, p tenant.Principal, id, d, consentDigest string, revoke bool, verify func(pgx.Tx, attachwatch.View) error) (attachwatch.View, error) {
 	var out attachwatch.View
 	var rejected error
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
 		var owner string
 		var err error
-		out, owner, _, err = loadAttach(r.Context(), tx, r.PathValue("requestId"))
+		out, owner, _, err = loadAttach(ctx, tx, id)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return fail(404, "not_found", "attach unavailable")
 		}
@@ -565,19 +622,28 @@ func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant
 		if owner != p.ID {
 			return fail(403, "forbidden", "paired computer owner required")
 		}
+		if verify != nil {
+			if err := verify(tx, out); err != nil {
+				return err
+			}
+		}
 		if revoke {
 			if out.State == "confirmed_exited" {
 				return nil
 			}
-			return attachEnd(r.Context(), tx, &out, "detached")
+			return attachEnd(ctx, tx, &out, "detached")
 		}
-		expired, err := attachExpired(r.Context(), tx, &out)
+		expired, err := attachExpired(ctx, tx, &out)
 		if err != nil {
 			return err
 		}
 		if expired {
 			rejected = fail(410, "attach_ended", "attach expired")
 			return nil
+		}
+		if verify != nil {
+			d = out.Digest
+			consentDigest = out.ConsentDigest
 		}
 		if consentDigest != out.ConsentDigest {
 			return fail(409, "conflict", "consent setting changed; review the request again")
@@ -588,11 +654,11 @@ func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant
 		if d != out.Digest {
 			return fail(409, "conflict", "review digest mismatch")
 		}
-		owner, _, host, workspace, _, err := attachComputer(r.Context(), tx, out.Snapshot.ComputerID)
+		owner, _, host, workspace, _, err := attachComputer(ctx, tx, out.Snapshot.ComputerID)
 		if err != nil || owner != p.ID || host != out.Snapshot.Host || !attachwatch.Within(workspace, out.Snapshot.Process.CWD) {
 			return fail(403, "forbidden", "pairing changed")
 		}
-		if err = attachScope(r.Context(), tx, p.TenantID, owner, out.Snapshot); err != nil {
+		if err = attachScope(ctx, tx, p.TenantID, owner, out.Snapshot); err != nil {
 			return err
 		}
 		if out.State != "pending" {
@@ -608,18 +674,38 @@ func (m *Module) attachDecision(w http.ResponseWriter, r *http.Request, p tenant
 				nonce = &challenge
 				out.LocalAuthNonce = challenge
 			}
-			_, err = tx.Exec(r.Context(), `UPDATE harness_attach_requests SET state='approved',consent_mode=$2,local_auth_nonce=$3 WHERE id=$1`, out.RequestID, out.ConsentMode, nonce)
+			_, err = tx.Exec(ctx, `UPDATE harness_attach_requests SET state='approved',consent_mode=$2,local_auth_nonce=$3 WHERE id=$1`, out.RequestID, out.ConsentMode, nonce)
 			out.State = "approved"
 		}
 		return err
 	})
 	if err != nil {
-		WriteError(w, err)
-		return
+		return out, err
 	}
 	if rejected != nil {
-		WriteError(w, rejected)
-		return
+		return out, rejected
 	}
-	reply(w, out)
+	return out, nil
+}
+
+// ReviewAttach exposes the immutable request only to the paired computer owner.
+func ReviewAttach(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (attachwatch.View, error) {
+	v, owner, _, err := loadAttach(ctx, tx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return v, fail(404, "not_found", "attach unavailable")
+	}
+	if err != nil {
+		return v, err
+	}
+	if p.Kind != tenant.Person || owner != p.ID {
+		return attachwatch.View{}, fail(403, "forbidden", "paired computer owner required")
+	}
+	if err := authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}); err != nil {
+		return attachwatch.View{}, fail(403, "forbidden", "account management permission required")
+	}
+	if err := attachScope(ctx, tx, p.TenantID, owner, v.Snapshot); err != nil {
+		return attachwatch.View{}, err
+	}
+	v.LocalAuthNonce = ""
+	return v, nil
 }

@@ -51,6 +51,13 @@
 //     Draft (POST .../draft) is person-only: it appends one rule to a chosen
 //     rule draft and records knowledge.learning_drafted. It does not publish.
 //     Agents may tag candidates; they cannot accept, dismiss, draft or undo.
+//     They may prepare the decision (AEON-788): PUT .../recommendation stores
+//     one current recommendation per learning (accept with a target entry and
+//     an optional lesson line, or dismiss with a reason) and appends
+//     knowledge.learning_recommended. It applies nothing. The list returns it
+//     on each item, marked stale when the learning's text changed since; a
+//     person applies it through accept (optional lesson) and dismiss
+//     (optional reason). The list holds 50; next_cursor continues it.
 //     A daily tagger nominates closed tickets, review verdicts and incident
 //     comments. It never accepts them. Merging the process-learning tag into
 //     a ticket appends node.updated under that tenant's System principal, in

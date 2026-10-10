@@ -21,7 +21,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     const queue = page.getByRole('region', { name: 'Needs you' })
     // Production removes Needs you when nothing is pending and there is no decided
     // history. The sentence "Nothing waits on you" exists only inside that region.
-    await expect(page.locator('.live-line .live-total')).toHaveText('5 live')
+    await expect(page.locator('.page-head .count[data-filter="working"] b')).toHaveText('5')
     await expect(queue).toHaveCount(0)
     await expect(page.getByText('Nothing waits on you')).toHaveCount(0)
     await expect(page.getByRole('list', { name: 'Requests waiting for you' })).toHaveCount(0)
@@ -39,7 +39,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     const inbox = panel.getByRole('region', { name: 'Inbox attention' })
     // AEON-313: shared-inbox obligations stay outside the session thread, in
     // Messages as well as in Now.
-    await panel.getByRole('tab', { name: /Messages/ }).click()
+    await panel.getByRole('tab', { name: /Chat/ }).click()
     await expect(panel.getByRole('tabpanel', { name: /Messages/ }).getByRole('region', { name: 'Conversation' })).toBeVisible()
     await expect(inbox).toHaveCount(0)
     await expect(panel).not.toContainText('Shared inbox')

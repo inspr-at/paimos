@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -31,9 +32,14 @@ import (
 	"github.com/inspr-at/paimos/internal/business/quotes/collaboration"
 	"github.com/inspr-at/paimos/internal/business/quotes/confirmation"
 	publicquotes "github.com/inspr-at/paimos/internal/business/quotes/public"
+	"github.com/inspr-at/paimos/internal/chat"
 	"github.com/inspr-at/paimos/internal/crossreview"
+	"github.com/inspr-at/paimos/internal/decisiondesk"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
+	"github.com/inspr-at/paimos/internal/engineadmission"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/features"
 	"github.com/inspr-at/paimos/internal/fromclassic"
 	"github.com/inspr-at/paimos/internal/greetings"
 	"github.com/inspr-at/paimos/internal/harness"
@@ -47,11 +53,14 @@ import (
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/outcomes"
+	"github.com/inspr-at/paimos/internal/parentbenefits"
+	"github.com/inspr-at/paimos/internal/phoneapprovals"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
 	"github.com/inspr-at/paimos/internal/projectgroups"
 	"github.com/inspr-at/paimos/internal/questions"
+	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/relations"
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/releases"
@@ -61,7 +70,9 @@ import (
 	"github.com/inspr-at/paimos/internal/search"
 	"github.com/inspr-at/paimos/internal/stagehandoff"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
+	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenantbrand"
+	"github.com/inspr-at/paimos/internal/themes"
 	"github.com/inspr-at/paimos/internal/ticketwork"
 	"github.com/inspr-at/paimos/internal/usagedashboard"
 	"github.com/inspr-at/paimos/internal/views"
@@ -83,15 +94,15 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 	}
 	modules := []httpapi.Module{
 		authModule, &tokens.Module{}, &host.Module{}, authz.New(nil), nodes.New(nil, nil), fromclassic.New(nil), tenantbrand.New(nil), modelprovider.New(nil, nil), relations.New(nil),
-		events.New(nil), search.New(nil, nil), views.New(nil), activity.New(nil),
+		events.New(nil), features.New(nil), search.New(nil, nil), views.New(nil), activity.New(nil),
 		attachments.New(nil, attachments.Store{}), &greetings.Module{}, knowledge.New(nil),
-		projectgroups.New(nil), &releasehistory.Module{}, profile.New(nil, attachments.Store{}),
-		imports.New(nil), inbox.New(nil), messaging, harness.New(nil), rules.New(nil), doctrine.New(nil, doctrine.Options{}), ticketwork.New(nil), outcomes.New(nil), deliveryvote.New(nil), usagedashboard.New(nil), workorders.New(nil), crossreview.New(nil, nil),
-		agentruns.New(nil), agentpairing.New(nil, "https://pairing.test", "test"), approvals.New(nil), questions.New(nil), modelregistry.New(nil), agentaccounts.New(nil),
-		journey.New(nil), requirements.New(nil), releases.New(nil), statusautopilot.New(nil), intake.New(nil),
+		projectgroups.New(nil), &releasehistory.Module{}, profile.New(nil, attachments.Store{}), themes.New(nil),
+		imports.New(nil), inbox.New(nil), chat.New(nil), messaging, harness.New(nil), rules.New(nil), doctrine.New(nil, doctrine.Options{}), ticketwork.New(nil), outcomes.New(nil), deliveryvote.New(nil), usagedashboard.New(nil), workorders.New(nil), crossreview.New(nil, nil), &delivery.Module{}, engineadmission.New(nil, nil),
+		agentruns.New(nil), agentpairing.New(nil, "https://pairing.test", "test"), approvals.New(nil), questions.New(nil), decisiondesk.New(nil), modelregistry.New(nil), agentaccounts.New(nil), accountuse.New(nil),
+		journey.New(nil), requirements.New(nil), releases.New(nil), recurrences.New(nil), statusautopilot.New(nil), parentbenefits.New(nil, nil), intake.New(nil),
 		plugins.New(nil), stagehandoff.New(nil, nil), costunits.New(nil, nil), crm.New(nil, nil),
 		&quotes.Module{}, &collaboration.Module{}, &publicquotes.Module{}, &confirmation.Module{}, portal.New(nil, false, nil),
-		hours.New(nil, nil), directory.New(nil, nil),
+		hours.New(nil, nil), directory.New(nil, nil), &phoneapprovals.Module{}, stepup.New(nil, nil, ""),
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(http.ResponseWriter, *http.Request) {})
@@ -107,7 +118,7 @@ func TestRealMuxRouteCoverage(t *testing.T) {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "route_map.go" {
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || (filepath.Base(path) == "route_map.go" || filepath.Dir(path) == filepath.Join("..", "authz") && strings.HasPrefix(filepath.Base(path), "routes_")) {
 			return nil
 		}
 		body, readErr := os.ReadFile(path)

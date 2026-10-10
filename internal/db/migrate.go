@@ -264,6 +264,13 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 			return fmt.Errorf("migrate %s: %w", name, err)
 		}
 	}
+	if name == "1292_agent_key_full_access.sql" {
+		// FORCE RLS applies to migration owners too. Repeat the additive
+		// backfill under each tenant, atomically with the column expansion.
+		if err := backfillFullAccessKeys(ctx, tx, stmts[len(stmts)-1]); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
 	if name == "1063_work_classification_model_identity.sql" {
 		if err := backfillWorkMetadata(ctx, tx); err != nil {
 			return fmt.Errorf("backfill %s: %w", name, err)
@@ -279,6 +286,26 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 			return fmt.Errorf("backfill %s: %w", name, err)
 		}
 	}
+	if name == "1135_account_readiness.sql" {
+		if err := backfillReadinessMemberships(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
+	if name == "1296_account_model_successors.sql" {
+		if err := backfillAccountModelSuccessors(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
+	if name == "1309_account_use_matrix.sql" {
+		if err := backfillAccountUse(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
+	if name == "1215_one_work_kind.sql" {
+		if err := migrateWorkNodes(ctx, tx); err != nil {
+			return fmt.Errorf("reconcile %s: %w", name, err)
+		}
+	}
 	if _, err := tx.Exec(ctx, `INSERT INTO schema_migrations (version) VALUES ($1)`, name); err != nil {
 		return fmt.Errorf("record %s: %w", name, err)
 	}
@@ -286,6 +313,83 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 		return fmt.Errorf("commit %s: %w", name, err)
 	}
 	return nil
+}
+
+func backfillFullAccessKeys(ctx context.Context, tx pgx.Tx, statement string) error {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	var prior string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.tenant_id',true),'')`).Scan(&prior); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true)`, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, statement); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true)`, prior)
+	return err
+}
+
+// Existing accounts need canonical resource IDs before a new daemon probes.
+// Scope each bounded tenant page with ordinary FORCE RLS in the same schema
+// transaction; failure rolls back both migration and membership backfill.
+func backfillReadinessMemberships(ctx context.Context, tx pgx.Tx) error {
+	after := "00000000-0000-0000-0000-000000000000"
+	for {
+		rows, err := tx.Query(ctx, `SELECT id::text FROM tenants WHERE id>$1::uuid ORDER BY id LIMIT 100`, after)
+		if err != nil {
+			return err
+		}
+		ids := []string{}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+		for _, id := range ids {
+			if err := enterTenant(ctx, tx, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_readiness_resources(tenant_id,kind,identity_kind,identity_key)
+    SELECT tenant_id,CASE WHEN harness='pi' THEN 'key_cap' ELSE 'subscription_quota' END,'account',
+    encode(sha256(convert_to('account:'||id::text||':'||CASE WHEN harness='pi' THEN 'key_cap' ELSE 'subscription_quota' END,'UTF8')),'hex') FROM agent_accounts WHERE tenant_id=$1
+    ON CONFLICT(tenant_id,kind,identity_kind,identity_key) DO NOTHING`, id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_readiness_memberships(tenant_id,account_id,resource_id,binding_revision)
+    SELECT a.tenant_id,a.id,r.id,a.link_revision FROM agent_accounts a JOIN account_readiness_resources r ON r.tenant_id=a.tenant_id AND r.identity_kind='account'
+    AND r.kind=CASE WHEN a.harness='pi' THEN 'key_cap' ELSE 'subscription_quota' END
+    AND r.identity_key=encode(sha256(convert_to('account:'||a.id::text||':'||r.kind,'UTF8')),'hex') WHERE a.tenant_id=$1
+    ON CONFLICT(tenant_id,account_id,resource_id) DO NOTHING`, id); err != nil {
+				return err
+			}
+		}
+		after = ids[len(ids)-1]
+	}
 }
 
 // Keep 1088 one numbered migration while committing installation's exclusive
@@ -463,6 +567,44 @@ func backfillModelProfileDisplay(ctx context.Context, tx pgx.Tx) error {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `SELECT aeon_backfill_model_profile_display()`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Successor policy expands effective grants, retaining immutable paired pins
+// for old-release rollback. Fence all tenants before appending any audit event
+// so no account/tenant lock follows an event counter in this transaction.
+func backfillAccountModelSuccessors(ctx context.Context, tx pgx.Tx) error {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id FOR NO KEY UPDATE`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	// Production migrates with a plain context (no principal, no service
+	// visibility). The audit insert and its retry check touch workspace events
+	// (node_id NULL), which the events SELECT policy shows only to system code,
+	// so the backfill runs as system code over workspace rows (release 127
+	// incident: RLS 42501 on prod-1, AEON P0).
+	sys := NoProjects(ctx, "migration 1296: account successor audit")
+	for _, id := range ids {
+		if err := enterTenant(sys, tx, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT aeon_backfill_account_model_successors()`); err != nil {
 			return err
 		}
 	}

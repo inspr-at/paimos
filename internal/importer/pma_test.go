@@ -49,28 +49,28 @@ func TestPMAFixtureAndSourceIdentity(t *testing.T) {
 	if err := os.WriteFile(key, []byte("fixture"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	source, err := NewPMAAdapter("augmentoring", server.URL, key, server.Client())
+	source, err := NewPMAAdapter("example-business", server.URL, key, server.Client())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(source.InstanceID(), "pma:augmentoring:") {
+	if !strings.HasPrefix(source.InstanceID(), "pma:example-business:") {
 		t.Fatal(source.InstanceID())
 	}
 	ctx := context.Background()
-	report, err := (Importer{Source: source}).Run(ctx, "augmentoring", "", true)
+	report, err := (Importer{Source: source}).Run(ctx, "example-business", "", true)
 	if err != nil || report.Counts["cost_unit"] != 1 {
 		t.Fatalf("dry run %+v %v", report, err)
 	}
 	d := dbtest.Open(t)
-	if _, err := tenantbootstrap.Create(ctx, d.App, "augmentoring", "Augmentoring"); err != nil {
+	if _, err := tenantbootstrap.Create(ctx, d.App, "example-business", "Example Business"); err != nil {
 		t.Fatal(err)
 	}
 	job := Importer{Source: source, Writer: PostgresWriter{Pool: d.App}}
-	first, err := job.Run(ctx, "augmentoring", "", false)
+	first, err := job.Run(ctx, "example-business", "", false)
 	if err != nil || first.Created != 2 {
 		t.Fatalf("import %+v %v", first, err)
 	}
-	second, err := job.Run(ctx, "augmentoring", "", false)
+	second, err := job.Run(ctx, "example-business", "", false)
 	if err != nil || second.Created != 0 || second.Updated != 0 {
 		t.Fatalf("replay %+v %v", second, err)
 	}

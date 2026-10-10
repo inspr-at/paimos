@@ -1,0 +1,7 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "routes": {
+    "GET /api/cost-units/{costUnitId}/rates": "cost_units.read",
+    "POST /api/cost-units/{costUnitId}/rates": "cost_units.manage"
+  }
+}

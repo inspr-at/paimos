@@ -4,14 +4,15 @@ import { computed, onMounted, ref } from 'vue'
 import { getNode, listNodes, updateNode, type ListItem } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { rowStore } from '../../lib/rowStore'
-import { applyQueueEstimate, queueReadiness, readyGaps, type QueueReadiness, type ReadyGap } from '../../lib/workQueue'
+import { applyQueueEstimate, queueReadiness, readyGaps, type QueueReadiness, type ReadyGap, type QueueWireEntry } from '../../lib/workQueue'
+import { useSession } from '../../stores/session'
 import { useWorkQueue } from '../../stores/workQueue'
 import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 const props = defineProps<{ row: ListItem; projectId: string; anchor: HTMLElement }>()
-const emit = defineEmits<{ close: [restore: boolean] }>()
-const queue = useWorkQueue()
+const emit = defineEmits<{ close: [restore: boolean]; queued: [entry: QueueWireEntry] }>()
+const queue = useWorkQueue(), session = useSession()
 const current = ref(props.row)
 const readiness = ref<QueueReadiness | null>(null), loading = ref(true)
 const gaps = computed(() => readiness.value?.missing.filter((gap): gap is ReadyGap => gap !== 'status') ?? readyGaps(current.value))
@@ -76,7 +77,12 @@ async function fix(kind: ReadyGap) {
 async function add() {
   if (!readiness.value?.ready || loading.value || busy.value) return
   busy.value = true; error.value = ''
-  try { await queue.add(props.projectId, props.row.id); toast(`${props.row.key} queued`); emit('close', true) }
+  const id = props.row.id, project = props.projectId, actor = session.identity?.principal.id
+  try {
+    const entry = await queue.add(project, id)
+    if (!entry || props.row.id !== id || props.projectId !== project || session.identity?.principal.id !== actor) return
+    emit('queued', entry); emit('close', true)
+  }
   catch (e) { error.value = e instanceof Error ? e.message : 'The ticket could not be queued.' }
   finally { busy.value = false }
 }

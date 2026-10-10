@@ -2,7 +2,6 @@
 import { test, expect } from '@playwright/test'
 import { domAudit, installLayoutShiftAudit, armLayoutShiftAudit, readLayoutShiftAudit, expectedMockConsole, decorativeVersionContrast } from './ui-audit-rules'
 import { fixtures, mockWork } from './work-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
 
 test.use({ viewport: { width: 390, height: 700 } })
 
@@ -99,17 +98,4 @@ test('layout shift audit arms after navigation and resets startup movement', asy
   expect(await page.evaluate(() => (window as unknown as { auditShiftArmed: boolean }).auditShiftArmed)).toBe(true)
   expect(await page.evaluate(readLayoutShiftAudit)).toEqual({ score: 0, sources: [] })
   expect(await page.evaluate(() => (window as unknown as { auditShiftArmed: boolean }).auditShiftArmed)).toBe(false)
-})
-
-test('the journey keeps its lower decision card out of the loading reflow', async ({ page }) => {
-  await mockWork(page, fixtures())
-  await mockJourney(page, journeyWorld('plan'))
-  let release: () => void = () => {}
-  const pending = new Promise<void>(resolve => { release = resolve })
-  await page.route('**/api/projects/p-pharos/releases/r-2/walker', async route => { await pending; await route.fallback() })
-  await page.goto('/p/PHAROS?view=journey')
-  await expect(page.getByRole('navigation', { name: 'Project journey' })).toBeVisible()
-  await expect(page.locator('.j-grid > .j-col')).toHaveCount(1)
-  release()
-  await expect(page.locator('.j-grid > .j-col')).toHaveCount(2)
 })

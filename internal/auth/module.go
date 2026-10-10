@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"github.com/jackc/pgx/v5"
@@ -22,11 +23,14 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reportercontract"
+	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Module serves /api/auth, /api/me and /api/agent-keys, and resolves the caller.
 type Module struct {
+	StepUp   *stepup.Module   // native requests, using the existing OIDC callback
+	trimNow  func() time.Time // injected only by deterministic key-trim tests
 	cfg      Config
 	pool     *pgxpool.Pool
 	inTenant func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error
@@ -36,9 +40,31 @@ type Module struct {
 	// existing path; no protected route becomes public.
 	Delegated func(http.ResponseWriter, *http.Request, http.Handler) bool
 
-	mu       sync.Mutex
+	mu        sync.Mutex
+	provider  *oidc.Provider
+	oauth     oauth2.Config
+	discovery *oidcDiscovery
+}
+
+type oidcDiscovery struct {
+	done     chan struct{}
 	provider *oidc.Provider
 	oauth    oauth2.Config
+	err      error
+}
+
+const oidcDiscoveryTimeout = 5 * time.Second
+
+// Discovery and JWKS are small documents. Enforce the byte bound before the
+// OIDC library's ReadAll, including for chunked responses with no length.
+type oidcBoundedTransport struct{ base http.RoundTripper }
+
+func (t oidcBoundedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	response, err := t.base.RoundTrip(r)
+	if err == nil && response.Body != nil {
+		response.Body = http.MaxBytesReader(nil, response.Body, 1<<20)
+	}
+	return response, err
 }
 
 type credKind int
@@ -86,9 +112,16 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/me", reportercontract.WithHeader(reportercontract.Me, m.handleMe))
 	mux.HandleFunc("POST /api/agent-keys", m.handleCreateAgentKey)
 	mux.HandleFunc("GET /api/agent-keys", m.handleListAgentKeys)
+	mux.HandleFunc("POST /api/agent-keys/{id}/adopt", m.handleAdoptAgentKey)
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
+	mux.HandleFunc("PUT /api/agent-keys/{id}/owner-workstation", m.handleOwnerWorkstation)
+	mux.HandleFunc("GET /api/agentd/step-ups/{challenge_id}", m.handleWorkstationChallenge)
+	mux.HandleFunc("POST /api/agent-keys/{id}/trim-proposals", m.handleProposeKeyTrim)
+	mux.HandleFunc("GET /api/key-trim-proposals", m.handleListKeyTrims)
+	mux.HandleFunc("POST /api/key-trim-proposals/{proposalId}/decision", m.handleDecideKeyTrim)
+	mux.HandleFunc("POST /api/key-trim-proposals/{proposalId}/restore", m.handleDecideKeyTrim)
 }
 
 // Middleware resolves a session cookie or an agent bearer token onto the
@@ -115,6 +148,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
+			p.BrowserSession = true
 			if !publicRequest(r) {
 				if c, cErr := r.Cookie(sessionCookieName); cErr == nil {
 					m.setSessionCookie(w, c.Value)
@@ -134,10 +168,40 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		}
 		if kind == credAgent {
 			if err := m.pairingBoundary(r, p); err != nil {
+				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
+					if err := m.auditWorkstation(r, p, false, "pairing_denied"); err != nil {
+						writeInternal(w)
+						return
+					}
+				}
+				if errors.Is(err, authz.ErrForbidden) {
+					writeForbidden(w)
+					return
+				}
 				agentpairing.WriteError(w, err)
 				return
 			}
-			if scope, controlled := coreAgentScope(r); !controlled || scope == "" {
+			if r.Pattern == "GET /api/agents/plan" {
+				if !hasScope(p.Scopes, "agents.plan.read") {
+					httpapi.WriteError(w, http.StatusForbidden, "agents.plan.read scope missing")
+					return
+				}
+				if p.KeyCreatorID == "" {
+					httpapi.WriteError(w, http.StatusForbidden, "key has no person owner — adopt it in Settings › Keys")
+					return
+				}
+			}
+			scope, controlled := coreAgentScope(r)
+			if authz.OwnerWorkstation(p) && workstationGovernance(r) && !strings.HasSuffix(r.Pattern, "/owner-workstation") {
+				scope, controlled = authz.RoutePermissions[r.Pattern], true
+			}
+			if !controlled || scope == "" {
+				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
+					if err := m.auditWorkstation(r, p, false, "route_denied"); err != nil {
+						writeInternal(w)
+						return
+					}
+				}
 				if receiptRoute(r) {
 					writeReceiptNotFound(w)
 				} else {
@@ -176,6 +240,12 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				}
 			}
 			if err := permissionErr; err != nil {
+				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
+					if err := m.auditWorkstation(r, p, false, "permission_denied"); err != nil {
+						writeInternal(w)
+						return
+					}
+				}
 				if errors.Is(err, authz.ErrForbidden) {
 					if receiptRoute(r) {
 						writeReceiptNotFound(w)
@@ -188,6 +258,10 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				return
 			}
 			r = r.WithContext(ctx)
+		}
+		if authz.OwnerWorkstation(p) {
+			m.serveWorkstation(w, r, p, next)
+			return
 		}
 		next.ServeHTTP(w, r)
 	})
@@ -268,6 +342,41 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "stepup-requests":
+		if len(parts) == 1 && (read || r.Method == http.MethodPost) || len(parts) == 2 && validRouteUUID(parts[1]) && read || len(parts) == 3 && validRouteUUID(parts[1]) && parts[2] == "withdraw" && r.Method == http.MethodPost {
+			return "approvals.request", true
+		}
+	case "status":
+		// Definitions and live limits are read-only tenant metadata. Project
+		// overrides remain confined by the handler's project visibility.
+		if len(parts) == 2 && parts[1] == "help" && read {
+			return authz.AuthenticatedRoute, true
+		}
+	case "recurrences":
+		// This is an explicit agent allowlist. Every recurrence handler also
+		// checks the custom role and recurrences.manage key scope in its tenant.
+		if len(parts) == 1 && (read || r.Method == http.MethodPost) {
+			return "recurrences.manage", true
+		}
+		if len(parts) == 2 && parts[1] == "preview" && r.Method == http.MethodPost {
+			return "recurrences.manage", true
+		}
+		if len(parts) == 2 && parts[1] != "" && parts[1] != "preview" && (read || r.Method == http.MethodPut || r.Method == http.MethodDelete) {
+			return "recurrences.manage", true
+		}
+		if len(parts) == 3 && parts[1] != "" {
+			if read && (parts[2] == "preview" || parts[2] == "history" || parts[2] == "releases") || r.Method == http.MethodPost && (parts[2] == "pause" || parts[2] == "resume" || parts[2] == "run-now") {
+				return "recurrences.manage", true
+			}
+		}
+	case "agent-keys":
+		if len(parts) == 3 && parts[2] == "trim-proposals" && validRouteUUID(parts[1]) && r.Method == http.MethodPost {
+			return "approvals.request", true
+		}
+	case "agents":
+		if len(parts) == 2 && parts[1] == "plan" && read {
+			return "agents.plan.read", true
+		}
 	case "decision-desk":
 		if len(parts) == 1 && read {
 			return "questions.read", true
@@ -316,6 +425,21 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "lead-settings":
+			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
+				return "nodes.read", true
+			}
+		case "lead":
+			if len(parts) == 4 && parts[3] == "usage" && read {
+				return "harness.read", true
+			}
+			// Starting a lead remains person-only, regardless of key scopes.
+			if len(parts) == 3 && read {
+				return "harness.read", true
+			}
+			if len(parts) == 4 && r.Method == http.MethodPost && (parts[3] == "claim" || parts[3] == "pause" || parts[3] == "yield") {
+				return "harness.worker", true
+			}
 		case "questions":
 			if len(parts) == 3 && read {
 				return "questions.read", true
@@ -330,6 +454,17 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		case "release-memberships":
 			if len(parts) == 3 && read {
 				return "releases.read", true
+			}
+		case "review-policy":
+			// Explicit agent allowlist. Built-in roles still exclude
+			// reviewpolicy.manage; a custom role and key scope may grant it.
+			if len(parts) == 3 && validRouteUUID(parts[1]) {
+				if read {
+					return "reviewpolicy.read", true
+				}
+				if r.Method == http.MethodPut || r.Method == http.MethodDelete {
+					return "reviewpolicy.manage", true
+				}
 			}
 		case "messages", "message-targets", "message-deliveries":
 			if read {
@@ -411,6 +546,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "relations":
 		return scope("relations")
 	case "events":
+		if len(parts) >= 2 && parts[1] == "subscribe" {
+			if len(parts) == 2 && read {
+				return "events.subscribe", true
+			}
+			return "", false
+		}
 		if read {
 			return "events.read", true
 		}
@@ -419,12 +560,22 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if read {
 			return "search.read", true
 		}
+	case "settings":
+		if len(parts) == 2 && parts[1] == "review-policy" {
+			if read {
+				return "reviewpolicy.read", true
+			}
+			if r.Method == http.MethodPut {
+				return "reviewpolicy.manage", true
+			}
+		}
 	case "views", "preferences", "project-groups":
 		return scope("views")
 	case "knowledge":
 		// Listing candidates is ordinary knowledge read. Accept and dismiss stay
 		// with a person: an agent key has no authority on those two routes, and
-		// the handler refuses every agent again.
+		// the handler refuses every agent again. A recommendation (PUT
+		// .../recommendation) is ordinary knowledge.write: it decides nothing.
 		if r.Method == http.MethodPost && len(parts) == 4 && parts[1] == "learnings" && (parts[3] == "accept" || parts[3] == "dismiss" || parts[3] == "draft") {
 			return "", false
 		}
@@ -448,6 +599,14 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		return "inbox.send", true
 	case "models":
+		if r.Method == http.MethodPost && len(parts) == 2 {
+			if parts[1] == "refresh" {
+				return "models.refresh", true
+			}
+			if parts[1] == "reports" {
+				return "models.report", true
+			}
+		}
 		if read {
 			return "models.read", true
 		}
@@ -485,6 +644,14 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "", false
 		}
 		return harnessScope(parts[1:], read), true
+	case "harness-recoveries":
+		if r.Method == http.MethodPost && (len(parts) == 2 && parts[1] == "claim" || len(parts) == 3 && validRouteUUID(parts[1]) && parts[2] == "complete") {
+			return "harness.worker", true
+		}
+	case "agentd":
+		if r.Pattern == "GET /api/agentd/step-ups/{challenge_id}" {
+			return "harness.worker", true
+		}
 	case "agent-pairing":
 		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/account-link" {
 			return "account.probe", true
@@ -492,7 +659,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
 			return "harness.worker", true
 		}
-		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && r.URL.Path == "/api/agent-pairing/self/disconnect" {
+		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && (r.URL.Path == "/api/agent-pairing/self/disconnect" || r.URL.Path == "/api/agent-pairing/self/capacity" || r.URL.Path == "/api/agent-pairing/self/ledger") {
 			return "run.claim", true
 		}
 	case "agent-accounts":
@@ -531,6 +698,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "stage-handoffs":
 		return "stage.<op>", true
 	case "outcomes":
+		if len(parts) == 2 && parts[1] == "measurement" && read {
+			return "outcome.read", true
+		}
 		if len(parts) == 1 && (read || r.Method == http.MethodPost) {
 			return scope("outcome")
 		}
@@ -564,7 +734,7 @@ func harnessScope(parts []string, read bool) string {
 	}
 	if len(parts) > 0 {
 		switch parts[len(parts)-1] {
-		case "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "rules-receipts", "managed-context":
+		case "model-reports", "heartbeat", "yield", "drain", "complete-delivery", "complete", "stop", "confirm-exit", "rules-receipts", "managed-context":
 			return "harness.worker"
 		}
 	}
@@ -575,7 +745,7 @@ func harnessScope(parts []string, read bool) string {
 const selfScope = "self"
 
 func agentHasScope(have []string, want string) bool {
-	if want == selfScope {
+	if want == selfScope || want == authz.AuthenticatedRoute {
 		return true
 	}
 	if want == "stage.<op>" {
@@ -665,16 +835,53 @@ func parseBearer(h string) (prefix, secret string, ok bool) {
 }
 
 func (m *Module) oidcProvider(ctx context.Context) (*oidc.Provider, oauth2.Config, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, oauth2.Config{}, err
+	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	if m.provider != nil {
+		defer m.mu.Unlock()
 		return m.provider, m.oauth, nil
 	}
 	if m.cfg.OIDCIssuer == "" || m.cfg.OIDCClientID == "" || m.cfg.PublicURL == "" {
+		m.mu.Unlock()
 		return nil, oauth2.Config{}, errOIDCNotConfigured
 	}
-	p, err := oidc.NewProvider(ctx, m.cfg.OIDCIssuer)
+	if pending := m.discovery; pending != nil {
+		m.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, oauth2.Config{}, ctx.Err()
+		case <-pending.done:
+			return pending.provider, pending.oauth, pending.err
+		}
+	}
+	pending := &oidcDiscovery{done: make(chan struct{})}
+	m.discovery = pending
+	m.mu.Unlock()
+	// No network operation holds the sign-in mutex. Preserve an injected
+	// transport but bound both discovery's context and its HTTP client.
+	op, cancel := context.WithTimeout(ctx, oidcDiscoveryTimeout)
+	defer cancel()
+	httpClient := *http.DefaultClient
+	if supplied, ok := ctx.Value(oauth2.HTTPClient).(*http.Client); ok && supplied != nil {
+		httpClient = *supplied
+	}
+	if httpClient.Timeout <= 0 || httpClient.Timeout > oidcDiscoveryTimeout {
+		httpClient.Timeout = oidcDiscoveryTimeout
+	}
+	transport := httpClient.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+	httpClient.Transport = oidcBoundedTransport{base: transport}
+	p, err := oidc.NewProvider(oidc.ClientContext(op, &httpClient), m.cfg.OIDCIssuer)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	defer close(pending.done)
+	m.discovery = nil // failures remain retryable by the next request
 	if err != nil {
+		pending.err = err
 		return nil, oauth2.Config{}, err
 	}
 	ep := p.Endpoint()
@@ -688,6 +895,7 @@ func (m *Module) oidcProvider(ctx context.Context) (*oidc.Provider, oauth2.Confi
 	}
 	m.provider = p
 	m.oauth = oc
+	pending.provider, pending.oauth = p, oc
 	return p, oc, nil
 }
 

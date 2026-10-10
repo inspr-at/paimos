@@ -129,7 +129,7 @@ const timelineCandidatesSQL = `SELECT e.id,aeon_activity_at(e.type,e.after,e.at)
     AND (r.at,r.id)<(e.at,e.id) ORDER BY r.at DESC,r.id DESC LIMIT 1
  ) previous ON e.type='import.history'
  WHERE e.tenant_id=$1 AND e.node_id=$2 AND e.id<=$3
- AND e.type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','node.kind_changed','comment.created','status_autopilot.changed','status_autopilot.undone','status_autopilot.skipped')
+ AND e.type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','node.kind_changed','comment.created','status_autopilot.changed','status_autopilot.undone','status_autopilot.skipped','status_autopilot.derived','status_autopilot.retained','status_autopilot.causal_undo')
  AND ($4::timestamptz IS NULL OR (aeon_activity_at(e.type,e.after,e.at),e.id)<($4,$5))
  AND coalesce(latest.type,'')<>'comment.deleted'
  AND (e.type<>'import.comment' OR NOT EXISTS (
@@ -452,7 +452,11 @@ func project(evs []activityEvent, people map[string]Author) []Item {
 			item.Type = "change"
 			item.Changes = []FieldChange{{Field: "kind", From: &from, To: &to}}
 			items = append(items, item)
-		case "status_autopilot.changed", "status_autopilot.skipped":
+		case "status_autopilot.retained":
+			item.Type = "change"
+			item.Changes = []FieldChange{}
+			items = append(items, item)
+		case "status_autopilot.changed", "status_autopilot.skipped", "status_autopilot.derived":
 			item.Type = "change"
 			item.Changes = diff(nativeFields(e.before, people), nativeFields(e.after, people))
 			items = append(items, item)

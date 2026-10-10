@@ -1,0 +1,2281 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+paths:
+components:
+  headers:
+    BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
+    EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
+    MutationEventIds:
+      description: Exact event IDs committed by this mutation, comma separated in reverse append order for Undo. Absent for an unchanged record or when a complete bounded receipt cannot be supplied. Never resolve an absent or lost receipt by finding the newest event.
+      schema: {type: string, maxLength: 22528, pattern: '^[1-9][0-9]*(,[1-9][0-9]*)*$'}
+  securitySchemes:
+    agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
+    aithemaDelegated:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Aithema delegated host token verified by internal/aithema/tokens. Requires a current host session and exact per-route capabilities. Acceptance is session-only.
+
+    session: {type: apiKey, in: cookie, name: aeon_session}
+  schemas:
+    AgentRecoveryDiagnosis:
+      type: object
+      required: [session_id, observed_revision, cause, detail, action]
+      properties:
+        session_id: {type: string, format: uuid}
+        observed_revision: {type: string, minLength: 64, maxLength: 64}
+        cause: {type: string}
+        detail: {type: string}
+        action: {type: string, enum: ['', restart, reconnect]}
+    AgentRecoveryReceipt:
+      type: object
+      required: [id, session_id, project_id, run_id, action, state, outcome, next_run_id, expires_at, claimed_at, expected_ownership]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        run_id: {type: [string, 'null'], format: uuid}
+        action: {type: string, enum: [restart, reconnect]}
+        state: {type: string, enum: [pending, claimed, completed, expired]}
+        outcome: {type: [string, 'null'], enum: [reconnected, continuation_queued, rejected, unconfirmed, null]}
+        next_run_id: {type: [string, 'null'], format: uuid}
+        expires_at: {type: string, format: date-time}
+        expires_in_ms: {type: integer, minimum: 0, maximum: 45000}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+    AgentRun:
+      type: object
+      required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
+      properties:
+        trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
+        queue_node_id: {type: [string, 'null'], format: uuid}
+        queue_target_agent_id: {type: [string, 'null'], format: uuid}
+        queue_routed_at: {type: [string, 'null'], format: date-time}
+        read_only_review: {type: boolean, description: A pinned review run using a qualified no-tools adapter; repository_mutation_allowed is false.}
+        verification_error: {type: string, enum: [verification_unavailable], description: Present only for a verification refused before launch.}
+        verification_reason: {type: string, enum: [adapter_unsupported, binding_incomplete, local_binding_missing], description: Bounded cause for verification_unavailable; never vendor diagnostics.}
+        capacity_override: {type: string, enum: ['', now]}
+        capacity_handoff: {type: boolean, description: 'Server-created vendor-stop retry. The owning daemon must prove the prior attempt has stopped and retain its recorded workspace and branch before launching.'}
+        wait: {allOf: [{$ref: '#/components/schemas/CapacityWait'}], description: 'Also present on a failed vendor-limited run awaiting automatic continuation. At most 20 minutes to reset waits on the same account; longer stops retry on the next eligible account on the same daemon. A terminal stop never bypasses a person pin, grant, budget, pairing or admission check.'}
+        purpose: {type: string, enum: [managed, pairing_verification]}
+        verification_policy: {type: string, enum: [read_only], description: Present only for pairing_verification; local adapter must enforce this policy.}
+        verification_task: {type: string, description: Fixed harmless server task for pairing verification.}
+        max_duration_seconds: {type: integer, const: 60, description: Present only for pairing verification.}
+        repository_mutation_allowed: {type: boolean}
+        row_version: {type: integer, format: int64, minimum: 1, description: 'The run''s own revision (AEON-449). Every statement that changes the run bumps it in the same transaction, so of two copies of one run the larger row_version is the newer one, whatever order they arrived in. Present on every body that carries a run: lists, detail, launch and every mutation result. Derived fields such as wait are read beside the row and can change without a new row_version.'}
+        id: {type: string, format: uuid}
+        work_order_id: {type: string, format: uuid}
+        agent_principal_id: {type: string, format: uuid}
+        model_profile_id: {type: [string, 'null'], format: uuid}
+        account_id: {type: [string, 'null'], format: uuid}
+        requested_account_id: {type: [string, 'null'], format: uuid, description: The optional account choice pinned at creation; account_id remains null until a reservation succeeds.}
+        status: {type: string, enum: [queued, starting, running, waiting, completed, failed, cancelled, ownership_lost]}
+        reservations_settled: {type: boolean, description: 'Present on run detail reads. True only when the run has at least one reservation and every reservation is settled with recorded actual usage and settlement time. Missing or false never proves accounting settlement; terminal run status and matching ownership are also required for local reconciliation.'}
+        requested_model: {type: [string, 'null']}
+        effective_model: {type: [string, 'null']}
+        outcome: {type: [string, 'null'], enum: [completed, failed, cancelled, ownership_lost, null]}
+        duration_ms: {type: [integer, 'null'], format: int64, description: Whole elapsed milliseconds for terminal runs; null until both timestamps exist}
+        waiting_ms: {type: [integer, 'null'], format: int64, description: Recorded waiting spans clipped to run timestamps and closed at terminal time. Null for legacy runs or timing-history overflow.}
+        active_ms: {type: [integer, 'null'], format: int64, description: 'Milliseconds not spent waiting. Null until terminal timestamps exist, or when timing history exceeds 10000 status records. For measured runs, active_ms + waiting_ms equals duration_ms. Legacy active_ms is preserved; waiting_ms remains null.'}
+        outcome_detail: {type: [string, 'null'], enum: [no_commit, committed, pr_opened, merged, abandoned, null], description: Derived when the run becomes terminal. Local git evidence yields committed or no_commit only; merged is reserved for forge or release evidence. A pull-request URL is pr_opened. Null when the run is not terminal.}
+        retry_of_run_id: {type: [string, 'null'], format: uuid, description: Earlier run of the same work order and agent that this run retries.}
+        model_evidence: {type: string, enum: [unverified, vendor_reported]}
+        input_tokens: {type: integer, format: int64}
+        output_tokens: {type: integer, format: int64}
+        cached_input_tokens: {type: integer, format: int64, minimum: 0, description: Cached input accumulated from telemetry deltas. A subset of input when both were reported together.}
+        reasoning_tokens: {type: integer, format: int64, minimum: 0, description: Reasoning output accumulated from telemetry deltas. A subset of output when both were reported together. Not a separate cost.}
+        cost_micros: {type: integer, format: int64}
+        started_at: {type: [string, 'null'], format: date-time}
+        ended_at: {type: [string, 'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+    AgentdStepUpChallenge:
+      type: object
+      additionalProperties: false
+      required: [summary, nonce, action_digest, expires_at, computer_id]
+      properties:
+        summary: {type: string, minLength: 1, maxLength: 256, description: Server-generated plain summary; bounded to 256 UTF-8 bytes without control or format characters}
+        nonce: {type: string, pattern: '^[0-9a-f]{64}$'}
+        action_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        expires_at: {type: string, format: date-time, description: At most five minutes after issue}
+        computer_id: {type: string, format: uuid}
+    AithemaHostError:
+      type: object
+      required: [error, code]
+      properties:
+        error: {type: string}
+        code: {type: string}
+        document: {type: object}
+    ApiError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+    Approval:
+      allOf:
+        - {$ref: '#/components/schemas/ApprovalProposal'}
+        - type: object
+          required: [id, agent_principal_id, proposed_at, decision, risk]
+          properties:
+            id: {type: string, format: uuid}
+            agent_principal_id: {type: string, format: uuid}
+            agent_name: {type: string, description: "Present only when the caller holds members.read or harness.read at the approval's workspace or project scope and the proposing agent is visible; otherwise omitted."}
+            risk: {type: string, enum: [low, medium, high], readOnly: true, description: "Tenant resource or control/deploy/delete scope segments are high; read-only scopes are low; others medium"}
+            proposed_at: {type: string, format: date-time}
+            decision: {type: [string, 'null'], enum: [approved, denied, null]}
+            decided_by_principal_id: {type: [string, 'null'], format: uuid}
+            target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the recorded target; informational only}
+    ApprovalProposal:
+      type: object
+      required: [scope, resource_kind, rationale, expires_at]
+      properties:
+        scope: {type: string, pattern: '^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$'}
+        resource_kind: {type: string, enum: [tenant, node, run]}
+        resource_id: {type: string, format: uuid}
+        run_id: {type: string, format: uuid}
+        rationale: {type: string, minLength: 1}
+        expires_at: {type: string, format: date-time}
+        target: {$ref: '#/components/schemas/DeployTarget', description: Optional for journey.deploy and stage.deploy; omit for other scopes. Omission preserves existing approval behavior}
+    AttachProcess:
+      type: object
+      additionalProperties: false
+      required: [pid, uid, started, executable, cwd]
+      properties:
+        pid: {type: integer, minimum: 1}
+        uid: {type: integer, minimum: 0}
+        started: {type: string, maxLength: 128}
+        executable: {type: string, maxLength: 1024}
+        cwd: {type: string, maxLength: 1024}
+    AttachSnapshot:
+      type: object
+      additionalProperties: false
+      required: [computer_id, project_id, ticket_id, host, harness, process, transcript, file_id]
+      description: Mode lease is the explicit status-only option; omitted mode selects the default conversation watch.
+      allOf:
+        - if:
+            required: [mode]
+            properties:
+              mode: {const: lease}
+          then:
+            properties:
+              transcript: {const: ''}
+              file_id: {const: ''}
+      properties:
+        mode: {type: string, const: lease}
+        computer_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        ticket_id: {type: string, format: uuid}
+        host: {type: string, maxLength: 128}
+        harness: {type: string, enum: [codex, claude, cursor, grok, gemini, opencode]}
+        process: {$ref: '#/components/schemas/AttachProcess'}
+        transcript: {type: string, maxLength: 1024}
+        file_id: {type: string, maxLength: 128}
+        platform: {type: string, enum: [darwin, linux], description: Observed daemon platform; required for strict local authentication}
+    AttachView:
+      type: object
+      required: [request_id, request_digest, snapshot, state, expires_at]
+      properties:
+        agent_activity_mode: {type: string, enum: [off, tool_activity, agent_summary], description: Workspace policy; spend summary tokens only in agent_summary mode.}
+        request_id: {type: string, format: uuid}
+        request_digest: {type: string}
+        snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
+        state: {type: string, enum: [pending, approved, active, detached, unreachable, confirmed_exited]}
+        expires_at: {type: string, format: date-time}
+        lease_until: {type: [string, 'null'], format: date-time}
+        session_id: {type: [string, 'null'], format: uuid}
+        user_code: {type: string, description: 'Nine digits, daemon response only'}
+        local_auth_nonce: {type: string, description: 'Present only for an approved local_auth request; consumed at activation'}
+        local_consent_proof_version: {type: integer, const: 2, description: Required local consent signature format}
+        consent_mode: {type: string, enum: [aeon, local_auth]}
+        consent_digest: {type: string, description: 'SHA-256 binding of request ID, snapshot digest and server-selected mode; immutable after approval'}
+    Attachment:
+      type: object
+      required: [id, node_id, sha256, name, content_type, size, caption, position, created_by, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        node_id: {type: string, format: uuid}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        name: {type: string}
+        content_type: {type: string}
+        size: {type: integer, format: int64}
+        width: {type: [integer, 'null']}
+        height: {type: [integer, 'null']}
+        caption: {type: string}
+        position: {type: string}
+        created_by: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        deleted_at: {type: [string, 'null'], format: date-time}
+        thumbnail_kind: {type: string, enum: [html-text], description: Bounded inert text rendition of HTML; not a browser screenshot. Available as variant=thumb.}
+    AuthzRole:
+      type: object
+      required: [id, key, name, description, builtin, permissions, based_on, member_count]
+      properties:
+        id: {type: string, format: uuid}
+        key: {type: string}
+        name: {type: string}
+        description: {type: string}
+        builtin: {type: boolean}
+        permissions: {type: array, items: {type: string}}
+        based_on: {type: [string, 'null'], format: uuid}
+        member_count: {type: integer}
+    AuthzRoleRef:
+      type: object
+      required: [id, key, name]
+      properties:
+        id: {type: string, format: uuid}
+        key: {type: string}
+        name: {type: string}
+    CapacityWait:
+      type: object
+      required: [code, run_now_allowed]
+      description: Server routing advice; times use the account owner schedule. Does not grant dispatch authority.
+      properties:
+        code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency, daily_limit, daily_limit_unknown]}
+        host_reason: {type: string, description: Content-free host admission reason; present only on a capacity wait.}
+        until: {type: string, format: date-time}
+        read_at: {type: string, format: date-time}
+        timezone: {type: string}
+        run_now_allowed: {type: boolean, description: Only schedule or reserve waits can be skipped; all safety fences still apply. A reserve wait means only Keep for you stands in the way; until is when the reserve is gone.}
+    ChatCancelResponse:
+      type: "object"
+      additionalProperties: false
+      required: ["contract", "message_id", "result", "receipt"]
+      properties:
+        contract:
+          type: "string"
+          const: "chat-v1"
+        message_id:
+          type: "string"
+          format: "uuid"
+        result:
+          type: "string"
+          enum: ["cancelled", "too_late", "uncertain"]
+        receipt:
+          $ref: "#/components/schemas/ChatReceipt"
+    ChatEvent:
+      type: "object"
+      additionalProperties: false
+      required: ["contract", "cursor", "conversation_id", "type", "revision"]
+      properties:
+        contract:
+          type: "string"
+          const: "chat-v1"
+        cursor:
+          type: "string"
+          maxLength: 4096
+        conversation_id:
+          type: "string"
+          format: "uuid"
+        message_id:
+          type: "string"
+          format: "uuid"
+        type:
+          type: "string"
+          enum: ["message", "receipt", "binding", "reply_activity", "read_marker", "migration"]
+        revision:
+          $ref: "#/components/schemas/ChatPosition"
+    ChatPosition:
+      type: string
+      pattern: '^(0|[1-9][0-9]{0,18})$'
+      maxLength: 19
+      description: Decimal int64 position or epoch. Never a floating-point JSON number.
+    ChatReadiness:
+      type: object
+      additionalProperties: false
+      required: [state, capabilities, reason]
+      description: Conversation-local allowlist. Excludes account/quota/usage/reset/billing data, host paths and private native references. All capabilities remain absent until qualified in later packages.
+      properties:
+        state: {type: string, enum: [idle, busy, offline, unavailable]}
+        capabilities: {type: array, maxItems: 4, uniqueItems: true, items: {type: string, enum: [boundary_input, wake_idle, confirm_received, interrupt]}}
+        reason: {type: string, maxLength: 128}
+    ChatReceipt:
+      type: object
+      additionalProperties: false
+      description: Future evidence projection; fetch/queue/legacy ACK never means agent_confirmed. Preview receipt cannot confirm the full body. No legacy receipt enum is extended.
+      required: [message_id, binding_epoch, state, payload_mode, delivery_deadline]
+      properties:
+        message_id: {type: string, format: uuid}
+        binding_epoch: {$ref: '#/components/schemas/ChatPosition'}
+        state: {type: string, enum: [pending, queued, offered, handed_off, preview_received, agent_confirmed, replying, replied, failed, uncertain, cancelled]}
+        payload_mode: {type: string, enum: [inline, preview]}
+        delivery_deadline:
+          type: string
+          format: date-time
+          readOnly: true
+          x-aeon-immutable: true
+          description: "Immutable server-accepted deadline for never-offered input, calculated once from acceptance time and the effective offline-wait policy. Retained on every receipt, including expiry, cancellation and uncertainty. Reconnect, retries, binding epochs and later policy changes cannot extend it; it does not fabricate failure or resend after a possible offer."
+    ChatRole:
+      type: object
+      additionalProperties: false
+      required: [contract, role_id, project_id, kind, slot_key, conversation_scope]
+      properties:
+        contract: {type: string, const: chat-v1}
+        role_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        kind: {type: string, enum: [lead, worker]}
+        slot_key: {type: string, maxLength: 128}
+        conversation_scope: {type: string, const: person_project}
+    ChatThread:
+      type: object
+      additionalProperties: false
+      required: [contract, conversation_id, role, revision, binding_epoch, readiness]
+      properties:
+        contract: {type: string, const: chat-v1}
+        conversation_id: {type: string, format: uuid}
+        role: {$ref: '#/components/schemas/ChatRole'}
+        revision: {$ref: '#/components/schemas/ChatPosition'}
+        binding_epoch: {$ref: '#/components/schemas/ChatPosition'}
+        readiness: {$ref: '#/components/schemas/ChatReadiness'}
+    CurrentAgentActivity:
+      type: object
+      required: [text, source, at]
+      properties:
+        text: {type: string, minLength: 1, maxLength: 60, description: "Public summary or closed tool vocabulary; automatic editing includes only a safe source-file basename."}
+        source: {type: string, enum: [agent, auto]}
+        at: {type: string, format: date-time}
+    DeliveryItem:
+      type: object
+      required: [id, project_id, ticket_node_id, repository, pull_request, branch, head_sha, state, state_since, owner, deadline_at, held_reason, link_source, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        ticket_node_id: {type: [string, 'null'], format: uuid}
+        repository: {type: string}
+        pull_request: {type: [integer, 'null']}
+        branch: {type: string}
+        head_sha: {type: string}
+        state: {$ref: '#/components/schemas/DeliveryState'}
+        state_since: {type: string, format: date-time}
+        owner: {type: string, enum: [coordinator, ci, queue, builder, person, '']}
+        deadline_at: {type: [string, 'null'], format: date-time}
+        held_reason: {type: [string, 'null']}
+        held_from_state: {type: [string, 'null'], description: 'Observed state when the hold started; unchanged while held.'}
+        required_checks_passed: {type: integer, minimum: 0, description: 'Successful configured checks in the stored observation for this head.'}
+        required_checks_total: {type: integer, minimum: 0, description: 'Configured required checks in the stored observation.'}
+        link_source: {type: [string, 'null'], enum: [review_row, title_key, branch_key, null]}
+        updated_at: {type: string, format: date-time}
+    DeliveryMetric:
+      type: object
+      additionalProperties: false
+      required: [number, key, label, unit, source, definition, status, reason, latest, windows, daily, series, target]
+      properties:
+        number: {type: integer, minimum: 1, maximum: 18, description: 'Project Arion number this metric belongs to: 1 to 10 are the original numbers (3 and 7 have two metrics), 11 to 18 the Arion v5 readings.'}
+        key: {type: string, enum: [pr_ci_wall, queue_run_wall, first_attempt_green, required_checks_green, flaked_failures, time_to_first_green, time_to_first_green_commit, pr_open_to_merged, queue_runs_per_pr, queue_ejections, queue_unclassified, review_time, review_changes_share, merge_rounds_model_share, release_queue_to_live, nightly_green, runner_wait, preflight_red_rate, review_audits, escaped_defects]}
+        label: {type: string}
+        unit: {type: string, enum: [minutes, percent, runs, per100, audits, defects]}
+        source: {type: string, description: 'Where the samples come from.'}
+        definition: {type: string, description: 'What one sample measures, written for the page.'}
+        status: {type: string, enum: [ok, partial, no_data], description: 'Status of the 30-day window.'}
+        reason: {type: [string, 'null'], description: 'Why the metric is partial or has no data; null when ok.'}
+        latest: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricSample'}, {type: 'null'}]}
+        windows: {type: array, maxItems: 5, description: 'The 7, 30, 90, 180 and 365-day windows, in this order.', items: {$ref: '#/components/schemas/DeliveryMetricWindow'}}
+        daily: {type: array, maxItems: 30, description: 'One point per UTC day, oldest first; days without samples have null values, never zero.', items: {$ref: '#/components/schemas/DeliveryMetricPoint'}}
+        series: {type: array, maxItems: 64, description: 'Chart buckets of the 90 and 180-day windows (weeks) and the 365-day window (calendar months), grouped by days and oldest first. Buckets without samples have null values, never zero.', items: {$ref: '#/components/schemas/DeliveryMetricBucket'}}
+        target: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricTarget'}, {type: 'null'}]}
+        releases: {type: array, maxItems: 50, description: 'Only on release_queue_to_live: releases reported in the 365-day window, newest first.', items: {$ref: '#/components/schemas/DeliveryMetricRelease'}}
+    DeliveryMetricBucket:
+      type: object
+      additionalProperties: false
+      required: [days, from, to, bucket, status, n, value, p50, p90]
+      properties:
+        days: {type: integer, enum: [90, 180, 365], description: 'The window this bucket belongs to.'}
+        from: {type: string, format: date, description: 'First UTC day of the bucket, clipped to the window.'}
+        to: {type: string, format: date, description: 'Last UTC day of the bucket, inclusive; the newest bucket ends today.'}
+        bucket: {type: string, enum: [week, month], description: 'week: seven days ending on the window''s last day (the oldest is clipped); month: a calendar month clipped to the window.'}
+        status: {type: string, enum: [ok, partial, no_data], description: 'partial when the bucket starts before complete coverage or the source is incomplete; no_data without samples.'}
+        n: {type: integer, minimum: 0}
+        value: {type: [number, 'null']}
+        p50: {type: [number, 'null']}
+        p90: {type: [number, 'null']}
+    DeliveryMetricCoverage:
+      type: object
+      additionalProperties: false
+      required: [window_days, bucket, buckets_total, buckets_covered, covered_days, from, full]
+      properties:
+        window_days: {type: integer, enum: [7, 30, 90, 180, 365]}
+        bucket: {type: string, enum: [day, week, month], description: 'Chart bucket of this window: day for 7 and 30, week for 90 and 180, month for 365.'}
+        buckets_total: {type: integer, minimum: 0}
+        buckets_covered: {type: integer, minimum: 0, description: 'Buckets with at least one covered day.'}
+        covered_days: {type: integer, minimum: 0, description: 'Days of the window that lie at least partly inside the time the source''s facts are complete.'}
+        from: {type: [string, 'null'], format: date, description: 'First covered day of the window; null when no day is covered.'}
+        full: {type: boolean, description: 'Every day of the window is covered. A covered window can still be partial when the source itself is incomplete; status and reason say so.'}
+    DeliveryMetricFactsInput:
+      type: object
+      additionalProperties: false
+      required: [facts]
+      properties:
+        facts:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, key, at, outcome]
+            properties:
+              kind: {type: string, enum: [review, merge_round, release, review_audit, escaped_defect]}
+              key: {type: string, pattern: '^[A-Za-z0-9._:/+-]{1,128}$', description: 'Idempotency key per kind, for example a release version or a gate run id.'}
+              pull_request: {type: [integer, 'null'], minimum: 1, description: 'Required for merge_round and review_audit (the audited pull request); for escaped_defect the pull request that caused the defect (this or release is required).'}
+              head_sha: {type: [string, 'null'], pattern: '^[0-9a-f]{40}$'}
+              started_at: {type: [string, 'null'], format: date-time, description: 'Review requested, or the release PR entering the merge queue. Required for review and release.'}
+              at: {type: string, format: date-time, description: 'Verdict, merge round or live time.'}
+              outcome: {type: string, enum: [ok, changes, scripted, model, live, failed, clean, low, medium, high], description: 'review ok or changes; merge_round scripted or model; release live or failed; review_audit clean, low, medium or high (the highest severity among its findings); escaped_defect low, medium or high.'}
+              release: {type: [string, 'null'], pattern: '^[A-Za-z0-9._-]{1,32}$', description: 'Release: the release name, for example 126. escaped_defect: the release that caused the defect (this or pull_request is required).'}
+              tag: {type: [string, 'null'], pattern: '^[A-Za-z0-9._+-]{1,128}$', description: 'Release only: the version tag.'}
+              healthy_at: {type: [string, 'null'], format: date-time, description: 'Release only, outcome live: when the live version was healthy again after its live check; at or after at.'}
+    DeliveryMetricPoint:
+      type: object
+      additionalProperties: false
+      required: [date, status, n, value, p50, p90]
+      properties:
+        date: {type: string, format: date}
+        status: {type: string, enum: [ok, partial, no_data], description: 'partial when the day starts before complete coverage or the source is incomplete.'}
+        n: {type: integer, minimum: 0}
+        value: {type: [number, 'null']}
+        p50: {type: [number, 'null']}
+        p90: {type: [number, 'null']}
+    DeliveryMetricPrevious:
+      type: object
+      additionalProperties: false
+      required: [status, n, value, p50, p90, coverage]
+      properties:
+        status: {type: string, enum: [ok, partial, no_data]}
+        n: {type: integer, minimum: 0}
+        value: {type: [number, 'null']}
+        p50: {type: [number, 'null']}
+        p90: {type: [number, 'null']}
+        coverage: {$ref: '#/components/schemas/DeliveryMetricCoverage'}
+    DeliveryMetricRelease:
+      type: object
+      additionalProperties: false
+      required: [key, release, tag, outcome, queued_at, live_at, healthy_at]
+      properties:
+        key: {type: string, description: 'The reported fact key.'}
+        release: {type: [string, 'null'], description: 'Release name; null when the tooling did not report one.'}
+        tag: {type: [string, 'null']}
+        outcome: {type: string, enum: [live, failed]}
+        queued_at: {type: string, format: date-time, description: 'The release PR entered the merge queue.'}
+        live_at: {type: [string, 'null'], format: date-time, description: 'Live on the production host; null when the release failed.'}
+        healthy_at: {type: [string, 'null'], format: date-time, description: 'Healthy again after the live check; null when not reported.'}
+    DeliveryMetricSample:
+      type: object
+      additionalProperties: false
+      required: [value, at]
+      properties:
+        value: {type: number}
+        at: {type: string, format: date-time}
+    DeliveryMetricSource:
+      type: object
+      additionalProperties: false
+      required: [repository, ci_workflow, nightly_workflow, app_connected, backfill, backfill_since, backfill_done_at, covered_since]
+      properties:
+        repository: {type: string}
+        ci_workflow: {type: string}
+        nightly_workflow: {type: string}
+        app_connected: {type: boolean, description: 'True when the workspace GitHub App receives events for this repository.'}
+        backfill: {type: string, enum: [not_started, running, done]}
+        backfill_since: {type: [string, 'null'], format: date-time}
+        backfill_done_at: {type: [string, 'null'], format: date-time}
+        covered_since: {type: [string, 'null'], format: date-time, description: 'Run and pull request facts are complete from this time on.'}
+    DeliveryMetricSourceInput:
+      type: object
+      additionalProperties: false
+      required: [repository]
+      properties:
+        repository: {type: string, description: 'owner/name'}
+        ci_workflow: {type: string, pattern: '^\.github/workflows/[A-Za-z0-9._-]{1,100}\.ya?ml$', default: '.github/workflows/ci.yml'}
+        nightly_workflow: {type: string, pattern: '^\.github/workflows/[A-Za-z0-9._-]{1,100}\.ya?ml$', default: '.github/workflows/nightly-full.yml'}
+    DeliveryMetricTarget:
+      type: object
+      additionalProperties: false
+      required: [value, direction, note, source]
+      properties:
+        value: {type: number}
+        direction: {type: string, enum: [max, min], description: 'max: at most this value is on target; min: at least.'}
+        note: {type: string}
+        source: {type: string}
+    DeliveryMetricWindow:
+      type: object
+      additionalProperties: false
+      required: [days, status, n, value, p50, p90, coverage, previous]
+      properties:
+        days: {type: integer, enum: [7, 30, 90, 180, 365], description: 'Whole UTC days ending today.'}
+        status: {type: string, enum: [ok, partial, no_data]}
+        n: {type: integer, minimum: 0, description: 'Samples in the window.'}
+        value: {type: [number, 'null'], description: 'p50 for durations, the mean for runs per PR, the share in percent for rates, p90 for runner wait, the events per 100 merged pull requests for queue readings, the count for audits and defects. Null, never 0, when the confirmed flake share is withheld because case, workflow revision and runner class are not stored; counts then still name workflow_rescue and suspect.'}
+        p50: {type: [number, 'null']}
+        p90: {type: [number, 'null']}
+        counts: {type: object, additionalProperties: {type: integer, minimum: 0}, description: 'Exact numbers behind the value, named by the metric: never_green, superseded and first_run_green for time to first green; confirmed, suspect and workflow_rescue for flakes (workflow_rescue is a same-run pass, not a confirmed flake); events and base for readings per 100 merged pull requests; high, medium, low and clean for audits and defects. Omitted when a metric names none.'}
+        coverage: {$ref: '#/components/schemas/DeliveryMetricCoverage'}
+        previous: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricPrevious'}, {type: 'null'}], description: 'The same number of days just before the window, for the change; null when no comparison is computed.'}
+    DeliveryMetrics:
+      type: object
+      additionalProperties: false
+      required: [project_id, generated_at, source, metrics]
+      properties:
+        project_id: {type: string, format: uuid}
+        generated_at: {type: string, format: date-time}
+        source: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricSource'}, {type: 'null'}], description: 'Null when no repository is linked.'}
+        metrics: {type: array, maxItems: 24, items: {$ref: '#/components/schemas/DeliveryMetric'}}
+    DeliveryMetricsBackfill:
+      type: object
+      additionalProperties: false
+      required: [state, since, phase, day, calls, runs, pulls, truncated]
+      properties:
+        state: {type: string, enum: [running, done]}
+        since: {type: string, format: date-time}
+        phase: {type: string, enum: [runs, pulls, jobs, done], description: 'jobs is the pass that reads job conclusions after the runs and pulls are in. A deferred jobs failure keeps phase jobs until retry_at.'}
+        day: {type: [string, 'null'], format: date, description: 'Next UTC day of runs to read.'}
+        calls: {type: integer, minimum: 0, description: 'GitHub reads in this step.'}
+        runs: {type: integer, minimum: 0}
+        pulls: {type: integer, minimum: 0}
+        jobs: {type: integer, minimum: 0, description: 'Runs whose jobs this step read (the jobs pass).'}
+        retry_at: {type: [string, 'null'], format: date-time, description: 'When a jobs read failed and no other job work is eligible, the earliest time to call again. Absent when this step has no deferred retry.'}
+        truncated: {type: boolean, description: 'A day had more runs than GitHub lists; metrics stay partial.'}
+    DeliveryMetricsBackfillInput:
+      type: object
+      additionalProperties: false
+      properties:
+        days: {type: integer, minimum: 1, maximum: 90, default: 30}
+        restart: {type: boolean, default: false}
+    DeliveryPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        available: {type: boolean, description: 'Whether a GitHub App is configured for the current tenant.'}
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeliveryItem'}}
+        next_cursor: {type: [string, 'null'], format: uuid}
+    DeliveryRating:
+      type: object
+      description: One visible session. A missing mine means this person has not marked it. harness, model and account_label are current session metadata.
+      required: [session_id, ticket_node_id, harness, model, account_label, mine, votes, average, signals]
+      properties:
+        session_id: {type: string, format: uuid}
+        ticket_node_id: {type: string, format: uuid}
+        harness: {type: string}
+        model: {type: [string, 'null']}
+        account_label: {type: [string, 'null']}
+        mine: {oneOf: [{$ref: '#/components/schemas/DeliveryVote'}, {type: 'null'}]}
+        votes: {type: integer, minimum: 0, description: Exception rows on this session. Silence is not counted.}
+        average: {type: [string, 'null'], pattern: '^(?:[1-4]\.[0-9]{2}|5\.00)$', description: 'Mean of the optional scores, two decimal places, half up. Null when no score was given. Never a JSON number.'}
+        signals: {$ref: '#/components/schemas/DeliverySignals'}
+    DeliveryRoundInput:
+      type: "object"
+      additionalProperties: false
+      required: ["ticket_node_id","slug","kind","round_number","brief_ref","base_ref","estimate_minutes"]
+      properties:
+        ticket_node_id: {"type":"string","format":"uuid"}
+        slug: {"type":"string","minLength":1,"maxLength":120,"pattern":"^[a-z0-9][a-z0-9-]*$"}
+        kind: {"type":"string","enum":["first_build","fix","merge","land"]}
+        round_number: {"type":"integer","minimum":1,"maximum":100}
+        brief_ref: {"type":"string","minLength":1,"maxLength":1024,"description":"Opaque repository-relative reference; never resolved or executed by the server."}
+        base_ref: {"type":"string","minLength":1,"maxLength":200}
+        estimate_minutes: {"type":"integer","minimum":1,"maximum":1440}
+        pull_request: {"type":["integer","null"],"format":"int64","minimum":1}
+    DeliverySettings:
+      type: object
+      additionalProperties: false
+      properties:
+        required_workflow: {type: string, minLength: 1, maxLength: 200, description: 'Required queue workflow name. Omitted project values inherit the tenant value; the default is CI.'}
+        required_checks: {type: array, maxItems: 64, items: {type: string, minLength: 1, maxLength: 200}}
+        deadlines:
+          type: object
+          additionalProperties: false
+          description: 'Durations in minutes; omitted state keys inherit defaults. Zero disables that deadline.'
+          properties:
+            reviewed: {type: integer, minimum: 0, maximum: 10080}
+            pushed: {type: integer, minimum: 0, maximum: 10080}
+            ci_green: {type: integer, minimum: 0, maximum: 10080}
+            in_queue: {type: integer, minimum: 0, maximum: 10080}
+            queue_failed: {type: integer, minimum: 0, maximum: 10080}
+    DeliverySignals:
+      type: object
+      description: Counts from ticket events (review.verdict, review.round, gate.finding, gate.verdict, ci.failed, ci.failure, check.failed, undone events, change.reverted, node.reverted, delivery.reverted). Zero means none of that kind were recorded. AEON-286 outcome events will replace this source.
+      required: [review_rounds, ci_failures, reverts]
+      properties:
+        review_rounds: {type: integer, minimum: 0, description: 'Distinct rounds of review.verdict, review.round, gate.finding or gate.verdict.'}
+        ci_failures: {type: integer, minimum: 0, description: 'Events of type ci.failed, ci.failure or check.failed.'}
+        reverts: {type: integer, minimum: 0, description: 'Undone events, or change.reverted, node.reverted or delivery.reverted. A delivery.rated event is not a signal.'}
+    DeliveryState:
+      type: string
+      enum: [built, reviewed, pushed, ci_green, in_queue, merged, queue_failed, held]
+    DeliveryVote:
+      type: object
+      required: [score, tags, comment, updated_at]
+      properties:
+        score: {type: [integer, 'null'], minimum: 1, maximum: 5, description: Optional detail. Null when the mark has no score.}
+        tags: {type: array, maxItems: 3, uniqueItems: true, items: {type: string, enum: [quality, rework, taste]}}
+        comment: {type: string, minLength: 1, maxLength: 2000, description: Required reason.}
+        updated_at: {type: string, format: date-time}
+    DeployTarget:
+      type: object
+      additionalProperties: false
+      required: [service, change]
+      description: When supplied, a target requires a nonempty hosts array or environment. Canonical hosts are sorted before digesting. All fields are explicit caller input; no destination is inferred.
+      anyOf:
+        - required: [hosts]
+          properties: {hosts: {minItems: 1}}
+        - required: [environment]
+      properties:
+        hosts: {type: array, maxItems: 32, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 255}}
+        environment: {type: string, minLength: 1, maxLength: 128}
+        service: {type: string, minLength: 1, maxLength: 128}
+        image: {type: string, minLength: 1, maxLength: 512}
+        change: {type: string, minLength: 1, maxLength: 1000}
+    DeskAnswerReference:
+      type: object
+      required: [question_id, answer_id, revision]
+      description: Durable answer pointer. Fetch private answer text through the authorized question status API.
+      properties:
+        question_id: {type: string, format: uuid}
+        answer_id: {type: string, format: uuid}
+        revision: {type: integer}
+        replaces: {type: string, format: uuid}
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        code: {type: string, description: Existing top-level error code; forbidden for permission denials}
+        reason: {type: string, description: Safe human-readable explanation}
+        reason_code:
+          type: string
+          enum: [missing_role_permission, missing_key_scope, missing_project_access]
+          description: Optional denial layer based on the authenticated caller's own access. If resolving a target's project still leaves the request forbidden, the denial from before resolution is retained so diagnostics do not disclose whether the target exists. Absent for generic denials.
+        scope:
+          type: string
+          description: Present only for missing_key_scope after role and project authority have passed in the reported check. A failed target-project retry retains the pre-resolution denial instead. Never includes resource or principal data.
+        scope_label:
+          type: string
+          description: Human label of scope, such as See history. Present only with a missing_key_scope diagnostic; error and reason also name the scope and label.
+        scope_code:
+          type: string
+          description: Non-secret proposal for the missing scope, to paste into a key dialog. aeon-scopes:v1 followed by a colon, sorted comma-separated resource.action groups (actions within a resource joined by +), a colon and eight lowercase hex digits of CRC32-IEEE over all preceding bytes. It grants nothing and is not a credential. Present only with a missing_key_scope diagnostic.
+    FeatureEvaluation:
+      type: object
+      required: [key, label, description, enabled, source]
+      properties:
+        key: {type: string}
+        label: {type: string}
+        description: {type: string}
+        enabled: {type: boolean}
+        source: {type: string, enum: [default, tenant, project]}
+    HarnessAccountLabel: {type: [string, 'null'], maxLength: 128, description: 'Subscription or account display name, never a credential. Trimmed plain text; control characters stripped.'}
+    HarnessActivityNote:
+      type: object
+      required: [note, at]
+      properties:
+        note: {type: string, maxLength: 120}
+        at: {type: string, format: date-time}
+    HarnessAttentionReason:
+      type: object
+      description: Content-free grouped evidence; no message body, rationale, request ID or private routing. Shared reasons belong to the principal inbox and never block a session. Detail requires harness.read and the underlying approval/message access.
+      required: [kind, scope, actor, count, blocking, location]
+      properties:
+        kind: {type: string, enum: [approval, held_action, reply, reply_due, run_waiting, session_yielded]}
+        scope: {type: string, enum: [session, run, shared]}
+        actor: {type: string, enum: [person, agent, unknown]}
+        count: {type: integer, minimum: 1}
+        blocking: {type: boolean}
+        location: {type: string, enum: [approvals, messages, session]}
+    HarnessBranch: {type: [string, 'null'], maxLength: 200, description: Branch name; trimmed plain text.}
+    HarnessBrief: {type: [string, 'null'], maxLength: 240, description: Short prompt file name or ticket key; trimmed plain text.}
+    HarnessCommit:
+      type: object
+      required: [sha, subject]
+      properties:
+        sha: {type: string, pattern: '^[0-9a-fA-F]{7,40}$'}
+        subject: {type: string, minLength: 1, maxLength: 200}
+        lines_added: {type: integer, format: int64, minimum: 0, maximum: 1000000000, description: Optional measured numstat total; all three diff counts must be supplied together.}
+        lines_deleted: {type: integer, format: int64, minimum: 0, maximum: 1000000000}
+        files_changed: {type: integer, format: int64, minimum: 0, maximum: 1000000000}
+    HarnessContinuation:
+      type: object
+      required: [succeeds_session_id, handover, brief]
+      properties:
+        desk_answers: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeskAnswerReference'}}
+        succeeds_session_id: {type: string, format: uuid}
+        handover: {$ref: '#/components/schemas/HarnessHandover'}
+        brief: {type: string, description: 'Full continuation brief built from the durable handover, never truncated to the metadata brief label.'}
+    HarnessEffort: {type: [string, 'null'], maxLength: 40, description: Optional trimmed plain text; control characters stripped.}
+    HarnessEstimateWarning:
+      type: object
+      required: [code, hint]
+      properties:
+        code: {type: string, enum: [missing_progress, missing_eta, ticket_without_estimate]}
+        hint: {type: string}
+    HarnessHandover:
+      type: object
+      additionalProperties: false
+      required: [state, next_steps, open_questions, worktree_state]
+      description: Worker finishes or rolls back the current step, commits WIP on its own branch, then supplies this note with stop reason paused. Stored in the session and as a bound-ticket comment in one transaction. No credentials or private registration references.
+      properties:
+        state: {type: string, minLength: 1, maxLength: 4000}
+        next_steps: {type: array, minItems: 1, maxItems: 20, items: {type: string, minLength: 1, maxLength: 1000}}
+        open_questions: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 1000}}
+        worktree_state: {type: string, enum: [committed, clean, rolled_back]}
+        commit_sha: {type: string, pattern: '^[0-9a-fA-F]{7,40}$', description: Required when worktree_state is committed.}
+    HarnessMetadataChange:
+      type: object
+      required: [field, previous_value, value, at]
+      properties:
+        field: {type: string, enum: [display_label, model, reasoning_effort]}
+        previous_value: {type: [string, 'null']}
+        value: {type: [string, 'null']}
+        at: {type: string, format: date-time}
+    HarnessModel: {type: [string, 'null'], maxLength: 128, description: Optional trimmed plain text; control characters stripped.}
+    HarnessPause:
+      type: object
+      required: [control_id, state, requested_by_principal_id, requested_at, reason, deadline_at]
+      properties:
+        level: {$ref: '#/components/schemas/HarnessPauseLevel'}
+        note: {type: string, maxLength: 2000}
+        starts_at: {type: string, format: date-time, description: Do not deliver or plan before this database-clock time.}
+        wake_in_ms: {type: integer, minimum: 1, maximum: 86400000, description: "Relative database-clock delay to the next scheduled transition. Anchor to monotonic request start. A wake hint grants no signal authority."}
+        leaving_request_id: {type: string, format: uuid}
+        stop_control_id: {type: string, format: uuid}
+        interrupt_control_id: {type: string, format: uuid}
+        stop_expires_in_ms: {type: integer, minimum: 0, maximum: 45000, description: "Heartbeat-only authorization lifetime for an owned unmanaged launcher. Anchor to monotonic request start, deduct round trip, and fail closed if absent or zero."}
+        stop_requested: {type: boolean, description: An immediate stop was queued; this does not confirm process exit.}
+        deliver: {type: boolean, description: Database-clock delivery eligibility. Old records without starts_at remain deliverable.}
+        control_id: {type: string, format: uuid}
+        state: {type: string, enum: [requested, planned, paused, resume_requested, resumed, cancelled]}
+        requested_by_principal_id: {type: string, format: uuid}
+        requested_at: {type: string, format: date-time}
+        reason: {type: string}
+        deadline_at: {type: string, format: date-time, description: 'DB-clock handover deadline. Legacy records without a level cancel on expiry. Level-aware requests cancel the cooperative control and queue Stop now for the exact generation. Deadlines are checked on heartbeat, reads and the periodic sweep. Process exit is confirmed only by the owned executor.'}
+        handover_point: {type: string}
+        planned_at: {type: string, format: date-time}
+        paused_at: {type: string, format: date-time}
+        handover: {$ref: '#/components/schemas/HarnessHandover'}
+        resume_requested_at: {type: string, format: date-time}
+        successor_session_id: {type: string, format: uuid}
+    HarnessPauseBatch:
+      type: object
+      additionalProperties: false
+      properties:
+        level: {$ref: '#/components/schemas/HarnessPauseLevel', description: Omitted uses the person's workspace default; agents default to pause.}
+        note: {type: string, maxLength: 2000, description: Optional steer note saved with the pause request.}
+        reason: {type: string, maxLength: 240}
+        deadline_minutes: {type: integer, minimum: 1, maximum: 60, default: 10}
+        coordinator_session_id: {type: string, format: uuid}
+        except: {type: array, maxItems: 200, items: {type: string, format: uuid}}
+    HarnessPauseBatchResult:
+      type: object
+      required: [items, more]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessSession'}}
+        more: {type: boolean, description: More pause-capable generations remain; repeat the request. Skipped generations do not consume this limit.}
+        skipped: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/HarnessPauseSkippedSession'}}
+        skipped_more: {type: boolean, description: More unsupported generations were omitted from the bounded skipped report.}
+    HarnessPauseLevel:
+      type: string
+      enum: [stop_now, pause_quickly, pause, wrap_up]
+    HarnessPauseProgress:
+      type: object
+      description: 'Latest worker planning snapshot. Sending any planning field replaces the snapshot; omitted fields in that snapshot are unknown, null clears. Omitting all planning fields preserves its original report time. Estimates count down from reported_at and expire after two ETA intervals. Text must be public labels without credentials, paths or command arguments. The command here is the current operation, separate from a terminal session command label.'
+      required: [reported_at]
+      properties:
+        reported_at: {type: string, format: date-time, readOnly: true}
+        step: {type: [string, 'null'], maxLength: 240}
+        next_point: {type: [string, 'null'], maxLength: 240}
+        next_point_in_min: {type: [number, 'null'], minimum: 0, maximum: 1440}
+        finish_in_min: {type: [number, 'null'], minimum: 0, maximum: 1440}
+        finish_outcome: {type: [string, 'null'], maxLength: 240}
+        interrupt: {type: [boolean, 'null'], description: Whether the current operation can be interrupted; never grants signal authority.}
+        command: {type: [string, 'null'], maxLength: 240}
+        command_left_min: {type: [number, 'null'], minimum: 0, maximum: 1440}
+    HarnessPauseSkippedSession:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, reason]
+      description: A controlled managed generation that lacks inbox delivery. No pause or control is created; the session remains running. Only public identifiers and its optional display label are returned.
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        display_label: {type: string, maxLength: 128}
+        reason: {type: string, enum: [inbox_delivery_unavailable]}
+    HarnessProcessOwnership:
+      type: object
+      description: Content-free current daemon ownership. Never sufficient by itself; the daemon verifies its live Process before signaling.
+      required: [daemon_id, generation, process_id, root_pid, group_id, started_at]
+      properties:
+        daemon_id: {type: string, maxLength: 128}
+        generation: {type: string, pattern: '^[0-9a-f]{32}$'}
+        process_id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        root_pid: {type: integer, minimum: 2}
+        group_id: {type: integer, minimum: 2}
+        started_at: {type: string, format: date-time}
+    HarnessRegistration:
+      type: object
+      required: [agent_principal_id, harness, host, management_mode, role, harness_session_ref, worker_lease]
+      properties:
+        succeeds_session_id: {type: [string, 'null'], format: uuid, description: 'Explicit stopped or heartbeat-lost coordinator, or paused worker with a durable resume request, owned by the same principal in this project.'}
+        max_session_file_bytes: {$ref: '#/components/schemas/RulesClientMaximum'}
+        rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80, description: "Aeon CLI or agentd version reporting the capability."}
+        agent_principal_id: {type: string, format: uuid}
+        run_id: {type: [string, 'null'], format: uuid}
+        ticket_node_id: {type: [string, 'null'], format: uuid}
+        work_order_id: {type: [string, 'null'], format: uuid}
+        parent_harness_session_id: {type: [string, 'null'], format: uuid, description: 'Parent generation in this project. Children register distinct session references and worker leases under the same authenticated agent, including when parent and child use the same harness.'}
+        display_label:
+          type: [string, 'null']
+          maxLength: 128
+          description: Optional public session label. Trimmed; empty becomes null. Control characters are rejected. Part of exact registration replay.
+        model: {$ref: '#/components/schemas/HarnessModel'}
+        reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
+        account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
+        model_reports: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}
+        harness_version: {$ref: '#/components/schemas/HarnessVersion'}
+        brief: {$ref: '#/components/schemas/HarnessBrief'}
+        worktree: {$ref: '#/components/schemas/HarnessWorktree'}
+        branch: {$ref: '#/components/schemas/HarnessBranch'}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}
+        generator: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$", description: "Media only. Public generator label, required for media registration; no model registry lookup."}
+        command: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$", description: "Terminal only. Public command label, required for terminal registration. Never include credentials or command arguments containing secrets."}
+        host: {type: string, minLength: 1, maxLength: 128}
+        management_mode: {type: string, enum: [managed, unmanaged]}
+        role: {type: string, enum: [coordinator, worker]}
+        work_shape: {type: string, enum: [unknown, ship, scout]}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, pause, owned_stop_v1, status, steer, interrupt, stop, managed_control_v1, session_recovery_v1, rename, model, effort, service_tier_v1]}}
+        harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
+        vendor_session_ref:
+          type: string
+          minLength: 16
+          maxLength: 4096
+          writeOnly: true
+          description: Optional harness-native session id, digested like harness_session_ref. Unique among active generations per tenant and agent across all harnesses. Must identify this generation, not its parent. Omitted on replay does not clear a stored value. The same value as harness_session_ref is not stored again.
+        worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
+    HarnessResume:
+      type: object
+      required: [session, continuation, registration]
+      properties:
+        session: {$ref: '#/components/schemas/HarnessSession'}
+        continuation: {$ref: '#/components/schemas/HarnessContinuation'}
+        registration: {$ref: '#/components/schemas/HarnessRegistration', description: Public recipe without private proofs or old run binding. Retains generator and command labels from the paused session; a continuation with different run-kind labels is rejected. Caller supplies fresh harness_session_ref and worker_lease.}
+        successor: {$ref: '#/components/schemas/HarnessSession'}
+    HarnessSession:
+      type: object
+      description: State evidence is populated on reads and omitted when unknown in mutation responses and event snapshots. finished is the exception, derived from the row itself, so every payload that carries a session (reads, mutation responses, event snapshots) states it.
+      required: [id, project_id, agent_principal_id, harness, host, management_mode, role, work_shape, advertised_capabilities, phase, activity, activity_sequence, revision, created_at, finished]
+      properties:
+        desk_answers: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeskAnswerReference'}}
+        service_tier: {$ref: '#/components/schemas/ServiceTier'}
+        service_tier_revision: {type: integer, minimum: 0}
+        service_tier_request: {type: [string, 'null'], enum: [default, fast, fastest, null], description: Pending agent-requested tier available on session list rows without opening the panel.}
+        service_tier_reports: {type: array, items: {$ref: '#/components/schemas/ServiceTierReport'}}
+        supported_pause_levels: {type: array, items: {$ref: '#/components/schemas/HarnessPauseLevel'}, description: Without a cooperative inbox only stop_now is supported.}
+        pause_can_interrupt: {type: boolean, description: 'Harness advertises cooperative interrupt support. Fresh pause_progress.interrupt describes the current operation; false means it reacts after the command.'}
+        pause_progress: {$ref: '#/components/schemas/HarnessPauseProgress'}
+        pause: {$ref: '#/components/schemas/HarnessPause', description: Durable cooperative stop request and handover. Delivered on every heartbeat until closure.}
+        continuation: {$ref: '#/components/schemas/HarnessContinuation', description: Handover brief inherited by a new generation registered with succeeds_session_id.}
+        warnings:
+          type: array
+          description: Non-blocking guidance returned on heartbeats, including an empty array when satisfied or guidance cannot be computed; absent on other session responses. Working workers get missing_progress after three consecutive accepted beats without a non-null progress_pct, even if an older value is stored. Working sessions with a bound ticket_node_id get missing_eta for their role's absent ETA (ready for workers, live for coordinators); unbound sessions do not. A visible bound work item or legacy ticket/task without valid hours gets ticket_without_estimate. Clients print each code at most once per ten minutes. Status-file diagnostics such as stale_progress are local CLI warnings, not response codes.
+          items: {$ref: '#/components/schemas/HarnessEstimateWarning'}
+        vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
+        limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Omitted unless current account owner sharing permits reset details.}
+        limit_resets_at: {type: string, format: date-time, description: Omitted unless current account owner sharing permits reset details.}
+        run_status: {type: [string, 'null'], description: Status of the bound run when visible to the caller.}
+        needs_attention: {type: boolean, description: "Bound run waiting or an exact bound-run approval pending. Yielded phase is separate session evidence. Principal-only requests and nonblocking replies never set this flag. False for stopped sessions; omitted when not loaded."}
+        attention_reasons: {type: array, description: "Authorized session/run reasons and separately scoped shared inbox attention. Empty means loaded with no visible reasons; omitted when unloaded or withheld.", items: {$ref: '#/components/schemas/HarnessAttentionReason'}}
+        has_problem: {type: boolean, description: "Bound run failed or lost ownership, or the stop reason reports an error or block. Normal stops are false. Omitted when not loaded."}
+        finished: {type: boolean, description: "True when the session reported 100% and stopped with a recorded clean exit (stop reason process_exited). Anything else that stopped, a silence the server closed, a stop with no recorded reason, and a session that is still open are false. Derived, so it is always present, also where stop_reason is withheld. Clients read this flag and never derive Done from progress_pct or stop_reason (AEON-437)."}
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        agent_principal_id: {type: string, format: uuid}
+        run_id: {type: [string, 'null'], format: uuid}
+        ticket_node_id: {type: [string, 'null'], format: uuid}
+        work_order_id: {type: [string, 'null'], format: uuid}
+        parent_harness_session_id: {type: [string, 'null'], format: uuid}
+        owner_principal_id: {type: [string, 'null'], format: uuid, readOnly: true, description: 'Canonical person who owns this generation; null or omitted when no owner is recorded. Wind-down selects only the caller-owned running sessions, even for administrators.'}
+        display_label: {type: [string, 'null'], maxLength: 128, description: Public current per-session label; null for unlabeled generations.}
+        model: {$ref: '#/components/schemas/HarnessModel'}
+        model_raw: {type: [string, 'null'], maxLength: 128, readOnly: true, description: Original cleaned model string before separating an effort suffix; retained for audit.}
+        model_profile_id: {type: [string, 'null'], format: uuid, readOnly: true, description: "Unique tenant registry match for harness, normalised model and effort. Unknown or ambiguous matches are omitted."}
+        reasoning_effort: {$ref: '#/components/schemas/HarnessEffort'}
+        account_label: {$ref: '#/components/schemas/HarnessAccountLabel'}
+        harness_version: {$ref: '#/components/schemas/HarnessVersion'}
+        brief: {$ref: '#/components/schemas/HarnessBrief'}
+        worktree: {$ref: '#/components/schemas/HarnessWorktree'}
+        branch: {$ref: '#/components/schemas/HarnessBranch'}
+        commits: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/HarnessCommit'}}
+        activity_note: {type: [string, 'null'], maxLength: 120, description: Current step reported by the worker.}
+        activity_history: {type: array, description: 'Up to 20 changed notes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessActivityNote'}}
+        agent_activity_mode: {type: string, enum: [off, tool_activity, agent_summary], description: Workspace policy; reporters spend summary tokens only in agent_summary mode. Default agent_summary.}
+        current_activity: {oneOf: [{$ref: '#/components/schemas/CurrentAgentActivity'}, {type: 'null'}], description: "Fresh agent summary preferred for ten minutes, then latest tool activity. Null when off. Existing activity busy/idle state is unchanged."}
+        current_activity_history: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/CurrentAgentActivity'}, description: "Bounded changed activities, newest first; detail only, hidden when off."}
+        controls: {type: array, description: Session requests on detail reads; outstanding requests plus the latest 20 completions and the last applied request of each kind. Expiry is terminal rejected with request_expired reason., items: {$ref: '#/components/schemas/HarnessSessionRequest'}}
+        metadata_history: {type: array, description: 'Up to 20 display label, model, and reasoning effort changes, newest first; present on session detail.', items: {$ref: '#/components/schemas/HarnessMetadataChange'}}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}
+        generator: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+-]*$", description: "Media only. Public generator label, required for media registration; no model registry lookup."}
+        command: {type: string, maxLength: 120, pattern: "^[A-Za-z0-9][A-Za-z0-9._:/+ -]*$", description: "Terminal only. Public command label, required for terminal registration. Never include credentials or command arguments containing secrets."}
+        watch:
+          type: object
+          description: Content-free attach status, present on attached session detail only
+          properties:
+            mode: {type: string, const: lease, description: Metadata only; no conversation viewer}
+            request_id: {type: string, format: uuid}
+            owner_id: {type: string, format: uuid}
+            state: {type: string, enum: [active, detached, unreachable]}
+            process_state: {type: string, const: confirmed_exited, description: Present only for a kernel-confirmed exit; absent means unconfirmed}
+            lease_until: {type: [string, 'null'], format: date-time}
+        host: {type: string}
+        management_mode: {type: string, enum: [managed, unmanaged]}
+        role: {type: string, enum: [worker, coordinator]}
+        work_shape: {type: string, enum: [unknown, ship, scout]}
+        agent_recovery:
+          $ref: '#/components/schemas/AgentRecoveryDiagnosis'
+          description: Caller-specific evidence; omitted for agents and people without harness.control.
+        advertised_capabilities: {type: array, items: {type: string}}
+        phase: {type: string, enum: [starting, working, yielded, stopping, stopped]}
+        activity: {type: string, enum: [unknown, busy, idle, throttled]}
+        activity_sequence: {type: integer, format: int64}
+        revision: {type: integer, format: int64}
+        row_version: {type: integer, format: int64, minimum: 1, description: 'The row''s own revision (AEON-449). Every statement that changes the session bumps it in the same transaction, so of two copies of one session the larger row_version is the newer one, whatever order they arrived in. Present on every body that carries a session: lists, detail, mutation results and event snapshots. Unlike revision, which is an optimistic-lock token only some writers advance, it advances on every change, heartbeats included.'}
+        heartbeat_at: {type: [string, 'null'], format: date-time}
+        stopped_at: {type: [string, 'null'], format: date-time}
+        stop_reason: {type: [string, 'null'], description: 'Why the generation closed. heartbeat_lost means the server closed a silent unmanaged session (Lost contact); its worker may still revive it with a heartbeat.'}
+        process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+        process_observed_at: {type: [string, 'null'], format: date-time}
+        archived_at: {type: [string, 'null'], format: date-time}
+        recovery_process_state: {type: [string, 'null'], enum: [unknown, null]}
+        created_at: {type: string, format: date-time}
+        eta_ready_at: {type: string, format: date-time, description: When the bound ticket is estimated ready for review.}
+        eta_live_at: {type: string, format: date-time, description: When the bound ticket is estimated live.}
+        progress_pct: {type: integer, minimum: 0, maximum: 100, description: Percent done. Zero is reported; omission means unknown.}
+        eta_reported_at: {type: string, format: date-time, description: When the session last sent an estimate.}
+        eta_stale: {type: boolean, description: True when the last estimate is older than two reporting intervals. Omitted when fresh or absent. Clients derive attention from this field.}
+        inbox_seen_at: {type: string, format: date-time, description: 'AEON-280. Last time this generation pulled its inbox (a session pull, drain, stream or ack). Omitted until it first pulls. Clients derive Listening from its age.'}
+        inbox_seen_via: {type: string, enum: [hook, drain, long_poll, stream, ack], description: 'How it last pulled: hook = one-shot session pull, long_poll = waiting pull, drain = managed harness drain, stream = inbox SSE, ack = acknowledgement when nothing has pulled yet. A later acknowledgement keeps the pull path and only refreshes inbox_seen_at. Omitted with inbox_seen_at.'}
+        has_vendor_session_ref: {type: boolean, description: 'True when a vendor session reference is stored. The reference itself is never returned.'}
+    HarnessSessionHierarchy:
+      description: Agents tree extension for lists and hierarchy mutations. The pinned reporter status and heartbeat responses retain HarnessSession without these fields.
+      allOf:
+        - {$ref: '#/components/schemas/HarnessSession'}
+        - type: object
+          properties:
+            can_reparent: {type: boolean, description: Caller may move this live session or select it as a lead; read-time hint rechecked on writes. Omitted in event snapshots.}
+            handed_over_to_id: {type: string, format: uuid, description: Successor coordinator; omitted without a handover.}
+            adopted_from_id: {type: string, format: uuid, description: Previous lead from which this child was adopted; omitted after a manual move clears the lineage.}
+    HarnessSessionRequest:
+      type: object
+      required: [id, session_id, expected_generation, kind, state, sequence, request_payload, expires_at, outcome, reason]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        expected_generation: {type: string, format: uuid}
+        kind: {type: string, enum: [rename_request, model_request]}
+        state: {type: string, enum: [pending, claimed, completed]}
+        sequence: {type: integer, format: int64}
+        outcome: {type: [string, 'null'], enum: [applied, rejected, null]}
+        reason: {type: [string, 'null'], description: 'request_expired means expired, not applied.'}
+        expires_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        completed_at: {type: [string, 'null'], format: date-time}
+        request_payload:
+          type: object
+          properties:
+            display_label: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9 _.:()/#-]+$'}
+            model: {type: string, maxLength: 128}
+            reasoning_effort: {type: string, enum: [default, low, medium, high, xhigh]}
+            account_id: {type: string, format: uuid}
+            model_profile_id: {type: string, format: uuid}
+    HarnessVersion: {type: [string, 'null'], maxLength: 80, description: Optional trimmed plain text; control characters stripped.}
+    HarnessWorktree: {type: [string, 'null'], maxLength: 512, description: Worktree path; trimmed plain text.}
+    Identity:
+      type: object
+      required: [id, issuer, subject]
+      properties:
+        id:
+          type: string
+          format: uuid
+        issuer:
+          type: string
+        subject:
+          type: string
+        email:
+          type: ["string", "null"]
+        display_name:
+          type: ["string", "null"]
+    JourneyNextAction:
+      type: object
+      required: [key, label, stage, available]
+      properties:
+        key: {type: string, enum: [continue_intake, confirm_brief, decide, reopen, approve_requirements, open_first_release, start_build, wait_for_build, mark_candidate, approve_candidate, approve_deploy, retry_deploy, approve_permit, plan_next_release]}
+        renewal_action: {type: string, enum: [renew_candidate, renew_deploy], description: Explicit action for replacing a nonlive standing gate. Requires the exact current release_id and a fresh approved request. Advances the journey revision and requires fresh preparation and deployment evidence. Older clients using key alone fail closed.}
+        access_renewal_action: {type: string, enum: [renew_permit], description: Replace a nonlive Access permit with a fresh approved request for the exact current release_id. Advances the journey revision and fences stale Access evidence while retaining the completed deployment. Older clients using key alone fail closed.}
+        label: {type: string}
+        stage: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
+        available: {type: boolean}
+        reason: {type: string}
+        approval_request_id: {type: [string, 'null'], format: uuid}
+    KeyTrimEvidence:
+      type: object
+      additionalProperties: false
+      required: [summary, observed_at, risks]
+      properties:
+        summary: {type: string, minLength: 1, maxLength: 2000}
+        observed_at: {type: string, format: date-time}
+        risks:
+          type: array
+          maxItems: 256
+          items:
+            type: object
+            additionalProperties: false
+            required: [scope, evidence, risk_if_dropped]
+            properties:
+              scope: {type: string, maxLength: 128}
+              evidence: {type: string, minLength: 1, maxLength: 2000}
+              risk_if_dropped: {type: string, minLength: 1, maxLength: 1000}
+    KeyTrimProposal:
+      type: object
+      description: Protected approval memo; metadata only. Usage timestamps have at most a one-minute debounce lag. Unknown use is not evidence of safety.
+      required: [id, key_id, key_name, owner_id, owner_name, previous_scopes, snapshot_digest, candidate_scopes, candidate_digest, evidence, usage, created_by, created_at, expires_at, state, revision]
+      properties:
+        id: {type: string, format: uuid}
+        key_id: {type: string, format: uuid}
+        key_name: {type: string}
+        owner_id: {type: string, format: uuid, description: Agent principal owning this key}
+        owner_name: {type: string}
+        previous_scopes: {type: array, items: {type: string}}
+        snapshot_digest: {type: string}
+        candidate_scopes: {type: array, items: {type: string}}
+        candidate_digest: {type: string}
+        evidence: {$ref: '#/components/schemas/KeyTrimEvidence'}
+        usage:
+          type: array
+          maxItems: 256
+          items:
+            type: object
+            required: [scope, last_used_at]
+            properties:
+              scope: {type: string}
+              last_used_at: {type: [string, 'null'], format: date-time}
+        created_by: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        state: {type: string, enum: [pending, applied, declined, restored, expired]}
+        revision: {type: integer, minimum: 1}
+        applied_at: {type: [string, 'null'], format: date-time}
+        restore_until: {type: [string, 'null'], format: date-time}
+        blocked_reason: {type: string, description: 'Non-actionable source, rechecked during reads and writes'}
+    LeadDecision:
+      type: object
+      required: [event_id, project_id, session_id, recorded_at, evidence, authority_granted, request, outcome, reason_codes, gate_freshness, results]
+      properties:
+        event_id: {type: integer, minimum: 1}
+        project_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        evidence: {type: string, const: coordinator_reported}
+        authority_granted: {type: boolean, const: false}
+        request: {$ref: '#/components/schemas/LeadDecisionWrite'}
+        outcome: {type: string, enum: [selected, wait, requested, passed, failed, handoff, partial]}
+        reason_codes: {type: array, maxItems: 13, items: {type: string}}
+        gate_freshness:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [kind, freshness]
+            properties:
+              kind: {type: string, enum: [dial, harness, account_room, host_load]}
+              freshness: {type: string, enum: [fresh, stale, unreadable]}
+        results:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            required: [kind, id]
+            properties:
+              kind: {type: string, enum: [run, review, release]}
+              id: {type: string, format: uuid}
+              head_sha: {type: string, pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$'}
+              base_sha: {type: string, pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$'}
+              author_run_id: {type: string, format: uuid}
+              review_run_id: {type: string, format: uuid}
+              author_family: {type: string, enum: [openai, anthropic, xai, cursor]}
+              reviewer_family: {type: string, enum: [openai, anthropic, xai, cursor]}
+    LeadDecisionGate:
+      type: object
+      additionalProperties: false
+      required: [kind, state]
+      properties:
+        kind: {type: string, enum: [dial, harness, account_room, host_load]}
+        state: {type: string, enum: [ready, full, unreadable]}
+        observed_at: {type: [string, 'null'], format: date-time}
+    LeadDecisionLink:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: {type: string, enum: [run, review, release]}
+        id: {type: string, format: uuid}
+        head_sha: {type: string, pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$', description: Required for review; must match the existing pinned review binding.}
+    LeadDecisionWrite:
+      type: object
+      additionalProperties: false
+      required: [request_id, stage, outcome, reason_codes, policy_source, policy_revision, attempt]
+      properties:
+        request_id: {type: string, format: uuid}
+        ticket_node_id: {type: string, format: uuid}
+        stage: {type: string, enum: [queue, admission, review, release_handoff]}
+        outcome: {type: string, enum: [selected, wait, requested, passed, failed, handoff, partial]}
+        reason_codes:
+          type: array
+          minItems: 1
+          maxItems: 8
+          uniqueItems: true
+          items: {type: string, enum: [oldest_eligible, manual_order, dependency_wait, criteria_wait, no_work, policy_wait, gates_ready, review_requested, review_passed, review_failed, attempt_limit, release_handoff, person_gate_required, forecast_unavailable, model_escalated, login_selected, connection_broken, process_broken, capacity_unavailable, capacity_full, partial_result, dial_full, dial_unreadable, dial_stale, harness_full, harness_unreadable, harness_stale, account_room_full, account_room_unreadable, account_room_stale, host_load_full, host_load_unreadable, host_load_stale]}
+        policy_source: {type: string, enum: [workspace, project], description: Reported effective policy scope; no new permission source.}
+        policy_revision: {type: integer, minimum: 1, maximum: 2147483647, description: Reported revision frozen as evidence; never authorizes execution.}
+        attempt: {type: integer, minimum: 1, maximum: 32}
+        previous_event_id: {type: integer, minimum: 1, description: Optional prior decision in the same visible project and ticket. Attempt may stay the same or advance by one. Allows succession without inventing an assignment store; run result links identify existing assignments.}
+        gates: {type: array, maxItems: 4, items: {$ref: '#/components/schemas/LeadDecisionGate'}}
+        results: {type: array, maxItems: 8, items: {$ref: '#/components/schemas/LeadDecisionLink'}}
+    LeadPolicyOverride:
+      type: object
+      additionalProperties: false
+      description: "Sparse replacement. Null or omitted fields inherit. Empty ID arrays allow no targets. Filters never grant use of a host/account. Models continue through existing Default → You → Project preferences; no copied profiles or second dial."
+      properties:
+        allowed_host_ids: {type: [array, 'null'], maxItems: 32, uniqueItems: true, items: {type: string, format: uuid}}
+        allowed_account_ids: {type: [array, 'null'], maxItems: 32, uniqueItems: true, items: {type: string, format: uuid}}
+        work_kind_id: {type: [string, 'null'], format: uuid}
+        bucket: {type: [string, 'null'], enum: [normal, complex, null]}
+        recovery:
+          oneOf:
+            - {type: 'null'}
+            - type: object
+              additionalProperties: false
+              required: [max_attempts, agent_hours]
+              properties:
+                max_attempts: {type: integer, minimum: 0, maximum: 5}
+                agent_hours: {type: number, minimum: 0, maximum: 10000}
+              description: "Shared build/review/fix attempt and agent-hour ceilings, narrowed by workspace policy. Zero disables automatic recovery. No credential change, force stop or release authority."
+    LeadSettingsView:
+      type: object
+      required: [revision, workspace_revision, owner_person_id, effective, model_revisions, automatic_launch_enabled, details_redacted, dial_path]
+      properties:
+        revision: {type: integer, minimum: 0}
+        workspace_revision: {type: integer, minimum: 0}
+        owner_person_id: {type: [string, 'null'], format: uuid}
+        overrides: {$ref: '#/components/schemas/LeadPolicyOverride'}
+        effective: {$ref: '#/components/schemas/LeadPolicyOverride'}
+        model_selector: {type: object, description: "Live modelprefs CellResult; selector metadata is withheld from nonowners"}
+        model_revisions: {type: array, items: {type: integer, minimum: 0}}
+        residency: {type: string, enum: [any, eu, local]}
+        details_redacted: {type: boolean}
+        automatic_launch_enabled: {type: boolean, const: false}
+        wait_reason: {type: string, enum: [acceptance_pending, owner_unavailable, selector_unavailable], description: "An archived or unavailable work kind leaves settings readable and resettable but withholds model_selector; execution must wait until an available selector is configured or restored"}
+        dial_path: {type: string, const: /api/agents/plan}
+        required_start_gates: {type: array, items: {type: string}, description: "Dial, harness, account room and host load must be rechecked on every start; unreadable gates mean wait"}
+    LeadSettingsWrite:
+      type: object
+      additionalProperties: false
+      required: [revision, overrides]
+      properties:
+        revision: {type: integer, minimum: 0}
+        overrides: {$ref: '#/components/schemas/LeadPolicyOverride'}
+    Me:
+      type: object
+      description: Linked persons use their target's name and email for display. Authenticated principal IDs and roles and OIDC identity IDs, issuers and subjects retain their original authority.
+      required: [principal, tenant, identity, dev_mode]
+      properties:
+        full_access: {type: boolean, description: "This authenticated key dynamically holds every current and future agent-grantable permission, subject to live role, creator, tenant and project ceilings. Person-only permissions remain excluded."}
+        owner_workstation: {type: boolean}
+        workstation_computer_id: {type: string, format: uuid}
+        dev_mode: {type: boolean, description: True only when AEON_ENV is explicitly dev.}
+        oidc_display_name: {type: string, maxLength: 48, description: Sanitised public provider name from AEON_OIDC_DISPLAY_NAME; empty means neutral sign-in copy.}
+        principal:
+          $ref: "#/components/schemas/Principal"
+        tenant:
+          $ref: "#/components/schemas/Tenant"
+        identity:
+          oneOf:
+            - {$ref: "#/components/schemas/Identity"}
+            - {type: "null"}
+    ModelBoardLock:
+      type: object
+      required: [kind, value, who, why, at, scope]
+      properties:
+        kind: {type: string, enum: [rule, cross_family, residency]}
+        value: {type: string, enum: [top, bottom, not]}
+        who: {type: [string, 'null']}
+        why: {type: string}
+        at: {type: [string, 'null'], format: date-time}
+        scope: {type: string}
+    ModelEstimateHistory:
+      type: object
+      required: [state, basis, tickets, hours, tokens, speed_factor, speed_tickets]
+      properties:
+        state: {type: string, enum: [calibrated, uncalibrated]}
+        basis: {type: string, description: Sample cell and versions used; always includes n. Truncated or unavailable history is explicitly uncalibrated.}
+        tickets: {type: integer, minimum: 0}
+        hours: {type: [number, 'null'], description: Median measured active hours in history; model-adjusted estimate hours in planning. Null below five samples.}
+        tokens: {type: [integer, 'null'], description: Median reported input plus output tokens; null below five samples.}
+        speed_factor: {type: [number, 'null'], description: 'Median active hours divided by frozen estimate hours, exact cell only; null below five valid estimates.'}
+        speed_tickets: {type: integer, minimum: 0}
+    ModelObservationWrite:
+      type: object
+      additionalProperties: false
+      required: [report_id, harness, model, effort, status]
+      properties:
+        report_id: {type: string, format: uuid, description: Stable evidence id. Retrying the same evidence never counts another failure.}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+        model: {type: string, minLength: 1, maxLength: 128}
+        effort: {type: string, minLength: 1, maxLength: 32}
+        status: {type: string, enum: [advertised, working, invalid], description: 'Invalid means an explicit model-not-found or unsupported-model failure, never a generic HTTP 400.'}
+    ModelPreferenceTrace:
+      type: object
+      description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
+      properties:
+        preference_of: {type: object, required: [person, source], properties: {person: {type: [string, 'null'], format: uuid}, source: {type: string}}}
+        column: {type: string}
+        situation: {type: string, enum: [first, fix, stuck]}
+        card_index: {type: integer, minimum: 1}
+        lock: {$ref: '#/components/schemas/ModelBoardLock'}
+        held: {type: array, items: {type: object, required: [line, reason], properties: {line: {type: string}, reason: {type: string}}}}
+        selector: {$ref: '#/components/schemas/ModelSelector'}
+        order_mode: {type: string, enum: [legacy, saved], description: "Ordinary managed review fallback source captured with its ladder; preferences still apply within qualified candidates."}
+        worker_assignment: {$ref: '#/components/schemas/WorkerHandoff'}
+        project_lead:
+          type: object
+          required: [session_id, generation]
+          properties:
+            session_id: {type: string, format: uuid}
+            generation: {type: integer, format: int64, minimum: 1}
+        role: {type: string}
+        project_id: {type: string, format: uuid}
+        ticket_requirement: {type: string, enum: [any, eu, local]}
+        person_id: {type: [string, 'null'], format: uuid}
+        residency:
+          type: object
+          required: [value, set_by, loosened_lock]
+          properties:
+            value: {type: string, enum: [any, eu, local]}
+            set_by: {type: string, enum: [default, person, project]}
+            locked_by: {type: string, enum: [default, person]}
+            lock_value: {type: string, enum: [any, eu, local]}
+            loosened_lock: {type: boolean}
+            loosened_locks:
+              type: array
+              items: {type: object, required: [level, value], properties: {level: {type: string, enum: [default, person]}, value: {type: string, enum: [any, eu, local]}}}
+        kind: {type: string}
+        kind_source: {type: string}
+        complexity: {type: string}
+        complexity_source: {type: string}
+        bucket: {type: string, enum: [normal, complex]}
+        set_by: {type: string}
+        locked_by: {type: string}
+        mode: {type: string, enum: [auto, latest, pinned]}
+        prefs_revision: {type: integer, format: int64}
+        qualifying_account_ids: {type: array, description: "An empty list under any residency means the role ladder was not account-filtered; it does not mean no account qualifies.", items: {type: string, format: uuid}}
+        preferred_candidates: {type: array, items: {type: object, properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
+        latest_resolved_to: {type: string, format: uuid}
+        fallback: {type: string}
+        blocked: {type: string}
+        prefs: {type: string}
+        hard: {type: array, items: {type: string}}
+    ModelProfile:
+      allOf:
+        - {$ref: '#/components/schemas/ModelProfileWrite'}
+        - type: object
+          required: [id, enabled, created_at]
+          properties:
+            id: {type: string, format: uuid}
+            enabled: {type: boolean}
+            created_at: {type: string, format: date-time}
+            effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5, readOnly: true, description: "Shared effort scale from the immutable effort pin, including Gemini fixed thinking-budget buckets; unknown stays null."}
+            provider: {type: string, readOnly: true, description: Registered model brand; separate from the routing family.}
+            source: {type: string, enum: [auto, manual], readOnly: true}
+            retire_at: {type: [string, 'null'], format: date-time, readOnly: true}
+            retired: {type: boolean, readOnly: true}
+    ModelProfileWrite:
+      type: object
+      description: Family must match the fixed harness provider or an explicitly supported provider/model binding. Ambiguous multi-provider pins may use unknown and cannot perform independent review. Existing inconsistent immutable profiles are excluded from routing and review approval.
+      required: [slug, version, harness, family, model, effort, tier]
+      properties:
+        slug: {type: string, pattern: '^[a-z][a-z0-9_-]*$'}
+        version: {type: string, minLength: 1, maxLength: 64}
+        harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
+        family: {type: string, enum: [openai, anthropic, xai, cursor, google, local, unknown]}
+        model: {type: string, minLength: 1, maxLength: 128}
+        effort: {type: string, minLength: 1, maxLength: 32}
+        tier: {type: string, enum: [fast, standard, strong, frontier]}
+        display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
+        short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
+        model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
+        note: {type: string, maxLength: 80, description: 'Admin-owned note shown below the model name.'}
+    ModelSelector:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      description: Auto has no other fields; pinned requires only profile_id; latest requires family, line and effort, with optional harness.
+      oneOf:
+        - properties: {mode: {const: auto}}
+          not: {anyOf: [{required: [profile_id]}, {required: [family]}, {required: [line]}, {required: [effort]}, {required: [harness]}]}
+        - properties: {mode: {const: pinned}}
+          required: [profile_id]
+          not: {anyOf: [{required: [family]}, {required: [line]}, {required: [effort]}, {required: [harness]}]}
+        - properties: {mode: {const: latest}}
+          required: [family, line, effort]
+          not: {required: [profile_id]}
+      properties:
+        mode: {type: string, enum: [auto, latest, pinned]}
+        profile_id: {type: string, format: uuid}
+        family: {type: string, maxLength: 32}
+        line: {type: string, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        effort: {type: string, maxLength: 32}
+        harness: {type: string, enum: [codex, claude, grok, pi, cursor, gemini, opencode]}
+    Node:
+      description: Ticket creation may return benefit warnings. Entering a built-in completed state (done, accepted, delivered) from outside that set requires both pills and benefits, including on creation and when hidden from release notes. Already-completed records remain editable, including transitions within that set.
+      type: object
+      required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]
+      properties:
+        is_leaf: {type: boolean, description: 'Work shape; only live work children make a parent. Absent for non-work nodes.'}
+        depth: {type: integer, minimum: 1, description: 'Work level, starting at 1 after every project.'}
+        level_name: {type: string, description: 'Workspace name, behind work-parent-status rollout. Leaf name wins over depth.'}
+        level_icon: {type: string, description: 'Workspace SVG icon token; stable fallback.'}
+        work_children_count: {type: integer, minimum: 0, description: 'Visible direct work children; never includes non-work children.'}
+        status_derived: {type: boolean, description: 'Parent status follows children while rollout is enabled.'}
+        queued: {$ref: '#/components/schemas/QueuedTicket'}
+        recurrence:
+          $ref: '#/components/schemas/NodeRecurrence'
+          readOnly: true
+          description: Read-only provenance on node GET and list responses, derived from a visible recurrence_occurrences receipt, never editable fields. Absent for ordinary tickets or an inaccessible source recurrence. Loaded once per bounded page, with no per-row HTTP requests. Retained after recurrence retirement.
+        queue_stale: {type: boolean, description: 'Authoritative idle In progress eligibility: no assignee and no live agent run or bound session. Contains no worker identity. Rechecked on queue writes.'}
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+          example: PAI-123
+        kind_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        body:
+          type: string
+          description: Markdown
+        warnings:
+          type: array
+          items: {type: string}
+          description: "Non-blocking ticket benefit guidance. An agent creating a ticket or task without estimate_hours is told to set fields.estimate_hours. The warning does not name a client flag."
+        fields:
+          type: object
+          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields describes route_role, area and complexity classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
+        human_check:
+          type: [string, 'null']
+          maxLength: 500
+          description: Optional pending person-only check. Automatic moves to Delivered and Accepted skip it. A person clears it with PATCH human_check=null; fields.human_check_completed then carries server-authored text, by (principal id) and at (UTC timestamp). Null when no pending check exists.
+        state:
+          type: string
+        parent_id:
+          type: [string, 'null']
+          format: uuid
+        position:
+          type: string
+          description: Decimal sibling rank
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        estimate:
+          $ref: '#/components/schemas/TicketEstimate'
+        deleted_at:
+          type: [string, 'null']
+          format: date-time
+    NodeRecurrence:
+      type: object
+      required: [id, project_id, project_key, number, trigger, retired]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid, description: Source recurrence project; may differ from a moved ticket's project.}
+        project_key: {type: string, description: Source project's current key for its settings route.}
+        number: {type: integer, minimum: 1, description: 'Receipt occurrence number, including skipped attempts.'}
+        trigger: {$ref: '#/components/schemas/RecurrenceTrigger'}
+        retired: {type: boolean, description: Retired sources retain their marker but cannot be managed.}
+    OwnerWorkstationStepUp:
+      type: object
+      description: >-
+        HTTP 428 for a marked key's high-risk governance action. Retry the identical
+        method, route (including query), body and conditional headers with
+        Aeon-Step-Up: <challenge_id>.<base64 signature>. nonce and action_digest are
+        lowercase 64-character hexadecimal strings. Sign their UTF-8 concatenation
+        (128 ASCII bytes, no separator or hex decoding) with ECDSA P-256/SHA-256;
+        the signature is ASN.1 DER in standard padded base64. The server verifies
+        against the computer's pairing-pinned key, never a request-supplied key.
+        Challenges expire after two minutes and are consumed once even if the
+        eventual action fails. They bind tenant, key, agent, computer, exact action
+        and signer. Changing marking, revoking, disconnecting or changing the signer
+        invalidates authority. All mutating keys, roles, settings, rules publication,
+        approval decisions, member removal/deactivation and workspace role changes
+        require step-up. All governance attempts are recorded in the access audit.
+        Agents must forward only challenge_id to agentd; agentd retrieves the original
+        challenge using GET /agentd/step-ups/{challenge_id} with its runtime bearer and
+        device proof. The agent receives no summary, nonce or action_digest.
+      additionalProperties: false
+      required: [code, challenge_id, expires_at]
+      properties:
+        code: {type: string, const: step_up_required}
+        challenge_id: {type: string, format: uuid}
+        expires_at: {type: string, format: date-time}
+    PairingError: {"type": "object", "additionalProperties": false, "required": ["error", "code"], "properties": {"error": {"type": "string"}, "code": {"type": "string"}}}
+    ParentQueueSnapshot:
+      type: object
+      required: [id, parent_id, parent_revision, tree_revision, state, truncated, partial, tree_changed, items]
+      properties:
+        id: {type: string, format: uuid}
+        parent_id: {type: string, format: uuid}
+        parent_revision: {type: string, format: date-time}
+        tree_revision: {type: string, description: SHA-256 of the bounded visible topology and revisions at capture}
+        state: {type: string, enum: [pending, applied, cancelled]}
+        truncated: {type: boolean}
+        continuation_available: {type: boolean, description: More visible traversal remains; use this snapshot id as continuation_of for a fresh capture. Remaining nodes may all be ineligible. False when only the depth limit truncated traversal.}
+        partial: {type: boolean, description: True when truncated or any captured leaf was skipped or is no longer readable}
+        tree_changed: {type: boolean, description: Visible topology or revision changed before application}
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [node_id, revision, outcome]
+            properties:
+              node_id: {type: string, format: uuid}
+              revision: {type: string, format: date-time}
+              outcome: {type: string, enum: [pending, queued, already_queued, changed, not_ready, active, unavailable]}
+              run_id: {type: string, format: uuid}
+    PhoneCeremony:
+      type: object
+      required: [challenge_id, publicKey]
+      properties:
+        challenge_id: {type: string, format: uuid}
+        publicKey: {type: object, description: WebAuthn JSON options; base64url byte fields decoded by client.}
+    PortalAspect:
+      type: object
+      additionalProperties: false
+      required: [id, label]
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string}
+    PortalCell:
+      type: object
+      additionalProperties: false
+      required: [id, aspect_id, competitor_id, stance, approved, stale, recheck]
+      properties:
+        id: {type: string, format: uuid}
+        aspect_id: {type: string, format: uuid}
+        competitor_id: {type: string, format: uuid}
+        stance: {type: string, enum: [unknown, 'yes', 'no', partial]}
+        quote: {type: string}
+        source_url: {type: string}
+        retrieved_on: {type: string, format: date}
+        approved: {type: boolean}
+        stale: {type: boolean}
+        recheck: {type: boolean, description: True when the source is 90 days old or older. Admin only.}
+    PortalCellRevision:
+      type: object
+      additionalProperties: false
+      required: [cell_id, stance, approved, at]
+      properties:
+        cell_id: {type: string, format: uuid}
+        stance: {type: string, enum: [unknown, 'yes', 'no', partial]}
+        quote: {type: string}
+        source_url: {type: string}
+        retrieved_on: {type: string, format: date}
+        approved: {type: boolean}
+        at: {type: string, format: date-time}
+    PortalCompetitor:
+      type: object
+      additionalProperties: false
+      required: [id, name, published]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        published: {type: boolean}
+    PortalCorrection:
+      type: object
+      additionalProperties: false
+      required: [id, competitor, aspect, statement, at]
+      properties:
+        id: {type: string, format: uuid}
+        competitor: {type: string}
+        aspect: {type: string}
+        statement: {type: string}
+        source_url: {type: string}
+        at: {type: string, format: date-time}
+    PortalDeleted:
+      type: object
+      additionalProperties: false
+      required: [deleted]
+      properties:
+        deleted: {const: true}
+    PortalFulfillment:
+      type: object
+      additionalProperties: false
+      required: [wish_id, feature_id]
+      properties:
+        wish_id: {type: string, format: uuid}
+        feature_id: {type: string, format: uuid}
+    PortalMarket:
+      type: object
+      additionalProperties: false
+      required: [competitors, aspects, cells, history, corrections]
+      properties:
+        competitors: {type: array, items: {$ref: '#/components/schemas/PortalCompetitor'}}
+        aspects: {type: array, items: {$ref: '#/components/schemas/PortalAspect'}}
+        cells: {type: array, items: {$ref: '#/components/schemas/PortalCell'}}
+        history: {type: array, items: {$ref: '#/components/schemas/PortalCellRevision'}}
+        corrections: {type: array, items: {$ref: '#/components/schemas/PortalCorrection'}}
+    PortalModeration:
+      type: object
+      additionalProperties: false
+      required: [id, title, summary, state, fields]
+      properties:
+        id: {type: string, format: uuid}
+        title: {type: string}
+        summary: {type: string}
+        state: {type: string}
+        fields:
+          type: object
+          additionalProperties: {type: string}
+          description: Public feature fields only. Internal notes are omitted.
+    PortalPace:
+      type: object
+      additionalProperties: false
+      required: [fulfillments]
+      properties:
+        project_id: {type: string, format: uuid}
+        project_title: {type: string, description: Admin only. Never copied onto the public document.}
+        revision: {type: integer, minimum: 1, description: "Admin only. Present while a project is linked. Advances when the link or its release-history choice changes, and is not reused after the link is cleared. A release-history write must send this value."}
+        release_history: {type: boolean, default: false, description: Admin only. Frozen notes are public only when this is true. A new or existing link stays false until set.}
+        releases_30d: {type: integer, minimum: 0}
+        median_release_gap_days: {type: integer, minimum: 0}
+        wish_to_live_median_days: {type: integer, minimum: 0}
+        fulfillments: {type: array, items: {$ref: '#/components/schemas/PortalFulfillment'}}
+    PortalPaceWrite:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        project_id: {oneOf: [{type: string, format: uuid}, {type: 'null'}], description: "A uuid links that project. Null clears the link. Together with release_history, it is the project the admin still expects to be linked and the write does not move the link."}
+        release_history: {type: boolean, description: "Publish frozen notes for the linked project. Requires project_id and revision from the read this publish is based on. Absent on a project write leaves the current choice when the project stays, and leaves a different project off."}
+        revision: {type: integer, minimum: 1, description: Required together with release_history and project_id. The link revision from the read this publish is based on.}
+    Principal:
+      type: object
+      required: [id, tenant_id, kind, name, roles]
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [person, agent]
+        name:
+          type: string
+        email:
+          type: ["string", "null"]
+          description: Display email for auth responses, resolved from the link target when present.
+        roles:
+          type: array
+          items:
+            type: string
+    PrincipalRef:
+      type: object
+      required: [principal_id, name]
+      properties:
+        principal_id: {type: string, format: uuid}
+        name: {type: string}
+    Question:
+      type: object
+      required: [id, project_id, revision, state, input, suggested_outcome, suggestion_reason, askers, pending, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        state: {type: string, enum: [open, answered]}
+        input: {$ref: '#/components/schemas/QuestionInput'}
+        suggested_outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        suggestion_reason: {type: string, enum: [agent_suggestion, ticket_default, project_default]}
+        askers: {type: array, items: {$ref: '#/components/schemas/QuestionAsker'}}
+        answer: {$ref: '#/components/schemas/QuestionAnswer'}
+        pending: {type: array, items: {$ref: '#/components/schemas/QuestionPending'}}
+        outcomes: {type: array, items: {$ref: '#/components/schemas/QuestionOutcomeAvailability'}}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    QuestionAnswer:
+      type: object
+      required: [id, revision, answer, outcome, decided_by, created_at, deliver_after]
+      properties:
+        id: {type: string, format: uuid, description: Protected decision node ID}
+        revision: {type: integer, minimum: 2}
+        option_id: {type: string}
+        answer: {type: string}
+        reason: {type: string}
+        outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        decided_by: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        deliver_after: {type: string, format: date-time}
+        replaces: {type: string, format: uuid, description: Previously dispatched answer replaced by this correction; immutable history is retained.}
+    QuestionAsker:
+      type: object
+      required: [id, principal_id, request_id, reply_root_id, comment_node_id, created_at, input]
+      properties:
+        id: {type: string, format: uuid}
+        principal_id: {type: string, format: uuid}
+        request_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        reply_root_id: {type: string, format: uuid, description: Server-reserved per-asker correlation root. P3 materializes the inbox counterpart for the answering person; until then this is not a public tell --reply-to message ID. Never infer a newer session.}
+        comment_node_id: {type: string, format: uuid, description: Linked ticket or the question node for ticketless asks}
+        created_at: {type: string, format: date-time}
+        input: {$ref: '#/components/schemas/QuestionInput'}
+        from_record: {$ref: '#/components/schemas/QuestionReuse'}
+    QuestionDoctrineTarget:
+      type: object
+      additionalProperties: false
+      required: [source_id, path, rule_key, rule_sha256]
+      properties:
+        source_id: {type: string, format: uuid}
+        path: {type: string, maxLength: 300}
+        rule_key: {type: string, maxLength: 200}
+        rule_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        tldr_en: {type: string, maxLength: 300}
+        tldr_de: {type: string, maxLength: 300}
+    QuestionEffectData:
+      type: object
+      additionalProperties: false
+      properties:
+        ticket_id: {type: string, format: uuid}
+        criterion: {type: string, maxLength: 8200, description: Exact appended criterion; person edits are preserved and flagged for review.}
+        knowledge_id: {type: string, format: uuid}
+        doctrine_id: {type: string, format: uuid, description: Pending AEON-444 inbox draft; publication needs the existing person-only action.}
+        supersedes: {type: string, format: uuid, description: Earlier outcome effect ID}
+        superseded_by: {type: string, format: uuid, description: Replacing outcome effect ID}
+        retryable: {type: boolean, description: False means automatic retry is stopped; review the failure and decide a new revision.}
+        review_required:
+          type: array
+          maxItems: 2
+          items:
+            type: object
+            required: [kind, ref, why]
+            properties:
+              kind: {type: string, enum: [criterion, doctrine]}
+              ref: {type: string}
+              why: {type: string}
+    QuestionInput:
+      type: object
+      additionalProperties: false
+      required: [request_id, question, options, meanwhile]
+      properties:
+        request_id: {type: string, format: uuid}
+        question: {type: string, minLength: 1, maxLength: 2000}
+        context: {type: string, maxLength: 16000}
+        findings: {type: string, maxLength: 8000}
+        options: {type: array, minItems: 1, maxItems: 9, items: {$ref: '#/components/schemas/QuestionOption'}}
+        recommend: {type: string, maxLength: 40, description: Existing option ID}
+        why: {type: string, maxLength: 2000}
+        meanwhile: {type: string, enum: [carries_on, parked, paused, stopped]}
+        meanwhile_text: {type: string, maxLength: 2000}
+        blocked_node_ids: {type: array, maxItems: 20, uniqueItems: true, items: {type: string, format: uuid}}
+        doctrine: {$ref: '#/components/schemas/QuestionDoctrineTarget'}
+        suggested_outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        ticket_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid, description: Verified original public harness generation; never an arbitrary attribution UUID}
+        source_request_id: {type: string, format: uuid, description: Optional owned inbox_compat_messages ID in this project and exact session}
+        source_handover_id: {type: string, format: uuid, description: Reserved for a verified AEON-524 adapter; currently returns source_unavailable}
+        anyway_reason: {type: string, minLength: 1, maxLength: 2000}
+    QuestionOption:
+      type: object
+      additionalProperties: false
+      required: [id, title, description, answer]
+      properties:
+        id: {type: string, pattern: '^[a-zA-Z0-9_-]{1,40}$'}
+        title: {type: string, minLength: 1, maxLength: 200}
+        description: {type: string, maxLength: 1000}
+        answer: {type: string, minLength: 1, maxLength: 4000}
+    QuestionOutcome:
+      type: string
+      enum: [once, always, requirement, doctrine]
+    QuestionOutcomeAvailability:
+      type: object
+      required: [outcome, available, why]
+      properties:
+        outcome: {$ref: '#/components/schemas/QuestionOutcome'}
+        available: {type: boolean}
+        why: {type: string, description: Unavailable stamps have no shortcut; do not treat the stored suggestion as permission.}
+        mapping_present: {type: boolean, description: Cheap Doctrine mapping hint; the exact source and guard are validated only when deciding and applying.}
+    QuestionPage:
+      type: object
+      required: [items, has_more]
+      properties:
+        next_cursor: {type: string, maxLength: 512, description: Present only when order=desc has another page. Continue with the same scope and filters; concurrent new decisions appear after refreshing from the first page.}
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/Question'}}
+        has_more: {type: boolean}
+    QuestionPending:
+      type: object
+      required: [id, revision, kind, state, deliver_after]
+      properties:
+        id: {type: string, format: uuid}
+        asker_id: {type: string, format: uuid}
+        revision: {type: integer}
+        kind: {type: string, enum: [inbox, comment, outcome]}
+        state: {type: string, enum: [pending, delivered, failed, replaced]}
+        deliver_after: {type: string, format: date-time}
+        effect_ref: {type: string}
+        error_code: {type: string}
+        error_message: {type: string, description: Safe explanation of a failed effect; retryable effects recheck authority; final conflicts require a new decision.}
+        effect_data: {$ref: '#/components/schemas/QuestionEffectData'}
+        receipt_state: {type: string, enum: [queued, handed_off, failed], description: Inbox receiver confirmation. Outbox state delivered means dispatched only.}
+        receipt_failure: {type: string}
+        delivery_session_id: {type: string, format: uuid, description: Exact original generation or verified successor.}
+        doctrine_state: {type: string, description: Current referenced proposal state; delivered does not mean the draft is still pending.}
+    QuestionReuse:
+      type: object
+      description: Immutable per-asker provenance retained when the answer is later corrected. The active source decision reuse_count increments once per new membership, never on replay or delivery retry.
+      required: [label, decision_id, revision]
+      properties:
+        label: {type: string, const: From the record}
+        decision_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 2}
+    QueuedTicket:
+      type: object
+      required: [position, by, at, run_id, targeted, waiting]
+      properties:
+        position: {type: integer, minimum: 1}
+        by: {type: object, required: [id, name, kind], properties: {id: {type: string, format: uuid}, name: {type: string}, kind: {type: string, enum: [person, agent]}}}
+        at: {type: string, format: date-time}
+        run_id: {type: string, format: uuid}
+        targeted: {type: boolean}
+        target_agent_id: {type: [string, 'null'], format: uuid}
+        expected_agent_id: {type: [string, 'null'], format: uuid}
+        model_profile_id: {type: [string, 'null'], format: uuid}
+        expected_start_at: {type: [string, 'null'], format: date-time}
+        manual_order: {type: boolean}
+        waiting: {type: boolean}
+        wait_reason: {type: string}
+        security_review_required: {type: boolean}
+    QuoteDocument:
+      type: object
+      additionalProperties: false
+      required: [schema_version, minimum_writer_version, title, subtitle, project_ref, offer_date, valid_until, currency, sender, recipient, legal, layout, sections, positions, net_total_cents]
+      properties:
+        schema_version: {type: integer, const: 1}
+        minimum_writer_version: {type: integer, enum: [1, 2]}
+        title: {type: string, maxLength: 512}
+        subtitle: {type: string, maxLength: 512}
+        project_ref: {type: string, maxLength: 512}
+        offer_date: {type: string, format: date}
+        valid_until: {type: string, format: date}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        sender: {type: object}
+        recipient: {type: object}
+        legal: {type: object}
+        layout: {type: object}
+        profile: {type: object, description: 'Immutable selected profile id, revision, and full definition snapshot; included in the issued document digest'}
+        sections: {type: array, maxItems: 20, items: {$ref: '#/components/schemas/QuoteDocumentSection'}}
+        positions: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/QuoteDocumentPosition'}}
+        net_total_cents: {type: integer, minimum: 0, description: Server-computed; input is ignored}
+    QuoteDocumentPosition:
+      type: object
+      required: [id, pricing_source, short_text, long_text, quantity, unit_label, unit_price_cents, total_cents, currency]
+      properties:
+        id: {type: string, format: uuid}
+        pricing_source: {type: string, enum: [manual, cost_unit]}
+        short_text: {type: string}
+        long_text: {type: string}
+        quantity: {type: string, pattern: '^[0-9]+(\.[0-9]{1,2})?$', description: Exact quantity}
+        unit_label: {type: string, maxLength: 80}
+        unit_price_cents: {type: integer, minimum: 0}
+        total_cents: {type: integer, minimum: 0, description: Server-computed}
+        cost_unit_node_id: {type: string, format: uuid}
+        rate_unit: {type: string, enum: [hour, day, item]}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+    QuoteDocumentSection:
+      type: object
+      additionalProperties: false
+      required: [id, heading, body, nodes]
+      properties:
+        id: {type: string, format: uuid}
+        heading: {type: string}
+        body: {type: string}
+        nodes: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/QuoteTextNode'}}
+        numbering_style: {type: string, enum: [decimal, upper-roman, lower-roman, upper-alpha, lower-alpha, none], description: Omitted means decimal}
+        page_break_before: {type: boolean, description: Omitted means false}
+        keep_together: {type: boolean, description: Omitted means true}
+        spacing_before_mm: {type: string, pattern: '^(?:0|[1-9][0-9]?)(?:\.[0-9])?$', description: Exact millimetres from 0 to 40}
+        spacing_after_mm: {type: string, pattern: '^(?:0|[1-9][0-9]?)(?:\.[0-9])?$', description: Exact millimetres from 0 to 40}
+    QuoteInlineMark:
+      type: object
+      required: [start, end]
+      properties:
+        start: {type: integer, minimum: 0, description: Inclusive UTF-16 offset}
+        end: {type: integer, minimum: 1, description: Exclusive UTF-16 offset}
+        bold: {type: boolean}
+        italic: {type: boolean}
+    QuoteTextNode:
+      type: object
+      required: [id, kind, text]
+      properties:
+        id: {type: string, format: uuid}
+        kind: {type: string, enum: [paragraph, item]}
+        text: {type: string}
+        depth: {type: integer, minimum: 0, maximum: 5}
+        marker: {type: string, enum: [disc, circle, square, dash, decimal]}
+        numbering: {type: string, enum: [outline]}
+        list_start: {type: integer, minimum: 0, maximum: 9999}
+        list_continue: {type: boolean}
+        section_bound: {type: boolean}
+        glyph: {type: string}
+        marker_x_mm: {type: string, description: Exact signed decimal millimetres}
+        marker_y_mm: {type: string, description: Exact signed decimal millimetres}
+        text_start_mm: {type: string, description: Exact signed decimal millimetres}
+        marks: {type: array, items: {$ref: '#/components/schemas/QuoteInlineMark'}}
+    RecurrenceTrigger:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [time, event]}
+        rrule: {type: string, maxLength: 256, description: 'Time only. FREQ=DAILY, FREQ=WEEKLY with optional BYDAY=MO,TU,WE,TH,FR,SA,SU, or FREQ=MONTHLY with optional BYMONTHDAY=-31..-1,1..31 and INTERVAL=1,2,3,6 (default 1). Monthly intervals step from the month of start_date. INTERVAL is rejected for DAILY and WEEKLY. Unspecified days derive from start_date. Other RFC 5545 parts are rejected.'}
+        time_of_day: {type: string, pattern: '^(?:[01][0-9]|2[0-3]):[0-5][0-9]$', description: Time only; HH:MM wall time.}
+        timezone: {type: string, maxLength: 128, description: Time only; IANA timezone or UTC.}
+        start_date: {type: string, format: date, description: Time only; defaults to today's date in the selected timezone. Inclusive earliest local date.}
+        event: {type: string, enum: [release.published], description: Event only; the project's journey publications and configured product release history. Historical publications before creation and those during pause are ignored.}
+        event_start: {type: string, enum: [now, hour, morning], default: now, description: 'Event only; immediately, one hour later or next local morning at 06:00.'}
+        event_timezone: {type: string, maxLength: 128, description: 'Event only; IANA zone for next morning, default UTC.'}
+    ReleaseNotes:
+      type: object
+      required: [source, snapshot_sha256, captured_at, release_revision, items, gaps, hidden]
+      description: Additive v1 extension. Captured member benefits are authoritative, including an empty or hidden-only membership. When no snapshot was captured, fallback is historical-tag-headline and the git tag headline is only a labelled historical fallback for that release. Old manifests without notes keep the same labelled headline display. New builds always record notes, including gaps. Snapshot digest binds the exact tagged file bytes or the stored database snapshot JSON. Git headlines never replace captured benefits. written_after_release is true only when the captured snapshot was labelled backfilled.
+      properties:
+        source: {type: string}
+        fallback: {type: string, enum: [historical-tag-headline], description: Set only when member benefits were not captured and the git tag headline is the labelled historical fallback}
+        snapshot_sha256: {type: string}
+        captured_at: {type: [string, 'null'], format: date-time}
+        release_revision: {type: integer}
+        hidden: {type: integer, minimum: 0}
+        written_after_release: {type: boolean, description: "True when the captured snapshot was labelled backfilled. The release sheet says the notes were written after the release."}
+        corrections:
+          type: array
+          description: Reviewed public-note corrections applied over the frozen original. The original snapshot digest is preserved; each correction records its reason and exact version binding. Hidden or absent tickets cannot be added.
+          items:
+            type: object
+            required: [version, key, snapshot_sha256, reason]
+            properties:
+              version: {type: string}
+              key: {type: string}
+              snapshot_sha256: {type: string}
+              reason: {type: string}
+              group: {type: string, enum: [features, fixes, other]}
+              pill_en: {type: string}
+              pill_de: {type: string}
+              benefit_en: {type: string}
+              benefit_de: {type: string}
+        gaps: {type: array, items: {type: string}}
+        public_items:
+          type: array
+          description: Portable product notes with no tenant-local identifiers. When present, these are the embedded fallback instead of items. Tenant snapshots omit this field and retain precedence.
+          items:
+            type: object
+            required: [key, pill_en, pill_de, benefit_en, benefit_de]
+            properties:
+              key: {type: string}
+              pill_en: {type: string}
+              pill_de: {type: string}
+              benefit_en: {type: string}
+              benefit_de: {type: string}
+              group: {type: string, enum: [features, fixes, other], description: "Frozen classification, including a group recorded at export when an older snapshot did not capture one. Omitted until then."}
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, key, pill_en, pill_de, benefit_en, benefit_de]
+            properties:
+              id: {type: string, format: uuid}
+              key: {type: string}
+              group: {type: string, enum: [features, fixes, other], description: "Frozen classification when the snapshot captured it. When an older snapshot omitted it, the server fills features or fixes from the ticket's current classification only (a bug is a fix) and leaves the captured pill and benefit unchanged."}
+              pill_en: {type: string}
+              pill_de: {type: string}
+              benefit_en: {type: string}
+              benefit_de: {type: string}
+    ReviewBinding:
+      type: object
+      required: [ticket_node_id, repository, base_sha, head_sha, author_family]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        repository: {type: string}
+        base_sha: {type: string}
+        head_sha: {type: string}
+        author_family: {type: string}
+        ticket_snapshot: {type: string, description: Immutable ticket and acceptance-criteria snapshot supplied on the managed work order.}
+        author_run_id: {type: [string, 'null'], format: uuid}
+        reviewer_profile_id: {type: [string, 'null'], format: uuid}
+        reviewer_family: {type: [string, 'null']}
+        pull_request: {type: [integer, 'null']}
+    ReviewPolicy:
+      type: object
+      additionalProperties: false
+      required: [mode, allowed_families]
+      description: "Only the family requirement is configurable; completed run, vendor_reported model evidence and an ok verdict remain mandatory."
+      properties:
+        mode: {type: string, enum: [off, other_family, allowlist]}
+        allowed_families:
+          type: array
+          maxItems: 6
+          uniqueItems: true
+          description: "Nonempty only for allowlist; other modes require an empty list."
+          items: {type: string, enum: [openai, anthropic, xai, cursor, google, local]}
+    ReviewPolicySettings:
+      type: object
+      required: [project_id, policy, effective, source, updated_by, updated_at]
+      properties:
+        project_id: {type: [string, 'null'], format: uuid}
+        policy:
+          oneOf:
+            - {$ref: '#/components/schemas/ReviewPolicy'}
+            - {type: 'null'}
+          description: "The policy stored at this scope; null means inherited."
+        effective: {$ref: '#/components/schemas/ReviewPolicy'}
+        workspace: {$ref: '#/components/schemas/ReviewPolicy', description: 'Current workspace default before the project override.'}
+        valid_families: {type: array, maxItems: 6, uniqueItems: true, items: {type: string}, description: 'The server registry of eligible model families.'}
+        source: {type: string, enum: [default, tenant, project]}
+        updated_by: {type: [string, 'null'], format: uuid}
+        updated_at: {type: [string, 'null'], format: date-time}
+
+    RuleError: {type: object, required: [error, code], properties: {error: {type: string}, code: {type: string, description: "forbidden for a general denial. GET /rules/merged and GET /rules/explained may use not_key_creator, key_revoked, key_expired, or agent_inactive when the caller could already see that agent."}, actual_bytes: {type: integer}, max_bytes: {type: integer}, layer: {type: string, enum: [company, project, person, agent], description: "AEON-314: the layer whose own cap was crossed; absent for the total"}}}
+    RulesClientMaximum:
+      type: [integer, 'null']
+      minimum: 2000
+      maximum: 512000
+      description: "Optional report on every registration and heartbeat. Omitted/null means legacy 12000 (including after downgrade); never a permission grant. Reports affect per-client delivery and the admin inventory, never budget admission or session response fields."
+    ServiceTier:
+      type: string
+      enum: [default, fast, fastest]
+    ServiceTierCapability:
+      type: object
+      required: [tier, name, offered, speed_factor, price_multiplier, usage_multiplier, mechanism]
+      properties:
+        tier: {$ref: '#/components/schemas/ServiceTier'}
+        name: {type: string, enum: [Default, Fast, Fastest]}
+        offered: {type: boolean, description: True only when the pinned catalog has a supported mechanism and a cited vendor price with checked-at provenance.}
+        speed_factor: {type: [number, 'null'], exclusiveMinimum: 0}
+        price_multiplier: {type: [number, 'null'], exclusiveMinimum: 0}
+        usage_multiplier: {type: [number, 'null'], exclusiveMinimum: 0, description: 'Subscription capacity consumption, separate from token price.'}
+        mechanism: {type: string}
+        reason: {type: string}
+    ServiceTierReport:
+      type: object
+      required: [harness, model, harness_version, adapter_version, checked_at, source, applies, change_instructions, tiers]
+      properties:
+        harness: {type: string}
+        model: {type: string}
+        harness_version: {type: string}
+        adapter_version: {type: string}
+        checked_at: {type: string, format: date-time}
+        source: {type: string}
+        applies: {type: string, enum: [next_run, next_turn]}
+        change_instructions: {type: string}
+        tiers: {type: array, minItems: 3, maxItems: 3, items: {$ref: '#/components/schemas/ServiceTierCapability'}}
+    StageArtifact:
+      type: object
+      additionalProperties: false
+      required: [version_scheme, version, release_channel, release_sequence, digest_sha256, commit_digest, manifest_coordinate, manifest_digest_sha256]
+      properties:
+        version_scheme: {type: string, enum: [legacy, inspr-calendar-v1, inspr-calendar-v2]}
+        version: {type: string}
+        release_channel: {type: string}
+        release_sequence: {type: integer, minimum: 1}
+        digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        commit_digest: {type: string}
+        manifest_coordinate: {type: string}
+        manifest_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    StatusAutopilotChange:
+      type: object
+      required: [event_id, node_id, key, title, actor, rule, reason, from, to, at, undone, undoable]
+      properties:
+        event_id: {type: integer}
+        node_id: {type: string, format: uuid}
+        key: {type: string}
+        title: {type: string}
+        actor: {type: string, const: Status autopilot}
+        rule: {type: string, enum: [new, backlog, blocked, progress, done, publish, accept, work_parent]}
+        reason: {type: string}
+        from: {type: string}
+        to: {type: string}
+        at: {type: string, format: date-time}
+        undone: {type: boolean}
+        changed_since: {type: boolean, description: A later ticket edit made the original change stale}
+        requires_preview: {type: boolean, description: A derived parent change uses the causal Undo preview and confirmation API.}
+        undoable: {type: boolean, description: Revision and state still match; Undo requires events.undo_other and nodes.update}
+    StatusAutopilotOverride:
+      type: object
+      required: [mode, effective_enabled, revision]
+      properties:
+        mode: {type: string, enum: [inherit, on, off], default: inherit}
+        effective_enabled: {type: boolean}
+        revision: {type: integer, minimum: 0}
+    StepUpRequired:
+      type: object
+      additionalProperties: false
+      required: [code, challenge_id, expires_at]
+      properties:
+        code: {const: step_up_required}
+        challenge_id: {type: string, format: uuid}
+        expires_at: {type: string, format: date-time}
+    Tenant:
+      type: object
+      required: [id, slug, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        brand:
+          $ref: "#/components/schemas/TenantBrand"
+    TenantBrand:
+      type: object
+      description: The workspace's own brand for the header (AEON-431). Absent when the workspace has set nothing; each part is absent when unset. Render logos only through an img element.
+      properties:
+        short_name: {type: string, maxLength: 32}
+        logo: {$ref: "#/components/schemas/TenantBrandLogo"}
+        logo_dark: {$ref: "#/components/schemas/TenantBrandLogo"}
+    TenantBrandLogo:
+      type: object
+      required: [url, width, height]
+      properties:
+        url: {type: string, description: Same-origin image URL carrying the content hash; the response is immutable.}
+        width: {type: integer, minimum: 1, maximum: 4096}
+        height: {type: integer, minimum: 1, maximum: 4096}
+    Theme:
+      type: object
+      required: [id, tenant_id, name, scope, owner_principal_id, values, revision, created_at, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        tenant_id: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 80}
+        scope: {type: string, enum: [default, workspace, personal]}
+        owner_principal_id: {type: [string, 'null'], format: uuid, description: 'Person owning a personal theme (canonical at creation); preserved through linking and unlinking. Null means workspace-owned'}
+        values: {$ref: '#/components/schemas/ThemeValues'}
+        revision: {type: integer, minimum: 1}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    ThemeAccent:
+      type: object
+      additionalProperties: false
+      required: [light, dark]
+      properties:
+        light: {type: string, pattern: '^#[0-9a-fA-F]{6}$'}
+        dark: {type: [string, 'null'], pattern: '^#[0-9a-fA-F]{6}$', description: 'Null means derived; explicit Porcelain dark preserves the current look'}
+    ThemeAgentStates:
+      type: object
+      additionalProperties: false
+      required: [working, waiting, throttled, problem, idle]
+      properties:
+        working: {$ref: '#/components/schemas/ThemeAccent'}
+        waiting: {$ref: '#/components/schemas/ThemeAccent'}
+        throttled: {$ref: '#/components/schemas/ThemeAccent'}
+        problem: {$ref: '#/components/schemas/ThemeAccent'}
+        idle: {$ref: '#/components/schemas/ThemeAccent'}
+    ThemeValues:
+      type: object
+      additionalProperties: false
+      required: [primary, secondary, recurring_marker, agents]
+      properties:
+        primary: {$ref: '#/components/schemas/ThemeAccent'}
+        secondary: {$ref: '#/components/schemas/ThemeAccent'}
+        recurring_marker:
+          type: object
+          additionalProperties: false
+          required: [source, custom]
+          properties:
+            source: {type: string, enum: [primary, secondary, neutral, custom]}
+            custom: {type: [string, 'null'], pattern: '^#[0-9a-fA-F]{6}$', description: Required and non-null when source is custom; retained when choosing another source}
+        agents:
+          type: object
+          additionalProperties: false
+          required: [avatar, ring, hover, size, palette]
+          allOf:
+            - if:
+                properties:
+                  palette: {const: custom}
+                required: [palette]
+              then:
+                required: [custom_states]
+                properties:
+                  custom_states: {$ref: '#/components/schemas/ThemeAgentStates'}
+          properties:
+            avatar: {type: string, enum: [pulse, robot-1, robot-2, robot-3, robot-4, robot-5, orbit, quill, sprite]}
+            ring: {type: [string, 'null'], enum: [moving, still, off, null], description: Null retains the selected style's drawn ring}
+            hover: {type: boolean}
+            size: {type: [integer, 'null'], minimum: 30, maximum: 100, description: Artwork fullness percentage; null retains the style's drawn size}
+            palette: {type: string, enum: [standard, protan, deutan, tritan, monochrome, focus, errors, custom]}
+            custom_states:
+              description: 'Five state accents; required and non-null for custom, retained for other looks. Omitted means null; no migration needed.'
+              default: null
+              oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/ThemeAgentStates'
+            dim_inactive: {type: boolean, description: 'Dim idle and ended agents; omitted means true'}
+            inactive_opacity: {type: integer, minimum: 40, maximum: 80, description: 'Inactive opacity percent; omitted means 55'}
+    TicketBenefitFields:
+      type: object
+      additionalProperties: true
+      description: Tenant-default ticket fields. Drafts may be incomplete; entering a built-in completed state (done, accepted, delivered) from outside that set validates pills (2–4 whitespace-separated words) and nonblank benefits. One or two plain-language sentences and translation quality are editorial requirements, not inferred by software. roadmap_public publishes the ticket on the public roadmap. Only a person can turn that on or clear it. The server writes source, by and at. Agents cannot publish.
+      properties:
+        pill_en: {type: string, description: "English pill, 2–4 words"}
+        pill_de: {type: string, description: "German pill, 2–4 words"}
+        benefit_en: {type: string, description: "English benefit, one or two plain-language sentences"}
+        benefit_de: {type: string, description: "German benefit, one or two plain-language sentences, neutral without direct address"}
+        hide_from_release_notes: {type: boolean, default: false, description: Omit from public notes; does not waive completion requirements}
+        roadmap_public: {type: boolean, description: Person approval for the public roadmap. False and omitted are unpublished. Only a person can change that.}
+        roadmap_public_source: {type: [string, 'null'], enum: [person, null], description: Acting principal kind. Must be person when supplied while publishing.}
+        roadmap_public_by: {type: [string, 'null'], format: uuid, readOnly: true, description: Person principal id. The server overwrites this.}
+        roadmap_public_at: {type: [string, 'null'], format: date-time, readOnly: true, description: 'When a person published the ticket, UTC. The server overwrites this.'}
+    TicketEstimate:
+      type: object
+      required: [hours, estimated_children, open_children]
+      description: Read-only leaf estimate sum. A parent's own typed estimate is planned_hours and is never added to the sum. Archived, cancelled and deleted leaves are excluded. Existing estimated_children/open_children fields remain compatibility aliases for estimated_leaves/leaf_count. Counts include done leaves so regrouping cannot alter the total.
+      properties:
+        hours: {type: [number, 'null'], exclusiveMinimum: 0}
+        planned_hours: {type: [number, 'null'], exclusiveMinimum: 0}
+        is_parent: {type: boolean}
+        estimated_leaves: {type: integer, minimum: 0}
+        leaf_count: {type: integer, minimum: 0}
+        estimated_children: {type: integer, minimum: 0}
+        open_children: {type: integer, minimum: 0}
+        by: {type: object, properties: {id: {type: string, format: uuid}, name: {type: string}}}
+    TicketEstimateFields:
+      type: object
+      additionalProperties: true
+      description: Agent work hours until ready for review. New values must be positive and at most 200. Omit or set hours to null to clear with the provenance. Legacy unchanged values remain editable. The server derives source from the authenticated principal (person or agent), and sets by and at; supplied new provenance cannot impersonate another principal. An explicit source must match the caller. To confirm the same hours, resubmit them without by/at. A person or an active agent bound to this ticket confirms the estimate.
+      properties:
+        estimate_hours: {type: [number, 'null'], exclusiveMinimum: 0, maximum: 200}
+        estimate_source: {type: string, enum: [agent, person]}
+        estimate_by: {type: string, format: uuid, readOnly: true}
+        estimate_at: {type: string, format: date-time, readOnly: true}
+        estimate_confirmed: {type: boolean, readOnly: true, description: True for a person or active bound worker; false for an agent draft.}
+    TicketRouteFields:
+      type: object
+      additionalProperties: true
+      description: >-
+        Classification of work items, tickets and tasks. Creating an estimate or changing its hours or provenance fills missing route_role, area and complexity from title/labels, ancestor defaults, then build/backend. A changed route_role also refreshes suggestions. These changes are compared with the stored fields under the node lock; resending an unchanged estimate with an unrelated fields edit leaves missing hints absent.
+        Server suggestions have source suggested and confirmed false; by is the acting principal and at is UTC. Explicit values are stamped person or agent; only a person confirms classifications.
+        To confirm an unchanged suggestion or an unconfirmed agent classification, a person resubmits its value without source/by/at. Other unchanged values retain stored provenance. Clients cannot forge confirmation or attribution.
+        Complexity is S for up to 2 hours, M for up to 8, L above 8; build-hard promotes S to M and M to L. Only unconfirmed server-derived complexity follows estimate/role changes.
+        Null clears a classification and provenance. When an estimate or route_role changes and valid hours remain, missing classifications are suggested again. Existing tickets are not backfilled by unrelated edits.
+      properties:
+        route_role: {type: [string, 'null'], enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security, null]}
+        route_role_source: {type: [string, 'null'], enum: [agent, person, suggested, null]}
+        route_role_by: {type: [string, 'null'], format: uuid, readOnly: true}
+        route_role_at: {type: [string, 'null'], format: date-time, readOnly: true}
+        route_role_confirmed: {type: boolean, readOnly: true}
+        area: {type: [string, 'null'], maxLength: 48, description: 'Active default or project work-kind slug, excluding review and other. security is valid.'}
+        area_source: {type: [string, 'null'], enum: [agent, person, suggested, null]}
+        area_by: {type: [string, 'null'], format: uuid, readOnly: true}
+        area_at: {type: [string, 'null'], format: date-time, readOnly: true}
+        area_confirmed: {type: boolean, readOnly: true}
+        complexity: {type: [string, 'null'], enum: [S, M, L, null]}
+        complexity_source: {type: [string, 'null'], enum: [agent, person, suggested, null]}
+        complexity_by: {type: [string, 'null'], format: uuid, readOnly: true}
+        complexity_at: {type: [string, 'null'], format: date-time, readOnly: true}
+        complexity_confirmed: {type: boolean, readOnly: true}
+    WorkDisplayWords:
+      type: object
+      additionalProperties: false
+      required: [label, hint, examples]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        examples: {type: array, maxItems: 3, items: {type: string, minLength: 1, maxLength: 120}}
+    WorkKind:
+      type: object
+      required: [id, slug, label, hint, position]
+      properties:
+        words_de: {$ref: '#/components/schemas/WorkDisplayWords', description: "German wording, stored separately from English; omitted for untranslated custom kinds."}
+        display_words: {$ref: '#/components/schemas/WorkDisplayWords', description: "Complete wording for the requested display language, falling back to English as a whole."}
+        examples: {type: array, maxItems: 3, items: {type: string, maxLength: 120}}
+        labels: {type: array, maxItems: 32, items: {type: string, maxLength: 48}}
+        ticket_count: {type: integer, minimum: 0}
+        id: {type: string, format: uuid}
+        slug: {type: string, maxLength: 48}
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        project_id: {type: string, format: uuid}
+        system: {type: string, enum: [review, security, other]}
+        position: {type: integer}
+        archived_at: {type: string, format: date-time}
+    WorkerHandoff:
+      type: object
+      required: [run_id, work_order_id, worker_principal_id, project_id, lead_session_id, lead_generation, ticket_id, ticket_revision, work_order_revision, brief_sha256, state]
+      properties:
+        run_id: {type: string, format: uuid}
+        work_order_id: {type: string, format: uuid}
+        worker_principal_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        lead_session_id: {type: string, format: uuid}
+        lead_generation: {type: integer, format: int64, minimum: 1}
+        ticket_id: {type: string, format: uuid}
+        ticket_revision: {type: string, format: date-time}
+        work_order_revision: {type: integer, format: int64, minimum: 1}
+        brief_sha256: {type: string, pattern: '^[a-f0-9]{64}$', description: 'SHA-256 of domain-separated canonical JSON title, body and ordered criterion descriptions; content is fetched through existing work-order/node APIs.'}
+        worktree_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        state: {type: string, enum: [assigned, launch_unknown, launched, completed], description: Completed requires confirmed process exit or proof launch was not attempted. Silence and terminal labels do not prove exit.}
+        accepted_at: {type: string, format: date-time}
+        launched_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time}
+        outcome: {type: string, enum: [completed, failed, cancelled, ownership_lost]}
+  parameters:
+    AeonStepUp:
+      name: Aeon-Step-Up
+      in: header
+      required: false
+      description: Single-use signed proof for the exact request; see OwnerWorkstationStepUp.
+      schema: {type: string, maxLength: 181}
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor bound to filters and sort
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 50
+  responses:
+    Error:
+      description: Request error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+    Node:
+      description: Node
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Node'
+    OwnerWorkstationStepUpRequired:
+      description: A marked owner workstation key needs local confirmation for this exact action.
+      headers:
+        Cache-Control: {schema: {type: string, const: no-store}}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/OwnerWorkstationStepUp"}

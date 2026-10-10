@@ -40,9 +40,9 @@ test('intended result prefers an explicit phrase, then the bound ticket title, t
   const keyOnly = view({ session: { brief: 'AEON-221' }, name: 'SC1 working' })
   assert.equal(intendedResult(keyOnly), 'AEON-221')
   assert.equal(sessionContext(keyOnly, 'AEON-221'), 'SC1 working')
-  const plain = view({ name: 'amy', session: { host: 'csb1', activity_note: 'Quiet · heartbeat only' } as SessionView['session'] })
+  const plain = view({ name: 'amy', session: { host: 'prod-1', activity_note: 'Quiet · heartbeat only' } as SessionView['session'] })
   assert.equal(intendedResult(plain), 'amy')
-  assert.equal(sessionContext(plain, 'amy'), 'csb1')
+  assert.equal(sessionContext(plain, 'amy'), 'prod-1')
   assert.equal(intendedResult(plain).includes('heartbeat'), false)
 })
 
@@ -80,4 +80,14 @@ test('media and terminal use their execution label and never infer an AI vendor'
     assert.equal(exec.effort, '')
     assert.equal(exec.account, '')
   }
+})
+
+test('heartbeat model changes refresh the same session row over a stale launch model', () => {
+  const row = view({ harness: 'Claude', model: 'claude-sonnet', session: { harness: 'claude', model: 'claude-sonnet', reasoning_effort: 'low' } })
+  assert.equal(sessionExecution(row).modelLine, 'claude-sonnet · low')
+  const sessionID = row.session.id
+  row.session = { ...row.session, model: 'claude-opus', reasoning_effort: 'high' }
+  assert.equal(row.session.id, sessionID)
+  assert.equal(sessionExecution(row).modelLine, 'claude-opus · high')
+  assert.equal(sessionExecution(row).provider, 'anthropic')
 })

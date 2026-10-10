@@ -25,9 +25,6 @@ import (
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
-const publicRepository = "inspr-at/inspr-modules"
-const privateRepository = "inspr-at/inspr-doctrine-private"
-
 // AppConfig is host policy, never tenant-editable. No key material or tokens.
 // GateLogin is the independent repository gate that attests CI + cross-family
 // review in a PR review; this App has no permission to manufacture that gate.
@@ -45,17 +42,30 @@ var appSlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,38}$`)
 var loginPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,38}(\[bot\])?$`)
 
 func (a AppConfig) configured() bool {
-	return a.DCOAcknowledged && digits.MatchString(a.ID) && digits.MatchString(a.InstallationID) && credentialRefPattern.MatchString(a.KeyRef) && workorders.UUID(a.TenantID) && strings.ToLower(a.TenantID) == a.TenantID && loginPattern.MatchString(a.GateLogin)
+	return a.readConfigured() && a.DCOAcknowledged && loginPattern.MatchString(a.GateLogin)
+}
+
+func (a AppConfig) readConfigured() bool {
+	return digits.MatchString(a.ID) && digits.MatchString(a.InstallationID) && credentialRefPattern.MatchString(a.KeyRef) && a.KeyRef != "github-app" && a.KeyRef != "host-mirror" && workorders.UUID(a.TenantID) && strings.ToLower(a.TenantID) == a.TenantID
 }
 
 func (m *Module) appClient(ctx context.Context, tenantID, repository string) (*GitHub, error) {
+	return m.installationClient(ctx, tenantID, repository, false)
+}
+
+// installationClient shares the signing, exact scope and revocation boundary
+// between read tokens and proposal tokens. Reads confer no publication authority.
+func (m *Module) installationClient(ctx context.Context, tenantID, repository string, readOnly bool) (*GitHub, error) {
 	a := m.app
-	if !a.configured() {
+	if readOnly && !a.readConfigured() {
+		return nil, gitFail("the doctrine GitHub App installation is not configured")
+	}
+	if !readOnly && !a.configured() {
 		return nil, fail(503, "app_unavailable", "Doctrine proposals need a server-provisioned GitHub App and independent review gate.")
 	}
 	// Host configuration alone cannot grant access to the App key. Use the same
 	// operator-owned tenant/repository policy as credential-backed reads.
-	if tenantID != a.TenantID || (repository != publicRepository && repository != privateRepository) {
+	if tenantID != a.TenantID || !m.repositories.IsPublic(repository) && !m.repositories.IsPrivate(repository) {
 		return nil, ErrCredential
 	}
 	if err := m.credentials.authorize(a.KeyRef, tenantID, repository); err != nil {
@@ -130,9 +140,13 @@ func (m *Module) appClient(ctx context.Context, tenantID, repository string) (*G
 			Private  *bool  `json:"private"`
 		} `json:"repositories"`
 	}
+	permissions := map[string]string{"contents": "write", "pull_requests": "write"}
+	if readOnly {
+		permissions = map[string]string{"contents": "read"}
+	}
 	err = g.request(ctx, "POST", "/app/installations/"+a.InstallationID+"/access_tokens", map[string]any{
 		"repositories": []string{strings.SplitN(repository, "/", 2)[1]},
-		"permissions":  map[string]string{"contents": "write", "pull_requests": "write"},
+		"permissions":  permissions,
 	}, &out)
 	if err != nil {
 		return nil, err
@@ -154,20 +168,29 @@ func (m *Module) appClient(ctx context.Context, tenantID, repository string) (*G
 		if _, ok := allowed[r.FullName]; !ok {
 			return nil, gitFail("the App token includes an unapproved repository")
 		}
-		if r.Private == nil || *r.Private != (r.FullName == privateRepository) {
+		if r.Private == nil || *r.Private != m.repositories.IsPrivate(r.FullName) {
 			return nil, gitFail("the doctrine repository visibility does not match its public/private boundary")
 		}
 		allowed[r.FullName] = true
 	}
-	if len(out.Repositories) != 1 || !allowed[repository] || out.Permissions["contents"] != "write" || out.Permissions["pull_requests"] != "write" || !tokenPattern.MatchString(out.Token) {
+	if len(out.Repositories) != 1 || !allowed[repository] {
 		return nil, gitFail("the App token does not have the exact doctrine repository scope")
 	}
+	for permission, level := range permissions {
+		if out.Permissions[permission] != level {
+			return nil, gitFail("the App token does not have the exact doctrine permissions")
+		}
+	}
 	for permission, level := range out.Permissions {
-		if permission != "contents" && permission != "pull_requests" && !(permission == "metadata" && level == "read") {
+		if permissions[permission] != level && !(permission == "metadata" && level == "read") {
 			return nil, gitFail("the App token has unexpected permissions")
 		}
 	}
 	g.Token = out.Token
+	if readOnly {
+		ready = true
+		return g, nil
+	}
 	var bot struct {
 		ID    int64  `json:"id"`
 		Login string `json:"login"`

@@ -145,7 +145,7 @@ func projectFail(w http.ResponseWriter, err error) {
 // members.manage on the project and that the actor holds every permission the
 // role would grant there.
 func (m *Module) authorizeProjectMutation(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string, grants []string) error {
-	if err := lockProjectMutation(ctx, tx, p.TenantID); err != nil {
+	if err := LockProjectMutation(ctx, tx, p.TenantID); err != nil {
 		return err
 	}
 	if err := requireTx(ctx, tx, p, "members.manage", Scope{ProjectID: projectID}); err != nil {
@@ -166,17 +166,16 @@ func (m *Module) authorizeProjectMutation(ctx context.Context, tx pgx.Tx, p tena
 	return nil
 }
 
-// lockProjectMutation serializes project bindings with other membership
-// changes in the tenant. The advisory lock also covers operator CLI calls.
-func lockProjectMutation(ctx context.Context, tx pgx.Tx, tenantID string) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID); err != nil {
-		return err
-	}
-	var id string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, tenantID).Scan(&id); err != nil {
-		return err
-	}
-	return nil
+// LockProjectMutation fences placement and access through commit. Tenant's
+// FK-compatible fence precedes tree and resource locks; decode before entry.
+func LockProjectMutation(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	return db.LockTree(ctx, tx, tenantID)
+}
+
+// LockProjectWrite uses the same exclusive non-key fence as mutations. A shared
+// tenant lock followed by a later upgrade could deadlock concurrent re-entries.
+func LockProjectWrite(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	return db.LockTree(ctx, tx, tenantID)
 }
 
 func bindableTx(ctx context.Context, tx pgx.Tx, tenantID, principalID string) error {
@@ -245,6 +244,9 @@ func (m *Module) putProjectMember(w http.ResponseWriter, r *http.Request) {
 // the actor principal for both HTTP and operator events.
 func (m *Module) setProjectBindingTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, principalID, roleID string, operator bool) (ProjectBinding, error) {
 	var out ProjectBinding
+	if err := LockProjectMutation(ctx, tx, p.TenantID); err != nil {
+		return out, err
+	}
 	projectKey, _, err := projectNodeTx(ctx, tx, projectID)
 	if err != nil {
 		return out, err
@@ -256,11 +258,7 @@ func (m *Module) setProjectBindingTx(ctx context.Context, tx pgx.Tx, p tenant.Pr
 	if !projectRoleAllowed(role) {
 		return out, errProjectRole
 	}
-	if operator {
-		if err := lockProjectMutation(ctx, tx, p.TenantID); err != nil {
-			return out, err
-		}
-	} else {
+	if !operator {
 		grants := []string{}
 		for _, key := range role.Permissions {
 			if ProjectGrantable(key) {
@@ -324,7 +322,7 @@ func (m *Module) removeProjectBindingTx(ctx context.Context, tx pgx.Tx, p tenant
 		return err
 	}
 	if operator {
-		if err := lockProjectMutation(ctx, tx, p.TenantID); err != nil {
+		if err := LockProjectMutation(ctx, tx, p.TenantID); err != nil {
 			return err
 		}
 	} else if err := m.authorizeProjectMutation(ctx, tx, p, projectID, nil); err != nil {

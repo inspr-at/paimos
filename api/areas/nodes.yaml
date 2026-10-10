@@ -1,0 +1,1426 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/activity
+# aeon:owner internal/attachments
+# aeon:owner internal/crossreview
+# aeon:owner internal/delivery
+# aeon:owner internal/deliveryvote
+# aeon:owner internal/nodes
+# aeon:owner internal/outcomes
+# aeon:owner internal/parentbenefits
+# aeon:owner internal/ticketwork
+paths:
+  /nodes:
+    get:
+      operationId: listNodes
+      description: 'Work aggregate reads reject more than 4096 roots or 50000 expanded root/node pairs before computing facts. Over-budget scopes fail explicitly; results are never silently truncated. A cursor whose anchor was deleted or no longer matches the filters returns 409 cursor_expired; restart from the first page.'
+      security: *auth
+      parameters:
+        - {name: shape, in: query, description: 'parent or leaf; supports ! exclusions', schema: {type: array, items: {type: string, enum: [parent, leaf, '!parent', '!leaf']}}}
+        - {name: depth, in: query, description: 'Project-relative work levels; supports ! exclusions', schema: {type: array, items: {type: string}}}
+        - {name: kind_id, in: query, schema: {type: string, format: uuid}}
+        - {name: kind, in: query, description: 'Repeatable or comma-separated kind slugs or IDs. epic, ticket and task also match work after migration; a leading ! excludes the alias', schema: {type: array, items: {type: string}}}
+        - {name: state, in: query, description: 'Repeatable or comma-separated states. In every list filter a leading ! excludes a value: plain values of one filter are alternatives, excluded values must all not match, and filters combine with AND.', schema: {type: array, items: {type: string}}}
+        - {name: work_state, in: query, description: 'Canonical work statuses as in project status_counts. Recognises all stored spelling variants. Repeatable or comma-separated, with ! exclusions; at most 64 values of 64 characters each. Combines with other filters.', schema: {type: array, maxItems: 64, items: {type: string, maxLength: 64}}}
+        - {name: work_bucket, in: query, description: 'Work buckets using the same kind categories and fallback as project counts and Hide. Repeatable or comma-separated; at most five values. Combines with other filters.', schema: {type: array, maxItems: 5, items: {type: string, enum: [open, in_progress, done, cancelled, archived]}}}
+        - {name: priority, in: query, description: Repeatable or comma-separated priorities or none; ! excludes, schema: {type: array, items: {type: string}}}
+        - {name: assignee, in: query, description: Repeatable or comma-separated principal IDs or none; ! excludes, schema: {type: array, items: {type: string}}}
+        - {name: tag, in: query, description: 'Tag names (case-insensitive) or none for untagged work; ! excludes. Tags are the name strings or {name} objects in fields.tags.', schema: {type: array, items: {type: string}}}
+        - {name: cost_unit, in: query, description: 'Cost unit labels (case-insensitive) or none; ! excludes. Reads fields.cost_unit, else the imported fields.classic.cost_unit.', schema: {type: array, items: {type: string}}}
+        - {name: release, in: query, description: 'Release labels (case-insensitive) or none; ! excludes. Reads fields.release.', schema: {type: array, items: {type: string}}}
+        - {name: human_check, in: query, description: 'pending or none; ! excludes. Pending means human_check contains non-empty text. Combines with other filters and applies to facets and pagination.', schema: {type: array, items: {type: string, enum: [pending, none, '!pending', '!none']}}}
+        - {name: epic, in: query, description: 'Epic node IDs (matching their whole subtree, not the epic itself) or none for work under no epic; ! excludes.', schema: {type: array, items: {type: string}}}
+        - {name: date_field, in: query, description: 'Which date date_from and date_to bound. created and updated compare instants; start, end and accepted read fields.start_date, end_date and accepted_at by the calendar day of the bounds in their own offset. Alone it keeps work that has that date.', schema: {type: string, enum: [created, updated, start, end, accepted]}}
+        - {name: date_from, in: query, description: Inclusive lower bound (RFC 3339), schema: {type: string, format: date-time}}
+        - {name: date_to, in: query, description: Exclusive upper bound (RFC 3339), schema: {type: string, format: date-time}}
+        - {name: q, in: query, description: 'Matches keys (also earlier keys), titles and descriptions; key prefixes rank first and description-only matches last', schema: {type: string}}
+        - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
+        - {name: hide_closed, in: query, description: 'When true, omits the hide_states choices, defaulting to nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
+        - {name: hide_states, in: query, description: 'Closed statuses omitted when hide_closed is true. Defaults to all five. Kind-aware buckets and canonical spellings match project counts: delivered and accepted keep their names inside the done bucket; other done-bucket statuses use done, and exit buckets use cancelled or archived. At least one and at most five choices; ignored when hide_closed is false.', style: form, explode: false, schema: {type: array, minItems: 1, maxItems: 5, uniqueItems: true, items: {type: string, enum: [done, delivered, accepted, cancelled, archived]}}}
+        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, human_check, shape, depth. State facets count work leaves only, so status-grid and Hide counts omit grouping parents. Other facets retain row semantics. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
+        - {name: parent_id, in: query, schema: {type: string, format: uuid}}
+        - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
+        - {name: ids, in: query, description: 'Repeatable or comma-separated node IDs, at most 200: only these nodes, with every other filter still applied. A live list refetches the rows that changed through its own query; a row that no longer matches is absent.', schema: {type: array, maxItems: 200, items: {type: string, format: uuid}}}
+        - {$ref: '#/components/parameters/Sort'}
+        - {$ref: '#/components/parameters/Direction'}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '409': {description: 'cursor_expired: pagination anchor is gone or no longer matches; restart from the first page'}
+        '200':
+          $ref: '#/components/responses/Nodes'
+        '400':
+          $ref: '#/components/responses/Error'
+        '503': {description: 'Read deadline or work aggregate budget exceeded; narrow the scope or retry. No partial aggregate is returned.'}
+    post:
+      operationId: createNode
+      description: |
+        Allocate a tenant-scoped key, or preserve a supplied import key.
+        The created node includes the same read-only estimate view as a later read when it has hours or open children.
+        Any create of a portal_product, portal_feature or portal_wish, and any create that places a node under a portal parent, requires a person with settings.manage. Agents are refused.
+        An agent creating a ticket or task without an estimate is warned to set fields.estimate_hours. The warning does not name a client flag.
+      security: *auth
+      requestBody:
+        $ref: '#/components/requestBodies/NodeCreate'
+      responses:
+        '201':
+          $ref: '#/components/responses/Node'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          description: |
+            Unprocessable node. A work item or legacy ticket entering a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/ApiError'}
+                  - {$ref: '#/components/schemas/NodeError'}
+  /nodes/bulk:
+    post:
+      operationId: bulkChangeNodes
+      description: |
+        One change for up to 500 nodes in one transaction: a state (archive is the
+        state archived), a priority or assignee (null clears, also over an imported
+        value), tags to add and remove (by name, case-insensitive), and a new parent
+        inside the same project. Each changed node gets its own node.updated and
+        node.moved events; the batch gets one node.bulk_changed event whose id is
+        returned. POST /events/{event_id}/undo restores every node of the batch, or
+        answers 409 and changes nothing when any of them changed since. A node that
+        cannot take the change (not found, another project, a kind rule, a cycle) is
+        listed under skipped with a reason; nodes already so are listed as unchanged.
+        if_unmodified_since names, per node, the updated_at the caller last saw; a
+        node changed since is skipped with code conflict and left as it is.
+        Any change to a portal_product, portal_feature or portal_wish, and any
+        reparent into or out of a portal parent, requires a person with
+        settings.manage. Agents are refused, and the batch changes nothing.
+        Undoing that batch has the same requirement.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [ids]
+              minProperties: 2
+              properties:
+                ids: {type: array, minItems: 1, maxItems: 500, items: {type: string, format: uuid}}
+                state: {type: string, minLength: 1, maxLength: 64}
+                priority: {type: [string, 'null'], maxLength: 32}
+                assignee: {type: [string, 'null'], format: uuid}
+                tags_add:
+                  type: array
+                  maxItems: 20
+                  items:
+                    oneOf:
+                      - {type: string, minLength: 1, maxLength: 100}
+                      - type: object
+                        required: [name]
+                        properties:
+                          name: {type: string, minLength: 1, maxLength: 100}
+                          color: {type: string, maxLength: 32}
+                tags_remove: {type: array, maxItems: 20, items: {type: string, minLength: 1, maxLength: 100}}
+                parent_id: {type: string, format: uuid}
+                if_unmodified_since:
+                  type: object
+                  description: Node ID to the updated_at the caller last saw (RFC 3339, compared exactly like PATCH's If-Unmodified-Since). Nodes not named are not checked.
+                  maxProperties: 500
+                  additionalProperties: {type: string, format: date-time}
+      responses:
+        '200':
+          description: Changed, unchanged and skipped nodes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event_id, items, unchanged, skipped]
+                properties:
+                  event_id: {type: [integer, 'null'], description: The node.bulk_changed event to undo; null when nothing changed}
+                  items: {type: array, items: {$ref: '#/components/schemas/Node'}}
+                  unchanged: {type: array, items: {type: string, format: uuid}}
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, reason]
+                      properties:
+                        id: {type: string, format: uuid}
+                        key: {type: string}
+                        reason: {type: string}
+                        code:
+                          type: string
+                          description: benefit_required when a work item or legacy ticket enters a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /nodes/lookup:
+    get:
+      operationId: lookupNodes
+      description: Resolve up to 100 live node previews by ID and up to 100 by key in one tenant-scoped request (ids, keys or both). Missing, deleted and invisible nodes (outside the caller's projects) are omitted alike.
+      security: *auth
+      parameters:
+        - name: ids
+          in: query
+          description: Comma-separated or repeated node UUIDs; at most 100 values, duplicates included, or 400.
+          schema: {type: array, minItems: 1, maxItems: 100, items: {type: string, format: uuid}}
+        - name: keys
+          in: query
+          description: Comma-separated or repeated node keys (case-insensitive, at most 30 characters, the stored key limit); at most 100 values, duplicates included, or 400. A current key wins; an earlier key (left by a project move) resolves to the node that carried it.
+          schema: {type: array, minItems: 1, maxItems: 100, items: {type: string, maxLength: 30, pattern: '^[A-Za-z][A-Za-z0-9]{1,9}-[1-9][0-9]*$'}}
+      responses:
+        '200':
+          description: ID previews in request order, then key previews in request order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, key, title, state]
+                      properties:
+                        id: {type: string, format: uuid}
+                        key: {type: string}
+                        title: {type: string}
+                        state: {type: string}
+                        requested_key: {type: string, description: Key lookups only; the upper-cased key asked for.}
+                        project_id: {type: string, format: uuid, description: Key lookups only; the nearest project above the node (or the node itself).}
+        '400':
+          $ref: '#/components/responses/Error'
+  /nodes/tree:
+    get:
+      operationId: getNodeTree
+      description: Depth-first flat page with parent IDs; omission of max_depth permits any depth.
+      security: *auth
+      parameters:
+        - {name: root_id, in: query, description: Omit for all root nodes, schema: {type: string, format: uuid}}
+        - {name: max_depth, in: query, schema: {type: integer, minimum: 0}}
+        - {$ref: '#/components/parameters/Limit'}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          $ref: '#/components/responses/Tree'
+        '400':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /nodes/{id}/delivery:
+    get:
+      operationId: nodeDelivery
+      description: 'Observe-only delivery rows for a visible ticket. Requires delivery.read; same bounded pagination as the delivery list.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: 'Ticket delivery page', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPage'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    get:
+      operationId: getNode
+      security: *auth
+      responses:
+        '200':
+          $ref: '#/components/responses/Node'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503': {description: 'Work aggregate read exceeded its five-second deadline or scope budget. No partial aggregate is returned.'}
+    patch:
+      operationId: updateNode
+      description: |
+        Key and parent are immutable here; use move for parent.
+        Naming the node's current kind, type, or kind_id changes nothing.
+        A different kind or type returns 409 with code kind_change_not_allowed and changes nothing else in that call.
+        Tag renames use PATCH /tags/{tagId} so assignments change atomically.
+        Optional optimistic concurrency compares If-Unmodified-Since to the exact
+        updated_at value while holding the node row lock in the write transaction.
+        A stale value returns 412 without changing the node or appending an event.
+        Omission preserves unconditional patch behavior.
+        The tenant tree lock is acquired before the node row lock. A database deadlock
+        rolls back the update and returns 409 with code retryable_conflict; retry the request.
+        Any change to a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused.
+      parameters:
+        - name: If-Unmodified-Since
+          in: header
+          description: Exact RFC3339 timestamp from Node.updated_at, including fractional seconds. HTTP dates are also accepted and compared at full stored precision; prefer updated_at to avoid precision loss.
+          schema: {type: string}
+      security: *auth
+      requestBody:
+        $ref: '#/components/requestBodies/NodePatch'
+      responses:
+        '200':
+          $ref: '#/components/responses/Node'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: |
+            A different kind, type, or kind_id was named. The node is unchanged. code is kind_change_not_allowed.
+            A database deadlock leaves the node unchanged and returns code retryable_conflict; retry the request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeError'
+        '412':
+          $ref: '#/components/responses/Error'
+        '422':
+          description: |
+            Unprocessable node. A work item or legacy ticket entering a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - {$ref: '#/components/schemas/ApiError'}
+                  - {$ref: '#/components/schemas/NodeError'}
+    delete:
+      operationId: deleteNode
+      description: Soft-delete; cancel a still-queued ticket run and soft-delete its generated work-order child atomically before deleting the ticket. Reject while other live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused. The deletion moves updated_at forward like every other write; Aeon-Revision names that revision (AEON-326).
+      security: *auth
+      responses:
+        '204':
+          description: Deleted
+          headers:
+            Aeon-Revision: {$ref: '#/components/headers/NodeRevision'}
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+  /nodes/{nodeId}/activity:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    get:
+      operationId: listNodeActivity
+      summary: Merged comment and visible field-change timeline
+      description: "Reverse chronological by (at, event ID). The opaque cursor binds tenant, node and event watermark. Imported snapshots with no visible changes are omitted; the first snapshot is a baseline. Comments retain their creation position after edits; deleted comments are omitted. Imported comments are read-only. Native updates also show a labels change (field tags). Each read has a five-second deadline and a bounded candidate batch; a sparse history may return fewer items with a continuation cursor. Continue until next_cursor is null."
+      security: *auth
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {$ref: '#/components/parameters/Cursor'}
+      responses:
+        '200':
+          description: Activity page
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, items: {$ref: '#/components/schemas/ActivityItem'}}
+                  next_cursor: {type: [string, 'null']}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/agent-work:
+    get:
+      operationId: getTicketAgentWork
+      summary: Agent sessions, tokens, estimated cost and time for a work item
+      description: >
+        Sessions whose ticket is this live work item (or legacy ticket, epic or task), or a visible descendant.
+        Filtered by the caller's tenant and visible projects. Each session is listed once.
+        Token counts and list-price estimates are summed from the current
+        harness_session_usage rows for that session, one row per model. Cost is an exact
+        USD decimal string. Missing figures are null, never zero and never a JSON float.
+        Unknown rows stay in the unknown counts. Managed-run telemetry is not added.
+        Totals cover only the bounded session list. Duration is counted once per session.
+      security: *auth
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 80, default: 40}}
+      responses:
+        '200': {description: Agent work for the node, content: {application/json: {schema: {$ref: '#/components/schemas/TicketAgentWork'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/attachments:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    get:
+      operationId: listNodeAttachments
+      description: Tenant staff people only.
+      security: *auth
+      responses:
+        '200': {description: Live attachments ordered by position and ID, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Attachment'}}}}}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: addNodeAttachments
+      description: Tenant staff people only. Multipart files (repeat the file field) with optional caption, or a raw image body with X-Filename. Each file is limited by the server's configured maximum (50 MiB by default). Images are limited to 16777216 pixels and 8192 pixels per side, checked before decoding. Image processing shares a server-wide memory budget with avatar uploads.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          multipart/form-data: {schema: {type: object, required: [file], properties: {file: {type: array, items: {type: string, format: binary}}, caption: {type: string}}}}
+          image/png: {schema: {type: string, format: binary}}
+          image/jpeg: {schema: {type: string, format: binary}}
+          image/gif: {schema: {type: string, format: binary}}
+          image/webp: {schema: {type: string, format: binary}}
+      responses:
+        '201': {description: Created attachments, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/Attachment'}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '415': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/benefit-generation:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    get:
+      operationId: getParentBenefitGeneration
+      security: *auth
+      description: Parent-only asynchronous bilingual benefit status. Done never waits for generation. Leaf completion gates and published note snapshots are unchanged.
+      responses:
+        '200': {description: Current generation status, content: {application/json: {schema: {$ref: '#/components/schemas/ParentBenefitGeneration'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/benefit-generation/retry:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    post:
+      operationId: retryParentBenefitGeneration
+      security: *auth
+      description: Person-only retry requiring nodes.write in the current project. Request bodies are limited to 4 KiB with a five-second read deadline before decoding or mutation locks. Queues work; never changes status or published notes. Stale identity/revision and active jobs return 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_generation, expected_revision]
+              properties:
+                expected_generation: {type: string, format: uuid}
+                expected_revision: {type: string, format: date-time}
+      responses:
+        '202': {description: Queued, content: {application/json: {schema: {$ref: '#/components/schemas/ParentBenefitGeneration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/comments:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    post:
+      operationId: createNodeComment
+      summary: Append a comment authored by the authenticated caller
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommentBody'}
+      responses:
+        '201':
+          description: Created comment; id is the creation event ID used for editing and deletion
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ActivityItem'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/comments/{commentId}:
+    parameters:
+      - {$ref: '#/components/parameters/NodeId'}
+      - {name: commentId, in: path, required: true, schema: {type: string, pattern: '^[1-9][0-9]*$'}}
+    patch:
+      operationId: updateNodeComment
+      description: Append comment.updated for the author's own native comment strictly before 15 minutes from creation. The window does not reset on edit. Imported and deleted comments are not editable.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CommentBody'}
+      responses:
+        '200':
+          description: Updated comment at its original timeline position
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ActivityItem'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteNodeComment
+      description: Append comment.deleted for the author's own native comment strictly before 15 minutes from creation. The immutable audit events remain; the comment leaves the timeline.
+      security: *auth
+      responses:
+        '204': {description: Deleted}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/convert:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    post:
+      operationId: convertNodeKind
+      description: |
+        Change an issue between issue-family kinds in one transaction.
+        A kind is in that family when its field_schema sets issue_family true.
+        When the flag is absent, epic, ticket and task are, and so is a kind that uses one of those icons.
+        issue_family false excludes a kind. Parent and child rules still apply.
+        Person callers only; agent keys are refused even with nodes.write.
+        The key, history, relations, comments and attachments stay.
+        Fields the new schema does not allow are removed from the node and kept in full on the node.kind_changed event: before is the previous node, after is the stored node. Undo restores those fields with the old kind.
+        The stored fields are checked with the same schema validator as PATCH, including root constraints.
+        One node.kind_changed event records from, to and by.
+        Naming the current kind returns the node and writes nothing.
+      parameters:
+        - name: If-Unmodified-Since
+          in: header
+          description: Exact RFC3339 timestamp from Node.updated_at, including fractional seconds. A mismatch returns 412 without changing the node or appending an event.
+          schema: {type: string}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ConvertNode'}
+      responses:
+        '200': {$ref: '#/components/responses/Node'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409':
+          description: |
+            kind_change_not_allowed when the pair is not an issue-kind conversion.
+            kind_conversion_blocked when the parent, existing children, or schema fields do not allow it. children and fields list the offenders. The node is unchanged.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NodeError'}
+        '412': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/delivery-ratings:
+    get:
+      operationId: listDeliveryRatings
+      summary: Rework marks and objective signals for sessions on a work item
+      description: >
+        Person session only. Supports work and legacy ticket, epic and task nodes.
+        One row per visible session whose ticket is this node
+        or a visible descendant, newest first, at most 80. A vote row is an exception:
+        silence is not stored. mine is the caller's mark, or null. votes counts
+        exception rows. average is the mean of optional scores, null when none were
+        given, and is a two-decimal string, never a JSON number. Signals count review
+        rounds, CI failures and reverts from ticket events when those events exist.
+        Zero means none were recorded. An event that names a session counts only for
+        that session. An event that names none counts only while the session was running.
+        AEON-286 outcome events will replace that signal source.
+      security: [{session: []}]
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Ratings, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRatingPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/escalation:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getWorkEscalation
+      summary: Read bounded stuck-work escalation state
+      description: "Requires outcome.read for the current project. Null means no observations. State never opens the exact-commit review gate or authorizes launch, merge or deployment. Retry routes still require ordinary live admission and proven exit. AEON-601 consumes the transactional retry adapter; AEON-741 may display this state."
+      security: *auth
+      responses:
+        '200':
+          description: "Current escalation episode"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [escalation]
+                properties:
+                  escalation:
+                    oneOf:
+                      - {$ref: '#/components/schemas/WorkEscalation'}
+                      - {type: 'null'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/live-eta:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: putNodeLiveEta
+      description: A coordinator session reports when a work leaf in its project is live. Work parents roll up from children and reject this write. Existing ticket and task kinds remain supported. Null clears the live estimate. Requires current harness.worker authority and the worker lease of an active coordinator session in the node's project.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eta_live_at]
+              properties:
+                eta_live_at: {type: [string, 'null'], format: date-time}
+      responses:
+        '200': {description: The ticket estimate after the write, content: {application/json: {schema: {$ref: '#/components/schemas/TicketEta'}}}}
+        '400': {description: 'Not a work leaf or supported legacy ticket or task, or the timestamp is not RFC3339'}
+        '403': {description: No active coordinator session for this agent in the project}
+        '404': {description: Node not found}
+  /nodes/{nodeId}/move:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    post:
+      operationId: moveNode
+      description: |
+        Atomically reparent/reorder; reject cycles and disallowed child kinds.
+        Optional If-Unmodified-Since must equal Node.updated_at at second precision.
+        The comparison holds the node row lock inside the move transaction.
+        A mismatch returns 412 with the current node, without changing nodes or
+        appending an event. Each successful move advances updated_at to at least
+        the next second so competing moves cannot reuse the same precondition.
+        Omission preserves unconditional move behavior.
+        Moving a portal_product, portal_feature or portal_wish, or moving any node into or out of a portal parent, requires a person with settings.manage. Agents are refused.
+      parameters:
+        - name: If-Unmodified-Since
+          in: header
+          description: Node.updated_at as RFC3339 (fractional seconds accepted) or an HTTP date. Both timestamps are truncated to seconds before equality comparison. Invalid or repeated values return 400.
+          schema: {type: string}
+      security: *auth
+      requestBody:
+        $ref: '#/components/requestBodies/MoveNode'
+      responses:
+        '200':
+          $ref: '#/components/responses/Node'
+        '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '412':
+          description: Node changed; current node snapshot from the locked transaction.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, node]
+                properties:
+                  error: {type: string, const: node has changed}
+                  node: {$ref: '#/components/schemas/Node'}
+  /nodes/{nodeId}/project-move:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    post:
+      operationId: moveNodeProject
+      description: Atomically move an issue under a target project, assign its next project key, retain all former keys as aliases, and append an undoable node.project_moved event. Issues with child nodes or feature projections cannot move. Moving a portal_product, portal_feature or portal_wish, or moving any node into or out of a portal parent, requires a person with settings.manage. Agents are refused.
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [project_id]
+              properties:
+                project_id: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Moved issue and key change
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [issue_id, old_key, new_key, project_id, detached, notes]
+                properties:
+                  issue_id: {type: string, format: uuid}
+                  old_key: {type: string}
+                  new_key: {type: string}
+                  project_id: {type: string, format: uuid}
+                  detached: {type: array, items: {type: string}}
+                  notes: {type: array, items: {type: string}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/reviews:
+    get:
+      operationId: listTicketReviews
+      summary: Cross-family review results for this ticket
+      description: Work and legacy Ticket/Task nodes retain their existing review history. Newest first, bounded to 50 reviews. A gate opens only for a completed, vendor-reported, other-family review of the exact commit range. No merge is performed.
+      security: *auth
+      parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Reviews, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TicketReview'}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: requestTicketReview
+      summary: Queue an independent managed review of a commit range
+      description: Requires work_orders.write and run.create on the work leaf (legacy tickets and tasks remain supported). Work parents cannot receive new review work orders. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection. Catalog preparation repeats current initiating-key and target permissions in its own fenced transaction. Review resources and their ordered events then commit atomically; replay retains the original immutable binding.
+      security: *auth
+      parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TicketReviewCreate'}}}}
+      responses:
+        '201': {description: Review (queued or blocked), content: {application/json: {schema: {$ref: '#/components/schemas/TicketReview'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/time-totals:
+    get:
+      operationId: getNodeTimeTotals
+      summary: Sum hours and cost for a node subtree
+      description: Traverses live descendants inside db.InTenant. Returns separate totals by currency; no implicit conversion.
+      security: *auth
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: approved_only, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200': {description: Totals, content: {application/json: {schema: {$ref: '#/components/schemas/TimeTotals'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/work-lifecycle:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: previewWorkLifecycle
+      summary: Leaf shape, open leaf count, and this person's pending action
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Bounded preview; only work children make a parent
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkLifecyclePreview'}
+        '403': {description: Person with nodes.read required}
+    post:
+      operationId: requestWorkLifecycle
+      summary: Split into children or cancel with its open children after graceful handover
+      security: [{session: []}]
+      requestBody:
+        required: true
+        description: At most 1 MiB, read within ten seconds before opening the mutation transaction.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id, kind, expected_updated_at, expected_open_leaves, expected_scope_revision]
+              additionalProperties: false
+              properties:
+                request_id: {type: string, format: uuid}
+                kind: {type: string, enum: [split, cancel]}
+                expected_updated_at: {type: string, format: date-time}
+                expected_open_leaves: {type: integer, minimum: 0, maximum: 100}
+                expected_scope_revision: {type: string, pattern: "^[a-f0-9]{64}$"}
+                children:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    required: [title]
+                    additionalProperties: false
+                    properties:
+                      title: {type: string, minLength: 1, maxLength: 500}
+                      body: {type: string, maxLength: 16000}
+      responses:
+        '200':
+          description: Waiting or completed action; waiting never means success. Replays preserve the original action.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkLifecycleAction'}
+        '400': {description: Invalid request or bounded scope exceeded}
+        '403': {description: Person with current nodes.write and any required harness.control/run.create/work_orders.write permissions}
+        '408': {description: Request body read timed out}
+        '409': {description: 'Stale preview, another pending intent, or a run without cooperative handover delivery'}
+  /nodes/{nodeId}/work-lifecycle/{actionId}:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: actionId, in: path, required: true, schema: {type: string, format: uuid}}
+    delete:
+      operationId: abandonWorkLifecycle
+      summary: Release this person's pending intent without killing or resuming any agent
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Abandoned intent; existing handover requests and completed leaf writes remain
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkLifecycleAction'}
+        '403': {description: Original requester with current nodes.write required}
+  /nodes/{nodeId}/work-lifecycle/{actionId}/continue:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: actionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: continueWorkLifecycle
+      summary: Recheck permissions and confirmed stops, then apply the saved intent atomically
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Waiting or completed; expired cooperative handovers are retried without force or releasing the stop fence. Repeat requests cannot create children or cancel a leaf twice
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkLifecycleAction'}
+        '403': {description: Original requester with current target permissions required}
+        '409': {description: Split target changed or original targets no longer form the previewed scope}
+components:
+  headers:
+    NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
+  schemas:
+    ActivityItem:
+      type: object
+      required: [id, at, type, author]
+      properties:
+        automatic_change: {$ref: '#/components/schemas/StatusAutopilotChange'}
+        id: {type: string, description: "Stable tenant-local event ID, represented as a decimal string"}
+        at: {type: string, format: date-time}
+        type: {type: string, enum: [comment, change, created]}
+        author:
+          type: object
+          required: [id, name, has_avatar]
+          properties:
+            id: {type: [string, 'null'], format: uuid, description: Null if no imported principal mapping exists}
+            name: {type: string}
+            has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
+            automatic: {type: boolean, description: 'True when the tenant System principal wrote the event. Clients show that actor as the product short name followed by (automatic). Omitted for people and ordinary agents, including a person named System.'}
+            job: {type: string, description: 'Background job recorded on the event, when one was.'}
+            reason: {type: string, description: 'Why that job wrote the event, when a reason was recorded.'}
+        body_markdown: {type: string, description: Present for comments only}
+        changes:
+          type: array
+          description: Present for changes only; assignees resolve to names when mapped, parent values are source IDs or native UUIDs.
+          items:
+            type: object
+            required: [field, from, to]
+            properties:
+              field: {type: string, description: "tags is the native label list, names in stored order joined by a comma and a space. kind is the issue type slug after a conversion.", enum: [status, priority, assignee, title, parent, tags, kind, human_check]}
+              from: {type: [string, 'null']}
+              to: {type: [string, 'null']}
+    CommentBody:
+      type: object
+      additionalProperties: false
+      required: [body_markdown]
+      properties:
+        body_markdown: {type: string, minLength: 1, maxLength: 65536, description: Nonblank Markdown; at most 65536 UTF-8 bytes. Render safely on the client.}
+    ConvertNode:
+      type: object
+      additionalProperties: false
+      required: [to_kind]
+      properties:
+        to_kind: {type: string, description: "Target kind slug. Both kinds must be issue-family kinds in the tenant configuration."}
+    DeliveryRatingPage:
+      type: object
+      required: [node_id, sessions]
+      properties:
+        node_id: {type: string, format: uuid}
+        sessions: {type: array, maxItems: 80, items: {$ref: '#/components/schemas/DeliveryRating'}}
+    MoveNode:
+      type: object
+      required: [parent_id]
+      properties:
+        parent_id:
+          type: [string, 'null']
+          format: uuid
+        before_id:
+          type: [string, 'null']
+          format: uuid
+    NodeCreate:
+      type: object
+      required: [kind_id, title]
+      properties:
+        human_check: {type: [string, 'null'], maxLength: 500, description: Optional pending human check; non-empty text after trimming}
+        kind_id:
+          type: string
+          format: uuid
+        key:
+          type: string
+          description: Optional preserved import key
+        key_prefix:
+          type: string
+          description: Optional generated-key prefix; defaults to kind short_prefix
+        title:
+          type: string
+          minLength: 1
+        body:
+          type: string
+          default: ''
+        fields:
+          type: object
+          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields describes route_role, area and complexity classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
+          default: {}
+        state:
+          type: string
+          default: open
+        parent_id:
+          type: [string, 'null']
+          format: uuid
+        before_id:
+          type: [string, 'null']
+          format: uuid
+          description: Existing sibling; null appends
+    NodeError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          description: benefit_required when a work item or legacy ticket enters a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.
+        children:
+          type: array
+          description: Direct children that cannot stay under the target kind. Present for kind_conversion_blocked.
+          items:
+            type: object
+            required: [id, key, kind]
+            properties:
+              id: {type: string, format: uuid}
+              key: {type: string}
+              kind: {type: string}
+        fields:
+          type: array
+          description: Schema fields that are missing or invalid for the target kind. Extra fields the schema does not declare are kept and are not listed.
+          items: {type: string}
+    NodeListItem:
+      allOf:
+        - $ref: '#/components/schemas/Node'
+        - type: object
+          required: [kind_slug, kind_label, priority, assignee, parent, children_count, project, epic]
+          properties:
+            kind_slug: {type: string}
+            kind_label: {type: string}
+            priority: {type: [string, 'null']}
+            assignee:
+              type: [object, 'null']
+              properties:
+                id: {type: string, format: uuid}
+                name: {type: string}
+                has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
+            parent:
+              type: [object, 'null']
+              properties:
+                id: {type: string, format: uuid}
+                key: {type: string}
+                title: {type: string}
+                kind_slug: {type: string}
+            children_count: {type: integer, minimum: 0}
+            project:
+              type: [object, 'null']
+              properties:
+                id: {type: string, format: uuid}
+                key: {type: string}
+                title: {type: string}
+            epic:
+              description: The nearest epic above the item (a task's is its ticket's epic); null under no epic.
+              type: [object, 'null']
+              properties:
+                id: {type: string, format: uuid}
+                key: {type: string}
+                title: {type: string}
+            eta:
+              description: Ready and live estimates when an active agent has reported one. Absent when unknown.
+              $ref: '#/components/schemas/TicketEta'
+            lead_worker:
+              description: The live worker the Assignee cell leads with, when one is bound. name is the authoritative permission-projected label (session label, principal name, or harness label). key is a stable matching token. It carries a session id only when the caller may already open the session; otherwise it uses only the public harness and session start, which may coincide for indistinguishable sessions. Heartbeats, state and names never change the key. Absent when no live worker is bound. The assignee sort and this projection use the same query snapshot.
+              type: object
+              required: [name, key]
+              properties:
+                name: {type: string}
+                key: {type: string}
+            planning:
+              $ref: '#/components/schemas/TicketPlanning'
+    NodePage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeListItem'
+        next_cursor:
+          type: [string, 'null']
+        facets:
+          type: object
+          description: Requested counts over the filtered result before pagination
+          additionalProperties:
+            type: object
+            additionalProperties: {type: integer}
+    NodePatch:
+      type: object
+      minProperties: 1
+      properties:
+        human_check: {type: [string, 'null'], maxLength: 500, description: 'Set a pending human check. Null marks it checked; only a person can clear a pending check. Server authors completion provenance; only a person can set a new pending check when it clears stored completion provenance. Writers, including agents, may set or edit a pending check without stored completion provenance. Existing revision preconditions apply.'}
+        estimate_hours:
+          type: [number, 'null']
+          exclusiveMinimum: 0
+          maximum: 200
+          description: Atomically sets only fields.estimate_hours, preserving other fields and stamping caller provenance. Null clears the estimate and its provenance. Cannot be combined with fields. Existing node write permissions and revision preconditions apply.
+        title:
+          type: string
+          minLength: 1
+        body:
+          type: string
+        fields:
+          type: object
+          description: Tenant-configured fields. TicketBenefitFields and TicketEstimateFields describe default work properties; TicketRouteFields describes route_role, area and complexity classification. Other kinds retain their own schema. PATCH replaces fields. Unchanged estimate metadata is preserved; changing or resubmitting hours without provenance attributes the estimate to the caller.
+        state:
+          type: string
+        kind_id:
+          type: string
+          format: uuid
+          description: The current kind is a no-op and is not written. A different kind returns 409 kind_change_not_allowed and changes nothing else.
+        type:
+          type: string
+          description: Kind slug. The current slug is a no-op. A different slug returns 409 kind_change_not_allowed and changes nothing else.
+        kind:
+          type: string
+          description: Kind slug. Same rules as type.
+    NonNegativeDecimalString:
+      type: [string, 'null']
+      pattern: '^(0|[1-9][0-9]{0,17})(\.[0-9]{1,12})?$'
+      description: Exact nonnegative decimal string with at most 12 fractional places, or null when unknown. Never a JSON number. USD list prices use this.
+    NonNegativeIntString:
+      type: [string, 'null']
+      pattern: '^(0|[1-9][0-9]{0,18})$'
+      description: Nonnegative integer as a decimal string, or null when unknown. Never a JSON number.
+    ParentBenefitGeneration:
+      type: object
+      required: [is_parent, status, generation, revision, generated]
+      properties:
+        is_parent: {type: boolean}
+        status: {type: string, enum: [none, queued, running, failed, generated, edited, cancelled]}
+        generation: {type: string, description: Opaque attempt identity; empty when no attempt exists.}
+        revision: {type: string, format: date-time}
+        generated: {type: boolean, description: Current text was generated; becomes false after a human edits a benefit field.}
+        error: {type: string, description: Safe actionable failure message; never raw provider output.}
+    ReviewFinding:
+      type: object
+      required: [severity, file, line, message]
+      properties:
+        severity: {type: string, enum: [critical, high, medium, low]}
+        file: {type: string}
+        line: {type: integer, minimum: 1}
+        message: {type: string}
+    ReviewResult:
+      type: object
+      required: [verdict, findings, reason]
+      properties:
+        verdict: {type: string, enum: ['', ok, changes]}
+        findings: {type: array, items: {$ref: '#/components/schemas/ReviewFinding'}}
+        reason: {type: string, description: A missing or malformed final verdict keeps the gate closed.}
+    TicketAgentSession:
+      type: object
+      required: [id, ticket_node_id, ticket_key, ticket_title, harness, label, model, model_state, effort, effort_state, phase, started_at, ended_at, duration_seconds, duration_state, usage_reported, models, models_truncated, input_tokens, output_tokens, cached_input_tokens, tokens_state, cached_state, estimated_cost_usd, cost_state, unknown_token_models, unknown_cost_models]
+      properties:
+        id: {type: string, format: uuid}
+        ticket_node_id: {type: string, format: uuid}
+        ticket_key: {type: string}
+        ticket_title: {type: string}
+        harness: {type: string}
+        label: {type: [string, 'null']}
+        model: {type: [string, 'null'], description: Model recorded on the harness session. Priced models are in models.}
+        model_state: {type: string, enum: [known, missing]}
+        effort: {type: [string, 'null']}
+        effort_state: {type: string, enum: [known, missing]}
+        phase: {type: string}
+        started_at: {type: string, format: date-time}
+        ended_at: {type: [string, 'null'], format: date-time}
+        duration_seconds: {type: [integer, 'null'], minimum: 0}
+        duration_state: {type: string, enum: [known, ongoing, unknown]}
+        usage_reported: {type: boolean}
+        models: {type: array, items: {$ref: '#/components/schemas/TicketAgentUsageModel'}}
+        models_truncated: {type: boolean}
+        input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        output_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        cached_input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        tokens_state: {type: string, enum: [known, partial, unknown]}
+        cached_state: {type: string, enum: [known, partial, unknown]}
+        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString'}
+        cost_state: {type: string, enum: [estimated, provisional, partial, unknown]}
+        unknown_token_models: {type: integer, minimum: 0}
+        unknown_cost_models: {type: integer, minimum: 0}
+    TicketAgentUsageModel:
+      type: object
+      description: One current usage row for a session and model. estimated_cost_usd is a list price, not a billed charge, and is present only when billing_mode is api. billing_mode is reported metadata, not verified coverage.
+      required: [model, input_tokens, output_tokens, cached_input_tokens, tokens_state, cached_state, estimated_cost_usd, cost_state, provisional, price_version, billing_mode, subscription_label]
+      properties:
+        model: {type: string}
+        input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        output_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        cached_input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        tokens_state: {type: string, enum: [known, unknown]}
+        cached_state: {type: string, enum: [known, unknown]}
+        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString', description: Null unless billing_mode is api. A stored estimate on a subscription or unknown row is historical and is never returned or summed.}
+        cost_state: {type: string, enum: [estimated, unknown]}
+        provisional: {type: boolean}
+        price_version: {$ref: '#/components/schemas/NonNegativeIntString', description: Null unless billing_mode is api.}
+        billing_mode: {type: string, enum: [unknown, api, subscription]}
+        subscription_label: {type: [string, 'null']}
+    TicketAgentWork:
+      type: object
+      required: [node_id, kind, currency, usage_available, includes_descendants, scope_truncated, list_truncated, sessions, totals]
+      properties:
+        node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [work, ticket, epic, task]}
+        currency: {type: string, enum: [USD]}
+        usage_available: {type: boolean, description: 'True when harness_session_usage was read. A missing relation is an error, not an empty cost. Null figures are unreported, not zero.'}
+        includes_descendants: {type: boolean}
+        scope_truncated: {type: boolean}
+        list_truncated: {type: boolean}
+        sessions: {type: array, items: {$ref: '#/components/schemas/TicketAgentSession'}}
+        totals: {$ref: '#/components/schemas/TicketAgentWorkTotals'}
+    TicketAgentWorkTotals:
+      type: object
+      required: [session_count, input_tokens, output_tokens, cached_input_tokens, tokens_state, cached_state, estimated_cost_usd, cost_state, currency, duration_seconds, duration_state, unknown_token_sessions, unknown_cost_sessions, unknown_token_models, unknown_cost_models]
+      properties:
+        session_count: {type: integer, minimum: 0}
+        input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        output_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        cached_input_tokens: {$ref: '#/components/schemas/NonNegativeIntString'}
+        tokens_state: {type: string, enum: [known, partial, unknown]}
+        cached_state: {type: string, enum: [known, partial, unknown]}
+        estimated_cost_usd: {$ref: '#/components/schemas/NonNegativeDecimalString'}
+        cost_state: {type: string, enum: [estimated, provisional, partial, unknown]}
+        currency: {type: string, enum: [USD]}
+        duration_seconds: {type: [integer, 'null'], minimum: 0}
+        duration_state: {type: string, enum: [known, ongoing, partial, unknown]}
+        unknown_token_sessions: {type: integer, minimum: 0}
+        unknown_cost_sessions: {type: integer, minimum: 0}
+        unknown_token_models: {type: integer, minimum: 0}
+        unknown_cost_models: {type: integer, minimum: 0}
+    TicketEstimateSnapshot:
+      type: object
+      description: 'AEON-511 stable baseline captured transactionally at the first session binding or entry into the in-progress work bucket in a work episode. Kind state categories take precedence over fixed spellings, as in project work counts. Later estimates, QA, blocked and open transitions do not overwrite or close it. Only done, cancelled or archived work buckets close the episode; a subsequent start preserves a new row. Latest snapshot accompanies live planning. All cost fields, including rate_basis.list_per_hour, require harness.read on the current ticket project and the saved source project.'
+      required: [id, started_at, source, estimate_hours, estimated_tokens, route, rate_basis]
+      properties:
+        id: {type: string, format: uuid}
+        started_at: {type: string, format: date-time}
+        source: {type: string, enum: [session, status]}
+        estimate_hours: {type: [number, 'null']}
+        work_classification:
+          type: object
+          description: Area, role and complexity frozen with the estimate; absent on legacy snapshots.
+          properties:
+            area: {type: string}
+            route_role: {type: string}
+            complexity: {type: string}
+        model_estimate: {$ref: '#/components/schemas/ModelEstimateHistory'}
+        estimated_tokens: {type: [integer, 'null']}
+        estimated_cost_usd: {type: [string, 'null'], description: Computed API list value at start; never an invoice. Omitted without harness.read.}
+        route: {$ref: '#/components/schemas/TicketPlanning/properties/route'}
+        rate_basis:
+          type: object
+          required: [basis, tickets, tokens_per_hour]
+          properties:
+            basis: {type: string, enum: [default, median]}
+            tickets: {type: integer, minimum: 0}
+            tokens_per_hour: {type: integer, minimum: 0}
+            any_route: {type: boolean}
+            basis_text: {type: string}
+            level: {type: string, enum: [cell, line, profile, route, default]}
+            speed: {type: number, exclusiveMinimum: 0, description: Exact-cell speed factor frozen at start; defaults to 1 in older snapshots. Estimated tokens are rounded estimate_hours × tokens_per_hour_exact × speed.}
+            tokens_per_hour_exact: {type: string, description: Unrounded token rate before applying the frozen speed factor.}
+            list_per_hour: {type: [string, 'null'], description: Speed-scaled USD per size hour frozen at start; estimated cost is estimate_hours × list_per_hour. Omitted without harness.read.}
+            price_version: {type: [integer, 'null']}
+            input_usd_per_million: {type: [string, 'null']}
+            output_usd_per_million: {type: [string, 'null']}
+            cached_input_usd_per_million: {type: [string, 'null']}
+            cached_mix: {type: number}
+            input_mix: {type: number}
+            output_mix: {type: number}
+    TicketEta:
+      type: object
+      description: Ready and live estimates for a work node. Parents use the latest ETA of open leaves and estimate-weighted leaf progress. Missing estimates are explicit coverage; without estimates progress counts leaves. Deleted and archived work is excluded; cancelled leaves are excluded from progress and ETA. Traversal has no depth cutoff. Historical worker completion remains separate from workflow status.
+      required: [finished]
+      properties:
+        has_working_session: {type: boolean, description: True when a visible working session is bound to this ticket in its current project. Omitted when false; enables a quiet no ETA hint even before the first estimate.}
+        finished: {type: boolean, description: 'True when no session is open on the ticket and the last worker to leave reported 100% and recorded a clean exit. The only evidence that reads as Done; progress_pct is then 100 and the estimate is not kept. Always present, false included (AEON-437).'}
+        finished_at: {type: string, format: date-time, description: 'When that worker stopped. Present with finished.'}
+        finished_by: {type: string, description: 'Name of that worker, when known. Present with finished.'}
+        eta_ready_at: {type: string, format: date-time}
+        eta_live_at: {type: string, format: date-time}
+        leaf_count: {type: integer, minimum: 0, description: Non-archived non-cancelled leaves contributing to progress.}
+        estimated_leaves: {type: integer, minimum: 0}
+        progress_basis: {type: string, enum: [estimate, leaves]}
+        open_leaves: {type: integer, minimum: 0, description: Leaves whose workflow status is not complete. A parent retains its ETA and staleness while this is positive even when estimate-weighted or rounded progress_pct is 100.}
+        ready_leaves: {type: integer, minimum: 0}
+        live_leaves: {type: integer, minimum: 0}
+        ready_partial: {type: boolean, description: Some open leaves have no ready ETA.}
+        live_partial: {type: boolean, description: Some open leaves have no live ETA.}
+        progress_pct: {type: integer, minimum: 0, maximum: 100}
+        ready_reported_at: {type: string, format: date-time}
+        live_reported_at: {type: string, format: date-time}
+        ready_by: {type: string}
+        live_by: {type: string}
+        ready_stale: {type: boolean}
+        live_stale: {type: boolean}
+        eta_stale: {type: boolean, description: True when the ready or live estimate is older than two reporting intervals. Omitted when fresh or absent.}
+    TicketPlanning:
+      description: 'Planning figures for a ticket, task or epic in the list (AEON-329). Absent when there is nothing to show. Live model names come from the registry at read time. Work-start estimate snapshots freeze the planned route and rates separately. Numeric planning sorts use spent when present, otherwise estimated, with missing values last and the node ID as tiebreaker.'
+      type: object
+      required: [route, tokens]
+      properties:
+        route:
+          description: The placement resolution of project, canonical assignee (or viewer), kind of work, complexity and route_role. Null for epics and when unresolved.
+          type: [object, 'null']
+          required: [label, profile, harness, model, effort, revision]
+          properties:
+            label: {type: string, description: 'Display name such as "Codex astra · xhigh".'}
+            profile: {type: string, description: Profile slug.}
+            harness: {type: string}
+            provider: {type: string, description: Registry model provider used by the brand mark.}
+            model: {type: string}
+            effort: {type: string}
+            display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
+            short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
+            model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
+            effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5}
+            revision: {type: string, description: Short digest of the registry routes the resolution used; it changes with any route change.}
+            set_by: {type: string, enum: [default, person, project], description: Level supplying the model preference.}
+            follows_latest: {type: boolean, description: The effective selector follows a model line.}
+            pinned: {type: boolean, description: The effective selector pins a profile.}
+        route_gap:
+          description: 'Why a role has no model: area (no area set), review_gate (chosen against the author''s family at dispatch), registry (no available route).'
+          type: string
+          enum: [area, review_gate, registry]
+        models:
+          description: 'Actually used models from visible sessions on this node and its open/done work descendants. Ordered by measured tokens descending, then harness/model. Session profile identity wins; normalized model and raw metadata are fallbacks. Contains no billing or prices.'
+          type: array
+          items:
+            type: object
+            required: [label, harness, model, sessions]
+            properties:
+              label: {type: string, description: Short model label without effort.}
+              harness: {type: string}
+              provider: {type: string, description: Registry model provider used by the brand mark.}
+              model: {type: string}
+              display_name: {type: string, maxLength: 128, description: Full model name without its model version; independent of the profile revision.}
+              short_name: {type: string, maxLength: 128, description: Model name with the vendor or harness word omitted.}
+              model_version: {type: string, maxLength: 64, description: Model version from registry metadata; empty when unknown.}
+              sessions:
+                type: array
+                items:
+                  type: object
+                  required: [id, effort, role, running, tokens]
+                  properties:
+                    id: {type: string, format: uuid}
+                    profile_id: {type: string, format: uuid}
+                    model_raw: {type: string, description: 'Original harness metadata, retained for audit.'}
+                    effort: {type: string}
+                    effort_level: {type: [integer, 'null'], minimum: 0, maximum: 5, description: 'Resolved from model_profile_id and matching reported effort; null when unregistered or unknown.'}
+                    role: {type: string}
+                    running: {type: boolean}
+                    tokens: {type: [integer, 'null'], minimum: 0, description: Session input plus output; null without complete counters.}
+        tokens:
+          type: object
+          required: [spent, input, output, cached, sessions, unreported, estimated]
+          properties:
+            spent: {type: [integer, 'null'], description: 'Input plus output tokens over all historical sessions in the node subtree, including sessions from former leaves and closed or archived work; each session is counted once (cached input is part of input). Null when nothing was reported.'}
+            input: {type: integer, minimum: 0}
+            output: {type: integer, minimum: 0}
+            cached: {type: integer, minimum: 0}
+            sessions: {type: integer, minimum: 0}
+            running: {type: integer, minimum: 0, description: 'Visible sessions that have not stopped, including those with no model or usage yet.'}
+            unreported: {type: integer, minimum: 0, description: Sessions without a complete usage report; spent is then a lower bound.}
+            estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour × the measured exact-cell speed factor when available. Ticket and task rows also return default-rate figures with calibration.basis=default; clients must label or hide these uncalibrated figures. A parent sums only calibrated eligible work leaves at any depth; excluded default estimates are counted in children.uncalibrated. Its own typed planned estimate is separate from the sum. Null without a contributing estimate.'}
+            calibration:
+              description: The rate behind a ticket's estimate.
+              type: object
+              required: [basis, tickets, tokens_per_hour]
+              properties:
+                basis: {type: string, enum: [median, default], description: 'median of the last 30 eligible finished tickets (all sessions stopped and fully reported, at least one minute of session time) whose main session ran on the route (any route when none resolved), once 5 exist; otherwise the documented default of 5,000,000 tokens per hour.'}
+                basis_text: {type: string, description: Backoff level and sample count; uncalibrated for the documented default. A history truncation or availability issue may accompany an independently calibrated legacy route.}
+                level: {type: string, enum: [cell, line, profile, route, default]}
+                tickets: {type: integer, minimum: 0}
+                tokens_per_hour: {type: integer, minimum: 0}
+                any_route: {type: boolean}
+        cost:
+          description: USD decimal strings, plus the integer micro-dollars of each cost sort key. Present only when the caller holds harness.read on the row's project. Billing and calibration costs also require harness.read on each source project.
+          type: object
+          required: [list_spent, list_estimated, list_unpriced, paid_spent, paid_estimated, paid_unknown, plans]
+          properties:
+            list_spent: {type: [string, 'null'], description: 'Spent tokens at API list prices, whatever the billing.'}
+            list_estimated: {type: [string, 'null'], description: 'Ticket and task rows also return uncalibrated default-rate figures when tokens.calibration.basis=default; clients must label or hide them. Parents include only calibrated eligible work leaves. The estimate at list prices: the route''s median list price per hour, or its tokens priced with a 90% cached, 8% input, 2% output mix.'}
+            list_unpriced: {type: boolean, description: 'Some reported usage or the route''s model has no list price. A session without a usage row does not set this flag.'}
+            paid_spent: {type: [string, 'null'], description: Pay-per-use charges; subscription usage counts 0.}
+            paid_estimated: {type: [string, 'null'], description: 'Follows how the route''s harness was billed most recently in a source project the caller may read: 0 for a subscription pool, the list estimate for pay-per-use.'}
+            paid_unknown: {type: boolean, description: 'Some reported usage or the route''s harness has no billing on record. A session without a usage row does not set this flag.'}
+            plans: {type: array, items: {type: string}, description: Subscription plans that covered the spend or cover the estimate.}
+            billing_modes: {type: array, items: {type: string, enum: [api, subscription, unknown]}, description: Billing modes of actual visible usage only; requires harness.read on source and row projects.}
+            list_cost_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the list_cost sort key (spent when present, otherwise the estimate), as a decimal string. Clients compare it as an integer. Display stays on list_spent and list_estimated.'}
+            paid_micros: {type: [string, 'null'], pattern: '^[0-9]+$', description: 'Integer micro-dollars of the paid sort key, same rule as list_cost_micros. Display stays on paid_spent and paid_estimated.'}
+        model_estimate: {$ref: '#/components/schemas/ModelEstimateHistory'}
+        estimate_snapshot: {$ref: '#/components/schemas/TicketEstimateSnapshot'}
+        children:
+          description: 'Parents only: eligible work leaves at any depth, how many contribute calibrated estimates, and how many uncalibrated estimates are excluded. A nonzero uncalibrated count makes the sum partial.'
+          type: object
+          required: [total, estimated]
+          properties:
+            total: {type: integer, minimum: 0}
+            estimated: {type: integer, minimum: 0, description: Children contributing calibrated estimates to the sum.}
+            uncalibrated: {type: integer, minimum: 0, description: Children with size estimates excluded from the sum because their rates are uncalibrated.}
+    TicketReview:
+      allOf:
+        - {$ref: '#/components/schemas/ReviewBinding'}
+        - type: object
+          required: [work_order_id, request_id, status, gate_open, gate_reason, ladder, result, created_at, github_status]
+          properties:
+            work_order_id: {type: string, format: uuid}
+            request_id: {type: string, format: uuid}
+            run_id: {type: [string, 'null'], format: uuid}
+            status: {type: string, enum: [blocked, queued, starting, running, waiting, completed, failed, cancelled, ownership_lost]}
+            reviewer_model: {type: [string, 'null']}
+            reviewer_effort: {type: [string, 'null']}
+            reviewer_profile_version: {type: [string, 'null']}
+            effective_model: {type: [string, 'null']}
+            gate_open: {type: boolean}
+            gate_reason: {type: string}
+            result: {$ref: '#/components/schemas/ReviewResult'}
+            trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
+            ladder: {type: array, items: {type: object, required: [profile_id, selected, skip_reasons], properties: {profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
+            cost_micros: {type: [integer, 'null'], format: int64, description: Reported USD cost; null when cost was not measured.}
+            duration_seconds: {type: [integer, 'null'], format: int64}
+            created_at: {type: string, format: date-time}
+            github_status: {type: string, enum: [unconfigured, pending, success, failure, error, stale]}
+    TicketReviewCreate:
+      type: object
+      additionalProperties: false
+      required: [request_id, repository, base_sha, head_sha]
+      properties:
+        request_id: {type: string, format: uuid}
+        repository: {type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$', maxLength: 200}
+        base_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+        head_sha: {type: string, pattern: '^(?:[0-9a-f]{40}|[0-9a-f]{64})$'}
+        author_run_id: {type: string, format: uuid}
+        author_family: {type: string, enum: [openai, anthropic, xai, cursor, google, local], description: Person-only declaration for a change outside managed runs.}
+        pull_request: {type: integer, minimum: 1}
+    TimeTotals:
+      type: object
+      required: [node_id, duration_seconds, amounts]
+      properties:
+        node_id: {type: string, format: uuid}
+        duration_seconds: {type: integer, minimum: 0}
+        amounts: {type: array, items: {type: object, required: [currency, amount], properties: {currency: {type: string, pattern: '^[A-Z]{3}$'}, amount: {type: number, minimum: 0}}}}
+    TreeEntry:
+      type: object
+      required: [node, depth]
+      properties:
+        node:
+          $ref: '#/components/schemas/Node'
+        depth:
+          type: integer
+          minimum: 0
+    TreePage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/TreeEntry'
+        next_cursor:
+          type: [string, 'null']
+    WorkEscalation:
+      description: "Tier A state. work.escalation_changed events carry the same public projection; a successfully created retry also freezes its charged episode in the run trace. No raw findings or account identities are exposed."
+      type: object
+      required: [episode_id, revision, status, reason, fix_rounds, attempts, held_cost_micros, max_attempts, max_cost_micros]
+      properties:
+        episode_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        status: {type: string, enum: [observing, stuck, awaiting_decision, resolved]}
+        reason: {type: string}
+        fix_rounds: {type: integer, minimum: 0}
+        attempts: {type: integer, minimum: 0, maximum: 2}
+        held_cost_micros: {type: integer, minimum: 0}
+        max_attempts: {type: integer, const: 2}
+        max_cost_micros: {type: integer, const: 20000000}
+        route_role: {type: string}
+        route_area: {type: string}
+        prefs_revision: {type: integer, minimum: 0}
+        route_block_reason: {type: string}
+        wait_reason: {type: string, enum: [admission_wait]}
+        planned_profile_id: {type: string, format: uuid}
+        question_id: {type: string, format: uuid}
+        question_pending: {type: boolean, description: "Question creation waits for questions.ask/read authority; retries remain closed."}
+        last_outcome_id: {type: string, format: uuid}
+        used_profile_ids: {type: array, maxItems: 2, items: {type: string, format: uuid}}
+    WorkLifecycleAction:
+      type: object
+      required: [id, node_id, kind, state, target_count, waiting_count, result]
+      properties:
+        id: {type: string, format: uuid}
+        node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [split, cancel]}
+        state: {type: string, enum: [waiting, completed, abandoned]}
+        target_count: {type: integer, minimum: 0, maximum: 100}
+        waiting_count: {type: integer, minimum: 0, maximum: 100}
+        result: {type: array, maxItems: 100, items: {type: string, format: uuid}}
+    WorkLifecyclePreview:
+      type: object
+      required: [is_leaf, busy, open_leaves, updated_at, scope_revision, pending]
+      properties:
+        is_leaf: {type: boolean}
+        busy: {type: boolean}
+        open_leaves: {type: integer, minimum: 0, maximum: 100}
+        updated_at: {type: string, format: date-time}
+        scope_revision: {type: string, pattern: "^[a-f0-9]{64}$"}
+        pending: {oneOf: [{$ref: '#/components/schemas/WorkLifecycleAction'}, {type: 'null'}]}
+  parameters:
+    Direction:
+      name: direction
+      in: query
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: asc
+    NodeId:
+      name: nodeId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Sort:
+      name: sort
+      in: query
+      schema:
+        type: string
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, parent eligible-leaf sum, empty last in both directions), model (full model name and model version of the leading used model, otherwise the frozen plan or live registry route; unknown last in both directions; independent of Display preferences), tokens, list_cost and paid (spent over all historical sessions in the node subtree, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
+        default: position
+  requestBodies:
+    MoveNode:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MoveNode'
+    NodeCreate:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/NodeCreate'
+    NodePatch:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/NodePatch'
+  responses:
+    Nodes:
+      description: Node page
+      headers:
+        Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/NodePage'
+    Tree:
+      description: Tree page
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TreePage'

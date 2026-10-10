@@ -4,7 +4,6 @@ package cli
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -31,7 +30,7 @@ func (rt *runtime) rawResponse(method, path string, body []byte, contentType str
 	if err != nil || u.IsAbs() || u.Host != "" || strings.HasPrefix(path, "//") {
 		return nil, "", usagef("invalid API path")
 	}
-	req, err := http.NewRequestWithContext(context.Background(), method, inst.URL+path, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(rt.context(), method, inst.URL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, "", rt.fail(err, inst.APIKey)
 	}

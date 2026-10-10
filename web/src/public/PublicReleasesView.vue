@@ -6,7 +6,9 @@ import ReleaseName from '../components/ReleaseName.vue'
 import { setPageTitle } from '../lib/brand'
 import { resilientFetch } from '../lib/api'
 
-const props = defineProps<{ tenantSlug: string }>()
+const props = defineProps<{ tenantSlug: string; productSlug?: string }>()
+const pageBase = computed(() => `/portal/${encodeURIComponent(props.tenantSlug)}${props.productSlug ? `/products/${encodeURIComponent(props.productSlug)}` : ''}`)
+const apiBase = computed(() => `/api/public/portal/${encodeURIComponent(props.tenantSlug)}${props.productSlug ? `/products/${encodeURIComponent(props.productSlug)}` : ''}`)
 
 interface PublicNote {
   pill_en: string
@@ -80,16 +82,20 @@ function noteHasGerman(note: PublicNote) {
 const visibleReleases = computed(() => (doc.value?.releases ?? []).filter(release => release.notes.some(noteHasText)))
 const hasGerman = computed(() => visibleReleases.value.some(release => release.notes.some(noteHasGerman)))
 
+let loadRevision = 0
 async function load() {
+  const revision = ++loadRevision
+  const address = apiBase.value
   loading.value = true
   error.value = ''
   missing.value = false
   try {
-    const response = await resilientFetch(`/api/public/portal/${encodeURIComponent(props.tenantSlug)}/releases`, {
+    const response = await resilientFetch(`${address}/releases`, {
       credentials: 'omit',
       cache: 'no-store',
       referrerPolicy: 'no-referrer',
     })
+    if (revision !== loadRevision || address !== apiBase.value) return
     if (response.status === 404) {
       missing.value = true
       doc.value = null
@@ -97,18 +103,21 @@ async function load() {
       return
     }
     if (!response.ok) throw new Error('unavailable')
-    doc.value = await response.json() as ReleasesDocument
+    const document = await response.json() as ReleasesDocument
+    if (revision !== loadRevision || address !== apiBase.value) return
+    doc.value = document
     setPageTitle(doc.value.product ? 'Releases' : 'Nothing published yet')
   } catch {
+    if (revision !== loadRevision || address !== apiBase.value) return
     error.value = 'Releases could not be loaded.'
     doc.value = null
     setPageTitle('Releases')
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
-watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
+watch(() => [props.tenantSlug, props.productSlug], () => { void load() }, { immediate: true })
 </script>
 
 <template>
@@ -133,7 +142,7 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
       </template>
       <template v-else>
         <nav class="jumps" aria-label="Portal">
-          <router-link class="jump" :to="`/portal/${tenantSlug}`"><AppIcon name="arrow-left" :size="16" />Catalog</router-link>
+          <router-link class="jump" :to="pageBase"><AppIcon name="arrow-left" :size="16" />Catalog</router-link>
         </nav>
         <p class="eyebrow">Product portal</p>
         <h1>Releases</h1>
@@ -166,7 +175,7 @@ watch(() => props.tenantSlug, () => { void load() }, { immediate: true })
           </li>
         </ol>
         <footer class="colophon">
-          <a class="colophon-link" :href="`/portal/${tenantSlug}/llms.txt`">llms.txt</a>
+          <a class="colophon-link" :href="`${pageBase}/llms.txt`">llms.txt</a>
         </footer>
       </template>
     </div>
@@ -233,7 +242,7 @@ h1 {
   padding: 18px;
   border-radius: 16px;
   background: var(--surface-raised);
-  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(20, 40, 40, 0.04);
+  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-color) 4%, transparent);
 }
 .release h2 {
   margin: 0;

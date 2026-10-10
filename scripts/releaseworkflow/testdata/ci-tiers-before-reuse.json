@@ -1,0 +1,23 @@
+{
+  "SPDX-License-Identifier": "AGPL-3.0-only",
+  "sha256": {
+    "go-static": "fe8a1795e02e4ec94d0172669d4fd312d52edbca27fe0688f9830e1df12cca62",
+    "go-test": "c050bdb77ccf952e5644e029bc0e05890c4639bb193cd35be53ef353be101a1c",
+    "go-timing": "289820424aa1e423099fc1ace82e19c8eedd6f63994b3a7679a1e8fd5c4eafdd",
+    "web-setup": "4e36f06e32c92a4bd9d65b458dda239d540c3f7ebf393a06b57cd4d9fec7724a",
+    "web-shard": "5cdf77d4a3d35abc66035435840ce0993a431940def90e1df91f9f9e0eac0187"
+  },
+  "source_main_sha": "d6e22c76e64df0bcee6ed0ec2ff96de84c5e2b17",
+  "mergeMain": {
+    "source_main_sha": "7ba4b51c621a7d53c9c4595cadda9a39180d9c7c",
+    "sha256": {
+      "go-static": "69bd9d13eee7e8a320d50611b66af14188f3f143a4426d061986973ce95bcf35",
+      "go-test": "544d22ecded5f8f028af5405cff877741b36c41ee41ffa1e10f1d7012b0f2b48",
+      "go-timing": "32e69b730ca23fae77192394eb2ff5ddfe6be31a2c60ac6dadc56b3dc1518e5a",
+      "e2e-run": "b49725615746d4bcf0554e6f1ad32bc1f5d7f2fec7298e73d3fbfd0ca9fc217a",
+      "release-check-run": "2295782ebcaff79f1e829721e5dea8c136cc9f6f036af0add52d343203d5342c",
+      "web-setup": "5ce8cb18f97a7e6358dd1b11adce78e318fc9fafe52811c022820ddcb420e6b9",
+      "web-shard": "6e38fa7c09424c715e80f30842df3784b377cf362e0cf10c366cf126d1722f7e"
+    }
+  }
+}

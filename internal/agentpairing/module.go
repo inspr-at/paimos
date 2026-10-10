@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentcompat"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
@@ -27,6 +28,7 @@ import (
 )
 
 type Module struct {
+	messages              *attachedmsg.Service
 	ignoredHarnessReport  sync.Once
 	pool                  *pgxpool.Pool
 	origin, defaultTenant string
@@ -34,6 +36,7 @@ type Module struct {
 	clients               map[string]rate
 	watch                 watchRelay
 	watchKeys             watchPollKeys
+	watchRecovery         watchRecoveryLimits
 	managed               *ManagedSetup
 	accountLinkPepper     []byte
 }
@@ -52,7 +55,14 @@ func New(pool *pgxpool.Pool, publicURL, defaultTenant string, nixGuide ...*confi
 
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountWatch(mux)
+	mux.HandleFunc("PUT /api/agent-pairing/computers/{computerId}/name", m.person("account.manage", m.renameComputer))
+	mux.HandleFunc("POST /api/agent-pairing/accounts/sign-out", m.person("account.manage", m.signOutEverywhere))
+	mux.HandleFunc("PUT /api/agent-pairing/computers/{computerId}/capacity", m.person("account.manage", m.saveHostCapacity))
+	mux.HandleFunc("POST /api/agent-pairing/self/capacity", m.reportHostCapacity)
+	mux.HandleFunc("POST /api/agent-pairing/self/ledger", m.enrollLedger)
 	m.mountAccountLink(mux)
+	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/verify", m.person("account.manage", m.verifyAgain))
+	m.mountAttachedMessages(mux)
 	mux.HandleFunc("GET /api/agent-pairing/guide", m.guide)
 	mux.HandleFunc("POST /api/agent-pairing/device", m.device)
 	mux.HandleFunc("POST /api/agent-pairing/redeem", m.redeem)
@@ -85,6 +95,7 @@ func (m *Module) guide(w http.ResponseWriter, r *http.Request) {
 	}
 	guide["homebrew_command"] = homebrewCommand(m.origin)
 	guide["agent_compatibility"] = agentcompat.Supported()
+	guide["server_capabilities"] = []string{LedgerCapability}
 	reply(w, guide)
 }
 
@@ -143,7 +154,7 @@ func (m *Module) person(permission string, fn func(http.ResponseWriter, *http.Re
 }
 func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error) error {
 	return db.InTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		if err := Lock(ctx, tx); err != nil {
+		if err := LockMutation(ctx, tx); err != nil {
 			return err
 		}
 		return fn(tx)

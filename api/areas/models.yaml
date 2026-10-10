@@ -1,0 +1,367 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/modelregistry
+paths:
+  /models/lines/{harness}/{model}:
+    parameters:
+      - {name: harness, in: path, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
+      - {name: model, in: path, required: true, description: 'URL-encoded immutable model identifier.', schema: {type: string, maxLength: 128}}
+    put:
+      operationId: editModelLineVersion
+      description: 'Person with models.manage creates replacement immutable profiles, retires the old active profiles and transfers orders, rules and role routes atomically. The optional revision from the usage preview rejects stale edits. Discovery source is preserved. Existing runs retain their original pins.'
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelLineWrite'}}}}
+      responses:
+        '200': {description: 'Replacement profiles and registry revision.', content: {application/json: {schema: {type: object, required: [profiles, revision], properties: {profiles: {type: array, items: {$ref: '#/components/schemas/ModelProfile'}}, revision: {type: string}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /models/lines/{harness}/{model}/usage:
+    parameters:
+      - {name: harness, in: path, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
+      - {name: model, in: path, required: true, schema: {type: string, maxLength: 128}}
+    get:
+      operationId: previewModelLineRemoval
+      description: 'Requires models.read. One read-only snapshot lists visible usages and qualified replacements using the dispatch fallback. Other people and project rules are visible only with workspace model_prefs.manage; hidden usages are reported as incomplete. No preference or retirement writes.'
+      security: *auth
+      responses:
+        '200': {description: 'Removal preview.', content: {application/json: {schema: {$ref: '#/components/schemas/ModelLineUsage'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /models:
+    get:
+      operationId: listModelProfiles
+      description: Catalog preparation commits separately under current read authority before the model snapshot is loaded. Denied preparation creates no profiles, routes or seed events.
+      security: *auth
+      responses:
+        '200': {description: Tenant model registry, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelProfile'}}}}}
+    post:
+      operationId: createModelProfile
+      description: Admin creates an immutable model profile version. Routing policy is a separate ordered ladder.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelProfileWrite'}}}}
+      responses:
+        '201': {description: Profile, content: {application/json: {schema: {$ref: '#/components/schemas/ModelProfile'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /models/proposals/accept:
+    post:
+      operationId: acceptModelProposal
+      description: Person with models.manage accepts and enables a previously observed model using its declared conservative mapping. Unmapped families require explicit person-managed profile creation. No ladder changes.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [harness, model, effort]
+              properties:
+                harness: {type: string, enum: [codex, claude, pi, cursor, grok]}
+                model: {type: string, maxLength: 128}
+                effort: {type: string, maxLength: 32}
+      responses:
+        '200': {description: Accepted profile, content: {application/json: {schema: {$ref: '#/components/schemas/ModelProfile'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /models/refresh:
+    get:
+      operationId: getModelRefreshStatus
+      security: *auth
+      responses:
+        '200': {description: 'Settings, last refresh result, pending models and observations; no credentials', content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshStatus'}}}}
+    post:
+      operationId: refreshModelCatalog
+      description: 'Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials. Person-triggered checks bypass interval_minutes and share a five-minute per-tenant manual cooldown; 429 includes retry_after seconds and Retry-After. Agents and the scheduler retain interval_minutes. Vendor requests run after the reservation transaction commits, with a shared 30-second deadline, at most 5 pages and 500 identifiers per vendor, and 200 observations/profile additions per run. Accepts no profile, route, URL or credential writes. Optional API calls stay disabled until a person enables them. Every completed run writes one audit event; outages keep the last good catalog and mark that source stale.'
+      security: *auth
+      responses:
+        '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true, properties: {new_lines: {type: array, maxItems: 200, items: {type: string}}, added: {type: integer, minimum: 0, description: 'Profiles inserted by this run, including disabled discoveries and one profile per effort.'}, accepted_models: {type: array, maxItems: 200, items: {type: string}, description: 'Distinct board line ids whose newer version was accepted because the line is already in use. Absent when acceptance was not established.'}}}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {description: 'Manual cooldown or agent interval; retry_after is seconds.', headers: {Retry-After: {schema: {type: integer}}}, content: {application/json: {schema: {type: object, properties: {error: {type: string}, retry_after: {type: integer, minimum: 1, maximum: 300}}}}}}
+  /models/refresh/credentials/{accountId}:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    put:
+      operationId: setModelDiscoveryCredential
+      description: Person with models.manage stores a vendor model-list key encrypted and bound to this tenant/account. Empty key revokes it. Secrets never enter responses or audit events. Only fixed vendor model-list endpoints are used; redirects are refused.
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [vendor, api_key]
+              properties:
+                vendor: {type: string, enum: [openai, anthropic, xai, openrouter]}
+                api_key: {type: string, maxLength: 4096, writeOnly: true}
+      responses:
+        '200': {description: Credential configured or revoked; no key material}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /models/refresh/settings:
+    put:
+      operationId: setModelRefreshSettings
+      description: 'Person with models.manage configures reporting, profile acceptance and optional API discovery. Auto-update accepts newer versions of lines used by saved orders or rules through the shared successor policy; unused and new lines remain proposals.'
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshSettingsWrite'}}}}
+      responses:
+        '200': {description: Settings, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshSettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+  /models/reports:
+    post:
+      operationId: reportModelObservations
+      description: Requires models.report. Every agent observation requires an available account owned by the caller on the reported harness; registering a session does not enroll an account. Health evidence also requires an active caller-owned session with the exact stored model and effort or its managed run pin; usage for another model is insufficient. Two invalid-model failures at least five minutes apart suppress routing for 24 hours independently of person overrides. Replayed report ids remain idempotent for seven days; at most 1000 receipts per principal and 200 new receipts per hour are accepted. New profiles are auto-added disabled by default and require person acceptance before dispatch; no reports reorder ladders. Unknown families are proposed for person acceptance.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/ModelObservationWrite'}}}}}
+      responses:
+        '200': {description: Report result, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /models/resolve:
+    get:
+      operationId: resolveModelRole
+      description: "Replaces classic paimos model resolve. role with optional project_id preserves the CLI role ladder and adds residency evidence only. Placement resolution is enabled by mode=placement or the placement-specific ticket, area, complexity or person_id parameters; managed reviews then enforce qualification and approved-account requirements. review-gate requires author_family and excludes that family; if no eligible candidate, owner_required is true. Candidate reasons include policy, account availability and allowance. Command templates are rendered from trusted local templates, never stored shell snippets. For a person-owned daily plan, exhausted harnesses follow the saved model order only when at_limit is ladder. Wait and unknown daily evidence return a null profile and a daily_limit or daily_limit_unknown blocked trace. Qualified successors retain the existing model allowance, account, project and residency checks. A harness filter never switches harnesses."
+      security: *auth
+      parameters:
+        - {name: role, in: query, description: 'Required unless ticket supplies its route role. review-gate-security requires placement resolution; unavailable security ladders return owner_required with their explanation.', schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
+        - {name: author_family, in: query, description: "Required for review-gate and review-gate-security. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
+        - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
+        - {name: project_id, in: query, description: Optional project for the starter's residency preference trace., schema: {type: string, format: uuid}}
+        - {name: mode, in: query, description: Explicitly enable placement resolution when only role and project_id are supplied., schema: {type: string, enum: [placement]}}
+        - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible work item or legacy ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
+        - {name: area, in: query, schema: {type: string, maxLength: 48}}
+        - {name: situation, in: query, schema: {type: string, enum: [first, fix, stuck]}}
+        - {name: fix_round, in: query, schema: {type: integer, minimum: 0, maximum: 1000}}
+        - {name: estimate_hours, in: query, schema: {type: number, minimum: 0, maximum: 100000}}
+        - {name: concept, in: query, schema: {type: boolean}, description: 'Explicit request for a concept or ADR; uses the Concepts column.'}
+        - {name: previous_family, in: query, schema: {type: string}, description: 'Previous author family for a Stuck fallback.'}
+        - {name: complexity, in: query, schema: {type: string, enum: [S, M, L]}}
+        - {name: person_id, in: query, schema: {type: string, format: uuid}, description: Must map to the canonical caller or key creator. Operator keys cannot supply it.}
+      responses:
+        '200': {description: Resolution, content: {application/json: {schema: {$ref: '#/components/schemas/ModelResolution'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /models/routes:
+    get:
+      operationId: readModelRoutes
+      description: Read-only ladder for one role, requiring models.read. Never seeds the catalog or appends events. CLI uses ladder priority and harness health; ordinary managed review uses legacy family/tier order until an explicit saved-order activation, then saved priorities. Qualification floors, platform capability, approved accounts and preferences still apply. order_mode and managed_fallback_order (profile IDs before qualification/preferences) share the stored-row SQL snapshot; truncated order is incomplete. At most 50 steps, with explicit truncation. Complete snapshots include routes, a quoted strong edit_token over canonical role content (including full-precision expiry and reason), and can_edit for person plus models.manage. Truncated snapshots have no edit token and cannot be edited; no cursor. Unseeded tenants return setup false. Each read applies a five-second statement timeout.
+      security: *auth
+      parameters:
+        - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
+      responses:
+        '200': {description: Bounded tenant ladder snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRoutesRead'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {description: Statement timeout; retry later, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retrying}}, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+    put:
+      operationId: replaceModelRoutes
+      description: Person with workspace models.manage replaces routes under a tenant and registry fence with final authorization. Unqualified PUT preserves whole-tenant last-writer-wins compatibility. With role, replace only that complete role and require its quoted strong If-Match token; review-gate tokens include ordering mode. Explicit order_mode is allowed only for conditional review-gate writes; omission and legacy whole-tenant writes preserve the mode. Rows and mode change atomically, including mode-only audit events with before_order_mode/after_order_mode metadata; before/after arrays retain their shape; missing 428 revision_required, malformed 400 invalid_revision, mismatched 409 stale_revision. Never initializes in role mode. At most 50 rows per role and 300 total; audit before/after must be complete within those bounds. Unchanged stored expired holds may be reordered; new or changed holds require strictly future expiry sampled after fences. Conditional expiry_policy=clear compensation converts all desired expired holds to available with empty reason/null expiry. Invalid temporal conditional changes return 422 suppression_expired; legacy keeps 400. No-op emits no replacement event. Thirty-second request deadline; five-second lock and statement timeouts.
+      security: [{session: []}]
+      parameters:
+        - {name: role, in: query, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
+        - {name: If-Match, in: header, description: Required in role mode; complete strong SHA-256 content token from GET. No wildcard or weak/list form., schema: {type: string, maxLength: 66}}
+        - {name: order_mode, in: query, description: Only with role=review-gate. saved explicitly activates saved managed fallback priorities; legacy compensates activation. Omission preserves current mode., schema: {type: string, enum: [legacy, saved]}}
+        - {name: expiry_policy, in: query, description: Allowed only with role. clear is for compensation; preserves future holds without extending them., schema: {type: string, enum: [preserve, clear], default: preserve}}
+      requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 300, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
+      responses:
+        '200': {description: Actual normalized stored routes for the addressed role or whole tenant, headers: {ETag: {description: New quoted strong role content token including ordinary review mode in conditional mode, schema: {type: string}}, Model-Order-Mode: {description: Actual stored ordinary review mode for role=review-gate, schema: {type: string, enum: [legacy, saved]}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /models/{id}/retire:
+    post:
+      operationId: retireModelProfile
+      security: *auth
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRetirementWrite'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRetirement'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: restoreModelProfile
+      security: *auth
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRetirement'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    ModelPreferenceDecision:
+      type: object
+      description: Additive resolution evidence returned only when preference placement parameters are supplied.
+      required: [kind, complexity, role, person_id, project_id, cell, residency, fallback, blocked, hard_rules]
+      properties:
+        kind:
+          type: object
+          required: [slug, source]
+          properties: {slug: {type: string}, source: {type: string}}
+        complexity:
+          type: object
+          required: [value, bucket, source]
+          properties: {value: {type: string}, bucket: {type: string, enum: [normal, complex]}, source: {type: string}}
+        role: {type: string}
+        person_id: {type: [string, 'null'], format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        cell:
+          type: object
+          required: [set_by, selector]
+          properties:
+            set_by: {type: string, enum: [default, person, project]}
+            locked_by: {type: string, enum: [default, person]}
+            selector: {$ref: '#/components/schemas/ModelSelector'}
+        residency:
+          allOf:
+            - {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
+            - type: object
+              required: [ticket_requirement, qualifying_account_ids]
+              properties:
+                ticket_requirement: {type: string, enum: [any, eu, local]}
+                qualifying_account_ids: {type: array, description: "An empty list under any residency means the role ladder was not account-filtered; it does not mean no account qualifies.", items: {type: string, format: uuid}}
+        latest_resolved_to: {type: string, format: uuid}
+        fallback: {type: [object, 'null'], properties: {reason: {type: string}}}
+        blocked: {type: [object, 'null'], properties: {reason: {type: string}}}
+        hard_rules: {type: array, items: {type: string, enum: [cross_family, security_review, review_qualification, residency]}}
+    ModelRefreshSettings:
+      type: object
+      additionalProperties: false
+      required: [agent_reports_enabled, auto_add_profiles, api_enabled, interval_minutes]
+      properties:
+        agent_reports_enabled: {type: boolean, default: true}
+        auto_add_profiles: {type: boolean, default: true}
+        api_enabled: {type: boolean, default: false}
+        interval_minutes: {type: integer, minimum: 60, maximum: 43200, default: 1440}
+    ModelRefreshSettingsWrite:
+      type: object
+      additionalProperties: false
+      required: [agent_reports_enabled, auto_add_profiles, api_enabled, interval_minutes]
+      properties:
+        agent_reports_enabled: {type: boolean, default: true}
+        auto_add_profiles: {type: boolean, default: true}
+        api_enabled: {type: boolean, default: false}
+        interval_minutes: {type: integer, minimum: 60, maximum: 43200, default: 1440}
+        account_use_revision: {type: integer, minimum: 1, description: "Required when changing auto_add_profiles. Person account.use.manage is rechecked under tenant, catalog and matrix fences; stale revision returns 409."}
+    ModelRefreshStatus:
+      type: object
+      required: [settings, sources, observations, last_result]
+      properties:
+        settings: {$ref: '#/components/schemas/ModelRefreshSettings'}
+        last_run_at: {type: [string, 'null'], format: date-time}
+        last_result: {type: object, additionalProperties: true}
+        sources: {type: array, items: {type: object, required: [account_id, vendor], properties: {account_id: {type: string, format: uuid}, vendor: {type: string, enum: [openai, anthropic, xai, openrouter]}}}}
+        observations: {type: array, items: {type: object, additionalProperties: true}}
+    ModelResolution:
+      type: object
+      required: [role, ladder, owner_required, source]
+      properties:
+        role: {type: string}
+        author_family: {type: string, enum: ['', openai, anthropic, xai, cursor, google, local], description: Normalised author family used for exclusion; empty when none was supplied.}
+        profile: {oneOf: [{$ref: '#/components/schemas/ModelProfile'}, {type: 'null'}]}
+        ladder: {type: array, items: {type: object, required: [profile_id, selected, skip_reasons], properties: {stage: {type: string, enum: [column, default, role]}, profile_id: {type: string, format: uuid}, selected: {type: boolean}, skip_reasons: {type: array, items: {type: string}}}}}
+        command_template: {type: string}
+        owner_required: {type: boolean}
+        source: {type: string, enum: [aeon]}
+        trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
+        residency: {type: string, enum: [any, eu, local], description: Present for placement-aware resolution.}
+        preference: {$ref: '#/components/schemas/ModelPreferenceDecision'}
+    ModelRetirement:
+      type: object
+      required: [profile_id, retired]
+      properties:
+        profile_id: {type: string, format: uuid}
+        retired: {type: boolean}
+        reason: {type: string, maxLength: 200}
+        retire_at: {type: [string, 'null'], format: date-time}
+    ModelRetirementWrite:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 1, maxLength: 200}
+        retire_at: {type: string, format: date-time, description: 'Optional future retirement time. Until then the profile remains eligible. DELETE cancels the schedule or restores the profile.'}
+    ModelLineWrite:
+      type: object
+      additionalProperties: false
+      required: [display_name, note, efforts, route]
+      properties:
+        display_name: {type: string, minLength: 1, maxLength: 128}
+        note: {type: string, maxLength: 80}
+        efforts: {type: array, minItems: 1, maxItems: 16, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 32}, description: 'Native effort names, lowest first.'}
+        route: {type: string, minLength: 1, maxLength: 32, description: 'Provider route matching the harness and model namespace; for example OpenRouter for pi openrouter/vendor/model.'}
+        model: {type: string, minLength: 1, maxLength: 128}
+        revision: {type: string, maxLength: 64}
+    ModelLineUsage:
+      type: object
+      required: [used_by, replacement, revision, incomplete, line_profiles]
+      properties:
+        used_by:
+          type: array
+          maxItems: 256
+          items:
+            type: object
+            required: [column, layer, replacement]
+            properties:
+              column: {type: string}
+              layer: {type: string, enum: [default, person, workspace, project]}
+              person: {type: string, format: uuid}
+              replacement: {$ref: '#/components/schemas/ModelSimplePick'}
+        replacement: {$ref: '#/components/schemas/ModelSimplePick'}
+        revision: {type: string}
+        incomplete: {type: boolean}
+        line_profiles: {type: array, maxItems: 64, items: {$ref: '#/components/schemas/ModelProfile'}, description: 'Active profiles of this line, read in the same transaction as revision.'}
+    ModelRoute:
+      type: object
+      required: [role, priority, profile_id, state]
+      properties:
+        role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}
+        priority: {type: integer, minimum: 1, maximum: 2147483647}
+        profile_id: {type: string, format: uuid}
+        state: {type: string, enum: [available, unavailable, conserved, budget_limited]}
+        reason: {type: string}
+        valid_until: {type: [string, 'null'], format: date-time}
+    ModelRoutesRead:
+      type: object
+      required: [role, steps, routes, edit_token, can_edit, setup, truncated, dispatch_family_order, review_floors]
+      properties:
+        role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}
+        routes: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/ModelRoute'}, description: Stored rows matching steps; conditional PUT sends this complete array.}
+        edit_token: {type: [string, 'null'], description: Quoted SHA-256 content token; null when truncated. Time passing alone never changes it.}
+        can_edit: {type: boolean, description: Person with models.manage and a complete initialized snapshot; source authorization still checked on save.}
+        steps:
+          type: array
+          maxItems: 50
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/ModelRoute'}
+              - type: object
+                required: [profile]
+                properties:
+                  profile: {$ref: '#/components/schemas/ModelProfile'}
+        setup: {type: boolean, description: Whether the tenant has any model profiles; false means the registry has not been set up.}
+        truncated: {type: boolean, description: More than 50 steps exist for this role; the omitted steps still apply.}
+        order_mode: {type: string, enum: [legacy, saved], description: Present for review-gate; absent metadata means legacy. Included in the complete token.}
+        managed_fallback_order: {type: array, maxItems: 50, items: {type: string, format: uuid}, description: Present for review-gate. Applied fallback order of the displayed profiles before qualification and model preferences; incomplete when truncated.}
+        dispatch_family_order: {type: array, items: {type: string}, description: 'Built-in family order used only by legacy ordinary review dispatch.'}
+        review_floors: {type: array, items: {type: string}, description: Existing review constraints in words; not new enforcement.}

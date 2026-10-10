@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+name: Verify live
+
+# Coordinator dispatch only after the approved pin merge/host rollout. No pin,
+# deployment, SSH or PPM credential belongs in this workflow. Never run PR code
+# with release credentials. AEON-493 pre-switch distribution order is preserved.
+on:
+  workflow_dispatch:
+    inputs:
+      rollout:
+        description: "Trusted coordinator aeon.rollout.v1 JSON with native qualification and post-switch measurements"
+        required: true
+        type: string
+      apply:
+        description: "Finalize immutable published release and merge verified tap PR (coordinator approval required)"
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: aeon-live-verification
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  environment-policy:
+    if: >-
+      github.repository == 'inspr-at/paimos' && github.ref == 'refs/heads/main' &&
+      github.actor == 'markus-barta' && github.actor_id == '276789' &&
+      github.triggering_actor == 'markus-barta'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Verify installed environment protection before requesting secrets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/verify-live-policy.mjs live-verification
+  verify-live:
+    needs: environment-policy
+    if: >-
+      github.repository == 'inspr-at/paimos' && github.ref == 'refs/heads/main' &&
+      github.actor == 'markus-barta' && github.actor_id == '276789' &&
+      github.triggering_actor == 'markus-barta'
+    runs-on: ubuntu-latest
+    # Lead must configure required reviewers, main-only deployment policy and
+    # non-admin, repository-scoped App secrets before enabling this workflow.
+    environment: live-verification
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Write and validate value-free rollout evidence
+        env:
+          ROLLOUT_JSON: ${{ inputs.rollout }}
+        run: |
+          node --input-type=module - <<'JS'
+          import { writeFileSync } from 'node:fs';
+          import { validateRollout } from './scripts/verify-live.mjs';
+          try {
+            const record = JSON.parse(process.env.ROLLOUT_JSON);
+            validateRollout(record);
+            writeFileSync('rollout.json', JSON.stringify(record), { mode: 0o600 });
+          } catch { console.error('Rollout evidence refused; lead must inspect the source record.'); process.exit(1); }
+          JS
+      - name: Install isolated browser smoke dependencies
+        timeout-minutes: 18
+        working-directory: web
+        run: |
+          npm ci
+          bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install --with-deps chromium
+      - name: Verify live and optionally finalize distribution
+        env:
+          RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+          RELEASE_APP_KEY: ${{ secrets.RELEASE_APP_KEY }}
+          HOMEBREW_TAP_APP_ID: ${{ secrets.HOMEBREW_TAP_APP_ID }}
+          HOMEBREW_TAP_APP_KEY: ${{ secrets.HOMEBREW_TAP_APP_KEY }}
+          APPLY: ${{ inputs.apply }}
+          LIVE_REPORT: live-verification.json
+          WORKFLOW_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$APPLY" = true ]; then
+            node scripts/verify-live.mjs rollout.json --apply
+          else
+            node scripts/verify-live.mjs rollout.json
+          fi
+      - name: Retain redacted verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: live-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: live-verification.json
+          if-no-files-found: ignore
+      - name: Alert lead and list manual steps
+        if: always()
+        env:
+          OUTCOME: ${{ job.status }}
+        run: |
+          node --input-type=module - <<'JS'
+          import { appendFileSync } from 'node:fs';
+          const failed = process.env.OUTCOME !== 'success';
+          const text = failed
+            ? 'LIVE VERIFICATION FAILED: lead must inspect this run. Stop publication/tap mutation. Preserve or roll back the server through the existing coordinator controls.'
+            : 'Live verification passed. Consult the artifact for read-only versus applied actions.';
+          if (failed) console.log(`::error::${text}`);
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${text}\n\nManual: native qualification/Touch ID; deployment/rollback; D7 lead announcement via aeon tell and ticket closure.\n`);
+          JS

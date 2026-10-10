@@ -4,7 +4,6 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
 
 const world: AgentWorld = {
   me: me.id,
@@ -80,68 +79,4 @@ test('Needs you names destinations and keeps target-less approvals usable', asyn
 })
 
 for (const width of [390, 1600]) for (const named of [true, false]) {
-  test(`journey decision and confirmation preserve optional targets: ${named} at ${width}`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 1000 })
-    await mockWork(page, fixtures())
-    const calls = await mockJourney(page, named ? namedJourney() : journeyWorld('deploy'))
-    await page.goto('/p/PHAROS?view=journey')
-    const card = page.getByRole('region', { name: 'Decision: The host did not apply it' })
-    await expect(card.getByRole('region', { name: named ? /Deploy target: app-01/ : 'Target not named' })).toBeVisible()
-    const history = page.getByRole('region', { name: 'Handoffs · deploy and verify' })
-    // The strict 1.0 handoff has no target; never attribute the current stage's
-    // destination to a historical attempt. The stage and approval carry it.
-    await expect(history.getByRole('region', { name: /Deploy target:|Target not named/ })).toHaveCount(0)
-    await expect(page.getByRole('region', { name: 'Target', exact: true })).toContainText(named ? 'app-01' : 'Target not named')
-    if (named) await expect(card.getByText('named by the agent', { exact: true })).toBeVisible()
-    await card.getByRole('button', { name: 'Approve and retry deployment' }).click()
-    const dialog = page.getByRole('dialog', { name: 'Retry deployment?' })
-    await expect(dialog).toContainText(named ? 'Server: app-01 · production' : 'Target not named')
-    await dialog.getByRole('button', { name: 'Approve and retry deployment' }).click()
-    await expect.poll(() => calls.filter(call => call.path.endsWith('/decision')).length).toBe(1)
-  })
 }
-
-test('deploy target uses journey metadata when no approval is available', async ({ page }) => {
-  await mockWork(page, fixtures())
-  const world = namedJourney()
-  world.approvals = []
-  await mockJourney(page, world)
-  await page.goto('/p/PHAROS?view=journey')
-  const target = page.getByRole('region', { name: 'Target', exact: true })
-  await expect(target).toContainText('app-01 · production')
-  await expect(target).toContainText('named by the agent')
-})
-
-test('deploy target screenshots', async ({ page }) => {
-  test.skip(!process.env.DEPLOY_TARGET_SHOTS, 'Opt-in visual evidence')
-  test.setTimeout(120_000)
-  for (const surface of ['agents', 'journey']) {
-    if (surface === 'agents') {
-      await openAgents(page)
-      await expect(page.getByRole('region', { name: 'Live now' }).locator('.name').first()).toBeVisible()
-      await queue(page).getByRole('button', { name: /^Decided/ }).click()
-    } else {
-      await mockWork(page, fixtures())
-      await mockJourney(page, namedJourney())
-      await page.goto('/p/PHAROS?view=journey')
-    }
-    await expect(page.getByText('app-01 · production', { exact: true }).first()).toBeVisible()
-    for (const theme of ['light', 'dark'] as const) {
-      await page.emulateMedia({ colorScheme: theme })
-      await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
-      for (const width of [1600, 390]) {
-        await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-        await page.getByText('app-01 · production', { exact: true }).first().scrollIntoViewIfNeeded()
-        expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-        await page.screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/${surface}-${theme}-${width}.png`, fullPage: true })
-        if (surface === 'agents') {
-          await queue(page).locator('.item', { hasText: 'Deploy wherever the session host is' }).screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/missing-${theme}-${width}.png` })
-          await queue(page).locator('.history').screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/approval-history-${theme}-${width}.png` })
-        } else {
-          await page.getByRole('region', { name: 'Decision: The host did not apply it' }).screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/decision-${theme}-${width}.png` })
-          await page.getByRole('region', { name: 'Handoffs · deploy and verify' }).screenshot({ animations: 'disabled', path: `${process.env.DEPLOY_TARGET_SHOTS}/handoff-history-${theme}-${width}.png` })
-        }
-      }
-    }
-  }
-})

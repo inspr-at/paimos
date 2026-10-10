@@ -11,20 +11,40 @@ import (
 	"github.com/inspr-at/paimos/internal/agentcompat"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/hookcap"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
-// Lock is acquired before work-order/run/account locks by every paired
-// dispatch, claim, probe, settlement and lifecycle mutation. This serializes
+// Lock acquires tenant, tree, then pairing before work-order/run/account locks.
+// Paired dispatch, claim, probe, settlement and lifecycle mutations share it. It serializes
 // revocation with in-flight credentials that passed the HTTP auth boundary.
 func Lock(ctx context.Context, tx pgx.Tx) error {
+	if err := db.LockCurrentTree(ctx, tx); err != nil {
+		return err
+	}
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`)
 	return err
 }
 
+// LockRead serializes a pure read with lifecycle changes. It has no outgoing
+// tenant/tree/resource edge: callers must never mutate resources or acquire
+// those fences afterward. Write entries use Lock, including GETs that mutate.
+func LockRead(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`)
+	return err
+}
+
+// LockMutation enters an account/lifecycle transaction through the shared
+// tenant, tree, pairing fence before resource rows.
+func LockMutation(ctx context.Context, tx pgx.Tx) error {
+	return Lock(ctx, tx)
+}
+
 type disconnectInput struct {
+	SuppressAudit    bool   `json:"-"`
 	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
 	Mode             string `json:"mode"`
 	AccountID        string `json:"account_id,omitempty"`
@@ -172,6 +192,9 @@ func disconnectTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, computer s
 	if _, err = tx.Exec(ctx, `UPDATE agent_pairing_computers SET revision=revision+1 WHERE id=$1`, computer); err != nil {
 		return err
 	}
+	if in.SuppressAudit {
+		return nil
+	}
 	return audit(ctx, tx, p, "agent_pairing.disconnected", map[string]any{"computer_id": computer, "account_id": in.AccountID, "mode": in.Mode, "local_cleanup": "pending", "local_processes": "unconfirmed"})
 }
 
@@ -205,7 +228,7 @@ func cancelQueued(ctx context.Context, tx pgx.Tx, computer, account string, all 
 
 	return nil
 }
-func revokeComputer(ctx context.Context, tx pgx.Tx, id string) error {
+func revokeComputer(ctx context.Context, tx pgx.Tx, id string, pending ...*[]events.Change) error {
 	if _, err := tx.Exec(ctx, `UPDATE agent_keys SET revoked_at=coalesce(revoked_at,clock_timestamp()) WHERE principal_id=(SELECT principal_id FROM agent_pairing_computers WHERE id=$1)`, id); err != nil {
 		return err
 	}
@@ -215,10 +238,10 @@ func revokeComputer(ctx context.Context, tx pgx.Tx, id string) error {
 	if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET state='revoked' WHERE id=$1`, id); err != nil {
 		return err
 	}
-	return cancelDisconnectedAccountLinks(ctx, tx, id)
+	return cancelDisconnectedAccountLinks(ctx, tx, id, pending...)
 }
-func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string) error {
-	if err := cancelDisconnectedAccountLinks(ctx, tx, computer); err != nil {
+func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string, pending ...*[]events.Change) error {
+	if err := cancelDisconnectedAccountLinks(ctx, tx, computer, pending...); err != nil {
 		return err
 	}
 	tag, err := tx.Exec(ctx, `UPDATE agent_pairing_enrollments e SET state='revoked' WHERE computer_id=$1 AND state='draining'
@@ -239,7 +262,7 @@ func finalizeDrain(ctx context.Context, tx pgx.Tx, computer string) error {
 		return err
 	}
 	if ready {
-		return revokeComputer(ctx, tx, computer)
+		return revokeComputer(ctx, tx, computer, pending...)
 	}
 	return nil
 }
@@ -291,6 +314,37 @@ WHERE c.id=$1`, computer).Scan(&principal, &tenantID, &audience)
 }
 func (m *Module) cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) error {
 	changed := false
+	if in.HookCapabilities != nil {
+		if len(in.HookCapabilities) > 5 {
+			return fail(400, "invalid_request", "invalid hook capabilities")
+		}
+		rec, err := computerRecord(ctx, tx, computer)
+		if err != nil {
+			return err
+		}
+		seen := map[string]bool{}
+		for i, c := range in.HookCapabilities {
+			if !hookcap.Valid(c) || seen[c.Harness] {
+				return fail(400, "invalid_request", "invalid hook capabilities")
+			}
+			if c.OS != rec.Details.Platform {
+				return fail(400, "invalid_request", "invalid hook capability platform")
+			}
+			var enrolled bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$1 AND a.harness=$2)`, computer, c.Harness).Scan(&enrolled); err != nil {
+				return err
+			}
+			if !enrolled {
+				return fail(400, "invalid_request", "invalid hook capability enrollment")
+			}
+			seen[c.Harness] = true
+			in.HookCapabilities[i] = hookcap.Project(c)
+		}
+		raw, _ := json.Marshal(in.HookCapabilities)
+		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET hook_capabilities=$2 WHERE id=$1 AND state='connected'`, computer, raw); err != nil {
+			return err
+		}
+	}
 	if in.Progress != nil {
 		switch in.Progress.State {
 		case "provisioning", "login_required", "service_conflict", "connected", "setup_failed":
@@ -434,11 +488,12 @@ func (m *Module) harnessReports(ctx context.Context, tx pgx.Tx, computer string,
 		if agentsetup.KnownHarnessState(detail.State) {
 			statuses[harness] = detail.State
 		}
+		detail = detail.WithProbeDetail(harness, report.ReasonDetail)
 		// Never persist client-supplied commands, paths or diagnostics: the
 		// fix is derived from the harness and reason code. Attention on a
-		// non-ready report is ignored. A ready report keeps only enrolled
-		// accounts that are a proper subset and still need a fix.
-		if detail.State == "ready" {
+		// blocked/login_required report may name every enrolled account;
+		// a ready report requires a proper subset.
+		if detail.State == "ready" || detail.State == "blocked" || detail.State == "login_required" {
 			block := agentsetup.ResolveAttention(harness, detail.State, enrolledAccounts[harness], report.Attention, report.AttentionCount, report.AttentionTruncated)
 			detail.Attention = block.Accounts
 			detail.AttentionCount = block.Count

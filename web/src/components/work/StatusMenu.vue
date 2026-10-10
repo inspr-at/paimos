@@ -9,7 +9,7 @@ import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
 import StatusIcon from './StatusIcon.vue'
 
-const props = defineProps<{ anchor: HTMLElement | null; current: string; knownStates: string[]; ticketKey: string; projectId?: string }>()
+const props = defineProps<{ anchor: HTMLElement | null; current: string; knownStates: string[]; ticketKey: string; projectId?: string; derived?: boolean; childrenCount?: number }>()
 const emit = defineEmits<{ choose: [state: string]; close: [restoreFocus: boolean] }>()
 const list = ref<HTMLElement>()
 const options = computed(() => statusOptions(props.knownStates))
@@ -38,7 +38,8 @@ function move(event: KeyboardEvent) {
 <template>
   <FloatingPanel :anchor="anchor" :width="212" :tallest="480" :label="`Status of ${ticketKey}`" @close="restore => emit('close', restore)">
     <p class="menu-title eyebrow">Status</p>
-    <div ref="list" class="menu" role="menu" :aria-label="`Status of ${ticketKey}`" @keydown="move">
+    <p v-if="derived" class="menu-help" role="status">{{ childrenCount ? `Follows its ${childrenCount} children` : 'Follows its children' }}</p>
+    <div v-else ref="list" class="menu" role="menu" :aria-label="`Status of ${ticketKey}`" @keydown="move">
       <template v-for="(option, index) in options" :key="option.value">
       <span v-if="option.meta.key === 'cancelled'" class="menu-sep" role="separator" aria-label="Exits" />
       <button type="button" role="menuitemradio" class="menu-item" :aria-checked="normaliseState(option.value) === current" :data-autofocus="normaliseState(option.value) === current ? '' : undefined" :data-tip="hint(option.value)" data-tip-side="end" :aria-describedby="`${id}-hint-${index}`" @click="emit('choose', option.value)">
@@ -47,12 +48,12 @@ function move(event: KeyboardEvent) {
         <AppIcon v-if="normaliseState(option.value) === current" name="check" :size="14" class="tick" />
         <span v-else-if="index < 9" class="digit keycap" aria-hidden="true">{{ index + 1 }}</span>
       </button>
-      <span :id="`${id}-hint-${index}`" class="sr-only">{{ hint(option.value) }}</span>
       </template>
       <span class="menu-sep" role="separator" />
       <button type="button" role="menuitem" class="menu-item help-item" @click="showHelp"><AppIcon name="help" :size="14" /><span class="label">What do these mean?</span></button>
     </div>
-    <p class="menu-help"><AppIcon name="queue" :size="12" /><span><b>Queued</b> is Open with a place in the work queue. Pickup sets In progress; Blocked keeps the place and waits.</span></p>
+    <span v-for="(option, index) in options" :id="`${id}-hint-${index}`" :key="option.value" class="sr-only">{{ hint(option.value) }}</span>
+    <p v-if="!derived" class="menu-help"><AppIcon name="queue" :size="12" /><span><b>Queued</b> is Open with a place in the work queue. Pickup sets In progress; Blocked keeps the place and waits.</span></p>
   </FloatingPanel>
 </template>
 

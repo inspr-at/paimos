@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 // Package releases implements the R3 release walker and planning API.
-// The coordinator mounts New(pool); release creation and stage transitions
-// belong to the journey module. No version or completion state is invented.
+// The coordinator mounts New(pool). Planning is independent of the retired Flow;
+// no version or completion state is invented.
 package releases
 
 import (
@@ -31,6 +31,8 @@ type module struct{ pool *pgxpool.Pool }
 // persists only the complete eligible ticket order and selected ticket set.
 func New(pool *pgxpool.Pool) httpapi.Module { return &module{pool} }
 func (m *module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("POST /api/projects/{projectId}/releases", m.createRelease)
+	mux.HandleFunc("GET /api/projects/{projectId}/releases", m.listPlanningReleases)
 	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/note-snapshot", m.noteSnapshot)
 	mux.HandleFunc("GET /api/projects/{projectId}/releases/{releaseId}/walker", m.get)
 	mux.HandleFunc("GET /api/projects/{projectId}/release-memberships", m.readMemberships)
@@ -202,14 +204,25 @@ func load(ctx context.Context, tx pgx.Tx, project, release string) (Walker, erro
 	// Historical release members cannot be selected into a different release.
 	// Backlog is available in planning only; active/historical walkers are sealed
 	// to their own members so subsequent backlog changes do not rewrite history.
-	rows, err := tx.Query(ctx, `SELECT t.ticket_node_id::text,n.key,n.title,t.feature_node_id::text,coalesce(t.release_node_id=$2,false),t.walker_position,t.estimated_hours::float8,n.state,
- ARRAY(SELECT DISTINCT screen.id::text FROM node_relations rel
- JOIN nodes screen ON screen.tenant_id=rel.tenant_id AND screen.id=CASE WHEN rel.source_node_id=n.id THEN rel.target_node_id ELSE rel.source_node_id END
- JOIN node_kinds sk ON sk.tenant_id=screen.tenant_id AND sk.id=screen.kind_id
- WHERE (rel.source_node_id=n.id OR rel.target_node_id=n.id) AND screen.deleted_at IS NULL AND sk.slug='screen' ORDER BY screen.id::text)
+	// Collect screen edges once for the current member set. A correlated
+	// screen lookup per leaf can rescan the visible node tree 1,000 times.
+	rows, err := tx.Query(ctx, `WITH members AS MATERIALIZED (
+ SELECT t.tenant_id,t.ticket_node_id,n.key,n.title,t.feature_node_id,coalesce(t.release_node_id=$2,false) AS included,
+ t.walker_position,t.estimated_hours::float8 AS hours,n.state
  FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id
  WHERE t.project_node_id=$1 AND (t.release_node_id=$2 OR ($3='planning' AND t.release_node_id IS NULL)) AND n.deleted_at IS NULL
- ORDER BY t.walker_position,t.ticket_node_id`, project, release, out.State)
+ AND NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+  WHERE c.tenant_id=n.tenant_id AND c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug IN ('work','ticket','task'))
+ ), screens AS MATERIALIZED (
+ SELECT m.ticket_node_id,array_agg(DISTINCT screen.id::text ORDER BY screen.id::text) AS ids
+ FROM members m JOIN node_relations rel ON rel.tenant_id=m.tenant_id
+  AND (rel.source_node_id=m.ticket_node_id OR rel.target_node_id=m.ticket_node_id)
+ JOIN nodes screen ON screen.tenant_id=rel.tenant_id AND screen.id=CASE WHEN rel.source_node_id=m.ticket_node_id THEN rel.target_node_id ELSE rel.source_node_id END
+ JOIN node_kinds sk ON sk.tenant_id=screen.tenant_id AND sk.id=screen.kind_id
+ WHERE screen.deleted_at IS NULL AND sk.slug='screen' GROUP BY m.ticket_node_id
+ ) SELECT m.ticket_node_id::text,m.key,m.title,m.feature_node_id::text,m.included,m.walker_position,m.hours,m.state,
+ coalesce(s.ids,'{}'::text[]) FROM members m LEFT JOIN screens s ON s.ticket_node_id=m.ticket_node_id
+ ORDER BY m.walker_position,m.ticket_node_id`, project, release, out.State)
 	if err != nil {
 		return out, err
 	}
@@ -222,9 +235,8 @@ func load(ctx context.Context, tx pgx.Tx, project, release string) (Walker, erro
 			return out, err
 		}
 		out.Tickets = append(out.Tickets, t)
-		// R1 uses 'done' for completed nodes. Other tenant-defined states are not
-		// guessed to be completion evidence.
-		if t.FeatureID != nil && state != "done" {
+		// Use the same terminal states as membership and the ticket picker.
+		if t.FeatureID != nil && !closedTicketState(state) {
 			c := counts[*t.FeatureID]
 			c[0]++
 			if t.Included {

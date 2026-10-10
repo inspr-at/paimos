@@ -8,10 +8,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,6 +22,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"golang.org/x/sys/unix"
@@ -290,5 +294,167 @@ func TestOpenNoFollowRejectsFIFO(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("opening a fifo blocked")
+	}
+}
+
+func TestHeartbeatPairedReconnectBindsOnlyItsLiveIndexedSession(t *testing.T) {
+	for _, code := range []int{200, 409} {
+		t.Run(strconv.Itoa(code), func(t *testing.T) {
+			var calls []hbCall
+			srv := heartbeatFixture(t, &calls, "", "")
+			defer srv.Close()
+			rt, _, stderr := heartbeatRuntime(t, srv)
+			dir, err := os.MkdirTemp("/tmp", "aeon-hb-hook-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(dir)
+			dir, err = filepath.EvalSymlinks(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			socket := filepath.Join(dir, "hook.sock")
+			if err := os.WriteFile(socket+".token", []byte(strings.Repeat("fixture-", 4)), 0600); err != nil {
+				t.Fatal(err)
+			}
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			requests := make(chan map[string]any, 1)
+			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/attached-hook" || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("fixture-", 4) {
+					t.Error("unauthenticated or wrong local route")
+				}
+				var body map[string]any
+				if json.NewDecoder(r.Body).Decode(&body) != nil {
+					t.Error("bad local binding")
+				}
+				requests <- body
+				w.WriteHeader(code)
+				_, _ = w.Write([]byte("{}"))
+			})}
+			go func() { _ = server.Serve(listener) }()
+			defer server.Close()
+			o := heartbeatTestOptions(dir)
+			o.OwnerPID = os.Getpid()
+			o.SourceSession = "11111111-1111-4111-8111-111111111111"
+			o.ReconnectSocket = socket
+			if err := rt.runHeartbeat(t.Context(), o, heartbeatDeps{wait: func(context.Context, int, time.Duration) error { return errOwnerExited }}); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case body := <-requests:
+				if body["origin"] != srv.URL || body["session_id"] != transcriptSessionID || body["project_id"] != transcriptProjectID || body["owner_pid"] != float64(os.Getpid()) || body["activity_sequence"] != float64(1) || body["worker_lease"] == "" {
+					t.Fatal("binding lost exact session, origin, owner or lease")
+				}
+			default:
+				t.Fatalf("heartbeat never bound its indexed hook: %s", stderr.String())
+			}
+			if strings.Contains(stderr.String(), "binding was refused") != (code == 409) {
+				t.Fatal("partial binding result was not reported honestly")
+			}
+			registrations := hbWhere(calls, "POST", "/harness-sessions")
+			if len(registrations) != 1 {
+				t.Fatal("missing registration")
+			}
+			caps := registrations[0].body["advertised_capabilities"].([]any)
+			if len(caps) != 2 || caps[1] != "inbox" {
+				t.Fatal("attached hook inbox not advertised")
+			}
+		})
+	}
+}
+
+func TestPairedInboxHookAcknowledgesOnlyForegroundHandoff(t *testing.T) {
+	for _, scenario := range []string{"delivered", "short-output", "closed-output"} {
+		t.Run(scenario, func(t *testing.T) {
+			setupHookTest(t)
+			home, err := os.MkdirTemp("/tmp", "aeon-hook-home-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(home)
+			home, err = filepath.EvalSymlinks(home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("HOME", home)
+			t.Setenv("AEON_SESSION_ID", hookSessionID)
+			root, err := agentsetup.DefaultStateRoot(goruntime.GOOS, home, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := filepath.Join(root, "daemon")
+			store, err := agentsetup.OpenStore(state, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			socket, err := agentsetup.ResolveSocketPath(state, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := agentsetup.PrepareSocketDirectory(socket); err != nil {
+				t.Fatal(err)
+			}
+			ref, _ := json.Marshal(agentsetup.ControlReference{Socket: socket, DaemonID: "fixture", Generation: strings.Repeat("a", 32)})
+			if err := store.Write("control.json", ref, true); err != nil {
+				t.Fatal(err)
+			}
+			listener, err := net.Listen("unix", socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = listener.Close(); _ = os.Remove(socket); _ = os.Remove(socket + ".token") }()
+			if err := os.Chmod(socket, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(socket+".token", []byte(strings.Repeat("fixture-", 4)), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var out observedHookWriter
+			var stdout io.Writer = &out
+			if scenario == "short-output" {
+				stdout = shortHookWriter{}
+			} else if scenario == "closed-output" {
+				stdout = failedHookWriter{}
+			}
+			var complete bool
+			delivery := agentd.HarnessDelivery{ID: "00000000-0000-4000-8000-000000000094", MessageID: hookMessageID, SenderPrincipalID: "00000000-0000-4000-8000-000000000093", Cursor: 7, Body: "Untrusted attached fixture message"}
+			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var request agentd.AttachedHookRequest
+				if r.URL.Path != "/v1/attached-hook" || json.NewDecoder(r.Body).Decode(&request) != nil || request.SessionID != hookSessionID || r.Header.Get("Authorization") != "Bearer "+strings.Repeat("fixture-", 4) {
+					t.Error("hook lost owner/session authentication")
+					w.WriteHeader(403)
+					return
+				}
+				switch request.Operation {
+				case "pull":
+					_ = json.NewEncoder(w).Encode([]agentd.HarnessDelivery{delivery})
+				case "complete":
+					if !out.emitted.Load() || request.DeliveryID != delivery.ID || request.Cursor != delivery.Cursor {
+						t.Error("ack before or outside exact stdout handoff")
+					}
+					complete = true
+					_ = json.NewEncoder(w).Encode([]agentd.HarnessDelivery{})
+				default:
+					t.Error("hook changed its binding")
+					w.WriteHeader(400)
+				}
+			})}
+			go func() { _ = server.Serve(listener) }()
+			defer server.Close()
+			rt := &runtime{stdin: strings.NewReader(`{"hook_event_name":"PostToolUse","session_id":"fixture-vendor"}`), stdout: stdout, stderr: io.Discard}
+			err = rt.runInboxHook(t.Context(), "PostToolUse")
+			if scenario == "delivered" {
+				if err != nil || !complete || !strings.Contains(out.String(), delivery.Body) {
+					t.Fatal("paired hook did not deliver and confirm stdout")
+				}
+			} else if err == nil || complete {
+				t.Fatal("failed foreground output was acknowledged")
+			}
+		})
 	}
 }

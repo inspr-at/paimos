@@ -107,7 +107,7 @@ export function statusLabel(status: MessageStatus): string {
     case 'read': return 'Read'
     case 'delivered': return 'Delivered'
     case 'not_delivered': return status.reason ? `Not delivered · ${reasonText(status.reason)}` : 'Not delivered'
-    default: return 'Sent'
+    default: return 'Sending'
   }
 }
 export function statusTip(status: MessageStatus, format: (iso: string) => string): string {
@@ -115,7 +115,7 @@ export function statusTip(status: MessageStatus, format: (iso: string) => string
     case 'read': return status.read_at ? `Read by the session · ${format(status.read_at)}` : 'Read by the session'
     case 'delivered': return status.delivered_at ? `Delivered to the session · ${format(status.delivered_at)}` : 'Delivered to the session'
     case 'not_delivered': return 'It will not arrive later. Send it again once the session is listening.'
-    default: return 'Sent · waiting for the session to pick it up'
+    default: return 'On its way to the agent.'
   }
 }
 export const statusDone = (status?: MessageStatus) => status?.status === 'read' || status?.status === 'not_delivered'
@@ -130,7 +130,7 @@ export const statusDone = (status?: MessageStatus) => status?.status === 'read' 
 // asked after the outstanding ids, so they can still move to read.
 export const receiptBatchLimit = 100
 const terminalReceipt = (status?: MessageStatus) =>
-  status?.status === 'delivered' || status?.status === 'read' || status?.status === 'not_delivered'
+  status?.cancelled || status?.status === 'delivered' || status?.status === 'read' || status?.status === 'not_delivered'
 
 export function receiptQueryBatches(
   boundIds: readonly string[],
@@ -214,3 +214,55 @@ export const hookNoticeVisible = (awaits: boolean, receipts: HookReceipts) => aw
 // Within this distance of the end the thread counts as read to the bottom.
 export const nearBottom = (el: { scrollHeight: number; scrollTop: number; clientHeight: number }, slack = 32) =>
   el.scrollHeight - el.scrollTop - el.clientHeight <= slack
+
+// Receipt reads may complete out of order. Evidence never moves backwards.
+export function advanceReceipt(held: MessageStatus | undefined, next: MessageStatus): MessageStatus {
+  if (!held || next.cancelled) return next
+  const rank = { sent: 0, delivered: 1, read: 2, not_delivered: 2 }
+  if (rank[next.status] < rank[held.status] || held.status === 'read' || held.status === 'not_delivered') return held
+  return next
+}
+// Chat's approved exception to the general field-submit convention. IME and
+// native browser shortcuts remain untouched.
+export function chatSendLevel(event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'altKey' | 'metaKey' | 'ctrlKey' | 'isComposing'>, canSteer: boolean): 'simple' | 'steer' | null {
+  if (event.key !== 'Enter' || event.isComposing || event.shiftKey || event.altKey) return null
+  return canSteer && (event.metaKey || event.ctrlKey) ? 'steer' : 'simple'
+}
+
+export const chatWords = {
+  en: { chat: "Chat", overview: "Overview", copy: "Copy", copied: "Copied", copyFailed: "Could not copy. Try again.", cancel: "Cancel", edit: "Edit", save: "Save", queued: "Queued messages", editing: "Editing a queued message", cancelled: "Message cancelled.", tooLate: "Too late: the agent already has it.", unclear: "Delivery unclear", cancelFailed: "Message could not be cancelled. Try again.", next: "At next step", stopSend: "Stop and send", queueNow: "Sending now", queueNext: "At the next step", queueBetween: "At its next step", newDivider: "New", noPermissionTitle: "You can’t read this chat", noPermission: "Chats with agents are open to the people on this project. Ask a workspace admin to add you.", loadError: "Messages could not be loaded right now. Close and reopen the session to try again.", ended: "This session has ended.", offline: "Offline · reconnecting", offlineNote: "Sending is unavailable until the connection is back.", emptyTitle: "Chat with", emptyBody: "Ask anything, or give it the next task.", suggest1: "What are you working on?", suggest2: "Summarise your progress so far", suggest3: "Pause after this step", replying: "Replying to", geminiNote: "Gemini stops its current turn when it gets a new message. After this turn lets it finish.", unmanagedNote: "runs outside PAIMOS and is idle at its prompt. It sees your message when it takes its next step.", insertionNow: "Steered in mid-turn", insertionNext: "Delivered at the next step", insertionBetween: "Delivered between steps", insertionAfter: "Sent after the turn", actionRequest: "Action request", awaitingReply: "Awaiting reply", resolved: "Resolved", dismissed: "Dismissed", you: "You", cancelReply: "Cancel the reply", older: 'Earlier messages', start: 'Start of the conversation', historyError: 'Earlier messages could not be loaded. Try again.', stop: 'Stop', stopTip: 'Stop the turn', latest: 'Go to the latest message', newCount: (n: number) => `${n} new`, pendingLimit: 'Too many pending messages. Retry an existing message or wait for it to appear in the thread.', send: 'Send', now: 'Send now', after: 'After this turn', newline: 'new line', sending: 'Sending', delivered: 'Delivered', read: 'Read', failed: 'Not delivered', retry: 'Retry', message: 'Message to', placeholder: 'Message', reply: 'Reply' },
+  de: { chat: "Chat", overview: "Übersicht", copy: "Kopieren", copied: "Kopiert", copyFailed: "Kopieren fehlgeschlagen. Erneut versuchen.", cancel: "Abbrechen", edit: "Bearbeiten", save: "Speichern", queued: "Wartende Nachrichten", editing: "Wartende Nachricht bearbeiten", cancelled: "Nachricht verworfen.", tooLate: "Zu spät: der Agent hat sie schon.", unclear: "Zustellung unklar", cancelFailed: "Nachricht konnte nicht verworfen werden. Erneut versuchen.", next: "Beim nächsten Schritt", stopSend: "Stoppen und senden", queueNow: "Wird jetzt gesendet", queueNext: "Beim nächsten Schritt", queueBetween: "Bei seinem nächsten Schritt", newDivider: "Neu", noPermissionTitle: "Du kannst diesen Chat nicht lesen", noPermission: "Chats mit Agenten sind für die Leute im Projekt offen. Bitte eine Workspace-Admin, dich hinzuzufügen.", loadError: "Nachrichten konnten gerade nicht geladen werden. Schließe die Sitzung und öffne sie erneut.", ended: "Diese Sitzung ist beendet.", offline: "Offline · verbinde neu", offlineNote: "Senden ist erst wieder möglich, sobald die Verbindung zurück ist.", emptyTitle: "Chatte mit", emptyBody: "Frag etwas oder gib die nächste Aufgabe.", suggest1: "Woran arbeitest du gerade?", suggest2: "Fasse deinen Fortschritt zusammen", suggest3: "Pausiere nach diesem Schritt", replying: "Antwort auf", geminiNote: "Gemini beendet die laufende Runde, sobald eine neue Nachricht kommt. Nach dieser Runde lässt sie fertig werden.", unmanagedNote: "läuft außerhalb von PAIMOS und wartet am Prompt. Er sieht deine Nachricht beim nächsten Schritt.", insertionNow: "Mitten in der Runde eingelenkt", insertionNext: "Beim nächsten Schritt zugestellt", insertionBetween: "Zwischen Schritten zugestellt", insertionAfter: "Nach der Runde gesendet", actionRequest: "Aktionsanfrage", awaitingReply: "Antwort ausstehend", resolved: "Erledigt", dismissed: "Verworfen", you: "Du", cancelReply: "Antwort abbrechen", older: 'Frühere Nachrichten', start: 'Anfang des Gesprächs', historyError: 'Frühere Nachrichten konnten nicht geladen werden. Erneut versuchen.', stop: 'Stoppen', stopTip: 'Runde stoppen', latest: 'Zur neuesten Nachricht', newCount: (n: number) => `${n} neu`, pendingLimit: 'Zu viele ausstehende Nachrichten. Eine vorhandene Nachricht erneut senden oder warten, bis sie im Gespräch erscheint.', send: 'Senden', now: 'Jetzt senden', after: 'Nach dieser Runde', newline: 'neue Zeile', sending: 'Wird gesendet', delivered: 'Zugestellt', read: 'Gelesen', failed: 'Nicht zugestellt', retry: 'Erneut senden', message: 'Nachricht an', placeholder: 'Nachricht an', reply: 'Antworten' },
+} as const
+
+// P0 capability presentation is static per harness until P1 readiness flags.
+export type ChatCapability = 'native' | 'next' | 'queue' | 'abort' | 'between'
+export function chatCapability(session: Pick<HarnessSession, 'management_mode' | 'harness'>): ChatCapability {
+  if (session.management_mode !== 'managed') return 'between'
+  switch (session.harness) {
+    case 'claude': case 'codex': case 'pi': return 'native'
+    case 'opencode': return 'next'
+    case 'gemini': return 'abort'
+    default: return 'queue'
+  }
+}
+export function isQueuedMessage(message: ProjectMessage, receipt: MessageStatus | undefined, working: boolean, atPrompt: boolean): boolean {
+  if (receipt?.cancelled || receipt?.status === 'delivered' || receipt?.status === 'read') return false
+  if (message.queue_pending) return true
+  return receipt?.status === 'sent' && (working || atPrompt)
+}
+export const capabilityWords = {
+  en: {
+    native: ['Steers mid-turn', 'Send now reaches the agent during this turn. After this turn waits until it is done.'],
+    next: ['Gets your message at the next step', 'OpenCode reads a message before its next step, not during a step. After this turn waits until it is done.'],
+    queue: ['Gets your message after this turn', 'This harness cannot take input mid-turn. Your message waits above the composer until the turn ends.'],
+    abort: ['A new message stops its turn', 'Gemini ends the active turn when it gets a new prompt. After this turn is safe; Stop and send interrupts on purpose.'],
+    between: ['Receives between steps', 'Runs outside PAIMOS. It reads messages between steps; idle at its prompt it gets nothing until it acts again.'],
+  },
+  de: {
+    native: ['Lenkbar mitten in der Runde', 'Jetzt senden erreicht den Agenten noch in der laufenden Runde. Nach dieser Runde wartet, bis sie fertig ist.'],
+    next: ['Erhält deine Nachricht beim nächsten Schritt', 'OpenCode liest eine Nachricht vor dem nächsten Schritt, nicht mitten im Schritt. Nach dieser Runde wartet, bis sie fertig ist.'],
+    queue: ['Erhält deine Nachricht nach dieser Runde', 'Diese Harness nimmt während einer Runde nichts an. Deine Nachricht wartet über dem Eingabefeld, bis die Runde endet.'],
+    abort: ['Eine neue Nachricht beendet die Runde', 'Gemini beendet die laufende Runde, sobald ein neuer Prompt kommt. Nach dieser Runde ist sicher; Stoppen und senden unterbricht bewusst.'],
+    between: ['Empfängt zwischen Schritten', 'Läuft außerhalb von PAIMOS. Liest Nachrichten zwischen Schritten; am Prompt wartend empfängt er nichts, bis er wieder etwas tut.'],
+  },
+} as const

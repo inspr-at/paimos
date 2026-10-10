@@ -33,6 +33,7 @@ func TestCapacityIngestRouteResetAndRLS(t *testing.T) {
 	mod := accountsMod()
 	var account Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Codex","max_parallel_runs":2}`, 201, &account)
+	ownFixtureAccount(t, admin, &account)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+account.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
 	r := capacity.Reading{WindowKind: "5h", Bucket: "codex", WindowMinutes: 300, UsedPercent: 41.2, ResetsAt: now.Add(time.Hour), ReadAt: now, Source: "harness", Phase: "start"}
@@ -162,6 +163,7 @@ func TestCapacityStaleManualOverrideAndSchedules(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Codex"}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	// The stale reading stays dispatchable inside the default 08:00–22:00 band.
 	// A wall clock outside that band waits on the schedule instead.
@@ -221,7 +223,8 @@ func TestCapacityStaleManualOverrideAndSchedules(t *testing.T) {
 		}
 	}
 	check(admin, 6)
-	check(reader, 5)
+	// Other administrators receive a neutral, explicitly redacted schedule.
+	check(reader, 7)
 	save(admin, "account", "", a.ID, nil, 204)
 	check(admin, 4)
 	save(admin, "pool", "codex", "", nil, 204)
@@ -296,9 +299,15 @@ func testCapacityActiveWindowSelection(t *testing.T, now time.Time) {
 	if got := activeWindows([]Window{denied, manual}, now); len(got) != 0 {
 		t.Fatal("manual bypassed vendor denial")
 	}
-	denied.EndsAt = now
-	if got := activeWindows([]Window{denied, manual}, now); len(got) != 0 {
-		t.Fatal("reset bypassed fresh vendor denial")
+	expiredDenial := denied
+	expiredDenial.ID = "expired-weekly"
+	expiredDenial.capacityKind = "weekly"
+	expiredDenial.EndsAt = now
+	if got := activeWindows([]Window{expiredDenial, manual}, now); len(got) != 1 || got[0].ID != manual.ID {
+		t.Fatal("own reset retained an expired vendor denial", got)
+	}
+	if got := activeWindows([]Window{expiredDenial, fresh}, now); len(got) != 1 || got[0].ID != fresh.ID {
+		t.Fatal("expired denial masked the current reading", got)
 	}
 	// A manual window caps on top of the reading (AEON-384): both bind.
 	got := activeWindows([]Window{fresh, manual}, now)
@@ -318,6 +327,7 @@ func TestCapacityPacingAtNightAndDay(t *testing.T) {
 	mod := accountsMod()
 	var account Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"clock","harness":"codex","daemon_id":"daemon-a","label":"Clock"}`, 201, &account)
+	ownFixtureAccount(t, admin, &account)
 	for _, date := range []struct {
 		month time.Month
 		day   int
@@ -375,7 +385,7 @@ func workDays(s capacity.Schedule) int {
 	return n
 }
 
-func TestCapacityEnforcesSchedulesSnapshotsAndSingleRefresh(t *testing.T) {
+func TestCapacityEnforcesSchedulesSnapshotsAndResourceStops(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "enforced-capacity", "person", "Ada", []string{"admin"})
 	runner := addPrincipal(t, admin.TenantID, "agent", "runner", nil)
@@ -384,6 +394,7 @@ func TestCapacityEnforcesSchedulesSnapshotsAndSingleRefresh(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Quota","max_parallel_runs":3}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	path := "/api/agent-accounts/" + a.ID + "/readings"
 	report := func(rs ...capacity.Reading) {
@@ -445,27 +456,35 @@ func TestCapacityEnforcesSchedulesSnapshotsAndSingleRefresh(t *testing.T) {
 	route(409)
 	short.ReadAt = now.Add(200 * time.Millisecond)
 	report(short)
-	run = route(200)
-	release(run) // Missing weekly bucket no longer constrains this source.
+	route(409) // A missing weekly bucket cannot erase its full reading.
 	if n := scalar(t, admin, `SELECT count(*) FROM account_allowance_windows WHERE account_id=$1 AND capacity_retired`, a.ID); n != 1 {
 		t.Fatal("missing bucket not retired", n)
 	}
-	// Out-of-order history cannot resurrect a missing bucket.
+	// Out-of-order history cannot clear the still-full bucket.
 	weekly.ReadAt = now.Add(150 * time.Millisecond)
+	report(weekly)
+	route(409)
+	weekly.ReadAt = now.Add(250 * time.Millisecond)
+	weekly.UsedPercent = 10
 	report(weekly)
 	run = route(200)
 	release(run)
 	// Retire the short window and introduce an older observation from a different source.
-	// Its first refresh job is bounded to one reservation even with 3 parallel slots.
+	// Stale room creates no quota fence; only the actual three slots bind.
 	stale := short
 	stale.Source = "agentd"
 	stale.ReadAt = now.Add(-20 * time.Minute)
 	stale.Bucket = "refresh"
 	report(stale)
 	run = route(200)
+	other := route(200)
+	third := route(200)
 	route(409)
 	release(run)
-	route(409)
+	release(other)
+	release(third)
+	run = route(200)
+	release(run)
 	stale.ReadAt = now.Add(300 * time.Millisecond)
 	report(stale)
 	run = route(200)
@@ -545,7 +564,10 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	other := addPrincipal(t, person.TenantID, "person", "Other", []string{"admin"})
 	issueKey(t, runner, []string{"account.read"})
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$1 WHERE principal_id=$2 AND created_by_principal_id IS NULL`, other.ID, runner.ID)
+		tag, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$1 WHERE principal_id=$2 AND scopes=ARRAY['account.read']`, other.ID, runner.ID)
+		if err == nil && tag.RowsAffected() != 1 {
+			t.Fatalf("second creator assigned to %d keys, want 1", tag.RowsAffected())
+		}
 		return err
 	})
 	if err != nil {
@@ -558,7 +580,7 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	check("America/New_York", "")
 }
 
-func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
+func TestExpiredCapacityHasNoStartFence(t *testing.T) {
 	reset(t)
 	person := makePrincipal(t, "expired-capacity", "person", "Ada", []string{"admin"})
 	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
@@ -567,6 +589,7 @@ func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"expired","harness":"codex","daemon_id":"daemon-a","label":"Expired","max_parallel_runs":3}`, 201, &a)
+	ownFixtureAccount(t, person, &a)
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	s := capacity.DefaultSchedule()
 	s.Week = capacity.Preset(7)
@@ -587,7 +610,7 @@ func TestExpiredCapacityGetsOneProvisionalRefresh(t *testing.T) {
 	}
 	second := insertRun(t, person, runner, profile)
 	body := encoded(t, map[string]any{"run_id": second, "daemon_id": "daemon-a", "account_ids": []string{a.ID}, "estimated_units": map[string]int64{"requests": 1}})
-	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", body, 409, nil)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", body, 200, nil)
 	reading.ReadAt = now
 	reading.ResetsAt = now.Add(time.Hour)
 	reading.UsedPercent = 1
@@ -603,6 +626,7 @@ func TestCapacityPreviewPacesDraftWithoutSaving(t *testing.T) {
 	mod := accountsMod()
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Codex"}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
 	now := time.Now().UTC()
 	r := capacity.Reading{WindowKind: "weekly", WindowMinutes: 7 * 24 * 60, UsedPercent: 40, ResetsAt: now.Add(72 * time.Hour), ReadAt: now.Add(-time.Minute), Source: "harness"}
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/readings", encoded(t, readingsWrite{[]capacity.Reading{r}}), 204, nil)

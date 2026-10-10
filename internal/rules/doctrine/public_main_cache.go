@@ -23,10 +23,11 @@ type publicMainSnapshot struct {
 func (m *Module) readPublicMain(ctx context.Context, tenantID string, s Source) *publicMainSnapshot {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
-	r, err := m.reader(tenantID, s.Repository, s.CredentialRef)
+	r, cleanup, err := m.reader(ctx, tenantID, s.Repository, s.CredentialRef)
 	if err != nil {
 		return nil
 	}
+	defer cleanup()
 	observed := time.Now()
 	main, err := r.Commit(ctx, s.Repository, "main")
 	if err != nil {
@@ -58,6 +59,14 @@ func storePublicMain(ctx context.Context, tx pgx.Tx, tenantID string, s Source, 
 // hit, only a recent independently resolved main tree can exempt cached blobs.
 // Missing/stale/malformed caches refuse; this path never refreshes them.
 func (m *Module) checkPrivateQuotes(ctx context.Context, actor tenant.Principal, s Source, files []File, guard *guardCorpus, texts ...string) (string, error) {
+	return m.checkPrivateQuotesWith(ctx, s, files, guard, func(fn func(pgx.Tx) error) error { return m.tx(ctx, actor, "rules.write", fn) }, texts...)
+}
+
+func (m *Module) checkPrivateQuotesTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Source, files []File, guard *guardCorpus, texts ...string) (string, error) {
+	return m.checkPrivateQuotesWith(ctx, s, files, guard, func(fn func(pgx.Tx) error) error { return fn(tx) }, texts...)
+}
+
+func (m *Module) checkPrivateQuotesWith(ctx context.Context, s Source, files []File, guard *guardCorpus, read func(func(pgx.Tx) error) error, texts ...string) (string, error) {
 	var exemptMain string
 	err := withGuardSlot(ctx, func() error {
 		err := guardPrivateQuotes(guard, nil, texts...)
@@ -70,7 +79,7 @@ func (m *Module) checkPrivateQuotes(ctx context.Context, actor tenant.Principal,
 		}
 		var cached publicMainSnapshot
 		var raw []byte
-		err = m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
+		err = read(func(tx pgx.Tx) error {
 			return tx.QueryRow(ctx, `SELECT c.main_commit,c.observed_at,c.tree FROM doctrine_public_main_cache c
 				JOIN doctrine_sources s ON s.tenant_id=c.tenant_id AND s.id=c.source_id
 				WHERE c.source_id=$1 AND c.pin_commit=$2 AND s.commit_sha=c.pin_commit AND s.index_error='' AND s.indexed_at IS NOT NULL`, s.ID, s.Commit).Scan(&cached.Commit, &cached.ObservedAt, &raw)

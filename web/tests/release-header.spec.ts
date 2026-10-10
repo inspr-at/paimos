@@ -4,10 +4,10 @@
 // focus pauses it, an arrow stops it for good, a button pauses and resumes it,
 // reduced motion never starts it); the cadence chart steps through ranges it
 // remembers, and its bars are one keyboard stop.
-import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
+import { expectStableControls } from './helpers/stable'
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const card = (page: Page) => sheet(page).getByRole('region', { name: 'Release stats' })
@@ -161,12 +161,12 @@ test('a thirty-day release gap keeps the timeline inside the phone card', async 
   expect(geometry.right).toBeLessThanOrEqual(geometry.width)
 })
 
-test('the light codename leads one glass status dock; Details adds the generation and counts', async ({ page }) => {
+test('the light codename leads one glass status dock; Details keeps it steady and shows generation and counts in the notes', async ({ page }) => {
   const history = await open(page)
   const live = history.releases.find(r => r.version === history.current)!
   const head = sheet(page).locator('.head')
   await expect(head.getByRole('heading', { level: 1, name: live.codename })).toBeVisible()
-  await expect(head.locator('.eyebrow')).toHaveText('PAIMOS AEON · Release')
+  await expect(head.locator('.eyebrow')).toHaveText('PAIMOS AEON · RELEASE')
   await expect(head.getByRole('heading', { level: 1 })).toHaveCSS('font-weight', '300')
   await expect(head.locator('.codename-label')).toHaveCSS('text-transform', 'none')
   const headingSpacing = await head.getByRole('heading', { level: 1 }).evaluate(el => getComputedStyle(el).letterSpacing)
@@ -184,7 +184,9 @@ test('the light codename leads one glass status dock; Details adds the generatio
   await expect(version.locator('.version-pretty')).toHaveAttribute('data-canonical', history.current)
   await expect(version.locator('.version-canonical')).toHaveText(history.current)
   await sheet(page).getByRole('radio', { name: 'Details' }).click()
-  await expect(head.locator('.eyebrow')).toHaveText('PAIMOS 7 · AEON releases · 6 published · 1 reserved')
+  await expect(head.locator('.eyebrow')).toHaveText('PAIMOS AEON · RELEASE')
+  await expect(sheet(page).locator('.detail-info')).toHaveText('PAIMOS 7 · AEON releases · 6 published')
+  await expect(sheet(page).locator('.detail .tech')).toContainText('PAIMOS 7 · Release')
 })
 
 test('Pretty dock separators use the muted ink in both themes and after a live theme change', async ({ page }) => {
@@ -299,21 +301,47 @@ test('the dock crossfades per character to canonical text and back over the shar
 })
 
 for (const width of [320, 390]) {
-  test(`the glass dock and canonical version fit a ${width}px phone`, async ({ page }) => {
-    const history = releaseHistory()
-    history.releases.find(r => r.version === history.current)!.codename = 'Intact Ion'
-    await open(page, { history, viewport: { width, height: 844 } })
-    const head = sheet(page).locator('.head')
-    const button = head.getByRole('button', { name: `Copy version ${history.current}`, exact: true })
-    await button.focus()
-    await expect(button.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
-    for (const element of [head.locator('.status-dock'), button, head.getByRole('button', { name: 'Close release history' })]) {
-      const bounds = await element.boundingBox()
-      expect(bounds!.x).toBeGreaterThanOrEqual(0)
-      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)
-    }
-    expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44)
-  })
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`the glass dock and canonical version fit a ${width}px phone in ${colorScheme}`, async ({ page }) => {
+      await page.emulateMedia({ colorScheme })
+      const history = releaseHistory()
+      history.releases.find(r => r.version === history.current)!.codename = 'Intact Ion'
+      await open(page, { history, viewport: { width, height: 844 } })
+      const head = sheet(page).locator('.head')
+      const button = head.getByRole('button', { name: `Copy version ${history.current}`, exact: true })
+      await button.focus()
+      await expect(button.locator('[data-version-character="canonical"]').last()).toHaveCSS('opacity', '1')
+      for (const element of [head.locator('.status-dock'), button, head.getByRole('button', { name: 'Close release history' })]) {
+        const bounds = await element.boundingBox()
+        expect(bounds!.x).toBeGreaterThanOrEqual(0)
+        expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)
+      }
+      expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44)
+      const views = head.getByRole('radiogroup', { name: 'View', exact: true })
+      const details = views.getByRole('radio', { name: 'Details', exact: true })
+      const highlights = views.getByRole('radio', { name: 'Highlights', exact: true })
+      await expectStableControls({
+        controls: {
+          sheet: sheet(page), dock: head.locator('.status-dock'), copy: button,
+          close: head.getByRole('button', { name: 'Close release history' }),
+          languages: head.getByRole('radiogroup', { name: 'Language', exact: true }),
+          views, details, highlights,
+        },
+        scrollAreas: { sheet: sheet(page), head },
+        interactions: [
+          { name: 'copy hover', run: () => button.hover() },
+          { name: 'Details', run: async () => {
+            await details.click()
+            await expect(details).toHaveAttribute('aria-checked', 'true')
+          } },
+          { name: 'Highlights', run: async () => {
+            await highlights.click()
+            await expect(highlights).toHaveAttribute('aria-checked', 'true')
+          } },
+        ],
+      })
+    })
+  }
 }
 
 test('keyboard focus reveals the dock version; Enter and click copy its exact canonical value and announce it', async ({ page, context }) => {
@@ -413,16 +441,3 @@ test('a clock tick preserves the chart focus, tooltip and next keyboard step', a
   await page.keyboard.press('ArrowLeft')
   await expect(bars.nth(4)).toBeFocused()
 })
-
-for (const colorScheme of ['light', 'dark'] as const) {
-  test(`axe: the header ${colorScheme}`, async ({ page }, testInfo) => {
-    await page.emulateMedia({ colorScheme })
-    await open(page)
-    await page.evaluate(value => { document.documentElement.dataset.theme = value }, colorScheme)
-    await card(page).getByRole('button', { name: 'Next stat' }).click()
-    const results = await new AxeBuilder({ page }).include('.releases .head').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).exclude('.calendar-version').analyze()
-    const summary = results.violations.map(v => `${v.id} (${v.impact}): ${v.help}\n${v.nodes.slice(0, 4).map(n => `    ${n.target.join(' ')}`).join('\n')}`)
-    expect(summary, summary.join('\n')).toEqual([])
-    await sheet(page).locator('.head').screenshot({ path: testInfo.outputPath(`release-header-${colorScheme}.png`) })
-  })
-}

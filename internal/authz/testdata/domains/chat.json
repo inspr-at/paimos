@@ -1,0 +1,95 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "chat.bind",
+      "chat.read",
+      "chat.receive",
+      "chat.send"
+    ],
+    "member": [
+      "chat.bind",
+      "chat.read",
+      "chat.receive",
+      "chat.send"
+    ],
+    "owner": [
+      "chat.bind",
+      "chat.read",
+      "chat.receive",
+      "chat.send"
+    ]
+  },
+  "project_decided": {
+    "POST /api/chat-deliveries/binding/resolve": true,
+    "POST /api/chat-threads/{id}/binding": true
+  },
+  "project_filtered": {
+    "GET /api/chat-threads/{id}": true
+  },
+  "registry": [
+    {
+      "agent_grantable": false,
+      "description": "Bind chat",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Chat",
+      "key": "chat.bind",
+      "owner_workstation_grantable": false,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read chat",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Chat",
+      "key": "chat.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Receive chat",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Chat",
+      "key": "chat.receive",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Send chat",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Chat",
+      "key": "chat.send",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "routes": {
+    "GET /api/chat-threads/{id}": "chat.read",
+    "GET /api/chat-threads/{id}/messages": "chat.read",
+    "GET /api/chat-threads/{id}/read-marker": "chat.read",
+    "POST /api/chat-deliveries/binding/resolve": "chat.receive",
+    "POST /api/chat-threads/{id}/binding": "chat.bind",
+    "POST /api/projects/{projectId}/chat-roles": "chat.bind",
+    "POST /api/projects/{projectId}/chat-threads/resolve": "chat.read",
+    "PUT /api/chat-threads/{id}/read-marker": "chat.read"
+  },
+  "words": {
+    "resources": {
+      "chat": "agent conversations"
+    }
+  }
+}

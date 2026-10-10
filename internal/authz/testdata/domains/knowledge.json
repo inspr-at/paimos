@@ -1,0 +1,92 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "knowledge.delete",
+      "knowledge.read",
+      "knowledge.write"
+    ],
+    "guest": [
+      "knowledge.read"
+    ],
+    "member": [
+      "knowledge.delete",
+      "knowledge.read",
+      "knowledge.write"
+    ],
+    "owner": [
+      "knowledge.delete",
+      "knowledge.read",
+      "knowledge.write"
+    ],
+    "viewer": [
+      "knowledge.read"
+    ]
+  },
+  "project_decided": {
+    "POST /api/knowledge": true
+  },
+  "project_filtered": {
+    "GET /api/knowledge": true,
+    "GET /api/knowledge/graph": true,
+    "GET /api/knowledge/learnings": true,
+    "GET /api/knowledge/resolve": true
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Delete knowledge",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Knowledge",
+      "key": "knowledge.delete",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read knowledge",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Knowledge",
+      "key": "knowledge.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write knowledge",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Knowledge",
+      "key": "knowledge.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "routes": {
+    "DELETE /api/knowledge/{id}": "knowledge.delete",
+    "GET /api/knowledge": "knowledge.read",
+    "GET /api/knowledge/graph": "knowledge.read",
+    "GET /api/knowledge/learnings": "knowledge.read",
+    "GET /api/knowledge/resolve": "knowledge.read",
+    "GET /api/knowledge/{id}": "knowledge.read",
+    "PATCH /api/knowledge/{id}": "knowledge.write",
+    "POST /api/knowledge": "knowledge.write",
+    "POST /api/knowledge/learnings/{learningId}/accept": "knowledge.write",
+    "POST /api/knowledge/learnings/{learningId}/dismiss": "knowledge.write",
+    "POST /api/knowledge/learnings/{learningId}/draft": "knowledge.write",
+    "PUT /api/knowledge/learnings/{learningId}/recommendation": "knowledge.write"
+  },
+  "words": {
+    "resources": {
+      "knowledge": "knowledge"
+    }
+  }
+}

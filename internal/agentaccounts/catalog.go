@@ -8,18 +8,21 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
 // ModelsForRun projects the same catalog as /agent-accounts/catalog, scoped to
 // the exact enrolled account of a run. It exposes no account credentials or keys.
 func ModelsForRun(ctx context.Context, tx pgx.Tx, runID, harness string) ([]CatalogModel, error) {
 	var account Account
-	err := tx.QueryRow(ctx, `SELECT a.harness,a.allowed_model_profile_ids::text[]
+	err := tx.QueryRow(ctx, `SELECT a.harness,aeon_account_allowed_profile_ids(a.harness,a.allowed_model_profile_ids)::text[]
 		FROM agent_runs r JOIN agent_accounts a ON a.id=r.account_id AND a.tenant_id=r.tenant_id
 		WHERE r.id=$1 AND a.harness=$2 AND a.daemon_id=r.daemon_id`, runID, harness).Scan(&account.Harness, &account.AllowedProfileIDs)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -112,9 +115,9 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 	if role == "" {
 		role = "build"
 	}
-	if !slices.Contains([]string{"scout", "mechanical", "build", "build-hard", "review-gate"}, role) ||
-		(family != "" && !slices.Contains([]string{"openai", "anthropic", "xai", "cursor"}, family)) ||
-		(role == "review-gate" && family == "") {
+	if !slices.Contains([]string{"scout", "mechanical", "build", "build-hard", "review-gate", "review-gate-security"}, role) ||
+		(family != "" && !reviewgate.ValidFamily(family)) ||
+		(strings.HasPrefix(role, "review-gate") && family == "") {
 		writeErr(w, fail(http.StatusBadRequest, "invalid role or author family"))
 		return
 	}
@@ -125,6 +128,10 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		accounts, err := listAccounts(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		accounts, err = expandCatalogAllowances(r.Context(), tx, accounts)
 		if err != nil {
 			return err
 		}
@@ -184,10 +191,14 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 	// suppressions. Read-only: catalog initialization remains modelregistry's job.
 	rows, err := tx.Query(ctx, `
 		SELECT p.id::text,p.harness,p.model,p.family,p.effort,p.version,r.priority
-		FROM model_profiles p LEFT JOIN model_role_routes r
+		FROM model_profiles p LEFT JOIN (`+ModelRoleRoutesSQL+`) r
 		  ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.role=$1
+		LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
 		WHERE p.enabled
-		  AND ($1 <> 'review-gate' OR (p.family <> $2 AND p.family <> 'unknown' AND r.profile_id IS NOT NULL))
+		  AND p.model NOT IN ('gpt-6-terra','gpt-6.1-astra','gpt-6.1-luna','gpt-6.1-terra')
+		  AND (o.suppressed_until IS NULL OR o.suppressed_until <= $3)
+		  AND ($1 <> 'review-gate-security' OR p.family <> 'anthropic')
+		  AND ($1 NOT IN ('review-gate','review-gate-security') OR (p.family <> $2 AND p.family <> 'unknown' AND r.profile_id IS NOT NULL))
 		  AND (r.state IS NULL OR r.state='available' OR r.valid_until <= $3)
 		ORDER BY p.harness,p.model,p.family,p.effort,p.created_at DESC,p.id`, role, authorFamily, now)
 	if err != nil {
@@ -199,6 +210,10 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 		var p catalogProfile
 		if err := rows.Scan(&p.ID, &p.Harness, &p.Model, &p.Family, &p.Effort, &p.Version, &p.Priority); err != nil {
 			return nil, err
+		}
+		family := harnesslaunch.ModelFamily(p.Harness, p.Model)
+		if family != p.Family || strings.HasPrefix(role, "review-gate") && (!harnesslaunch.FamilyMatches(p.Harness, p.Model, p.Family) || family == authorFamily) {
+			continue
 		}
 		profiles = append(profiles, p)
 	}

@@ -124,15 +124,15 @@ test('No heartbeat rows carry a bin; live rows keep the confirm', async ({ page 
   await expect(page.getByRole('dialog', { name: 'Remove codex-outside?' })).toContainText('Its process keeps running')
 })
 
-test('an unmanaged session menu offers only what works, with one quiet line', async ({ page }) => {
+test('an unmanaged inbox session offers durable Pause/Stop, with one quiet line', async ({ page }) => {
   const { live } = await setup(page)
   await page.goto('/agents')
   await row(page, live.id).hover()
   await row(page, live.id).getByRole('button', { name: 'Actions for codex-outside' }).click()
   const menu = page.getByRole('menu', { name: 'Actions for codex-outside' })
-  await expect(menu.getByRole('menuitem')).toHaveText([/^Open PHAROS-12/, 'Copy session id', 'Remove…'])
+  await expect(menu.getByRole('menuitem')).toHaveText(['Pause…', /^Open PHAROS-12/, 'Copy session id', 'Stop now…', 'Remove…'])
   await expect(menu).toContainText(/Runs outside aeon — stop it in its terminal/i)
-  await expect(menu.getByRole('menuitem', { name: /Interrupt|Stop/ })).toHaveCount(0)
+  await expect(menu.getByRole('menuitem', { name: /Interrupt|Name, model, effort/ })).toHaveCount(0)
   await expect(page.locator('[role="menuitem"][aria-disabled="true"], [role="menuitem"]:disabled')).toHaveCount(0)
   await menu.getByRole('menuitem', { name: /^Open PHAROS-12/ }).click()
   await expect(page).toHaveURL(/\/PHAROS-12$/)
@@ -144,7 +144,7 @@ test('a managed session menu offers Interrupt, Stop, settings and Remove', async
   await row(page, lead.id).hover()
   await row(page, lead.id).getByRole('button', { name: 'Actions for claude-lead' }).click()
   const menu = page.getByRole('menu', { name: 'Actions for claude-lead' })
-  await expect(menu.getByRole('menuitem')).toHaveText([/^Interrupt/, 'Stop session…', 'Name, model, effort', /^Open PHAROS-11/, 'Copy session id', 'Remove…'])
+  await expect(menu.getByRole('menuitem')).toHaveText(['Pause…', /^Interrupt this step/, 'Name, model, effort', /^Open PHAROS-11/, 'Copy session id', 'Stop now…', 'Remove…'])
   await expect(menu).not.toContainText('Runs outside')
   // managed_control_v1: Interrupt goes through the ownership-aware route, bound to the process generation.
   await menu.getByRole('menuitem', { name: /^Interrupt/ }).click()
@@ -158,10 +158,10 @@ test('a managed session menu offers Interrupt, Stop, settings and Remove', async
 })
 
 // The row menu and the panel share one eligibility rule with the server (AEON-291).
-for (const [state, change, rowItems, panelHint] of [
-  ['without the stop capability', { advertised_capabilities: ['inbox', 'status', 'steer', 'interrupt', 'managed_control_v1', 'rename', 'model', 'effort'] }, [], 'This session does not take controls from here.'],
-  ['with a failed run', { run_status: 'failed' }, [], 'Its run is not running.'],
-  ['with only the stop capability', { advertised_capabilities: ['inbox', 'status', 'stop', 'managed_control_v1'] }, ['Stop session…'], ''],
+for (const [state, change, panelHint] of [
+  ['without the stop capability', { advertised_capabilities: ['inbox', 'status', 'steer', 'interrupt', 'managed_control_v1', 'rename', 'model', 'effort'] }, 'This session does not take controls from here.'],
+  ['with a failed run', { run_status: 'failed' }, 'Its run is not running.'],
+  ['with only the stop capability', { advertised_capabilities: ['inbox', 'status', 'stop', 'managed_control_v1'] }, ''],
 ] as const) {
   test(`a managed_control_v1 session ${state} offers only controls the server accepts`, async ({ page }) => {
     const { lead, managed, legacy } = await setup(page)
@@ -170,17 +170,20 @@ for (const [state, change, rowItems, panelHint] of [
     await row(page, lead.id).hover()
     await row(page, lead.id).getByRole('button', { name: 'Actions for claude-lead' }).click()
     const menu = page.getByRole('menu', { name: 'Actions for claude-lead' })
-    await expect(menu.getByRole('menuitem', { name: /^(Interrupt|Stop session…)/ })).toHaveText([...rowItems])
+    await expect(menu.getByRole('menuitem', { name: /^(Pause…|Stop now…)/ })).toHaveText(['Pause…', 'Stop now…'])
+    await expect(menu.getByRole('menuitem', { name: /^Interrupt/ })).toHaveCount(0)
     await page.keyboard.press('Escape')
     await expect(row(page, lead.id).getByRole('button', { name: 'Interrupt claude-lead' })).toHaveCount(0)
     await page.goto(`/agents/${lead.id}`)
     const controls = page.getByRole('region', { name: 'Session controls' })
+    await expect(page.getByRole('button', { name: 'Stop now…', exact: true })).toBeEnabled()
+    await expect(controls.getByRole('button', { name: 'Steer', exact: true })).toBeDisabled()
+    await controls.getByRole('button', { name: 'More session controls', exact: true }).click()
     if (panelHint) {
       await expect(controls).toContainText(panelHint)
-      for (const name of ['Steer', 'Interrupt', 'Stop']) await expect(controls.getByRole('button', { name, exact: true })).toBeDisabled()
+      await expect(page.getByRole('menuitem', { name: /^Interrupt this step/ })).toBeDisabled()
     } else {
-      await expect(controls.getByRole('button', { name: 'Stop', exact: true })).toBeEnabled()
-      await expect(controls.getByRole('button', { name: 'Interrupt', exact: true })).toBeDisabled()
+      await expect(page.getByRole('menuitem', { name: /^Interrupt/ })).toHaveCount(0)
     }
     expect([managed, legacy]).toEqual([[], []])
   })
@@ -201,21 +204,22 @@ test('a project-only harness.control grant controls that project in the row and 
   await page.goto('/agents')
   await row(page, lead.id).hover()
   await row(page, lead.id).getByRole('button', { name: 'Actions for claude-lead' }).click()
-  await expect(page.getByRole('menu', { name: 'Actions for claude-lead' }).getByRole('menuitem', { name: /^(Interrupt|Stop session…)/ })).toHaveText([/^Interrupt/, 'Stop session…'])
+  await expect(page.getByRole('menu', { name: 'Actions for claude-lead' }).getByRole('menuitem', { name: /^(Pause…|Stop now…|Interrupt)/ })).toHaveText(['Pause…', /^Interrupt this step/, 'Stop now…'])
   await page.keyboard.press('Escape')
   await row(page, elsewhere.id).hover()
   await row(page, elsewhere.id).getByRole('button', { name: 'Actions for aeon-worker' }).click()
-  await expect(page.getByRole('menu', { name: 'Actions for aeon-worker' }).getByRole('menuitem', { name: /^(Interrupt|Stop session…)/ })).toHaveCount(0)
+  await expect(page.getByRole('menu', { name: 'Actions for aeon-worker' }).getByRole('menuitem', { name: /^(Pause…|Stop now…|Interrupt)/ })).toHaveCount(0)
   await page.keyboard.press('Escape')
   // The panel agrees with the row.
   await page.goto(`/agents/${lead.id}`)
   const controls = page.getByRole('region', { name: 'Session controls' })
-  await expect(controls.getByRole('button', { name: 'Interrupt', exact: true })).toBeEnabled()
-  await controls.getByRole('button', { name: 'Interrupt', exact: true }).click()
+  await controls.getByRole('button', { name: 'More session controls', exact: true }).click()
+  await expect(page.getByRole('menuitem', { name: /^Interrupt this step/ })).toBeEnabled()
+  await page.getByRole('menuitem', { name: /^Interrupt this step/ }).click()
   await expect.poll(() => managed.length).toBe(1)
 })
 
-test('a managed_control_v1 session without fresh ownership offers no Interrupt or Stop', async ({ page }) => {
+test('a managed_control_v1 session without fresh ownership offers no managed controls', async ({ page }) => {
   const { lead } = await setup(page)
   await page.route(/\/api\/harness-sessions\?/, async route => route.fallback())
   lead.process_observed_at = new Date(Date.now() - 5 * 60_000).toISOString()
@@ -223,7 +227,9 @@ test('a managed_control_v1 session without fresh ownership offers no Interrupt o
   await page.goto('/agents')
   await row(page, lead.id).hover()
   await row(page, lead.id).getByRole('button', { name: 'Actions for claude-lead' }).click()
-  await expect(page.getByRole('menu', { name: 'Actions for claude-lead' }).getByRole('menuitem', { name: /Interrupt|Stop session/ })).toHaveCount(0)
+  const menu = page.getByRole('menu', { name: 'Actions for claude-lead' })
+  await expect(menu.getByRole('menuitem', { name: /Interrupt|Name, model, effort/ })).toHaveCount(0)
+  await expect(menu.getByRole('menuitem', { name: /^(Pause…|Stop now…)/ })).toHaveText(['Pause…', 'Stop now…'])
 })
 
 test('sessions that ended over a day ago leave the list and stay in History', async ({ page }) => {
@@ -247,12 +253,14 @@ test('sessions that ended over a day ago leave the list and stay in History', as
   await expect(page.getByRole('complementary', { name: 'Session details' })).toContainText('old-run')
 })
 
-test('the panel of a session outside Aeon offers no Interrupt or Stop, one quiet line instead', async ({ page }) => {
+test('the panel of an outside inbox session offers durable Pause/Stop, one quiet line', async ({ page }) => {
   const { live, lost } = await setup(page)
   await page.goto(`/agents/${live.id}`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await expect(panel).toContainText(/Runs outside aeon — stop it in its terminal/i)
-  await expect(panel.getByRole('button', { name: /^(Interrupt|Stop)$/ })).toHaveCount(0)
+  await expect(panel.getByRole('region', { name: 'Session controls' })).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: 'More session actions', exact: true })).toHaveCount(0)
+  for (const name of ['Pause…', 'Stop now…']) await expect(panel.getByRole('button', { name, exact: true })).toBeVisible()
   await expect(panel.getByRole('button', { name: 'Remove codex-outside' })).toHaveText('Remove…')
   await page.goto(`/agents/${lost.id}`)
   await expect(panel).toContainText('Lost contact')
@@ -282,14 +290,14 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     if (shots) {
       await row(page, lost.id).scrollIntoViewIfNeeded()
       await page.mouse.move(0, 0)
-      await page.screenshot({ path: `${shots}/list-${width}-${theme}.png` })
+      await page.screenshot({ path: test.info().outputPath(`list-${width}-${theme}.png`) })
     }
     await row(page, live.id).scrollIntoViewIfNeeded()
     await row(page, live.id).hover()
     await row(page, live.id).getByRole('button', { name: 'Actions for codex-outside' }).click()
     await expect(page.getByRole('menu', { name: 'Actions for codex-outside' })).toBeVisible()
     if (width === 390) for (const item of await page.getByRole('menuitem').all()) expect((await item.boundingBox())!.height).toBeGreaterThanOrEqual(44)
-    if (shots) await page.screenshot({ path: `${shots}/menu-unmanaged-${width}-${theme}.png` })
+    if (shots) await page.screenshot({ path: test.info().outputPath(`menu-unmanaged-${width}-${theme}.png`) })
     await page.keyboard.press('Escape')
     await row(page, lost.id).getByRole('button', { name: 'Remove cursor-275' }).click()
     await expect(page.getByRole('button', { name: 'Undo', exact: true })).toBeVisible()
@@ -298,15 +306,15 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
       expect(box.height).toBeGreaterThanOrEqual(44)
       expect(box.width).toBeGreaterThanOrEqual(name === 'Dismiss' ? 44 : 40)
     }
-    if (shots) await page.screenshot({ path: `${shots}/undo-${width}-${theme}.png` })
+    if (shots) await page.screenshot({ path: test.info().outputPath(`undo-${width}-${theme}.png`) })
     await page.getByRole('button', { name: 'Show history: every ended or removed session' }).click()
     await expect(page.getByRole('heading', { name: 'History' })).toBeVisible()
-    if (shots) { await page.getByRole('heading', { name: 'History' }).scrollIntoViewIfNeeded(); await page.screenshot({ path: `${shots}/history-${width}-${theme}.png` }) }
+    if (shots) { await page.getByRole('heading', { name: 'History' }).scrollIntoViewIfNeeded(); await page.screenshot({ path: test.info().outputPath(`history-${width}-${theme}.png`) }) }
     await page.goto(`/agents/${live.id}`)
     await page.evaluate(t => { document.documentElement.dataset.theme = t }, theme)
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel).toContainText(/Runs outside aeon/i)
     if (width === 390) expect((await panel.getByRole('button', { name: 'Remove codex-outside' }).boundingBox())!.height).toBeGreaterThanOrEqual(44)
-    if (shots) await page.screenshot({ path: `${shots}/panel-unmanaged-${width}-${theme}.png` })
+    if (shots) await page.screenshot({ path: test.info().outputPath(`panel-unmanaged-${width}-${theme}.png`) })
   })
 }

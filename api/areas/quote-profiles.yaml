@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/business/quotes
+paths:
+  /quote-profiles:
+    get:
+      operationId: listQuoteProfiles
+      summary: List tenant quote document profiles
+      security: [{session: []}]
+      responses:
+        '200': {description: Profiles, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/QuoteProfile'}}}}}
+    post:
+      operationId: createQuoteProfile
+      summary: Create a versioned tenant quote profile
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteProfileWrite'}}}}
+      responses:
+        '201': {description: Profile, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteProfile'}}}}
+  /quote-profiles/assets:
+    post:
+      operationId: uploadQuoteProfileAsset
+      summary: Upload a TTF, OTF, WOFF2, PNG or safe SVG for a quote profile
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/octet-stream: {schema: {type: string, format: binary}}}}
+      responses:
+        '201': {description: Asset, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteProfileAsset'}}}}
+  /quote-profiles/assets/{assetId}:
+    get:
+      operationId: getQuoteProfileAsset
+      summary: Serve an immutable profile asset to tenant staff
+      security: [{session: []}]
+      parameters: [{name: assetId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Font or mark bytes, content: {application/octet-stream: {schema: {type: string, format: binary}}}}
+  /quote-profiles/{profileId}:
+    get:
+      operationId: getQuoteProfile
+      summary: Get the current profile or a retained revision
+      security: [{session: []}]
+      parameters: [{name: profileId, in: path, required: true, schema: {type: string, format: uuid}}, {name: revision, in: query, schema: {type: integer, minimum: 1}}]
+      responses:
+        '200': {description: Profile, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteProfile'}}}}
+    patch:
+      operationId: updateQuoteProfile
+      summary: Create a new immutable profile revision
+      security: [{session: []}]
+      parameters: [{name: profileId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteProfileWrite'}}}}
+      responses:
+        '200': {description: New revision, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteProfile'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: archiveQuoteProfile
+      summary: Archive a profile for new quotes; retained revisions remain readable
+      security: [{session: []}]
+      parameters: [{name: profileId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '204': {description: Archived}
+  /quote-profiles/{profileId}/undo:
+    post:
+      operationId: undoQuoteProfile
+      summary: Undo the latest profile save or archive; a restored prior definition becomes a new revision
+      security: [{session: []}]
+      parameters: [{name: profileId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}}}}
+      responses:
+        '200': {description: Restored profile, content: {application/json: {schema: {$ref: '#/components/schemas/QuoteProfile'}}}}
+components:
+  schemas:
+    QuoteProfile:
+      type: object
+      required: [id, name, revision, definition, archived]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string, maxLength: 100}
+        revision: {type: integer, minimum: 1}
+        definition: {$ref: '#/components/schemas/QuoteProfileDefinition'}
+        archived: {type: boolean}
+    QuoteProfileAsset:
+      type: object
+      required: [id, sha256, content_type, size]
+      properties:
+        id: {type: string, format: uuid}
+        sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        content_type: {type: string, enum: [font/ttf, font/otf, font/woff2, image/png, image/svg+xml]}
+        size: {type: integer, minimum: 1}
+    QuoteProfileDefinition:
+      type: object
+      additionalProperties: false
+      required: [schema, layout_variant, locale, fonts, colors, typography, page, cover, sections, positions_table, totals, payment_terms, acceptance, footer, labels]
+      properties:
+        schema: {type: string, const: inspr.document-profile.v1}
+        layout_variant: {type: string, enum: [standard, classic-v1]}
+        locale: {type: string, enum: [de-AT, en]}
+        fonts: {type: array, maxItems: 12, items: {type: object, required: [role, family, weight, style, asset_id], properties: {role: {type: string, enum: [body, display]}, family: {type: string}, weight: {type: integer, minimum: 100, maximum: 900}, style: {type: string, enum: [normal, italic]}, asset_id: {type: string, format: uuid}}}}
+        colors: {type: object, additionalProperties: {type: string, pattern: '^#[0-9a-fA-F]{6}$'}, description: 'Tokens: ink, muted, soft, accent, rule, paper'}
+        typography: {type: object, additionalProperties: {type: string, description: Exact point size or unitless line height}}
+        page: {type: object, description: A4 geometry and four exact decimal millimetre margins}
+        cover: {type: object, description: Cover layout and spacing in exact decimal millimetres}
+        sections: {type: object, description: Hierarchy and numbering style}
+        positions_table: {type: object, description: 'Ordered columns, exact millimetre widths, separators and repeated headings'}
+        totals: {type: object, description: 'Net, VAT and discount display modes; amounts remain integer minor units'}
+        payment_terms: {type: object, description: Payment block style and heading}
+        acceptance: {type: object, description: Signature count and spacing}
+        footer: {type: object, description: 'Optional mark asset, width, offset, and page number template'}
+        labels: {type: object, additionalProperties: {type: string}, description: Localized document labels}
+    QuoteProfileWrite:
+      type: object
+      additionalProperties: false
+      required: [name, definition]
+      properties:
+        name: {type: string, maxLength: 100}
+        expected_revision: {type: integer, minimum: 1, description: Required for an update}
+        definition: {$ref: '#/components/schemas/QuoteProfileDefinition'}

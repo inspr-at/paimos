@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-499: Accounts and computers on /agents, computer first. Each computer is
-// a card with its status and its accounts inside, one readiness state each; an
-// offline computer says why and the one fix and never calls an account ready;
-// pacing is one summary button; destructive actions live in row menus.
-// AEON499_SHOTS=<dir> also writes screenshots at 1280 and 390.
-import { mkdirSync } from 'node:fs'
+// AEON-782: Accounts and computers on /agents is a status line and what blocks
+// agents (the approved design of AEON-721). The head says the state; unfolded,
+// the body holds Needs you, the sign-ins grid and the pacing line. Lists,
+// capacity, pacing and the account menu live in Settings (AEON-686, AEON-786);
+// every name and cell opens the right panel there.
 import AxeBuilder from '@axe-core/playwright'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { ACCOUNTS, NOW, TZ, capacityWorld, type CapacityOptions } from './capacity-fixtures'
+import { expectStableControls } from './helpers/stable'
+import { controlStability } from './control-stability'
+import type { PairingView } from '../src/lib/agentPairing'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 test.use({ timezoneId: TZ })
@@ -23,254 +25,386 @@ const world: AgentWorld = {
     'n-a1': { key: 'AEON-1', title: 'Aeon foundation' }, 'n-5': { key: 'PHAROS-15', title: 'Beacon health probes' }, 'n-6': { key: 'PHAROS-16', title: 'Retire the old dashboard' },
   },
 }
-async function setup(page: Page, options: CapacityOptions & { manage?: boolean } = {}) {
+interface Options extends CapacityOptions { manage?: boolean; thresholds?: { early_percent: number; urgent_percent: number }; unfolded?: boolean }
+/** Every sign-in reports ready and both computers are online: the calm state (the studio one is online here). */
+function calm(capacity: ReturnType<typeof capacityWorld>) {
+  for (const c of capacity.computers as unknown as PairingView[]) {
+    const harnesses = [...new Set(c.enrollments.map(e => e.harness))]
+    Object.assign(c, {
+      connectivity: 'online', revision: 1,
+      harness_statuses: Object.fromEntries(harnesses.map(h => [h, 'ready'])), harness_details: Object.fromEntries(harnesses.map(h => [h, { state: 'ready' }])),
+      verification_capabilities: Object.fromEntries(harnesses.map(h => [h, { supported: true, policy: 'read_only', reason: '' }])),
+    })
+  }
+}
+/** Claude's verification on build-7 ran out: the one thing that blocks agents. */
+function expireClaude(capacity: ReturnType<typeof capacityWorld>) {
+  const c = (capacity.computers as unknown as PairingView[])[0]!
+  const e = c.enrollments.find(e => e.account_id === ACCOUNTS.claude)!
+  Object.assign(e, { can_verify: true, verification_state: 'expired', verification_expired_ready: false })
+  return { c, e }
+}
+async function setup(page: Page, options: Options = {}) {
   await page.clock.setSystemTime(NOW)
   const work = fixtures()
   await mockWork(page, work, { admin: true })
   const data = agentData(world)
   const capacity = capacityWorld(options)
-  data.accounts = capacity.accounts as unknown as typeof data.accounts
+  calm(capacity)
+  data.accounts = (capacity.accounts as unknown as typeof data.accounts).map(a => ({ ...a, registered_by_principal_id: me.id }))
   data.approvals = data.approvals.filter(a => a.decision)
   data.messages = data.messages.filter(m => !m.is_action_request)
-  await mockAgents(page, data, { capacity })
+  if (options.unfolded) work.preferences['ui.agents.sections'] = { dial: true, accounts: true, sessions: true, queued: true }
+  await mockAgents(page, data, { capacity, workingPreference: () => work.preferences['agents.working'] })
+  const thresholds = options.thresholds ?? { early_percent: 5, urgent_percent: 2 }
+  await page.route('**/api/settings/quota-warnings', route => route.fulfill({ json: thresholds }))
   await page.route('**/api/me/permissions*', route => {
     const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
     answer.workspace.permissions = [...answer.workspace.permissions, 'account.read', ...(options.manage === false ? [] : ['account.manage']), 'run.create', 'run.read', 'models.read', 'work_orders.read']
     return route.fulfill({ json: answer })
   })
-  return { capacity, work, data }
+  return { capacity, work, data, thresholds }
 }
-const panel = (page: Page) => page.getByRole('region', { name: 'Accounts and computers' })
-const computer = (page: Page, name: string) => panel(page).getByRole('region', { name: `Computer ${name}` })
+const section = (page: Page) => page.getByRole('region', { name: 'Accounts and computers' })
+const title = (page: Page) => section(page).getByRole('button', { name: 'Accounts and computers', exact: true })
+const status = (page: Page) => section(page).locator('.fs-sum')
 async function open(page: Page) {
   await page.goto('/agents')
-  await expect(computer(page, 'mbp2607')).toBeVisible()
-}
-const shots = process.env.AEON499_SHOTS
-async function shot(page: Page, name: string) {
-  if (!shots) return
-  mkdirSync(shots, { recursive: true })
-  await panel(page).screenshot({ path: `${shots}/${name}.png`, animations: 'disabled' })
+  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
+  await expect(title(page)).toBeVisible()
+  await expect(status(page)).not.toContainText('Reading')
 }
 
-test('one card per computer: offline says why and the fix, and never calls an account ready', async ({ page }) => {
+test('calm: one status line folded; unfolded, nothing needs you and the grid names every sign-in', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
   await setup(page)
   await open(page)
-  const studio = computer(page, 'studio')
-  await expect(studio.getByText(/^Offline since /)).toBeVisible()
-  await expect(studio.getByRole('status')).toContainText('stopped reporting at')
-  await expect(studio.getByRole('status').locator('code')).toHaveText('aeon-agentd status')
-  await expect(studio.getByRole('row')).toHaveCount(1)
-  await expect(studio.getByRole('row').first()).toContainText('Paused · computer offline')
-  await expect(studio.getByText('Ready', { exact: true })).toHaveCount(0)
-  // The legend only where a bar is drawn: the online card has bars, the offline one none.
-  await expect(studio.getByText('stop here tonight')).toHaveCount(0)
-  const mbp = computer(page, 'mbp2607')
-  await expect(mbp.getByText(/^Online · seen /)).toBeVisible()
-  await expect(mbp.getByText('stop here tonight')).toBeVisible()
-  await expect(mbp.getByRole('row').filter({ hasText: 'Spare' })).toContainText('% left')
-  await expect(panel(page).getByText(/ of 6 ready · studio offline$/)).toBeVisible()
-  // No trash icon on a row: removal lives in the row menu.
-  await expect(panel(page).getByRole('button', { name: /^Remove/ })).toHaveCount(0)
-  const axe = await new AxeBuilder({ page }).include('.ac').analyze()
-  expect(axe.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])
-  await shot(page, 'desktop-offline-readings')
+  await expect(title(page)).toHaveAttribute('aria-expanded', 'false')
+  await expect(status(page)).toHaveText('All 6 ready · 2 computers online')
+  await expect(section(page).getByRole('link', { name: /Manage/ })).toHaveAttribute('href', '/settings/accounts')
+  await expect(section(page).getByRole('button', { name: 'Verify again' })).toHaveCount(0)
+  // Folded means no body: nothing to tab into, and none of today's cards, menus or pacing summary.
+  await expect(section(page).getByRole('heading', { name: 'Nothing needs you' })).toBeHidden()
+  await title(page).click()
+  await expect(section(page).getByRole('heading', { name: 'Nothing needs you' })).toBeVisible()
+  await expect(section(page).getByText('Everything else is working.')).toBeVisible()
+  const grid = section(page).getByRole('table')
+  await expect(grid.getByRole('columnheader')).toHaveText([/Account/, /build-7/, /studio/])
+  await expect(grid.getByRole('row')).toHaveCount(7)
+  await expect(grid.getByRole('link', { name: 'Claude on build-7: Ready' })).toBeVisible()
+  await expect(grid.getByText('Claude is not signed in on studio')).toBeAttached()
+  await expect(section(page).locator('.acc-foot')).toContainText('Pacing: 5 days · keep auto · no nights')
+  await expect(section(page).getByRole('region', { name: /^Computer / })).toHaveCount(0)
+  await expect(section(page).getByRole('button', { name: /days · keep/ })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Account availability notices' })).toHaveCount(0)
+  expect((await new AxeBuilder({ page }).include('.acc-section').analyze()).violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])
 })
 
-test('no reading yet is said once, with Check now; an offline computer has no reading', async ({ page }) => {
+test('a problem: the line names the first thing and counts the rest, and Verify again fixes it from the folded head', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
-  await setup(page, { unmeasured: true, unread: true })
-  await open(page)
-  // Every vendor without a reading, Pi and Cursor included: "No reading yet" and Check now (Ready.dc.html).
-  const pi = computer(page, 'mbp2607').getByRole('row').filter({ hasText: 'Pi on hsb1' })
-  await expect(pi).toContainText('No reading yet')
-  await expect(pi).not.toContainText('usage limit')
-  await expect(pi.getByRole('button', { name: 'Check now' })).toBeVisible()
-  await expect(computer(page, 'studio').getByRole('row').first()).toContainText('No reading while the computer is offline')
-  await shot(page, 'desktop-unmeasured')
-})
-
-// AEON-499 review: refresh() never rejected, so a failed read said "No reading yet".
-test('Check now says what came back: a failure as a failure, still nothing, then the reading', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 1100 })
-  const { capacity } = await setup(page, { unread: true })
-  await open(page)
-  const pi = computer(page, 'mbp2607').getByRole('row').filter({ hasText: 'Pi on hsb1' })
-  const toasts = page.locator('.toast')
-  let mode: 'fail' | 'empty' | 'read' = 'fail'
-  await page.route('**/api/agent-accounts/capacity', async route => {
-    if (route.request().method() !== 'GET' || mode === 'empty') return route.fallback()
-    if (mode === 'fail') return route.fulfill({ status: 500, json: { error: 'internal error' } })
-    const answer = capacity.handle('/api/agent-accounts/capacity', 'GET', undefined)!.json as { account_id: string; windows: unknown[] }[]
-    const spare = answer.find(a => a.windows.length)!
-    return route.fulfill({ json: answer.map(a => (a.account_id === ACCOUNTS.pi ? { ...a, windows: spare.windows } : a)) })
+  const { capacity } = await setup(page, { thresholds: { early_percent: 10, urgent_percent: 3 } })
+  const { c, e } = expireClaude(capacity)
+  let posted: unknown = null
+  await page.route('**/api/agent-pairing/computers/*/enrollments/*/verify', route => {
+    posted = route.request().postDataJSON()
+    Object.assign(e, { verification_state: 'queued', verification_run_id: 'b0000000-0000-4000-8000-000000000782' })
+    return route.fulfill({ json: { account_id: e.account_id, run_id: 'b0000000-0000-4000-8000-000000000782' } })
   })
-  // Failed: a 500 is an error with the server's answer, never the reassuring "no reading yet".
-  await pi.getByRole('button', { name: 'Check now' }).click()
-  await expect(toasts.filter({ hasText: /^Capacity could not be read: The server answered .internal error. \(500\)\. Please try again\./ })).toBeVisible()
-  await expect(toasts.filter({ hasText: 'No reading yet for Pi' })).toHaveCount(0)
-  await expect(pi.getByRole('button', { name: 'Check now' })).toBeEnabled()
-  // Empty: the read worked and still has no reading.
-  mode = 'empty'
-  await pi.getByRole('button', { name: 'Check now' }).click()
-  await expect(toasts.filter({ hasText: 'No reading yet for Pi on mbp2607. It arrives with its next run.' })).toBeVisible()
-  // Successful: the reading arrives and replaces the button with the bar.
-  mode = 'read'
-  await pi.getByRole('button', { name: 'Check now' }).click()
-  await expect(toasts.filter({ hasText: 'Pi on mbp2607: reading updated.' })).toBeVisible()
-  await expect(pi.getByRole('meter')).toHaveCount(1)
+  await open(page)
+  // Claude on build-7 plus Codex low (9% left this week, early warning at 10%).
+  await expect(status(page)).toHaveText('5 of 6 ready · Claude needs verifying on build-7 · +1')
+  const verify = section(page).locator('.fs-act .verify-button')
+  const guard = await controlStability(page, { verify, toggle: title(page), manage: section(page).getByRole('link', { name: /Manage/ }) })
+  await guard.check(async () => { await verify.click(); await expect(verify).toHaveAttribute('aria-busy', 'true') })
+  await expect(section(page).getByRole('status').filter({ hasText: 'Waiting for the computer to start' })).toBeVisible()
+  guard.done()
+  expect(posted).toEqual({ expected_revision: c.revision, expected_verification_run_id: null })
+  // The queued check stays visible and disabled; readiness still awaits its result.
+  await expect(verify).toBeDisabled()
+  await expect(status(page)).toHaveText('5 of 6 ready · Codex is low: 9% left this week')
 })
 
-// AEON-499 review: --gold-ink on the 17% gold tint was about 4.04:1 in light.
-for (const theme of ['light', 'dark'] as const) {
-  test(`warning pills and fixes clear 4.5:1 in ${theme}`, async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 1100 })
-    const { work } = await setup(page)
-    work.preferences.theme = { choice: theme }
-    await open(page)
-    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
-    const warn = panel(page).locator('.pill.warn, .n-copy')
-    expect(await warn.count()).toBeGreaterThan(1)
-    // Composite each tint over the raised surface on a canvas, then measure text against it.
-    const ratios = await warn.evaluateAll(els => {
-      const canvas = document.createElement('canvas')
-      canvas.width = canvas.height = 1
-      const ctx = canvas.getContext('2d', { willReadFrequently: true })!
-      const surface = getComputedStyle(document.documentElement).getPropertyValue('--surface-raised').trim()
-      const paint = (...fills: string[]) => { ctx.clearRect(0, 0, 1, 1); for (const f of fills) { ctx.fillStyle = f; ctx.fillRect(0, 0, 1, 1) } return [...ctx.getImageData(0, 0, 1, 1).data.slice(0, 3)] }
-      const lum = (rgb: number[]) => { const [r, g, b] = rgb.map(v => { const c = v / 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4 }); return 0.2126 * r + 0.7152 * g + 0.0722 * b }
-      const tinted = (el: Element): string[] => { const out: string[] = []; for (let n: Element | null = el; n && n !== document.documentElement; n = n.parentElement) { const bg = getComputedStyle(n).backgroundColor; if (bg && !/^rgba\(0, 0, 0, 0\)$|transparent/.test(bg) && n.matches('.pill, .notice')) out.unshift(bg) } return out }
-      return els.map(el => {
-        const bg = paint(surface, ...tinted(el))
-        const fg = paint(surface, ...tinted(el), getComputedStyle(el).color)
-        const [hi, lo] = [lum(fg), lum(bg)].sort((a, b) => b - a)
-        return { text: (el.textContent || '').trim(), ratio: Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100 }
-      })
-    })
-    for (const r of ratios) expect(r.ratio, `${r.text} in ${theme}`).toBeGreaterThanOrEqual(4.5)
-  })
-}
-
-test('pacing is one summary button; the existing settings and editors open from it', async ({ page }) => {
+test('Needs you lists what blocks agents with the fix or its details; a low-quota notice moves here with its urgency', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
-  const { capacity } = await setup(page)
+  const { capacity, thresholds } = await setup(page, { unfolded: true, thresholds: { early_percent: 10, urgent_percent: 3 } })
+  expireClaude(capacity)
   await open(page)
-  const button = panel(page).getByRole('button', { name: /5 days · keep auto · no nights/ })
-  await expect(button).toBeVisible()
-  await button.click()
-  const pacing = page.getByRole('dialog', { name: 'Pacing' })
-  await expect(pacing.getByRole('radiogroup', { name: 'Work days a week' })).toBeVisible()
-  await shot(page, 'desktop-pacing')
-  await pacing.getByRole('radio', { name: '7' }).click()
-  await expect.poll(() => capacity.puts.length).toBeGreaterThan(0)
-  await expect(panel(page).getByRole('button', { name: /7 days · keep auto · no nights/ })).toBeVisible()
-  await page.keyboard.press('Escape')
-  await expect(pacing).toHaveCount(0)
+  const needs = section(page).getByRole('heading', { name: '2 things need you' })
+  await expect(needs).toBeVisible()
+  const rows = section(page).locator('.att-row')
+  await expect(rows).toHaveCount(2)
+  await expect(rows.nth(0)).toContainText('Claude verification on build-7')
+  await expect(rows.nth(0)).toContainText('Verification expired. New agents wait until the sign-in passes again.')
+  await expect(rows.nth(0).getByRole('button', { name: 'Verify again' })).toBeVisible()
+  await expect(rows.nth(1)).toContainText('Codex is low: 9% left this week')
+  await expect(rows.nth(1)).toContainText('Early warning, below 10%. Resets tomorrow 18:02.')
+  await expect(rows.nth(1).getByRole('button', { name: 'Details' })).toBeVisible()
+  // Raise the urgent line above the same 9%: the notice reads as urgent.
+  Object.assign(thresholds, { early_percent: 20, urgent_percent: 10 })
+  await page.reload()
+  await expect(section(page).locator('.att-row').filter({ hasText: 'Codex is low: 9% left this week' })).toContainText('Urgent warning, below 10%.')
+  expect((await new AxeBuilder({ page }).include('.acc-section').analyze()).violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])
 })
 
-test('the row menu carries Sprint, Hold and Remove; the computer menu its own actions', async ({ page }) => {
+test('people without account management see Details, not Verify again', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
-  await setup(page)
+  const { capacity } = await setup(page, { manage: false, unfolded: true })
+  expireClaude(capacity)
   await open(page)
-  await computer(page, 'mbp2607').getByRole('button', { name: 'More for Codex Spare' }).click()
-  const menu = page.getByRole('menu')
-  await expect(menu.getByRole('menuitem', { name: /Sprint Codex until reset/ })).toBeVisible()
-  await expect(menu.getByRole('menuitem', { name: /Remove account/ })).toBeVisible()
-  await shot(page, 'desktop-row-menu')
-  await page.keyboard.press('Escape')
-  await expect(menu).toHaveCount(0)
-  await computer(page, 'studio').getByRole('button', { name: 'More for studio' }).click()
-  await expect(page.getByRole('menu').getByRole('menuitem', { name: /Details/ })).toBeVisible()
+  await expect(status(page)).toContainText('Claude needs verifying on build-7')
+  await expect(section(page).getByRole('button', { name: 'Verify again' })).toHaveCount(0)
+  await expect(section(page).locator('.att-row').first().getByRole('button', { name: 'Details' })).toBeVisible()
 })
 
-test('phone: stacked rows, no sideways scroll', async ({ page }) => {
-  await page.setViewportSize({ width: 390, height: 900 })
-  await setup(page)
+test('a name, a cell and Details open the right panel in Settings', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1100 })
+  const { capacity } = await setup(page, { unfolded: true, thresholds: { early_percent: 10, urgent_percent: 3 } })
+  expireClaude(capacity)
   await open(page)
-  await expect(computer(page, 'studio').getByRole('status')).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
-  await shot(page, 'phone')
+  await section(page).locator('.att-row').filter({ hasText: 'Codex is low' }).getByRole('button', { name: 'Details' }).click()
+  await expect(page).toHaveURL(/\/settings\/accounts$/)
+  await expect(page.locator('section.pane')).toContainText('Shared quota')
+  await page.goBack()
+  await section(page).getByRole('link', { name: 'Claude verification on build-7' }).click()
+  await expect(page).toHaveURL(/\/settings\/accounts$/)
+  const panel = page.locator('section.pane')
+  await expect(panel).toContainText('build-7')
+  await expect(panel.locator(`[data-signin="${ACCOUNTS.claude}"]`)).toBeVisible()
+  await page.goBack()
+  await section(page).getByRole('table').getByRole('link', { name: /^Codex on build-7/ }).first().click()
+  await expect(page).toHaveURL(/\/settings\/accounts$/)
+  await expect(page.locator('section.pane')).toContainText('build-7')
+  await page.goBack()
+  await section(page).getByRole('table').getByRole('rowheader').first().getByRole('link').click()
+  await expect(page).toHaveURL(/\/settings\/accounts$/)
+  await expect(page.locator('section.pane')).toContainText('Shared quota')
 })
 
-test('Agents working: the total and per-model targets are the person’s own, counts are the live sessions', async ({ page }) => {
+test('Away stays in the head with Back now, and one click ends it', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1100 })
+  await setup(page, { away: true })
+  await open(page)
+  const away = section(page).locator('.away')
+  await expect(away).toContainText('Away until Mon 5 Oct')
+  await away.getByRole('button', { name: 'Back now: end Away' }).click()
+  await expect(page.locator('.toast').filter({ hasText: 'Welcome back. Agents follow your plan again.' })).toBeVisible()
+  await expect(away).toHaveCount(0)
+})
+
+test('an approval link shows the folded section once and offers that account\'s check; the fold preference stays', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
   const { work } = await setup(page)
-  await open(page)
-  const working = page.getByRole('region', { name: 'Agents working at once' })
-  await expect(working).toBeVisible()
-  // No total chosen yet: nothing stands in for it; the line says what runs now.
-  await expect(working.locator('.big-num')).toHaveText('—')
-  await expect(working.locator('.big-num')).toHaveAttribute('aria-label', 'Target: not set yet')
-  await expect(working.locator('.now')).toHaveText('5 running now · no target set yet')
-  // By area lists only areas with work or a target; the others are quiet choices.
-  await expect(working.getByRole('listitem')).toHaveCount(1)
-  await expect(working.getByRole('button', { name: 'More agents on Frontend' })).toBeVisible()
-  await working.getByRole('button', { name: 'More agents at once' }).click()
-  await expect(working.locator('.big-num')).toHaveText('6')
-  await expect(working.locator('.now')).toHaveText('5 running now · 1 slot free')
-  await expect.poll(() => work.preferences['agents.working']).toMatchObject({ cap: 6 })
-  await working.getByRole('tab', { name: 'By model' }).click()
-  await expect(working.getByRole('tab', { name: 'By model' })).toHaveAttribute('aria-selected', 'true')
-  const codex = working.getByRole('listitem').filter({ hasText: 'Codex' })
-  await codex.getByRole('button', { name: 'More agents on Codex' }).click()
-  await expect(codex.locator('.target')).toHaveText('1')
-  await expect(working.locator('.foot')).toContainText('1 of 6 assigned · 5 flexible: any model takes them')
-  await expect(working).not.toContainText(/autopilot/i)
-  const axe = await new AxeBuilder({ page }).include('.working').analyze()
-  expect(axe.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])
-  if (shots) { mkdirSync(shots, { recursive: true }); await working.screenshot({ path: `${shots}/working.png`, animations: 'disabled' }) }
-  await page.setViewportSize({ width: 390, height: 900 })
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true)
-  if (shots) await working.screenshot({ path: `${shots}/working-phone.png`, animations: 'disabled' })
+  await page.goto(`/agents?verify_account=${ACCOUNTS.claude}`)
+  await expect(title(page)).toHaveAttribute('aria-expanded', 'true')
+  await expect(section(page).locator('.att-row').first()).toContainText('Claude verification on build-7')
+  expect(work.preferences['ui.agents.sections']).toBeUndefined()
+  // An explicit fold wins while the link is still in the address.
+  await title(page).click()
+  await expect(title(page)).toHaveAttribute('aria-expanded', 'false')
+  expect(new URL(page.url()).searchParams.get('verify_account')).toBe(ACCOUNTS.claude)
 })
 
-// AEON-499 review: with zero to three running, the control once showed "Target: 4",
-// four slots and "0 of 4 assigned" before the person chose anything.
-for (const running of [0, 2]) {
-  test(`Agents working with ${running} running and no total invents no target`, async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 1100 })
-    const { data } = await setup(page)
-    const keep = new Set(data.sessions.filter(s => s.phase === 'working' && s.activity === 'busy' && s.management_mode === 'managed').slice(0, running).map(s => s.id))
-    data.sessions = data.sessions.filter(s => s.phase === 'stopped' || keep.has(s.id))
-    await open(page)
-    const working = page.getByRole('region', { name: 'Agents working at once' })
-    await expect(working.locator('.now')).toHaveText(`${running} running now · no target set yet`)
-    await expect(working.locator('.big-num')).toHaveText('—')
-    await expect(working.locator('.big-num')).toHaveAttribute('aria-label', 'Target: not set yet')
-    await expect(working.locator('.dots .dot')).toHaveCount(running)
-    await expect(working.locator('.dots .dot:not(.on)')).toHaveCount(0)
-    await expect(working).not.toContainText(/assigned|flexible|Target: 4/)
-    // − sets a total below what runs now, so with fewer than two running there is nothing below.
-    if (running > 1) await expect(working.getByRole('button', { name: 'Fewer agents at once' })).toBeEnabled()
-    else await expect(working.getByRole('button', { name: 'Fewer agents at once' })).toBeDisabled()
-    await working.getByRole('button', { name: 'More agents at once' }).click()
-    await expect(working.locator('.big-num')).toHaveText(String(running + 1))
-    await expect(working.locator('.now')).toHaveText(`${running} running now · 1 slot free`)
-    await expect(working.locator('.foot')).toContainText(`0 of ${running + 1} assigned`)
+test('loading, a failed read with Try again, and an empty workspace each say so in the status place', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1100 })
+  await setup(page)
+  let fail = true
+  await page.route('**/api/agent-accounts/capacity', route => route.request().method() === 'GET' && fail ? route.fulfill({ status: 500, json: { error: 'down' } }) : route.fallback())
+  await open(page)
+  await expect(status(page)).toContainText('Accounts could not be read')
+  fail = false
+  await status(page).getByRole('button', { name: 'Try again' }).click()
+  await expect(status(page)).toHaveText('All 6 ready · 2 computers online')
+  await page.route('**/api/agent-pairing/computers', route => route.fulfill({ json: { computers: [] } }))
+  await page.route('**/api/agent-accounts', route => route.request().method() === 'GET' ? route.fulfill({ json: [] }) : route.fallback())
+  await page.route('**/api/agent-accounts/capacity', route => route.fulfill({ json: [] }))
+  await page.reload()
+  await expect(status(page)).toContainText('No accounts yet')
+  await expect(status(page).getByRole('link', { name: 'Connect a computer' })).toHaveAttribute('href', '/agents/register-agent')
+})
+
+// Verify again leaves the head when the section unfolds. If the head wrapped only while it was
+// there, the toggle jumped half a row gap on unfold (the CI Linux fonts at 1024). The head now wraps
+// by the container's width alone, in two fixed rows. Scanning the widths above the phone layout
+// makes that independent of the font the machine happens to have.
+test('the head keeps its height, and the toggle stays put, whether or not Verify again is shown', async ({ page }) => {
+  // Tall enough that the section stays in view at every width, so nothing scrolls under the measurement.
+  await page.setViewportSize({ width: 1100, height: 3000 })
+  const { capacity } = await setup(page, { thresholds: { early_percent: 10, urgent_percent: 3 } })
+  expireClaude(capacity)
+  await open(page)
+  const head = section(page).locator('.fs-head')
+  const toggle = section(page).locator('.fs-tog')
+  const verify = section(page).locator('.fs-act')
+  const measure = async () => ({ head: (await head.boundingBox())!, toggle: (await toggle.boundingBox())! })
+  let scanned = 0
+  for (let width = 1100; width >= 700; width -= 20) {
+    await page.setViewportSize({ width, height: 3000 })
+    await expect(verify).toBeVisible()
+    const folded = await measure()
+    await title(page).click()
+    await expect(verify).toHaveCount(0)
+    const unfolded = await measure()
+    await title(page).click()
+    await expect(verify).toBeVisible()
+    expect(Math.abs(unfolded.toggle.y - folded.toggle.y), `toggle.y at ${width}`).toBeLessThanOrEqual(0.5)
+    expect(Math.abs(unfolded.head.height - folded.head.height), `head height at ${width}`).toBeLessThanOrEqual(0.5)
+    scanned++
+  }
+  expect(scanned).toBeGreaterThan(10)
+})
+
+// Away and an expired verification are the widest head: both pills beside the status, then Verify
+// again, Manage and the title. Between the phone layout and a wide one the controls stopped fitting
+// one row and Manage left the card (AEON-782 gate, 700 to 800 px). The head wraps by the container's
+// width alone, never by what is shown, so these controls keep their place through hover, focus and
+// unfolding (which removes Verify again), and nothing leaves the card at any width in between.
+test('Away with an expired verification keeps the head inside the card and its controls put at 640, 720 and 800', async ({ page }) => {
+  test.setTimeout(90_000) // the same kind of width scan: ~17 s on CI against the 30 s default
+  await page.setViewportSize({ width: 800, height: 3000 })
+  const { capacity } = await setup(page, { away: true, thresholds: { early_percent: 10, urgent_percent: 3 } })
+  expireClaude(capacity)
+  await open(page)
+  const card = section(page)
+  const manage = card.getByRole('link', { name: /Manage/ })
+  const back = card.getByRole('button', { name: 'Back now: end Away' })
+  const verify = card.locator('.fs-act').getByRole('button', { name: 'Verify again' })
+  const toggle = card.locator('.fs-tog')
+  const spill = () => card.evaluate(el => {
+    const edge = el.getBoundingClientRect().right
+    const out: string[] = []
+    for (const node of el.querySelectorAll('*')) {
+      const box = node.getBoundingClientRect()
+      if ((box.width >= 1 || box.height >= 1) && box.right - edge > 1) out.push(`${node.tagName.toLowerCase()}.${(node.getAttribute('class') || '').split(/\s+/)[0]} +${Math.round(box.right - edge)}px`)
+    }
+    return { out, over: document.documentElement.scrollWidth - document.documentElement.clientWidth }
+  })
+  for (let width = 1100; width >= 640; width -= 20) {
+    await page.setViewportSize({ width, height: 3000 })
+    await expect(verify).toBeVisible()
+    const found = await spill()
+    expect(found.out, `${width}px spills`).toEqual([])
+    expect(found.over, `${width}px page scrolls`).toBeLessThanOrEqual(1)
+  }
+  for (const width of [640, 720, 800]) {
+    await page.setViewportSize({ width, height: 3000 })
+    await expect(verify).toBeVisible()
+    expect((await spill()).out, `${width}px spills`).toEqual([])
+    await expectStableControls({
+      controls: { toggle, title: title(page), manage, back },
+      scrollAreas: { page: page.locator('html') },
+      interactions: [
+        { name: 'hover Back now', run: () => back.hover() },
+        { name: 'hover Verify again', run: () => verify.hover() },
+        { name: 'hover Manage', run: () => manage.hover() },
+        { name: 'focus Verify again', run: () => verify.focus() },
+        { name: 'unfold removes Verify again', run: async () => { await title(page).click(); await expect(verify).toHaveCount(0); await expect(card.getByRole('table')).toBeVisible() } },
+        { name: 'fold shows it again', run: async () => { await title(page).click(); await expect(verify).toBeVisible() } },
+      ],
+    })
+  }
+  // Fractional container widths between the two ranges (640 < w < 641) must still get the two-row head.
+  await page.setViewportSize({ width: 800, height: 3000 })
+  for (const width of [640.25, 640.5, 640.75]) {
+    await card.evaluate((el, w) => { (el as HTMLElement).style.width = `${w}px` }, width)
+    await expect(verify).toBeVisible()
+    expect((await spill()).out, `${width}px container spills`).toEqual([])
+  }
+  await card.evaluate(el => { (el as HTMLElement).style.width = '' })
+})
+
+// A wide status (a font wider than ours) pushes Away to the row below the state, where Verify again
+// joins it. Verify again leaving on unfold must not change that row's height, or Away (centred in
+// the row) drops half the difference: back.y moved 1 px on the CI Linux fonts at 720 (AEON-782 gate).
+// Widening the state's letters stands in for the font, so this holds on any machine.
+async function wideAway(page: Page, width: number) {
+  await page.setViewportSize({ width, height: 3000 })
+  const { capacity } = await setup(page, { away: true, thresholds: { early_percent: 10, urgent_percent: 3 } })
+  expireClaude(capacity)
+  await open(page)
+  await page.addStyleTag({ content: '.acc-section .fs-sum .t { letter-spacing: 2px; }' })
+  await page.evaluate(() => document.fonts.ready)
+  const card = section(page)
+  const verify = card.locator('.fs-act').getByRole('button', { name: 'Verify again' })
+  const away = card.locator('.away')
+  const back = card.getByRole('button', { name: 'Back now: end Away' })
+  const measure = async () => ({ away: (await away.boundingBox())!, back: (await back.boundingBox())! })
+  return { verify, measure }
+}
+
+// Retain the positive-case guard over every original width. The actual fold
+// interactions run below in bounded groups, instead of 82 clicks in one case.
+test('the wide status scan encounters Away beside Verify again', async ({ page }) => {
+  // The old single scan folded and unfolded 41 widths and failed on the last width under the 30 s
+  // default (AEON-887 and AEON-886 merge queues). The budget only guards against a hang.
+  test.setTimeout(90_000)
+  const { verify, measure } = await wideAway(page, 1100)
+  let shared = 0
+  for (let width = 1100; width >= 700; width -= 10) {
+    await page.setViewportSize({ width, height: 3000 })
+    await expect(verify).toBeVisible()
+    const folded = await measure()
+    const beside = Math.abs((await verify.boundingBox())!.y + 14 - (folded.away.y + 13)) <= 1
+    if (beside) shared++
+  }
+  expect(shared, 'widths where Away and Verify again share a row').toBeGreaterThan(0)
+})
+
+// Every one of the original 41 widths keeps both fold/unfold interactions and
+// both 0.5 px assertions. Each case has at most 16 clicks and its own fixture.
+for (const first of [1100, 1020, 940, 860, 780, 700]) {
+  const last = Math.max(700, first - 70)
+  test(`Away and Back now stay put through fold and unfold from ${first} to ${last}px`, async ({ page }) => {
+    // Same hang-only budget as the wide-status scan this case was split from (AEON-887).
+    test.setTimeout(90_000)
+    const { verify, measure } = await wideAway(page, first)
+    for (let width = first; width >= last; width -= 10) {
+      await page.setViewportSize({ width, height: 3000 })
+      await expect(title(page)).toHaveAttribute('aria-expanded', 'false')
+      await expect(verify).toBeVisible()
+      const folded = await measure()
+      await title(page).click()
+      await expect(title(page)).toHaveAttribute('aria-expanded', 'true')
+      await expect(verify).toHaveCount(0)
+      const unfolded = await measure()
+      await title(page).click()
+      await expect(verify).toBeVisible()
+      const refolded = await measure()
+      expect(Math.abs(unfolded.away.y - folded.away.y), `away.y at ${width}`).toBeLessThanOrEqual(0.5)
+      expect(Math.abs(unfolded.back.y - folded.back.y), `back.y at ${width}`).toBeLessThanOrEqual(0.5)
+      expect(Math.abs(refolded.away.y - folded.away.y), `refolded away.y at ${width}`).toBeLessThanOrEqual(0.5)
+      expect(Math.abs(refolded.back.y - folded.back.y), `refolded back.y at ${width}`).toBeLessThanOrEqual(0.5)
+    }
   })
 }
 
-test('Agents working waits for the stored total: no flash of "no target set" while it loads', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 1100 })
-  await page.addInitScript(() => {
-    const seen = () => { if (document.querySelector('.working .big-num')?.textContent === '—') (window as unknown as { flashed: boolean }).flashed = true }
-    new MutationObserver(seen).observe(document, { subtree: true, childList: true, characterData: true })
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+  test(`the head and the body keep their controls put through fold, verify and refresh at ${width} ${theme}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1100 })
+    const { capacity } = await setup(page, { thresholds: { early_percent: 10, urgent_percent: 3 } })
+    const { e } = expireClaude(capacity)
+    await page.route('**/api/agent-pairing/computers/*/enrollments/*/verify', route => {
+      Object.assign(e, { verification_state: 'queued', verification_run_id: 'b0000000-0000-4000-8000-000000000782' })
+      return route.fulfill({ json: { account_id: e.account_id, run_id: 'b0000000-0000-4000-8000-000000000782' } })
+    })
+    await page.addInitScript(t => { document.documentElement.dataset.theme = t }, theme)
+    await open(page)
+    await page.evaluate(t => { document.documentElement.dataset.theme = t }, theme)
+    const toggle = section(page).locator('.fs-tog')
+    const manage = section(page).getByRole('link', { name: /Manage/ })
+    await expect(section(page).locator('.fs-sum')).toContainText('Claude needs verifying on build-7')
+    await expectStableControls({
+      controls: { toggle, title: title(page), manage },
+      scrollAreas: { page: page.locator('html') },
+      interactions: [
+        { name: 'unfold', run: async () => { await title(page).click(); await expect(section(page).getByRole('table')).toBeVisible(); await info.attach('unfolded', { body: await section(page).screenshot({ animations: 'disabled' }), contentType: 'image/png' }) } },
+        { name: 'verify from Needs you', run: async () => { await section(page).locator('.att-row').first().getByRole('button', { name: 'Verify again' }).click(); await expect(section(page)).toContainText('Waiting for the computer to start the check.'); await expect(section(page).locator('.verify-button')).toHaveAttribute('aria-busy', 'true') } },
+        { name: 'fold again', run: async () => { await toggle.click(); await expect(section(page).getByRole('table')).toBeHidden() } },
+      ],
+    })
+    if (width === 390) {
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+      const box = (await manage.boundingBox())!
+      expect(box.width).toBeGreaterThanOrEqual(43.5); expect(box.height).toBeGreaterThanOrEqual(43.5)
+    }
   })
-  await setup(page)
-  let release: () => void = () => {}
-  const held = new Promise<void>(resolve => { release = resolve })
-  await page.route('**/api/preferences/agents.working', async route => {
-    if (route.request().method() !== 'GET') return route.fallback()
-    await held
-    return route.fulfill({ json: { key: 'agents.working', value: { cap: 3 }, updated_at: new Date(NOW).toISOString() } })
-  })
-  await open(page)
-  const working = page.getByRole('region', { name: 'Agents working at once' })
-  await expect(working).toHaveCount(0)
-  release()
-  await expect(working.locator('.big-num')).toHaveText('3')
-  await expect(working.locator('.big-num')).toHaveAttribute('aria-label', 'Target: 3 agents at once')
-  await expect(working.locator('.now')).toHaveText('5 running now · 2 over your target')
-  expect(await page.evaluate(() => (window as unknown as { flashed?: boolean }).flashed ?? false)).toBe(false)
-})
+}
