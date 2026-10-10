@@ -255,6 +255,19 @@ components:
         outcome: {type: string, enum: [created, skipped]}
         reason: {type: string}
         created_at: {type: string, format: date-time}
+        run: {$ref: '#/components/schemas/RoutineRunReceipt'}
+    RoutineRunReceipt:
+      type: object
+      additionalProperties: false
+      required: [id, state, assignment_digest, policy_digest]
+      description: 'Optional durable execution intent for an occurrence with a saved assignment. Replay returns the same run identity. Pending intent grants no launch authority; consent, project qualification and current permissions remain required. Ticket-only and skipped occurrences omit this field.'
+      properties:
+        id: {type: string, format: uuid}
+        state: {type: string}
+        work_order_id: {type: string, format: uuid}
+        agent_run_id: {type: string, format: uuid}
+        assignment_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        policy_digest: {type: string, pattern: '^[a-f0-9]{64}$', description: 'Digest of the frozen scope, owner, target, consent revision and assignment policy inputs; it is not an evaluated guardrail verdict.'}
     RecurrencePreview:
       type: object
       required: [times, trigger_kind]

@@ -64,15 +64,16 @@ type Result struct {
 	State   string `json:"state,omitempty"`
 }
 type Occurrence struct {
-	RecurrenceID  string    `json:"recurrence_id"`
-	Key           string    `json:"occurrence_key"`
-	Number        int64     `json:"number"`
-	ScheduledAt   time.Time `json:"scheduled_at"`
-	NodeID        *string   `json:"node_id"`
-	SourceEventID *int64    `json:"source_event_id"`
-	Outcome       string    `json:"outcome"`
-	Reason        string    `json:"reason"`
-	CreatedAt     time.Time `json:"created_at"`
+	RecurrenceID  string      `json:"recurrence_id"`
+	Key           string      `json:"occurrence_key"`
+	Number        int64       `json:"number"`
+	ScheduledAt   time.Time   `json:"scheduled_at"`
+	NodeID        *string     `json:"node_id"`
+	SourceEventID *int64      `json:"source_event_id"`
+	Outcome       string      `json:"outcome"`
+	Reason        string      `json:"reason"`
+	CreatedAt     time.Time   `json:"created_at"`
+	Run           *RunReceipt `json:"run,omitempty"`
 }
 
 var variablePattern = regexp.MustCompile(`\{\{([^{}]*)\}\}`)

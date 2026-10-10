@@ -8104,6 +8104,8 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineDefinitionScopeAuthorityAndInertRoundTrip","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineIntentAtomicReplayAndAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestSixMonthSpringGapWalksPastOneYear","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestSourceClaimSkipsFilteredEventsInBoundedBatches","tier":"ESSENTIAL"}

@@ -224,7 +224,9 @@
         "internal/usagedashboard/**",
         "internal/activity/**",
         "internal/decisiondesk/cutover_test.go",
-        "internal/questions/lock_order_test.go"
+        "internal/questions/lock_order_test.go",
+        "internal/recurrences/runs.go",
+        "internal/recurrences/runs_test.go"
       ]
     },
     {

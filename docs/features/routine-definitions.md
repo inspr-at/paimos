@@ -46,3 +46,22 @@ keeps an invisible projection from appearing as a legacy row. The projection's
 execution identity and person-consent fields are default off seams for consent
 controls; the definition API cannot set them. Execution qualification,
 guardrails, budgeting and dispatch belong to subsequent delivery slices.
+
+Occurrences with a saved assignment now persist a pending `routine_runs` row
+in the same fenced transaction as their work, inert queue entries, action
+receipt and occurrence receipt. The optional `run` on a Run now response
+contains its stable identity, assignment and policy-input digests and, when
+queued, the existing work-order and agent-run IDs. Repeating the same occurrence
+returns that identity even after the definition changes. Skipped and ticket-only
+occurrences have no execution intent.
+
+Migration 1321 adds run, attempt, typed action and effect-outbox storage with
+tenant and definition-scope RLS and run-scoped receipt uniqueness. Runs freeze
+the definition revision, canonical owner, output target, assignment, consent
+inputs and bounded source receipt. Current owner authority is checked inside
+the occurrence write fence. The policy digest represents saved inputs, not
+a guardrail verdict or admission grant. PostgreSQL wakes a future executor only
+after commit; a rollback leaves no work, receipt, intent or wake. The durable
+outbox survives a missed notification. No attempt, process or external effect
+is started here; project enablement, qualification, consent and final action
+checks remain required.
