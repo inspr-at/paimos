@@ -168,7 +168,7 @@ func (m *Module) runNow(w http.ResponseWriter, r *http.Request) {
 					found = true
 					if choice.Receipt != nil {
 						out = choice.Receipt.Occurrence
-						return nil
+						return runReceipt(r.Context(), tx, &out)
 					}
 					key = "release:" + choice.Key
 					name = choice.Name
@@ -205,7 +205,8 @@ func occurSource(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recur
 
 	existing, err := scanOccurrence(tx.QueryRow(ctx, `SELECT `+occurrenceColumns+` FROM recurrence_occurrences WHERE recurrence_id=$1 AND occurrence_key=$2`, r.ID, key))
 	if err == nil {
-		return existing, nil
+		err = runReceipt(ctx, tx, &existing)
+		return existing, err
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return Occurrence{}, err
@@ -223,6 +224,9 @@ func occurSource(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recur
 	}
 	r, err = load(ctx, tx, r.ID, true)
 	if err != nil {
+		return Occurrence{}, err
+	}
+	if err = authorizeRunOwner(ctx, tx, actor, r); err != nil {
 		return Occurrence{}, err
 	}
 	// The locked reload replaces the earlier normalized copy.
@@ -343,10 +347,15 @@ func occurSource(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recur
 	if _, err = tx.Exec(ctx, `UPDATE recurrences SET occurrence_count=$2,updated_at=clock_timestamp() WHERE id=$1`, r.ID, o.Number); err != nil {
 		return Occurrence{}, err
 	}
+	if err = persistRun(ctx, tx, actor, r, &o, source, name, version); err != nil {
+		return Occurrence{}, err
+	}
+	run := o.Run
 	o, err = scanOccurrence(tx.QueryRow(ctx, `INSERT INTO recurrence_occurrences(tenant_id,recurrence_id,occurrence_key,number,scheduled_at,node_id,source_event_id,outcome,reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+occurrenceColumns, actor.TenantID, r.ID, key, o.Number, at, o.NodeID, eventID, o.Outcome, o.Reason))
 	if err != nil {
 		return Occurrence{}, err
 	}
+	o.Run = run
 	typ := "recurrence.occurred"
 	if o.Outcome == "skipped" {
 		typ = "recurrence.skipped"
