@@ -5,7 +5,7 @@
 // keeps retrying a refused thread.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { applyLiveFrame, elapsed, followChatLive, liveTextLimit, liveToolLimit, settled, type LiveSource, type LiveTurn } from '../src/components/agents/chatLive.ts'
+import { applyLiveFrame, chatFinals, elapsed, followChatLive, liveQueue, liveTextLimit, liveToolLimit, settleStop, settled, type LiveSource, type LiveTurn } from '../src/components/agents/chatLive.ts'
 import { sessionChatFlags } from '../src/components/agents/sessionChat.ts'
 
 const chunk = (text: string, dropped = 0) => JSON.stringify({ type: 'update', update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }, dropped_events: dropped, source_sequence: 1 })
@@ -115,7 +115,8 @@ test('the follower opens only a found thread and resyncs on refusal or handover'
     let answer: { status: number; thread?: string } = { status: 404 }
     const frames: string[] = []
     let resyncs = 0
-    const follow = followChatLive('s-1', { frame: data => frames.push(data), resync: () => { resyncs++ }, attached: () => {} }, {
+    const bound: string[] = []
+    const follow = followChatLive('s-1', { frame: data => frames.push(data), resync: () => { resyncs++ }, thread: id => bound.push(id), attached: () => {} }, {
       lookup: async id => { looked.push(id); return answer },
       open: url => { const source = new FakeSource(url); sources.push(source); return source },
       later,
@@ -143,6 +144,8 @@ test('the follower opens only a found thread and resyncs on refusal or handover'
     assert.equal(sources[0]!.closed, true)
     assert.equal(sources.length, 2)
     assert.equal(sources[1]!.url, '/api/chat-threads/th-2/live')
+    // Each found thread is announced, so the saved replies load from it.
+    assert.deepEqual(bound, ['th/1', 'th-2'])
     // A stale source can no longer deliver.
     sources[0]!.emit('chat', chunk('stale'))
     assert.equal(frames.length, 1)
@@ -165,4 +168,63 @@ test('the follower opens only a found thread and resyncs on refusal or handover'
     assert.equal(sources.length, 6)
     assert.ok(looked.every(id => id === 's-1'))
   }
+})
+
+// Risk (AEON-1071 gate): a paused animation frame let the queue fill and
+// silently drop the turn's end and the saved-reply hint, so the turn never
+// settled.
+test('a full frame queue applies at once and never drops the end of a turn', () => {
+  const scheduled: (() => void)[] = []
+  const cancelled: number[] = []
+  const batches: string[][] = []
+  const queue = liveQueue(frames => batches.push(frames), { schedule: run => scheduled.push(run), cancel: handle => cancelled.push(handle), limit: 4 })
+  const sent = [state('running'), chunk('a'), chunk('b'), chunk('c'), chunk('d'), state('idle'), JSON.stringify({ type: 'message', message_id: 'final-1' })]
+  // The animation frame never fires while the tab is hidden.
+  for (const data of sent) queue.push(data)
+  assert.deepEqual(batches, [sent.slice(0, 4)])
+  assert.equal(cancelled.length, 1)
+  scheduled.at(-1)!()
+  assert.deepEqual(batches.flat(), sent)
+  const { turn, hints } = run(batches.flat())
+  assert.equal(turn?.ended, true)
+  assert.equal(turn?.text, 'abcd')
+  assert.deepEqual(hints, ['message'])
+  assert.equal(settled(turn, 'final-1'), true)
+  // Clearing drops what is queued and its pending frame.
+  queue.push(chunk('stale'))
+  queue.clear()
+  assert.equal(cancelled.length, 2)
+  assert.equal(batches.length, 2)
+})
+
+// Risk (AEON-1071 gate): the turn ended before the interrupt was refused, and
+// the block still said the person stopped it.
+test('only an applied interrupt may say the person stopped the turn', () => {
+  const ended = { ...run([state('running'), chunk('x'), state('idle')]).turn!, stop: 'requested' as const }
+  assert.equal(settleStop(ended, 'withdrawn')?.stop, 'none')
+  assert.equal(settleStop(ended, 'withdrawn')?.ended, true)
+  assert.equal(settleStop(ended, 'applied')?.stop, 'applied')
+  const running = { ...run([state('running')]).turn!, stop: 'requested' as const }
+  assert.equal(settleStop(running, 'withdrawn')?.stop, 'none')
+  // A fresh turn carries no claim, and a settled claim is not rewritten.
+  assert.equal(run([state('running')]).turn!.stop, 'none')
+  assert.equal(settleStop({ ...ended, stop: 'applied' }, 'withdrawn')?.stop, 'applied')
+  assert.equal(settleStop(null, 'applied'), null)
+})
+
+// Risk (AEON-1071 gate): chat-native finals live only in the chat thread, so
+// reading the project message list never replaced the live block.
+test('saved chat replies from the agent join the thread and settle the live turn', () => {
+  const page = [
+    { message: { message_id: 'in-1', sent_event_position: '40', body: 'input', sender_principal_id: 'person-1', created_at: '2026-10-10T08:00:00Z' } },
+    { message: { message_id: 'final-2', sent_event_position: '41', body: 'Final answer', reply_to: 'in-1', sender_principal_id: 'agent-1', created_at: '2026-10-10T08:00:05Z' } },
+    { message: { message_id: 'other', sent_event_position: '42', body: 'not ours', sender_principal_id: 'agent-2' } },
+    { message: { message_id: 'broken', sent_event_position: 'x', body: 'bad', sender_principal_id: 'agent-1' } },
+  ]
+  const finals = chatFinals(page, 'agent-1', 'session-1', 'person-1', 'release-lead')
+  assert.deepEqual(finals.map(message => [message.id, message.sent_event_id, message.body, message.reply_to, message.sender_session_id, message.sender_label, message.recipient_principal_id]),
+    [['final-2', 41, 'Final answer', 'in-1', 'session-1', 'release-lead', 'person-1']])
+  assert.equal(chatFinals(page, '', 'session-1', 'person-1', 'x').length, 0)
+  const { turn } = run([state('running'), chunk('live'), state('idle')], null, 'final-1')
+  assert.equal(settled(turn, finals.at(-1)!.id), true)
 })

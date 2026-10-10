@@ -194,6 +194,17 @@ func TestChatLiveViewersReplayFinalOnlyAndReceipts(t *testing.T) {
 	if len(history.Items) != 2 || history.Items[1].Message.Body != "final answer" {
 		t.Fatal("final transcript incomplete")
 	}
+	// The session panel tells the agent's saved reply from the person's input
+	// by its author (AEON-1071).
+	for i, want := range []bool{false, true} {
+		item := history.Items[i].Message
+		if item.Sender == "" || (item.Sender == f.agent.ID) != want {
+			t.Fatalf("history item %d author %q, agent=%v", i, item.Sender, want)
+		}
+		if _, err := time.Parse(time.RFC3339Nano, item.Created); err != nil {
+			t.Fatalf("history item %d time %q: %v", i, item.Created, err)
+		}
+	}
 	decode[seenMarker](t, f.call(f.alice, "PUT", path+"/read-marker", seenUnion{[]string{final.Message.ID}, "0"}, ""))
 	personPage := decode[outboxPage](t, f.call(f.alice, "GET", path+"/outbox?limit=1", nil, ""))
 	if personPage.Next == nil || len(personPage.Items) != 1 || personPage.Items[0].Receipt.State != "read" {

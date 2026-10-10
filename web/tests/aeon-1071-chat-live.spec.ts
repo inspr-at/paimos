@@ -52,13 +52,17 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; session?: 
   data.messages.splice(0, data.messages.length, ...messages)
   const calls = await mockAgents(page, data)
   const lookups: string[] = []
+  // The bound chat thread's saved messages: chat-native finals live only here,
+  // never in the project message list.
+  const chat: { message: Record<string, unknown> }[] = []
+  await page.route(/\/api\/chat-threads\/[^/]+\/messages(\?|$)/, route => route.fulfill({ json: { contract: 'chat-v1', items: chat, has_more_before: false, has_more_after: false, before_cursor: null, after_cursor: null, snapshot_cursor: 'c', migration_epoch: '0' } }))
   await page.route('**/api/chat-sessions/*/thread', route => {
     lookups.push(new URL(route.request().url()).pathname)
     return options.bound === false
       ? route.fulfill({ status: 404, json: { error: 'chat binding unavailable' } })
       : route.fulfill({ json: { contract: 'chat-v1', conversation_id: conversation, role: { contract: 'chat-v1' }, revision: '2', binding_epoch: '1', readiness: { state: 'offline', capabilities: [], reason: 'session_offline' } } })
   })
-  return { worker, data, calls, lookups, template }
+  return { worker, data, calls, lookups, chat }
 }
 
 const emit = (page: Page, type: string, payload: unknown) => page.evaluate(([kind, data]) => {
@@ -70,7 +74,7 @@ const chunk = (page: Page, sequence: number, text: string) => update(page, seque
 
 for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`AEON-1071 streams in place, stops mid-stream and yields to the saved reply ${theme} ${width}`, async ({ page }, testInfo) => {
-    const { worker, data, calls, lookups, template } = await setup(page, { theme })
+    const { worker, data, calls, lookups, chat } = await setup(page, { theme })
     await page.setViewportSize({ width, height: 860 })
     await page.goto(`/agents/${worker.id}?tab=messages`)
     const panel = panelOf(page)
@@ -113,24 +117,49 @@ for (const width of [390, 1440]) for (const theme of ['light', 'dark'] as const)
       await expect.poll(() => calls.filter(call => call.method === 'POST' && call.path.endsWith('/controls/interrupt')).length).toBe(1)
       await expect(panel.locator('.live-turn')).toContainText('Stopping…')
     })
+    // The turn ends before the interrupt is confirmed: no claim yet.
     await guard.check(async () => {
       await update(page, 40, { sessionUpdate: 'state', state: 'idle' })
-      await expect(panel.locator('.live-turn')).toContainText('You stopped this turn')
       await expect(panel.locator('.live-turn .fold')).toContainText('Used 1 tool')
+      await expect(panel.locator('.live-turn')).not.toContainText('Stopping…')
+      await expect(panel.locator('.live-turn')).not.toContainText('You stopped this turn')
       await expect(send).toContainText('Send')
       await expect(steer).toBeDisabled()
     })
+    // Once the harness applied it, the block says the person stopped the turn.
+    await guard.check(async () => {
+      Object.assign(data.controls.at(-1)!, { state: 'completed', outcome: 'applied', completed_at: new Date(now + 2_000).toISOString() })
+      await page.clock.runFor(2_100)
+      await expect(panel.locator('.live-turn')).toContainText('You stopped this turn')
+    })
+    // The tool fold opens below its toggle; the toggle stays put.
+    const fold = panel.locator('.live-turn .fold')
+    const folding = await controlStability(page, { fold, composer, send, stop })
+    await folding.check(async () => {
+      await fold.click()
+      await expect(fold).toHaveAttribute('aria-expanded', 'true')
+      await expect(panel.locator('.live-turn .tools')).toContainText('Read web/src/components/agents/SessionChat.vue')
+    })
+    await folding.check(async () => {
+      await fold.click()
+      await expect(panel.locator('.live-turn .tools')).toHaveCount(0)
+    })
+    folding.done()
     await page.screenshot({ path: testInfo.outputPath(`aeon-1071-live-${theme}-${width}.png`) })
-    // The saved final reply replaces the live block in place.
-    data.messages.push({ ...template, id: '3e000000-0000-4000-8000-000000000900', sent_event_id: 900, body: 'Final: the release checks pass.', created_at: new Date(now + 5_000).toISOString(), sender_principal_id: worker.agent_principal_id, recipient_principal_id: me.id, to: 'paimos:markus', sender_session_id: worker.id, sender_label: 'release-lead' } as typeof template)
+    // The saved chat-native reply replaces the live block in place.
+    chat.push({ message: { message_id: '3e000000-0000-4000-8000-000000000900', conversation_id: conversation, read_seq: '900', sent_event_position: '900', body: 'Final: the release checks pass.', payload_mode: 'inline', sender_principal_id: worker.agent_principal_id, created_at: new Date(now + 5_000).toISOString() } })
     await guard.check(async () => {
       await emit(page, 'chat', { type: 'message', message_id: '3e000000-0000-4000-8000-000000000900', receipt: null })
       await expect(panel.getByText('Final: the release checks pass.', { exact: true })).toBeVisible()
       await expect(panel.locator('.live-turn')).toHaveCount(0)
     })
+    expect(data.messages.some(message => message.body.startsWith('Final:'))).toBe(false)
     guard.done()
-    // Nothing interim was sent anywhere: the only writes are the interrupt.
-    expect(calls.filter(call => call.method !== 'GET').map(call => call.path)).toEqual([expect.stringMatching(/\/controls\/interrupt$/)])
+    // Nothing interim was sent anywhere: the only writes are the interrupt and
+    // the read marker the confirmation wait let flush, and none carries live text.
+    const writes = calls.filter(call => call.method !== 'GET')
+    expect(writes.map(call => call.path)).toEqual([expect.stringMatching(/\/controls\/interrupt$/), `/api/projects/${worker.project_id}/harness-sessions/${worker.id}/read-marker`])
+    for (const write of writes) expect(JSON.stringify(write.body ?? null)).not.toMatch(/Paragraph|release checklist|SessionChat\.vue/)
   })
 }
 
@@ -156,4 +185,40 @@ for (const item of cases) test(`AEON-1071 composer offers sends per capability: 
   else await expect(panel.locator('.chat-stop')).toBeDisabled()
   // An unbound session simply has no live stream.
   expect(await page.evaluate(() => (window as unknown as { __live?: unknown[] }).__live?.length ?? 0)).toBe(0)
+})
+
+// Risk (AEON-1071 gate): the turn ended on its own, then the interrupt was
+// refused, and the block still claimed the person stopped it.
+test('AEON-1071 a refused stop after the turn ended claims nothing', async ({ page }) => {
+  const { worker, data, calls } = await setup(page)
+  // The shared fixture applies every polled control; this harness refuses it.
+  await page.route(/\/harness-sessions\/[^/]+\/controls\/c[^/]+$/, route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const id = new URL(route.request().url()).pathname.split('/').at(-1)
+    const found = data.controls.find(control => control.id === id)
+    return found ? route.fulfill({ json: found }) : route.fallback()
+  })
+  await page.setViewportSize({ width: 1440, height: 860 })
+  await page.goto(`/agents/${worker.id}?tab=messages`)
+  const panel = panelOf(page)
+  const composer = panel.getByRole('textbox', { name: 'Message to release-lead' })
+  await expect(composer).toBeVisible()
+  // Esc outside a field: leave the composer so the key reaches the chat.
+  await composer.focus()
+  await composer.blur()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __live?: unknown[] }).__live?.length ?? 0)).toBe(1)
+  await update(page, 1, { sessionUpdate: 'state', state: 'running' })
+  await chunk(page, 2, 'Checking the gate.')
+  await expect(panel.locator('.live-turn')).toContainText('Checking the gate.')
+  await page.keyboard.press('Escape')
+  await expect.poll(() => calls.filter(call => call.method === 'POST' && call.path.endsWith('/controls/interrupt')).length).toBe(1)
+  await expect(panel.locator('.live-turn')).toContainText('Stopping…')
+  await update(page, 3, { sessionUpdate: 'state', state: 'idle' })
+  await expect(panel.locator('.live-turn')).not.toContainText('Stopping…')
+  Object.assign(data.controls.at(-1)!, { state: 'completed', outcome: 'rejected', reason: 'not_running', completed_at: new Date(now + 2_000).toISOString() })
+  await page.clock.runFor(2_100)
+  // The completed control was read (its toast shows) before the claim is judged.
+  await expect(page.getByText(/refused the interrupt/).first()).toBeVisible()
+  await expect(panel.locator('.live-turn')).toContainText('Checking the gate.')
+  await expect(panel.locator('.live-turn')).not.toContainText('You stopped this turn')
 })

@@ -3,7 +3,7 @@
 import { displayLanguage } from '../../lib/displayLanguage'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { APIError } from '../../lib/api'
-import { cancelSessionMessage, chatThreadForSession, messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
+import { cancelSessionMessage, chatThreadForSession, chatThreadMessages, messageStatuses, type MessageStatus, type ProjectMessage } from '../../lib/agents'
 import { readSessionMarker, writeSessionMarker } from '../../lib/agentRows'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
@@ -13,7 +13,7 @@ import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
 import ChatLiveBlock from './ChatLiveBlock.vue'
-import { applyLiveFrame, followChatLive, liveWorking, settled, type LiveSource, type LiveTurn } from './chatLive'
+import { applyLiveFrame, chatFinals, followChatLive, liveQueue, liveWorking, settleStop, settled, type LiveSource, type LiveTurn } from './chatLive'
 import { collapseMessages } from './sessionMessages'
 import { advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWords, awaitsInboxHook, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
 
@@ -32,9 +32,15 @@ const localSends = ref<ProjectMessage[]>([])
 // A late failure for A must not leave B looking busy (S8-013).
 const sending = computed(() => localSends.value.some(message => message.optimistic && !message.send_failed && message.recipient_session_id === s.value.id))
 const statuses = ref<Record<string, MessageStatus>>({})
+// The agent's saved replies in the bound chat thread (AEON-1071). They are
+// stored only there, never in the project message list.
+const chatMessages = ref<ProjectMessage[]>([])
+let chatThread = ''
 const messages = computed(() => {
   if (!me.value) return []
-  const server = agents.thread(s.value)
+  const project = agents.thread(s.value)
+  const stored = new Set(project.map(message => message.id))
+  const server = [...project, ...chatMessages.value.filter(message => message.sender_session_id === s.value.id && !stored.has(message.id))].sort((a, b) => a.sent_event_id - b.sent_event_id)
   const known = new Set(server.map(message => message.id))
   return [...server, ...localSends.value.filter(message => !known.has(message.id))]
 })
@@ -569,6 +575,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
   markerHold = viewer && person.value && !local ? generation : 0
   seen?.disconnect()
   draft.value = ''; replyTo.value = null; editing.value = null; queueBusy.value = false; uncertain.value = new Set(); queuedIds.value = new Set(); sendError.value = ''; localSends.value = []
+  chatMessages.value = []; chatThread = ''
   historyLoading.value = false; historyError.value = ''; paging = false
   const projectId = s.value.project_id
   boundProject = projectId
@@ -585,7 +592,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
 }, { immediate: true })
 // Message hints refresh the open thread immediately; session reads retain the
 // periodic recovery path. The store coalesces bursts with a trailing read.
-watch([() => agents.threadPulse, () => agents.sessionsUpdatedAt], () => { if (loaded && props.active) void refresh().then(refreshReceipts) })
+watch([() => agents.threadPulse, () => agents.sessionsUpdatedAt], () => { if (loaded && props.active) { void refresh().then(refreshReceipts); refreshChat() } })
 watch(() => props.active, active => { if (active && loaded) void refresh().then(refreshReceipts) })
 
 // ---------- Live turn (AEON-1071, transcript policy A) ----------
@@ -595,20 +602,15 @@ const latestAgentMessage = computed(() => {
   for (let i = messages.value.length - 1; i >= 0; i--) if (messages.value[i]!.sender_principal_id === s.value.agent_principal_id) return messages.value[i]!.id
   return ''
 })
-const liveFrameLimit = 256
-let liveFrames: string[] = []
-let liveOverflow = false
 let liveDropped: number | undefined
-let liveFrameHandle: number | undefined
 let liveGeneration = 0
 let follower: ReturnType<typeof followChatLive> | undefined
 let stopTimer: ReturnType<typeof setTimeout> | undefined
 let stopBefore: string | undefined
 let stopIssued = false
-function applyLiveFrames() {
-  liveFrameHandle = undefined
-  const frames = liveFrames, overflow = liveOverflow
-  liveFrames = []; liveOverflow = false
+let chatFlight = false
+let chatAgain = false
+function applyLiveFrames(frames: string[]) {
   let turn = liveTurn.value, hint = false
   const at = Date.now()
   for (const data of frames) {
@@ -617,39 +619,50 @@ function applyLiveFrames() {
     if (applied.dropped !== undefined) liveDropped = applied.dropped
     if (applied.hint) hint = true
   }
-  // Frames beyond the per-frame bound were skipped: say so instead of
-  // pretending the text is whole.
-  liveTurn.value = overflow && turn ? { ...turn, gap: true } : turn
-  if (hint && loaded) void refresh().then(refreshReceipts)
+  liveTurn.value = turn
+  if (hint && loaded) { void refresh().then(refreshReceipts); refreshChat() }
 }
-function liveFrame(data: string) {
-  if (liveFrames.length >= liveFrameLimit) { liveOverflow = true; return }
-  liveFrames.push(data)
-  if (liveFrameHandle === undefined) liveFrameHandle = requestAnimationFrame(applyLiveFrames)
-}
+const liveFrames = liveQueue(applyLiveFrames, { schedule: run => requestAnimationFrame(run), cancel: handle => cancelAnimationFrame(handle) })
 function resetLive() {
-  if (liveFrameHandle !== undefined) { cancelAnimationFrame(liveFrameHandle); liveFrameHandle = undefined }
+  liveFrames.clear()
   if (stopTimer !== undefined) { clearTimeout(stopTimer); stopTimer = undefined }
-  liveFrames = []; liveOverflow = false; liveDropped = undefined; liveTurn.value = null
+  liveDropped = undefined; liveTurn.value = null
 }
-function clearStopping() {
-  const turn = liveTurn.value
-  if (turn?.stopRequested && !turn.ended) liveTurn.value = { ...turn, stopRequested: false }
+// Saved replies come from the bound chat thread's newest page. A failed read
+// leaves the live block in place; the next hint or session read retries.
+function refreshChat() {
+  const thread = chatThread
+  if (!thread || !me.value) return
+  if (chatFlight) { chatAgain = true; return }
+  chatFlight = true
+  const session = s.value.id, agent = s.value.agent_principal_id, viewer = me.value, generation = liveGeneration
+  void chatThreadMessages(thread).then(page => {
+    if (chatThread !== thread || s.value.id !== session || me.value !== viewer || liveGeneration !== generation) return
+    const merged = new Map(chatMessages.value.map(message => [message.id, message]))
+    for (const message of chatFinals(page.items, agent, session, viewer, props.view.name)) merged.set(message.id, message)
+    chatMessages.value = [...merged.values()].sort((a, b) => a.sent_event_id - b.sent_event_id).slice(-200)
+  }).catch(() => { /* The live block stays until a read succeeds. */ }).finally(() => {
+    chatFlight = false
+    if (chatAgain) { chatAgain = false; refreshChat() }
+  })
 }
-// "Stopping" holds only while an interrupt is on record. A refused one, or
-// none within five seconds, withdraws the claim.
+function withdrawStop() { liveTurn.value = settleStop(liveTurn.value, 'withdrawn') }
+// "Stopping" holds only while an interrupt is on record; "You stopped this
+// turn" needs it applied. A refused one, or none within five seconds,
+// withdraws the claim, even when the turn ended meanwhile.
 function markStopping(before: string | undefined) {
   const turn = liveTurn.value
   if (!turn) return
-  liveTurn.value = { ...turn, stopRequested: true }
+  liveTurn.value = { ...turn, stop: 'requested' }
   stopBefore = before; stopIssued = false
   if (stopTimer !== undefined) clearTimeout(stopTimer)
-  stopTimer = setTimeout(() => { stopTimer = undefined; if (!stopIssued) clearStopping() }, 5000)
+  stopTimer = setTimeout(() => { stopTimer = undefined; if (!stopIssued) withdrawStop() }, 5000)
 }
 watch(() => agents.controls[s.value.id], control => {
   if (!control || control.kind !== 'interrupt' || control.id === stopBefore) return
   stopIssued = true
-  if (control.state === 'completed' && control.outcome !== 'applied') clearStopping()
+  if (control.state !== 'completed') return
+  liveTurn.value = settleStop(liveTurn.value, control.outcome === 'applied' ? 'applied' : 'withdrawn')
 })
 watch([liveTurn, latestAgentMessage], ([turn, latest]) => { if (settled(turn, latest)) liveTurn.value = null })
 const openLive = (url: string) => typeof EventSource === 'undefined' ? null : new EventSource(url, { withCredentials: true }) as unknown as LiveSource
@@ -662,11 +675,16 @@ function startLive() {
   if (!loaded || !me.value || !person.value || !props.active || ended.value || !s.value.id) return
   const generation = ++liveGeneration
   follower = followChatLive(s.value.id, {
-    frame: data => { if (generation === liveGeneration) liveFrame(data) },
+    frame: data => { if (generation === liveGeneration) liveFrames.push(data) },
     resync: () => {
       if (generation !== liveGeneration) return
       resetLive()
-      if (loaded) void refresh().then(refreshReceipts)
+      if (loaded) { void refresh().then(refreshReceipts); refreshChat() }
+    },
+    thread: id => {
+      if (generation !== liveGeneration) return
+      chatThread = id
+      refreshChat()
     },
     attached: () => {},
   }, { lookup: chatThreadForSession, open: openLive })

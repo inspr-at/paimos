@@ -17,14 +17,20 @@ With a thread, the panel follows `GET /api/chat-threads/{id}/live`. Text
 deltas, tool lines and running, idle or waiting state render in a live block
 at the end of the thread. The block sits inside the scroll area and only grows
 downward; a reader pinned to the bottom stays on the newest line. Frames are
-applied once per animation frame. The block holds at most 256 KiB of text and
+applied once per animation frame; when 256 frames wait, for example in a
+hidden tab, they are applied at once rather than dropped, so a turn's end and
+its saved-reply hint are never lost. The block holds at most 256 KiB of text and
 64 tool lines and says when output was cut or the relay skipped frames.
 
 Interim output follows transcript policy A. It lives only in the open view's
 memory and is never stored, logged or replayed. When the turn ends, the tool
-lines fold into a "Used N tools" chip marked live-only. The block remains
-until the agent's saved reply arrives in the thread, then the reply takes its
-place. Message, receipt and read-marker hints reload final history. A resync,
+lines fold into a "Used N tools" chip marked live-only; its toggle sits above
+the list it opens. The block remains until the agent's saved reply arrives in
+the thread, then the reply takes its place. Chat-native replies are stored
+only in the chat thread, so the panel also reads the thread's newest page
+(`GET /api/chat-threads/{id}/messages`, whose items now name
+`sender_principal_id` and `created_at`) and shows the agent's messages from it
+in the session thread. Message, receipt and read-marker hints reload both. A resync,
 or a refused or expired stream, drops interim content, reloads history and
 looks up the thread again; refused streams retry with backoff four times per
 turn.
@@ -44,17 +50,23 @@ disabled while nothing runs, so a turn starting or ending never moves a
 control. A narrow composer hides the new-line hint so Stop stays on the action
 row. A live turn counts as working before the session row catches up. Stop and
 Esc outside a text field use the existing interrupt control. The live block
-shows "Stopping…" only while an interrupt is on record; a refusal, or no
-interrupt within five seconds, withdraws it. "You stopped this turn" is a
-live-only line; saving the partial reply is part of the daemon slices.
+shows "Stopping…" only while an interrupt is on record. "You stopped this
+turn" appears only once the harness applied the interrupt. A refusal, or no
+interrupt within five seconds, withdraws the claim, also when the turn has
+meanwhile ended on its own. The line is live-only; saving the partial reply is
+part of the daemon slices.
 
 ## Validation
 
 `internal/chat` `TestSessionThreadLookupFollowsOnlyTheCallersCurrentBinding`
-covers the lookup's participant, handover and disabled-module refusals.
+covers the lookup's participant, handover and disabled-module refusals;
+`TestChatLiveViewersReplayFinalOnlyAndReceipts` checks that history names each message's author and time.
 `web/tests/chatLive.test.ts` covers turn assembly, bounds, gap detection, the
-capability mapping and the stream follower's resync and bounded retry.
+capability mapping, the stream follower's resync and bounded retry, the full
+frame queue, the stop claim and the mapping of saved chat replies.
 `web/tests/aeon-1071-chat-live.spec.ts` streams a turn at 390 and 1440 px in
 light and dark themes. The stability guard keeps the field, Send, Send now and
-Stop within 0.5 px through streaming, Esc-to-stop and the saved reply
-replacing the block. The spec also checks the composer for each capability.
+Stop within 0.5 px through streaming, Esc-to-stop, the applied interrupt, the
+tool fold and a chat-native saved reply replacing the block. The spec also
+checks the composer for each capability and that a refused stop after the
+turn ended claims nothing.

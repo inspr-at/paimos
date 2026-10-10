@@ -154,7 +154,11 @@ export async function chatThreadForSession(sessionId: string): Promise<{ status:
   const body = await response.json().catch(() => null) as { conversation_id?: unknown } | null
   return typeof body?.conversation_id === 'string' && body.conversation_id ? { status: 200, thread: body.conversation_id } : { status: 502 }
 }
-export const messageStatuses = (ids: string[]) => request<{ items: MessageStatus[] }>(`/inbox/message-status?ids=${ids.map(enc).join(',')}`)
+// The newest page of that chat thread. Chat-native finals live only here,
+// never in the project message list (AEON-1071).
+export interface ChatHistoryMessage { message_id: string; sent_event_position: string; body: string; reply_to?: string | null; sender_principal_id?: string; created_at?: string }
+export const chatThreadMessages = (threadId: string, limit = 50) => request<{ items: { message: ChatHistoryMessage }[] }>(`/chat-threads/${enc(threadId)}/messages?limit=${limit}`)
+export const messageStatuses =(ids: string[]) => request<{ items: MessageStatus[] }>(`/inbox/message-status?ids=${ids.map(enc).join(',')}`)
 
 export const message = (error: unknown) => error instanceof Error ? error.message : 'Request failed. Please retry.'
 

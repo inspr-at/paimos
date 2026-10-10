@@ -5,6 +5,7 @@
 // they are never stored, logged or replayed. The persisted final message
 // replaces the live block once it lands in the thread.
 import { parseJson } from '../../lib/json.ts'
+import type { ChatHistoryMessage, ProjectMessage } from '../../lib/agents.ts'
 
 export type LiveState = 'running' | 'idle' | 'requires_action'
 export type ToolStatus = 'in_progress' | 'completed' | 'failed'
@@ -22,8 +23,11 @@ export interface LiveTurn {
   // The agent message id that was newest when the turn began. A newer one
   // after the turn ended is its final reply.
   before: string
-  stopRequested: boolean
+  // 'requested' while an interrupt is pending, 'applied' once the harness
+  // confirmed it. Only 'applied' may say the person stopped the turn.
+  stop: LiveStop
 }
+export type LiveStop = 'none' | 'requested' | 'applied'
 export type LiveHint = 'message' | 'receipt' | 'read_marker'
 
 // Display bounds, independent of the server's replay window.
@@ -34,7 +38,7 @@ interface Update { sessionUpdate?: unknown; content?: { type?: unknown; text?: u
 interface Frame { type?: unknown; update?: Update; dropped_events?: unknown }
 
 const newTurn = (now: number, before: string, state: LiveState = 'running'): LiveTurn =>
-  ({ text: '', truncated: false, tools: [], state, gap: false, started: now, ended: false, before, stopRequested: false })
+  ({ text: '', truncated: false, tools: [], state, gap: false, started: now, ended: false, before, stop: 'none' })
 
 export interface Applied { turn: LiveTurn | null; hint?: LiveHint; dropped?: number }
 // One chat frame. `dropped` is the relay's cumulative per-session overflow
@@ -102,6 +106,57 @@ export const settled = (turn: LiveTurn | null, latestAgentMessage: string) =>
 
 export const liveWorking = (turn: LiveTurn | null) => !!turn && !turn.ended
 
+// The interrupt's fate decides the stop claim. A refusal, or no interrupt on
+// record at all, withdraws it, also when the turn has meanwhile ended on its
+// own; an applied interrupt confirms it.
+export function settleStop(turn: LiveTurn | null, outcome: 'applied' | 'withdrawn'): LiveTurn | null {
+  if (!turn || turn.stop !== 'requested') return turn
+  return { ...turn, stop: outcome === 'applied' ? 'applied' : 'none' }
+}
+
+// Frames wait for the next animation frame. A full queue is applied at once
+// instead of dropping frames: a paused tab must not lose the end of a turn or
+// a saved-reply hint.
+export const liveQueueLimit = 256
+export interface LiveQueueDeps { schedule: (run: () => void) => number; cancel: (handle: number) => void; limit?: number }
+export function liveQueue(apply: (frames: string[]) => void, deps: LiveQueueDeps) {
+  let frames: string[] = []
+  let handle: number | undefined
+  const limit = deps.limit ?? liveQueueLimit
+  const flush = () => {
+    if (handle !== undefined) { deps.cancel(handle); handle = undefined }
+    const batch = frames
+    frames = []
+    if (batch.length) apply(batch)
+  }
+  return {
+    push(data: string) {
+      frames.push(data)
+      if (frames.length >= limit) flush()
+      else if (handle === undefined) handle = deps.schedule(() => { handle = undefined; flush() })
+    },
+    clear() {
+      if (handle !== undefined) { deps.cancel(handle); handle = undefined }
+      frames = []
+    },
+  }
+}
+
+// The agent's saved replies in the chat thread, shaped like the session's
+// project messages so the thread renders them in place. Chat-native finals
+// are stored only in the chat thread, never in the project message list.
+export function chatFinals(items: readonly { message: ChatHistoryMessage }[], agent: string, session: string, viewer: string, label: string): ProjectMessage[] {
+  return items.flatMap(({ message }) => {
+    const position = Number(message.sent_event_position)
+    if (!agent || message.sender_principal_id !== agent || !Number.isSafeInteger(position) || position <= 0) return []
+    return [{
+      id: message.message_id, sender_principal_id: agent, recipient_principal_id: viewer, to: '', body: message.body, reply_to: message.reply_to ?? null,
+      sent_event_id: position, created_at: message.created_at, sender_session_id: session, sender_label: label,
+      is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none',
+    } satisfies ProjectMessage]
+  })
+}
+
 // m:ss, tabular so the timer never changes width within a minute range.
 export function elapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000))
@@ -133,6 +188,8 @@ export interface LiveHandlers {
   // The replay window is gone (restart, eviction, handover). Reload final
   // history; the caller drops interim content.
   resync: () => void
+  // The thread this session is bound to, once found.
+  thread?: (id: string) => void
   // Whether a stream is attached right now.
   attached: (live: boolean) => void
 }
@@ -190,7 +247,7 @@ export function followChatLive(sessionId: string, handlers: LiveHandlers, deps: 
     try {
       const found = await deps.lookup(sessionId)
       if (stopped) return
-      if (found.status === 200 && found.thread) { thread = found.thread; connect() }
+      if (found.status === 200 && found.thread) { thread = found.thread; handlers.thread?.(thread); connect() }
     } catch { /* Final history stays authoritative. */ }
     finally { looking = false }
   }

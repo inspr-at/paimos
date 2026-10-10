@@ -239,6 +239,8 @@ components:
         body: {type: string, maxLength: 65536}
         payload_mode: {type: string, enum: [inline, preview]}
         reply_to: {type: [string, 'null'], format: uuid}
+        sender_principal_id: {type: string, format: uuid, description: "Author of the message. Present on history pages (AEON-1071)."}
+        created_at: {type: string, format: date-time, description: "When the message was stored. Present on history pages (AEON-1071)."}
     ChatMessagePage:
       type: "object"
       additionalProperties: false

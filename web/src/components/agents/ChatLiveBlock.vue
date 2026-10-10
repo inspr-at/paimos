@@ -29,6 +29,10 @@ const foldLabel = computed(() => `${words.value.tools(props.turn.tools.length)} 
       <span class="live-tag" tabindex="0" :data-tip="words.liveOnly" :aria-label="words.liveOnly">Live</span>
     </p>
     <template v-if="turn.tools.length">
+      <!-- The toggle sits above the list it opens, so it never moves (AEON-541). -->
+      <button v-if="!running" type="button" class="fold" :aria-expanded="open" :data-tip="words.liveOnly" @click="open = !open">
+        <AppIcon name="chevron-right" :size="13" class="chev" />{{ foldLabel }}
+      </button>
       <ul v-if="running || open" class="tools" :aria-label="foldLabel">
         <li v-for="tool in turn.tools" :key="tool.id" class="tool" :class="{ active: tool.status === 'in_progress' && running, failed: tool.status === 'failed' }">
           <AppIcon :name="tool.status === 'failed' ? 'alert' : tool.status === 'completed' ? 'check' : 'wrench'" :size="14" />
@@ -37,21 +41,18 @@ const foldLabel = computed(() => `${words.value.tools(props.turn.tools.length)} 
           <span v-if="tool.ended !== undefined" class="tool-time">{{ seconds(tool.ended - tool.started) }}</span>
         </li>
       </ul>
-      <button v-if="!running" type="button" class="fold" :aria-expanded="open" :data-tip="words.liveOnly" @click="open = !open">
-        <AppIcon name="chevron-right" :size="13" class="chev" />{{ foldLabel }}
-      </button>
     </template>
     <MarkdownBody v-if="turn.text" :body="turn.text" chat class="live-text" />
     <p v-if="turn.truncated" class="live-note">{{ words.truncated }}</p>
     <p v-else-if="turn.gap" class="live-note">{{ words.gap }}</p>
-    <p v-if="running && turn.stopRequested" class="working" role="status"><AppIcon name="stop" :size="14" />{{ words.stopping }}</p>
+    <p v-if="running && turn.stop === 'requested'" class="working" role="status"><AppIcon name="stop" :size="14" />{{ words.stopping }}</p>
     <p v-else-if="running && turn.state === 'requires_action'" class="working" role="status"><AppIcon name="alert" :size="14" />{{ words.waiting }}</p>
     <p v-else-if="running" class="working">
       <AppIcon name="sparkle" :size="16" class="spark" />
       <span>{{ words.working }}</span><span class="num">{{ elapsed(now - turn.started) }}</span>
       <span v-if="canStop" class="esc-hint"><span aria-hidden="true">·</span><KeyCap k="Esc" /><span>{{ words.escStop }}</span></span>
     </p>
-    <p v-else-if="turn.stopRequested" class="live-note stopped" role="status">{{ words.stopped }}</p>
+    <p v-else-if="!running && turn.stop === 'applied'" class="live-note stopped" role="status">{{ words.stopped }}</p>
   </section>
 </template>
 
