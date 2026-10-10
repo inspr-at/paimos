@@ -72,3 +72,10 @@ attempt rejection, orphan ownership, preserved fixture data, normal completion,
 cancellation and a real controller crash. FIFO barriers and witness descriptors
 prove descendant exit and that an unrelated fixture survives. No migration,
 public API change, global launch switch or version change is required.
+
+Validation for AEON-1089: remote `go test -race ./internal/runisolation
+./internal/ownedprocess ./cmd/aeon-isolation` passed (the helper is compiled;
+behavior lives in the allocator package). Ten repeated allocation race checks
+also passed after applying the existing Darwin file-creation guard. The locked
+remote `node scripts/ci-static.mjs --merge-main` exited 0 with all 42 checks
+passed and no optional skips; the ownership audit passed all 33 checks.
