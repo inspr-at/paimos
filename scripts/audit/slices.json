@@ -136,6 +136,8 @@
         "internal/agentd/chat_normalize.go",
         "internal/agentd/chat_stream.go",
         "internal/agentd/chat_stream_test.go",
+        "internal/agentd/chat_relay.go",
+        "internal/agentd/chat_relay_test.go",
         "internal/agentd/chat_acp.go",
         "internal/agentd/chat_acp_test.go",
         "internal/harness/routine_execution.go",
@@ -228,7 +230,9 @@
         "internal/decisiondesk/cutover_test.go",
         "internal/questions/lock_order_test.go",
         "internal/recurrences/consent.go",
-        "internal/recurrences/consent_test.go"
+        "internal/recurrences/consent_test.go",
+        "internal/recurrences/runs.go",
+        "internal/recurrences/runs_test.go"
       ]
     },
     {

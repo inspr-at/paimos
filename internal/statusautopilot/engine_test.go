@@ -411,7 +411,12 @@ func TestReleasePublishHumanCheckReplayUndo(t *testing.T) {
 	for i, state := range []string{"new", "backlog", "open", "blocked", "in_progress", "qa", "archived"} {
 		unshipped[state] = f.add(fmt.Sprintf("AUT-%d", i+6), "work", state, 15, nil)
 	}
-	ids := []string{done, flagged, cancelled, accepted}
+	content := f.add("AUT-1091", "work", "done", 15, nil)
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"no_release_needed":true}'::jsonb WHERE id=$1`, content)
+		return err
+	})
+	ids := []string{done, flagged, cancelled, accepted, content}
 	for _, id := range unshipped {
 		ids = append(ids, id)
 	}
@@ -421,6 +426,9 @@ func TestReleasePublishHumanCheckReplayUndo(t *testing.T) {
 	publish()
 	if f.state(done).State != "delivered" || f.state(flagged).State != "done" || f.state(cancelled).State != "cancelled" || f.state(accepted).State != "accepted" {
 		t.Fatal("publish status/flag failure")
+	}
+	if n := f.state(content); n.State != "done" || len(f.changes(content)) != 0 {
+		t.Fatalf("content sent through release publication: %+v", n)
 	}
 	for state, id := range unshipped {
 		if f.state(id).State != state {
@@ -489,5 +497,125 @@ func TestAutopilotTenantIsolation(t *testing.T) {
 		return err
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Risk: content work reports false completion, bypasses a human hold, or waits
+// forever for a release. Injected time proves the acceptance boundary.
+func TestNoReleaseNeededAcceptancePolicy(t *testing.T) {
+	now := time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC)
+	settings := Defaults()
+	settings.Rules["accept"] = Rule{Enabled: true, Days: 1}
+	c := candidate{Node: node{State: "done", Fields: map[string]json.RawMessage{"no_release_needed": json.RawMessage(`true`), "merged_at": json.RawMessage(`"2026-10-10T00:00:00Z"`)}, Marks: map[string]bool{"missed_release": true}}, Since: now.Add(-24 * time.Hour)}
+	if d := evaluate(c, settings, now.Add(-time.Nanosecond)); d != nil {
+		t.Fatalf("accepted before one day: %+v", d)
+	}
+	d := evaluate(c, settings, now)
+	if d == nil || d.Rule != "accept" || d.To != "accepted" || d.Flag != "" || d.Skip || !strings.Contains(d.Reason, "no release needed") {
+		t.Fatalf("content decision: %+v", d)
+	}
+	c.Objection = true
+	if d := evaluate(c, settings, now.Add(60*24*time.Hour)); d != nil {
+		t.Fatalf("objection ignored or marked as missed release: %+v", d)
+	}
+	c.Objection = false
+	c.Node.Fields["delivery_objection"] = json.RawMessage(`"Scene needs another edit"`)
+	if d := evaluate(c, settings, now); d != nil {
+		t.Fatalf("stored objection ignored: %+v", d)
+	}
+	delete(c.Node.Fields, "delivery_objection")
+	check := "Inspect the scene"
+	c.Node.HumanCheck = &check
+	if d := evaluate(c, settings, now.Add(60*24*time.Hour)); d == nil || !d.Skip || d.To != "" || d.Flag != "" {
+		t.Fatalf("human check bypassed: %+v", d)
+	}
+	c.Node.HumanCheck = nil
+	for _, rule := range []string{"accept", "workspace"} {
+		off := Defaults()
+		off.Rules["accept"] = Rule{Enabled: rule != "accept", Days: 1}
+		off.Enabled = rule != "workspace"
+		if d := evaluate(c, off, now); d != nil {
+			t.Fatalf("disabled %s bypassed: %+v", rule, d)
+		}
+	}
+	settings.Rules["accept"] = Rule{Enabled: true, Days: 2}
+	if d := evaluate(c, settings, now); d != nil {
+		t.Fatalf("ignored configured two-day policy: %+v", d)
+	}
+	c.Node.Marks = nil
+	delete(c.Node.Fields, "merged_at")
+	for _, mark := range []string{`false`, `"true"`, `null`} {
+		c.Node.Fields["no_release_needed"] = json.RawMessage(mark)
+		if d := evaluate(c, settings, now); d != nil {
+			t.Fatalf("unmarked work accepted: %+v", d)
+		}
+		if d := evaluate(c, settings, c.Since.Add(14*24*time.Hour)); d == nil || d.Rule != "done" || d.Flag != "missed_release" || d.To != "" {
+			t.Fatalf("software release path changed: %+v", d)
+		}
+	}
+}
+
+func TestNoReleaseNeededDailyAcceptanceAndObjections(t *testing.T) {
+	f := setup(t)
+	settings := Defaults()
+	settings.Rules["accept"] = Rule{Enabled: true, Days: 1}
+	body, err := json.Marshal(map[string]any{"enabled": true, "rules": settings.Rules, "expected_revision": 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.call(f.p, "PUT", "/api/settings/status-autopilot", string(body), 200)
+	check := "Inspect the content"
+	accepted := f.add("AUT-1091", "work", "done", 1, nil)
+	human := f.add("AUT-1092", "work", "done", 40, &check)
+	objection := f.add("AUT-1093", "work", "done", 40, nil)
+	software := f.add("AUT-1094", "work", "done", 1, nil)
+	for _, id := range []string{accepted, human, objection} {
+		f.tx(func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"no_release_needed":true}'::jsonb WHERE id=$1`, id)
+			return err
+		})
+	}
+	f.tx(func(tx pgx.Tx) error {
+		_, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &objection, Type: "comment.created", After: map[string]string{"body_markdown": "The scene still needs changes."}})
+		return err
+	})
+	f.run(f.now)
+	if n := f.state(accepted); n.State != "accepted" || n.Marks["missed_release"] {
+		t.Fatalf("marked done did not accept: %+v", n)
+	}
+	changes := f.changes(accepted)
+	if len(changes) != 1 || changes[0].Rule != "accept" || !strings.Contains(changes[0].Reason, "no release needed") {
+		t.Fatalf("missing acceptance audit: %+v", changes)
+	}
+	f.call(f.p, "POST", fmt.Sprintf("/api/events/%d/undo", changes[0].EventID), "", 201)
+	f.run(f.now.Add(24 * time.Hour))
+	for _, id := range []string{accepted, human, objection, software} {
+		if n := f.state(id); n.State != "done" || n.Marks["missed_release"] {
+			t.Fatalf("hold, objection or software path bypassed: %+v", n)
+		}
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var skips int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE node_id=$1 AND type='status_autopilot.skipped' AND metadata->>'rule'='accept'`, human).Scan(&skips); err != nil {
+			return err
+		}
+		if skips != 1 {
+			return fmt.Errorf("human-check skip audit: %d", skips)
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET human_check=NULL WHERE id=$1`, human)
+		return err
+	})
+	f.run(f.now.Add(2 * 24 * time.Hour))
+	if n := f.state(human); n.State != "accepted" {
+		t.Fatalf("completed check never resumed: %+v", n)
+	}
+	f.run(f.now.Add(60 * 24 * time.Hour))
+	for _, id := range []string{accepted, objection} {
+		if n := f.state(id); n.State != "done" || n.Marks["missed_release"] {
+			t.Fatalf("content falsely flagged for release: %+v", n)
+		}
+	}
+	if n := f.state(software); n.State != "done" || !n.Marks["missed_release"] {
+		t.Fatalf("software release flag changed: %+v", n)
 	}
 }

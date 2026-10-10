@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1327_release_note_content_flags.sql",
+      "sha256": "4dbba9693059cdf992d55431a74da69168b6ab69f0f85a4651d1e881905a457f",
+      "ticket": "AEON-1091",
+      "reason": "Add no_release_needed to the live release-note snapshot field allowlist and retain that existing boolean alongside hide_from_release_notes on unavailable members. The complete released 1237 function is otherwise identical, including invoker rights, tenant/project joins, leaf membership and bounds. No schema columns, tables, memberships or existing frozen payloads change. CREATE OR REPLACE FUNCTION is outside the conservative expand-safe allowlist. This exact-byte draft requires the coordinator-assigned migration number and coordinator review/compatibility gates before merge or release; it grants no acceptance, push or deployment authority."
+    }
+  ]
+}

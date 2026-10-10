@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/cookiejar"
 	"os"
 	"path/filepath"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
+	"github.com/inspr-at/paimos/internal/chat"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -29,6 +31,98 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// Risk: production ignores the deployment opt-in, or serves chat while it is off.
+func TestServeChatEnabled(t *testing.T) {
+	t.Setenv("AEON_ENV", "dev")
+	t.Setenv("AEON_BOOTSTRAP_TENANT_SLUG", "chat-switch")
+	t.Setenv("AEON_BOOTSTRAP_ADMIN_EMAIL", "chat-switch@example.test")
+	for _, name := range []string{"AEON_SESSION_KEY_FILE", "AEON_OIDC_ISSUER", "AEON_OIDC_CLIENT_ID", "AEON_PUBLIC_URL"} {
+		t.Setenv(name, "")
+	}
+	for _, tc := range []struct {
+		name    string
+		enabled bool
+		status  int
+	}{
+		{"off", false, http.StatusNotFound},
+		{"on", true, http.StatusOK},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fresh := dbtest.Open(t)
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ln.Close()
+			cfg := config.Config{
+				ChatEnabled: tc.enabled, DatabaseURL: fresh.AppURL, Env: "dev",
+				PublicURL: "http://127.0.0.1", BootstrapTenantSlug: "chat-switch", BootstrapTenantName: "Chat switch",
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			done := make(chan error, 1)
+			go func() { done <- serveListener(ctx, cfg, ln) }()
+			defer func() {
+				cancel()
+				select {
+				case err := <-done:
+					if err != nil {
+						t.Error(err)
+					}
+				case <-time.After(20 * time.Second):
+					t.Error("server did not stop")
+				}
+			}()
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := &http.Client{Jar: jar, Timeout: 10 * time.Second}
+			defer client.CloseIdleConnections()
+			base := "http://" + ln.Addr().String()
+			call := func(path, payload string) (int, []byte) {
+				t.Helper()
+				resp, err := client.Post(base+path, "application/json", bytes.NewBufferString(payload))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer resp.Body.Close()
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return resp.StatusCode, body
+			}
+			// The already-bound listener queues this request until Serve accepts it;
+			// no sleep or elapsed-time assertion stands in for server readiness.
+			if status, body := call("/api/auth/dev-login", `{"email":"chat-switch@example.test"}`); status != http.StatusOK {
+				t.Fatalf("fixture login = %d %s", status, body)
+			}
+			var project string
+			if err := fresh.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title)
+				SELECT t.id,'CHAT-1',k.id,'Chat switch project' FROM tenants t
+				JOIN node_kinds k ON k.tenant_id=t.id AND k.slug='project'
+				WHERE t.slug='chat-switch' RETURNING id::text`).Scan(&project); err != nil {
+				t.Fatal(err)
+			}
+			status, body := call("/api/projects/"+project+"/chat-roles", `{"kind":"lead","slot_key":"lead"}`)
+			if status != tc.status {
+				t.Fatalf("chat route = %d, want %d: %s", status, tc.status, body)
+			}
+			if tc.enabled {
+				var role chat.Role
+				if err := json.Unmarshal(body, &role); err != nil {
+					t.Fatal(err)
+				}
+				if role.Contract != "chat-v1" || role.ID == "" || role.ProjectID != project || role.Kind != "lead" || role.SlotKey != "lead" || role.ConversationScope != "person_project" {
+					t.Fatalf("unexpected chat role: %+v", role)
+				}
+			} else if !bytes.Contains(body, []byte(`"error":"not found"`)) {
+				t.Fatalf("disabled chat did not return its feature-gate refusal: %s", body)
+			}
+		})
+	}
+}
 
 // Risk: background work consumes every slot and takes the entire installation
 // out of service although Postgres itself is healthy (AEON-995).

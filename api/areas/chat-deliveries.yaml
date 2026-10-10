@@ -17,6 +17,22 @@ paths:
         '400': {description: Invalid bounded request}
         '408': {description: Request body did not arrive before the deadline}
         '404': {description: Disabled or unavailable proof/binding}
+  /chat-deliveries/binding/current:
+    post:
+      operationId: "currentChatWorkerBinding"
+      description: "chat-v1. Return the exact current conversation ID and binding epoch for the caller's own session only. Authorised like the relay routes: the session's agent principal, its private worker lease, a live unmanaged inbox registration or a live managed registration advertising chat, an owner person, a heartbeat within two minutes, current chat.receive permission and key scope, and the current binding epoch with native-context ownership. No body content, role, person or session metadata is returned. 404 when no thread is bound. At most 8 KiB body, three-second body/work deadline."
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string, minLength: 32, maxLength: 4096}, description: "Private existing registration proof; never returned or logged"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ChatCurrentBindingRequest'}
+      responses:
+        '200': {description: "Exact current binding of the caller's session", content: {application/json: {schema: {$ref: '#/components/schemas/ChatCurrentBinding'}}}}
+        '400': {description: "Invalid bounded request"}
+        '408': {description: "Request body did not arrive before the deadline"}
+        '404': {description: "Disabled, unbound or unavailable proof"}
   /chat-deliveries/claim:
     post:
       operationId: "claimChatDelivery"
@@ -194,6 +210,20 @@ components:
         reason:
           type: "string"
           maxLength: 128
+    ChatCurrentBindingRequest:
+      type: object
+      additionalProperties: false
+      required: [session_id]
+      properties:
+        session_id: {type: string, format: uuid}
+    ChatCurrentBinding:
+      type: object
+      additionalProperties: false
+      required: [contract, conversation_id, binding_epoch]
+      properties:
+        contract: {type: string, const: chat-live-v1}
+        conversation_id: {type: string, format: uuid}
+        binding_epoch: {$ref: '#/components/schemas/ChatPosition'}
     ChatWorkerBindingRequest:
       type: object
       additionalProperties: false

@@ -72,13 +72,24 @@ import (
 )
 
 type Module struct {
-	sessionRecovery SessionRecovery
-	leadAdmission   LeadAdmission
-	routineRuntime  modelregistry.ExecutionRuntimeReader
-	planningStart   func(context.Context, pgx.Tx, string, string) error
-	pool            *pgxpool.Pool
-	controlText     controlRelay
-	ownershipClock  func(context.Context, pgx.Tx) (time.Time, error)
+	heartbeatIsolation func(context.Context, pgx.Tx, string) (bool, error)
+	sessionRecovery    SessionRecovery
+	leadAdmission      LeadAdmission
+	routineRuntime     modelregistry.ExecutionRuntimeReader
+	planningStart      func(context.Context, pgx.Tx, string, string) error
+	pool               *pgxpool.Pool
+	controlText        controlRelay
+	ownershipClock     func(context.Context, pgx.Tx) (time.Time, error)
+}
+
+// WithHeartbeatIsolation installs the project execution setting's gate before
+// Mount. Nil (the default) retains the existing reporter behaviour. An enabled
+// project receives the committed heartbeat receipt without optional read
+// projections; the session read endpoint remains the projection surface.
+// This does not enable execution or grant worker authority.
+func (m *Module) WithHeartbeatIsolation(enabled func(context.Context, pgx.Tx, string) (bool, error)) *Module {
+	m.heartbeatIsolation = enabled
+	return m
 }
 
 // SessionRecovery prepares a continuation under the caller's transaction and
@@ -604,7 +615,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 				continue
 			}
 			switch v {
-			case "inbox", "pause", "owned_stop_v1", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability, recoveryCapability, servicetier.Capability:
+			case "inbox", "pause", "owned_stop_v1", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability, recoveryCapability, servicetier.Capability, ChatCapability:
 			default:
 				return nil, workorders.Fail(400, "invalid capability")
 			}
@@ -1337,6 +1348,13 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if err := lockActivityPolicy(ctx, tx, true); err != nil {
 		return nil, err
 	}
+	if m.heartbeatIsolation != nil {
+		// Endpoint holds tenant and tree fences. Check the current target
+		// grant before any mutation, including lost-contact revival.
+		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: r.PathValue("projectId")}); err != nil {
+			return nil, err
+		}
+	}
 	s, err := worker(ctx, tx, r, p)
 	if err != nil && lostContact(s) && leaseProof(s, r, p) {
 		// AEON-291: the sweeper closed a silent generation; its own worker is back.
@@ -1344,6 +1362,13 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	}
 	if err != nil {
 		return nil, err
+	}
+	isolated := false
+	if m.heartbeatIsolation != nil {
+		isolated, err = m.heartbeatIsolation(ctx, tx, s.ProjectID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if in.AttachedHook && in.ProcessOwnership == nil {
 		return nil, workorders.Fail(400, "exact attached hook identity required")
@@ -1487,6 +1512,17 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	}
 	if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {
 		return nil, err
+	}
+	if isolated {
+		// Pause delivery and wake timers are mandatory controls, even when
+		// optional projections are omitted. Stamp after the final writes so
+		// a scheduled start reached during this heartbeat is delivered.
+		now, err := m.ownershipNow(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		s = stampPause(s, now)
+		return heartbeatReceipt(s), nil
 	}
 	if err = m.stampSessions(ctx, tx, []*Session{&s}); err != nil {
 		return nil, err

@@ -9,6 +9,14 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+func noReleaseNeeded(fields json.RawMessage) bool {
+	var flags struct {
+		NoRelease bool `json:"no_release_needed"`
+	}
+	_ = json.Unmarshal(fields, &flags)
+	return flags.NoRelease
+}
+
 // Resolve both states with the same tenant catalog used by parent derivation.
 // Call inside the write transaction; category overrides apply to historical
 // completion as well as the requested state.

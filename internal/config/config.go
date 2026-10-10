@@ -22,6 +22,7 @@ import (
 
 // Config is the process configuration for `paimos serve`.
 type Config struct {
+	ChatEnabled                    bool // disabled by default; deployment opt-in via AEON_CHAT_ENABLED
 	AttachedMessages               bool // disabled by default; also requires single-instance qualification
 	AttachedMessagesSingleInstance bool
 	PhonePush                      *PhonePushConfig
@@ -121,6 +122,13 @@ func FromEnv() (Config, error) {
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, fmt.Errorf("AEON_DATABASE_URL is required")
+	}
+	switch getenv("AEON_CHAT_ENABLED", "false") {
+	case "true":
+		cfg.ChatEnabled = true
+	case "false":
+	default:
+		return Config{}, fmt.Errorf("AEON_CHAT_ENABLED must be true or false")
 	}
 	publicRepository, publicSet := os.LookupEnv("AEON_DOCTRINE_PUBLIC_REPOSITORY")
 	if !publicSet {

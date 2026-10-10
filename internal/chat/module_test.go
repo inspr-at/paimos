@@ -126,12 +126,18 @@ func (f *fixture) thread(t *testing.T, p tenant.Principal, role Role) Thread {
 }
 func (f *fixture) session(t *testing.T, owner tenant.Principal, project, role, management string) (string, string) {
 	t.Helper()
+	return f.sessionWith(t, f.agent.ID, owner, project, role, management, "inbox")
+}
+
+// sessionWith registers a live session for agent with the given capabilities.
+func (f *fixture) sessionWith(t *testing.T, agent string, owner tenant.Principal, project, role, management string, caps ...string) (string, string) {
+	t.Helper()
 	id := uid()
 	lease := "fixture-lease-" + uid()
 	sum := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
 	ref := sha256.Sum256([]byte(id))
 	_, err := f.d.Admin.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,capabilities,ref_digest,lease_digest,account_label,display_label,model)
- VALUES($1,$2,$3,$4,$5,'claude','private-host-fixture',$6,$7,ARRAY['inbox'],$8,$9,'private-account-fixture','private-label-fixture','private-model-fixture')`, owner.TenantID, id, project, f.agent.ID, owner.ID, management, role, ref[:], sum[:])
+ VALUES($1,$2,$3,$4,$5,'claude','private-host-fixture',$6,$7,$10,$8,$9,'private-account-fixture','private-label-fixture','private-model-fixture')`, owner.TenantID, id, project, agent, owner.ID, management, role, ref[:], sum[:], caps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,6 +262,34 @@ func TestBindingRejectsForeignWrongRoleManagedAndStaleRegistration(t *testing.T)
 		t.Fatal(err)
 	}
 	expect(t, f.call(f.alice, "POST", "/api/chat-threads/"+thread.ID+"/binding", map[string]string{"expected_epoch": "0", "session_id": id}, ""), 404)
+	// A managed agentd run is selectable only with the chat stream capability
+	// and is otherwise held to exactly the same owner/project/role/liveness rules.
+	for _, c := range []struct {
+		owner         tenant.Principal
+		project, role string
+		caps          []string
+	}{
+		{f.alice, f.project, "coordinator", []string{"inbox", "steer", "interrupt"}}, {f.bob, f.project, "coordinator", []string{"chat"}},
+		{f.alice, f.secondProject, "coordinator", []string{"chat"}}, {f.alice, f.project, "worker", []string{"chat"}},
+	} {
+		id, _ := f.sessionWith(t, f.agent.ID, c.owner, c.project, c.role, "managed", c.caps...)
+		expect(t, f.call(f.alice, "POST", "/api/chat-threads/"+thread.ID+"/binding", map[string]string{"expected_epoch": "0", "session_id": id}, ""), 404)
+	}
+	for _, mutation := range []string{
+		`UPDATE harness_sessions SET created_at=clock_timestamp()-interval '3 minutes',heartbeat_at=NULL WHERE id=$1`,
+		`UPDATE harness_sessions SET stopped_at=clock_timestamp(),phase='stopped' WHERE id=$1`,
+		`UPDATE harness_sessions SET phase='stopping' WHERE id=$1`,
+	} {
+		id, _ := f.sessionWith(t, f.agent.ID, f.alice, f.project, "coordinator", "managed", "chat")
+		if _, err := f.d.Admin.Exec(t.Context(), mutation, id); err != nil {
+			t.Fatal(err)
+		}
+		expect(t, f.call(f.alice, "POST", "/api/chat-threads/"+thread.ID+"/binding", map[string]string{"expected_epoch": "0", "session_id": id}, ""), 404)
+	}
+	managed, _ := f.sessionWith(t, f.agent.ID, f.alice, f.project, "coordinator", "managed", "chat")
+	if bound := f.bind(t, f.alice, thread, managed, "0"); bound.BindingEpoch != "1" || bound.Readiness.State != "unavailable" {
+		t.Fatalf("managed chat registration not selectable: %+v", bound)
+	}
 	for _, epoch := range []string{"", "01", "-1", "9223372036854775808"} {
 		expect(t, f.call(f.alice, "POST", "/api/chat-threads/"+thread.ID+"/binding", map[string]string{"expected_epoch": epoch, "session_id": id}, ""), 400)
 	}

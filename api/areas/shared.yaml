@@ -706,7 +706,7 @@ components:
       type: object
       required: [code, hint]
       properties:
-        code: {type: string, enum: [missing_progress, missing_eta, ticket_without_estimate]}
+        code: {type: string, enum: [missing_progress, missing_eta, ticket_without_estimate, projection_unavailable]}
         hint: {type: string}
     HarnessHandover:
       type: object
@@ -841,7 +841,7 @@ components:
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
         work_shape: {type: string, enum: [unknown, ship, scout]}
-        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, pause, owned_stop_v1, status, steer, interrupt, stop, managed_control_v1, session_recovery_v1, rename, model, effort, service_tier_v1]}}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, pause, owned_stop_v1, status, steer, interrupt, stop, managed_control_v1, session_recovery_v1, rename, model, effort, service_tier_v1, chat]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         vendor_session_ref:
           type: string
@@ -2144,6 +2144,7 @@ components:
         benefit_en: {type: string, description: "English benefit, one or two plain-language sentences"}
         benefit_de: {type: string, description: "German benefit, one or two plain-language sentences, neutral without direct address"}
         hide_from_release_notes: {type: boolean, default: false, description: Omit from public notes; does not waive completion requirements}
+        no_release_needed: {type: boolean, default: false, description: 'Content or tool work needing no software release. Done work uses rules.accept.days before automatic acceptance, unless there is an objection or pending human check. Omitted from release notes; completion requirements still apply.'}
         roadmap_public: {type: boolean, description: Person approval for the public roadmap. False and omitted are unpublished. Only a person can change that.}
         roadmap_public_source: {type: [string, 'null'], enum: [person, null], description: Acting principal kind. Must be person when supplied while publishing.}
         roadmap_public_by: {type: [string, 'null'], format: uuid, readOnly: true, description: Person principal id. The server overwrites this.}

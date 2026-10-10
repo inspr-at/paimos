@@ -33,6 +33,10 @@ func (m *Module) notifications(w http.ResponseWriter, r *http.Request) {
 		workorders.WriteError(w, workorders.Fail(403, "harness worker proof rejected"))
 		return
 	}
+	// Reconnect's initial wake recovers control/inbox changes during recycling.
+	ctx, stop := context.WithTimeout(r.Context(), db.ListenerMaxLifetime)
+	defer stop()
+	r = r.WithContext(ctx)
 	// Authorize before allocating a dedicated LISTEN connection, then authorize
 	// again after subscribing. The initial wake closes the replay/listen gap.
 	if _, err := m.notificationHint(r, p, 0); err != nil {
