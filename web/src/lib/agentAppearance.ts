@@ -27,6 +27,7 @@ export function useAgentAppearance() {
 }
 export const agentStateAppearance = (state: AgentState, choice: AgentStatePreference) => ({
     '--agent-state-color': state === 'paused' ? 'var(--ink-2)' : `var(--agent-${state === 'pausing' ? 'working' : inactiveState(state) ? 'idle' : state === 'unresponsive' ? 'problem' : state === 'awaiting' ? 'waiting' : state === 'done' ? 'working' : state})`,
+    '--agent-state-ink': state === 'paused' ? 'var(--paused-mark-ink)' : `var(--agent-${state === 'pausing' ? 'working' : inactiveState(state) ? 'idle' : state === 'unresponsive' ? 'problem' : state === 'awaiting' ? 'waiting' : state === 'done' ? 'working' : state}-ink)`,
     '--agent-state-opacity': inactiveState(state) ? 'var(--agent-idle-opacity)' : '1',
     '--agent-state-saturation': choice.palette === 'monochrome' ? '0' : '1',
   })

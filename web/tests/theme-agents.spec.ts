@@ -6,6 +6,7 @@ import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { indicatorVariants } from '../src/lib/indicatorVariants'
+import { inkOn } from '../src/lib/themeEngine'
 import type { ActiveTheme, ThemeRecord } from '../src/lib/themes'
 
 // Each case measures many controls after every option and captures both previews.
@@ -166,6 +167,10 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     // Both modes render their own state tokens regardless of the page mode.
     const colors = await card.locator('.live-row .live-bot').evaluateAll(nodes => nodes.map(el => getComputedStyle(el.querySelector('.agent-state-mark')!).color))
     expect(colors).toEqual(['rgb(0, 110, 75)', 'rgb(95, 233, 193)'])
+    // A preview must choose ink from its own fill, including opposite page modes.
+    const previewInk = await card.locator('.live-row .live-bot').evaluateAll(nodes => nodes.map(el => getComputedStyle(el.querySelector('.agent-state-mark path')!).stroke))
+    const rgb = (hex: string) => `rgb(${[1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)).join(', ')})`
+    expect(previewInk).toEqual(['#006e4b', '#5fe9c1'].map(fill => rgb(inkOn(fill))))
     for (const mode of ['light', 'dark']) for (const state of ['waiting', 'throttled', 'problem', 'idle']) {
       expect(await card.locator(`.${mode} [data-preview-state="${state}"] .live-bot`).evaluate(el => el.getAnimations({ subtree: true }).filter(a => a.effect?.getTiming().iterations === Infinity).length)).toBe(0)
     }

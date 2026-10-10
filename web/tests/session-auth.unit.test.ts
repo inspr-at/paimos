@@ -6,7 +6,7 @@ import { can, clearPermissions, ensurePermissions } from '../src/lib/authz'
 import { useSession } from '../src/stores/session'
 
 vi.mock('../src/lib/api', () => ({ api: vi.fn(), getSession: vi.fn(), sessionEnded: { blocked: false, handler: null } }))
-vi.mock('../src/lib/theme', () => ({ restoreTheme: async () => {} }))
+vi.mock('../src/lib/theme', () => ({ restoreTheme: async () => {}, resetTheme: () => {} }))
 const person = (id: string): Identity => ({ principal: { id, name: id, kind: 'person' }, tenant: { id: 'tenant', name: 'Workspace' } })
 
 beforeEach(() => {

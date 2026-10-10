@@ -61,7 +61,7 @@ export function colourContrast(a: string, b: string) {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
 }
 const ONS = ['#ffffff', '#102327'] as const
-const onFor = (fill: string) => colourContrast(ONS[0], fill) >= colourContrast(ONS[1], fill) ? ONS[0] : ONS[1]
+export const inkOn = (fill: string) => colourContrast(ONS[0], fill) >= colourContrast(ONS[1], fill) ? ONS[0] : ONS[1]
 const TINT: Record<ColourMode, [number, number][]> = {
   light: [[.875, .07], [.923, .045], [.963, .02]],
   dark: [[.44, .055], [.38, .048], [.325, .04]],
@@ -91,9 +91,9 @@ export function roles(hex: string, mode: ColourMode): AccentRoles {
   for (let i = 0; i < 120 && colourContrast(line, card) < 3; i++) {
     ll += light ? -.01 : .01; line = fromOklch(ll, C, H)
   }
-  let fl = L, fill = hex, on = onFor(fill), nudged = false
+  let fl = L, fill = hex, on = inkOn(fill), nudged = false
   for (let i = 0; i < 120 && colourContrast(on, fill) < 4.5; i++) {
-    fl += on === ONS[0] ? -.01 : .01; fill = fromOklch(fl, C, H); on = onFor(fill); nudged = true
+    fl += on === ONS[0] ? -.01 : .01; fill = fromOklch(fl, C, H); on = inkOn(fill); nudged = true
   }
   return { chosen: hex, fill, hi: fromOklch(fl + .06, C, H), lo: fromOklch(fl - .05, C, H), on, line, ink, t1, t2, t3, nudged }
 }
@@ -118,7 +118,7 @@ export function agentTokens(agents: AgentThemeAppearance, mode: ColourMode): Rec
   if (palette === 'custom' && !agents.custom_states) throw new TypeError('Custom states need five accents')
   const colours = AGENT_STATES.map((state, i) => palette === 'custom' ? modeValue(agents.custom_states![state], mode) : preset[mode][i]!)
   return {
-    ...Object.fromEntries(AGENT_STATES.map((state, i) => [`--agent-${state}`, colours[i]!])),
+    ...Object.fromEntries(AGENT_STATES.flatMap((state, i) => [[`--agent-${state}`, colours[i]!], [`--agent-${state}-ink`, inkOn(colours[i]!)]])),
     '--agent-idle-opacity': String((agents.dim_inactive ?? true) ? (agents.inactive_opacity ?? 55) / 100 : 1),
     '--agent-art-scale': String(agents.size == null ? 1 : Math.round(agents.size / nativeIconSize(agents.avatar) * 1000) / 1000),
   }
@@ -126,12 +126,12 @@ export function agentTokens(agents: AgentThemeAppearance, mode: ColourMode): Rec
 /** Isolated previews and legacy preferences follow their container's color-scheme. */
 export function agentPreviewTokens(agents: AgentThemeAppearance): Record<string, string> {
   const light = agentTokens(agents, 'light'), dark = agentTokens(agents, 'dark')
-  return Object.fromEntries(Object.entries(light).map(([key, value]) => [key, AGENT_STATES.some(state => key === `--agent-${state}`) ? `light-dark(${value}, ${dark[key]})` : value]))
+  return Object.fromEntries(Object.entries(light).map(([key, value]) => [key, AGENT_STATES.some(state => key === `--agent-${state}` || key === `--agent-${state}-ink`) ? `light-dark(${value}, ${dark[key]})` : value]))
 }
 export function themeTokens(v: ThemeValues, mode: ColourMode): Record<string, string> {
   const light = mode === 'light', P = roles(modeValue(v.primary, mode), mode), S = roles(modeValue(v.secondary, mode), mode), mk = markerValue(v, mode)
   return {
-    ...agentTokens(v.agents, mode), ...accentTokens('primary', P), ...accentTokens('secondary', S), '--marker': mk, '--marker-on': onFor(mk),
+    ...agentTokens(v.agents, mode), ...accentTokens('primary', P), ...accentTokens('secondary', S), '--marker': mk, '--marker-on': inkOn(mk),
     '--teal': P.line, '--teal-ink': P.ink, '--aqua': P.t1, '--aqua-2': P.t2, '--aqua-3': P.t3, '--button-ink': P.on, '--level-person': P.line,
     '--row-hover': light ? mix(P.line, 5.5) : mix(P.fill, 6), '--row-selected': light ? mix(P.t1, 30) : mix(P.fill, 11),
     '--chip-teal-bg': light ? `linear-gradient(180deg, #fff, ${P.t2})` : `linear-gradient(180deg, ${mix(P.fill, 20)}, ${mix(P.fill, 10)})`,
