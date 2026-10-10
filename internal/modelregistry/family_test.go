@@ -20,7 +20,7 @@ import (
 // ordinary review-off setting removes the compiled routine evaluator floor.
 func TestRoutineEvaluationHonorsLivePolicyInBothRegistryRoutes(t *testing.T) {
 	p, _ := boardFixture(t)
-	project := editorProject(t, p, "EVAL-POLICY")
+	project := editorProject(t, p, "EVAL-1")
 	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", http.StatusOK)
 	opus := profileBySlug(profiles, "claude-opus-xhigh")
 	minimalAccount(t, p, opus)
