@@ -4,7 +4,7 @@
 // TG0 already mounts the API through nodes.New; no new module/manifest is needed.
 import type { GraphData, GraphLink } from './graphRenderer.ts'
 import type { TicketGraph, TicketGraphLinkKind, TicketStatusCategory } from './ticketGraph.ts'
-import { excluded, included, type Dimension, type ListFilters } from './ticketList.ts'
+import { excluded, included, levelOf, type Dimension, type ListFilters } from './ticketList.ts'
 import { normaliseState } from './work.ts'
 
 // The graph API has no assignee, labels or date-range projection. Visible
@@ -30,7 +30,7 @@ export function filterTicketGraph(data: TicketGraph, filters: ListFilters): Tick
   const nodes = data.nodes.filter(node => (filters.showClosed || node.status_category !== 'done')
     && matches(filters.status, node.status, normaliseState)
     && matches(filters.priority, node.priority ?? 'none')
-    && matches(filters.type, node.type, v => node.type === 'work' && ['epic','ticket','task'].includes(v) ? 'work' : v.toLowerCase())
+    && matches(filters.type, levelOf({ is_leaf: node.is_leaf, depth: node.depth, kind_slug: node.type }))
     && matches(filters.shape, node.is_leaf === false || (node.is_leaf === undefined && node.type === 'epic') ? 'parent' : 'leaf')
     && matches(filters.depth, String(node.depth ?? 1))
     && words.every(word => `${node.key} ${node.title}`.toLowerCase().includes(word)))

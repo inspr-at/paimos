@@ -67,8 +67,8 @@ test('sort keys cycle ascending, descending, off; shift adds secondary keys', ()
 
 test('list state round-trips through the URL and maps onto the list API', () => {
   const filters = filtersFromQuery({ q: ' pill ', status: 'in-progress,qa', priority: 'high', type: 'ticket,bogus', closed: '1', sort: 'priority', group: 'status' })
-  assert.deepEqual(filters.type, ['ticket'])
-  assert.deepEqual(filtersToQuery(filters), { q: 'pill', status: 'in-progress,qa', priority: 'high', type: 'ticket', closed: '1', sort: 'priority', group: 'status' })
+  assert.deepEqual(filters.type, ['leaf'])
+  assert.deepEqual(filtersToQuery(filters), { q: 'pill', status: 'in-progress,qa', priority: 'high', type: 'leaf', closed: '1', sort: 'priority', group: 'status' })
   assert.deepEqual(effectiveSort(filters), [{ field: 'state', desc: false }, { field: 'priority', desc: false }, { field: 'updated_at', desc: true }])
   const params = apiParams('p1', filters, { facets: ['state'] })
   assert.deepEqual(params.state, ['in-progress', 'in_progress', 'qa'])

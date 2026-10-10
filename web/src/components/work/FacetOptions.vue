@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { vClipTip } from '../../directives/clipTip'
 import { valueState, type Dimension, type FacetOption } from '../../lib/ticketList'
+import { workIconChoice } from '../../lib/workVocabulary'
 import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
@@ -31,7 +32,6 @@ function move(event: KeyboardEvent) {
   event.preventDefault(); event.stopPropagation()
   items[next]?.focus()
 }
-function kindIcon(value: string) { return value === 'epic' ? 'epic' : value === 'task' ? 'task' : 'ticket' }
 </script>
 
 <template>
@@ -49,7 +49,7 @@ function kindIcon(value: string) { return value === 'epic' ? 'epic' : value === 
         <AppIcon v-if="dimension === 'status' && option.value === 'queued'" name="queue" :size="14" class="queue-glyph" /><StatusIcon v-else-if="dimension === 'status'" :state="option.value" />
         <template v-else-if="dimension === 'priority'"><PriorityIcon v-if="option.value !== 'none'" :priority="option.value" /><span v-else class="no-icon" /></template>
         <template v-else-if="dimension === 'assignee'"><PersonAvatar v-if="option.value !== 'none'" :id="option.value" :name="option.label" :size="18" /><AppIcon v-else name="user" :size="14" class="faint" /></template>
-        <AppIcon v-else-if="dimension === 'type'" :name="kindIcon(option.value)" :size="14" class="kind" :class="option.value" />
+        <AppIcon v-else-if="dimension === 'type'" :name="workIconChoice(option.icon ?? '', option.value === 'leaf' ? 'ticket' : 'epic')" :size="14" class="kind" :class="{ epic: option.value !== 'leaf' }" />
         <template v-else-if="dimension === 'tag'"><i v-if="option.value !== 'none'" class="tag-dot" :data-color="option.color || undefined" aria-hidden="true" /><AppIcon v-else name="tag" :size="14" class="faint" /></template>
         <AppIcon v-else-if="dimension === 'epic'" name="epic" :size="14" :class="option.value === 'none' ? 'faint' : 'kind epic'" />
         <AppIcon v-else-if="dimension === 'cost'" name="coin" :size="14" class="faint" />

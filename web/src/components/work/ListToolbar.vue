@@ -132,9 +132,10 @@ const dimensions = computed(() => DIMENSIONS.filter(d => !graph.value || TICKET_
 const presented = ref(props.filters)
 // Resolving a person's name or an epic's title can finish after the menu opens.
 // Snapshot the words too, for the visible label, accessible name and clip-tip.
+// Type levels that share a name read once ("Task", not "Task, Task").
 const resolvedLabels = computed(() => new Map(DIMENSIONS.map(({ key }) => [key, {
-  plain: included(props.filters[key]).map(value => props.label(key, value)),
-  not: excluded(props.filters[key]).map(value => props.label(key, value)),
+  plain: [...new Set(included(props.filters[key]).map(value => props.label(key, value)))],
+  not: [...new Set(excluded(props.filters[key]).map(value => props.label(key, value)))],
 }])))
 const presentedLabels = ref(resolvedLabels.value)
 watch([() => props.filters, resolvedLabels, open, dateAnchor, menuAnchor], () => {
@@ -143,9 +144,9 @@ watch([() => props.filters, resolvedLabels, open, dateAnchor, menuAnchor], () =>
     presentedLabels.value = resolvedLabels.value
   }
 }, { flush: 'sync' })
-const primary = computed(() => dimensions.value.filter(d => d.primary || presented.value[d.key].length))
+// Only applied filters show, as pills to the right of Filter (AEON-974).
+const pills = computed(() => dimensions.value.filter(d => presented.value[d.key].length))
 const active = computed(() => activeDimensions(presented.value).filter(key => !graph.value || TICKET_GRAPH_FILTERS.includes(key)))
-const secondaryActive = computed(() => active.value.filter(key => !DIMENSION_BY_KEY.get(key)!.primary).length + (!graph.value && presented.value.date ? 1 : 0))
 const filterCount = computed(() => active.value.reduce((sum, key) => sum + props.filters[key].length, 0) + (props.filters.q ? 1 : 0) + (!graph.value && presented.value.date ? 1 : 0))
 const activeFilterCount = computed(() => active.value.length + (!graph.value && presented.value.date ? 1 : 0))
 const groupWord = computed(() => props.filters.group === 'tag' ? 'label' : props.filters.group)
@@ -192,7 +193,7 @@ function filterKey(event: KeyboardEvent, clear: () => void) {
     const chip = (event.currentTarget as HTMLElement).closest('.facet-control')
     const next = (chip?.nextElementSibling ?? chip?.previousElementSibling)?.querySelector<HTMLElement>('button')
     clear()
-    void nextTick(() => (next ?? input.value)?.focus())
+    void nextTick(() => (next?.isConnected ? next : filterButton.value ?? input.value)?.focus())
   }
 }
 function closeDisplay(restore: boolean) {
@@ -245,31 +246,33 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
       <button v-for="facet in attentionFacets" :key="facet.field" type="button" class="btn sm facet-button" :class="{ on: !!attention.filters[facet.field] }" :aria-label="`${facet.label} filter`" :aria-expanded="attentionMenu?.field === facet.field" @click="attentionMenu = attentionMenu?.field === facet.field ? null : { field: facet.field, anchor: $event.currentTarget as HTMLElement }">{{ facet.label }}<AppIcon name="chevron" :size="12" /></button>
       <button type="button" class="btn sm ghost reset" :aria-disabled="!Object.values(attention.filters).some(Boolean)" @click="emit('clearAll')">{{ attentionWord('Clear filters', 'Filter löschen') }}</button>
     </div>
+    <!-- Filter stays first and never moves; applied filters follow as pills, then Clear all (AEON-974). -->
     <div v-else class="facets" aria-label="Ticket filters">
-      <span v-for="dimension in primary" :key="dimension.key" class="facet-control" :data-dim="dimension.key" :class="{ on: presented[dimension.key].length }">
-        <button type="button" class="btn sm facet-btn" :data-dim="dimension.key"
-          :class="{ on: presented[dimension.key].length }" :aria-label="presented[dimension.key].length ? `Edit ${dimension.title} filter: ${filterText(dimension.key, true)}` : dimension.title"
-          :data-tip="presented[dimension.key].length ? `${dimension.title}: ${filterText(dimension.key, true)}` : undefined"
-          :aria-expanded="open?.dimension === dimension.key" aria-haspopup="dialog" @click="openMenu(dimension.key, $event.currentTarget as HTMLElement)"
-          @keydown="filterKey($event, () => emit('clear', dimension.key))">
-          {{ dimension.title }}
-          <span v-if="presented[dimension.key].length" v-clip-tip="filterText(dimension.key, true)" class="facet-value"> · {{ filterText(dimension.key) }}</span>
-          <span class="facet-end"><span v-if="presented[dimension.key].length" class="facet-count mono">{{ presented[dimension.key].length }}</span><AppIcon v-else name="chevron" :size="12" class="facet-chevron" /></span>
-        </button>
-        <button v-if="presented[dimension.key].length" type="button" class="facet-x" :aria-label="`Remove ${dimension.title} filter`" @click="emit('clear', dimension.key)"><AppIcon name="close" :size="11" /></button>
-      </span>
-      <span v-if="!graph && presented.date" class="facet-control on date-filter">
-        <button type="button" class="btn sm facet-btn on" :aria-label="`Edit date filter: ${fieldLabel(presented.date.field)} ${dateLabel(presented.date)}`"
-          :data-tip="`${fieldLabel(presented.date.field)}: ${dateLabel(presented.date)}`" aria-haspopup="dialog" :aria-expanded="!!dateAnchor" @click="dateAnchor = $event.currentTarget as HTMLElement">
-          <AppIcon name="calendar" :size="12" />{{ fieldLabel(presented.date.field) }}<span class="facet-value"> · {{ dateLabel(presented.date) }}</span><span class="facet-count date-count">1</span>
-        </button>
-        <button type="button" class="facet-x" aria-label="Remove date filter" @click="emit('date', null)"><AppIcon name="close" :size="11" /></button>
-      </span>
-      <button ref="filterButton" type="button" class="btn sm facet-btn more-btn" :class="{ on: secondaryActive }" aria-haspopup="menu" :aria-expanded="!!menuAnchor"
-        aria-label="Filter by more" aria-keyshortcuts="Shift+F" :data-tip="graph ? 'Status, priority, type · Shift F' : 'Labels, human check, epic, cost unit, release, date · Shift F'" @click="menuAnchor = menuAnchor ? null : ($event.currentTarget as HTMLElement)">
+      <button ref="filterButton" type="button" class="btn sm facet-btn more-btn" aria-haspopup="menu" :aria-expanded="!!menuAnchor"
+        aria-label="Add a filter" aria-keyshortcuts="Shift+F" data-tip="Add a filter · Shift F" @click="menuAnchor = menuAnchor ? null : ($event.currentTarget as HTMLElement)">
         <AppIcon name="filter" :size="13" /><span class="more-label">Filter</span>
-        <span v-if="secondaryActive" class="facet-count mono">{{ secondaryActive }}</span>
       </button>
+      <div v-if="pills.length || (!graph && presented.date)" class="pills" aria-label="Applied filters">
+        <span v-for="dimension in pills" :key="dimension.key" class="facet-control on" :data-dim="dimension.key">
+          <button type="button" class="btn sm facet-btn on" :data-dim="dimension.key"
+            :aria-label="`Edit ${dimension.title} filter: ${filterText(dimension.key, true)}`"
+            :data-tip="`${dimension.title}: ${filterText(dimension.key, true)}`"
+            :aria-expanded="open?.dimension === dimension.key" aria-haspopup="dialog" @click="openMenu(dimension.key, $event.currentTarget as HTMLElement)"
+            @keydown="filterKey($event, () => emit('clear', dimension.key))">
+            {{ dimension.title }}
+            <span v-clip-tip="filterText(dimension.key, true)" class="facet-value"> · {{ filterText(dimension.key) }}</span>
+            <span class="facet-end"><span class="facet-count mono">{{ presented[dimension.key].length }}</span></span>
+          </button>
+          <button type="button" class="facet-x" :aria-label="`Remove ${dimension.title} filter`" @click="emit('clear', dimension.key)"><AppIcon name="close" :size="11" /></button>
+        </span>
+        <span v-if="!graph && presented.date" class="facet-control on date-filter">
+          <button type="button" class="btn sm facet-btn on" :aria-label="`Edit date filter: ${fieldLabel(presented.date.field)} ${dateLabel(presented.date)}`"
+            :data-tip="`${fieldLabel(presented.date.field)}: ${dateLabel(presented.date)}`" aria-haspopup="dialog" :aria-expanded="!!dateAnchor" @click="dateAnchor = $event.currentTarget as HTMLElement">
+            <AppIcon name="calendar" :size="12" />{{ fieldLabel(presented.date.field) }}<span class="facet-value"> · {{ dateLabel(presented.date) }}</span><span class="facet-count date-count">1</span>
+          </button>
+          <button type="button" class="facet-x" aria-label="Remove date filter" @click="emit('date', null)"><AppIcon name="close" :size="11" /></button>
+        </span>
+      </div>
       <button v-if="activeFilterCount || presented.q" type="button" class="btn sm ghost clear-all" @click="emit('clearAll')">Clear all</button>
     </div>
 
@@ -393,7 +396,7 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
    the tip. Project sections and Knowledge are not this switch. Phones keep the
    full names on their own row. */
 @media (min-width: 601px) {
-  @container toolbar (max-width: 1500px) { .more-label { display: none; } .more-btn { padding: 0 9px; } .list-search { width: 208px; } }
+  @container toolbar (max-width: 1500px) { .list-search { width: 208px; } }
   @container toolbar (max-width: 1420px) {
     .toolbar:not(.knowledge) :deep(.view-switch button:not([aria-selected="true"]) .tab-label) { display: none; }
     .toolbar:not(.knowledge) :deep(.view-switch button:not([aria-selected="true"])) { padding: 0 8px; }
@@ -403,14 +406,11 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
     .toolbar:not(.knowledge) :deep(.view-switch button) { padding: 0 8px; }
   }
 }
-@container toolbar (max-width: 1300px) { .more-label { display: none; } .more-btn { padding: 0 9px; } .list-search { width: 190px; } }
-@container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } .facet-btn[data-dim="type"]:not(.on) { display: none; } .display-label { display: none; } .display-btn { padding: 0 9px; } }
-@container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } .facet-btn:not(.on) .facet-end { display: none; } }
-@container toolbar (max-width: 820px) { .list-search { width: 112px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 10px; } .facet-btn:not(.on) .facet-end { display: none; } }
-@container toolbar (max-width: 760px) { .facet-btn[data-dim="assignee"]:not(.on) { display: none; } }
-/* Docked beside a wide ticket panel the list can be phone-narrow: unused quick
-   filters wait in the Filter menu, so the controls take two lines, not three. */
-@container toolbar (max-width: 460px) { .facet-btn:not(.on):not(.more-btn) { display: none; } }
+@container toolbar (max-width: 1300px) { .list-search { width: 190px; } }
+@container toolbar (max-width: 1000px) { .list-search { width: 190px; } .count { display: none; } .new-btn { width: 32px; padding: 0; } .new-label { display: none; } .display-label { display: none; } .display-btn { padding: 0 9px; } }
+@container toolbar (max-width: 920px) { .list-search { width: 150px; } .facet-btn { padding: 0 11px; } }
+/* Narrow docked lists: Filter keeps its icon and its place; the word goes. */
+@container toolbar (max-width: 820px) { .list-search { width: 112px; } .list-search .field { padding-right: 10px; } .facet-btn { padding: 0 10px; } .more-label { display: none; } .more-btn { padding: 0 9px; } }
 /* Narrowest docked width: a labelled pill replaces the switch and its longer label. */
 .closed-pill { display: none; gap: 6px; padding: 0 11px 0 9px; color: var(--ink-2); }
 .closed-pill.on { color: var(--teal-ink); }
@@ -436,7 +436,9 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
 .toolbar:not(.knowledge) { flex-wrap: nowrap; min-height: 44px; padding: 6px 0; }
 .view-switch { order: 0; }
 .list-search { order: 1; flex: 0 1 240px; min-width: 150px; }
-.facets { order: 2; min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: thin; padding: 3px; }
+/* Filter never scrolls away: only the applied pills scroll when they overflow. */
+.facets { order: 2; align-items: center; min-width: 0; flex: 0 1 auto; padding: 3px; }
+.pills { display: flex; gap: 6px; min-width: 0; flex: 0 1 auto; overflow-x: auto; scrollbar-width: thin; padding: 3px; margin: -3px 0; }
 .facet-control { display: inline-flex; align-items: center; flex: none; height: 28px; border-radius: 8px; }
 .facet-control.on { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .facet-control.on .facet-btn { background: transparent; border-color: transparent; box-shadow: none; border-radius: 8px 0 0 8px; padding-right: 4px; }

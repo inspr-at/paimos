@@ -12,7 +12,8 @@ import { estimateHours } from './estimates.ts'
 import { compareModelSort, planningSortValue } from './planning.ts'
 import type { Facets, ListItem, ListQuery, WorkCountBucket } from './api.ts'
 import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
-import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
+import { DEFAULT_SORT, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
+import { workLevel, type WorkVocabulary } from './workVocabulary.ts'
 
 export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'human_check' | 'shape' | 'depth'
 export type GroupBy = 'none' | 'status' | 'assignee' | 'priority' | 'type' | 'epic' | 'tag' | 'project'
@@ -21,7 +22,8 @@ export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'month' | 'year'
 // A date filter: one field, and a relative preset (kept relative in saved views)
 // or a custom range of calendar days (inclusive, either end open).
 export interface DateFilter { field: DateField; preset: DatePreset | null; from: string | null; to: string | null }
-export interface FacetOption { value: string; label: string; count?: number; hint?: string; color?: string }
+// members: every value the option stands for (Type levels that share one name).
+export interface FacetOption { value: string; label: string; count?: number; hint?: string; color?: string; icon?: string; members?: string[] }
 export interface ListFilters {
   mode: 'list' | 'outline' | 'graph'
   q: string
@@ -31,6 +33,7 @@ export interface ListFilters {
   statusScope?: 'canonical' | 'open' | 'in_progress' | 'done' | 'closed'
   priority: string[]
   assignee: string[]
+  // Work levels (AEON-974): "leaf", else a parent's depth; the workspace names them.
   type: string[]
   tag: string[]
   epic: string[]
@@ -51,21 +54,26 @@ export interface ListFilters {
   // The saved view the state came from.
   view: string | null
 }
-export interface DimensionDef { key: Dimension; title: string; facet: string | null; primary: boolean; none: string }
+// advanced: offered only while applied (older saved views and links); Type covers them.
+export interface DimensionDef { key: Dimension; title: string; facet: string | null; primary: boolean; none: string; advanced?: boolean }
 export const DIMENSIONS: DimensionDef[] = [
   { key: 'status', title: 'Status', facet: 'state', primary: true, none: '' },
   { key: 'priority', title: 'Priority', facet: 'priority', primary: true, none: 'No priority' },
   { key: 'assignee', title: 'Assignee', facet: 'assignee', primary: true, none: 'Unassigned' },
-  { key: 'shape', title: 'Parents / Leaves', facet: 'shape', primary: true, none: '' },
-  { key: 'depth', title: 'Depth', facet: 'depth', primary: false, none: '' },
-  { key: 'type', title: 'Legacy type', facet: 'kind', primary: true, none: '' },
+  { key: 'type', title: 'Type', facet: 'level', primary: true, none: '' },
   { key: 'tag', title: 'Labels', facet: 'tag', primary: false, none: 'No labels' },
   { key: 'human_check', title: 'Human check', facet: 'human_check', primary: false, none: 'No human check' },
   { key: 'epic', title: 'Parent', facet: null, primary: false, none: 'No parent' },
   { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
   // Imported fields.release only. The ticket Release column reads native release membership.
   { key: 'release', title: 'Imported release', facet: 'release', primary: false, none: 'No imported release' },
+  { key: 'shape', title: 'Parents / Leaves', facet: 'shape', primary: false, none: '', advanced: true },
+  { key: 'depth', title: 'Depth', facet: 'depth', primary: false, none: '', advanced: true },
 ]
+// The filters a person can add: advanced ones only while they are applied.
+export function offeredDimensions(filters: ListFilters, only?: Dimension[]): DimensionDef[] {
+  return DIMENSIONS.filter(d => (!only || only.includes(d.key)) && (!d.advanced || filters[d.key].length > 0))
+}
 export const DIMENSION_BY_KEY = new Map(DIMENSIONS.map(d => [d.key, d]))
 export const DIMENSION_KEYS = DIMENSIONS.map(d => d.key)
 // The counts every page carries; the others are asked for when a menu opens.
@@ -128,9 +136,68 @@ function parseCols(raw: unknown): ColumnId[] | null {
   const valid = normalizeColumnIds(list(raw))
   return valid.length ? valid.filter(id => !PINNED.includes(id)) : null
 }
+// ---------- Type: work levels in the workspace's names ----------
+// A level is "leaf", else a parent's depth. Links and saved views from before
+// AEON-974 carried the legacy kind (type=epic) or Parents / Leaves (shape):
+// they read as the closest level, epic as the top level and ticket or task as
+// the leaf. "work" was every kind, so it no longer narrows anything.
+const LEVEL = /^(leaf|[1-9][0-9]{0,4})$/
+const LEGACY_LEVEL: Record<string, string | null> = { epic: '1', ticket: 'leaf', task: 'leaf', work: null }
+function levels(values: string[]): string[] {
+  const out = new Set<string>()
+  for (const value of values) {
+    const token = bare(value)
+    const level = token in LEGACY_LEVEL ? LEGACY_LEVEL[token] : LEVEL.test(token) && (token === 'leaf' || Number(token) <= 50000) ? token : null
+    if (level) out.add(isExcluded(value) ? `!${level}` : level)
+  }
+  return [...out]
+}
+// Parents / Leaves and Depth fold into Type when they say the same: only leaves,
+// or parents at named depths. Other combinations stay as they were.
+function foldShape(type: string[], shape: string[], depth: string[]): { type: string[]; shape: string[]; depth: string[] } {
+  if (type.length || !shape.length) return { type, shape, depth }
+  const only = (value: string) => shape.length === 1 && shape[0] === value
+  if ((only('leaf') || only('!parent')) && !depth.length) return { type: ['leaf'], shape: [], depth: [] }
+  if ((only('parent') || only('!leaf')) && depth.length && !excluded(depth).length) return { type: depth, shape: [], depth: [] }
+  return { type, shape, depth }
+}
+export const levelOf = (row: { is_leaf?: boolean; depth?: number; kind_slug?: string }): string =>
+  row.is_leaf === false || (row.is_leaf === undefined && row.kind_slug === 'epic') ? String(row.depth ?? 1) : 'leaf'
+const EMPTY_VOCABULARY: WorkVocabulary = { revision: 0, leaf: { name: '', icon: '' }, levels: [] }
+export function levelName(level: string, vocabulary: WorkVocabulary = EMPTY_VOCABULARY): string {
+  return level === 'leaf' ? workLevel(vocabulary, true, 1).name : workLevel(vocabulary, false, Number(level)).name
+}
+// One option per name, top level first and the leaf last. Levels that share a
+// name are one option; it stands for all of them (members).
+function levelOptions(counts: Record<string, number>, selected: string[], vocabulary: WorkVocabulary = EMPTY_VOCABULARY): FacetOption[] {
+  const present = [...new Set(['1', ...vocabulary.levels.map((_, i) => String(i + 1)), ...Object.keys(counts), ...selected])]
+    .filter(level => LEVEL.test(level) && level !== 'leaf')
+    .sort((a, b) => Number(a) - Number(b))
+  const byName = new Map<string, FacetOption & { members: string[] }>()
+  for (const level of [...present, 'leaf']) {
+    const shape = level === 'leaf' ? workLevel(vocabulary, true, 1) : workLevel(vocabulary, false, Number(level))
+    const key = shape.name.toLocaleLowerCase()
+    const option = byName.get(key)
+    if (option) { option.members.push(level); option.count = (option.count ?? 0) + (counts[level] ?? 0) }
+    else byName.set(key, { value: level, label: shape.name, icon: shape.icon, count: counts[level] ?? 0, members: [level] })
+  }
+  return [...byName.values()]
+}
+// Include, exclude or drop every member of a Type option together.
+export function toggleMembers(values: string[], members: string[], mode: 'in' | 'out'): string[] {
+  const on = members.every(member => valueState(values, member) === mode)
+  const rest = values.filter(value => !members.includes(bare(value)))
+  return on ? rest : [...rest, ...members.map(member => mode === 'out' ? `!${member}` : member)]
+}
+
 const VIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
   const group = GROUPS.find(g => g.value === query.group)?.value ?? 'none'
+  const structure = foldShape(
+    levels(list(query.type)),
+    list(query.shape).filter(v => ['parent', 'leaf'].includes(bare(v))),
+    list(query.depth).filter(v => /^[1-9][0-9]{0,4}$/.test(bare(v)) && Number(bare(v)) <= 50000),
+  )
   return {
     mode: query.view === 'outline' || query.view === 'graph' ? query.view : 'list',
     q: typeof query.q === 'string' ? query.q : '',
@@ -139,9 +206,7 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
       ? { statusScope: query.status_scope as ListFilters['statusScope'] } : {}),
     priority: list(query.priority),
     assignee: list(query.assignee),
-    shape: list(query.shape).filter(v => ['parent', 'leaf'].includes(bare(v))),
-    depth: list(query.depth).filter(v => /^[1-9][0-9]{0,4}$/.test(bare(v)) && Number(bare(v)) <= 50000),
-    type: list(query.type).filter(kind => WORK_KINDS.includes(bare(kind))),
+    ...structure,
     tag: list(query.tag),
     epic: list(query.epic).filter(value => /^[\w-]{1,64}$/.test(bare(value))),
     cost: list(query.cost),
@@ -284,13 +349,6 @@ function stateSpellings(states: string[]): string[] {
   }
   return [...out]
 }
-// The work kinds to ask for; excluding every kind asks for a kind that does not exist.
-function kindsFor(values: string[]): string[] {
-  const wanted = included(values).filter(kind => WORK_KINDS.includes(kind))
-  const not = new Set(excluded(values))
-  const kinds = (wanted.length ? wanted : WORK_KINDS).filter(kind => !not.has(kind))
-  return kinds.length ? kinds : ['none']
-}
 const GROUP_SORT: Partial<Record<GroupBy, SortKey['field']>> = { status: 'state', priority: 'priority', type: 'kind', assignee: 'assignee' }
 export function effectiveSort(filters: ListFilters): SortKey[] {
   const keys = filters.sort.length ? [...filters.sort] : [...DEFAULT_SORT]
@@ -310,8 +368,8 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
   const bounds = dateBounds(filters.date, options.now)
   return {
     within,
-    shape: take('shape'), depth: take('depth'),
-    kind: omit === 'type' ? WORK_KINDS : [...kindsFor(filters.type), ...excluded(filters.type).map(kind => `!${kind}`)],
+    shape: take('shape'), depth: take('depth'), level: take('type'),
+    kind: WORK_KINDS,
     state: filters.statusScope && omit !== 'status' ? [] : [...stateSpellings(included(status)), ...stateSpellings(excluded(status)).map(s => `!${s}`)],
     ...(status.length && filters.statusScope === 'canonical' ? { work_state: status } : {}),
     ...(status.length && filters.statusScope && filters.statusScope !== 'canonical'
@@ -341,7 +399,7 @@ export function totalFrom(facets: Facets | undefined): number | null {
 
 // ---------- Facet options ----------
 export interface EpicOption { id: string; key: string; title: string; state?: string }
-export interface OptionContext { names?: Map<string, string>; me?: string; colors?: Map<string, string>; epics?: EpicOption[]; workName?: string }
+export interface OptionContext { names?: Map<string, string>; me?: string; colors?: Map<string, string>; epics?: EpicOption[]; workName?: string; vocabulary?: WorkVocabulary }
 // Labels (tags, cost units, releases) are counted by spelling; one label is one option.
 function labelOptions(dimension: Dimension, counts: Record<string, number>, selected: string[], colors: Map<string, string> = new Map()): FacetOption[] {
   const byName = new Map<string, FacetOption>()
@@ -390,7 +448,7 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
   }
   if (dimension === 'shape') return [{ value: 'parent', label: 'Parents', count: counts.parent ?? 0 }, { value: 'leaf', label: 'Leaves', count: counts.leaf ?? 0 }]
   if (dimension === 'depth') return [...new Set([...Object.keys(counts), ...selected, '1', '2', '3'])].sort((a,b) => Number(a)-Number(b)).map(value => ({ value, label: `Level ${value}`, count: counts[value] ?? 0 }))
-  if (dimension === 'type') return KINDS.map(kind => ({ value: kind.value, label: kind.value === 'work' && context.workName ? context.workName : kind.label, count: counts[kind.value] ?? 0 }))
+  if (dimension === 'type') return levelOptions(counts, selected, context.vocabulary)
   if (dimension === 'tag' || dimension === 'cost' || dimension === 'release') return labelOptions(dimension, counts, selectedValues, context.colors)
   if (dimension === 'epic') {
     const epics = context.epics ?? []
@@ -417,7 +475,7 @@ export function valueLabel(dimension: Dimension, value: string, context: OptionC
     case 'priority': return priorityLabel(value)
     case 'shape': return value === 'parent' ? 'Parents' : 'Leaves'
     case 'depth': return `Level ${value}`
-    case 'type': return value === 'work' && context.workName ? context.workName : kindLabel(value)
+    case 'type': return levelName(value, context.vocabulary)
     case 'assignee': return value === context.me ? 'Me' : context.names?.get(value) ?? 'Someone'
     case 'epic': return context.epics?.find(e => e.id === value)?.title ?? context.names?.get(value) ?? 'A parent'
     default: return value

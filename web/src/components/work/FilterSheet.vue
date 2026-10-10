@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
-import { DATE_FIELDS, DATE_PRESETS, DIMENSIONS, type DateField, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
+import { DATE_FIELDS, DATE_PRESETS, offeredDimensions, type DateField, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
 import type { ColumnId } from '../../lib/columns'
 import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
 import { plural, type SortKey } from '../../lib/work'
@@ -29,7 +29,7 @@ const emit = defineEmits<{
 }>()
 const hideName = computed(() => hideLabel(props.filters.hideStates))
 const hideNames = computed(() => hiddenStates(props.filters.hideStates).map(state => statusMeta(state).label).join(', '))
-const dimensions = computed(() => DIMENSIONS.filter(d => props.view !== 'graph' || TICKET_GRAPH_FILTERS.includes(d.key)))
+const dimensions = computed(() => offeredDimensions(props.filters, props.view === 'graph' ? TICKET_GRAPH_FILTERS : undefined))
 const dialog = ref<HTMLDialogElement>()
 const doneButton = ref<HTMLButtonElement>()
 const dateField = ref<DateField>('updated')
