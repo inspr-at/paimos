@@ -312,12 +312,13 @@ func TestExternalEventSignatureOwnershipReplayAndNoAgentExecution(t *testing.T) 
 			f.run()
 			f.assertContextAndNoRuns(r, 1)
 			f.signedCall(sender, key, r.ID, e, nil, 202)
-			// Revocation after intake is checked again before the scheduler writes work.
+			// Revoke write authority while retaining project visibility: the denial
+			// must prove the live write check, rather than an invisible-record 404.
 			next := e
 			next.DeliveryID = "delivery-456"
 			f.signedCall(sender, key, r.ID, next, nil, 202)
 			f.tx(func(tx pgx.Tx) error {
-				_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, sender.ID)
+				_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='viewer') WHERE principal_id=$1`, sender.ID)
 				return err
 			})
 			f.signedCall(sender, key, r.ID, next, nil, 403)
