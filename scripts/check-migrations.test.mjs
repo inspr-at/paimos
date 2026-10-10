@@ -358,34 +358,45 @@ elif tool == 'python3':
     const calls = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     const probes = calls.filter(call => call[0] === 'python3' && call[1] === 'scripts/migration-compat-probe.py');
     const modes = probes.map(call => call[2]);
-    assert.deepEqual(modes, ['wait-ready', 'seed', 'wait-ready', 'check', 'account-use',
-      'wait-ready', 'seed', 'wait-ready', 'check', 'account-use']);
+    // Each image seeds and migrates its own disposable database, including
+    // when the requested latest image is itself the below-floor release.
+    assert.deepEqual(modes,
+      ['wait-ready', 'seed', 'wait-ready', 'check', 'account-use', 'wait-ready', 'seed', 'wait-ready', 'check', 'account-use']);
     const version = call => call[call.indexOf('--version') + 1];
     const checks = probes.filter(call => call[2] === 'check');
-    assert.deepEqual(checks.map(version), [tag.slice(1), rollbackTag.slice(1)]);
+    assert.deepEqual(checks.map(version), sameImage ? [rollbackTag.slice(1), rollbackTag.slice(1)] :
+      [latestTag.slice(1), rollbackTag.slice(1)]);
     const accountUse = probes.filter(call => call[2] === 'account-use');
-    assert.deepEqual(accountUse.map(version), [tag.slice(1), rollbackTag.slice(1)]);
+    assert.deepEqual(accountUse.map(version), checks.map(version));
     assert.equal(accountUse[0][accountUse[0].indexOf('--release-tag') + 1], tag);
     assert.ok(!accountUse[1].includes('--release-tag'), 'legacy refusal stays unconditional');
     assert.equal(version(probes.at(-1)), rollbackTag.slice(1));
     const pulls = calls.filter(call => call[0] === 'docker' && call[1] === 'pull');
-    assert.deepEqual(pulls.map(call => call.at(-1)), sameImage ? [`ghcr.io/inspr-at/aeon@${rollbackDigest}`] :
+    assert.deepEqual(pulls.map(call => call.at(-1)), sameImage ?
+      [`ghcr.io/inspr-at/aeon@${rollbackDigest}`] :
       [`ghcr.io/inspr-at/aeon@${latestDigest}`, `ghcr.io/inspr-at/aeon@${rollbackDigest}`]);
     const starts = calls.filter(call => call[0] === 'docker' && call[1] === 'run' && call.includes('256m'));
     assert.deepEqual(starts.map(call => call.at(-1)), sameImage ? Array(4).fill('sha256:' + '1'.repeat(64)) :
       ['sha256:' + '2'.repeat(64), 'sha256:' + '2'.repeat(64), 'sha256:' + '1'.repeat(64), 'sha256:' + '1'.repeat(64)]);
-    // Both policy probes retain an independent seed/migrate/read cycle,
-    // including when the latest release is itself below the capability floor.
-    const seeds = probes.filter(call => call[2] === 'seed');
-    assert.deepEqual(seeds.map(version), [tag.slice(1), rollbackTag.slice(1)]);
-    const migrations = calls.filter(call => call[0] === 'go');
-    assert.equal(migrations.length, 2);
     const databases = calls.filter(call => call[0] === 'docker' && call[1] === 'run' && call.includes('POSTGRES_USER=postgres'));
+    const databaseNames = databases.map(call => call[call.indexOf('--name') + 1]);
     assert.equal(databases.length, 2);
+    assert.equal(new Set(databaseNames).size, 2);
     const first = calls.indexOf(databases[0]), second = calls.indexOf(databases[1]);
     assert.ok(calls.slice(first + 1, second).some(call =>
       call[0] === 'docker' && call[1] === 'container' && call[2] === 'rm' && call.includes('-fv')));
+    assert.equal(probes.at(-1)[probes.at(-1).indexOf('--database-container') + 1], databaseNames[1]);
+    const seeds = probes.filter(call => call[2] === 'seed');
+    assert.deepEqual(seeds.map(version), checks.map(version));
+    const migrations = calls.flatMap((call, i) => call[0] === 'go' ? [i] : []);
+    assert.equal(migrations.length, 2);
+    for (let i = 0; i < migrations.length; i++)
+      assert.ok(calls.indexOf(seeds[i]) < migrations[i] && migrations[i] < calls.indexOf(checks[i]));
     assert.deepEqual(calls.filter(call => call[0] === 'git'), [['git', 'show', `${rollbackTag}:internal/db/visibility.go`]]);
+    for (let i = 0; i < accountUse.length; i++) {
+      assert.equal(accountUse[i][accountUse[i].indexOf('--database-container') + 1], databaseNames[i]);
+      assert.equal(accountUse[i][accountUse[i].indexOf('--state') + 1], seeds[i][seeds[i].indexOf('--state') + 1]);
+    }
     const migration = calls.findIndex(call => call[0] === 'go');
     const candidateCheck = calls.findIndex((call, i) => i > migration && call[2] === 'check');
     const activated = calls.findIndex(call => call[2] === 'account-use');

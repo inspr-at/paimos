@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/hookcap"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/version"
 	"github.com/jackc/pgx/v5"
@@ -444,7 +445,7 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	}
 	v.VerificationCapabilities = verificationCapabilities(rec.Details.Platform, rec.Details.Arch)
 	v.VerificationHelperVersion = version.Version
-	v.ServerCapabilities = []string{LedgerCapability, InstallCapability}
+	v.ServerCapabilities = []string{LedgerCapability, InstallCapability, hostcapacity.UnattendedCapability}
 	var err error
 	v.LedgerMode, err = LedgerMode(ctx, tx)
 	if err != nil {

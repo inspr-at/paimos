@@ -10,7 +10,7 @@ func init() {
 		"GET /api/status-autopilot/attention":                       "nodes.read",
 		"GET /api/status-autopilot/attention/groups":                "nodes.read",
 		"GET /api/status-autopilot/changes":                         "nodes.read",
-		"GET /api/status-autopilot/projects":                        "settings.manage",
+		"GET /api/status-autopilot/projects":                        "nodes.read",
 		"GET /api/status-autopilot/proposals":                       "nodes.read",
 		"POST /api/status-autopilot/attention/actions":              "nodes.write",
 		"POST /api/status-autopilot/attention/bulk":                 "nodes.write",
@@ -24,6 +24,7 @@ func init() {
 		"GET /api/status-autopilot/attention":        true,
 		"GET /api/status-autopilot/attention/groups": true,
 		"GET /api/status-autopilot/changes":          true,
+		"GET /api/status-autopilot/projects":         true,
 		"GET /api/status-autopilot/proposals":        true,
 	})
 	registerDeclarations("statusautopilot", "project_decided", ProjectDecidedRoutes, map[string]bool{

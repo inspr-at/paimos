@@ -82,7 +82,7 @@ const chosen = computed(() => rows.value.filter(row => selected.value.has(row.ev
 const applicableChosen = computed(() => chosen.value.filter(row => row.applicable))
 const selectable = computed(() => rows.value.filter(row => row.editable && !row.resolved))
 const kinds = new Map(ATTENTION_KINDS.map(kind => [kind.id, kind]))
-const titleFor = (row: Row) => row.to === 'release' ? row.release_title || words('Choose a release', 'Release wählen') : statusMeta(row.to).label
+const titleFor = (row: Row) => row.to === 'no_release_needed' ? words('No release needed', 'Kein Release nötig') : row.to === 'release' ? row.release_title || words('Choose a release', 'Release wählen') : statusMeta(row.to).label
 const rowID = (row: AttentionItem) => `attention-${row.event_id}`
 function ticketRow(row: Row): TicketRow {
   const group = groupRows.value.find(group => group.project_id === row.project_id), known = projects.byId(row.project_id)
@@ -534,7 +534,7 @@ onBeforeUnmount(() => { closeOverlay(false); generation++; scope.dispose(); sele
       <template #cell-attention-actions="{ row: ticket }"><template v-for="row in [attentionRow(ticket)]" :key="row.event_id">
             <span class="action-stack" :data-resolved="row.resolved" @click.stop>
               <span class="attention-row-actions" :class="{ hidden: row.resolved }" :aria-hidden="!!row.resolved">
-                <button :id="`apply-${row.event_id}`" type="button" class="btn sm" :disabled="rowBusy(row) || !row.editable || !row.applicable" :tabindex="row.resolved ? -1 : 0" :aria-label="`Apply to ${row.key}: ${statusMeta(row.from).label} to ${titleFor(row)}`" :data-tip="row.unavailable_reason || row.reason" @click="act('apply', [row], row.event_id)">{{ words('Apply', 'Anwenden') }}</button>
+                <button :id="`apply-${row.event_id}`" type="button" class="btn sm" :disabled="rowBusy(row) || !row.editable || !row.applicable" :tabindex="row.resolved ? -1 : 0" :aria-label="`Apply to ${row.key}: ${statusMeta(row.from).label} to ${titleFor(row)}`" :data-tip="row.unavailable_reason || row.reason" @click="act('apply', [row], row.event_id)">{{ row.to === 'no_release_needed' ? words('No release needed', 'Kein Release nötig') : words('Apply', 'Anwenden') }}</button>
                 <button type="button" class="btn sm ghost" :disabled="rowBusy(row) || !row.editable" :tabindex="row.resolved ? -1 : 0" :aria-label="`Dismiss for ${row.key}`" :data-tip="row.editable ? 'Keep it as it is; this suggestion does not return' : 'Editing this ticket needs permission'" @click="act('dismiss', [row], row.event_id)">{{ words('Dismiss', 'Verwerfen') }}</button>
               </span>
               <span class="done-mark" :class="{ hidden: !row.resolved }" :aria-hidden="!row.resolved">{{ row.resolved === 'dismiss' ? words('Dismissed', 'Verworfen') : words('Applied', 'Angewendet') }} · <button :id="`undo-${row.event_id}`" type="button" class="link-btn" :tabindex="row.resolved ? 0 : -1" :disabled="rowBusy(row)" :aria-label="`Undo for ${row.key}`" @click="act('undo', [row], row.event_id)">{{ words('Undo', 'Rückgängig') }}</button></span>

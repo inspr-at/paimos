@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 type runRow struct {
@@ -85,6 +86,9 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 		return RouteResult{}, err
 	}
 	if err := authorizeRoute(ctx, tx, r, p, run.AgentID, run.ID); err != nil {
+		return RouteResult{}, err
+	}
+	if _, err := workorders.GuardRoutineRunTx(ctx, tx, runID); err != nil {
 		return RouteResult{}, err
 	}
 	if err := agentpairing.RequireLedgerWork(ctx, tx, p, r.Header.Get(agentpairing.LedgerGenerationHeader)); err != nil {
@@ -202,13 +206,29 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 // The caller must authenticate ownership and acquire agentpairing.Lock before
 // any run/account row locks. Re-entering the transaction lock here is safe only
 // in that order; it serializes quota signals, pooling, routing and launch.
-func ValidateReservedCapacity(ctx context.Context, tx pgx.Tx, runID, accountID string) error {
+// RoutineStartCheck is installed by the qualified final-claim integration.
+// No adapter means routine claims wait; ordinary claims remain compatible.
+type RoutineStartCheck func(context.Context, pgx.Tx, string, string) error
+
+func ValidateReservedCapacity(ctx context.Context, tx pgx.Tx, runID, accountID string, routineChecks ...RoutineStartCheck) error {
 	if err := agentpairing.Lock(ctx, tx); err != nil {
 		return err
 	}
 	run, err := lockRun(ctx, tx, runID)
 	if err != nil {
 		return err
+	}
+	routine, err := workorders.GuardRoutineRunTx(ctx, tx, runID)
+	if err != nil {
+		return err
+	}
+	if routine {
+		if len(routineChecks) != 1 || routineChecks[0] == nil {
+			return workorders.Fail(409, "routine_start_check_unavailable")
+		}
+		if err := routineChecks[0](ctx, tx, runID, accountID); err != nil {
+			return err
+		}
 	}
 	return validateReservedAccount(ctx, tx, run, accountID)
 }

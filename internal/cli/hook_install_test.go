@@ -59,8 +59,13 @@ func TestHookInstallRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.Count(string(installed), inboxHookMarker) != 3 || !strings.Contains(string(installed), "startup-hook") {
+			if strings.Count(string(installed), inboxHookMarker) != len(harnessHookEvents(harness)) || !strings.Contains(string(installed), "startup-hook") {
 				t.Fatal("incorrect merge")
+			}
+			for _, event := range []string{"SubagentStart", "SubagentStop"} {
+				if strings.Contains(string(installed), event) != (harness == "claude") {
+					t.Fatal("subagent lifecycle hooks belong to Claude")
+				}
 			}
 			if harness == "codex" && strings.Count(string(installed), `"additionalContextLimit": 0`) != 2 {
 				t.Fatal("Codex context must not be silently shortened")

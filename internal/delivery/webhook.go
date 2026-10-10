@@ -140,12 +140,16 @@ func validAction(name, action string) bool {
 func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	app := &crossreview.GitHubApp{Config: m.config}
 	if m.github == nil || len(m.secret) < 32 || !app.Configured(m.config.TenantID, m.config.Repository) {
-		w.WriteHeader(404)
+		m.rejectWebhook(w, r, "unknown", "audit", 404, webhookClass("not_configured"))
 		return
 	}
 	raw, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
 	if err != nil || len(raw) > 2<<20 {
-		w.WriteHeader(413)
+		class := webhookClass("body_too_large")
+		if err != nil {
+			class = "body_read"
+		}
+		m.rejectWebhook(w, r, "unknown", "audit", 413, class)
 		return
 	}
 	name, id := r.Header.Get("X-GitHub-Event"), r.Header.Get("X-GitHub-Delivery")
@@ -155,20 +159,20 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	_, _ = mac.Write(raw)
 	decoded, decodeErr := hex.DecodeString(strings.TrimPrefix(sig, "sha256="))
 	if decodeErr != nil || len(sig) != 71 || !strings.HasPrefix(sig, "sha256=") || !hmac.Equal(decoded, mac.Sum(nil)) {
-		w.WriteHeader(401)
+		m.rejectWebhook(w, r, webhookLogAction(raw, name), "audit", 401, webhookClass("invalid_signature"))
 		return
 	}
 	e, err := authenticate(name, id, sig, raw, m.secret)
 	if err != nil || !validAction(name, e.Action) {
-		w.WriteHeader(400)
+		m.rejectWebhook(w, r, webhookLogAction(raw, name), "audit", 400, webhookClass("invalid_envelope"))
 		return
 	}
 	if strconv.FormatInt(e.Installation.ID, 10) != m.config.InstallationID || e.Repository.Name != m.config.Repository {
-		w.WriteHeader(404)
+		m.rejectWebhook(w, r, e.Action, "audit", 404, webhookClass("installation_mismatch"))
 		return
 	}
 	if name == "pull_request" && e.Pull.Base.Repo.FullName != m.config.Repository {
-		w.WriteHeader(404)
+		m.rejectWebhook(w, r, e.Action, "audit", 404, webhookClass("repository_mismatch"))
 		return
 	}
 	// A workflow run is a flow fact, not a delivery observation. The audit
@@ -181,18 +185,18 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	ctx, release, err := m.observationLock(ctx)
 	if err != nil {
-		w.WriteHeader(502)
+		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
 		return
 	}
 	defer release()
 	dup, err := m.duplicate(ctx, id)
 	if err != nil {
-		w.WriteHeader(502)
+		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
 		return
 	}
 	if dup {
-		if m.fanoutRecord(ctx, id) != nil {
-			w.WriteHeader(502)
+		if err := m.fanoutRecord(ctx, id); err != nil {
+			m.rejectWebhook(w, r, e.Action, "audit", 502, err)
 			return
 		}
 		w.WriteHeader(204)
@@ -201,11 +205,11 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	if handled, queueErr := m.quarantineEvent(ctx, name, id, raw); handled {
 		if queueErr != nil {
 			var refusal *apiError
+			status := 502
 			if errors.As(queueErr, &refusal) {
-				w.WriteHeader(refusal.status)
-			} else {
-				w.WriteHeader(502)
+				status = refusal.status
 			}
+			m.rejectWebhook(w, r, e.Action, "audit", status, queueErr)
 			return
 		}
 		w.WriteHeader(204)
@@ -220,7 +224,7 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	switch name {
 	case "pull_request":
 		if e.Pull.Number < 1 || !reviewgate.ValidSHA(e.Pull.Head.SHA) || !reviewgate.ValidSHA(e.Pull.Base.SHA) {
-			w.WriteHeader(400)
+			m.rejectWebhook(w, r, e.Action, "audit", 400, webhookClass("invalid_pull"))
 			return
 		}
 		p, er := m.github.Pull(ctx, e.Pull.Number)
@@ -245,7 +249,7 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !reviewgate.ValidSHA(head) || len(ns) > 100 {
-			w.WriteHeader(400)
+			m.rejectWebhook(w, r, e.Action, "audit", 400, webhookClass("invalid_check_subjects"))
 			return
 		}
 		err = db.InTenant(db.AllProjects(ctx, "delivery check subjects"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
@@ -283,7 +287,7 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	case "merge_group":
 		head = e.Group.Head
 		if !reviewgate.ValidSHA(head) || !reviewgate.ValidSHA(e.Group.Base) || !queueRef.MatchString(e.Group.Ref) || strings.Contains(e.Group.Ref, "..") {
-			w.WriteHeader(400)
+			m.rejectWebhook(w, r, e.Action, "audit", 400, webhookClass("invalid_group"))
 			return
 		}
 		if e.Action == "checks_requested" {
@@ -317,12 +321,15 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	case "push":
 		head = e.After
 		if !reviewgate.ValidSHA(head) {
-			w.WriteHeader(400)
+			m.rejectWebhook(w, r, e.Action, "audit", 400, webhookClass("invalid_push"))
 			return
 		}
 	}
 	if err != nil || len(pulls) > 100 {
-		w.WriteHeader(502)
+		if err == nil {
+			err = webhookClass("observation_limit")
+		}
+		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
 		return
 	}
 	at := m.now()
@@ -371,8 +378,11 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 		_, err := recordTx(ctx, tx, m.config.TenantID, rec)
 		return err
 	})
-	if err != nil || m.fanoutRecord(ctx, id) != nil {
-		w.WriteHeader(502)
+	if err == nil {
+		err = m.fanoutRecord(ctx, id)
+	}
+	if err != nil {
+		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
 		return
 	}
 	w.WriteHeader(204)
