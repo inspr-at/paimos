@@ -135,7 +135,7 @@ func (m *Module) leadScheduleWait(ctx context.Context, tx pgx.Tx, p tenant.Princ
 				} else if err != nil {
 					return "", err
 				}
-				projected, err := projectLead(ctx, step, p, other)
+				projected, err := m.projectLead(ctx, step, p, other)
 				if err != nil {
 					return "", err
 				}
@@ -176,7 +176,7 @@ func (m *Module) leadScheduleWait(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			if d.project != l.ProjectID {
 				// A paused intent or missing/stale start evidence is not an eligible
 				// contender and cannot head-of-line block another project's workers.
-				other, err = projectLead(ctx, step, p, other)
+				other, err = m.projectLead(ctx, step, p, other)
 				if err != nil {
 					return "", err
 				}
@@ -317,7 +317,7 @@ func (m *Module) yieldLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		return nil, authz.ErrForbidden
 	}
 	if l.State == "paused" && (l.Reason == "idle_yield" || l.Reason == "worker_priority") {
-		return projectLead(ctx, tx, p, l)
+		return m.projectLead(ctx, tx, p, l)
 	}
 	if l.State != "working" {
 		return nil, workorders.Fail(409, "current working lead required")
@@ -370,5 +370,5 @@ func (m *Module) yieldLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if err = record(ctx, tx, p, Session{ProjectID: id}, "lead_yielded", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }
