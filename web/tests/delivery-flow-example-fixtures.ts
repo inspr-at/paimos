@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Example flow (AEON-994 draft 5, package 5): release 126 and the three changes in
-// flight with it on 8 Oct 2026, taken from the approved mock (final OPS timeline via
-// the LEAD). Live "now" is 20:25, inside the incident. Flow shows it, labelled as an
-// example, while a project has no recorded run (package 6); Replay shows release 126
-// final and the changes so far, Compare races 126 against the Arion target.
-import type { DeliveryLanguage } from './delivery'
-import { LANES, type FlowData, type FlowRun, type FlowStep, type Lane, type RunFacts, type StepFacts, type StepKind } from './deliveryFlow'
-import { arionTarget, compareData, replayData } from './deliveryFlowData'
+// Test fixture: release 126 and the three changes in flight with it on 8 Oct 2026, taken
+// from the approved AEON-994 mock (final OPS timeline via the LEAD), already shaped as
+// FlowData. Live "now" is 20:25, inside the incident; Replay has release 126 final and
+// the changes so far, Compare races 126 against the Arion target. Tests only: the product
+// never shows sample data (AEON-1135, guarded by no-sample-data.test.ts).
+import type { DeliveryLanguage } from '../src/lib/delivery'
+import { LANES, type FlowData, type FlowRun, type FlowStep, type Lane, type RunFacts, type StepFacts, type StepKind } from '../src/lib/deliveryFlow'
+import { arionTarget, compareData, replayData } from '../src/lib/deliveryFlowData'
 
 const hm = (at: string) => { const [h, m, s = 0] = at.split(':').map(Number); return h! * 60 + m! + s / 60 }
 type Extra = Pick<FlowStep, 'side' | 'incident' | 'after' | 'stepKey'>
