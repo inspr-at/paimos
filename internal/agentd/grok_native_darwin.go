@@ -183,7 +183,7 @@ func (a *GrokAdapter) startNative(ctx context.Context, r StartRequest, b GrokBin
 	}
 	p.limitVendor = Grok
 	gp := &grokProcess{wireProcess: p, proxy: proxy, scratch: scratch, scratchInfo: info, binding: b, authBefore: before, promptDone: make(chan error, 1), model: grokModel, observe: observe}
-	if r.InboxEnabled {
+	if r.InboxEnabled && r.Run.Purpose != VerificationPurpose && !r.Run.ReadOnlyReview {
 		gp.conversation = &acpProcess{wireProcess: p, harness: Grok, model: grokModel, persistent: true, done: make(chan struct{}), idleTimeout: 10 * time.Minute, turnTimeout: 180 * time.Second}
 		gp.conversation.beforePrompt = func() error {
 			if gp.violation.Load() || proxy.violation.Load() || verifyGrokAssets(scratch) != nil || verifyGrokAuthUnchanged(b.AuthPath, b.PrincipalSHA256, before) != nil {

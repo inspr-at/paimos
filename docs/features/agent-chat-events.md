@@ -1,7 +1,7 @@
 # Live agent chat events
 
 AEON-1069 adds daemon-local, owned-session streaming groundwork for the
-AEON-618 conversation identity. It does not enable thread SSE or chat delivery.
+AEON-618 conversation identity. It does not enable thread SSE or the remote chat relay.
 The `session_chat_v1` section of `api/agent-pairing-contract.json` defines the
 binding, event shapes, bounds and retention policy.
 

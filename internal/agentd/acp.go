@@ -462,7 +462,7 @@ func (a *ACPAdapter) Start(ctx context.Context, r StartRequest, observe func(Ada
 	if timeout <= 0 {
 		timeout = 10 * time.Minute
 	}
-	p := &acpProcess{wireProcess: w, harness: a.Harness, model: r.Profile.Model, persistent: r.InboxEnabled, done: make(chan struct{}), idleTimeout: timeout}
+	p := &acpProcess{wireProcess: w, harness: a.Harness, model: r.Profile.Model, persistent: r.InboxEnabled && r.Run.Purpose != VerificationPurpose && !r.Run.ReadOnlyReview, done: make(chan struct{}), idleTimeout: timeout}
 	w.setOnEvent(p.event)
 	op, cancel := operationContext(ctx)
 	defer cancel()

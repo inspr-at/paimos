@@ -635,7 +635,7 @@ func (a *CursorAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	}
 	p.limitVendor = Cursor
 	cp := &cursorProcess{wireProcess: p, done: make(chan struct{})}
-	if r.InboxEnabled {
+	if r.InboxEnabled && r.Run.Purpose != VerificationPurpose && !r.Run.ReadOnlyReview {
 		cp.conversation = &acpProcess{wireProcess: p, harness: Cursor, model: r.Profile.Model, persistent: true, done: make(chan struct{}), idleTimeout: 10 * time.Minute}
 	}
 	var costMicros int64
