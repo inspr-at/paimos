@@ -308,7 +308,10 @@ func TestRoutineBudgetUnknownRetainsSlotAndChildBinding(t *testing.T) {
 	in := f.attempt("lead", Amount{Tokens: 1000, RecoveryMS: 1000})
 	g, err := reserve(t, f, f.d.App, t.Context(), in)
 	must(t, err)
-	must(t, f.tx(func(tx pgx.Tx) error {
+	must(t, db.InTenant(tenant.WithPrincipal(t.Context(), f.agent), f.d.App, f.agent.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockCurrentTree(t.Context(), tx); err != nil {
+			return err
+		}
 		return agentaccounts.ValidateReservedCapacity(t.Context(), tx, in.AgentRunID, in.AccountID, f.broker.StartCheck(f.agent))
 	}))
 	unknown := settlement("lost-exit", Amount{})
@@ -325,10 +328,16 @@ func TestRoutineBudgetUnknownRetainsSlotAndChildBinding(t *testing.T) {
 	}
 	next := f.attempt("evaluate", Amount{RecoveryMS: 1000})
 	wantError(t, f.tx(func(tx pgx.Tx) error { _, err := f.broker.ReserveTx(t.Context(), tx, f.owner, next); return err }), "dial_planned total reached")
-	wantError(t, f.tx(func(tx pgx.Tx) error {
+	wantError(t, db.InTenant(tenant.WithPrincipal(t.Context(), f.agent), f.d.App, f.agent.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockCurrentTree(t.Context(), tx); err != nil {
+			return err
+		}
 		return agentaccounts.ValidateReservedCapacity(t.Context(), tx, in.AgentRunID, in.AccountID)
 	}), "routine_start_check_unavailable")
-	wantError(t, f.tx(func(tx pgx.Tx) error {
+	wantError(t, db.InTenant(tenant.WithPrincipal(t.Context(), f.agent), f.d.App, f.agent.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockCurrentTree(t.Context(), tx); err != nil {
+			return err
+		}
 		return agentaccounts.ValidateReservedCapacity(t.Context(), tx, in.AgentRunID, in.AccountID, f.broker.StartCheck(f.agent))
 	}), "routine_grant_unavailable")
 	child := workorders.CreateInput{Parent: &f.work, Title: "Bound child", Criteria: []string{"Verify"}}
@@ -388,7 +397,10 @@ func TestRoutineBudgetAdmissionAndOwnership(t *testing.T) {
 	f.exec(`UPDATE account_allowance_windows SET capacity_read_at=clock_timestamp() WHERE account_id=$1`, f.account)
 	g, err := reserve(t, f, f.d.App, t.Context(), in)
 	must(t, err)
-	must(t, f.tx(func(tx pgx.Tx) error {
+	must(t, db.InTenant(tenant.WithPrincipal(t.Context(), f.agent), f.d.App, f.agent.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockCurrentTree(t.Context(), tx); err != nil {
+			return err
+		}
 		return agentaccounts.ValidateReservedCapacity(t.Context(), tx, in.AgentRunID, in.AccountID, f.broker.StartCheck(f.agent))
 	}))
 	var administrator string

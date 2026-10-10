@@ -136,7 +136,11 @@ func ensureBalance(ctx context.Context, tx pgx.Tx, p tenant.Principal, r runBind
 	if err != nil {
 		return Balance{}, err
 	}
-	return loadBalance(ctx, tx, r.id)
+	balance, err := loadBalance(ctx, tx, r.id)
+	// A subsequently qualified tighter policy cannot widen the frozen ledger.
+	// Settlement keeps its original accounting ceiling; new work uses both caps.
+	balance.RecoveryMS = min(balance.RecoveryMS, limit)
+	return balance, err
 }
 
 const grantColumns = `id::text,run_id::text,attempt_id::text,action_id::text,grant_key,parent_id::text,agent_run_id::text,account_id::text,maximum_tokens,maximum_microusd,maximum_ms,state,used_tokens,used_microusd,used_ms,billing_mode`
