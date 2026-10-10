@@ -9294,6 +9294,8 @@
     ,
     {"kind":"go","package":"internal/views","name":"TestAgentsPlanStays200WhenWeeklyPercentDeclines","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/views","name":"TestDeletedViewsOwnerPaginationReasonsAndRestore","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/views","name":"TestLegacyViewsMigrationScopeEventsAndRestore","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/views","name":"TestPreferencesArePrivateSmallObjectsPerPerson","tier":"GATED-FULL"}
