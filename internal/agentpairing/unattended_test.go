@@ -35,7 +35,7 @@ func TestUnattendedMissingPlatformPreservesLegacyPairing(t *testing.T) {
 			}
 			q.request["request_id"] = q.id
 			q.request["device_hash"] = hash(q.device)
-			q.request["accounts"] = []map[string]string{{"account_key": "codex-local", "harness": "codex", "label": "Added Codex", "model_profile_id": f.profiles["codex"]}}
+			q.request["accounts"] = []map[string]string{{"account_key": "grok-local", "harness": "grok", "label": "Added Grok", "model_profile_id": f.profiles["grok"]}}
 			q.request["existing_computer_id"] = *v.ComputerID
 			q.request["existing_lifecycle_secret"] = p.lifecycle
 			f.submit(q)
@@ -43,7 +43,7 @@ func TestUnattendedMissingPlatformPreservesLegacyPairing(t *testing.T) {
 			added := f.redeem(q)
 			var enrollment agentpairing.Enrollment
 			for _, e := range added.Enrollments {
-				if e.Harness == "codex" {
+				if e.Harness == "grok" {
 					enrollment = e
 				}
 			}
