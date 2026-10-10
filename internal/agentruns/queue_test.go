@@ -79,6 +79,12 @@ func TestRoutinePreparationPreservesAuthorityCriteriaAndPickup(t *testing.T) {
 		}
 		return out
 	}
+	if got := prepare(); got.Candidate != nil || got.WaitReason != "routine_paused" || got.Partial {
+		t.Fatalf("paused preparation: %+v", got)
+	}
+	path := "/api/recurrences/" + routine.ID
+	f.call(t, f.person, "POST", path+"/resume", map[string]any{"expected_revision": routine.Revision}, 200, &routine)
+	input.DefinitionRevision = routine.Revision
 	if got := prepare(); got.Candidate != nil || got.WaitReason != "automatic_launch_disabled" || got.Partial {
 		t.Fatalf("default-off preparation: %+v", got)
 	}
@@ -88,9 +94,6 @@ func TestRoutinePreparationPreservesAuthorityCriteriaAndPickup(t *testing.T) {
 		_, err := modelregistry.WriteExecutionSettingsTx(t.Context(), tx, f.person, project, modelregistry.ExecutionSettingsInput{ExpectedRevision: &revision, AutomaticLaunchEnabled: &enabled, QualificationID: &q.ID}, runtime)
 		return err
 	})
-	path := "/api/recurrences/" + routine.ID
-	f.call(t, f.person, "POST", path+"/resume", map[string]any{"expected_revision": routine.Revision}, 200, &routine)
-	input.DefinitionRevision = routine.Revision
 	if got := prepare(); got.Candidate != nil || got.WaitReason != "execution_consent_required" {
 		t.Fatalf("queue without consent: %+v", got)
 	}
