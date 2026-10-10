@@ -22,7 +22,17 @@ components:
       type: object
       additionalProperties: false
       required: [attempt_id, action_key, kind, project_id, target_id, expected_revision]
-      description: 'UTF-8 JSON limited to 65536 bytes. Exactly the payload matching kind is required. target_id is the parent for creation and the entry for updates. expected_revision is the target updated_at as integral Unix microseconds. Knowledge creation targets the output project; work creation targets a work parent inside the frozen output subtree. No path, recipient, command or arbitrary metadata is accepted.'
+      description: 'UTF-8 JSON limited to 65536 bytes. Exactly the payload matching kind is required. Titles are limited to 500 UTF-8 bytes, bodies to 32768 bytes and states to 64 bytes. The action key occurrence is reserved. target_id is the parent for creation and the entry for updates. expected_revision is the target updated_at as integral Unix microseconds. Knowledge creation targets the output project; work creation targets a work parent inside the frozen output subtree. No path, recipient, command or arbitrary metadata is accepted.'
+      oneOf:
+        - required: [work_create]
+          properties: {kind: {const: work.create}}
+          not: {anyOf: [{required: [work_update]}, {required: [knowledge_write]}]}
+        - required: [work_update]
+          properties: {kind: {const: work.update}}
+          not: {anyOf: [{required: [work_create]}, {required: [knowledge_write]}]}
+        - required: [knowledge_write]
+          properties: {kind: {const: knowledge.write}}
+          not: {anyOf: [{required: [work_create]}, {required: [work_update]}]}
       properties:
         attempt_id: {type: string, format: uuid}
         action_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$'}
