@@ -83,6 +83,8 @@ func workHandover(p *Pause) bool { return p != nil && strings.HasPrefix(p.Reason
 
 // RequireHandoverDelivery keeps young uncertain holds closed. A stale run can
 // be settled by the person's lifecycle write without claiming process exit.
+// A standalone order needs closure evidence at or after its current activity;
+// historical ticket sessions cannot shorten a newer order's grace period.
 func RequireHandoverDelivery(ctx context.Context, tx pgx.Tx, ids []string) error {
 	var missing bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions s
@@ -95,7 +97,8 @@ func RequireHandoverDelivery(ctx context.Context, tx pgx.Tx, ids []string) error
  AND NOT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.run_id=r.id OR s.work_order_id=r.work_order_id OR s.ticket_node_id IN(r.queue_node_id,o.parent_id,o.id)) AND s.stopped_at IS NULL))
  OR EXISTS(SELECT 1 FROM work_orders w JOIN nodes o ON o.id=w.node_id WHERE o.parent_id=ANY($1::uuid[]) AND o.deleted_at IS NULL AND w.status='running'
  AND w.updated_at>now()-interval '2 hours'
- AND NOT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.work_order_id=w.node_id OR s.ticket_node_id=o.parent_id OR s.ticket_node_id=o.id) AND aeon_work_session_released(s.stopped_at,s.stop_reason,s.heartbeat_at))
+ AND NOT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.work_order_id=w.node_id OR s.ticket_node_id=o.parent_id OR s.ticket_node_id=o.id)
+  AND s.stopped_at>=w.updated_at AND aeon_work_session_released(s.stopped_at,s.stop_reason,s.heartbeat_at))
  AND NOT EXISTS(SELECT 1 FROM agent_runs r WHERE r.work_order_id=w.node_id)
  AND NOT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.work_order_id=w.node_id OR s.ticket_node_id=o.parent_id OR s.ticket_node_id=o.id) AND s.stopped_at IS NULL))`, ids).Scan(&missing)
 	if err != nil {

@@ -20,7 +20,8 @@ func hostCapacity(ctx context.Context, tx pgx.Tx, computer string) (hostcapacity
 	var policy, signals, history []byte
 	var now time.Time
 	err := tx.QueryRow(ctx, `SELECT capacity_policy,capacity_signals,capacity_reported_at,capacity_history,
- (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.status IN ('starting','running','waiting')),
+ (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND (r.status IN ('starting','running','waiting')
+  OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')),
  (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.status='queued'),clock_timestamp()
  FROM agent_pairing_computers c WHERE c.id=$1`, computer).Scan(&policy, &signals, &v.ReportedAt, &history, &v.Running, &v.Queued, &now)
 	if err != nil {

@@ -217,11 +217,14 @@ func attachWindowsLimit(ctx context.Context, tx pgx.Tx, accounts []Account, boun
 }
 
 func occupancy(ctx context.Context, tx pgx.Tx) (map[string]int, error) {
+	// A lifecycle release clears the ticket hold, not the process's slot.
+	// Only authenticated exit telemetry clears exit_unconfirmed.
 	rows, err := tx.Query(ctx, `
 		SELECT account_id::text, count(*)
 		FROM agent_runs
 		WHERE account_id IS NOT NULL
-		  AND status IN ('queued', 'starting', 'running', 'waiting')
+		  AND (status IN ('queued', 'starting', 'running', 'waiting')
+		    OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')
 		GROUP BY account_id`)
 	if err != nil {
 		return nil, err
@@ -682,7 +685,8 @@ func archiveAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountI
 		return Account{}, err
 	}
 	var active bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id = $1::uuid AND status IN ('starting','running','waiting'))`, accountID).Scan(&active); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id = $1::uuid AND (status IN ('starting','running','waiting')
+  OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))`, accountID).Scan(&active); err != nil {
 		return Account{}, err
 	}
 	if active {

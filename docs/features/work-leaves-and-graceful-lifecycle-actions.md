@@ -71,11 +71,15 @@ with the action ID. A `work_lifecycle_release.exit_unconfirmed` trace marker
 retains the writer fence even for runs without a durable assignment. Only a
 finished exit report from the same authorized daemon clears it. It preserves
 daemon ownership, launch uncertainty and all capacity/accounting holds so a
-later owned executor can reconcile. It never
+later owned executor can reconcile. Account and shared-quota occupancy, queue
+capacity advice, host concurrency and pairing drain checks count these runs
+until that authenticated exit report clears the marker. It never
 reports process exit or makes an uncertain writer eligible for takeover.
 A standalone running order with no reporting generation or run retains a
 two-hour hold from its last update and then settles through the same action,
-with the existing `work_order.cancelled` audit. Replays do not duplicate events.
+with the existing `work_order.cancelled` audit. Only a released session closure
+at or after that update can shorten the hold; historical ticket closures cannot
+release a newer standalone order. Replays do not duplicate events.
 
 Busy cancellation errors name visible holders by session/run/work-order ID,
 label and age in seconds. Each type shows up to 20 holders and identifies
