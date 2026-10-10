@@ -137,6 +137,31 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/execution-consent:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: putRoutineExecutionConsent
+      security: [{session: []}]
+      description: 'Interactive canonical owner only for enable, with live recurrence management and execution authority under the tenant/tree fence. Project/workspace routines require an administrator-provisioned keyless agent with one restricted custom role in their scope. Personal routines act as their canonical owner. expected_revision binds the displayed definition; each edit or control revision requires renewed consent. A project qualification and this separate consent are both required. Scope administrators may disable shared routines after owner loss. Consent creates no process, key, pairing, extra role or runtime grant.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, execute_consent]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                execute_consent: {type: boolean, default: false}
+                execution_principal_id: {type: [string, 'null'], format: uuid, description: 'Existing restricted keyless agent required for project/workspace enable; personal scope uses its canonical owner.'}
+      responses:
+        '200': {description: 'Current revision and redacted effective policy', content: {application/json: {schema: {$ref: '#/components/schemas/Recurrence'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: 'Stale revision, missing qualification, consent or restricted identity.'}
   /recurrences/{recurrenceId}/preview:
     parameters:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -148,7 +173,7 @@ paths:
         - {name: count, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 5}}
         - {name: after, in: query, schema: {type: string, format: date-time}}
       responses:
-        '200': {description: Occurrence preview, content: {application/json: {schema: {type: object, required: [times, trigger_kind], properties: {times: {type: array, items: {type: string, format: date-time}}, trigger_kind: {type: string, enum: [time, event]}}}}}}
+        '200': {description: 'Occurrence preview and the same effective execution policy as save/claim', content: {application/json: {schema: {$ref: '#/components/schemas/RecurrencePreview'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -255,6 +280,7 @@ components:
             updated_at: {type: string, format: date-time}
             last_result: {$ref: '#/components/schemas/RecurrenceResult'}
             open_previous: {$ref: '#/components/schemas/RecurrenceResult'}
+            execution_policy: {$ref: '#/components/schemas/RoutineExecutionPolicy'}
     RecurrenceHistoryEntry:
       type: object
       required: [id, type, at, actor_name, before, after]
@@ -310,6 +336,18 @@ components:
       properties:
         times: {type: array, maxItems: 100, items: {type: string, format: date-time}}
         trigger_kind: {type: string, enum: [time, event]}
+        execution_policy: {$ref: '#/components/schemas/RoutineExecutionPolicy'}
+    RoutineExecutionPolicy:
+      type: object
+      additionalProperties: false
+      required: [eligible, consent_required, wait_reason, project_revision, consent_revision]
+      description: 'Redacted live policy only. Eligible does not grant a start; final claims recheck current owner, exact record revision, qualification and scoped identity, then the existing admission and effect gates. Ticket-only definitions require no execution consent.'
+      properties:
+        eligible: {type: boolean}
+        consent_required: {type: boolean}
+        wait_reason: {type: string}
+        project_revision: {type: integer, minimum: 0}
+        consent_revision: {type: integer, minimum: 0}
     RecurrenceRelease:
       type: object
       required: [key, name, version, published_at]

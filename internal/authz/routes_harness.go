@@ -5,6 +5,8 @@ package authz
 // Route and scope declarations for harness.
 func init() {
 	registerRoutes("harness", map[string]string{
+		"GET /api/projects/{projectId}/routine-execution-settings":                             "harness.read",
+		"PUT /api/projects/{projectId}/routine-execution-settings":                             "harness.control",
 		"DELETE /api/projects/{projectId}/lead":                                                "harness.control",
 		"DELETE /api/me/leaving-at":                                                            "harness.control",
 		"GET /api/harness-sessions":                                                            "harness.read",
