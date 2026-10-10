@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,7 +19,312 @@ import (
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+type deliveryWorkTrace struct {
+	registry, queue, commits atomic.Int64
+	listening                chan uint32
+}
+
+func (tr *deliveryWorkTrace) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "FROM tenants WHERE id::text>") {
+		tr.registry.Add(1)
+	}
+	if strings.Contains(data.SQL, "WITH candidates AS MATERIALIZED") {
+		tr.queue.Add(1)
+	}
+	if data.SQL == "LISTEN aeon_events" && tr.listening != nil {
+		tr.listening <- conn.PgConn().PID()
+	}
+	return ctx
+}
+
+func (tr *deliveryWorkTrace) TraceQueryEnd(_ context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if data.Err == nil && data.CommandTag.String() == "COMMIT" {
+		tr.commits.Add(1)
+	}
+}
+
+func deliveryTracedPool(t *testing.T, pool *pgxpool.Pool, trace *deliveryWorkTrace) *pgxpool.Pool {
+	t.Helper()
+	cfg := pool.Config()
+	cfg.ConnConfig.Tracer = trace
+	if _, err := db.ConfigurePool(cfg); err != nil {
+		t.Fatal(err)
+	}
+	traced, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(traced.Close)
+	return traced
+}
+
+// Risk: replacing polling loses fresh/reused answers or retries in notification
+// gaps, dispatches before grace, or leaves the empty loop consuming DB commits.
+// Existing delivery tests cover final-write revocation and replica exclusivity.
+// Real LISTEN/termination barriers and injected clocks prove recovery ordering.
+func TestDeliveryDeadlineWakeScheduling(t *testing.T) {
+	t.Run("empty single tenant minute", func(t *testing.T) {
+		d := dbtest.Open(t)
+		if _, err := d.Admin.Exec(t.Context(), `INSERT INTO tenants(slug,name) VALUES('idle','idle')`); err != nil {
+			t.Fatal(err)
+		}
+		trace := &deliveryWorkTrace{}
+		m := New(deliveryTracedPool(t, d.App, trace))
+		now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+		m.clock = func(context.Context, pgx.Tx) (time.Time, error) { return now, nil }
+		passes := 0
+		m.runDelivery(t.Context(), nil, func() time.Time { return now }, func(_ context.Context, _ <-chan struct{}, delay time.Duration) bool {
+			if delay != 30*time.Second {
+				t.Fatalf("empty queue delay=%v, want 30s", delay)
+			}
+			now = now.Add(delay)
+			passes++
+			return passes < 2
+		})
+		if trace.registry.Load() != 2 || trace.queue.Load() != 2 || trace.commits.Load() != 2 {
+			t.Fatalf("one idle minute: registry=%d queue=%d explicit commits=%d; want 2 each", trace.registry.Load(), trace.queue.Load(), trace.commits.Load())
+		}
+		t.Log("one idle minute: 2 registry autocommits + 2 combined queue commits = 4 (previous 60 + 120 = 180)")
+	})
+	t.Run("new work wakes before grace and pages retain deadlines", func(t *testing.T) {
+		f := deliveryFixtureFor(t)
+		// Put enough empty tenants after the work tenant to cross a registry page.
+		if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO tenants(id,slug,name) SELECT ('ffffffff-ffff-4fff-8fff-'||lpad(to_hex(i),12,'0'))::uuid,'empty-'||i,'empty' FROM generate_series(1,100) i`); err != nil {
+			t.Fatal(err)
+		}
+		var position int
+		if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM tenants WHERE id::text<=$1`, f.person.TenantID).Scan(&position); err != nil || position > 100 {
+			t.Fatalf("work tenant must be on first page: position=%d err=%v", position, err)
+		}
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+		wakes := make(chan struct{}, 1)
+		done := make(chan error, 1)
+		go func() { done <- f.m.listenDeliveryConnection(ctx, wakes) }()
+		defer func() { cancel(); <-done }()
+		select {
+		case <-wakes: // LISTEN committed before any answer is created.
+		case <-ctx.Done():
+			t.Fatal("listener never subscribed")
+		}
+		var q, reused Question
+		step := 0
+		f.m.runDelivery(ctx, wakes, func() time.Time { return time.Unix(0, f.now.Load()) }, func(ctx context.Context, hints <-chan struct{}, delay time.Duration) bool {
+			want := []time.Duration{30 * time.Second, 10 * time.Second, time.Second, 10 * time.Millisecond, 30 * time.Second, 10 * time.Millisecond, 30 * time.Second}
+			if step >= len(want) || delay != want[step] {
+				t.Fatalf("step %d delay=%v", step, delay)
+			}
+			switch step {
+			case 0:
+				in := input()
+				in.SessionID = f.session
+				q = f.ask(t, in)
+				q = question(t, request(ctx, f.mux, f.person, "POST", "/api/questions/"+q.ID+"/decision", DecisionInput{RequestID: uid(), ExpectedRevision: q.Revision, OptionID: "a", Outcome: "always"}), 200)
+				select {
+				case <-hints:
+				case <-ctx.Done():
+					t.Fatal("committed answer did not wake idle dispatcher")
+				}
+			case 1:
+				f.advance(9 * time.Second)
+			case 2:
+				if n := f.count(t, `SELECT count(*) FROM inbox_messages`); n != 0 {
+					t.Fatal("notification bypassed grace")
+				}
+				f.advance(time.Second)
+			case 3:
+				f.expectEffects(t, q, "delivered")
+				if outcomeRow(t, f.status(t, q.ID)).State != "delivered" || f.knowledge(t, q.Answer.ID).Status != "active" {
+					t.Fatal("reusable answer was not published after grace")
+				}
+			case 4:
+				in := input()
+				in.SessionID = f.otherSession
+				reused = question(t, request(ctx, f.mux, f.otherAgent, "POST", "/api/projects/"+f.project+"/questions", in), 201)
+				if reused.ID != q.ID || reused.Answer == nil || reused.Answer.ID != q.Answer.ID || len(reused.Askers) != 1 || reused.Askers[0].FromRecord == nil || reused.Askers[0].FromRecord.DecisionID != q.Answer.ID {
+					t.Fatal("new asker did not reuse the published answer")
+				}
+				pending := 0
+				for _, e := range reused.Pending {
+					if e.Kind == "outcome" {
+						continue
+					}
+					if e.AskerID != reused.Askers[0].ID || e.State != "pending" {
+						t.Fatalf("reuse did not create a pending per-asker effect: %+v", e)
+					}
+					pending++
+				}
+				if pending != 2 {
+					t.Fatalf("reuse effects=%d, want inbox and comment", pending)
+				}
+				// Reuse uses the database clock. Align the injected clock after
+				// its commit without advancing to the reconciliation deadline.
+				var databaseNow time.Time
+				if err := f.d.Admin.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&databaseNow); err != nil {
+					t.Fatal(err)
+				}
+				if databaseNow.UnixNano() > f.now.Load() {
+					f.now.Store(databaseNow.UnixNano())
+				}
+				select {
+				case <-hints:
+				case <-ctx.Done():
+					t.Fatal("committed reuse did not wake idle dispatcher")
+				}
+			case 5:
+				f.expectEffects(t, reused, "delivered")
+				if n := f.count(t, `SELECT count(*) FROM inbox_compat_messages WHERE recipient_session_id=$1 AND body::jsonb->>'answer_id'=$2 AND body::jsonb->>'asker_id'=$3 AND reply_to_id=$4`, f.otherSession, q.Answer.ID, reused.Askers[0].ID, reused.Askers[0].ReplyRootID); n != 1 {
+					t.Fatalf("reuse delivered %d correlated replies, want 1", n)
+				}
+			case 6:
+				return false
+			}
+			step++
+			return true
+		})
+		if step != 6 {
+			t.Fatalf("scheduler stopped at step %d", step)
+		}
+	})
+	t.Run("retry deadline survives restart", func(t *testing.T) {
+		f := deliveryFixtureFor(t)
+		in := input()
+		in.SessionID = f.session
+		q := f.answer(t, f.ask(t, in), "retry me")
+		if _, err := f.d.Admin.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.agent.ID); err != nil {
+			t.Fatal(err)
+		}
+		f.advance(10 * time.Second)
+		f.dispatch(t)
+		var retry time.Time
+		if err := f.d.Admin.QueryRow(t.Context(), `SELECT retry_at FROM desk_pending WHERE question_id=$1 AND kind='inbox' AND state='failed' AND error_code='asker_access_lost'`, q.ID).Scan(&retry); err != nil {
+			t.Fatalf("expected authorization failure with durable retry: %v", err)
+		}
+		if !retry.Equal(time.Unix(0, f.now.Load()).Add(30 * time.Second)) {
+			t.Fatal("retry did not preserve existing 30s deadline")
+		}
+		clock := f.m.clock
+		f.m = New(f.d.App)
+		f.m.clock = clock
+		step := 0
+		f.m.runDelivery(t.Context(), nil, func() time.Time { return time.Unix(0, f.now.Load()) }, func(_ context.Context, _ <-chan struct{}, delay time.Duration) bool {
+			want := []time.Duration{30 * time.Second, time.Second, 10 * time.Millisecond, 30 * time.Second}
+			if step >= len(want) || delay != want[step] {
+				t.Fatalf("retry step %d delay=%v", step, delay)
+			}
+			switch step {
+			case 0:
+				dbtest.BindRole(t, f.d, f.person.TenantID, f.agent.ID, "member")
+				f.advance(29 * time.Second)
+			case 1:
+				if n := f.count(t, `SELECT count(*) FROM inbox_messages`); n != 0 {
+					t.Fatal("restart delivered before persisted retry")
+				}
+				f.advance(time.Second)
+			case 2:
+				f.expectEffects(t, q, "delivered")
+			case 3:
+				return false
+			}
+			step++
+			return true
+		})
+		if step != 3 {
+			t.Fatalf("retry scheduler stopped at step %d", step)
+		}
+	})
+	t.Run("disconnect gap and missing hints reconcile", func(t *testing.T) {
+		f := deliveryFixtureFor(t)
+		trace := &deliveryWorkTrace{listening: make(chan uint32, 2)}
+		f.m.pool = deliveryTracedPool(t, f.d.App, trace)
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+		wakes := make(chan struct{}, 1)
+		retrying, reconnect := make(chan struct{}), make(chan struct{})
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			f.m.listenDelivery(ctx, wakes, func(ctx context.Context, _ <-chan struct{}, delay time.Duration) bool {
+				if delay != time.Second {
+					t.Errorf("reconnect delay=%v", delay)
+				}
+				select {
+				case retrying <- struct{}{}:
+				case <-ctx.Done():
+					return false
+				}
+				select {
+				case <-reconnect:
+					return true
+				case <-ctx.Done():
+					return false
+				}
+			})
+		}()
+		defer func() { cancel(); <-done }()
+		receive := func(ch <-chan struct{}, label string) {
+			t.Helper()
+			select {
+			case <-ch:
+			case <-ctx.Done():
+				t.Fatalf("missing %s barrier", label)
+			}
+		}
+		receive(wakes, "initial LISTEN")
+		oldPID := <-trace.listening
+		var terminated bool
+		if err := f.d.Admin.QueryRow(ctx, `SELECT pg_terminate_backend($1)`, oldPID).Scan(&terminated); err != nil || !terminated {
+			t.Fatalf("terminate listener: %v, %v", terminated, err)
+		}
+		receive(wakes, "disconnect wake")
+		receive(retrying, "reconnect pause")
+		in := input()
+		in.SessionID = f.session
+		q := f.answer(t, f.ask(t, in), "committed in disconnect gap")
+		close(reconnect)
+		receive(wakes, "reconnected LISTEN")
+		if pid := <-trace.listening; pid == oldPID {
+			t.Fatal("reconnect reused terminated backend")
+		}
+		// Fresh process state must recover the gap solely from persisted work.
+		m := New(f.d.App)
+		m.clock = f.m.clock
+		if delay := m.dispatchQueue(ctx, func() time.Time { return time.Unix(0, f.now.Load()) }); delay != 10*time.Second {
+			t.Fatalf("reconnect missed gap deadline: %v", delay)
+		}
+		f.advance(10 * time.Second)
+		if _, err := m.DispatchTenant(ctx, f.person.TenantID); err != nil {
+			t.Fatal(err)
+		}
+		f.expectEffects(t, q, "delivered")
+		// Lose every notification for a later answer. The injected fallback still
+		// recovers it; notification payloads never carry delivery authority.
+		step := 0
+		m.runDelivery(ctx, nil, func() time.Time { return time.Unix(0, f.now.Load()) }, func(_ context.Context, _ <-chan struct{}, delay time.Duration) bool {
+			want := []time.Duration{30 * time.Second, 10 * time.Millisecond, 30 * time.Second}
+			if step >= len(want) || delay != want[step] {
+				t.Fatalf("missed-hint step %d delay=%v", step, delay)
+			}
+			switch step {
+			case 0:
+				q = f.answer(t, f.ask(t, input()), "missed hint")
+				f.advance(delay)
+			case 1:
+				f.expectEffects(t, q, "delivered")
+			case 2:
+				return false
+			}
+			step++
+			return true
+		})
+		if step != 2 {
+			t.Fatalf("fallback scheduler stopped at step %d", step)
+		}
+	})
+}
 
 type deliveryFixture struct {
 	*fixture
