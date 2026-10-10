@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -38,7 +39,7 @@ func hostNumber(value string) *float64 {
 	}
 	return &n
 }
-func sampleHost(ctx context.Context, activity bool) hostcapacity.Signals {
+func sampleHost(ctx context.Context, activity bool, unattended ...bool) hostcapacity.Signals {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	s := hostcapacity.Signals{Cores: runtime.NumCPU(), MemoryPressure: "unknown", Power: "unknown", Thermal: "unknown"}
@@ -155,6 +156,9 @@ func sampleHost(ctx context.Context, activity bool) hostcapacity.Signals {
 			}
 		}
 	}
+	if len(unattended) > 0 && unattended[0] {
+		s.Unattended = sampleUnattended(ctx)
+	}
 	return s
 }
 func readHostFile(path string) (string, error) {
@@ -200,7 +204,8 @@ func (r *Remote) hostCapacitySupported(ctx context.Context) (bool, error) {
 		return support > 0, nil
 	}
 	var self struct {
-		HostCapacity json.RawMessage `json:"host_capacity"`
+		HostCapacity       json.RawMessage `json:"host_capacity"`
+		ServerCapabilities []string        `json:"server_capabilities"`
 	}
 	err := r.Client.Do(ctx, "GET", "/api/agent-pairing/self", nil, &self)
 	var status *client.StatusError
@@ -214,12 +219,14 @@ func (r *Remote) hostCapacitySupported(ctx context.Context) (bool, error) {
 	}
 	r.mu.Lock()
 	r.hostCapacitySupport, r.hostCapacityCheckedAt = support, now
+	r.hostUnattendedSupport = support > 0 && slices.Contains(self.ServerCapabilities, hostcapacity.UnattendedCapability)
 	r.mu.Unlock()
 	return support > 0, nil
 }
 func (r *Remote) forgetHostCapacitySupport() {
 	r.mu.Lock()
 	r.hostCapacitySupport = 0
+	r.hostUnattendedSupport = false
 	r.mu.Unlock()
 }
 
@@ -234,9 +241,14 @@ func (r *Remote) HostCapacity(ctx context.Context) (hostcapacity.View, error) {
 	if !supported {
 		return out, ErrHostCapacityUnsupported
 	}
-	err = r.Client.Do(ctx, "POST", "/api/agent-pairing/self/capacity", sampleHost(ctx, false), &out)
+	r.mu.RLock()
+	unattendedSupported := r.hostUnattendedSupport
+	r.mu.RUnlock()
+	signals := sampleHost(ctx, false, unattendedSupported)
+	err = r.Client.Do(ctx, "POST", "/api/agent-pairing/self/capacity", signals, &out)
 	if err == nil && out.Policy.Mode == "smart" && out.Policy.ConsiderActivity {
-		err = r.Client.Do(ctx, "POST", "/api/agent-pairing/self/capacity", sampleHost(ctx, true), &out)
+		signals = sampleHost(ctx, true, unattendedSupported)
+		err = r.Client.Do(ctx, "POST", "/api/agent-pairing/self/capacity", signals, &out)
 	}
 	if err != nil {
 		// A supported server that fails stays fail-closed; the next call

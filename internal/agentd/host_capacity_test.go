@@ -3,6 +3,7 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -70,6 +71,8 @@ func TestManagedStartHostReportFailureNeverClaims(t *testing.T) {
 type capacityServer struct {
 	mu                    sync.Mutex
 	supported             bool
+	unattended            bool
+	signals               []hostcapacity.Signals
 	selfStatus, capStatus int
 	selfReads, reports    int
 }
@@ -87,12 +90,16 @@ func (c *capacityServer) handler() http.Handler {
 			return
 		}
 		if c.supported {
-			_, _ = w.Write([]byte(`{"state":"redeemed","host_capacity":{"policy":{"mode":"fixed"},"running":0,"queued":0,"reason":"","load_limit":0,"history":[]}}`))
+			capabilities := []string{}
+			if c.unattended {
+				capabilities = append(capabilities, hostcapacity.UnattendedCapability)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"state": "redeemed", "server_capabilities": capabilities, "host_capacity": hostcapacity.View{Policy: hostcapacity.Policy{Mode: "fixed"}}})
 			return
 		}
 		_, _ = w.Write([]byte(`{"state":"redeemed"}`))
 	})
-	mux.HandleFunc("POST /api/agent-pairing/self/capacity", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /api/agent-pairing/self/capacity", func(w http.ResponseWriter, r *http.Request) {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		c.reports++
@@ -107,6 +114,12 @@ func (c *capacityServer) handler() http.Handler {
 			_, _ = w.Write([]byte(`{"error":"pairing operation failed","code":"internal_error"}`))
 			return
 		}
+		var signals hostcapacity.Signals
+		if err := json.NewDecoder(r.Body).Decode(&signals); err != nil || signals.Validate() != nil || !c.unattended && signals.Unattended != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		c.signals = append(c.signals, signals)
 		_, _ = w.Write([]byte(`{"policy":{"mode":"fixed"},"running":0,"queued":0,"reason":"","load_limit":0,"history":[]}`))
 	})
 	return mux
@@ -162,6 +175,9 @@ func TestHostCapacityNegotiationRenegotiatesAndFailsClosed(t *testing.T) {
 	if _, err := r.HostCapacity(t.Context()); err != nil || srv.selfReads != 2 || srv.reports != 1 {
 		t.Fatalf("upgrade not negotiated: reads=%d reports=%d err=%v", srv.selfReads, srv.reports, err)
 	}
+	if len(srv.signals) != 1 || srv.signals[0].Unattended != nil {
+		t.Fatal("new fields were sent to a capacity-only server")
+	}
 	// A supported server that fails keeps starts closed and negotiates again.
 	srv.capStatus = http.StatusInternalServerError
 	_, err := r.HostCapacity(t.Context())
@@ -186,5 +202,20 @@ func TestHostCapacityNegotiationRenegotiatesAndFailsClosed(t *testing.T) {
 	srv.selfStatus = http.StatusNotFound
 	if _, err := r.HostCapacity(t.Context()); !errors.Is(err, ErrHostCapacityUnsupported) {
 		t.Fatal("unpaired key must take the legacy path", err)
+	}
+	// A separately negotiated upgrade enables the report; rollback drops the
+	// optional field instead of breaking ordinary capacity admission.
+	srv.selfStatus, srv.capStatus, srv.unattended = 0, 0, true
+	now = now.Add(hostCapacityRenegotiate)
+	if _, err := r.HostCapacity(t.Context()); err != nil {
+		t.Fatal("unattended upgrade failed", err)
+	}
+	if last := srv.signals[len(srv.signals)-1]; last.Unattended == nil || last.Unattended.Validate() != nil {
+		t.Fatal("negotiated unattended signals missing or invalid", last)
+	}
+	srv.unattended = false
+	now = now.Add(hostCapacityRenegotiate)
+	if _, err := r.HostCapacity(t.Context()); err != nil || srv.signals[len(srv.signals)-1].Unattended != nil {
+		t.Fatal("rollback did not restore the legacy report shape", err)
 	}
 }
