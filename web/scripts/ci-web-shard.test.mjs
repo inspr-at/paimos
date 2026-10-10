@@ -529,11 +529,12 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const autopilot = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/status-autopilot.spec.ts')
   assert.ok(autopilot && autopilot.weightSeconds >= autopilotOnMain, 'Autopilot regressions must remain in the gate')
   const autopilotGrowth = autopilot.weightSeconds - autopilotOnMain
-  // AEON-569 adds two regression files and twelve no-shift cases. Compare
-  // the unchanged prior gate separately, then charge their explicit weights.
-  const deskFiles = new Set(['tests/decision-desk-fix2.spec.ts', 'tests/decision-desk-fix3.spec.ts'])
+  // AEON-569 adds two regression files and twelve no-shift cases; AEON-1057
+  // adds the project spec. Compare the unchanged prior gate separately, then
+  // charge their explicit weights.
+  const deskFiles = new Set(['tests/decision-desk-fix2.spec.ts', 'tests/decision-desk-fix3.spec.ts', 'tests/decision-desk-project.spec.ts'])
   const deskAdded = real.groups.flatMap(group => group.specs).filter(spec => deskFiles.has(spec.file))
-  assert.equal(deskAdded.length, 2, 'Both cutover regression files must remain in the gate')
+  assert.equal(deskAdded.length, 3, 'The cutover regression files and the project spec must remain in the gate')
   const noShift = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/no-shift.spec.ts')
   const noShiftOnMain = 10.171603
   assert.ok(noShift && noShift.weightSeconds >= noShiftOnMain, 'No-shift regressions must remain in the gate')

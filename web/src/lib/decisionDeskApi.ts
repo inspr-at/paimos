@@ -3,7 +3,7 @@
 import { readKeyTrims, decideKeyTrim, type KeyTrimProposal, type KeyTrimCursors } from './keyTrim'
 import { approveStepup, declineStepup, readStepups, stepupAnswer, stepupDelivery, stepupTitle, type StepupDevices, type StepupRequest } from './stepup'
 import { api, APIError, getNode, getProjects, getRelations, lookupNodeKeys, type WorkNode } from './api'
-import { listApprovals, decideApproval, listMessages, resolveMessage, type Approval, type ProjectMessage, type HarnessSession } from './agents'
+import { listApprovals, decideApproval, listMessages, resolveMessage, type Approval, type ProjectMessage, type HarnessSession, type AgentRun } from './agents'
 import { canDecideApproval, decidedApprovals } from './agentState'
 import { getDoctrineInbox, submitDoctrineInbox, dismissDoctrineInbox, type DoctrineInboxItem } from './doctrine'
 import { listAttachments, type Attachment } from './attachments'
@@ -152,6 +152,8 @@ export const emptySources = (): DeskSources => ({ questions: new Map(), approval
 /** Upstream owners supply their native, permission-checked flows here. No
  * guessed endpoints, boolean verification bypass, or Q&A fallback is accepted. */
 export interface ProtectedDeskAdapters {
+  // Run rows pass through the Agents ledger before ownership is inspected.
+  approvalRun?: (id: string) => Promise<AgentRun | undefined>
   // AEON-455 owns user verification and the approval write together.
   phoneApproval?: (approval: Approval, decision: 'approved' | 'denied', reason: string) => Promise<void>
   // AEON-436's exact generation, revision and native permission contract.
@@ -260,8 +262,17 @@ export async function nativePhoneApproval(approval: Approval, decision: 'approve
 export interface DeskRead {
   items: DeskItem[]; sources: DeskSources; warnings: string[]; hasMore: Record<QuestionState, boolean>
   questionPositions: Record<QuestionState, QuestionPosition | undefined>; projectNames: Map<string, string>
+  /** Project id to key, for the project link (AEON-1057). */
+  projectKeys?: Map<string, string>
   nextKeyTrims: KeyTrimCursors
   canonical?: boolean
+}
+/** One permission-checked, bounded ticket lookup shared by the desk and panel. */
+export async function readDoctrineProjects(rules: readonly DoctrineInboxItem[]): Promise<Map<string, string>> {
+  const tickets = [...new Set(rules.map(rule => rule.ticket).filter((key): key is string => !!key))].slice(0, 100)
+  const projects = new Map<string, string>()
+  if (tickets.length) for (const node of (await lookupNodeKeys(tickets)).items) if (node.project_id) projects.set(node.requested_key ?? node.key, node.project_id)
+  return projects
 }
 /** Continue only the requested list. Refresh uses loadDesk to recheck all
  * sources from the beginning; callers keep this snapshot bound to its owner.
@@ -275,7 +286,7 @@ export async function loadMoreQuestions(previous: DeskRead, state: QuestionState
   const sources = { ...current.sources, questions: new Map(current.sources.questions), actions: new Map(current.sources.actions) }
   const items = new Map(current.items.filter(item => item.kind === 'question' || item.kind === 'handover').map(item => [item.id, item]))
   for (const question of result.items) {
-    const item = questionItem(question, current.projectNames.get(question.project_id) ?? 'Project name unavailable')
+    const item = { ...questionItem(question, current.projectNames.get(question.project_id) ?? 'Project name unavailable'), projectKey: current.projectKeys?.get(question.project_id) }
     sources.questions.set(item.id, question); items.set(item.id, item)
   }
   if (current.canonical) {
@@ -311,22 +322,43 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     // Reuse the ticket ancestry contract, bounded and cached within this read.
     const nodes = new Map<string, Promise<WorkNode>>()
     const readNode = (id: string) => { if (!nodes.has(id)) nodes.set(id, getNode(id)); return nodes.get(id)! }
-    const nodeIds = [...new Set(approvalsResult.value.filter(row => row.resource_kind === 'node').map(row => row.resource_id).filter((id): id is string => !!id))].slice(0, 30)
-    const names = new Map<string, string>()
-    await Promise.all(nodeIds.map(async resource => {
-      let id: string | null = resource
+    const canonicalProjects = new Map((projection?.items ?? []).filter(row => row.kind === 'approval' && row.project_id).map(row => [row.id, row.project_id!]))
+    const resources = new Map(approvalsResult.value.slice(0, 200).filter(row => row.resource_kind !== 'tenant' && row.resource_id && !canonicalProjects.has(row.id))
+      .map(row => [`${row.resource_kind}:${row.resource_id}`, row]))
+    const owners = new Map<string, { id: string; title: string }>()
+    if (resources.size > 30) warnings.push('Project ownership for approval history is limited to 30 resources in this read.')
+    const entries = [...resources.entries()].slice(0, 30)
+    for (let at = 0; at < entries.length; at += 5) await Promise.all(entries.slice(at, at + 5).map(async ([resource, approval]) => {
+      let id: string | null = approval.resource_id ?? null
       try {
+        if (approval.resource_kind === 'run' && id) {
+          const run = await adapters.approvalRun?.(id)
+          if (!run || run.id !== id) return
+          id = run.work_order_id
+        }
         for (let depth = 0; id && depth < 8; depth++) {
           const project = projects.find(project => project.id === id)
-          if (project) { names.set(resource, project.title); break }
+          if (project) { owners.set(resource, project); break }
           id = (await readNode(id)).parent_id
         }
       } catch { /* A missing name never becomes a fictitious Workspace. */ }
     }))
-    for (const approval of approvalsResult.value.slice(0, 200)) { sources.approvals.set(`a:${approval.id}`, approval); items.push(approvalItem(approval, approval.resource_id ? names.get(approval.resource_id) : undefined)) }
+    for (const approval of approvalsResult.value.slice(0, 200)) {
+      const owner = owners.get(`${approval.resource_kind}:${approval.resource_id}`)
+      const projectId = canonicalProjects.get(approval.id) ?? owner?.id ?? ''
+      sources.approvals.set(`a:${approval.id}`, approval); items.push({ ...approvalItem(approval, projectId ? name(projectId) : owner?.title), projectId })
+    }
   } else warnings.push('Approvals could not be read.')
-  if (rulesResult.status === 'fulfilled') for (const rule of rulesResult.value.items) { sources.rules.set(`r:${rule.id}`, rule); items.push(ruleItem(rule)) }
-  else warnings.push('Rule changes could not be read.')
+  if (rulesResult.status === 'fulfilled') {
+    // A rule change names its project through its ticket: one bounded key lookup.
+    let ticketProjects = new Map<string, string>()
+    try { ticketProjects = await readDoctrineProjects(rulesResult.value.items) }
+    catch { warnings.push('The projects of some rule changes could not be read.') }
+    for (const rule of rulesResult.value.items) {
+      const project = rule.ticket ? projects.find(project => project.id === ticketProjects.get(rule.ticket!)) : undefined
+      sources.rules.set(`r:${rule.id}`, rule); items.push(project ? { ...ruleItem(rule), projectId: project.id, projectName: project.title } : ruleItem(rule))
+    }
+  } else warnings.push('Rule changes could not be read.')
   if (projects.length > 30) warnings.push('Action requests are limited to the first 30 visible projects in this read.')
   const actionReads = await Promise.allSettled(projects.slice(0, 30).map(async project => ({ project, page: await listMessages(project.id, { pending: true, limit: 100 }) })))
   for (const read of actionReads) {
@@ -390,6 +422,7 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
       if (linkOut) return { ...base(id, 'account_matrix', row.title, '', []), linkOut, revision: row.revision, createdAt: row.created_at, held: row.held, source: row.source,
         meanwhile: 'Confirm which accounts agents may use in Settings.', destination: 'Settings · Accounts', unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : undefined }
       if (item && !item.decided) return { ...item, held: row.held, source: row.source,
+        ...(row.kind === 'approval' && row.project_id ? { projectId: row.project_id, projectName: name(row.project_id) } : {}),
         unavailable: row.can_decide === false ? 'This person may read this request but cannot decide it.' : item.unavailable }
       warnings.push('Some source details could not be confirmed. Retry remains available.')
       return { ...base(id, row.kind === 'question' ? 'question' : row.kind === 'action_request' ? 'action' : row.kind === 'doctrine' ? 'rule' : row.kind === 'tier_request' ? 'tier' : row.kind === 'key_trim' ? 'key_trim' : row.kind === 'stepup' ? 'stepup' : row.kind === 'account_matrix' ? 'account_matrix' : 'approval', row.title, '', []),
@@ -400,9 +433,11 @@ export async function loadDesk(pages = { open: 1, answered: 1 }, adapters: Prote
     else if (projection.has_more || open.length !== projection.counts.open) warnings.push('The canonical desk is partial or changed while reading. Retry for current coverage.')
     items.splice(0, items.length, ...open, ...history.filter(item => !open.some(row => row.id === item.id)))
   }
+  const projectKeys = new Map(projects.map(project => [project.id, project.key]))
+  for (const item of items) if (item.projectId) item.projectKey = projectKeys.get(item.projectId)
   return { items, sources, warnings: [...new Set(warnings)], hasMore: { open: openResult.status === 'fulfilled' && openResult.value.has_more, answered: answeredResult.status === 'fulfilled' && answeredResult.value.has_more },
     questionPositions: { open: openResult.status === 'fulfilled' ? openResult.value.position : undefined, answered: answeredResult.status === 'fulfilled' ? answeredResult.value.position : undefined },
-    projectNames: new Map(projects.map(project => [project.id, project.title])), nextKeyTrims: trimsResult.status === 'fulfilled' ? trimsResult.value.next : {}, canonical: projection !== undefined }
+    projectNames: new Map(projects.map(project => [project.id, project.title])), projectKeys, nextKeyTrims: trimsResult.status === 'fulfilled' ? trimsResult.value.next : {}, canonical: projection !== undefined }
 }
 export function decisionPermission(item: DeskItem, sources: DeskSources, can: (permission: string, project?: string) => boolean, adapters: ProtectedDeskAdapters = {}): boolean {
   if (item.kind === 'question' || item.kind === 'handover') return can('questions.read', item.projectId) && can('questions.decide', item.projectId)
@@ -437,7 +472,7 @@ export async function commitDesk(item: DeskItem, draft: DeskDraft, sources: Desk
     if (!question || question.revision !== item.revision) throw new Error('The question changed. Reopen it before deciding.')
     const updated = await decideQuestion(question.id, item.revision, draft, requestId, item.doctrine)
     sources.questions.set(item.id, updated)
-    return questionItem(updated, item.projectName)
+    return { ...questionItem(updated, item.projectName), projectKey: item.projectKey }
   }
   if (item.kind === 'approval') {
     const approval = sources.approvals.get(item.id)
