@@ -33,6 +33,9 @@ import (
 func TestRoutineLaunchClaimReplayAndCurrentAuthority(t *testing.T) {
 	f := setup(t)
 	f.person.BrowserSession = true
+	// The fixture supplies authenticated principals directly; mirror its real
+	// scoped key for the final RequireTx checks normally populated by auth.
+	f.agent.Scopes = []string{"work_orders.read", "work_orders.write", "run.read", "run.create", "run.claim", "run.telemetry"}
 	project, parent, service, role, computer, request, ledger, grantID := uuid(), uuid(), uuid(), uuid(), uuid(), uuid(), uuid(), uuid()
 	var workKind string
 	f.tx(t, f.person, func(tx pgx.Tx) error {
