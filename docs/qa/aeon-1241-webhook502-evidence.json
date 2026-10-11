@@ -1,8 +1,8 @@
 {
   "ticket": "AEON-1241",
-  "status": "blocked_migration",
+  "status": "partial_fix_blocked_migration",
   "ready_for_merge": false,
-  "statement": "MIGRATION NEEDED: tenant-scoped durable verified webhook receipts with replayable payloads, independent per-step outcomes/checkpoints, attempts, next-attempt timestamps and bounded retry claiming. No migration number is assigned in this brief; no migration was written.",
+  "statement": "MIGRATION NEEDED: tenant-scoped durable verified webhook receipts with replayable payloads, per-step outcomes/checkpoints, attempts, retry timestamps and bounded claiming. No migration number is assigned. The independent unconfigured-metrics no-op and linked-flow preservation are now implemented; durable ingestion and internal retries remain unimplemented.",
   "stop_authority": "aeon-1241-webhook502.md, Build 3: if you need a migration, write MIGRATION NEEDED in your evidence and stop before writing one.",
   "ownership": {
     "tracker": "PPM / INSPR",
@@ -21,37 +21,22 @@
   },
   "source_base": "928157260",
   "changes": [
-    "Added TestDeliveryWebhookUnlinkedMetricSource in the existing metrics integration test file; no application changes.",
-    "Registered the regression as ESSENTIAL through the existing manifest classifier; no prior test was loosened, removed or skipped."
+    "Unconfigured metrics return explicit not_configured/nothing_to_record outcomes without writing metric runs, pulls or review marks.",
+    "Completed Actions suites skip the Actions read only when neither a metric source nor a linked delivery flow consumer needs it. Linked PR heads, explicit suite PRs, stored queue heads and queue branch PRs retain the checks/queue flow path and default CI workflow.",
+    "Failed check-audit, merge-audit, metric and flow work retains its content-free step/error class; flow-only Actions failures remain 502.",
+    "Expanded the existing ESSENTIAL regression with linked/unlinked suites, queue subjects, upstream failure, explicit redelivery and idempotent flow effects; no test is skipped or weakened.",
+    "Merged the newer origin/main cleanly; no migration, API, permission, version or UI changes were authored."
   ],
   "reproduction": {
-    "commit": "d4e122cc0",
+    "baseline_application": "5da91b7fbdaecd3b2a7fb278e0f530a85ba11275",
+    "test_only_baseline_commit": "0e91ccee4",
     "test": "TestDeliveryWebhookUnlinkedMetricSource",
-    "risk": "A repository with no linked metric source still makes an Actions suite API read; an upstream failure can reject an already authenticated and projected delivery.",
-    "fixture": "Real HTTP mux, HMAC verification, installation/repository binding, tenant DB transactions and projection ledger. No metric source is created. GitHub API responses are injected.",
-    "desired": "204, no metric API read, no metric fact, no failure log when metrics are not configured.",
-    "controls": [
-      "Available GitHub read returns a complete valid workflow run.",
-      "Unavailable GitHub read returns crossreview.ErrUnavailable.",
-      "Before accepting a 502 as the reproduced bug, require exactly the expected metric read, the committed authenticated projection ledger, and the existing structured audit/github_unavailable log."
-    ],
-    "result": "Not executed: all three remote attempts exited 3. First: both global remote test slots occupied. Second and third: remote host RED under the host-watch guard. The new test is expected to fail on unchanged main behavior; HTTP values are source-derived expectations, not runtime observations. No local Go fallback.",
-    "source_expected_observations": {
-      "read_available": {
-        "status": 204,
-        "metric_api_reads": 1,
-        "projection_ledger_rows": 1,
-        "metric_run_rows": 1
-      },
-      "read_unavailable": {
-        "status": 502,
-        "metric_api_reads": 1,
-        "projection_ledger_rows": 1,
-        "metric_run_rows": 0,
-        "logged_step": "audit",
-        "logged_class": "github_unavailable"
-      }
-    }
+    "risk": "Unconfigured metrics must not reject authenticated deliveries on unnecessary Actions reads or suppress linked checks/queue flow facts.",
+    "fixture": "Signed HTTP mux, installation/repository binding, RLS-backed transactions and injected GitHub reads. No metric source is created; linked scenarios explicitly create a ticket-linked delivery item.",
+    "desired": "204 with no metric rows; Actions reads and flow rows only for linked consumers. A required read failure is a visible 502/flow/github_unavailable, not silent success.",
+    "baseline_result": "CONFIRMED expected regression failure, exit 1, on test-only commit 0e91ccee4 (application files unchanged from 5da91b7f): read_available wrote one unwanted metric fact; read_unavailable returned 502 instead of 204; linked_read_failure_then_redelivery logged audit instead of flow. The initial queue fixture also failed for its invalid subject and was subsequently corrected independently; it is not used as defect evidence.",
+    "fixed_result": "Full internal/delivery passed remotely on 21e09932d in 47.432 seconds after the queue fixture corrections, including the linked/unlinked suite, queue and explicit-redelivery assertions. The subsequent refs/heads-prefixed suite guard and clean origin/main merges were formatted but not compiled or executed in a final Go run: repeated final reruns were refused with exit 3 (load 15 > 12 or 2/2 remote slots).",
+    "explicit_redelivery_limit": "The test manually resends the same signed delivery and asserts convergent flow effects. It does not prove internal retry; durable receipt/retry remains blocked on the coordinator migration assignment."
   },
   "storage_findings": [
     {
@@ -107,36 +92,47 @@
   "validation": [
     {
       "command": "git fetch origin main; git merge origin/main",
-      "result": "Already up to date."
+      "result": "Clean merge of newer main; tier manifests auto-merged without conflict."
     },
     {
       "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
-      "result": "PASS: 289 tests, no failures or skips; exit 0."
+      "result": "PASS: 289 tests, zero failures/skips."
     },
     {
       "command": "python3 -m unittest discover -s scripts/audit",
-      "result": "PASS: 33 tests; exit 0. No new Go/web source files were introduced."
+      "result": "PASS: 33 tests; no new Go/web source file was authored."
     },
     {
-      "command": "node --test web/scripts/ci-web-shard.test.mjs",
-      "result": "FAILED prerequisite: native collection cannot find web dependencies (including vue); web/node_modules is absent. Not green. No UI files changed and npm ci was not run during this migration-stop handoff."
+      "command": "GOMAXPROCS=2 go test -p 2 ./internal/delivery -run ^TestWebhookFailureAudit$ -count=1 -v",
+      "result": "PASS: all eight logging cases and package compilation; the single permitted local package run. Local test Postgres port 55432 is unavailable."
     },
     {
-      "command": "remote-test.sh <assigned-worktree> ./internal/delivery -run ^TestDeliveryWebhookUnlinkedMetricSource$ -count=1 -v",
-      "result": "INCOMPLETE: three refusals, all exit 3. First: two remote slots busy. Second and third: remote host RED. No Go execution or local fallback."
+      "command": "remote-test.sh <assigned-worktree> ./internal/delivery -run <unconfigured and logging baseline names> -count=1 -v",
+      "result": "Expected regression failure on 0e91ccee4: unnecessary metric fact, unconfigured-source 502, and flattened flow error label. Original application code matches 5da91b7f. Baseline checkout was confined to the assigned worktree and automatically restored the assigned branch."
+    },
+    {
+      "command": "remote-test.sh <assigned-worktree> ./internal/delivery -run TestDeliveryWebhookUnlinkedMetricSource -count=1 -v",
+      "result": "Initial run on f0e4ef8a5 passed seven cases and failed two queue fixtures. Fixtures were corrected with valid SHA-suffixed queue branches and a separate queue-check reader; assertions retained."
+    },
+    {
+      "command": "remote-test.sh <assigned-worktree> ./internal/delivery -count=1",
+      "result": "PASS on 21e09932d, 47.432 seconds. Final merged revision INCOMPLETE: repeated exit-3 refusals for load 15 > 12 or 2/2 occupied global remote slots; the last attempt also refused. No additional local Go run."
+    },
+    {
+      "command": "ci-static-locked.sh",
+      "result": "INCOMPLETE: all approved attempts refused exit 3 because both global remote slots were occupied. Static checks and web dependency/shard prerequisites were not evaluated. No heavy local fallback; not green."
     },
     {
       "command": "git diff --check",
       "result": "PASS."
-    },
-    {
-      "command": "ci-static-remote.sh (approved runner for node scripts/ci-static.mjs --merge-main)",
-      "result": "INCOMPLETE: exit 3, remote host is not GREEN under the host-watch guard. No static run or local fallback; not green."
     }
   ],
   "limits": [
-    "This is a diagnosis and failing regression handoff, not a delivered fix; do not merge or advertise no lost facts.",
+    "This is a partial application fix. Build 3 durable receipts/internal retries and Build 4 per-step internal-retry exactly-once tests are blocked on an unassigned expansion migration; do not merge or advertise no lost facts.",
     "Production and GitHub delivery logs were not accessed; the actual production upstream error remains unverified.",
-    "No migrations, application/API/version changes, new secrets, origin push, deployment, review gates or other model CLIs."
-  ]
+    "No migration, authored API/version/UI change, new secret, origin push, deployment, review gate, other model CLI or ticket-status change.",
+    "An early combined-regex remote invocation failed shell parsing before tests. Its remote worktree/ref/database may need coordinator cleanup: run 0e91ccee42-79570. No other worker state was touched.",
+    "Worker completion is a handoff at the migration boundary, not ticket/release acceptance. No final merged Go or static success is claimed; the coordinator must rerun both before merge."
+  ],
+  "storage_findings_context": "Original pre-fix diagnosis. Durable-storage findings still apply; the unconfigured metrics no-op is implemented in this fix round."
 }
