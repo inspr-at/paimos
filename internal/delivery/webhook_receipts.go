@@ -203,7 +203,7 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 	if receipt.finished != nil || !immediate && receipt.next.After(m.now()) {
 		return nil
 	}
-	if len(receipt.raw) > 2<<20 || digest(receipt.raw) != receipt.hash || json.Unmarshal(checkpoints, &receipt.checkpoints) != nil || json.Unmarshal(runs, &receipt.runs) != nil || len(receipt.runs) > 2000 {
+	if len(receipt.raw) > 2<<20 || len(checkpoints) > 4096 || len(runs) > 2<<20 || digest(receipt.raw) != receipt.hash || json.Unmarshal(checkpoints, &receipt.checkpoints) != nil || json.Unmarshal(runs, &receipt.runs) != nil || len(receipt.runs) > 2000 {
 		return webhookClass("invalid_receipt")
 	}
 	var e envelope
@@ -262,15 +262,19 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 }
 
 func (m *Module) checkpointWebhook(ctx context.Context, step string, outcome webhookOutcome, receipt *webhookReceipt) error {
-	runs, err := json.Marshal(receipt.runs)
-	if err != nil || len(runs) > 2<<20 {
-		return errRead
+	var runs []byte
+	if step == "metrics" {
+		var err error
+		runs, err = json.Marshal(receipt.runs)
+		if err != nil || len(runs) > 2<<20 {
+			return errRead
+		}
 	}
 	return db.InTenant(db.AllProjects(ctx, "delivery receipt checkpoint"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET checkpoints=jsonb_set(checkpoints,ARRAY[$2::text],to_jsonb($3::text)),flow_runs=$4 WHERE delivery_id=$1`, receipt.id, step, string(outcome), runs)
+		_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET checkpoints=jsonb_set(checkpoints,ARRAY[$2::text],to_jsonb($3::text)),flow_runs=CASE WHEN $2='metrics' THEN $4::jsonb ELSE flow_runs END WHERE delivery_id=$1`, receipt.id, step, string(outcome), runs)
 		return err
 	})
 }
