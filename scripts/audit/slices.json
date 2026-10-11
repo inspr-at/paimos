@@ -168,6 +168,7 @@
         "internal/agentruns/queue_notifications.go",
         "internal/agentruns/queue_notifications_test.go",
         "internal/runisolation/**",
+        "internal/routineexec/**",
         "internal/modelregistry/routine_reads.go"
       ]
     },
