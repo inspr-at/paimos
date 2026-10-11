@@ -25,10 +25,25 @@ import (
 // HTTP client, auth middleware, pairing handlers, and disposable database.
 type handlerTransport struct{ handler http.Handler }
 
-func (x handlerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+func (x handlerTransport) RoundTrip(r *http.Request) (response *http.Response, err error) {
 	if r.URL.Scheme != "https" || r.URL.Host != "pairing.test" {
 		return nil, errors.New("unexpected pairing destination")
 	}
+	// net/http normally catches this sentinel and aborts the connection. A
+	// direct handler call needs the same boundary: discard the partial reply,
+	// preserve client cancellation, and let unrelated panics propagate.
+	defer func() {
+		if rec := recover(); rec != nil {
+			if rec != http.ErrAbortHandler {
+				panic(rec)
+			}
+			response = nil
+			err = r.Context().Err()
+			if err == nil {
+				err = io.ErrUnexpectedEOF
+			}
+		}
+	}()
 	w := httptest.NewRecorder()
 	x.handler.ServeHTTP(w, r)
 	return w.Result(), nil
