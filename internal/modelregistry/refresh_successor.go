@@ -75,7 +75,7 @@ func acceptUsedSuccessor(ctx context.Context, tx pgx.Tx, p tenant.Principal, pin
 	// at the accepted version; advance their write tokens without changing rank
 	// or native effort while the remaining efforts are being discovered.
 	line, _ := modelsLine(prof)
-	if _, err := tx.Exec(ctx, `UPDATE model_pref_profiles SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM (`+modelprefs.OrdersSQL+`) o WHERE o.profile_id=model_pref_profiles.id AND ($1=ANY(o.rank) OR $1=ANY(o.not_allowed)))`, line); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE model_pref_profiles SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM (`+modelprefs.OrdersSQL+`) o WHERE o.profile_id=model_pref_profiles.id AND ($1=ANY(o.rank) OR $1=ANY(o.not_allowed) OR $2=ANY(o.rank) OR $2=ANY(o.not_allowed)))`, line, boardLineID(predecessor)); err != nil {
 		return false, err
 	}
 	if err := copyModelPause(ctx, tx, predecessor, prof); err != nil {
