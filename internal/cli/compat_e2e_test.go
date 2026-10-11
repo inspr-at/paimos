@@ -305,7 +305,8 @@ func TestCompatEndToEnd(t *testing.T) {
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "model", "resolve", "review-gate", "--author-family", "xai"}, "")
 	line, _, _ := strings.Cut(out, "\n")
 	if code != 0 || !strings.Contains(out, "'{prompt}'") || strings.HasSuffix(strings.TrimSpace(line), "xai") {
-		t.Fatalf("review-gate code %d out %q err %q", code, out, errOut)
+		_, ladder, _ := runCLI([]string{"paimos", "--config", missing, "--json", "model", "resolve", "review-gate", "--author-family", "xai"}, "")
+		t.Fatalf("review-gate code %d out %q err %q; resolution %s", code, out, errOut, ladder)
 	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "session", "start", "--project", "AEON", "--agent", "worker"}, "")
