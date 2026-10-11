@@ -638,7 +638,7 @@ func TestRoutineQueueWaitsDoNotBlockLaterWork(t *testing.T) {
 // an unlaunched actor leaks its session/hold, or abandonment clears a started
 // actor, another daemon's claim, or partial settlement after a callback failure.
 func TestLeadRuntimeClaimReplayAndAbandon(t *testing.T) {
-	for _, mode := range []string{"expired_reply", "unlaunched", "started", "settlement_failure"} {
+	for _, mode := range []string{"expired_reply", "unlaunched", "started", "settlement_failure", "unsettled"} {
 		t.Run(mode, func(t *testing.T) {
 			f := setup(t, "off", false)
 			f.agent.Scopes = []string{"harness.worker", "run.telemetry"}
@@ -683,6 +683,9 @@ func TestLeadRuntimeClaimReplayAndAbandon(t *testing.T) {
 				calls++
 				if p.ID != f.agent.ID || l.SessionID != session || l.Grant.BudgetGrantID != budget {
 					return errors.New("wrong actor settled")
+				}
+				if mode == "unsettled" {
+					return nil
 				}
 				_, err := f.broker.SettleTx(ctx, tx, p, f.run, budget, routinebudget.Settlement{EventKey: "lead-abandon", UsageComplete: true, TokensKnown: true, PaidCostKnown: true, ProvenUnused: true, EvidenceDigest: strings.Repeat("a", 64)})
 				if err != nil {
@@ -732,11 +735,11 @@ func TestLeadRuntimeClaimReplayAndAbandon(t *testing.T) {
 			}
 			report := map[string]any{"pickup": pickup, "kind": "abandon"}
 			want := 200
-			if mode == "started" || fail {
+			if mode == "started" || fail || mode == "unsettled" {
 				want = 409
 			}
 			out := string(call("/report", report, want))
-			if mode == "started" && !strings.Contains(out, "lead_start_already_observed") || fail && !strings.Contains(out, "fixture_settlement_failed") {
+			if mode == "started" && !strings.Contains(out, "lead_start_already_observed") || fail && !strings.Contains(out, "fixture_settlement_failed") || mode == "unsettled" && !strings.Contains(out, "lead_abandon_hold_unsettled") {
 				t.Fatal(out)
 			}
 			assertState := func(abandoned bool) {
@@ -761,7 +764,7 @@ func TestLeadRuntimeClaimReplayAndAbandon(t *testing.T) {
 				call("/report", report, 200)
 				assertState(true)
 			}
-			if mode != "started" {
+			if mode != "started" && mode != "unsettled" {
 				before := calls
 				call("/report", report, 200)
 				assertState(true)

@@ -27,7 +27,7 @@ import (
 // Prepare resolves the lead role and persists an S09 lead attempt/hold and
 // reserved account. Validate repeats deterministic daily/quota/window/CI gates
 // (including the prospective root slot); Exit reconciles the exact actor only.
-// Neither collaborator may call a model/network, append events or infer exit.
+// No collaborator may call a model/network, append events or infer exit.
 // An installation without qualified collaborators remains visibly unavailable.
 type LeadRuntimeChecks struct {
 	Prepare  func(context.Context, pgx.Tx, tenant.Principal, agentsetup.LeadPickup) (agentsetup.LeadLaunch, error)

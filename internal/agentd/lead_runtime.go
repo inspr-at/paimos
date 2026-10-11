@@ -521,7 +521,8 @@ func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand a
 		return errors.Join(err, s.abandonLead(ctx, api, record))
 	}
 	// Disk/ledger contention must not carry an expiring grant past a window.
-	// Its durable attempted boundary remains conservative if this refuses.
+	// A refusal is journaled as never attempted before abandonment; a failed
+	// journal write retains the conservative attempted boundary.
 	if !s.capacityNow().Before(launch.Grant.ExpiresAt) || ctx.Err() != nil || !s.dispatchAllowed(account.ID) {
 		record.Attempted = false // The final local fence refused before StartLead.
 		if e := s.writeLead(record, false); e != nil {
