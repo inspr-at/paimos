@@ -319,5 +319,37 @@
       "finalEvidence": "Final committed-head qualification/static results will be reported on AEON-1225 and in worker status after the evidence commit; refusal is not a green check."
     },
     "enablement": "Release 130 routines remain automatic-execution OFF; controlled success is required before separate coordinator/OPS native qualification and person-owned enablement."
+  },
+  "fixRound3": {
+    "date": "2026-10-11",
+    "brief": "aeon-1225-faultsuite-fix3",
+    "review": "review-ap691",
+    "status": "blocked_missing_production_prerequisites",
+    "blockingFinding": "Unresolved: no owning-slice repairs are available to import; the three fixRound2 prerequisites still block ESSENTIAL qualification.",
+    "baseline": "72c962631c3a468c578f7e027117f5734af9ced2",
+    "fetchedRefsAlreadyInBaseline": {
+      "origin/main": "8e46d10156809dc0c26c3ad82bd041de1ad9a81b",
+      "origin/work/aeon-1130-budgethold": "776bd3f20cc7192b53f7b2e83158119178dc1719",
+      "origin/work/aeon-1186-dispatch": "95b73ca8ccdab4e6574124dff7f95e78a55a2c95",
+      "origin/work/aeon-1201-reviewfix": "227e7be3fb9481f6b13ea8e64b316fb1fedb059b"
+    },
+    "unchangedSince": "7ea816c4d3d84b5c7370577019729a724e99721c",
+    "unchangedPaths": [
+      "internal/agentaccounts/routine_admission.go",
+      "internal/agentaccounts/engine_admission.go",
+      "internal/routinebudget/broker.go",
+      "internal/routineexec/dispatch.go",
+      "internal/routineexec/review.go",
+      "internal/routineexec/qualification_test.go"
+    ],
+    "ownership": "The original test-only write set and existing production owners remain binding. No production repair, assertion change, tier downgrade or additional overlay was authored; the existing failed qualification and conditional downstream proof remain intact.",
+    "baselineQualification": {
+      "command": "go test -count=1 -run '^TestRoutineControlledQualification$' ./internal/routineexec",
+      "attempts": 2,
+      "exitCode": 3,
+      "result": "INCOMPLETE: approved remote-test.sh refused both attempts at the global two-run cap, with a wait/retry; no current-head execution is claimed. The approved local PostgreSQL port was unavailable, so no local fallback ran."
+    },
+    "finalCandidateValidation": "After committing this evidence, retry the approved qualification and static runners. Report their exact final-SHA outcomes on AEON-1225 and in worker status; refusal is incomplete, never green.",
+    "coordinatorHandoff": "Route the three fixRound2 prerequisites to AEON-1130/1186/1201, import their authorized repairs, rerun the full catalogue and static checks on the final candidate, then run the coordinator-owned review gate. Automatic execution stays OFF pending separate native qualification, OPS attestation and person-owned enablement."
   }
 }
