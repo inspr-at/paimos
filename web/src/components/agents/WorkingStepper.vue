@@ -10,7 +10,8 @@ import AppIcon from '../AppIcon.vue'
 // beside the number; − and + are muted, keep their room and show on hover or focus.
 const props = defineProps<{ value: HarnessLimit | undefined; effective: number; label: string; viewer: string; revision: string | null; total?: boolean; interrupt?: number; unit?: boolean }>()
 // hold: true while − or + is held (pointer or arrow key); the parent saves only once it is false again.
-const emit = defineEmits<{ step: [delta: number]; edit: [value: HarnessLimit]; boundary: [mode: 'off' | 'none']; hold: [active: boolean] }>()
+// face: a click on the unit outside its buttons (a touch tap there opens a tight row's plate).
+const emit = defineEmits<{ step: [delta: number]; edit: [value: HarnessLimit]; boundary: [mode: 'off' | 'none']; hold: [active: boolean]; face: [] }>()
 const editing = ref(false), draft = ref(''), input = ref<HTMLInputElement>(), valueButton = ref<HTMLButtonElement>(), group = ref<HTMLElement>()
 let owner = '', original: HarnessLimit | undefined, revision: string | null = null
 const mode = computed(() => limitMode(props.value))
@@ -136,10 +137,28 @@ watch(() => [props.viewer, props.value, props.revision], () => { if (editing.val
 // A changed viewer never inherits a hold, and a conflict ends one.
 watch([() => props.viewer, () => props.interrupt], release, { flush: 'sync' })
 onBeforeUnmount(release)
+function faceClick(event: MouseEvent) {
+  if (props.unit && !(event.target instanceof Element && event.target.closest('button, input'))) emit('face')
+}
+// A tight row's plate opens toward the room it has (AEON-1209): − and + at its ends, or both after
+// (or before) the face at a line's edge, so neither is clipped. Placed as the plate opens; the row's
+// layout never changes under it, so nothing moves while it is open.
+const side = ref<'both' | 'start' | 'end'>('both')
+function place() {
+  const el = group.value
+  if (!props.unit || !el) return
+  let clip = el.parentElement
+  while (clip && clip.parentElement && getComputedStyle(clip).overflowX === 'visible') clip = clip.parentElement
+  if (!clip) return
+  const box = el.getBoundingClientRect(), edge = clip.getBoundingClientRect(), style = getComputedStyle(el)
+  const px = (name: string) => parseFloat(style.getPropertyValue(name)) || 0
+  const reach = px('--pm-w') + px('--pm-gap') + px('--plate-pad'), left = box.left - edge.left, right = edge.right - box.right
+  side.value = left >= reach && right >= reach ? 'both' : right >= left ? 'end' : 'start'
+}
 </script>
 
 <template>
-  <span ref="group" class="f-pm" :class="{ 'f-pm-total': total, [`is-${mode}`]: !total, du: unit }" @keydown="keys" @keyup="keyUp" @focusout="focusOut">
+  <span ref="group" class="f-pm" :class="{ 'f-pm-total': total, [`is-${mode}`]: !total, du: unit }" :data-side="unit ? side : undefined" @keydown="keys" @keyup="keyUp" @focusout="focusOut" @pointerenter="place" @pointerdown.capture="place" @focusin="place" @click="faceClick">
     <button type="button" class="pm dec" :class="{ 'dv dm': unit }" :aria-label="destination(-1)" :data-tip="destination(-1)" :disabled="downDisabled" @pointerdown="pointerDown($event, -1)" @pointerup="release" @pointercancel="release" @pointerleave="release" @contextmenu.prevent @click="click($event, -1)"><AppIcon name="minus" :size="unit ? 11 : total ? 12 : 10" /></button>
     <span v-if="unit" class="du-mark"><slot name="mark" /></span>
     <span class="value-slot" :class="total ? 'f-num' : 'f-n lim-num'">
@@ -182,8 +201,8 @@ onBeforeUnmount(release)
 /* The light dial unit (AEON-1209, design AEON-1196 r7): no outline and no fill; the mark and
    its number sit 4 px apart and bind the unit by proximity. − and + are muted, keep their room
    and show on hover or focus, so nothing moves. The number keeps a fixed slot, so a step never
-   moves a neighbour. */
-.f-pm.du { --pm-size: 20px; --value-width: 22px; --value-height: 28px; --value-size: 13.5px; position: relative; height: 28px; gap: 0; border-radius: 999px; color: var(--ink); }
+   moves a neighbour. --pm-w, --pm-gap and --plate-pad place − / + and the plate in a tight row. */
+.f-pm.du { --pm-size: 20px; --pm-w: 20px; --pm-gap: 1px; --plate-pad: 4px; --value-width: 22px; --value-height: 28px; --value-size: 13.5px; position: relative; height: 28px; gap: 0; border-radius: 999px; color: var(--ink); }
 .du .du-mark { position: relative; z-index: 3; display: inline-grid; place-items: center; flex: none; margin: 0 4px 0 2px; }
 .du .value-slot, .du .f-num { position: relative; z-index: 3; color: var(--ink); font-weight: 650; }
 .du.is-none .value-slot, .du.is-off .value-slot { color: var(--ink-2); font-weight: 600; }
@@ -195,23 +214,33 @@ onBeforeUnmount(release)
   .du:hover .pm { opacity: 1; }
   .du .pm:hover:not(:disabled) { background: var(--seg-on); color: var(--teal-ink); }
 }
-/* Touch: the wide row always shows − and +; each has a 44 px reach without growing. */
+/* Touch: −, the number and + each own a distinct 44 px target, side by side, never overlapping.
+   − and + are 44 px wide themselves (the wide row always shows them); the number's target spans
+   its mark (22 px) and itself, 44 px tall. */
 @media (pointer: coarse) {
-  .f-pm.du { --pm-size: 28px; --value-width: 22px; --value-height: 28px; height: 36px; }
+  .f-pm.du { --pm-w: 44px; --pm-gap: 0px; --plate-pad: 0px; height: 36px; }
+  .du .pm { width: var(--pm-w); height: 36px; border-radius: 999px; }
   .du .pm, .du .pm:disabled { opacity: 1; }
   .du .pm::after, .du .value::after { content: ''; position: absolute; }
-  .du .pm::after { inset: -8px; }
+  .du .pm::after { inset: -4px 0; }
   .du .value { position: relative; }
-  .du .value::after { inset: -8px -11px; }
+  .du .value::after { inset: -8px 0 -8px -22px; }
 }
 /* A tight capacity row (under 900 px) shows only the units. Hover, focus or a tap lifts THAT
    unit onto a light plate above its neighbours, with − and + at its ends; nothing beside it
-   moves (AEON-541). The plate floats on a shadow, never an outline. */
+   moves (AEON-541). The plate floats on a shadow, never an outline. At a line's edge, where an
+   end has no room, both sit on the side that has it (data-side, set as the plate opens). */
 @container cap (max-width: 899px) {
   .du .pm, .du .pm:disabled { position: absolute; top: 50%; translate: 0 -50%; opacity: 0; pointer-events: none; }
-  .du .dec { left: -21px; }
-  .du .inc { right: -21px; }
-  .du::before { content: ''; position: absolute; z-index: 2; inset: -4px -25px; border-radius: 999px; background: var(--surface-raised); box-shadow: var(--shadow-pop); opacity: 0; transform: scale(.9); transition: opacity .15s ease, transform .15s ease; pointer-events: none; }
+  .du .dec { left: calc(-1 * (var(--pm-w) + var(--pm-gap))); }
+  .du .inc { right: calc(-1 * (var(--pm-w) + var(--pm-gap))); }
+  .du[data-side="end"] .dec { left: calc(100% + var(--pm-gap)); }
+  .du[data-side="end"] .inc { right: calc(-2 * (var(--pm-w) + var(--pm-gap))); }
+  .du[data-side="start"] .dec { left: calc(-2 * (var(--pm-w) + var(--pm-gap))); }
+  .du[data-side="start"] .inc { right: calc(100% + var(--pm-gap)); }
+  .du::before { content: ''; position: absolute; z-index: 2; inset: -4px calc(-1 * (var(--pm-w) + var(--pm-gap) + var(--plate-pad))); border-radius: 999px; background: var(--surface-raised); box-shadow: var(--shadow-pop); opacity: 0; transform: scale(.9); transition: opacity .15s ease, transform .15s ease; pointer-events: none; }
+  .du[data-side="end"]::before { inset: -4px calc(-2 * (var(--pm-w) + var(--pm-gap)) - var(--plate-pad)) -4px -4px; }
+  .du[data-side="start"]::before { inset: -4px -4px -4px calc(-2 * (var(--pm-w) + var(--pm-gap)) - var(--plate-pad)); }
   .du:is(:focus-within, .open) { z-index: 6; }
   .du:is(:focus-within, .open)::before { opacity: 1; transform: none; }
   .du:is(:focus-within, .open) .pm { opacity: 1; pointer-events: auto; }
@@ -223,6 +252,13 @@ onBeforeUnmount(release)
     .du:hover::before { opacity: 1; transform: none; }
     .du:hover .pm { opacity: 1; pointer-events: auto; }
     .du:hover .pm:disabled { opacity: .45; }
+  }
+}
+/* Touch in a tight row: closed, the whole unit is one target and a tap opens its plate; open,
+   the plate's −, number and + take over. */
+@media (pointer: coarse) {
+  @container cap (max-width: 899px) {
+    .du:not(.open, :focus-within) .value-slot { pointer-events: none; }
   }
 }
 @media (prefers-reduced-motion: reduce) { .du .pm, .du::before { transition: none; } }
