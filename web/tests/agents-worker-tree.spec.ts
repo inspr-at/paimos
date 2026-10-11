@@ -166,10 +166,12 @@ test('a deep problem marks every ancestor, folded parents name it, and arrow key
   await expect(row(page, id(4))).toHaveAttribute('aria-posinset', '3')
   await expect(row(page, id(4))).toHaveAttribute('aria-setsize', '4')
   await expect(row(page, id(4))).not.toHaveAttribute('aria-expanded', /.*/)
-  // The family sits with its most urgent member; only ancestors carry the dot.
+  // The family sits with its most urgent member; only ancestors say a problem is below. The avatar carries
+  // its own state badge only (AEON-1211), so the ancestors say it in their name and, folded, on their line.
   await expect(page.locator('.group-row.attention + .row')).toHaveAttribute('data-row', `s:${lead}`)
-  for (const key of [lead, id(2), id(100)]) await expect(row(page, key).locator('.roll-dot')).toHaveCount(1)
-  for (const key of [id(200), id(3)]) await expect(row(page, key).locator('.roll-dot')).toHaveCount(0)
+  for (const key of [lead, id(2), id(100)]) await expect(row(page, key).locator('.agent-link')).toHaveAccessibleName(/, \d+ problems? below\./)
+  for (const key of [id(200), id(3)]) await expect(row(page, key).locator('.agent-link')).not.toHaveAccessibleName(/problem below/)
+  for (const key of [lead, id(2), id(100), id(200), id(3)]) await expect(row(page, key).locator('.ava .agent-state-mark')).toHaveCount(1)
 
   await row(page, id(100)).focus()
   await page.keyboard.press('ArrowLeft')

@@ -310,7 +310,7 @@ function renamedHost(host: string, label: string) {
 // The state lives in each row's avatar, so it has no column; Display › Sort still orders by it
 // (AEON-1211). Time sits beside the name: running time, or how long ago a session ended.
 const SORTS: { key: SortKey; label: string; cls?: string }[] = [
-  { key: 'state', label: 'State' }, { key: 'result', label: 'Name' }, { key: 'running', label: 'Time', cls: 'right c-time' }, { key: 'ticket', label: 'Ticket' },
+  { key: 'state', label: 'State' }, { key: 'result', label: 'Name' }, { key: 'running', label: 'Time', cls: 'right c-time' }, { key: 'ticket', label: 'Ticket', cls: 'c-ticket' },
   { key: 'execution', label: 'Execution', cls: 'c-exec' }, { key: 'host', label: 'Host', cls: 'c-host' }, { key: 'heartbeat', label: 'Heartbeat', cls: 'right c-beat' },
 ]
 const COLUMNS = SORTS.filter(column => column.key !== 'state')
@@ -706,7 +706,8 @@ function sessionLinkClick(event: MouseEvent, id: string) {
               <span class="who">
                 <span class="l1">
                   <HarnessOpener class="opener" :harness="row.view.session.harness" :harness-label="row.view.harness" :exec="row.exec" />
-                  <span class="result" :title="row.view.ticket ? `${row.view.ticket.key} · ${row.primary}` : row.primary"><span v-if="row.view.ticket" class="key-inline">{{ row.view.ticket.key }} · </span>{{ row.primary }}</span>
+                  <span v-if="row.view.ticket" class="key-inline">{{ row.view.ticket.key }} ·</span>
+                  <span class="result" :title="row.primary">{{ row.primary }}</span>
                   <span v-if="row.context !== row.primary" class="session-name" :title="row.context">{{ row.context }}</span>
                   <span v-if="row.lead" class="role" data-tip="Coordinates other sessions">Lead</span>
                   <time class="t-inline" :datetime="row.view.session.stopped_at ?? row.view.session.created_at">{{ timeShort(row.view, now) }}</time>
@@ -1078,11 +1079,19 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 }
 /* The menu floats outside the list container: size its targets by viewport. */
 @media (max-width: 720px) { .menu-item { min-height: 44px; align-items: center; } .menu-item > svg { margin-top: 0; } }
-/* Compact rows (AEON-1211, design AEON-1196): a narrow list (the phone, and later the side list)
-   shows each session in two lines. Line 1 opens with the 12 px harness mark, names the session and
-   ends with its time; line 2 says what it works on. Execution, Tier, Host, Heartbeat and the ticket
-   move to the details and the row menu. 16 px per tree level (AEON-784). */
+/* The list's own width decides its form (design AEON-1196): the table down to 560 px, compact
+   rows below. A table under 880 px (beside the docked panel) keeps Time, the model, Tier and the
+   beat; the ticket key joins the name and Host moves to the details. */
 @container sessions (max-width: 880px) {
+  .table, .table.has-eta { grid-template-columns: minmax(108px, 1fr) 84px minmax(96px, .7fr) 80px 64px 108px; }
+  .thead > .c-ticket, .thead > .c-host, .row > .c-ticket, .execution-host > .c-host, .exec-account { display: none; }
+  .key-inline { display: inline; flex: none; margin-right: -2px; font-weight: 600; }
+}
+/* Compact rows (AEON-1211): a list under 560 px (the phone, and later the side list) shows each
+   session in two lines. Line 1 opens with the 12 px harness mark, names the session and ends with
+   its time; line 2 says what it works on. Execution, Tier, Host, Heartbeat and the ticket move to
+   the details and the row menu. 16 px per tree level (AEON-784). */
+@container sessions (max-width: 559px) {
   /* A 44 px fold column on touch and phones; 28 px beside a fine pointer. */
   .table { --tree-step: 16px; --fold: 28px; display: block; }
   .thead, .row > :is(.c-time, .c-ticket, .execution-host, .c-beat) { display: none; }
@@ -1102,7 +1111,6 @@ function sessionLinkClick(event: MouseEvent, id: string) {
   .who { gap: 2px; }
   .l1 { gap: 6px; font-size: 14px; }
   .opener { display: inline-grid; }
-  .key-inline { display: inline; }
   .t-inline { display: inline; }
   /* One name per compact row; the avatar says Lead (design AEON-1196). A list without parents needs no fold column. */
   .session-name, .role { display: none; }

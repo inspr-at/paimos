@@ -28,7 +28,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     for (const session of agents.sessions) {
       const row = page.locator(`[data-row="s:${session.id}"]`)
       await expect(row).toHaveAttribute('data-state', 'working')
-      await expect(row.locator('.agent-state-label')).toHaveText('Working')
+      await expect(row.locator('.ava')).toHaveAttribute('aria-label', /: Working$/)
     }
     await expect(page.locator('.row[data-state="waiting"]')).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath(`aeon-240-${theme}-${width}-working-siblings.png`), fullPage: true })

@@ -440,14 +440,15 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.goto(`/agents/${session.id}`)
     const row = page.locator(`[data-row="s:${session.id}"]`)
     const shotTarget = width === 390 ? page.getByRole('complementary', { name: 'Session details' }) : row
-    await expect(row.locator('.c-state .state-word')).toHaveText('Working')
+    // AEON-1211: the state lives in the row's avatar; its tooltip names the precise word.
+    await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Working( · |$)/)
     const guard = await controlStability(page, { row, menu: row.locator('.more') })
     await guard.check(async () => {
       await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop now…', exact: true }).click()
       const dialog = page.getByRole('dialog', { name: /^Stop now / })
       await dialog.locator('[data-submit]').click()
       await expect(dialog).not.toBeVisible()
-      await expect(row.locator('.c-state .state-word')).toHaveText('Stop requested')
+      await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Stop requested( · |$)/)
       expect(mock.calls).toHaveLength(1)
       expect(mock.calls[0]?.body.level).toBe('stop_now')
       expect(mock.calls[0]?.path).toContain(`/harness-sessions/${session.id}/pause`)
@@ -457,12 +458,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await guard.check(async () => {
       Object.assign(session, { row_version: Number(session.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'stopped' })
       await page.evaluate(() => window.dispatchEvent(new Event('online')))
-      await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
+      await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Stopped( · |$)/)
     })
     guard.done()
     await shotTarget.screenshot({ path: testInfo.outputPath(`stopped-${width}-${theme}.png`) })
     await page.reload()
-    await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
+    await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Stopped( · |$)/)
     expect(errors).toEqual([])
   })
 }
@@ -483,7 +484,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.goto(`/agents/${session.id}`)
     await page.addStyleTag({ content: '.agents-page .page-head { letter-spacing: .06em }' })
     const row = page.locator(`[data-row="s:${session.id}"]`)
-    await expect(row.locator('.c-state .state-word')).toHaveText('Working')
+    await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Working( · |$)/)
     const open = windButton(page)
     await expect(open).toBeVisible()
     await expect(open.locator('.wl')).toBeHidden()
@@ -496,12 +497,12 @@ for (const theme of ['light', 'dark'] as const) {
     await guard.check(async () => {
       await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop now…', exact: true }).click()
       await page.getByRole('dialog', { name: /^Stop now / }).locator('[data-submit]').click()
-      await expect(row.locator('.c-state .state-word')).toHaveText('Stop requested')
+      await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Stop requested( · |$)/)
     })
     await guard.check(async () => {
       Object.assign(session, { row_version: Number(session.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'stopped' })
       await page.evaluate(() => window.dispatchEvent(new Event('online')))
-      await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
+      await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Stopped( · |$)/)
     })
     guard.done()
     const after = await lines()

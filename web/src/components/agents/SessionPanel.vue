@@ -40,6 +40,8 @@ import DeliveryRating from '../work/DeliveryRating.vue'
 import { etaFromSession } from '../../lib/eta'
 import { quickRemoval } from './sessionActions'
 import { sessionEtaEligible } from './sessionRow'
+import SessionHost from './SessionHost.vue'
+import { listHostLabels } from '../../lib/agents'
 import ServiceTierBlock from './ServiceTierBlock.vue'
 import { tierHistoryText, tierRunCostLabel, tierCostAmount } from '../../lib/serviceTier'
 import { useServiceTiers } from '../../stores/serviceTiers'
@@ -63,6 +65,20 @@ const emit = defineEmits<{ close: []; control: [view: SessionView, kind: Session
 watch(() => props.view?.session.id, () => { actionsAnchor.value = null; composing.value = false })
 const agents = useAgents()
 const auth = useSession()
+// The person's own name for this computer (AEON-1211): compact rows have no Host cell, so the
+// details name it and rename it. A late answer for another session or person is dropped.
+const hostLabel = ref('')
+const hostPerson = computed(() => auth.identity?.principal.kind === 'person')
+let hostRead = 0
+watch([() => props.view?.session.host, () => auth.identity?.principal.id], async ([host]) => {
+  const read = ++hostRead
+  hostLabel.value = ''
+  if (!host || !hostPerson.value) return
+  try {
+    const labels = await listHostLabels()
+    if (read === hostRead) hostLabel.value = labels.find(item => item.host === host)?.label ?? ''
+  } catch { /* The registered name stays; the editor reads the labels again when opened. */ }
+}, { immediate: true })
 const capability = computed(() => s.value ? chatCapability(s.value) : 'between')
 const capText = computed(() => capabilityWords[displayLanguage()][capability.value])
 const root = ref<HTMLElement>()
@@ -289,7 +305,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
             <RouterLink v-if="view.projectKey" class="project-link" :to="`/p/${encodeURIComponent(view.projectKey)}`">{{ view.projectTitle || view.projectKey }}</RouterLink>
             <span v-else class="muted">Workspace</span>
           </dd></div>
-          <div class="fact"><dt>Runs on</dt><dd><span>{{ view.session.host }}</span><span class="muted">{{ view.session.role === 'coordinator' ? 'lead session' : 'worker' }} · {{ view.session.management_mode === 'managed' ? `owned by ${brand.short_name}` : 'runs on its own' }}</span></dd></div>
+          <div class="fact"><dt>Runs on</dt><dd><SessionHost :key="`${auth.identity?.principal.id}:${view.session.host}`" class="host-fact" :host="view.session.host" :label="hostLabel" :editable="hostPerson" @renamed="hostLabel = $event" /><span class="muted">{{ view.session.role === 'coordinator' ? 'lead session' : 'worker' }} · {{ view.session.management_mode === 'managed' ? `owned by ${brand.short_name}` : 'runs on its own' }}</span></dd></div>
           <div v-if="modelLine" class="fact"><dt>Model</dt><dd class="mono">{{ modelLine }}<span v-if="run && run.model_evidence === 'vendor_reported'" class="evidence" data-tip="Reported by the vendor, not only requested"><AppIcon name="check" :size="11" /></span></dd></div>
           <div v-if="reported?.account_label || view.account" class="fact"><dt>Account</dt><dd>{{ reported?.account_label || view.account }}</dd></div>
           <div class="fact"><dt>Harness</dt><dd>{{ setupLine }}</dd></div>

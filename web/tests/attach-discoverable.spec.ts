@@ -461,7 +461,7 @@ test('a list still on its way when the person changes is never shown to the next
   // Session rows appear only after those reads. Arming the hold earlier swallows
   // them, the page stays on Loading, and the click below never finds a row.
   releaseSessions()
-  const stateCell = page.locator('[data-row^="s:"] .c-state').first()
+  const stateCell = page.locator('[data-row^="s:"] .ava').first()
   await expect(stateCell).toBeVisible()
   // Ola signs in to another workspace; the next navigation refreshes the session. Her
   // permissions are slow, so the old answer lands while nobody is allowed yet, and the

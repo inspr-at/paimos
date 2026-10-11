@@ -14,8 +14,9 @@ for (const theme of ['light', 'dark'] as const) {
     for (const [index, state] of states.entries()) {
       const row = page.locator(`[data-row="s:${agents.sessions[index]!.id}"]`)
       await expect(row).toHaveAttribute('data-state', state)
-      await expect(row.locator('.agent-state-label')).toHaveText(STATE_LABEL[state])
-      await expect(row.locator('.agent-state-mark').first()).toHaveAttribute('data-mark', state)
+      // AEON-1211: the row's avatar carries the state: its badge, and the word in its name.
+      await expect(row.locator('.ava')).toHaveAttribute('aria-label', new RegExp(`: ${STATE_LABEL[state].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`))
+      await expect(row.locator('.ava .agent-state-mark')).toHaveAttribute('data-mark', state)
       await expect(row.locator('.exec-model')).toContainText('integration-model · xhigh')
       await expect(row.locator('.exec-account')).toContainText('Test account')
       await expect(row.locator('.provider-mark')).toHaveAttribute('data-provider', 'unknown')
@@ -116,7 +117,7 @@ test('saved theme palette/opacity and personal heartbeat thresholds persist acro
   await page.goto('/agents')
   await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(page.locator('.row[data-state="stopped"]')).toHaveCSS('opacity', '1')
-  await expect(page.locator('.row[data-state="working"] .agent-state-label')).toHaveCSS('--agent-state-color', /.+/)
+  await expect(page.locator('.row[data-state="working"] .ava .live-bot')).toHaveCSS('--agent-state-color', /.+/)
 })
 
 test('a migrated colour-blind choice uses Deutan while legacy appearance and heartbeat data stay intact', async ({ page }) => {
@@ -171,7 +172,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     appearance.saved.values.agents = { ...appearance.saved.values.agents, avatar: 'robot-5', hover: false }
     await page.setViewportSize({ width, height: width === 1600 ? 1000 : 844 })
     await page.goto('/agents')
-    await expect(page.locator('.row[data-state="awaiting"] .agent-state-label')).toHaveText('Awaiting heartbeat')
+    await expect(page.locator('.row[data-state="awaiting"] .ava')).toHaveAttribute('aria-label', /: Awaiting heartbeat$/)
     await expect(page.locator('.group-row').filter({ hasText: 'Needs attention' })).toBeVisible()
     await expect(page.getByRole('group', { name: 'Show sessions by state' })).toContainText('working')
     // Closing a session retains the page keyboard cursor and returns to the list.

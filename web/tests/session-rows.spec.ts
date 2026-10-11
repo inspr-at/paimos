@@ -39,11 +39,13 @@ for (const pass of [1, 2]) for (const theme of ['light', 'dark'] as const) for (
     await expect(row.locator('.result')).toHaveText('Keep fleet membership consistent while the connector lands')
     await expect(row.locator('.session-name')).toHaveText('camy')
     await expect(row.locator('.role')).toHaveText('Lead')
-    await expect(row.locator('.harness-badge')).toHaveAttribute('data-harness', 'claude')
-    const badge = await row.locator('.harness-badge').boundingBox()
-    expect(badge!.width).toBeGreaterThanOrEqual(12)
-    expect(badge!.width).toBeLessThanOrEqual(14)
-    expect(badge!.height).toBeLessThanOrEqual(14)
+    // AEON-1211: the avatar carries the state badge only; the harness is in Execution, or the 12 px opener of a compact row.
+    await expect(row.locator('.ava .harness-badge')).toHaveCount(0)
+    if (width === 390) {
+      await expect(row.locator('.op-mark')).toHaveAttribute('aria-label', /^claude-fable-high · Claude · Claude Max$/)
+      const mark = (await row.locator('.op-mark').boundingBox())!
+      expect([Math.round(mark.width), Math.round(mark.height)]).toEqual([12, 12])
+    } else await expect(row.locator('.op-mark')).toBeHidden()
     await expect(row.locator('.exec-model')).toContainText('claude-fable-high')
     await expect(row.locator('.exec-model')).toHaveText('claude-fable-high')
     await expect(row.locator('.exec-account')).toContainText('Claude Max')

@@ -104,8 +104,8 @@ for (const width of [1600, 390]) for (const reportedMetadata of [false, true]) {
       const last = getComputedStyle(child.querySelector('.tree-guide.elbow')!, '::before')
       return {
         fold: rect(parent.querySelector('.tree-fold')!),
-        parent: rect(parent.querySelector('.agent-glyph')!),
-        child: rect(child.querySelector('.agent-glyph')!),
+        parent: rect(parent.querySelector('.ava')!),
+        child: rect(child.querySelector('.ava')!),
         slot: rect(child.querySelector('.tree-fold-space')!),
         row: rect(parent),
         stem: rect(parent.querySelector('.tree-stem')!),
@@ -137,8 +137,12 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.goto('/agents')
     await expect(page.getByRole('group', { name: 'Show sessions by state' }).locator('[data-filter="working"]')).toContainText('2working')
-    await expect(page.locator(`[data-row="s:${worker.id}"] .exec-model`)).toHaveText('gpt-6-sol · xhigh')
-    await expect(page.locator(`[data-row="s:${worker.id}"] .exec-account`)).toHaveText('Codex · Codex Pro')
+    // Compact rows (AEON-1211) name the model in the opener mark; the table in Execution.
+    if (width === 390) await expect(page.locator(`[data-row="s:${worker.id}"] .op-mark`)).toHaveAttribute('aria-label', 'gpt-6-sol · xhigh · Codex · Codex Pro')
+    else {
+      await expect(page.locator(`[data-row="s:${worker.id}"] .exec-model`)).toHaveText('gpt-6-sol · xhigh')
+      await expect(page.locator(`[data-row="s:${worker.id}"] .exec-account`)).toHaveText('Codex · Codex Pro')
+    }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     const pass = process.env.AM1_CAPTURE_PASS
     if (pass) {

@@ -91,9 +91,11 @@ test('sessions are grouped by what they need, with ticket and heartbeat; details
   await expect(lead).toContainText('camy')
   await expect(lead).toContainText('Lead')
   await expect(lead.getByRole('link', { name: 'PHAROS-11' })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
-  await expect(lead.locator('.agent-state-label')).toHaveText('Working')
-  await expect(row(page, session(5)).locator('.agent-state-label')).toHaveText('Heartbeat overdue')
-  await expect(row(page, session(6)).locator('.agent-state-label')).toHaveText('Working')
+  // AEON-1211: the state lives in the avatar (its badge, name and tooltip); a precise word opens line 2.
+  await expect(lead.locator('.ava')).toHaveAttribute('aria-label', /: Working$/)
+  await expect(row(page, session(5)).locator('.ava')).toHaveAttribute('data-tip', /^Awaiting heartbeat · Heartbeat overdue · /)
+  await expect(row(page, session(5)).locator('.l2t')).toContainText(/^Heartbeat overdue/)
+  await expect(row(page, session(6)).locator('.ava')).toHaveAttribute('aria-label', /: Working$/)
   // Stopped sessions fold away until asked for.
   await expect(row(page, session(7))).toHaveCount(0)
   await page.getByRole('button', { name: /^Ended/ }).click()
@@ -368,7 +370,7 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   await openAgents(page)
   // A click anywhere on the row that is not a link or button opens the session.
   // Rows follow urgency, then start time: kite, which needs you and started first, sits right above nova.
-  await row(page, kite).locator('.c-state').click()
+  await row(page, kite).locator('.c-time').click()
   await expect(page).toHaveURL(`/agents/${kite}`)
   await expect(panel(page).getByRole('heading', { name: /kite/ })).toBeVisible()
   await panel(page).focus()

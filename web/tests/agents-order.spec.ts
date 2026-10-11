@@ -67,7 +67,9 @@ test('default order is start time and survives live refreshes with shuffled hear
   await page.goto('/agents')
   const expected = [sid(3), sid(1), sid(2), sid(4)]
   await expect.poll(() => rowOrder(page)).toEqual(expected)
-  await expect(page.getByRole('columnheader', { name: 'State' })).toHaveAttribute('aria-sort', 'ascending')
+  // The state lives in each row's avatar, so it has no column (AEON-1211); Display names the order.
+  await expect(page.locator('.sessions .sort-tool')).toHaveAccessibleName('Display: sort sessions by State, ascending')
+  await expect(page.locator('.sessions [role="columnheader"][aria-sort]')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Default order' })).toHaveCount(0)
   for (let i = 0; i < 2; i++) {
     await liveRefresh()
@@ -84,7 +86,7 @@ test('clicking Ticket orders rows by ticket, stays put on refresh, is remembered
   const byTicket = [sid(2), sid(3), sid(1), sid(4)] // PHAROS-4, -12, -30, -100
   await expect.poll(() => rowOrder(page)).toEqual(byTicket)
   await expect(ticket).toHaveAttribute('aria-sort', 'ascending')
-  await expect(page.getByRole('columnheader', { name: 'State' })).not.toHaveAttribute('aria-sort', /.+/)
+  await expect(page.locator('.sessions .sort-tool')).toHaveAccessibleName('Display: sort sessions by Ticket, ascending')
   await liveRefresh()
   await liveRefresh()
   expect(await rowOrder(page)).toEqual(byTicket)
@@ -105,7 +107,7 @@ test('clicking Ticket orders rows by ticket, stays put on refresh, is remembered
   await page.locator('.sessions .sort-tool').click()
   await page.getByRole('button', { name: 'Default order' }).click()
   await expect.poll(() => rowOrder(page)).toEqual([sid(3), sid(1), sid(2), sid(4)])
-  await expect(page.getByRole('columnheader', { name: 'State' })).toHaveAttribute('aria-sort', 'ascending')
+  await expect(page.locator('.sessions .sort-tool')).toHaveAccessibleName('Display: sort sessions by State, ascending')
   await expect(page.getByRole('button', { name: 'Default order' })).toHaveCount(0)
   expect(await page.evaluate(key => localStorage.getItem(key), storageKey)).toBeNull()
 })
@@ -123,7 +125,7 @@ test('sorting still works when storage refuses the choice', async ({ page }) => 
   await setup(page)
   await page.goto('/agents')
   await expect.poll(() => rowOrder(page)).toEqual([sid(3), sid(1), sid(2), sid(4)])
-  await page.getByRole('columnheader', { name: 'Running' }).getByRole('button').click()
+  await page.getByRole('columnheader', { name: 'Time' }).getByRole('button').click()
   await expect.poll(() => rowOrder(page)).toEqual([sid(4), sid(2), sid(1), sid(3)])
 })
 

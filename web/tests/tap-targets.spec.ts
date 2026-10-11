@@ -251,6 +251,17 @@ for (const { width, coarse } of [
       await page.goto('/agents')
       const session = page.locator(`[data-row="s:${sessionId}"]`)
       const tier = session.locator('.tier-mark:visible')
+      if (width < 560) {
+        // A phone's list shows compact rows (AEON-1211, design AEON-1196): no Tier cell; the row menu leads to it.
+        await expect(session).toBeVisible()
+        await expect(tier).toHaveCount(0)
+        const more = session.locator('.more')
+        const box = (await more.boundingBox())!
+        expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44)
+        await more.click()
+        await expect(page.getByRole('menuitem', { name: 'Change tier…' })).toBeVisible()
+        return
+      }
       await expect(tier).toBeVisible()
       // The initial report can replace a read-only span with the live button.
       // Wait for the actionable control before measuring its settled visual.

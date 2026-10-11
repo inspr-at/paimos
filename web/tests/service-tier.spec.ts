@@ -116,12 +116,13 @@ test('1440: compact Default tier control keeps its box through confirmation and 
   const { writes, confirm, getState } = await setup(page)
   await page.goto(`/agents/${id}`)
   await expect(page.locator('.agents-page')).toHaveClass(/panel-open/)
-  const list = page.locator('.sessions'), host = row(page).locator('.host-badge'), actions = row(page).locator('.more')
+  // Beside the docked panel the table keeps Tier and the menu; Host moves to the details (AEON-1211, design AEON-1196).
+  const list = page.locator('.sessions'), time = row(page).locator('.c-time'), actions = row(page).locator('.more')
   expect((await list.boundingBox())!.width).toBeLessThanOrEqual(880)
   await expect(glyph(page)).toHaveCount(1)
   await expect(glyph(page)).toBeVisible()
   await expect(glyph(page)).toHaveAccessibleName(/^Service tier: Default/)
-  await expectStableControls({ controls: { tier: glyph(page), host, actions, row: row(page) }, scrollAreas: { list }, interactions: [
+  await expectStableControls({ controls: { tier: glyph(page), time, actions, row: row(page) }, scrollAreas: { list }, interactions: [
     { name: 'keyboard step from Default', run: async () => {
       await glyph(page).focus(); await expect(glyph(page)).toBeFocused()
       await glyph(page).press('ArrowRight'); await expect(page.locator('.tier-toast')).toBeVisible()
@@ -139,29 +140,30 @@ test('1440: compact Default tier control keeps its box through confirmation and 
   expect(writes[1]).toMatchObject({ tier: 'default', expected_revision: 3, expected_ownership: ownership })
 })
 
-for (const width of [1280, 1366, 1440]) test(`${width}: panel-open session table fits and keeps Host and overflow controls`, async ({ page }) => {
+for (const width of [1280, 1366, 1440]) test(`${width}: panel-open session table fits and keeps Tier and overflow controls`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 })
   const { data } = await setup(page)
   Object.assign(data.sessions[0]!, { eta_ready_at: new Date(Date.now() + 600_000).toISOString(), progress_pct: 50 })
   await page.goto(`/agents/${id}`)
   await expect(page.locator('.agents-page')).toHaveClass(/panel-open/)
   await expect(row(page)).toBeVisible()
-  const list = page.locator('.sessions'), actions = row(page).locator('.more'), host = row(page).locator('.host-badge')
+  const list = page.locator('.sessions'), actions = row(page).locator('.more'), tier = glyph(page)
   await row(page).hover()
-  await expect(actions).toBeVisible(); await expect(host).toBeVisible()
+  await expect(actions).toBeVisible(); await expect(tier).toBeVisible()
+  await expect(row(page).locator('.host-badge')).toBeHidden()
   const measure = async () => {
     const dimensions = await list.evaluate(el => ({ scroll: el.scrollWidth, client: el.clientWidth }))
     expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client)
-    const listBox = (await list.boundingBox())!, actionBox = (await actions.boundingBox())!, hostBox = (await host.boundingBox())!
-    expect(actionBox.width).toBeGreaterThan(0); expect(hostBox.width).toBeGreaterThan(0)
-    for (const box of [actionBox, hostBox]) {
+    const listBox = (await list.boundingBox())!, actionBox = (await actions.boundingBox())!, tierBox = (await tier.boundingBox())!
+    expect(actionBox.width).toBeGreaterThan(0); expect(tierBox.width).toBeGreaterThan(0)
+    for (const box of [actionBox, tierBox]) {
       expect(box.x).toBeGreaterThanOrEqual(listBox.x)
       expect(box.x + box.width).toBeLessThanOrEqual(listBox.x + listBox.width)
     }
     expect(await actions.evaluate(el => { const r = el.getBoundingClientRect(); return !!document.elementFromPoint(r.right - 1, r.y + r.height / 2)?.closest('.more') })).toBe(true)
   }
   await measure()
-  await expectStableControls({ controls: { actions, host, row: row(page) }, interactions: [{ name: 'open overflow', run: async () => { await actions.click(); await expect(page.getByRole('menuitem', { name: 'Change tier…' })).toBeVisible() } }] })
+  await expectStableControls({ controls: { actions, tier, row: row(page) }, interactions: [{ name: 'open overflow', run: async () => { await actions.click(); await expect(page.getByRole('menuitem', { name: 'Change tier…' })).toBeVisible() } }] })
   await measure()
 })
 test('an unopened row shows its pending agent tier request', async ({ page }) => {
@@ -265,11 +267,9 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await setup(page, { active: width === 390 ? 'fast' : 'default' })
     await page.goto('/agents')
     if (width === 390) {
-      const host = row(page).locator('.host-badge'), tier = row(page).locator('.phone-tier [data-tier]')
-      await expect(host).toBeVisible()
-      const hb = (await host.boundingBox())!, tb = (await tier.boundingBox())!
-      expect(tb.x + tb.width).toBeLessThanOrEqual(hb.x + .5)
-      await tier.click()
+      // Compact rows have no Tier cell (AEON-1211): the row menu's Change tier… opens the same picker.
+      await row(page).locator('.more').click()
+      await page.getByRole('menuitem', { name: 'Change tier…' }).click()
     }
     else await glyph(page).click()
     await expect(picker(page).getByRole('radio', { name: /Fastest:/ })).toHaveAttribute('aria-disabled', 'false')
