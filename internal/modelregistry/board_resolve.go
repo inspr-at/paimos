@@ -469,22 +469,28 @@ func modelsCatalog(c boardCatalog) boardCatalog {
 	return out
 }
 
-// Existing pickers stored harness-derived line ids. Fold those references into
-// the provider line too, so a saved Cursor pick retains its meaning until S2/S3
-// migrate storage and the picker. The stored document is never rewritten here.
-func modelsBoardIdentities(s modelprefs.BoardState, c boardCatalog) modelprefs.BoardState {
+// modelsIdentity maps a harness-derived line id of the board catalog to its
+// provider line; other ids, including unknown ones, map to themselves.
+func modelsIdentity(c boardCatalog) func(string) string {
 	aliases := map[string]string{}
 	for old, ps := range c.profiles {
 		if len(ps) > 0 {
 			aliases[old], _ = modelsLine(ps[0])
 		}
 	}
-	canonical := func(id string) string {
+	return func(id string) string {
 		if next, ok := aliases[id]; ok {
 			return next
 		}
 		return id
 	}
+}
+
+// Existing pickers stored harness-derived line ids. Fold those references into
+// the provider line too, so a saved Cursor pick retains its meaning until S2/S3
+// migrate storage and the picker. The stored document is never rewritten here.
+func modelsBoardIdentities(s modelprefs.BoardState, c boardCatalog) modelprefs.BoardState {
+	canonical := modelsIdentity(c)
 	s.Orders = slices.Clone(s.Orders)
 	for i := range s.Orders {
 		o := &s.Orders[i]

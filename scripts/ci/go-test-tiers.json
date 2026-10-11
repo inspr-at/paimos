@@ -2418,6 +2418,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestGuideCommandsHaveNoPlaceholders","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestHandlerTransportReportsAbortedResponses","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestHookCapabilityReconcileProjectsConservatively","tier":"GATED-FULL"}
@@ -2628,11 +2630,13 @@
     ,
     {"kind":"go","package":"internal/agentplan","name":"TestCanStart","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentplan","name":"TestDailyAtLimitIsIgnoredAndReportedAsFollowsModels","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentplan","name":"TestDailyHarnessSummaryAndUnknownUsage","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentplan","name":"TestDailySettingsValidationLocalDayAndLimitMath","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/agentplan","name":"TestDailyStartDecisionsFailClosedAndRespectLadderOrWait","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/agentplan","name":"TestDailyStartDecisionsFailClosedAndFollowModels","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentplan","name":"TestDecodePlanAndLegacyMapping","tier":"GATED-FULL"}
     ,
@@ -3575,6 +3579,8 @@
     {"kind":"go","package":"internal/auth","name":"TestHasScopeAcceptsDotAndColon","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestImportedSignInHintRequiresVerifiedTenantEmail","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestIncident1228MiddlewareRecordsFailureClass","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestInstructionProvenanceQueryScopeAtMiddleware","tier":"GATED-FULL"}
     ,
@@ -5458,6 +5464,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestBriefingMigrationDoesNotBlockLogWritersRegression","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestCancelledInTenantDoesNotPoisonTheOnlyConnection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestCatalogRefreshExpansionPreservesPublishedRoutes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestCatalogRefreshObservationsAcceptModelHarnesses","tier":"GATED-FULL"}
@@ -5917,6 +5925,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryIncludesCreatorProjectForWorkspaceAgent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryOmitsProjectsWithoutDeliveryRead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestWebhookBodyTimeoutDoesNotPoisonKeepAliveConnection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureAudit","tier":"ESSENTIAL"}
     ,
@@ -6750,9 +6760,13 @@
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestAttachmentFramePolicyComposesWithAithema","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/httpapi","name":"TestCancelledConnectionContextClosesConnection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/httpapi","name":"TestCapabilityAndPanicDetailsNeverEnterRequestLogs","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestClassicAPIPathsAreGone","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestHandlerFailureLoggingIsContentFree","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestHandlersAndMiddleware","tier":"ESSENTIAL"}
     ,
@@ -6767,6 +6781,8 @@
     {"kind":"go","package":"internal/httpapi","name":"TestReadyProbeDeadlineAndDrain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestRequestLogRoutes","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestRequestOnCancelledConnectionClosesIt","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/identity","name":"TestFromEnvDefaultAndCredentialFile","tier":"GATED-FULL"}
     ,
@@ -7404,6 +7420,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMaximumRoutePriorityCanBeStored","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMaximumRoutePriorityMigratesToModelsOrder","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalAutoAcceptOnlyUsedSuccessors","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalFallbackColumnDefaultWaitAndSkipReasons","tier":"ESSENTIAL"}
@@ -7434,6 +7452,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelWaitReasonsRespectCurrentAccountSharing","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2BoardStoredOrderCarriesEndingAndLevels","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2CrossHarnessNativeWrites","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2CursorPauseCoversNativeIDs","tier":"ESSENTIAL"}
@@ -7441,6 +7461,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2EscalationAdmissionWait","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2InheritedDefaultExclusionsAreNotExceptions","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigratedTailFoldsThroughRulesAndKeepsStamps","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigrationCursorHoldCoversNativeLevels","tier":"ESSENTIAL"}
     ,
@@ -7450,7 +7472,11 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NativeLevelsPerRoute","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NeverRuleAliasRemovedByDisplayedIdentity","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NoRuntimeLadderReaders","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2OrderAndPauseWritesFenceConcurrentWritersAndRevocation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2OrderNativeEffortCompatibility","tier":"ESSENTIAL"}
     ,
@@ -7461,6 +7487,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2PauseLifecycleAndAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2PauseRechecksGrantRevokedUnderFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2ResetUndoKeepsMigratedOrderWithoutEnding","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2ResidencyCauseMatchesEvidence","tier":"ESSENTIAL"}
     ,
@@ -8946,6 +8974,10 @@
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestLeadRuntimeClaimReplayAndAbandon","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineClaimReplayRetainsBindingAndLiveGuards","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineControlledQualification","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchRaceRecoveryAndAdmission","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchReservedAccountAdmission","tier":"ESSENTIAL"}
@@ -8955,6 +8987,10 @@
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineRecoveryRevocationReceiptsAndPendingNotice","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineReviewFixLineageAndFiniteEscalation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineSettledReviewHandoffKeepsCurrentFacts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineStartedTelemetryActivatesOnlyMatchingGrant","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineguard","name":"TestEvaluationAuthorMatchesPersistedActionAttempt","tier":"ESSENTIAL"}
     ,

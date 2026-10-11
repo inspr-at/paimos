@@ -6,7 +6,7 @@
 import { api } from './api'
 import { StaleScopeError } from './identityScope'
 import { compareModelVersions, profileLine } from './modelPrefs'
-import { fullName, lineName, modelLine, providerLabel, providerRank } from './modelsSimple'
+import { fullName, registryLineName, modelLine, providerLabel, providerRank } from './modelsSimple'
 import { validPiModel } from './piModel'
 
 export type Harness = 'codex' | 'claude' | 'grok' | 'gemini' | 'cursor' | 'pi' | 'opencode'
@@ -277,7 +277,7 @@ function modelOf(line: string, version: string, items: RegistryProfile[], lines:
   const enabled = items.some(profile => profile.enabled), source = profileSource(named)
   return {
     key: `${line}@${version}`, line, version, provider: named.provider || named.family || 'unknown', family: named.family,
-    lineName: lineName(named), versionLabel: named.model_version || (version === 'alias' ? '' : version), name: fullName(named),
+    lineName: registryLineName(named), versionLabel: named.model_version || (version === 'alias' ? '' : version), name: fullName(named),
     note: ordered.map(profile => profile.note ?? '').find(note => note.trim()) ?? '',
     routes: routesOf(items), source, lifecycle, old: isOld(lifecycle),
     enabled, isNew: !enabled && source !== 'manual', retireAt: scheduled.sort()[0] ?? null,

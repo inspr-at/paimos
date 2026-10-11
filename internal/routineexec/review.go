@@ -55,10 +55,11 @@ func routingBounds(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
-// Accepted daemon telemetry only persists demand. No worker requests an
-// approval, selects a reviewer, creates a retry or settles guessed usage.
+// Accepted daemon telemetry activates only its matching actor or persists
+// completion demand. No worker requests an approval, selects a reviewer,
+// creates a retry or settles guessed usage.
 func (e *Executor) recordCompletion(ctx context.Context, tx pgx.Tx, p tenant.Principal, v agentruns.Run, t agentruns.Telemetry, _ *[]events.Change) error {
-	if v.RoutineLaunchID == nil || t.Kind != "finished" {
+	if v.RoutineLaunchID == nil || t.Kind != "started" && t.Kind != "finished" {
 		return nil
 	}
 	// The telemetry endpoint already fenced the exact daemon, generation and
@@ -71,6 +72,30 @@ func (e *Executor) recordCompletion(ctx context.Context, tx pgx.Tx, p tenant.Pri
 		}
 		if role != "build" && role != "review" && role != "fix" {
 			return nil
+		}
+		if t.Kind == "started" {
+			// The hook runs inside accepted telemetry's final transaction and
+			// before event append. Refused/stale reports never reach it. Match
+			// the committed launch and held root grant before enabling actions.
+			tag, err := tx.Exec(ctx, `UPDATE routine_attempts a SET state='running',updated_at=clock_timestamp()
+ FROM routine_launch_intents l JOIN routine_runs r ON r.id=l.routine_run_id
+ JOIN agent_runs ar ON ar.id=l.agent_run_id
+ WHERE a.agent_run_id=$1 AND a.run_id=r.id AND l.id=$2 AND a.principal_id=$3
+ AND a.assignment_digest=r.assignment_digest AND l.binding=ar.trace->'routine_launch'
+ AND l.state='claimed' AND l.exit_observed_at IS NULL AND l.claimed_at IS NOT NULL
+ AND ar.status='running' AND ar.daemon_id=l.binding->>'daemon_id' AND ar.daemon_generation=l.binding->>'daemon_generation'
+ AND ar.account_id::text=l.binding->>'account_id' AND l.worker_principal_id=a.principal_id
+ AND a.state IN ('pending','running') AND r.state IN ('dispatched','starting','running')
+ AND EXISTS(SELECT 1 FROM routine_budget_grants g WHERE g.attempt_id=a.id AND g.agent_run_id=ar.id AND g.run_id=r.id
+  AND g.id::text=l.binding->>'budget_grant_id' AND g.account_id=ar.account_id AND g.parent_id IS NULL AND g.state='held')`, v.ID, *v.RoutineLaunchID, p.ID)
+			if err != nil {
+				return err
+			}
+			if tag.RowsAffected() != 1 {
+				return workorders.Fail(409, "routine_start_binding_changed")
+			}
+			_, err = tx.Exec(ctx, `UPDATE routine_runs SET state='running',updated_at=clock_timestamp() WHERE id=$1`, run)
+			return err
 		}
 		payload, _ := json.Marshal(completion{v.ID, t.ReviewRange})
 		if _, err := tx.Exec(ctx, `INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,payload) VALUES($1,$2,$3,'routine.continue',$4) ON CONFLICT(tenant_id,run_id,effect_key) DO NOTHING`, p.TenantID, run, "finish:"+v.ID, payload); err != nil {

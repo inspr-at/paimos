@@ -1,0 +1,355 @@
+{
+  "version": 1,
+  "ticket": "AEON-1225",
+  "qualification": "controlled-only",
+  "integratedFixture": "internal/routineexec:TestRoutineControlledQualification",
+  "observations": {
+    "real": [
+      "owned test-binary children and Wait receipts",
+      "temporary Git commits and preserved worker checkout",
+      "recurrence consent and reservations",
+      "assignment/claim/telemetry replay",
+      "action authority and PR reconciliation",
+      "review/fix continuation",
+      "person approval and authenticated merge-to-Done writer"
+    ],
+    "synthetic": [
+      "adopted lead session binding",
+      "vendor model/usage observations",
+      "pre-recorded independent evaluation verdict seam",
+      "read-only PR/CI/artifact/merge observations",
+      "counterfactual running phases and separately labelled coordinator handoff after retained qualification failures; original failed receipt stays intact"
+    ]
+  },
+  "excluded": [
+    "native production provider/tool/browser isolation",
+    "OPS attestation or person-owned enablement",
+    "paid model calls, deployment and product merge"
+  ],
+  "command": "go test ./internal/recurrences ./internal/routineexec ./internal/routineactions ./internal/routinebudget ./internal/routineguard ./internal/agentruns ./internal/harness ./internal/agentd ./internal/agentpairing ./internal/crossreview ./internal/delivery ./internal/reportercontract ./internal/agentaccounts",
+  "risks": [
+    {
+      "id": "reply-replay",
+      "risk": "Duplicate/lost assignment, claim, launch, PR and telemetry replies",
+      "tests": [
+        "internal/routineexec:TestRoutineControlledQualification",
+        "internal/agentruns:TestRoutineLaunchClaimReplayAndCurrentAuthority",
+        "internal/agentd:TestClaimResponseLossSettlesNeverLaunchedExactlyOnce",
+        "internal/agentd:TestWorkerAssignmentClaimResponseLossUsesJournalProof"
+      ],
+      "result": "FAILED: identical claim replay is refused after the accepted first claim; existing daemon and launch replay guards passed."
+    },
+    {
+      "id": "durable-restart",
+      "risk": "Server and daemon reconstruction at persisted phases; uncertain launch stays pending",
+      "tests": [
+        "internal/routineexec:TestRoutineControlledQualification",
+        "internal/routineexec:TestLeadRuntimeClaimReplayAndAbandon",
+        "internal/agentd:TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit",
+        "internal/agentd:TestRestartRecoversOnlyDurablyUnlaunchedClaim",
+        "internal/agentd:TestUncertainRestartDoesNotRelaunchVerification",
+        "internal/agentd:TestRoutineSupervisorReplaysInterruptedRouting"
+      ],
+      "result": "Existing daemon/restart guards passed; integrated server reconstruction retains the recorded claim and handoff failures."
+    },
+    {
+      "id": "old-daemon",
+      "risk": "Legacy daemon cannot claim bound work or review",
+      "tests": [
+        "internal/routineexec:TestRoutineDispatchRaceRecoveryAndAdmission",
+        "internal/crossreview:TestLegacyDaemonCannotSeeOrClaimAReview"
+      ],
+      "result": "PASSED: existing legacy-daemon refusal guards."
+    },
+    {
+      "id": "admission",
+      "risk": "Concurrent slots, tokens, paid cost, hours and recovery ceilings",
+      "tests": [
+        "internal/routinebudget:TestRoutineBudgetConcurrentCeilingsAndSettlement",
+        "internal/routinebudget:TestRoutineBudgetCheckedArithmeticAndModes",
+        "internal/routineexec:TestRoutineDispatchReservedAccountAdmission",
+        "internal/agentd:TestRoutineProviderBudgetBeforeCallsAndSettlement",
+        "internal/agentd:TestRoutineProviderBudgetRefusesNativeBeforeLaunch"
+      ],
+      "result": "PASSED: existing concurrency, token, cost, hour and recovery admission guards."
+    },
+    {
+      "id": "revocation",
+      "risk": "Live owner authority at save, reservation, claim, action and approval",
+      "tests": [
+        "internal/recurrences:TestRoutineConsentRechecksOwnerBehindAccessFence",
+        "internal/recurrences:TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner",
+        "internal/routinebudget:TestRoutineBudgetAdmissionAndOwnership",
+        "internal/agentruns:TestRoutineLaunchClaimReplayAndCurrentAuthority",
+        "internal/routineactions:TestRoutinePRResponseLossAndFinalAuthority",
+        "internal/routineactions:TestRoutineMergeObservationKeepsDoneRevisionAndApproval",
+        "internal/routineexec:TestRoutineRecoveryRevocationReceiptsAndPendingNotice"
+      ],
+      "result": "PASSED: existing save, reservation, claim, action and approval authority guards."
+    },
+    {
+      "id": "stale-evidence",
+      "risk": "Exact model identity, changed head, review lineage, CI/artifact and person decision",
+      "tests": [
+        "internal/routineexec:TestRoutineControlledQualification",
+        "internal/routineexec:TestRoutineReviewFixLineageAndFiniteEscalation",
+        "internal/routineguard:TestIndependentEvaluationBindsEvidenceAndCannotBootstrap",
+        "internal/routineguard:TestEvaluationAuthorMatchesPersistedActionAttempt",
+        "internal/routineactions:TestRoutinePipelineRecoversMergeFixAndTargetEdits",
+        "internal/delivery:TestRoutinePipelineRefreshesQueueProofAndObservesDone"
+      ],
+      "result": "Existing evidence-binding guards passed; integrated final review handoff FAILED. Later evidence and approval checks passed only with the labelled coordinator overlay."
+    },
+    {
+      "id": "isolation",
+      "risk": "Cross-tenant grants and private personal run history",
+      "tests": [
+        "internal/recurrences:TestRoutineDefinitionScopeAuthorityAndInertRoundTrip",
+        "internal/recurrences:TestRoutineRunHistoryPrivacyUsageAndPagination",
+        "internal/routinebudget:TestRoutineBudgetAdmissionAndOwnership",
+        "internal/routinebudget:TestRoutineBudgetDaemonSettlementKeepsLedgerPrivate",
+        "internal/crossreview:TestReviewPolicyExplicitAgentGrantAndTenantIsolation"
+      ],
+      "result": "PASSED: existing cross-tenant and personal-history guards."
+    },
+    {
+      "id": "calendar",
+      "risk": "Window end, overnight owner schedule and DST boundaries",
+      "tests": [
+        "internal/recurrences:TestCalendarEdges",
+        "internal/recurrences:TestEventMorningFollowsLocalDateAcrossDST",
+        "internal/agentaccounts:TestBUnknownScheduleDSTNightsAndRunNow",
+        "internal/agentaccounts:TestAdmissionScheduleClockAndRunNowFences"
+      ],
+      "result": "PASSED: existing window, overnight and DST guards."
+    },
+    {
+      "id": "readings",
+      "risk": "Missing, stale or future mandatory account/host/admission evidence",
+      "tests": [
+        "internal/routineexec:TestRoutineDispatchRaceRecoveryAndAdmission",
+        "internal/routinebudget:TestRoutineBudgetAdmissionAndOwnership",
+        "internal/harness:TestProjectLeadAdmissionIsFreshAndFailClosed",
+        "internal/agentaccounts:TestDailyAdmissionIncompleteFactsFailClosed"
+      ],
+      "result": "PASSED: existing stale-reading guards and added missing/future host, account and admission controls."
+    },
+    {
+      "id": "unknown-usage-exit",
+      "risk": "Unknown paid cost or uncertain process exit holds capacity and budget",
+      "tests": [
+        "internal/routinebudget:TestRoutineBudgetUnknownRetainsSlotAndChildBinding",
+        "internal/routineexec:TestRoutineRecoveryRevocationReceiptsAndPendingNotice",
+        "internal/agentd:TestLaunchErrorCannotProveNoFork",
+        "internal/agentd:TestOutagePreservesProcessAndPersistsExactSettlement",
+        "internal/agentd:TestRoutineCooperativeStopExactIdentityAndUncertainReplay"
+      ],
+      "result": "PASSED: existing unknown-cost and uncertain-exit hold guards."
+    },
+    {
+      "id": "finite-escalation",
+      "risk": "Fix and recovery exhaustion escalates without further launch",
+      "tests": [
+        "internal/routineexec:TestRoutineReviewFixLineageAndFiniteEscalation",
+        "internal/routineexec:TestRoutineRecoveryRevocationReceiptsAndPendingNotice"
+      ],
+      "result": "PASSED: existing bounded fix/recovery escalation guards."
+    },
+    {
+      "id": "single-effects",
+      "risk": "One writer, applicable PR/settlement and merge Done event; retained checkout",
+      "tests": [
+        "internal/routineexec:TestRoutineControlledQualification",
+        "internal/agentd:TestRoutineWorkspacesSeparateAndRetainWriters",
+        "internal/agentd:TestRoutineContinuationRetainsOriginalCheckout",
+        "internal/delivery:TestMergeDoneRecordedWebhookReplay"
+      ],
+      "result": "Existing guards passed; integrated one-PR/four-settlement/six-exit/retained-checkout and Done assertions passed conditionally after the labelled running/coordinator overlays. Overall qualification FAILED."
+    },
+    {
+      "id": "source-publications",
+      "risk": "Consume each ordered source release once with live source authority",
+      "tests": [
+        "internal/recurrences:TestReleaseSubscriptionOrderedReplayAndSourceAuthority"
+      ],
+      "result": "PASSED: existing ordered-publication replay and live-source-authority guard."
+    },
+    {
+      "id": "fail-closed-enablement",
+      "risk": "Person consent/exact qualification required; unqualified native capabilities never launch",
+      "tests": [
+        "internal/recurrences:TestRoutineConsentBindsQualificationAndScopedIdentity",
+        "internal/harness:TestRoutineExecutionSettingsRequirePersonAndExactQualification",
+        "internal/harness:TestLeadRuntimeConsentAndAdoptionRemainLaunchBarriers",
+        "internal/agentd:TestRoutineToolsRefuseUnqualifiedNativeStartup"
+      ],
+      "result": "PASSED: existing person-consent and exact-qualification barriers; automatic execution remains OFF."
+    }
+  ],
+  "assessment": {
+    "date": "2026-10-11",
+    "productionBase": "eec3b2672",
+    "status": "failed",
+    "enablement": "automatic execution must remain OFF; controlled passing is also insufficient for native OPS qualification",
+    "observedFailures": [
+      {
+        "id": "claimed-run-replay",
+        "owner": "internal/routineexec/dispatch.go:LaunchChecks; internal/agentaccounts/routine_admission.go:requireRoutineCapacityInputs",
+        "evidence": "A committed starting run receives 409 routine_account_unbound on identical claim replay because account admission still requires queued status."
+      },
+      {
+        "id": "started-action-grant",
+        "owner": "internal/routineexec/review.go:recordCompletion; internal/routineactions/catalog.go:loadBinding",
+        "evidence": "Accepted started telemetry leaves routine=dispatched and attempt=pending; the typed action broker requires running/running."
+      },
+      {
+        "id": "completed-review-handoff",
+        "owner": "internal/routineexec/review.go:continuationFacts; internal/agentaccounts/engine_admission.go:EngineRunCapacityTx",
+        "evidence": "The completed, settled final review cannot hand off: routine_account_unbound, because final fact admission still requires a queued actor."
+      }
+    ],
+    "conditionalDownstreamProof": "With labelled running/coordinator seams after retained failing assertions, the real PR, review/fix, person approval, work-order completion and authenticated merge-to-Done owners compose. The failed real handoff receipt remains intact. One PR, four settlements, six observed owned child exits and retained checkout are checked."
+  },
+  "verification": {
+    "codeCandidate": "eda95ab44",
+    "runner": "Approved remote runner refused the final package run at its global admission limit; weekend-authorized local-heavy single slot used an isolated, temporary PostgreSQL 18 fixture.",
+    "command": "GOTOOLCHAIN=local GOMAXPROCS=4 go test -p 4 -count=1 -timeout 30m ./internal/recurrences ./internal/routineexec ./internal/routineactions ./internal/routinebudget ./internal/routineguard ./internal/agentruns ./internal/harness ./internal/agentd ./internal/agentpairing ./internal/crossreview ./internal/delivery ./internal/reportercontract ./internal/agentaccounts",
+    "exitCode": 1,
+    "passedPackages": [
+      "recurrences",
+      "routineactions",
+      "routinebudget",
+      "routineguard",
+      "agentruns",
+      "harness",
+      "agentd",
+      "agentpairing",
+      "crossreview",
+      "delivery",
+      "reportercontract",
+      "agentaccounts"
+    ],
+    "failedPackages": {
+      "routineexec": [
+        "TestRoutineControlledQualification"
+      ]
+    },
+    "failures": "Only the three assessment failures remained. All terminal downstream assertions passed with explicitly labelled overlays; this is not a passing qualification.",
+    "testCatalogue": "scripts/ci/go-test-tiers.json registers the new integrated test in ESSENTIAL; scripts/audit/slices.json assigns its source and acceptance catalogue to S2."
+  },
+  "fixRound2": {
+    "date": "2026-10-11",
+    "brief": "aeon-1225-faultsuite-fix2",
+    "status": "blocked_missing_production_prerequisites",
+    "blockingFinding": "Unresolved: the ESSENTIAL integrated qualification still fails; owning integration repairs must land before this branch is mergeable.",
+    "testedCandidate": "59bbf7518b8c2f6b0bf7b729977d73140e7852bb",
+    "mergedMain": "8e46d10156809dc0c26c3ad82bd041de1ad9a81b",
+    "fixtureUnchangedSince": "7ea816c4d3d84b5c7370577019729a724e99721c",
+    "prerequisiteProductionPathsUnchangedSince": "7ea816c4d3d84b5c7370577019729a724e99721c",
+    "prerequisites": [
+      {
+        "id": "claimed-run-replay",
+        "owners": [
+          "AEON-1130",
+          "AEON-1186"
+        ],
+        "paths": [
+          "internal/agentaccounts/routine_admission.go",
+          "internal/agentaccounts/engine_admission.go",
+          "internal/routineexec/dispatch.go"
+        ],
+        "required": "Reconcile an identical accepted claim against its exact persisted launch/account/daemon binding without treating replay as a new queued start; retain live authority, budget and resource guards.",
+        "observed": "Each of the four actor claim replays returns 409 routine_account_unbound."
+      },
+      {
+        "id": "started-action-grant",
+        "owners": [
+          "AEON-1201"
+        ],
+        "paths": [
+          "internal/routineexec/review.go"
+        ],
+        "required": "Accepted exact-daemon started telemetry must atomically activate the matching routine and attempt for typed action authority; rejected or stale telemetry must not activate them.",
+        "observed": "Each accepted actor start leaves routine=dispatched and attempt=pending."
+      },
+      {
+        "id": "completed-review-handoff",
+        "owners": [
+          "AEON-1201",
+          "AEON-1186"
+        ],
+        "paths": [
+          "internal/routineexec/review.go",
+          "internal/agentaccounts/engine_admission.go"
+        ],
+        "required": "Final handoff must check current owner, exact settled actor, review/head and mandatory facts without requiring the completed reviewer to be queued for a new launch.",
+        "observed": "The completed, settled final review remains pending with routine_account_unbound."
+      }
+    ],
+    "ownership": "Original AEON-1225 write set is tests and catalogue/manifest/audit rows. Production prerequisites belong to their existing slices; no production patches, weakened assertions or tier changes were made.",
+    "qualificationRunner": {
+      "runner": "Approved remote-test.sh runner; admitted and completed; no local fallback.",
+      "command": "go test -count=1 ./internal/recurrences ./internal/routineexec ./internal/routineactions ./internal/routinebudget ./internal/routineguard ./internal/agentruns ./internal/harness ./internal/agentd ./internal/agentpairing ./internal/crossreview ./internal/delivery ./internal/reportercontract ./internal/agentaccounts",
+      "exitCode": 1,
+      "passedPackages": [
+        "recurrences",
+        "routineactions",
+        "routinebudget",
+        "routineguard",
+        "agentruns",
+        "harness",
+        "agentd",
+        "agentpairing",
+        "crossreview",
+        "delivery",
+        "reportercontract",
+        "agentaccounts"
+      ],
+      "failedPackages": {
+        "routineexec": [
+          "TestRoutineControlledQualification"
+        ]
+      },
+      "observedFailures": "Only the three prior composition gaps remained. All downstream assertions passed conditionally after the labelled overlays; qualification remains FAILED."
+    },
+    "staticRunner": {
+      "attemptsBeforeEvidenceCommit": 3,
+      "exitCode": 3,
+      "reason": "ci-static-locked.sh refused at the approved global remote cap.",
+      "finalEvidence": "Final committed-head qualification/static results will be reported on AEON-1225 and in worker status after the evidence commit; refusal is not a green check."
+    },
+    "enablement": "Release 130 routines remain automatic-execution OFF; controlled success is required before separate coordinator/OPS native qualification and person-owned enablement."
+  },
+  "fixRound3": {
+    "date": "2026-10-11",
+    "brief": "aeon-1225-faultsuite-fix3",
+    "review": "review-ap691",
+    "status": "blocked_missing_production_prerequisites",
+    "blockingFinding": "Unresolved: no owning-slice repairs are available to import; the three fixRound2 prerequisites still block ESSENTIAL qualification.",
+    "baseline": "72c962631c3a468c578f7e027117f5734af9ced2",
+    "fetchedRefsAlreadyInBaseline": {
+      "origin/main": "8e46d10156809dc0c26c3ad82bd041de1ad9a81b",
+      "origin/work/aeon-1130-budgethold": "776bd3f20cc7192b53f7b2e83158119178dc1719",
+      "origin/work/aeon-1186-dispatch": "95b73ca8ccdab4e6574124dff7f95e78a55a2c95",
+      "origin/work/aeon-1201-reviewfix": "227e7be3fb9481f6b13ea8e64b316fb1fedb059b"
+    },
+    "unchangedSince": "7ea816c4d3d84b5c7370577019729a724e99721c",
+    "unchangedPaths": [
+      "internal/agentaccounts/routine_admission.go",
+      "internal/agentaccounts/engine_admission.go",
+      "internal/routinebudget/broker.go",
+      "internal/routineexec/dispatch.go",
+      "internal/routineexec/review.go",
+      "internal/routineexec/qualification_test.go"
+    ],
+    "ownership": "The original test-only write set and existing production owners remain binding. No production repair, assertion change, tier downgrade or additional overlay was authored; the existing failed qualification and conditional downstream proof remain intact.",
+    "baselineQualification": {
+      "command": "go test -count=1 -run '^TestRoutineControlledQualification$' ./internal/routineexec",
+      "attempts": 2,
+      "exitCode": 3,
+      "result": "INCOMPLETE: approved remote-test.sh refused both attempts at the global two-run cap, with a wait/retry; no current-head execution is claimed. The approved local PostgreSQL port was unavailable, so no local fallback ran."
+    },
+    "finalCandidateValidation": "After committing this evidence, retry the approved qualification and static runners. Report their exact final-SHA outcomes on AEON-1225 and in worker status; refusal is incomplete, never green.",
+    "coordinatorHandoff": "Route the three fixRound2 prerequisites to AEON-1130/1186/1201, import their authorized repairs, rerun the full catalogue and static checks on the final candidate, then run the coordinator-owned review gate. Automatic execution stays OFF pending separate native qualification, OPS attestation and person-owned enablement."
+  }
+}
