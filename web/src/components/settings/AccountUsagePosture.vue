@@ -131,7 +131,13 @@ onBeforeUnmount(() => { scope.dispose(); unsubscribe() })
 .rs { margin: 4px 0 8px; }
 .policy-feedback { padding: 8px 0; font-size: 12.5px; color: var(--danger); }
 .policy-feedback.quiet { color: var(--ink-3); }
-@container usage (max-width: 420px) {
+/* Controls stay on the right in the docked panel; a phone sheet or a very narrow panel stacks them. */
+@container usage (max-width: 320px) {
+  .lim { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+  .lim > .pct, .lim > .go { justify-self: start; }
+  .go { margin-left: -6px; }
+}
+@media (max-width: 600px) {
   .lim { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
   .lim > .pct, .lim > .go { justify-self: start; }
   .go { margin-left: -6px; }

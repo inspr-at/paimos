@@ -60,5 +60,7 @@
 .lim-sec .use[aria-checked="true"] .thumb { transform: translateX(14px); }
 .lim-sec .use:disabled .track, .lim-sec .use[aria-disabled="true"] .track { opacity: .55; }
 @media (prefers-reduced-motion: reduce) { .lim-sec .track, .lim-sec .thumb { transition: none; } }
-@container lim (max-width: 420px) { .lim-sec .lim { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim > .btn, .lim-sec .lim > .use, .lim-sec .lim > .two-btn { justify-self: start; } .lim-sec .use { margin: 0 0 0 -8px; } }
+/* The docked panel keeps controls on the right; a phone sheet or a very narrow panel stacks them (design §phone). */
+@container lim (max-width: 320px) { .lim-sec .lim { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim > .btn, .lim-sec .lim > .use, .lim-sec .lim > .two-btn { justify-self: start; } .lim-sec .use { margin: 0 0 0 -8px; } }
+@media (max-width: 600px) { .lim-sec .lim { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim > .btn, .lim-sec .lim > .use, .lim-sec .lim > .two-btn { justify-self: start; } .lim-sec .use { margin: 0 0 0 -8px; } }
 @media (max-width: 720px), (pointer: coarse) { .lim-sec .lim .btn { min-height: 44px; }.lim-sec .use { width: 50px; height: 44px; }.ref-row { min-height: 52px; } }
