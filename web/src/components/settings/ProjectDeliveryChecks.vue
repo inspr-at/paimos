@@ -104,7 +104,7 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose(); closeAdd(false) })
     <template #aside><ProjectSettingsExplainer id="checks" :project-key="project.routeKey" /></template>
     <p v-if="!manage" class="lock-line"><AppIcon name="lock" :size="13" /><span>People who manage delivery for {{ project.routeKey }} change these.</span></p>
     <div v-if="loading" class="checks-sk" aria-busy="true" aria-label="Loading checks and deadlines"><span v-for="n in 7" :key="n" class="sk" /></div>
-    <div v-else-if="error" class="read-error" role="alert"><p>{{ error }}</p><button type="button" class="btn sm" @click="load">Try again</button></div>
+    <div v-else-if="error" class="read-error" role="alert"><p>{{ error }}</p><button type="button" class="btn sm" @click="load()">Try again</button></div>
     <template v-else-if="snapshot">
       <div class="frows">
         <form class="frow" data-project-field @submit.prevent="saveWorkflow"><label class="fl" for="f-wf"><b>Required workflow</b><small>Its result decides whether a change may merge.</small></label><span class="fctl"><input v-if="manage" id="f-wf" v-model="workflow" class="field w-wf" maxlength="200" :disabled="busy" @blur="saveWorkflow" /><b v-else class="fv">{{ snapshot.effective.required_workflow }}</b><button v-if="own('required_workflow') && manage" type="button" class="link-btn quiet rst" :disabled="busy" @click="resetValue('required_workflow')">Reset</button><span v-else class="origin">{{ own('required_workflow') ? 'this project' : 'workspace default' }}</span></span></form>

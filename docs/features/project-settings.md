@@ -47,6 +47,8 @@ from `/delivery-settings` and `?view=overrides`. Reset removes just that saved
 value, preserving inheritance and unrelated overrides. An ETag with If-Match
 rejects edits based on an older revision; the existing response schema and
 unconditional API callers remain compatible. Failed writes preserve drafts.
+Background revalidation preserves a dirty draft’s original revision; accepting
+new saved values requires an explicit reload before that draft can overwrite them.
 `delivery.read` permits viewing; `delivery.manage` permits these mutations.
 
 Delivery’s empty banners and problem chips, the unlinked ticket delivery slot,
