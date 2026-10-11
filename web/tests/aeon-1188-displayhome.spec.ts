@@ -24,13 +24,13 @@ const projectPage = (page: Page) => page.locator('.project-page')
 const SETTINGS = ['Group by', 'Row height', 'Project header density', 'Effort meter']
 async function settled(page: Page) { await page.evaluate(async () => { await document.fonts.ready; await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) }) }
 async function capture(page: Page, name: string) { await settled(page); await page.screenshot({ path: test.info().outputPath(`${name}.png`) }) }
-async function open(page: Page, width: number, theme = 'light') {
+async function open(page: Page, width: number, theme = 'light', url = '/p/PHAROS') {
   await page.setViewportSize({ width, height: 900 })
   const data = fixtures()
   data.preferences.theme = { choice: theme }
   data.preferences['list:display'] = { density: 'comfortable', headerGraph: false }
   await mockWork(page, data)
-  await page.goto('/p/PHAROS')
+  await page.goto(url)
   await expect(projectPage(page)).toHaveClass(/header-compact/)
   await expect(page.locator('tr.ticket-row:not(.ghost)').first()).toBeVisible()
   await settled(page)
@@ -56,6 +56,7 @@ for (const width of [390, 768]) {
         { name: 'updated today', run: async () => { await today.click(); await expect(today).toHaveAttribute('aria-pressed', 'true') } },
         { name: 'any time', run: async () => { await today.click(); await expect(today).toHaveAttribute('aria-pressed', 'false') } },
       ] })
+      await sheet(page).locator('.sheet-scroll').evaluate(el => { el.scrollTop = 0 })
       await capture(page, `filters-${width}-${theme}`)
 
       await link(page).click()
@@ -103,6 +104,17 @@ test('with the header folded on a phone, the link opens the Display menu beside 
   await menu(page).getByRole('button', { name: /^Done/ }).click()
   await expect(menu(page)).toBeHidden()
   await expect(toolbar(page).getByRole('button', { name: /^Display:/ })).toBeFocused()
+})
+
+test('Outline on a phone: Expand all from the Display sheet closes it and returns to Filters', async ({ page }) => {
+  await open(page, 390, 'light', '/p/PHAROS?view=outline&closed=1')
+  await filters(page).click()
+  await link(page).click()
+  await expect(menu(page).locator('.display-menu.as-sheet')).toBeVisible()
+  await expect(menu(page).getByRole('radiogroup', { name: 'Group by', exact: true })).toHaveCount(0)
+  await menu(page).getByRole('button', { name: 'Expand all', exact: true }).click()
+  await expect(menu(page)).toBeHidden()
+  await expect(filters(page)).toBeFocused()
 })
 
 for (const theme of ['light', 'dark'] as const) {

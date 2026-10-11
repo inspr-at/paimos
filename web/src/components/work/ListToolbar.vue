@@ -166,7 +166,8 @@ const displayWords = GROUPS.map(option => displayPhrase(option.value))
 const displayText = computed(() => props.view === 'outline' ? 'Display' : displayPhrase(props.filters.group))
 // The collapsed header's menu replaces the plain Display panel; the attention host keeps its own.
 const collapsedMenu = computed(() => !!props.collapsedHeader && !props.attention)
-// Opened away from its own buttons (the filter sheet's link), Display is a sheet of its own.
+// Opened away from its own buttons (the filter sheet's link), Display is a sheet of its own;
+// closing it, also by Expand or Collapse all, hands focus back to Filters.
 const detachedDisplay = computed(() => !!displayAnchor.value && displayAnchor.value !== displayButton.value && displayAnchor.value !== collapsedDisplayButton.value)
 const displaySheet = computed(() => detachedDisplay.value || (collapsedMenu.value && sheetMode.value))
 const displayOn = computed(() => props.view === 'list' && props.filters.group !== 'none')
@@ -371,7 +372,7 @@ defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
           :project-header="projectHeader" :sheet="displaySheet" :stable-sort="collapsedMenu"
           @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
           @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
-          @expand-all="emit('expandAll'); closeDisplay(false)" @collapse-all="emit('collapseAll'); closeDisplay(false)"
+          @expand-all="emit('expandAll'); closeDisplay(detachedDisplay)" @collapse-all="emit('collapseAll'); closeDisplay(detachedDisplay)"
           @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
         />
         <HeaderRoomyChoice v-else />

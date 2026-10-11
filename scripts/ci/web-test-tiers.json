@@ -180,6 +180,8 @@
     ,
     "browser:tests/aeon-1062-qapolish.spec.ts:chat header light 620: actions wrap without overlap, stay put, and Stop reads in the theme"
     ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:Outline on a phone: Expand all from the Display sheet closes it and returns to Filters"
+    ,
     "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px dark"
     ,
     "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px light"
@@ -5221,6 +5223,8 @@
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"Outline on a phone: Expand all from the Display sheet closes it and returns to Filters","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

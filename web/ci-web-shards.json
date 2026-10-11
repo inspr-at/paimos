@@ -732,7 +732,7 @@
         ,
         {"file":"tests/aeon-1071-chat-live.spec.ts","listedTests":9,"weightSeconds":14,"weightSource":"local-single-worker-AEON-1071-9s-plus-margin"}
         ,
-        {"file":"tests/aeon-1188-displayhome.spec.ts","listedTests":7,"weightSeconds":20,"weightSource":"unmeasured-estimate"}
+        {"file":"tests/aeon-1188-displayhome.spec.ts","listedTests":8,"weightSeconds":20,"weightSource":"local-single-worker-AEON-1188-15s-plus-margin"}
         ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
