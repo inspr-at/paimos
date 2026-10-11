@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
 // handlerTransport keeps the production HTTPS origin while exercising the real
@@ -30,6 +32,79 @@ func (x handlerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	w := httptest.NewRecorder()
 	x.handler.ServeHTTP(w, r)
 	return w.Result(), nil
+}
+
+// AEON-1228 risk: a watch cancelled after its headers were committed asks
+// net/http to abort the connection. The in-process transport must report that
+// as a failed client request rather than panic in the supervisor's goroutine.
+func TestHandlerTransportReportsAbortedResponses(t *testing.T) {
+	unexpectedPanic := errors.New("unexpected handler panic")
+	for _, mode := range []string{"cancel after headers", "abort", "unrelated panic", "healthy"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			var handler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch mode {
+				case "cancel after headers":
+					w.WriteHeader(http.StatusOK)
+					_, _ = io.WriteString(w, "incomplete")
+					cancel()
+				case "abort":
+					w.WriteHeader(http.StatusOK)
+					_, _ = io.WriteString(w, "incomplete")
+					panic(http.ErrAbortHandler)
+				case "unrelated panic":
+					panic(unexpectedPanic)
+				case "healthy":
+					w.WriteHeader(http.StatusCreated)
+					_, _ = io.WriteString(w, "complete")
+				}
+			})
+			if mode == "cancel after headers" {
+				mux := http.NewServeMux()
+				mux.Handle("GET /api/transport-probe", handler)
+				handler = (&httpapi.Server{Mux: mux}).Handler()
+			}
+			r, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://pairing.test/api/transport-probe", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := &http.Client{Transport: handlerTransport{handler}}
+			var response *http.Response
+			var recovered any
+			func() {
+				defer func() { recovered = recover() }()
+				response, err = client.Do(r)
+			}()
+			if mode == "unrelated panic" {
+				if recovered != unexpectedPanic {
+					t.Fatalf("unrelated handler panic was swallowed: %v", recovered)
+				}
+				return
+			}
+			if recovered != nil {
+				t.Fatalf("connection abort escaped the transport: %v", recovered)
+			}
+			if mode != "healthy" {
+				want := error(io.ErrUnexpectedEOF)
+				if mode == "cancel after headers" {
+					want = context.Canceled
+				}
+				if response != nil || !errors.Is(err, want) {
+					t.Fatalf("aborted response=%v error=%v, want no response and %v", response, err, want)
+				}
+				return
+			}
+			if err != nil || response == nil {
+				t.Fatalf("healthy response=%v error=%v", response, err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusCreated || string(body) != "complete" {
+				t.Fatalf("healthy status=%d body=%q error=%v", response.StatusCode, body, err)
+			}
+		})
+	}
 }
 
 type localSetupExecutor struct{ executable string }
