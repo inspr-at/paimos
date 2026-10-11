@@ -622,8 +622,6 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestAdmissionScheduleClockAndRunNowFences","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/agentaccounts","name":"TestAdvancedSentenceRoundTripsAndCaps","tier":"GATED-FULL"}
-    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestAllowanceProvisionalWithoutMeasuredUnit","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestBConcurrentQueuedClaimsPromoteOneRecovery","tier":"GATED-FULL"}
@@ -684,7 +682,7 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityIngestRouteResetAndRLS","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityLimitingResetIsTheSprintEnd","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityLimitingResetPreservesExistingSprintEnd","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityPacingAtNightAndDay","tier":"GATED-FULL"}
     ,
@@ -733,6 +731,10 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestDailyPlanReadKeepsDecliningWeeklyPercent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestDenialAdmissionInterleavings","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestExistingAdvancedLimitRoundTripsAndCaps","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestExistingRepeatedWindowCapsRequests","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestExpiredCapacityHasNoStartFence","tier":"GATED-FULL"}
     ,
@@ -807,8 +809,6 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestLimitConcurrentReservationsAndClaim","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestLimitPeriodDST","tier":"GATED-FULL"}
-    ,
-    {"kind":"go","package":"internal/agentaccounts","name":"TestMakeThisRepeat","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestMaxOutSoonestResetAndCarefulProjectedOrder","tier":"ESSENTIAL"}
     ,
@@ -955,6 +955,14 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestResidencyEvidenceValidityBound","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResidencyFenceMapsStarterLinkedAfterQueue","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRetiredAccountLimitWrites","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRetiredCapacityOverridesCanStillEnd","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRetiredCapacityOverridesDropExpiredOnSave","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRetiredCapacityOverridesRoundTripUnchanged","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRouteOnlyClaimsLocalDaemonEnrollment","tier":"GATED-FULL"}
     ,
@@ -1601,6 +1609,10 @@
     {"kind":"go","package":"internal/agentd","name":"TestJournaledClaimReroutesAfterServerReleasesObsoleteHold","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestLaunchErrorCannotProveNoFork","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit","reason":"AEON-1190: lead consent, duplicate native launch and unknown process ownership boundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestLeadRuntimeUnattemptedReceiptDoesNotFreezeStartup","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestLifecycleBoundsProbeAndCapacityWaits","tier":"GATED-FULL"}
     ,
@@ -3605,6 +3617,8 @@
     {"kind":"go","package":"internal/auth","name":"TestKeyTrimRestoreRechecksEditorAndOriginalCreatorCeilings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyTrimTenantIsolationAndBoundedInput","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestLeadRuntimeProductionMiddleware","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestLeadSettingsAgentRoutesReadOnly","tier":"GATED-FULL"}
     ,
@@ -6206,6 +6220,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestLeadIdleYieldCountsUntilConfirmedExit","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestLeadRuntimeConsentAndAdoptionRemainLaunchBarriers","reason":"AEON-1190: lead consent, duplicate native launch and unknown process ownership boundary","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestLeadSchedulingBoundAndDependencies","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLeadSingleDialProgressAfterWorkerYield","tier":"ESSENTIAL"}
@@ -8420,6 +8436,8 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineRunStateMappings","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineTemplatesValidateApplyWithoutActivationOrDuplicates","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineUIReadsScopeLatestRunAndDraftPolicy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestSixMonthSpringGapWalksPastOneYear","tier":"NIGHTLY"}
@@ -8746,6 +8764,8 @@
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestAccountLimitRequestAndResponseSchemas","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestAccountRetirementResponseSchemas","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/reportercontract","name":"TestCombinedHarnessSessionV15Fixture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestDeployTargetBytesMatchStable100","tier":"GATED-FULL"}
@@ -8819,6 +8839,8 @@
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetMovedRootKeepsChildBinding","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetUnknownRetainsSlotAndChildBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestLeadRuntimeClaimReplayAndAbandon","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchRaceRecoveryAndAdmission","tier":"ESSENTIAL"}
     ,
