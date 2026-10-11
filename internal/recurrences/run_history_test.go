@@ -35,7 +35,7 @@ func TestRoutineRunStateMappings(t *testing.T) {
 		raw  string
 		want RunState
 	}{
-		{"pending", RunCreated}, {"queued", RunCreated}, {"dispatched", RunCreated}, {"created", RunCreated},
+		{"pending", RunCreated}, {"queued", RunCreated}, {"created", RunCreated},
 		{"starting", RunRunning}, {"running", RunRunning},
 		{"needs_person", RunWaitingForPerson}, {"waiting_for_person", RunWaitingForPerson},
 		{"waiting", RunHeld}, {"held", RunHeld}, {"blocked", RunHeld}, {"paused", RunHeld},

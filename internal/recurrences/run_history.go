@@ -36,7 +36,7 @@ const (
 
 func runState(raw string) (RunState, string) {
 	switch raw {
-	case "pending", "queued", "dispatched", "created":
+	case "pending", "queued", "created":
 		return RunCreated, "The occurrence was created; execution has not started."
 	case "starting", "running":
 		return RunRunning, "Execution is in progress."
