@@ -379,7 +379,7 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 	// intent retains its own slot and logins; other records and admission continue.
 	replayCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	unconfirmed := false
+	unconfirmed, cleanupFailed := false, false
 	defer func() {
 		s.mu.Lock()
 		previous := s.ledgerRouteUnconfirmed
@@ -387,7 +387,10 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 		s.mu.Unlock()
 		// Emit the first hold immediately. Later polls retain their complete
 		// reason set, including queue failures, for unchanged-cause rate limiting.
-		if unconfirmed && !previous {
+		// A routine cleanup runs once, so its failure is reported when it happens.
+		if cleanupFailed {
+			s.reportPollDiagnostic("routine_cleanup_failed")
+		} else if unconfirmed && !previous {
 			s.reportPollDiagnostic("")
 		}
 	}()
@@ -414,6 +417,15 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 				entry.mu.Unlock()
 			}
 		}
+		if r.RoutineWorkspace != nil && r.LaunchState == launchRoutePending && (r.State == "cancelled" || r.State == "failed" || r.State == "completed") {
+			// A terminal route intent proves no native launch was attempted.
+			// Release remaining resource/checkout handles even after ledger
+			// coordinates clear. A failure holds only this record's owners.
+			if s.releaseObsoleteRoutineRoute(r) != nil {
+				unconfirmed, cleanupFailed = true, true
+				continue
+			}
+		}
 		if r.LedgerGroup == "" {
 			continue
 		}
@@ -430,7 +442,7 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 			}
 			s.ledgerReplayAfter = r.RunID
 			routeCtx, routeCancel := context.WithTimeout(replayCtx, 500*time.Millisecond)
-			route, e := s.api.Route(routeCtx, r.RunID, s.daemonID, candidateIDs(r.RouteCandidates), s.estimates)
+			route, e := s.routeWorkspace(routeCtx, r.RunID, candidateIDs(r.RouteCandidates), r.RoutineWorkspace)
 			routeCancel()
 			if e != nil {
 				// A generic 409 includes capacity/grant/generation refusals. Release only
@@ -443,6 +455,23 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 					if readErr == nil && ledgerAttemptObsolete(r, run) {
 						if err = s.releaseLedger(r); err != nil {
 							return err
+						}
+						if r.RoutineWorkspace != nil {
+							// Keep the allocation's durable journal anchor. Release
+							// only this never-launched attempt's ownership, not its files.
+							r.State = "failed"
+							if run.Status == "cancelled" {
+								r.State = "cancelled"
+							}
+							r.LedgerGroup, r.LedgerGeneration, r.RouteCandidates = "", "", nil
+							if err = s.journal.Put(r); err != nil {
+								return err
+							}
+							s.setLedgerRecord(r)
+							if s.releaseObsoleteRoutineRoute(r) != nil {
+								unconfirmed, cleanupFailed = true, true
+							}
+							continue
 						}
 						// Nothing was forked for an attempt. Remove its private marker
 						// only after owner release; a crash before Delete replays safely.
@@ -494,6 +523,11 @@ func ledgerAttemptObsolete(record Record, run Run) bool {
 	}
 	switch run.Status {
 	case "queued":
+		// A routine account binding may be our own committed route whose
+		// response was lost. Retain its pickup and allocation for replay.
+		if record.RoutineWorkspace != nil {
+			return false
+		}
 		// Route did not give this daemon a confirmed account binding. An
 		// independently observed binding makes this pending attempt obsolete.
 		return run.AccountID != ""

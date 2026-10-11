@@ -147,6 +147,16 @@
     {
       "classification": "personal",
       "columns": {
+        "routine_launch_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "agent_runs"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "action": "metadata",
         "actor_id": "personal",
         "completed_at": "metadata",
@@ -731,8 +741,8 @@
         "until_at": "personal"
       },
       "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "set_by"
+        "person_column": "set_by",
+        "tenant_column": "tenant_id"
       },
       "table": "model_pauses"
     },
@@ -754,6 +764,8 @@
         "column_key": "metadata",
         "effort": "metadata",
         "effort_level": "metadata",
+        "efforts": "personal",
+        "end_mode": "metadata",
         "not_allowed": "personal",
         "profile_id": "metadata",
         "rank": "personal",
@@ -761,9 +773,7 @@
         "set_by": "personal",
         "situation": "metadata",
         "tenant_id": "metadata",
-        "thinking": "personal",
-        "end_mode": "metadata",
-        "efforts": "personal"
+        "thinking": "personal"
       },
       "locator": {
         "person_column": "set_by",
@@ -812,8 +822,8 @@
         "thinking": "personal"
       },
       "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "set_by"
+        "person_column": "set_by",
+        "tenant_column": "tenant_id"
       },
       "table": "model_pref_situation_orders"
     },
@@ -880,8 +890,8 @@
         "why": "review"
       },
       "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "set_by"
+        "person_column": "set_by",
+        "tenant_column": "tenant_id"
       },
       "table": "model_row_constraints"
     },
@@ -904,14 +914,14 @@
         "column_key": "metadata",
         "line": "metadata",
         "lock": "metadata",
+        "moved_to_models": "metadata",
         "position": "metadata",
         "project_id": "metadata",
         "scope": "metadata",
         "set_at": "metadata",
         "set_by": "personal",
         "tenant_id": "metadata",
-        "why": "review",
-        "moved_to_models": "metadata"
+        "why": "review"
       },
       "locator": {
         "person_column": "set_by",
@@ -1107,8 +1117,8 @@
         "token_ceiling": "metadata"
       },
       "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "owner_principal_id"
+        "person_column": "owner_principal_id",
+        "tenant_column": "tenant_id"
       },
       "table": "routine_budget_balances"
     },
@@ -1139,8 +1149,8 @@
         "used_tokens": "personal"
       },
       "locator": {
-        "tenant_column": "tenant_id",
-        "person_column": "owner_principal_id"
+        "person_column": "owner_principal_id",
+        "tenant_column": "tenant_id"
       },
       "table": "routine_budget_grants"
     },
@@ -1264,6 +1274,45 @@
         "tenant_column": "tenant_id"
       },
       "table": "routine_guard_policies"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "created_at": "personal",
+        "kind": "metadata",
+        "launch_id": "metadata",
+        "receipt": "personal",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "routine_launch_evidence"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "agent_run_id": "metadata",
+        "binding": "personal",
+        "claimed_at": "personal",
+        "created_at": "personal",
+        "exit_observed_at": "personal",
+        "id": "metadata",
+        "kind": "metadata",
+        "lead_generation": "metadata",
+        "owner_principal_id": "personal",
+        "project_id": "metadata",
+        "routine_run_id": "metadata",
+        "state": "metadata",
+        "tenant_id": "metadata",
+        "worker_principal_id": "personal",
+        "worktree_id": "metadata"
+      },
+      "locator": {
+        "person_column": "owner_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "routine_launch_intents"
     },
     {
       "classification": "personal",
