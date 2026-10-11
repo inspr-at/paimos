@@ -21,7 +21,7 @@ async function audit(page, name, touch) {
       if (r.width && r.height && (r.width < 43.5 || r.height < 43.5)) small.push(`${(box.className || box.tagName).toString().slice(0, 26)} "${(box.textContent || box.getAttribute('aria-label') || '').trim().slice(0, 22)}" ${Math.round(r.width)}×${Math.round(r.height)}`)
     }
     const outside = []
-    for (const card of document.querySelectorAll('.m-card, .glass-card, .popover, .sheet')) {
+    for (const card of document.querySelectorAll('.m-card, .glass-card, .popover, .floating, .sheet')) {
       if (!scope(card) || card.hidden) continue; const cr = card.getBoundingClientRect()
       for (const e of card.querySelectorAll('button, p, small, input, select, label, textarea, .chk, li')) {
         if (!vis(e)) continue; const r = e.getBoundingClientRect(); if (!r.width) continue
