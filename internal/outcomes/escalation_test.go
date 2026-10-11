@@ -459,13 +459,25 @@ func setupEscalationRetry(t *testing.T) escalationRetryFixture {
 	project := insertNode(t, d, p, "project", "RTY-1", "Project", nil)
 	ticket := insertNode(t, d, p, "ticket", "RTY-2", "Stuck work", &project)
 	order := insertNode(t, d, p, "work_order", "RTY-3", "Fix", &ticket)
-	// Seed the real registry, then register only a qualified Claude account.
+	// Prepare the ID-only catalog, then own every pin and route needed by this
+	// retry fixture. Production bootstrap must not supply test dispatch policy.
 	w := callAs(t, modelregistry.New(d.App), p, "GET", "/api/models", "")
 	if w.Code != 200 {
 		t.Fatalf("catalog: %d %s", w.Code, w.Body.String())
 	}
 	var runner, account, opus, sol, run, session string
 	inTenant(t, d, p, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES
+			($1,'claude-opus-xhigh','retry-fixture','claude','anthropic','opus','xhigh','strong'),
+			($1,'codex-6-1-sol-high','retry-fixture','codex','openai','gpt-6.1-sol','high','standard'),
+			($1,'claude-fable-xhigh','retry-fixture','claude','anthropic','fable','xhigh','frontier')`, p.TenantID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state,reason)
+			SELECT $1,'build-hard',1,id,'available','Explicit fixture retry authority'
+			FROM model_profiles WHERE slug='claude-opus-xhigh'`, p.TenantID); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Retry runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
 			return err
 		}

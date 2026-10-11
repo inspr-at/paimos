@@ -1,0 +1,63 @@
+{
+  "data": [
+    {
+      "id": "anthropic/claude-opus-5",
+      "name": "Anthropic: Claude Opus 5",
+      "context_length": 1000000,
+      "expiration_date": null,
+      "reasoning": {
+        "mandatory": false,
+        "default_enabled": true,
+        "supported_efforts": [
+          "max",
+          "xhigh",
+          "high",
+          "medium",
+          "low"
+        ],
+        "default_effort": "high"
+      },
+      "top_provider": {
+        "context_length": 1000000,
+        "max_completion_tokens": 128000,
+        "is_moderated": true
+      }
+    },
+    {
+      "id": "google/gemini-2.5-pro",
+      "name": "Google: Gemini 2.5 Pro",
+      "context_length": 1048576,
+      "expiration_date": "2026-10-20",
+      "reasoning": {
+        "mandatory": true
+      },
+      "top_provider": {
+        "context_length": 1048576,
+        "max_completion_tokens": 65536,
+        "is_moderated": false
+      }
+    },
+    {
+      "id": "x-ai/grok-4.7",
+      "name": "SpaceXAI: Grok 4.7",
+      "context_length": 500000,
+      "expiration_date": null,
+      "reasoning": {
+        "mandatory": true,
+        "default_enabled": true,
+        "supported_efforts": [
+          "xhigh",
+          "high",
+          "medium",
+          "low"
+        ],
+        "default_effort": "high"
+      },
+      "top_provider": {
+        "context_length": 500000,
+        "max_completion_tokens": 450000,
+        "is_moderated": false
+      }
+    }
+  ]
+}

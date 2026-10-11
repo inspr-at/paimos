@@ -26,122 +26,7 @@ func catalogLock(ctx context.Context, tx pgx.Tx) error {
 }
 
 func prepareCatalogUpgrade(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
-	if err := catalogLock(ctx, tx); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id) VALUES($1) ON CONFLICT DO NOTHING`, p.TenantID); err != nil {
-		return nil, err
-	}
-	var version string
-	if err := tx.QueryRow(ctx, `SELECT catalog_version FROM model_refresh_settings`).Scan(&version); err != nil {
-		return nil, err
-	}
-	if version == CatalogVersion {
-		return nil, nil
-	}
-	existing, err := listProfiles(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	ids := map[string]string{}
-	for _, profile := range existing {
-		// Reuse only exact immutable seed pins. A tenant's different value is custom.
-		for _, seed := range catalogProfiles() {
-			if samePin(profile, seed) && (profile.Version == "2" || profile.Version == CatalogVersion) {
-				ids[seed.Slug] = profile.ID
-			}
-		}
-	}
-	var added []Profile
-	for _, seed := range catalogProfiles() {
-		if ids[seed.Slug] != "" {
-			continue
-		}
-		// A conflicting tenant-created v3 pin must not acquire default authority.
-		var conflict bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE slug=$1 AND version=$2)`, seed.Slug, CatalogVersion).Scan(&conflict); err != nil {
-			return nil, err
-		}
-		if conflict {
-			continue
-		}
-		profile, err := insertActivatedProfile(ctx, tx, p, profileWrite{Slug: seed.Slug, Version: seed.Version, Harness: seed.Harness, Family: seed.Family, Model: seed.Model, Effort: seed.Effort, Tier: seed.Tier}, true, modelactivation.ShippedCatalog)
-		if err != nil {
-			return nil, err
-		}
-		if profile.Enabled {
-			ids[seed.Slug] = profile.ID
-		}
-		added = append(added, profile)
-	}
-	now, err := dbNow(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	changed := []string{}
-	for _, role := range roleLadder {
-		steps, mode, err := loadLadderSnapshot(ctx, tx, role.name, 0)
-		if err != nil {
-			return nil, err
-		}
-		// An explicit ordinary review save remains tenant policy even when
-		// its rows happen to match the historical default byte-for-byte.
-		if role.name == "review-gate" && mode == reviewOrderSaved {
-			continue
-		}
-		if !matchesV2(role.name, steps) {
-			continue
-		}
-		replacements := []Route{}
-		safe := true
-		for _, seed := range defaultRoutes(catalogProfiles()) {
-			if seed.Role != role.name {
-				continue
-			}
-			if ids[seed.Slug] == "" {
-				safe = false
-				break
-			}
-			route := Route{Role: seed.Role, Priority: seed.Priority, ProfileID: ids[seed.Slug], State: "available"}
-			for _, old := range steps {
-				if old.Profile.Slug == seed.Slug {
-					route.State, route.Reason, route.ValidUntil = old.State, old.Reason, old.ValidUntil
-				}
-			}
-			replacements = append(replacements, route)
-		}
-		// Never discard an active override even when its old default was retired.
-		for _, old := range steps {
-			if old.State == "available" || old.ValidUntil == nil || !now.Before(*old.ValidUntil) {
-				continue
-			}
-			retained := false
-			for _, r := range replacements {
-				if r.ProfileID == old.ProfileID {
-					retained = true
-				}
-			}
-			if !retained {
-				safe = false
-			}
-		}
-		if !safe {
-			continue
-		}
-		if _, err := tx.Exec(ctx, `DELETE FROM `+roleRoutesTable(role.name)+` WHERE role=$1`, role.name); err != nil {
-			return nil, err
-		}
-		for _, r := range replacements {
-			if err := insertRoute(ctx, tx, p.TenantID, r); err != nil {
-				return nil, err
-			}
-		}
-		changed = append(changed, role.name)
-	}
-	if _, err := tx.Exec(ctx, `UPDATE model_refresh_settings SET catalog_version=$1`, CatalogVersion); err != nil {
-		return nil, err
-	}
-	return []events.Change{{Type: "model.catalog_upgraded", After: map[string]any{"version": CatalogVersion, "added": added, "roles": changed}}}, nil
+	return prepareCatalogDeferred(ctx, tx, p)
 }
 
 func samePin(p Profile, s seedProfile) bool {
@@ -158,7 +43,7 @@ func matchesV2(role string, steps []ladderStep) bool {
 		// Main's additive harness upgrade appends exact pins to historical
 		// defaults. Recognize that suffix while retaining custom route policy.
 		expected = append([]string(nil), expected...)
-		for _, route := range defaultRoutes(catalogProfiles()) {
+		for _, route := range defaultRoutes(nil) {
 			if route.Role == role && (strings.HasPrefix(route.Slug, "gemini-") || strings.HasPrefix(route.Slug, "opencode-")) {
 				expected = append(expected, route.Slug)
 			}
@@ -175,16 +60,8 @@ func matchesV2(role string, steps []ladderStep) bool {
 			if step.Profile.Harness != "codex" || step.Profile.Family != "openai" || step.Profile.Model != "gpt-6-terra" || step.Profile.Effort != "high" || step.Profile.Tier != "standard" {
 				return false
 			}
-		} else {
-			matched := false
-			for _, seed := range catalogProfiles() {
-				if samePin(step.Profile, seed) {
-					matched = true
-				}
-			}
-			if !matched {
-				return false
-			}
+		} else if step.Profile.Slug != expected[i] {
+			return false
 		}
 	}
 	return true

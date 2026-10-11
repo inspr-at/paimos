@@ -82,7 +82,9 @@ import (
 	"github.com/inspr-at/paimos/internal/releasehistory"
 	"github.com/inspr-at/paimos/internal/releases"
 	"github.com/inspr-at/paimos/internal/requirements"
+	"github.com/inspr-at/paimos/internal/routineactions"
 	"github.com/inspr-at/paimos/internal/routineexec"
+	"github.com/inspr-at/paimos/internal/routineguard"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/search"
@@ -472,6 +474,9 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			releases.New(pool),
 			statusAuto,
 			recurringWork,
+			routineactions.New(pool, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, b routineactions.Binding, c routineguard.Context) (tenant.Principal, routineguard.Decision, string, error) {
+				return recurringWork.AuthorizeActionTx(ctx, tx, p, recurrences.ActionBinding(b), c)
+			}),
 			intake.NewDelegated(pool, tokenMod.Keys, aithemaHost),
 			plugins.NewWithRegistry(pool, pluginRegistry),
 			// EvidenceLaunchChecks admits only from the recorded candidate artifact
