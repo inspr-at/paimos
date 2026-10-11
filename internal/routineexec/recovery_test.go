@@ -211,6 +211,9 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 			d := setupDispatch(t)
 			f := d.fixture
 			if cause == "role_loss" {
+				var retainedOwner string
+				must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Retained owner') RETURNING id::text`, f.owner.TenantID).Scan(&retainedOwner))
+				dbtest.BindRole(t, f.d, f.owner.TenantID, retainedOwner, "owner")
 				f.exec(`UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$2 AND key='viewer') WHERE principal_id=$1 AND scope_type='workspace'`, f.owner.ID, f.owner.TenantID)
 			} else {
 				var project string
