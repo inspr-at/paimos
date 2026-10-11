@@ -76,10 +76,17 @@ func TestModelsV2MigrationGolden(t *testing.T) {
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO model_rules(tenant_id,scope,column_key,line,lock,position,why,set_by,set_at) VALUES
    ($1,'workspace','other','anthropic:sonnet','not',1,'Keep the owner rule',$2,$3),
-   ($1,'workspace','other','local:qwen-coder','bottom',2,'Last resort',$2,$3)`, admin.TenantID, admin.ID, now); err != nil {
+   ($1,'workspace','backend','local:qwen-coder','bottom',2,'Last resort',$2,$3)`, admin.TenantID, admin.ID, now); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'agents.working','{"total":15,"daily":{"codex":{"pace":{"mode":"pace","points_per_day":null},"boost_today":null,"at_limit":"wait"}}}')`, admin.TenantID, waiter.ID); err != nil {
+			return err
+		}
+		var own string
+		if err := tx.QueryRow(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,person_id,set_by) VALUES($1,'person',$2,$2) RETURNING id::text`, admin.TenantID, waiter.ID).Scan(&own); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,set_by) VALUES($1,$2,'other','first',ARRAY['openai:sol'],$3)`, admin.TenantID, own, waiter.ID); err != nil {
 			return err
 		}
 		schedule := capacity.DefaultSchedule("UTC")
@@ -112,6 +119,14 @@ func TestModelsV2MigrationGolden(t *testing.T) {
 		if eligible != "ollama/qwen3-coder" {
 			t.Fatalf("pre-migration golden fixture selected %q", eligible)
 		}
+		var waiting bool
+		if err := tx.QueryRow(t.Context(), `SELECT cardinality(o.rank)=1 AND EXISTS(SELECT 1 FROM model_role_routes r JOIN model_profiles m ON m.id=r.profile_id WHERE r.role='build' AND aeon_models_line(m.family,m.harness,m.model)=o.rank[1] AND r.state<>'available' AND r.valid_until>$2) FROM model_pref_orders o JOIN model_pref_profiles own ON own.id=o.profile_id WHERE own.person_id=$1 AND o.column_key='other' AND o.situation='first'`, waiter.ID, now).Scan(&waiting); err != nil {
+			return err
+		}
+		if !waiting {
+			t.Fatal("pre-migration personal Wait fixture did not have a single held pick")
+		}
+
 		return nil
 	})
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
