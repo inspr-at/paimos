@@ -286,9 +286,13 @@ func telemetryAuthority(ctx context.Context, tx pgx.Tx, r *http.Request, p tenan
 	if err != nil {
 		return v, o, false, err
 	}
-	// Queued runs stay refused. A terminal run is refused unless this same
-	// daemon is reconciling an unconfirmed ownership_lost assignment.
-	reconciling := v.Status == "ownership_lost" && handoff != nil && handoff.State != "completed" && t.Kind == "finished" && t.ProcessState == "exited"
+	staleHold, err := staleWorkHoldUnconfirmed(v)
+	if err != nil {
+		return v, o, false, err
+	}
+	// Queued runs stay refused. The same owned daemon may reconcile a stale
+	// lifecycle release or unconfirmed assignment only with actual exit evidence.
+	reconciling := v.Status == "ownership_lost" && (handoff != nil && handoff.State != "completed" || staleHold) && t.Kind == "finished" && t.ProcessState == "exited"
 	if v.Status == "queued" || (terminal(v.Status) && !reconciling) {
 		return v, o, false, workorders.Fail(409, "run is not live")
 	}
