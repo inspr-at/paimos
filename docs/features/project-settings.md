@@ -7,11 +7,17 @@ opens General; `/settings/delivery`, `/settings/agents`, `/settings/access` and
 General saves the name and the full description through revision-checked node
 updates. Imported description fields are kept consistent with the shared header.
 Shared groups use `/project-groups/assign`. Confirmed changes offer Undo; a newer
-project revision prevents Undo from overwriting later work. The key stays read-only.
+project revision prevents Undo from overwriting later work. Field Undo changes
+only its own field, and lifecycle Undo preserves both field drafts, including
+drafts retained after failed saves. The key stays read-only.
 
 Project admins with `nodes.write` can freeze, unfreeze, archive or restore the
-project. Delete opens a sheet and requires its current key. All lifecycle calls
-use the revision shown when the action starts; the server remains the authority.
+project. Delete retains the approved sheet, but its final action is disabled and
+the sheet explains that deletion is unavailable. A state patch cannot remove a
+project and its tickets; enabling deletion requires an authorized, revision-checked
+server operation. Keyboard and form submissions also refuse deletion.
+Freeze, Archive and their reverse actions use the revision shown when the action
+starts; the server remains the authority.
 Freeze and Archive enforcement across agents, routines and delivery is owned by
 AEON-1234. This UI does not grant a permission or bypass a server restriction.
 

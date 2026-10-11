@@ -61,6 +61,97 @@ async function navigate(page: Page, path: string) {
   await page.evaluate(path => (document.querySelector('#app') as unknown as { __vue_app__: { config: { globalProperties: { $router: { push(path: string): Promise<void> } } } } }).__vue_app__.config.globalProperties.$router.push(path), path)
 }
 
+test('AEON-1233 FIX2: unavailable project deletion cannot write or report removal', async ({ page }) => {
+  // Risk: false completion of a destructive action leaves the project readable.
+  const world = await setup(page), before = structuredClone(world.nodes.get('p-pharos')!)
+  const mutations: string[] = []
+  page.on('request', request => {
+    if (new URL(request.url()).pathname === '/api/nodes/p-pharos' && request.method() !== 'GET') mutations.push(request.method())
+  })
+  await page.goto('/p/PHAROS/settings')
+  await expect(page.getByLabel('Name', { exact: true })).toBeEnabled()
+  await page.locator('[data-life="delete"]').click()
+  const sheet = page.getByRole('dialog', { name: 'Delete Pharos?' }), action = sheet.getByRole('button', { name: /^Delete project/ })
+  const key = sheet.getByLabel('Type PHAROS to confirm')
+  const stable = await controlStability(page, { sheet, key, action, cancel: sheet.getByRole('button', { name: /^Cancel/ }) })
+  await stable.check(() => key.fill('PHAROS'))
+  await expect(action).toBeDisabled()
+  await expect(sheet.getByRole('status')).toContainText('Project deletion is unavailable.')
+  const mod = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? 'Meta' : 'Control')
+  await stable.check(() => key.press(`${mod}+Enter`))
+  // The mutation handler also refuses a submission that bypasses the disabled button.
+  await stable.check(() => sheet.locator('form').evaluate(form => { form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) }))
+  await expect(sheet).toBeVisible()
+  await expect(page.getByText('Project deleted.', { exact: true })).toHaveCount(0)
+  expect(mutations).toEqual([]); expect(world.writes).toEqual([])
+  expect(world.nodes.get('p-pharos')).toEqual(before)
+  await expect(page).toHaveURL('/p/PHAROS/settings')
+  stable.done()
+  await sheet.getByRole('button', { name: /^Cancel/ }).click()
+  await navigate(page, '/p/PHAROS/tickets')
+  await expect(page.locator('#project-title')).toHaveText(before.title)
+  expect(world.errors).toEqual([])
+})
+
+test('AEON-1233 FIX2: field and lifecycle Undo preserve unrelated failed drafts', async ({ page }) => {
+  // Risk: Undo silently loses a draft that another field failed to save.
+  const world = await setup(page), original = structuredClone(world.nodes.get('p-pharos')!)
+  await page.goto('/p/PHAROS/settings')
+  const name = page.getByLabel('Name', { exact: true }), description = page.getByLabel('Description', { exact: true })
+  await expect(name).toBeEnabled(); await expect(description).toBeEnabled()
+  const mod = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? 'Meta' : 'Control')
+  const failed = () => page.waitForResponse(response => response.url().endsWith('/api/nodes/p-pharos') && response.request().method() === 'PATCH' && response.status() === 412)
+  const draftDescription = 'Description draft retained after the save failed.'
+  world.control.fail = true
+  let reply = failed()
+  await description.fill(draftDescription); await description.press(`${mod}+Enter`); await reply
+  await expect(description).toBeEditable(); await expect(description).toHaveValue(draftDescription)
+  // Leaving the failed field retries while failure is still enabled; the
+  // rename must not accidentally save the retained description on blur.
+  reply = failed(); await name.focus(); await reply; await expect(name).toBeEditable()
+  world.control.fail = false
+  await name.fill('Confirmed rename'); await name.press('Enter')
+  await expect(page.locator('#project-title')).toHaveText('Confirmed rename')
+  const renameRevision = world.nodes.get('p-pharos')!.updated_at
+  await page.locator('.toast').filter({ hasText: 'Name saved.' }).getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(name).toHaveValue(original.title)
+  await expect(description).toHaveValue(draftDescription)
+  expect(world.writes.at(-1)).toEqual({ id: original.id, body: { title: original.title }, expected: renameRevision })
+  expect(world.nodes.get('p-pharos')!.body).toBe(original.body)
+
+  const draftName = 'Name draft retained after the save failed.'
+  world.control.fail = true; reply = failed()
+  await name.fill(draftName); await name.press('Enter'); await reply; await expect(name).toBeEditable()
+  reply = failed(); await page.getByRole('heading', { name: 'Lifecycle', exact: true }).click(); await reply; await expect(name).toBeEditable()
+  world.control.fail = false
+  const freeze = page.locator('[data-life="freeze"]')
+  const stable = await controlStability(page, { name, description, freeze, archive: page.locator('[data-life="archive"]'), delete: page.locator('[data-life="delete"]') })
+  await stable.check(async () => {
+    await freeze.click()
+    await page.getByRole('dialog', { name: 'Freeze Pharos?' }).getByRole('button', { name: 'Freeze', exact: true }).click()
+    await expect(freeze).toHaveAccessibleName('Unfreeze')
+  })
+  const freezeRevision = world.nodes.get('p-pharos')!.updated_at
+  await stable.check(async () => {
+    await page.locator('.toast').filter({ hasText: 'Project frozen.' }).getByRole('button', { name: 'Undo', exact: true }).click()
+    await expect(freeze).toHaveAccessibleName('Freeze…')
+  })
+  await expect(name).toHaveValue(draftName); await expect(description).toHaveValue(draftDescription)
+  expect(world.writes.at(-1)).toEqual({ id: original.id, body: { state: original.state }, expected: freezeRevision })
+  expect(world.nodes.get('p-pharos')!.body).toBe(original.body)
+  expect(world.nodes.get('p-pharos')!.title).toBe(original.title)
+  stable.done()
+
+  await description.fill('Confirmed description'); await description.press(`${mod}+Enter`)
+  await expect(page.getByText('Description saved.', { exact: true })).toBeVisible()
+  const descriptionRevision = world.nodes.get('p-pharos')!.updated_at
+  await page.locator('.toast').filter({ hasText: 'Description saved.' }).getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(description).toHaveValue(original.body); await expect(name).toHaveValue(draftName)
+  expect(world.writes.at(-1)!.expected).toBe(descriptionRevision)
+  expect(world.writes.at(-1)!.body).toEqual({ body: original.body, fields: original.fields })
+  expect(world.errors).toEqual([])
+})
+
 test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on project and revision', async ({ page }) => {
   test.setTimeout(120_000)
   const world = await setup(page)
@@ -138,10 +229,11 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
   await sheetStable.check(() => sheet.getByLabel('Type PHAROS to confirm').fill('AEON'))
   await expect(deleteAction).toBeDisabled()
   await sheetStable.check(() => sheet.getByLabel('Type PHAROS to confirm').fill('PHAROS'))
-  await expect(deleteAction).toBeEnabled()
-  world.control.fail = true
-  await sheetStable.check(() => deleteAction.click())
-  await expect(sheet.getByRole('alert')).toContainText('The project changed')
+  await expect(deleteAction).toBeDisabled()
+  const writesBeforeDelete = world.writes.length
+  await sheetStable.check(() => sheet.getByLabel('Type PHAROS to confirm').press(`${mod}+Enter`))
+  await expect(sheet.getByRole('status')).toContainText('Project deletion is unavailable.')
+  expect(world.writes.length).toBe(writesBeforeDelete)
   expect(world.nodes.get('p-pharos')!.state).toBe('active')
   await sheet.getByLabel('Type PHAROS to confirm').focus()
   await page.keyboard.press('Escape'); await expect(sheet).toBeVisible()
@@ -175,15 +267,20 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
   const deleteRevision = world.nodes.get('p-aeon')!.updated_at
   await page.locator('[data-life="delete"]').click()
   await page.getByLabel('Type AEON to confirm').fill('AEON')
-  await page.getByRole('button', { name: /^Delete project/ }).click()
-  await expect(page).toHaveURL('/')
-  expect(world.writes.at(-1)).toEqual({ id: 'p-aeon', body: { state: 'deleted' }, expected: deleteRevision })
+  await expect(page.getByRole('button', { name: /^Delete project/ })).toBeDisabled()
+  const writesBeforeAeonDelete = world.writes.length
+  await page.getByLabel('Type AEON to confirm').press(`${mod}+Enter`)
+  await expect(page).toHaveURL('/p/AEON/settings')
+  expect(world.writes.length).toBe(writesBeforeAeonDelete)
+  expect(world.nodes.get('p-aeon')!.state).toBe('active')
+  expect(world.nodes.get('p-aeon')!.updated_at).toBe(deleteRevision)
+  await expect(page.getByText('Project deleted.', { exact: true })).toHaveCount(0)
   expect(world.errors).toEqual([])
 })
 
 test('AEON-1233: approved P1 reference states and check.mjs audit against the build', async ({ browser }, testInfo) => {
   test.setTimeout(240_000)
-  const lines = [`AEON-1233 P1 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit runs on the built P1 surface. Full mock flows for P2–P6 are outside this package.', 'The public-source guard requires the approved Lead example’s operator host to become {C}, filled from the selected computer; other approved explainer text is retained.', 'Freeze dates/actors are absent from the project API: show the confirmed Frozen state without inventing a date or person. The key uses a ticket-number pattern when no actual ticket number is supplied.']
+  const lines = [`AEON-1233 P1 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit runs on the built P1 surface. Full mock flows for P2–P6 are outside this package.', 'The public-source guard requires the approved Lead example’s operator host to become {C}, filled from the selected computer; other approved explainer text is retained.', 'Freeze dates/actors are absent from the project API: show the confirmed Frozen state without inventing a date or person. The key uses a ticket-number pattern when no actual ticket number is supplied.', 'FIX2: the approved Delete sheet is retained with an unavailable message and disabled final action until authorized, revision-checked project-and-ticket deletion exists.']
   for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
     const context = await browser.newContext({ viewport: { width, height: width < 600 ? 860 : 1000 }, hasTouch: width < 600, colorScheme: theme, reducedMotion: 'reduce' })
     try {

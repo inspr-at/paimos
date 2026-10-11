@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { APIError, assignProjectGroup, getNode, getProjectGroups, undoGroupEvent, updateNode, type NodePatch, type SharedProjectGroup, type WorkNode } from '../../lib/api'
 import { can, myProjectRole, myWorkspaceRole } from '../../lib/authz'
 import { useIdentityScope } from '../../lib/useIdentityScope'
@@ -18,7 +18,7 @@ import SettingsCard from './SettingsCard.vue'
 import ProjectSettingsExplainer from './ProjectSettingsExplainer.vue'
 
 const props = defineProps<{ project: Project }>()
-const router = useRouter(), route = useRoute(), projects = useProjects(), projectGroups = useProjectGroups()
+const route = useRoute(), projects = useProjects(), projectGroups = useProjectGroups()
 const scope = useIdentityScope(() => can('nodes.read', props.project.id)), reads = scope.lane(), groupReads = scope.lane()
 const node = ref<WorkNode | null>(null), name = ref(props.project.title), description = ref('')
 const groups = ref<SharedProjectGroup[]>([]), groupId = ref(''), groupsReady = ref(false), groupError = ref('')
@@ -37,7 +37,6 @@ const actionTitle = computed(() => `${confirmation.value?.kind === 'frozen' ? 'F
 const actionCopy = computed(() => confirmation.value?.kind === 'frozen'
   ? 'Agents, routines and the delivery queue start nothing new. Running agents finish what they are doing. People can still read and edit tickets.'
   : 'Nothing new starts, and it moves to the Archived group, out of everyday lists and search. Running agents finish. Restore it any time.')
-const canDelete = computed(() => admin.value && !busy.value && !!confirmation.value && typedKey.value.trim().toUpperCase() === props.project.routeKey.toUpperCase())
 function fullDescription(value: WorkNode): string {
   const classic = value.fields?.classic
   return classic && typeof classic === 'object' && typeof (classic as Record<string, unknown>).description === 'string'
@@ -89,7 +88,10 @@ function undoWrite(before: WorkNode, saved: WorkNode, patch: NodePatch, owner: s
   if (!writable.value || busy.value || node.value?.updated_at !== saved.updated_at) { toast('The project changed. Undo was not applied.', { tone: 'error' }); return }
   busy.value = true
   void scope.run(({ after }) => after(updateNode(before.id, patch, { ifUnmodifiedSince: saved.updated_at }), result => {
-    apply(result); name.value = result.title; description.value = fullDescription(result); toast('Change undone.')
+    apply(result)
+    if (patch.title !== undefined) name.value = result.title
+    if (patch.body !== undefined) description.value = fullDescription(result)
+    toast('Change undone.')
   }), { failed: error => toast(sayError(error, 'Undo failed. Nothing changed.'), { tone: 'error' }), settled: () => { busy.value = false } })
 }
 function saveField(field: 'name' | 'description') {
@@ -150,14 +152,13 @@ async function show(kind: Confirmation['kind'], anchor: HTMLElement) {
   await nextTick()
   if (confirmation.value?.kind === 'deleted') deleteDialog.value?.showModal()
 }
-function mutateState(snapshot: WorkNode, state: string) {
+function mutateState(snapshot: WorkNode, state: 'active' | 'frozen' | 'archived') {
   if (!admin.value || busy.value) return
   if (node.value?.updated_at !== snapshot.updated_at) { actionError.value = 'The project changed. Close this confirmation and try again.'; return }
   const owner = scope.owner.value
   busy.value = true; reads.cancel(); actionError.value = ''
   void scope.run(({ after }) => after(updateNode(snapshot.id, { state }, { ifUnmodifiedSince: snapshot.updated_at }), result => {
     apply(result); close()
-    if (state === 'deleted') { toast('Project deleted.'); void router.push('/'); return }
     toast(state === 'frozen' ? 'Project frozen. Nothing new starts.' : state === 'archived' ? 'Project archived.' : 'Project restored. New work may start.', {
       action: { label: 'Undo', run: () => { if (!admin.value) return; undoWrite(snapshot, result, { state: snapshot.state }, owner) } },
     })
@@ -165,7 +166,10 @@ function mutateState(snapshot: WorkNode, state: string) {
 }
 function confirm() {
   const pending = confirmation.value
-  if (!pending || pending.kind === 'deleted' && !canDelete.value) return
+  // A state patch does not remove a project or its tickets. Keep the approved
+  // sheet, but refuse every submission until a revision-checked project
+  // deletion operation exists, including keyboard and synthetic submissions.
+  if (!pending || pending.kind === 'deleted') return
   mutateState(pending.snapshot, pending.kind)
 }
 function restore() { if (node.value) mutateState(node.value, 'active') }
@@ -197,7 +201,7 @@ onBeforeUnmount(() => close(false))
     <div class="life">
       <div class="life-r"><AppIcon name="snowflake" :size="16" /><span class="lbl"><b>{{ frozen ? 'Frozen' : 'Freeze' }}</b><small>Pauses the project: agents, routines and the delivery queue start nothing new. People can still read and edit tickets. Unfreeze any time.</small></span><button v-if="admin" type="button" class="btn sm" :disabled="busy || !node || archived" aria-haspopup="dialog" :aria-expanded="confirmation?.kind === 'frozen'" data-life="freeze" @click="frozen ? restore() : show('frozen', $event.currentTarget as HTMLElement)"><span class="stable-label"><span :class="{ inactive: frozen }">Freeze…</span><span :class="{ inactive: !frozen }">Unfreeze</span></span></button></div>
       <div class="life-r"><AppIcon name="archive" :size="16" /><span class="lbl"><b>{{ archived ? 'Archived' : 'Archive' }}</b><small>Does what Freeze does, and takes it out of everyday lists and search, into the Archived group. Everything stays readable; restore it any time.</small></span><button v-if="admin" type="button" class="btn sm" :disabled="busy || !node" aria-haspopup="dialog" :aria-expanded="confirmation?.kind === 'archived'" data-life="archive" @click="archived ? restore() : show('archived', $event.currentTarget as HTMLElement)"><span class="stable-label"><span :class="{ inactive: archived }">Archive…</span><span :class="{ inactive: !archived }">Restore</span></span></button></div>
-      <div class="life-r"><AppIcon name="trash" :size="16" /><span class="lbl"><b>Delete</b><small>Removes the project and its tickets for everyone. The audit log keeps the record, and the key {{ project.routeKey }} stays reserved.</small></span><button v-if="admin" type="button" class="btn sm danger" :disabled="busy || !node" data-life="delete" aria-haspopup="dialog" :aria-expanded="confirmation?.kind === 'deleted'" @click="show('deleted', $event.currentTarget as HTMLElement)">Delete…</button></div>
+      <div class="life-r"><AppIcon name="trash" :size="16" /><span class="lbl"><b>Delete</b><small>Project deletion is unavailable. Freeze or archive it instead.</small></span><button v-if="admin" type="button" class="btn sm danger" :disabled="busy || !node" data-life="delete" aria-haspopup="dialog" :aria-expanded="confirmation?.kind === 'deleted'" @click="show('deleted', $event.currentTarget as HTMLElement)">Delete…</button></div>
     </div>
   </SettingsCard>
   <FloatingPanel v-if="confirmation && confirmation.kind !== 'deleted'" :anchor="confirmation.anchor" :width="340" align="end" :label="actionTitle" cycle class="life-pop" @close="close($event)">
@@ -206,8 +210,8 @@ onBeforeUnmount(() => close(false))
   <Teleport v-if="confirmation?.kind === 'deleted'" to="body">
     <dialog ref="deleteDialog" class="delete-sheet sheet" data-project-settings-overlay aria-labelledby="delete-project-title" @cancel.prevent="close()">
       <header class="sh-head"><h2 id="delete-project-title">{{ actionTitle }}</h2><button type="button" class="icon-btn sm" aria-label="Close delete sheet" @click="close()"><AppIcon name="close" :size="14" /></button></header>
-      <div class="sh-body"><form id="delete-project-form" @submit.prevent="confirm"><p class="sh-lead">This removes the project and its tickets for everyone. Agents stop working on it. The audit log keeps the record, and the key <b class="mono">{{ project.routeKey }}</b> stays reserved.</p><p class="sh-lead">To stop work for a while instead, <button type="button" class="link-btn" @click="show('frozen', confirmation!.anchor)">freeze</button> or <button type="button" class="link-btn" @click="show('archived', confirmation!.anchor)">archive</button> it.</p><label class="delete-key"><b>Type {{ project.routeKey }} to confirm</b><input id="del-key" v-model="typedKey" class="field mono" autocomplete="off" spellcheck="false" :maxlength="Math.max(project.routeKey.length + 8, 32)" autofocus></label></form><p v-if="actionError" class="error" role="alert">{{ actionError }}</p></div>
-      <footer class="sh-foot"><button type="button" class="btn" @click="close()">Cancel <KeyCap k="Esc" /></button><button type="submit" form="delete-project-form" class="btn danger" :disabled="!canDelete">Delete project <KeyCap k="mod" /><KeyCap k="enter" /></button></footer>
+      <div class="sh-body"><form id="delete-project-form" @submit.prevent="confirm"><p id="delete-unavailable" class="sh-lead" role="status">Project deletion is unavailable.</p><p class="sh-lead">To stop work for a while, <button type="button" class="link-btn" @click="show('frozen', confirmation!.anchor)">freeze</button> or <button type="button" class="link-btn" @click="show('archived', confirmation!.anchor)">archive</button> it.</p><label class="delete-key"><b>Type {{ project.routeKey }} to confirm</b><input id="del-key" v-model="typedKey" class="field mono" autocomplete="off" spellcheck="false" :maxlength="Math.max(project.routeKey.length + 8, 32)" autofocus></label></form><p v-if="actionError" class="error" role="alert">{{ actionError }}</p></div>
+      <footer class="sh-foot"><button type="button" class="btn" @click="close()">Cancel <KeyCap k="Esc" /></button><button type="submit" form="delete-project-form" class="btn danger" disabled aria-describedby="delete-unavailable">Delete project <KeyCap k="mod" /><KeyCap k="enter" /></button></footer>
     </dialog>
   </Teleport>
 </template>

@@ -10728,6 +10728,10 @@
     ,
     {"kind":"browser","file":"tests/project-sections.spec.ts","name":"ticket side panel retains tickets/outline through reload, expand, collapse and close","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1233 FIX2: field and lifecycle Undo preserve unrelated failed drafts","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1233 FIX2: unavailable project deletion cannot write or report removal","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1233: General edits, lifecycle and legacy links stay on the acted-on project and revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1233: approved P1 reference states and check.mjs audit against the build","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
