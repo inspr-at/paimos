@@ -85,8 +85,13 @@ test('one table: a row per computer, a column per account; every cell and list a
   await expect(chip(page, build7.computer_id)).toHaveAccessibleName('New starts on build-7: Smart. Change')
   await expect(row(page, studio.computer_id).locator('.ns.ro')).toHaveText('Fixed · load 8')
   // A cell opens the computer at that sign-in; the row opens the computer; a column head opens the account.
+  // The docked panel narrows the table but never restacks it: the clicked row stays where it was.
+  const rowTop = await row(page, build7.computer_id).evaluate(e => e.getBoundingClientRect().top)
   await claudeCell.click()
   const pane = page.getByRole('dialog', { name: /^build-7/ })
+  await expect(pane).toBeVisible()
+  await expect(table.locator('thead')).toBeVisible()
+  expect(Math.abs(await row(page, build7.computer_id).evaluate(e => e.getBoundingClientRect().top) - rowTop)).toBeLessThanOrEqual(0.5)
   await expect(pane.locator(`.si-row.is-target[data-signin="${ACCOUNTS.claude}"]`)).toBeVisible()
   await expect(pane.getByRole('button', { name: /New starts/ })).toHaveAttribute('aria-expanded', 'true')
   await expect(row(page, build7.computer_id)).toHaveClass(/current/)

@@ -8,7 +8,7 @@
 // accounts the computer column stays in view while the table scrolls sideways; on a phone
 // each computer is a stack of rows. Needs you lists the sign-ins with a problem and pending
 // cleanup, and is absent when nothing needs you. Shared with Accounts and Capacity.
-import { computed, nextTick, ref, toRefs, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, toRefs, watch } from 'vue'
 import type { PairingView } from '../../lib/agentPairing'
 import type { OverviewAccount, SignInReference } from '../../lib/accountsOverview'
 import { computerLine, shortIdentity, signinCell } from '../../lib/accountsGlance'
@@ -29,6 +29,13 @@ const line = (c: PairingView) => computerLine(c, agents.value.now)
 const cell = (s: SignInReference) => signinCell(s, capacity.value.rows.find(row => row.id === s.enrollment.account_id), agents.value.now)
 const signinName = (a: OverviewAccount, s: SignInReference) => `${a.vendor} · ${a.records.find(r => r.id === s.enrollment.account_id)?.label ?? a.identity}`
 const selected = (c: PairingView) => open.value && computer.value?.computer_id === c.computer_id
+// The computer column stays in view while the table scrolls sideways: always past six
+// accounts (design AEON-1149), and in a window too narrow for fewer. Measured when the
+// table's size changes, never while someone works inside it.
+const wrap = ref<HTMLElement>(), overflows = ref(false)
+const sizes = new ResizeObserver(() => { const w = wrap.value; overflows.value = !!w && w.scrollWidth > w.clientWidth + 1 })
+watch(wrap, (element, before) => { if (before) sizes.unobserve(before); if (element) { sizes.observe(element); if (element.firstElementChild) sizes.observe(element.firstElementChild) } })
+onBeforeUnmount(() => sizes.disconnect())
 
 // ---------- New starts: the chip on each row ----------
 // A save the next read has not brought yet: the chip shows what the server confirmed, at
@@ -127,8 +134,8 @@ watch(owner, () => { menuOpen.value = false; confirmed.value = new Map(); busy.v
     <NeedsYouList :items="needs.computers" hide-when-calm :show-calm="retained > 0" :aside="allReady ? 'Everything else is working.' : 'Based on the last available reports.'" @action="actAttention" />
     <section class="zone ct-zone" aria-labelledby="computers-title">
       <div class="zone-head"><h3 id="computers-title">Computers <span class="count">{{ computers.length }}</span></h3><p>Sign-ins and New starts, a row per computer</p><RouterLink v-if="manage" class="btn sm" to="/agents/register-agent"><AppIcon name="monitor" />Connect a computer</RouterLink></div>
-      <div v-if="computers.length" class="ct-wrap" tabindex="0" role="region" aria-label="Computers and their sign-ins; scroll sideways for more accounts">
-        <table class="ct" :class="{ many: accounts.length > 6 }" :style="{ '--ct-accounts': accounts.length }" aria-label="Computers and their sign-ins">
+      <div v-if="computers.length" ref="wrap" class="ct-wrap" tabindex="0" role="region" aria-label="Computers and their sign-ins; scroll sideways for more accounts">
+        <table class="ct" :class="{ many: accounts.length > 6 || overflows }" :style="{ '--ct-accounts': accounts.length }" aria-label="Computers and their sign-ins">
           <thead><tr>
             <th scope="col" class="c-pc"><span class="ct-corner">Computer</span></th>
             <th v-for="a in accounts" :key="a.id" scope="col" class="c-acc"><button type="button" class="ct-ah" :data-tip="a.identity" :aria-label="`${a.vendor} · ${a.identity}`" @click="show('account', a.id, $event)"><b><HarnessMark :harness="a.harness" :size="18" /><span v-clip-tip>{{ a.vendor }}</span></b><small>{{ shortIdentity(a.identity) }}</small></button></th>
@@ -138,7 +145,7 @@ watch(owner, () => { menuOpen.value = false; confirmed.value = new Map(); busy.v
             <tr v-for="c in computers" :key="c.computer_id!" :data-row="c.computer_id" :class="{ dim: line(c).tone === 'off', current: selected(c) }">
               <th scope="row"><button type="button" class="pc" :data-computer="c.computer_id" :aria-expanded="selected(c)" :aria-current="selected(c)" @click="show('computer', c.computer_id!, $event)"><AppIcon name="monitor" /><span class="who"><b v-clip-tip>{{ c.computer_name }}</b><small><span class="dot" :class="line(c).tone" /><span v-clip-tip>{{ line(c).text }}</span></small></span></button></th>
               <td v-for="a in accounts" :key="a.id" :class="{ none: !references(a, c).length }">
-                <button v-for="s in references(a, c)" :key="s.enrollment.account_id" type="button" class="si" :class="cell(s).tone" :data-signin="s.enrollment.account_id" :data-tip="cell(s).tip || undefined" :aria-label="`${signinName(a, s)} on ${c.computer_name}: ${cell(s).word}${cell(s).tip ? `. ${cell(s).tip}` : ''}`" @click="show('computer', c.computer_id!, $event, s.enrollment.account_id)"><span class="cl" aria-hidden="true"><HarnessMark :harness="a.harness" :size="16" /><span>{{ a.vendor }} · {{ shortIdentity(a.identity) }}</span></span><span class="sv"><span class="dot" :class="cell(s).tone" />{{ cell(s).word }}</span></button>
+                <button v-for="s in references(a, c)" :key="s.enrollment.account_id" type="button" class="si" :class="cell(s).tone" :data-signin="s.enrollment.account_id" :data-tip="cell(s).tip || undefined" :aria-label="`${signinName(a, s)} on ${c.computer_name}: ${cell(s).word}${cell(s).tip ? `. ${cell(s).tip}` : ''}`" @click="show('computer', c.computer_id!, $event, s.enrollment.account_id)"><span class="cl" aria-hidden="true"><HarnessMark :harness="a.harness" :size="16" /><span>{{ a.vendor }} · {{ shortIdentity(a.identity) }}</span></span><span class="sv"><span class="dot" :class="cell(s).tone" /><span class="w">{{ cell(s).word }}</span></span></button>
                 <span v-if="!references(a, c).length" class="si none"><AppIcon name="minus" :size="14" /><span class="sr-only">{{ a.vendor }} · {{ a.identity }} is not signed in on {{ c.computer_name }}</span></span>
               </td>
               <td class="nsc"><span class="cl" aria-hidden="true">New starts</span>
@@ -167,7 +174,7 @@ watch(owner, () => { menuOpen.value = false; confirmed.value = new Map(); busy.v
 .ct-zone { container: computers / inline-size; }
 .ct-wrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
 .ct-wrap:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-row); }
-.ct { width: 100%; min-width: calc((var(--ct-accounts) * 6.25rem + 10.5rem) / .74); border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.ct { width: 100%; min-width: calc((var(--ct-accounts) * 5.25rem + 10.5rem) / .74); border-collapse: separate; border-spacing: 0; table-layout: fixed; }
 .ct th, .ct td { padding: 0; border-bottom: 1px solid var(--line); text-align: left; font-weight: inherit; vertical-align: middle; }
 .ct thead th { height: 60px; border-bottom-color: var(--line-2); }
 .ct .c-pc { width: 26%; }
@@ -192,7 +199,9 @@ watch(owner, () => { menuOpen.value = false; confirmed.value = new Map(); busy.v
 .si.none { color: var(--ink-3); cursor: default; }
 .si.none:hover { background: transparent; }
 .si + .si { min-height: 33px; }
-.sv { display: inline-flex; align-items: center; gap: 7px; }
+.si { overflow: hidden; }
+.sv { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.sv .w { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .dot.off { background: transparent; box-shadow: inset 0 0 0 1.8px var(--ink-3); }
 .dot.warn { background: var(--gold); }
 .ct tr.dim .pc b, .ct tr.dim .si { opacity: .62; }
@@ -208,13 +217,15 @@ watch(owner, () => { menuOpen.value = false; confirmed.value = new Map(); busy.v
 .ns.ro.none { color: var(--ink-3); }
 /* Past six accounts the computer column stays in view while the table scrolls sideways. */
 .ct.many th[scope="row"], .ct.many .c-pc { position: sticky; left: 0; z-index: 1; background: var(--canvas); box-shadow: 1px 0 0 var(--line); }
-.ct.many tr.current th[scope="row"] { background: color-mix(in srgb, var(--row-selected) 100%, var(--canvas)); }
+.ct.many tr.current th[scope="row"] { background: linear-gradient(var(--row-selected), var(--row-selected)), var(--canvas); }
 .ct-foot { display: grid; gap: 8px; padding-top: 14px; }
 .foot { display: flex; align-items: flex-start; gap: 8px; margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
 .foot svg { flex: none; margin-top: 3px; }
 .foot b { color: var(--ink-2); font-weight: 600; }
-/* A phone or a narrow window: each computer is a stack of rows; nothing scrolls sideways. */
-@container computers (max-width: 560px) {
+/* A phone or a narrow window: each computer is a stack of rows; nothing scrolls sideways. From
+   1200 px the docked panel narrows this column instead of covering it: the table stays a table
+   (scrolling sideways), so opening a panel never restacks the rows under the pointer (AEON-541). */
+@media (max-width: 1199.98px) { @container computers (max-width: 560px) {
   .ct-wrap { overflow: visible; margin: 0; padding: 0; }
   .ct, .ct tbody, .ct tr, .ct th, .ct td { display: block; width: auto; min-width: 0; }
   .ct thead { display: none; }
@@ -230,6 +241,6 @@ watch(owner, () => { menuOpen.value = false; confirmed.value = new Map(); busy.v
   .nsc > .cl { display: inline; font-size: 12.5px; color: var(--ink-2); }
   .ns { margin-left: 0; }
   .ct.many th[scope="row"] { position: static; background: transparent; box-shadow: none; }
-}
+} }
 @media (pointer: coarse) { .ns, .si, .pc, .ct-ah { min-height: 44px; } }
 </style>
