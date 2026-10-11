@@ -83,6 +83,10 @@ func TestAccountUseSwitchChangesAreAuditedWithPersistedValues(t *testing.T) {
 // the same revision guard and audit as a full write.
 func TestAccountUseRuleSaveKeepsTheRulesItDoesNotName(t *testing.T) {
 	f := setup(t)
+	f.in(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_refresh_settings(tenant_id) VALUES($1)`, f.p.TenantID)
+		return err
+	})
 	models := f.rules(t, accountuse.RuleValues{NewAccounts: "ask", NewContexts: "ask", NewProjects: "default", NewModels: "deny"})
 	w := f.call(t, f.p, "PUT", "/api/account-use/rules", map[string]any{"expected_revision": models.Revision, "new_accounts": "allow"}, 200)
 	var saved accountuse.Rules
