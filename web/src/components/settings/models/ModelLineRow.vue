@@ -61,10 +61,11 @@ const olderSource = (version: RegistryModel) => version.lifecycle ? lifecycleSou
           <span v-else class="srcb sm unk" data-tip="No provider or harness has reported where this model comes from.">unknown</span>
           <template v-if="model.isNew"><span class="tag-new">New</span><span class="tag-off">off until used</span></template>
           <span v-else-if="retiring" class="tag-ret"><AppIcon name="clock" :size="12" />{{ retiring }}</span>
-          <span v-if="paused" class="tag-pause" data-reg-paused><AppIcon name="pause" :size="12" />{{ paused }}</span>
           <span v-if="older" class="tag-oldn">+{{ older }} older</span>
         </span>
-        <span v-if="meta" class="ln-m">{{ meta }}</span>
+        <!-- One line, like the design's: the pause tag leads it, so pausing never adds a line above the actions (AEON-541).
+             The routes and the note it shortens are in the fold in full. -->
+        <span v-if="meta || paused" class="ln-m"><span v-if="paused" class="tag-pause" data-reg-paused><AppIcon name="pause" :size="12" />{{ paused }}</span><span v-if="meta" class="ln-mt">{{ meta }}</span></span>
       </span>
       <span v-if="first" class="lv" :aria-label="`Levels: ${first.efforts.join(', ')}`"><span v-for="level in first.efforts" :key="level">{{ level }}</span></span>
       <AppIcon name="chevron" :size="14" class="ln-chev" />
@@ -142,7 +143,9 @@ const olderSource = (version: RegistryModel) => version.lifecycle ? lifecycleSou
 .ln-n { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 14px; font-weight: 600; }
 .ln-name { overflow-wrap: anywhere; }
 .ln-v { padding: 1px 7px; border-radius: 6px; background: var(--surface-sunken); font: 600 11.5px/1.5 var(--mono); color: var(--ink); }
-.ln-m { font-size: 12.5px; line-height: 1.5; color: var(--ink-3); overflow-wrap: anywhere; }
+.ln-m { display: flex; align-items: center; gap: 10px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+.ln-m .tag-pause { flex: none; font-weight: 500; }
+.ln-mt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ln-chev { color: var(--ink-3); transition: transform .2s ease; }
 .ln-row[aria-expanded="true"] .ln-chev { transform: rotate(180deg); }
 .lv { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 240px; }

@@ -9500,6 +9500,10 @@
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"models that cannot load say so in place and Try again recovers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"pausing, resuming and their Undo never move a line's row or actions (±0.5 px) at 1440 px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"pausing, resuming and their Undo never move a line's row or actions (±0.5 px) at 390 px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"people without models.manage read the registry and get no controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"provider and harness facts are read-only: only a route added by hand has Edit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
