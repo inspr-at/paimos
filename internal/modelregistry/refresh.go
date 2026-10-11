@@ -320,6 +320,9 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 				if err := RecordCatalogFacts(ctx, tx, p.TenantID, fetched.catalog.Facts); err != nil {
 					return err
 				}
+				if err := recordCatalogPresence(ctx, tx, p.TenantID, input.Vendor, out.At, fetched.catalog); err != nil {
+					return err
+				}
 				observations := catalogObservations(fetched.catalog, out.At.UTC().Format(time.RFC3339Nano)+"/"+input.Vendor+"/"+input.AccountID)
 				models := map[string]bool{}
 				for _, f := range fetched.catalog.Facts {
@@ -496,7 +499,7 @@ func (m *Module) putSettings(w http.ResponseWriter, r *http.Request) {
 			if in.AutoAddProfiles {
 				rules.NewModels = "allow"
 			} else {
-				rules.NewModels = "shipped_only"
+				rules.NewModels = "deny"
 			}
 			if _, err := accountuse.WriteRules(r.Context(), tx, p, *in.AccountUseRevision, rules.RuleValues); err != nil {
 				var conflict *accountuse.Error

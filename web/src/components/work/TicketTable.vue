@@ -12,7 +12,7 @@ import { useLiveAgents } from '../../stores/liveAgents'
 import { selectLoadedGroup, type GroupBy, type RowGroup, type EpicRef, type TicketRow } from '../../lib/ticketList'
 import type { OutlineEntry, TreeMeta } from '../../lib/outline'
 import { isWorkParent, workIcon, workLabel } from '../../lib/workVocabulary'
-import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../../lib/work'
+import { absoluteTime, highlight, kindLabel, plural, priorityLabel, relativeTime, statusMeta, ticketPath, type SortField, type SortKey } from '../../lib/work'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import TicketTypeIcon from './TicketTypeIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
@@ -438,7 +438,7 @@ function ariaSort(field: SortField | null) {
 }
 function href(row: { key: string; project_key?: string; project?: { key: string } | null }) {
   const project = row.project_key ?? row.project?.key ?? props.projectKey
-  return project ? `/p/${encodeURIComponent(project)}/${encodeURIComponent(row.key)}` : undefined
+  return project ? ticketPath(project, row.key) : undefined
 }
 function parentOf(row: ListItem) {
   // Direct parents only: an epic, or the ticket a task belongs to. The project itself is implied.

@@ -37,7 +37,7 @@ paths:
       description: Catalog preparation commits separately under current read authority before the model snapshot is loaded. Denied preparation creates no profiles, routes or seed events.
       security: *auth
       responses:
-        '200': {description: Tenant model registry, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelProfile'}}}}}
+        '200': {description: "Tenant model registry; optional lifecycle enrichment is null when unavailable or over budget", headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelCatalogProfile'}}}}}
     post:
       operationId: createModelProfile
       description: Admin creates an immutable model profile version. Routing policy is a separate ordered ladder.
@@ -92,6 +92,60 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /models/outdated:
+    get:
+      operationId: getOutdatedModels
+      description: "Bounded keyset page of registered outdated versions, with source evidence and moving Default, Except for, fallback, lock and legacy pinned references. Hidden uses set incomplete. Daily caps remain with accounts. Revision binds retirement to this catalog and reference snapshot."
+      security: *auth
+      parameters:
+        - {name: cursor, in: query, schema: {type: string, maxLength: 200}, description: "Canonical version cursor returned by next_cursor"}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200': {description: "Outdated preview", content: {application/json: {schema: {$ref: '#/components/schemas/ModelOutdatedDocument'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /models/outdated/retire:
+    post:
+      operationId: retireOutdatedModels
+      description: "Person with models.manage retires up to fifty previewed versions atomically. Moving preferences also requires workspace model_prefs.manage and current project access. Stale previews, missing registered successor routes, selected successors and conflicting rules reject the batch. Native successor evidence precedes the same-line version rule. Historical pins, grants and daily caps remain intact."
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelOutdatedRetireWrite'}}}}
+      responses:
+        '200': {description: "Atomic retirement and Undo token", content: {application/json: {schema: {$ref: '#/components/schemas/ModelOutdatedRetireResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /models/outdated/undo:
+    post:
+      operationId: undoOutdatedModels
+      description: "Person with current models.manage and events.undo restores the batch using its opaque token. Moving preferences requires current model_prefs.manage and project access; another actor also needs events.undo_other. Changed references or repeated Undo return 409. Preference revisions advance monotonically."
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [undo_token]
+              properties:
+                undo_token: {type: string, maxLength: 84}
+      responses:
+        '200':
+          description: "Batch restored"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event_id, restored]
+                properties:
+                  event_id: {type: integer, format: int64}
+                  restored: {type: boolean}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /models/refresh:
     get:
       operationId: getModelRefreshStatus
@@ -268,6 +322,64 @@ components:
         fallback: {type: [object, 'null'], properties: {reason: {type: string}}}
         blocked: {type: [object, 'null'], properties: {reason: {type: string}}}
         hard_rules: {type: array, items: {type: string, enum: [cross_family, security_review, review_qualification, residency]}}
+    ModelCatalogProfile:
+      allOf:
+        - {$ref: '#/components/schemas/ModelProfile'}
+        - type: object
+          properties:
+            identity: {type: string, description: "Canonical provider:model identity"}
+            lifecycle:
+              description: "Best-effort evidence for this profile; null when calculation fails or exceeds its bounds"
+              oneOf: [{$ref: '#/components/schemas/ModelCatalogLifecycle'}, {type: 'null'}]
+    ModelCatalogLifecycle:
+      type: object
+      required: [state, date, successor, reason, source]
+      properties:
+        state: {type: [string, 'null'], enum: [active, preview, superseded, deprecated, retiring, vanished, null], description: "Null means no lifecycle evidence was reported"}
+        date: {type: [string, 'null'], format: date-time}
+        successor: {type: [string, 'null'], description: "Canonical provider:model identity, or null when unknown"}
+        reason: {type: string}
+        source: {type: string, description: "Evidence source or the named SQL version rule"}
+    ModelOutdatedUse:
+      type: object
+      required: [label, who, from, to]
+      properties:
+        label: {type: string}
+        who: {type: string, description: "Default or the person who owns or set the reference"}
+        from: {type: string}
+        to: {type: [string, 'null']}
+    ModelOutdatedVersion:
+      allOf:
+        - {$ref: '#/components/schemas/ModelCatalogLifecycle'}
+        - type: object
+          required: [version, line, uses, incomplete]
+          properties:
+            version: {type: string, description: "Canonical provider:model identity used in versions[]"}
+            line: {type: string}
+            uses: {type: array, items: {$ref: '#/components/schemas/ModelOutdatedUse'}}
+            incomplete: {type: boolean}
+    ModelOutdatedDocument:
+      type: object
+      required: [versions, revision, next_cursor, incomplete]
+      properties:
+        versions: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/ModelOutdatedVersion'}}
+        revision: {type: string, minLength: 64, maxLength: 64}
+        next_cursor: {type: string}
+        incomplete: {type: boolean}
+    ModelOutdatedRetireWrite:
+      type: object
+      additionalProperties: false
+      required: [versions, revision]
+      properties:
+        versions: {type: array, minItems: 1, maxItems: 50, uniqueItems: true, items: {type: string, maxLength: 193}}
+        revision: {type: string, minLength: 64, maxLength: 64}
+    ModelOutdatedRetireResult:
+      type: object
+      required: [moved, removed, undo_token]
+      properties:
+        moved: {type: array, items: {$ref: '#/components/schemas/ModelOutdatedUse'}}
+        removed: {type: array, maxItems: 50, items: {type: string}}
+        undo_token: {type: string, maxLength: 84}
     ModelCatalogFact:
       type: object
       required: [provider, model_id, route, fact, value, source, source_kind, field_path, fetched_at]
@@ -288,6 +400,7 @@ components:
         identity: {type: string, description: "Provider and canonical model ID shared across routes"}
         provider: {type: string}
         model_id: {type: string}
+        lifecycle: {$ref: '#/components/schemas/ModelCatalogLifecycle'}
         facts: {type: object, additionalProperties: {$ref: '#/components/schemas/ModelCatalogFact'}}
         routes:
           type: array

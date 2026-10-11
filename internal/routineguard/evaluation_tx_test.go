@@ -112,11 +112,12 @@ func TestEvaluationRequestPersistsBeforeDispatchAndRechecksOwner(t *testing.T) {
 // Each fixture retains its action, author and immutable attempt evidence.
 // All simulated time passes through the evaluator's injected clock.
 type evaluationFixture struct {
-	db            *dbtest.DB
-	person, agent tenant.Principal
-	binding       routineguard.ActionBinding
-	context       routineguard.Context
-	in            func(func(pgx.Tx) error)
+	db                             *dbtest.DB
+	person, agent                  tenant.Principal
+	authorProfile, reviewerProfile string
+	binding                        routineguard.ActionBinding
+	context                        routineguard.Context
+	in                             func(func(pgx.Tx) error)
 }
 
 func newEvaluationFixture(t *testing.T) *evaluationFixture {
@@ -174,18 +175,28 @@ func newEvaluationFixture(t *testing.T) *evaluationFixture {
 		}
 		return out.Body.Bytes()
 	}
-	// Prepare the ID-only catalog, then own the author pin, the cross-family
-	// reviewer pin and its review route. Bootstrap supplies no dispatch policy.
-	call("GET", "/api/models", nil, 200)
+	var profiles []modelregistry.Profile
+	if err := json.Unmarshal(call("GET", "/api/models", nil, 200), &profiles); err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != 0 {
+		t.Fatal("ID-only bootstrap must not supply evaluation fixture pins")
+	}
+	// Risk: retiring the shipped catalog makes author evidence and evaluator
+	// routing disappear from tests that rely on GET to create legacy pins.
+	// Register exactly the fixture's known pins and review route explicitly;
+	// they are test authority, never evidence of provider capabilities.
+	var authorProfile, reviewerProfile string
 	in(func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES
-			($1,'codex-6-1-sol-high','evaluation-fixture','codex','openai','gpt-6.1-sol','high','standard'),
-			($1,'claude-opus-xhigh','evaluation-fixture','claude','anthropic','opus','xhigh','strong')`, p.TenantID); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level,source,note)
+ VALUES($1,'evaluation-author','evaluation-fixture','codex','openai','gpt-6.1-sol','high','strong',3,'manual','Recorded evaluation test fixture') RETURNING id::text`, p.TenantID).Scan(&authorProfile); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state,reason)
-			SELECT $1,'review-gate',1,id,'available','Explicit fixture reviewer authority'
-			FROM model_profiles WHERE slug='claude-opus-xhigh'`, p.TenantID)
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level,source,note)
+ VALUES($1,'evaluation-reviewer','evaluation-fixture','claude','anthropic','opus','xhigh','strong',4,'manual','Recorded evaluation test fixture') RETURNING id::text`, p.TenantID).Scan(&reviewerProfile); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'review-gate',1,$2)`, p.TenantID, reviewerProfile)
 		return err
 	})
 	input := recurrences.Input{ProjectID: project, ParentID: parent, Template: recurrences.Template{Title: "Inspect assigned source", Description: "Read code", Criteria: []string{"Report findings"}, EstimateHours: 1, Priority: "high", Type: "work"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "Europe/Vienna"}, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one", Definition: &recurrences.Definition{Scope: recurrences.DefinitionScope{Kind: "project", ProjectID: project}, OwnerPrincipalID: p.ID, Assignment: &recurrences.Assignment{Goal: "Review assigned source", Role: "build", WorkKindID: workKind, Sources: []recurrences.SourceReference{}, AllowedActions: []string{"pr.open"}, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: recurrences.DefinitionBudget{Mode: "off"}}}}
@@ -205,13 +216,18 @@ func newEvaluationFixture(t *testing.T) *evaluationFixture {
 		if err := tx.QueryRow(t.Context(), `SELECT updated_at FROM nodes WHERE id=$1`, b.TargetID).Scan(&b.TargetUpdatedAt); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET model_profile_id=(SELECT id FROM model_profiles WHERE harness='codex' AND enabled ORDER BY created_at,id LIMIT 1),requested_model=(SELECT model FROM model_profiles WHERE harness='codex' AND enabled ORDER BY created_at,id LIMIT 1),effective_model=(SELECT model FROM model_profiles WHERE harness='codex' AND enabled ORDER BY created_at,id LIMIT 1),model_evidence='vendor_reported' WHERE id=$1`, b.AuthorRunID); err != nil {
+		var boundProfile string
+		if err := tx.QueryRow(t.Context(), `UPDATE agent_runs a SET model_profile_id=p.id,requested_model=p.model,effective_model=p.model,model_evidence='vendor_reported'
+ FROM model_profiles p WHERE p.tenant_id=a.tenant_id AND p.id=$2 AND a.id=$1 RETURNING a.model_profile_id::text`, b.AuthorRunID, authorProfile).Scan(&boundProfile); err != nil {
 			return err
+		}
+		if boundProfile != authorProfile {
+			t.Fatal("author run did not retain its explicit fixture pin")
 		}
 		return tx.QueryRow(t.Context(), `INSERT INTO routine_actions(tenant_id,run_id,action_key,kind,request_digest,target_node_id,target_revision) VALUES($1,$2,'evaluate','pr.open',$3,$4,1) RETURNING id::text`, p.TenantID, b.RunID, b.PayloadDigest, b.TargetID).Scan(&b.ActionID)
 	})
 	c := routineguard.Context{Checkpoint: "action", Action: b.Kind, Text: "Inspect assigned source", PayloadBytes: 100}
-	return &evaluationFixture{db: d, person: p, agent: agent, binding: b, context: c, in: in}
+	return &evaluationFixture{db: d, person: p, agent: agent, authorProfile: authorProfile, reviewerProfile: reviewerProfile, binding: b, context: c, in: in}
 }
 
 func (f *evaluationFixture) write(t *testing.T, fn func(pgx.Tx) error) error {
@@ -262,7 +278,7 @@ func (f *evaluationFixture) reviewer(t *testing.T, now time.Time) {
 	t.Helper()
 	f.in(func(tx pgx.Tx) error {
 		var profile, account string
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh' AND enabled`).Scan(&profile); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE id=$1 AND enabled`, f.reviewerProfile).Scan(&profile); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,allowed_model_profile_ids) VALUES($1,'evaluation-fixture','claude','fixture',$2,'Fixture reviewer',$3,true,'fixture',$4,ARRAY[$5::uuid]) RETURNING id::text`, f.person.TenantID, f.agent.ID, now, f.person.ID, profile).Scan(&account); err != nil {
@@ -455,10 +471,14 @@ func TestEvaluationVerifiedVerdictCannotBeShopped(t *testing.T) {
 func TestEvaluationAuthorMatchesPersistedActionAttempt(t *testing.T) {
 	f := newEvaluationFixture(t)
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	var codex, claude string
+	var codex string
+	claude := f.reviewerProfile
 	f.in(func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT (SELECT model_profile_id::text FROM agent_runs WHERE id=$1),(SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh')`, f.binding.AuthorRunID).Scan(&codex, &claude)
+		return tx.QueryRow(t.Context(), `SELECT model_profile_id::text FROM agent_runs WHERE id=$1`, f.binding.AuthorRunID).Scan(&codex)
 	})
+	if codex != f.authorProfile || codex == claude {
+		t.Fatal("author and reviewer fixture pins must remain distinct")
+	}
 	actual, actualAttempt := f.attempt(t, "AUTHOR-BUILDER", "build", codex, "", strings.Repeat("c", 64), map[string]any{})
 	unrelated, _ := f.attempt(t, "OTHER-LEAD", "lead", claude, "", strings.Repeat("d", 64), map[string]any{})
 	evaluator, evaluationAttempt := f.attempt(t, "OTHER-EVALUATOR", "evaluation", claude, "", strings.Repeat("e", 64), map[string]any{})

@@ -1074,8 +1074,8 @@
         "token_ceiling": "metadata"
       },
       "locator": {
-        "person_column": "owner_principal_id",
-        "tenant_column": "tenant_id"
+        "tenant_column": "tenant_id",
+        "person_column": "owner_principal_id"
       },
       "table": "routine_budget_balances"
     },
@@ -1106,8 +1106,8 @@
         "used_tokens": "personal"
       },
       "locator": {
-        "person_column": "owner_principal_id",
-        "tenant_column": "tenant_id"
+        "tenant_column": "tenant_id",
+        "person_column": "owner_principal_id"
       },
       "table": "routine_budget_grants"
     },
