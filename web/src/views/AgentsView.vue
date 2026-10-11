@@ -3,7 +3,7 @@
 import { tierEvidenceRefresh, type AgentEventIdentity } from '../lib/tierEvidenceLive'
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { can, myPermissions } from '../lib/authz'
+import { can, myPermissions, permissionsKnown } from '../lib/authz'
 import type { AttachQueueRow, AttachReview } from '../lib/attachWatch'
 import { pairingPermissions } from '../lib/agentPairing'
 import { message, subscribeAgents, type Approval, type SessionControl } from '../lib/agents'
@@ -147,10 +147,12 @@ watch([sessionId, () => agents.loaded, () => agents.historyState], ([id, loaded,
   else if (state === 'ready' && agents.historyMore) void agents.loadOlderHistory()
 }, { immediate: true })
 const writable = computed(() => can('harness.control'))
-const showCapacity = computed(() => agents.loaded)
+const showCapacity = computed(() => can('account.read'))
 
 // ---------- Accounts and computers: one computer-first panel (AEON-499) ----------
-const showSetup = computed(() => agents.loaded)
+// The capacity sources read independently of Sessions. Mount their reserved row
+// once access is known so a pending accounts read can show its loading skeleton.
+const showSetup = computed(() => permissionsKnown())
 const pageTitle = ref<HTMLElement>()
 const attachRows = ref<AttachQueueRow[]>([])
 const attachHistory = ref<AttachQueueRow[]>([])
@@ -429,8 +431,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       </FloatingPanel>
     </header>
 
-    <!-- The first load swaps the loading layout for the real one in one step, so the
-         page does not jump as each read lands. -->
+    <!-- Capacity keeps its own loading slots; Sessions admits its first bundle
+         after its metadata and permissions have settled. -->
     <div class="layout">
       <div class="main-col">
         <!-- The capacity row: what may run. The folded dial, then the accounts chip; it scrolls with the page. -->

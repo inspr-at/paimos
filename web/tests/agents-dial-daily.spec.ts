@@ -644,8 +644,11 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     const errors = watchErrors(page)
     const { backend } = await setup(page, { example: 'limit', dial: { selected: 'claude' } })
     await page.goto('/agents')
-    const card = dial(page), claude = detail(page, 'claude'), link = claude.locator('.cd-line').getByRole('link', { name: 'Settings › Models' })
+    // P1 separates the control from the unfolded card. AEON-1166 measures the
+    // detail's card, while dial() intentionally searches both regions.
+    const card = body(page), claude = detail(page, 'claude'), link = claude.locator('.cd-line').getByRole('link', { name: 'Settings › Models' })
     await expect(link).toBeVisible()
+    await expect(link).toHaveAttribute('href', '/settings/models')
     mkdirSync(d1Shots, { recursive: true })
     const bounds = (await card.boundingBox())!
     await page.setViewportSize({ width, height: Math.ceil(Math.max(1000, bounds.y + bounds.height + 100)) })
