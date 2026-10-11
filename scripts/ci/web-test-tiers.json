@@ -9312,6 +9312,8 @@
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"controls stay still while menus open, picks change, rows come and go and the scope switches (AEON-541)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/models-simple.spec.ts","name":"hovering a half-hidden option never scrolls the list under the pointer; keys still bring it into view (AEON-541)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"many models stay calm: one option per line, older versions fold per provider and are never picked","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"old links still land on the page: ?why=1 opens the trace, the full-screen board redirects","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

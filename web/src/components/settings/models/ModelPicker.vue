@@ -31,13 +31,15 @@ const flat = computed<Item[]>(() => groups.value.flatMap(group => [
 const effortOf = (entry: ModelEntry) => pending.value[entry.key] ?? (entry.line === props.row.line ? props.row.effort : nearestEffort(entry, props.row.effort, effortLevel(props.row.entry, props.row.effort)))
 const id = (key: string) => `pm-o-${key.replace(/[^a-z0-9]+/gi, '-')}`
 const activeItem = computed(() => flat.value.find(item => item.key === active.value) ?? flat.value[0] ?? null)
-watch(flat, () => { if (!flat.value.some(item => item.key === active.value)) active.value = (flat.value.find(item => item.key === props.row.line) ?? flat.value[0])?.key ?? '' }, { flush: 'sync' })
-watch(active, async () => { await nextTick(); list.value?.querySelector('.opt.on')?.scrollIntoView({ block: 'nearest' }) })
+// Keys and typing bring the active option into view; a hover never scrolls the list under the pointer (AEON-541).
+const reveal = () => void nextTick(() => list.value?.querySelector('.opt.on')?.scrollIntoView({ block: 'nearest' }))
+watch(flat, () => { if (!flat.value.some(item => item.key === active.value)) { active.value = (flat.value.find(item => item.key === props.row.line) ?? flat.value[0])?.key ?? ''; reveal() } }, { flush: 'sync' })
 
 function move(step: number) {
   if (!flat.value.length) return
   const index = flat.value.findIndex(item => item.key === activeItem.value?.key)
   active.value = flat.value[(index + step + flat.value.length) % flat.value.length]!.key
+  reveal()
 }
 function stepLevel(step: number) {
   const entry = activeItem.value?.entry
@@ -49,7 +51,7 @@ function stepLevel(step: number) {
 function showOlder(provider: string) {
   olderOpen.value = new Set([...olderOpen.value, provider])
   const first = groups.value.find(group => group.provider === provider)?.older[0]
-  if (first) active.value = first.key
+  if (first) { active.value = first.key; reveal() }
   live.value = `${groups.value.find(group => group.provider === provider)?.older.length ?? 0} older versions shown`
   // An opened fold may need more room than is left: the menu keeps its side and lets its list scroll, so the field stays put.
   void nextTick(() => emit('grew'))

@@ -338,6 +338,39 @@ test('a short menu low in the window keeps its side and its filter when older ve
   expect(state.problems).toEqual([])
 })
 
+test('hovering a half-hidden option never scrolls the list under the pointer; keys still bring it into view (AEON-541)', async ({ page }) => {
+  const state = await open(page, { many: true })
+  await pick(page, 'all').click()
+  const list = page.locator('.mdl-pop .pm-l')
+  // Scroll the list so the first option below the fold straddles its lower edge, then aim at the option's visible part.
+  const target = await list.evaluate(el => {
+    const box = el.getBoundingClientRect()
+    const option = [...el.querySelectorAll<HTMLElement>('.opt')].find(item => item.getBoundingClientRect().top >= box.bottom)
+    if (!option) return null
+    const rect = option.getBoundingClientRect()
+    el.scrollTop += rect.top + rect.height / 2 - box.bottom
+    const now = option.getBoundingClientRect()
+    return now.top < box.bottom && now.bottom > box.bottom ? { id: option.id, x: now.left + now.width / 3, y: (now.top + box.bottom) / 2 } : null
+  })
+  expect(target, 'an option straddles the list’s lower edge').not.toBeNull()
+  const frames = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+  await frames()
+  const before = await list.evaluate(el => el.scrollTop)
+  await page.mouse.move(target!.x, target!.y)
+  await expect(page.locator(`#${target!.id}`)).toHaveClass(/\bon\b/)
+  await frames()
+  expect(await list.evaluate(el => el.scrollTop), 'hover scrolled the list').toBe(before)
+  // The keyboard moves on and brings the next option fully into view.
+  await page.keyboard.press('ArrowDown')
+  await frames()
+  const shown = await page.locator('.mdl-pop .opt.on').evaluate(option => {
+    const box = option.closest('.pm-l')!.getBoundingClientRect(), rect = option.getBoundingClientRect()
+    return rect.top >= box.top - .5 && rect.bottom <= box.bottom + .5
+  })
+  expect(shown, 'the active option is in view after ArrowDown').toBe(true)
+  expect(state.problems).toEqual([])
+})
+
 test('many models stay calm: one option per line, older versions fold per provider and are never picked', async ({ page }) => {
   const state = await open(page, { many: true })
   await pick(page, 'all').click()
