@@ -33,6 +33,7 @@ func TestAccountUseSelectionCallSiteGuard(t *testing.T) {
 		"internal/modelregistry/preferences_write.go": 1,
 		// AEON-1158 removed the ladder re-pin; only the successor lookup remains.
 		"internal/modelregistry/refresh_successor.go": 1,
+		"internal/routineexec/dispatch.go":            1,
 		"internal/workqueue/route.go":                 1,
 	}
 	root := filepath.Join("..", "..")
@@ -88,6 +89,7 @@ func TestAccountUseSelectionCallSiteGuard(t *testing.T) {
 		"internal/modelregistry/daily.go":            {"ProjectDailySnapshot(", "allDenied[harness]"},
 		"internal/engineadmission/module.go":         {"ProjectDailySnapshot(", "allDenied[in.Harness]"},
 		"internal/harness/session_requests.go":       {"RequireProject("},
+		"internal/routineexec/dispatch.go":           {"aeon_account_use_allowed_for_project(", "accountuse.LockShared("},
 		"internal/workqueue/route.go":                {"aeon_account_use_allowed_for_project("},
 	} {
 		raw, err := os.ReadFile(filepath.Join(root, file))

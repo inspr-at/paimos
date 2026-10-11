@@ -1867,7 +1867,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </div>
 
       <template v-if="settingsActive">
-        <RecurringWorkCard :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" />
+        <RecurringWorkCard :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" :consent="route.query.consent === '1'" />
         <ProjectWorkContextCard :key="project.id" :project="{ id: project.id, title: project.title }" />
       </template>
       <DeliveryView v-else-if="deliveryActive" :key="`${project.id}/${me?.id ?? ''}`" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" />

@@ -211,7 +211,7 @@ func TestBPromotionWaitsForStartedWorkAndPreservesFailedClaims(t *testing.T) {
 	bFinish(t, f, started, now, "completed", 1)
 	// A real manual cap still blocks promotion after started work has left.
 	limitPath := "/api/agent-accounts/" + f.account.ID + "/limit"
-	callStatus(t, f.mod, &f.admin, "", "PUT", limitPath, `{"amount":1,"unit":"runs","period":"day"}`, 200, nil)
+	seedExistingLimit(t, f, 1, "runs", "day", nil)
 	code, response = call(t, f.mod, &f.runner, f.token, "POST", path, body)
 	if code != 409 || !strings.Contains(string(response), "reserved capacity is not eligible: allowance") {
 		t.Fatalf("manual cap did not fence promotion: %d %s", code, response)
