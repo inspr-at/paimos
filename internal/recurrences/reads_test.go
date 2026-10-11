@@ -30,12 +30,15 @@ func TestRoutineUIReadsScopeLatestRunAndDraftPolicy(t *testing.T) {
 		in.Definition = &d
 		item := f.create(in)
 		items[scope] = item
-		f.manual(item.ID, "first")
+		first := f.manual(item.ID, "first")
 		latest := f.manual(item.ID, "last")
-		if latest.Run == nil {
+		if first.Run == nil || latest.Run == nil {
 			t.Fatal("fixture lost latest run")
 		}
 		f.tx(func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `UPDATE routine_runs SET created_at=$2 WHERE id=$1`, first.Run.ID, f.now); err != nil {
+				return err
+			}
 			_, err := tx.Exec(t.Context(), `UPDATE routine_runs SET created_at=$2 WHERE id=$1`, latest.Run.ID, f.now.AddDate(0, 0, 1))
 			return err
 		})
@@ -68,15 +71,35 @@ func TestRoutineUIReadsScopeLatestRunAndDraftPolicy(t *testing.T) {
 	}
 	for scope, item := range items {
 		var saved, draft routineguard.Policy
-		json.Unmarshal(f.call(f.p, "GET", "/api/recurrences/"+item.ID+"/guardrails", nil, 200), &saved)
+		if err := json.Unmarshal(f.call(f.p, "GET", "/api/recurrences/"+item.ID+"/guardrails", nil, 200), &saved); err != nil {
+			t.Fatal(err)
+		}
 		query := "/api/routine-guardrails?scope=" + scope
 		if scope == "project" {
 			query += "&project_id=" + f.project
 		}
-		json.Unmarshal(f.call(f.p, "GET", query, nil, 200), &draft)
+		if err := json.Unmarshal(f.call(f.p, "GET", query, nil, 200), &draft); err != nil {
+			t.Fatal(err)
+		}
 		if !reflect.DeepEqual(saved, draft) {
 			t.Fatalf("draft differs from saved %s policy", scope)
 		}
+	}
+	run := f.get(item.ID).LastRun
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO routine_attempts(tenant_id,run_id,attempt_key,role,agent_run_id,assignment_digest,state,process_receipt)
+ SELECT tenant_id,id,'confirmed','build',agent_run_id,assignment_digest,'done','{"exit_confirmed":true,"exit_code":1}'::jsonb FROM routine_runs WHERE id=$1`, run.ID)
+		return err
+	})
+	if got := f.get(item.ID).LastRun; got.State != "failed" {
+		t.Fatal("failed exit shown successful", got)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE routine_attempts SET process_receipt='{"exit_confirmed":true,"exit_code":0}'::jsonb WHERE run_id=$1`, run.ID)
+		return err
+	})
+	if got := f.get(item.ID).LastRun; got.State != "done" || got.Reason != "" {
+		t.Fatal("confirmed exit not shown done", got)
 	}
 	raw := f.call(projectReader, "GET", "/api/routine-guardrails?scope=personal", nil, 200)
 	if strings.Contains(string(raw), "custom.personal") {
@@ -111,7 +134,9 @@ func TestRoutineUIReadsScopeLatestRunAndDraftPolicy(t *testing.T) {
 		Items []Recurrence `json:"items"`
 		Next  *string      `json:"next_cursor"`
 	}
-	json.Unmarshal(f.call(projectReader, "GET", "/api/recurrences", nil, 200), &page)
+	if err := json.Unmarshal(f.call(projectReader, "GET", "/api/recurrences", nil, 200), &page); err != nil {
+		t.Fatal(err)
+	}
 	if len(page.Items) != 100 || page.Next == nil {
 		t.Fatalf("unbounded recurrence page: %d %+v", len(page.Items), page.Next)
 	}
