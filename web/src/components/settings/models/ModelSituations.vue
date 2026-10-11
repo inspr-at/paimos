@@ -36,15 +36,17 @@ watch(open, value => {
 })
 
 // The limits come from Settings › Kinds of work, read once when the fold first opens.
-const limits = ref<SituationLimitsView | null>(null)
+const limits = ref<SituationLimitsView | null>(null), limitsPending = ref(true)
 let limitsRead: AbortController | undefined
 watch([open, () => props.actionKey], ([value]) => {
   if (!value || limits.value || limitsRead) return
   limitsRead = new AbortController()
   getSituationLimits(limitsRead.signal).then(result => {
     if (Number.isInteger(result?.small_hours) && Number.isInteger(result?.fix_rounds)) limits.value = { small_hours: result.small_hours, fix_rounds: result.fix_rounds }
-  }).catch(() => { limitsRead = undefined /* The hints name the situation in words instead. */ })
+  }).catch(() => { limitsRead = undefined /* The hints name the situation in words instead. */ }).finally(() => { limitsPending.value = false })
 }, { immediate: true })
+// Until the limits are read, the two hints that use them keep their line blank, so no word is swapped in later.
+const hint = (key: SituationKey) => limitsPending.value && !limits.value && (key === 'small' || key === 'stuck') ? '\u00a0' : situationHint(key, limits.value)
 onBeforeUnmount(() => { limitsRead?.abort(); clearTimeout(closing) })
 
 const label = (key: SituationKey) => SITUATIONS.find(item => item.key === key)!.label
@@ -137,7 +139,7 @@ async function choose(entry: ModelEntry, effort: string | null) {
           <template v-if="rows">
             <p class="sx-lead">A row can use another order when work is small, in fix rounds, or stuck, and prefer a reviewer. An empty cell uses the row.{{ editable ? '' : ' ' }}<b v-if="!editable">Change these under For everyone.</b></p>
             <div class="sx-t" role="group" aria-label="Kind of work by situation">
-              <div class="sx-r sx-h" aria-hidden="true"><span /><span v-for="item in SITUATIONS" :key="item.key" class="sx-c"><b>{{ item.label }}</b><small data-sx-hint>{{ situationHint(item.key, limits) }}</small></span></div>
+              <div class="sx-r sx-h" aria-hidden="true"><span /><span v-for="item in SITUATIONS" :key="item.key" class="sx-c"><b>{{ item.label }}</b><small data-sx-hint>{{ hint(item.key) }}</small></span></div>
               <div v-for="row in rows" :key="row.column" class="sx-r" :data-sx-row="row.column">
                 <span v-clip-tip class="sx-k">{{ row.label }}</span>
                 <template v-for="item in SITUATIONS" :key="item.key">

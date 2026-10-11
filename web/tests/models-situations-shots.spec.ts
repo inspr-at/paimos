@@ -10,6 +10,7 @@ async function show(page: Page, theme: string, scope: 'For everyone' | 'Just me'
   await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
   await page.getByRole('button', { name: scope }).click(); await page.locator('#sx-fold').click()
   await expect(page.locator('#sx-fold')).toHaveAttribute('aria-expanded', 'true')
+  await expect(page.locator('[data-sx-hint]').first()).toHaveText('2 h or less')
 }
 for (const size of [{ width: 1440, height: 1100 }, { width: 1024, height: 1000 }, { width: 390, height: 860 }]) test.describe(`at ${size.width}`, () => {
   test.use({ viewport: size, ...(size.width < 600 ? { hasTouch: true, isMobile: true } : {}) })
