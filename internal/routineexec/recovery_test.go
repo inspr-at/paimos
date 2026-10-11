@@ -2,7 +2,6 @@
 package routineexec
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -206,5 +205,44 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 	}
 	if count(`SELECT count(*) FROM routine_budget_grants WHERE run_id=$1`, f.run) != 1 || count(`SELECT count(*) FROM routine_attempts WHERE run_id=$1`, f.run) != 1 {
 		t.Fatal("recovery duplicated an attempt or charge")
+	}
+	for _, cause := range []string{"role_loss", "parent_project_move", "occurrence_project_move"} {
+		t.Run(cause, func(t *testing.T) {
+			d := setupDispatch(t)
+			f := d.fixture
+			if cause == "role_loss" {
+				f.exec(`UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$2 AND key='viewer') WHERE principal_id=$1 AND scope_type='workspace'`, f.owner.ID, f.owner.TenantID)
+			} else {
+				var project string
+				must(t, f.tx(func(tx pgx.Tx) error {
+					return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Moved target' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.owner.TenantID).Scan(&project)
+				}))
+				moved := f.parent
+				if cause == "occurrence_project_move" {
+					moved = f.work
+				}
+				f.exec(`UPDATE nodes SET parent_id=$2 WHERE id=$1`, moved, project)
+			}
+			ctx := db.AllProjects(t.Context(), "live ownership recovery fixture")
+			if cause == "occurrence_project_move" {
+				must(t, d.e.recoverRun(ctx, f.owner.TenantID, f.run))
+			} else {
+				// The final guard closes before the recovery worker records pause.
+				err := f.tx(func(tx pgx.Tx) error {
+					_, err := recurrences.RequireExecutionConsentTx(t.Context(), tx, f.owner.TenantID, f.routine.ID, f.routine.Revision, f.broker.Runtime)
+					return err
+				})
+				var refusal *workorders.Error
+				if !errors.As(err, &refusal) || refusal.Status != 409 || (refusal.Message != "output_project_changed" && refusal.Message != "owner_unavailable" && refusal.Message != "definition_unavailable") {
+					t.Fatalf("live final guard refused for wrong reason: %v", err)
+				}
+				must(t, d.e.recoverOwner(ctx, f.owner.TenantID, f.routine.ID))
+			}
+			var paused, consent bool
+			must(t, f.d.Admin.QueryRow(t.Context(), `SELECT r.paused,d.execute_consent FROM recurrences r JOIN recurrence_definitions d ON d.recurrence_id=r.id WHERE r.id=$1`, f.routine.ID).Scan(&paused, &consent))
+			if !paused || consent {
+				t.Fatal("live authority/target change failed to pause and revoke consent")
+			}
+		})
 	}
 }

@@ -60,8 +60,8 @@ func QueueRoutineStopTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, 
 		return nil
 	}
 	var matches bool
-	if err := tx.QueryRow(ctx, `SELECT CASE WHEN kind='lead' THEN binding#>>'{launch,grant,daemon_id}' ELSE binding->>'daemon_id' END=$2
-  AND CASE WHEN kind='lead' THEN binding#>>'{launch,grant,daemon_generation}' ELSE binding->>'daemon_generation' END=$3 FROM routine_launch_intents WHERE id=$1`, launch, ownership.DaemonID, ownership.Generation).Scan(&matches); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT coalesce(CASE WHEN kind='lead' THEN binding#>>'{launch,grant,daemon_id}' ELSE binding->>'daemon_id' END=$2
+  AND CASE WHEN kind='lead' THEN binding#>>'{launch,grant,daemon_generation}' ELSE binding->>'daemon_generation' END=$3,false) FROM routine_launch_intents WHERE id=$1`, launch, ownership.DaemonID, ownership.Generation).Scan(&matches); err != nil {
 		return err
 	}
 	if !matches {

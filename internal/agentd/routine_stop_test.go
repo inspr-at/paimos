@@ -77,6 +77,11 @@ func TestRoutineCooperativeStopExactIdentityAndUncertainReplay(t *testing.T) {
 		t.Fatalf("wrong process stop: %v count=%d", err, proc.stops)
 	}
 	req.ExpectedOwnership = &identity
+	proc.identity.Generation = "stale-child-generation"
+	if _, err := s.control(t.Context(), req, true); !errors.Is(err, ErrNotOwned) || proc.stops != 0 {
+		t.Fatalf("stale current identity stop: %v count=%d", err, proc.stops)
+	}
+	proc.identity = identity
 	if _, err := s.control(t.Context(), req, true); err == nil || proc.stops != 1 {
 		t.Fatalf("positive cooperative stop: %v count=%d", err, proc.stops)
 	}

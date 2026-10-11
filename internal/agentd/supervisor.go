@@ -2585,7 +2585,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		if !entry.managedPolicy && req.Operation != "tier" && !(req.Operation == "stop" && entry.record.RoutineWorkspace != nil) {
 			return Receipt{}, ErrUnsupported
 		}
-		if entry.budgetStopReason() != "" {
+		if entry.budgetStopReason() != "" && !(req.Operation == "stop" && entry.record.RoutineWorkspace != nil) {
 			return Receipt{}, ErrBudgetExhausted
 		}
 		if req.ExpectedOwnership == nil || req.ExpiresAt == nil {
@@ -2604,6 +2604,9 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		}
 		current, e := recovery.Ownership()
 		if e != nil || current.ProcessID != expected.ProcessID || current.RootPID != expected.RootPID || current.GroupID != expected.GroupID || !current.StartedAt.Equal(expected.StartedAt) {
+			return Receipt{}, ErrNotOwned
+		}
+		if req.Operation == "stop" && entry.record.RoutineWorkspace != nil && (current.DaemonID != expected.DaemonID || current.Generation != expected.Generation) {
 			return Receipt{}, ErrNotOwned
 		}
 	}

@@ -332,6 +332,10 @@ func (e *Executor) recoverRun(ctx context.Context, tid, id string) error {
     AND NOT EXISTS(SELECT 1 FROM harness_sessions h WHERE h.project_id=l.project_id AND h.agent_principal_id=l.worker_principal_id
      AND (l.kind='worker' AND h.run_id=l.agent_run_id OR l.kind='lead' AND h.id=aeon_uuid_or_null(l.binding#>>'{launch,session_id}'))
      AND h.management='managed' AND h.stopped_at IS NULL AND h.archived_at IS NULL AND h.process_ownership IS NOT NULL
+     AND coalesce(h.process_ownership->>'process_id','')<>''
+     AND coalesce(h.process_ownership->>'root_pid','0')<>'0' AND coalesce(h.process_ownership->>'group_id','0')<>'0'
+     AND h.process_ownership->>'daemon_id'=CASE WHEN l.kind='lead' THEN l.binding#>>'{launch,grant,daemon_id}' ELSE l.binding->>'daemon_id' END
+     AND h.process_ownership->>'generation'=CASE WHEN l.kind='lead' THEN l.binding#>>'{launch,grant,daemon_generation}' ELSE l.binding->>'daemon_generation' END
      AND h.heartbeat_at BETWEEN clock_timestamp()-interval '1 minute' AND clock_timestamp()))
    OR EXISTS(SELECT 1 FROM routine_budget_grants g JOIN routine_launch_intents l ON l.agent_run_id=g.agent_run_id
     WHERE g.run_id=$1 AND g.state<>'settled' AND l.exit_observed_at IS NOT NULL)
