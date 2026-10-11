@@ -98,7 +98,17 @@ function setQuery(value: string) {
 const readFacets = (): Facets => ({ project: parseFacet(route.query.project), harness: parseFacet(route.query.harness), computer: parseFacet(route.query.computer) })
 const facets = ref<Facets>(readFacets())
 const group = ref<GroupBy>(parseGroup(route.query.group))
+// The page's own address writes can overlap (quick Group by clicks); an older one landing late must not
+// put back an older choice, so the address is read again only when no write of ours is on its way.
+// Each write carries every list tool as it is now, so whichever write lands last is complete.
+let writing = 0
+async function writeQuery() {
+  writing++
+  const tools = { project: facetParam(facets.value.project), harness: facetParam(facets.value.harness), computer: facetParam(facets.value.computer), group: group.value === DEFAULT_GROUP ? undefined : group.value }
+  try { await router.replace({ query: { ...route.query, ...tools } }) } finally { writing-- }
+}
 watch(() => [route.query.project, route.query.harness, route.query.computer, route.query.group], () => {
+  if (writing) return
   const next = readFacets()
   if (!sameFacets(next, facets.value)) facets.value = next
   const grouped = parseGroup(route.query.group)
@@ -107,11 +117,11 @@ watch(() => [route.query.project, route.query.harness, route.query.computer, rou
 function setFacets(next: Facets) {
   const bounded = Object.fromEntries(FACET_KEYS.map(key => [key, parseFacet(facetParam(next[key]))])) as Facets
   facets.value = bounded
-  void router.replace({ query: { ...route.query, project: facetParam(bounded.project), harness: facetParam(bounded.harness), computer: facetParam(bounded.computer) } })
+  void writeQuery()
 }
 function setGroup(next: GroupBy) {
   group.value = next
-  void router.replace({ query: { ...route.query, group: next === DEFAULT_GROUP ? undefined : next } })
+  void writeQuery()
 }
 // Existing briefing/notification links retain the original source identity.
 watch(() => route.query.needs, value => {

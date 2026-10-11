@@ -218,6 +218,7 @@ test('Display › Group by harness, state or none; the address keeps it and Proj
   await page.screenshot({ path: info.outputPath('1440-light-group-state.png') })
   await options.nth(5).click()
   await expect(page.locator('.sessions .group-row.keyed')).toHaveCount(0)
+  await expect(page).toHaveURL(/group=none/)
   await page.keyboard.press('Escape')
   await page.reload()
   await expect(display).toContainText('no groups')
