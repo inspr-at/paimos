@@ -4,7 +4,11 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,12 +20,64 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestNewRejectsShortKey(t *testing.T) {
 	_, err := New(Config{SessionKey: []byte("short")}, nil)
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+// Risk: a shared authentication failure is invisible except for generic 500
+// access logs, while logging raw driver errors can disclose credentials (AEON-1228).
+func TestIncident1228MiddlewareRecordsFailureClass(t *testing.T) {
+	var logs bytes.Buffer
+	prior := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prior) })
+	for _, fixture := range []struct {
+		name, class string
+		err         error
+	}{
+		{"cancelled", "request_cancelled", fmt.Errorf("set tenant: %w", context.Canceled)},
+		{"deadline", "deadline_exceeded", fmt.Errorf("bootstrap: %w", context.DeadlineExceeded)},
+		{"closed", "connection_closed", fmt.Errorf("begin: %w", pgconn.ErrConnClosed)},
+		{"database", "postgres_error", &pgconn.PgError{Code: "57014", Message: "private-fixture-value", Detail: "private-fixture-value"}},
+		{"unknown", "unknown", errors.New("private-fixture-value")},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			logs.Reset()
+			mod, err := New(Config{SessionKey: bytes.Repeat([]byte{1}, 32)}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mod.inTenant = func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error {
+				return fixture.err
+			}
+			req := httptest.NewRequest(http.MethodGet, "/api/me?private-fixture-value", nil)
+			req.Pattern = "GET /api/me"
+			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: strings.Repeat("0", 64)})
+			rec := httptest.NewRecorder()
+			mod.Middleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Error("failed authentication reached handler")
+			})).ServeHTTP(rec, req)
+			if rec.Code != http.StatusInternalServerError || strings.TrimSpace(rec.Body.String()) != `{"error":"internal"}` {
+				t.Fatalf("unexpected response: status %d", rec.Code)
+			}
+			if !strings.Contains(logs.String(), `"failure_class":"`+fixture.class+`"`) || !strings.Contains(logs.String(), `"operation":"authenticate"`) {
+				t.Fatalf("authentication failure class was not logged: %s", logs.String())
+			}
+			if strings.Contains(logs.String(), "private-fixture-value") || strings.Contains(logs.String(), req.Cookies()[0].Value) {
+				t.Fatal("diagnostic log disclosed raw error, query or cookie")
+			}
+			if fixture.name == "database" && !strings.Contains(logs.String(), `"sqlstate":"57014"`) {
+				t.Fatal("diagnostic log lost SQLSTATE")
+			}
+		})
 	}
 }
 

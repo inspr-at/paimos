@@ -3576,6 +3576,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestImportedSignInHintRequiresVerifiedTenantEmail","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestIncident1228MiddlewareRecordsFailureClass","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestInstructionProvenanceQueryScopeAtMiddleware","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestInviteAcceptanceRequiresVerifiedMatchingEmail","tier":"ESSENTIAL"}
