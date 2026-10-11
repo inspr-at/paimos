@@ -1270,6 +1270,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCaptureDoesNotHoldDispatchBudget","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestCatalogCaptureLoopDoesNotHoldDispatchOrHealthPolling","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestCatalogPollServicesIdleAccountsAndKeepsQualification","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestChatCapabilitiesHonorOwnedSessionControls","tier":"ESSENTIAL"}
@@ -3493,6 +3495,8 @@
     {"kind":"go","package":"internal/auth","name":"TestFromEnv","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestFullAccessLiveCatalogAndBoundaries","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestHarnessProbeRoutesThroughPairedRuntimeMiddleware","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestHasScopeAcceptsDotAndColon","tier":"GATED-FULL"}
     ,
@@ -7171,6 +7175,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCommandTemplates","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCursorHarnessProbeReusesRecordedLaunchIdentity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait","tier":"ESSENTIAL"}
     ,
