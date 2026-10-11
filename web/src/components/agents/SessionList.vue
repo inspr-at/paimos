@@ -195,9 +195,11 @@ const sections = computed<Section[]>(() => {
 })
 const hasLines = computed(() => sections.value.some(section => !!section.line))
 // A lead without a session here speaks through its project's lead state (AEON-741's words).
-const PENDING_STATE: Record<ProjectLead['state'], AgentState> = { none: 'idle', starting: 'working', working: 'working', waiting_for_room: 'throttled', paused: 'paused', cannot_start: 'problem' }
+// An intent without a running session never looks like a running process (audit AEON-1218 G2).
+const PENDING_STATE: Record<ProjectLead['state'], AgentState> = { none: 'idle', starting: 'awaiting', working: 'working', waiting_for_room: 'throttled', paused: 'paused', cannot_start: 'problem' }
 const PENDING_WORD: Record<ProjectLead['state'], string> = { none: 'None', starting: 'Starting', working: 'Working', waiting_for_room: 'Waiting', paused: 'Paused', cannot_start: 'Can’t start' }
-const pendingState = (lead: ProjectLead) => PENDING_STATE[lead.state]
+const pendingState = (lead: ProjectLead) => lead.state === 'working' && !(lead.session_id && lead.process_active) ? 'awaiting' : PENDING_STATE[lead.state]
+const pendingBusy = (lead: ProjectLead) => !!lead.session_id && lead.process_active
 const pendingWord = (lead: ProjectLead) => PENDING_WORD[lead.state]
 const pendingBand = (lead: ProjectLead, project: ProjectRef) => leadBand(lead, project.key, queuedOf(project.id))
 function openPending(event: MouseEvent, project: ProjectRef) {
@@ -826,7 +828,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
           <span role="gridcell" class="c-agent">
             <span class="tree-fold-space" aria-hidden="true" />
             <button type="button" class="agent-link lead-open" :aria-label="`${pendingBand(section.line.lead, section.project).title}, ${pendingWord(section.line.lead)}, lead. ${pendingBand(section.line.lead, section.project).status}. Open the ${LEAD_WORDS.l} panel`" @click.stop="openPending($event, section.project)">
-              <span class="bot pending-bot"><LeadBot :busy="pendingBand(section.line.lead, section.project).busy" small /></span>
+              <span class="bot pending-bot"><LeadBot :busy="pendingBusy(section.line.lead)" small /></span>
               <span class="who">
                 <span class="result">{{ pendingBand(section.line.lead, section.project).title }}</span>
                 <span class="session-context"><span class="session-name">{{ section.project.title || section.project.key }}</span><span class="role">Lead</span></span>

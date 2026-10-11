@@ -15,13 +15,17 @@ import type { ProjectLead } from '../src/lib/lead'
 
 const sid = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
 const LEAD = sid(1)
-async function setup(page: Page, options: { folded?: string[]; workers?: number } = {}) {
+async function setup(page: Page, options: { folded?: string[]; workers?: number; german?: boolean } = {}) {
   await page.clock.setSystemTime(NOW)
   const work = fixtures()
   // WEB has queued work and no lead; AEON first in the person's own project order.
   work.projects.push({ id: 'p-web', key: 'PRJ-40', title: 'Website', state: 'active', classic: 'WEB', description: '', last: new Date(NOW).toISOString() })
   work.preferences['projects:order'] = { ids: ['p-aeon'] }
   work.preferences['ui.agents.sections'] = { dial: false }
+  if (options.german) {
+    const frozen = work.projects.find(p => p.id === 'p-frozen')!
+    frozen.title = 'Studio-Infrastruktur für Datenbankänderungen und Wiederherstellungsprüfungen der Kundenportale'
+  }
   if (options.folded) work.preferences['agents:layout'] = { folded_projects: options.folded }
   const calls = await mockWork(page, work, { admin: true })
   const data = agentData({ me: me.id, now: NOW, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
@@ -29,6 +33,7 @@ async function setup(page: Page, options: { folded?: string[]; workers?: number 
   for (const session of data.sessions) if ([2, 5].includes(Number(session.id.slice(-2)))) (session as { parent_harness_session_id: string | null }).parent_harness_session_id = LEAD
   const base = data.sessions[1]!
   for (let i = 0; i < (options.workers ?? 0); i++) data.sessions.push({ ...base, id: `5e100000-0000-4000-8000-${String(i).padStart(12, '0')}`, display_label: `Long list worker w${i + 1}x`, parent_harness_session_id: LEAD as unknown as null })
+  if (options.german) Object.assign(data.sessions[0]!, { brief: 'Datenbankänderungen prüfen und die Wiederherstellungsprüfung für alle Kundenportale abschließen', display_label: 'Projektverantwortlicher Wiederherstellung' })
   const capacity = capacityWorld()
   data.accounts = (capacity.accounts as unknown as typeof data.accounts).filter(a => ['codex', 'claude', 'cursor'].includes(a.harness)).map(a => ({ ...a, registered_by_principal_id: me.id }))
   await mockAgents(page, data, { capacity })
@@ -291,6 +296,25 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await gate('folded')
   })
 }
+
+// Long German names (Markus's real projects are often German): titles clip on one line with the full
+// text on hover, group names wrap, and nothing scrolls sideways.
+for (const width of [390, 1024, 1440]) test(`${width}: long German names stay readable and never widen the page`, async ({ page }, info) => {
+  await page.setViewportSize({ width, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await setup(page, { german: true })
+  await page.goto('/agents')
+  await expect(leadRow(page)).toBeVisible()
+  const title = leadRow(page).locator('.result')
+  await expect(title).toHaveAttribute('title', /Wiederherstellungsprüfung für alle Kundenportale abschließen/)
+  await expect(page.locator('.sessions .grp[aria-label^="PRJ-26 · Studio-Infrastruktur"] .group-row')).toContainText('Kundenportale')
+  const wide = await page.evaluate(() => { const m = document.querySelector('main')!; return Math.max(document.documentElement.scrollWidth - innerWidth, m.scrollWidth - m.clientWidth) })
+  expect(wide).toBeLessThanOrEqual(0.5)
+  // The queue chip and the row's actions stay inside the row.
+  const inside = await leadRow(page).evaluate(row => { const r = row.getBoundingClientRect(); return [...row.querySelectorAll<HTMLElement>('.qchip, .c-actions button')].filter(el => el.getClientRects().length).every(el => { const b = el.getBoundingClientRect(); return b.left >= r.left - 0.5 && b.right <= r.right + 0.5 }) })
+  expect(inside).toBe(true)
+  await page.screenshot({ path: info.outputPath(`${width}-light-german.png`) })
+})
 
 test.describe('phone', () => {
   test.use({ viewport: { width: 390, height: 900 }, hasTouch: true, isMobile: true })
