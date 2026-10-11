@@ -176,7 +176,7 @@ func derivedRoleStepsIn(ctx context.Context, tx pgx.Tx, c boardCatalog, person *
 		if slices.Contains(d.Not, order.Line) && order.Stage != "quick" {
 			continue
 		}
-		for _, profile := range modelsRouteCandidates(c.profiles[order.Line], order.Effort, order.Level, q.Review) {
+		for _, profile := range modelsWalkCandidates(c.profiles[order.Line], order.Effort, order.Level, q.Review) {
 			if seen[profile.ID] || q.Review && (!qualifiedReviewProfile(profile) || role == "review-gate-security" && profile.Family == "anthropic") {
 				continue
 			}
