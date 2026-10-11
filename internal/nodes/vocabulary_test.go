@@ -32,14 +32,15 @@ func TestWorkName(t *testing.T) {
 func TestWorkVocabularyRoundTripAndShape(t *testing.T) {
 	p := newPrincipal(t, "vocabulary")
 	status, body := call(t, &p, "GET", "/api/settings/work-vocabulary", "")
+	// AEON-1142: a new workspace starts with Epic / Ticket / Task (migration 1332).
 	initial := decode[workVocabulary](t, status, body, 200)
-	if initial.Revision != 0 || len(initial.Levels) != 0 {
+	if initial.Revision != 1 || initial.Leaf != (workLevel{"Task", "task"}) || len(initial.Levels) != 2 || initial.Levels[0] != (workLevel{"Epic", "layers"}) || initial.Levels[1] != (workLevel{"Ticket", "ticket"}) {
 		t.Fatalf("defaults %+v", initial)
 	}
-	in := `{"revision":0,"leaf":{"name":"Schritt mit ausführlicher Beschreibung","icon":"check"},"levels":[{"name":"Vorhaben","icon":"tree"}]}`
+	in := `{"revision":1,"leaf":{"name":"Schritt mit ausführlicher Beschreibung","icon":"check"},"levels":[{"name":"Vorhaben","icon":"folder-kanban"}]}`
 	status, body = call(t, &p, "PUT", "/api/settings/work-vocabulary", in)
 	saved := decode[workVocabulary](t, status, body, 200)
-	if saved.Revision != 1 || saved.Levels[0].Name != "Vorhaben" {
+	if saved.Revision != 2 || saved.Levels[0].Name != "Vorhaben" {
 		t.Fatalf("saved %+v", saved)
 	}
 	status, body = call(t, &p, "PUT", "/api/settings/work-vocabulary", in)
@@ -52,10 +53,10 @@ func TestWorkVocabularyRoundTripAndShape(t *testing.T) {
 	}
 	other := addPrincipal(t, "other-vocabulary")
 	status, body = call(t, &other, "GET", "/api/settings/work-vocabulary", "")
-	if decode[workVocabulary](t, status, body, 200).Revision != 0 {
+	if got := decode[workVocabulary](t, status, body, 200); got.Revision != 1 || got.Leaf.Name != "Task" {
 		t.Fatal("tenant vocabulary leaked")
 	}
-	for _, bad := range []string{in + ` {}`, strings.Replace(in, `"revision":0`, `"revision":1,"unexpected":1`, 1), strings.Repeat("x", 8193), `{"levels":[]}`, `{"revision":1,"leaf":{"name":""},"levels":[]}`, `{"revision":1,"leaf":{"name":"","icon":""},"levels":[{}]}`} {
+	for _, bad := range []string{in + ` {}`, strings.Replace(in, `"revision":1`, `"revision":2,"unexpected":1`, 1), strings.Repeat("x", 8193), `{"levels":[]}`, `{"revision":1,"leaf":{"name":""},"levels":[]}`, `{"revision":1,"leaf":{"name":"","icon":""},"levels":[{}]}`} {
 		if status, _ = call(t, &p, "PUT", "/api/settings/work-vocabulary", bad); status != 400 {
 			t.Fatalf("invalid body %d", status)
 		}
@@ -70,7 +71,7 @@ func TestWorkVocabularyRoundTripAndShape(t *testing.T) {
 	enableWorkStatusTest(t, p)
 	parent := currentWorkTest(t, p, root.ID)
 	leaf := currentWorkTest(t, p, child.ID)
-	if parent.IsLeaf || parent.WorkChildrenCount != 1 || !parent.StatusDerived || parent.LevelName != "Vorhaben" || parent.LevelIcon != "tree" {
+	if parent.IsLeaf || parent.WorkChildrenCount != 1 || !parent.StatusDerived || parent.LevelName != "Vorhaben" || parent.LevelIcon != "folder-kanban" {
 		t.Fatalf("parent %+v", parent.WorkShape)
 	}
 	if !leaf.IsLeaf || leaf.Depth != 2 || leaf.LevelName != saved.Leaf.Name {
@@ -114,7 +115,7 @@ func TestWorkVocabularyRoundTripAndShape(t *testing.T) {
 		t.Fatalf("write shape %+v", got)
 	}
 	managerless := insertPerson(t, p.TenantID, "Reader")
-	if status, body = call(t, &managerless, "PUT", "/api/settings/work-vocabulary", strings.Replace(in, `"revision":0`, `"revision":1`, 1)); status != 403 || !strings.Contains(string(body), "permission denied") {
+	if status, body = call(t, &managerless, "PUT", "/api/settings/work-vocabulary", strings.Replace(in, `"revision":1`, `"revision":2`, 1)); status != 403 || !strings.Contains(string(body), "permission denied") {
 		t.Fatalf("unprivileged write %d %s", status, body)
 	}
 	status, body = call(t, &p, "GET", "/api/nodes?kind=work,!ticket", "")
@@ -166,27 +167,27 @@ func TestWorkShapeFilterBounds(t *testing.T) {
 // does not know them (older clients, the Work vocabulary card) wipes them.
 func TestWorkVocabularyLeadNamesSurviveLeadlessWrites(t *testing.T) {
 	p := newPrincipal(t, "vocabulary-lead")
-	named := `{"revision":0,"leaf":{"name":"","icon":""},"levels":[],"lead":{"singular":"Dirigent","plural":"Dirigenten"}}`
+	named := `{"revision":1,"leaf":{"name":"","icon":""},"levels":[],"lead":{"singular":"Dirigent","plural":"Dirigenten"}}`
 	status, body := call(t, &p, "PUT", "/api/settings/work-vocabulary", named)
 	if saved := decode[workVocabulary](t, status, body, 200); saved.Lead == nil || saved.Lead.Singular != "Dirigent" || saved.Lead.Plural != "Dirigenten" {
 		t.Fatalf("saved %s", body)
 	}
-	status, body = call(t, &p, "PUT", "/api/settings/work-vocabulary", `{"revision":1,"leaf":{"name":"Schritt","icon":""},"levels":[]}`)
+	status, body = call(t, &p, "PUT", "/api/settings/work-vocabulary", `{"revision":2,"leaf":{"name":"Schritt","icon":""},"levels":[]}`)
 	if kept := decode[workVocabulary](t, status, body, 200); kept.Leaf.Name != "Schritt" || kept.Lead == nil || kept.Lead.Plural != "Dirigenten" {
 		t.Fatalf("leadless write dropped the names: %s", body)
 	}
 	status, body = call(t, &p, "GET", "/api/settings/work-vocabulary", "")
-	if read := decode[workVocabulary](t, status, body, 200); read.Revision != 2 || read.Lead == nil || read.Lead.Singular != "Dirigent" {
+	if read := decode[workVocabulary](t, status, body, 200); read.Revision != 3 || read.Lead == nil || read.Lead.Singular != "Dirigent" {
 		t.Fatalf("read %s", body)
 	}
 	for _, bad := range []string{`{"singular":" Lead","plural":""}`, `{"singular":"` + strings.Repeat("ö", 41) + `","plural":""}`, `{"singular":"A\tB","plural":""}`, `{"singular":"Lead"}`, `{"singular":"Lead","plural":"","extra":1}`} {
-		in := `{"revision":2,"leaf":{"name":"Schritt","icon":""},"levels":[],"lead":` + bad + `}`
+		in := `{"revision":3,"leaf":{"name":"Schritt","icon":""},"levels":[],"lead":` + bad + `}`
 		if status, body = call(t, &p, "PUT", "/api/settings/work-vocabulary", in); status != 400 {
 			t.Fatalf("accepted lead %s: %d %s", bad, status, body)
 		}
 	}
 	// Blank names clear back to the defaults: the field is absent again.
-	status, body = call(t, &p, "PUT", "/api/settings/work-vocabulary", `{"revision":2,"leaf":{"name":"Schritt","icon":""},"levels":[],"lead":{"singular":"","plural":""}}`)
+	status, body = call(t, &p, "PUT", "/api/settings/work-vocabulary", `{"revision":3,"leaf":{"name":"Schritt","icon":""},"levels":[],"lead":{"singular":"","plural":""}}`)
 	if cleared := decode[workVocabulary](t, status, body, 200); cleared.Lead != nil || strings.Contains(string(body), `"lead"`) {
 		t.Fatalf("cleared %s", body)
 	}
