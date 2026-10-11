@@ -44,6 +44,10 @@ func (c *probeCapture) Write(p []byte) (int, error) {
 // bounded output, so a clear "signed out" answer can be told apart from a probe
 // that could not run (missing binary, timeout, oversized or ambiguous output).
 func probeRun(ctx context.Context, path string, env []string, args ...string) ([]byte, int, error) {
+	return probeRunWith(ctx, path, env, args, ownedprocess.Run)
+}
+
+func probeRunWith(ctx context.Context, path string, env, args []string, run func(context.Context, *exec.Cmd) error) ([]byte, int, error) {
 	path, err := pinnedExecutable(path)
 	if err != nil {
 		return nil, 0, err
@@ -58,7 +62,7 @@ func probeRun(ctx context.Context, path string, env []string, args ...string) ([
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	code := 0
-	err = ownedprocess.Run(op, cmd)
+	err = run(op, cmd)
 	// Oversized output is unavailable whatever the exit: its kept prefix is not
 	// the whole answer and must never be parsed.
 	if stdout.overflow || stderr.overflow {
@@ -69,7 +73,9 @@ func probeRun(ctx context.Context, path string, env []string, args ...string) ([
 		if errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) || !errors.As(err, &exit) || op.Err() != nil || exit.ExitCode() < 0 {
 			// AEON-341: a launcher that cannot run or never answers failed to
 			// start; callers without start semantics still read it as unavailable.
-			return nil, 0, errors.Join(harnesslaunch.ErrStart, op.Err())
+			// The vendor command's own deadline is an account failure. Only
+			// cancellation of the caller may cancel polling for sibling harnesses.
+			return nil, 0, errors.Join(harnesslaunch.ErrStart, ctx.Err())
 		}
 		code = exit.ExitCode()
 		if code == 126 || code == 127 {

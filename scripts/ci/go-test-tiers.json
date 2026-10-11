@@ -1776,6 +1776,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestProbeDiagnosticReachesLifecycleJSONAndClearsOnRecovery","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestProbeFailureMatrixKeepsSiblingDispatchAndRecovers","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestProbeStartupFailureIsNotLoginRequired","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestProbeStatusOutputCap","tier":"GATED-FULL"}
@@ -1879,6 +1881,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestRoutineContinuationRetainsOriginalCheckout","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineCooperativeStopExactIdentityAndUncertainReplay","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineDispatchIsolatesFailedHarnessProbe","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineProviderBudgetBeforeCallsAndSettlement","tier":"ESSENTIAL"}
     ,
@@ -2111,6 +2115,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestUnsupportedVerificationPollProbesWithoutLaunching","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestUsageProbeOptInAndCooldownSurviveRestart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestVendorProbeDeadlineCannotCancelSiblingPolling","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestVerificationFailedProbeRetainsQueuedRunWithoutVendorLaunch","tier":"ESSENTIAL"}
     ,
@@ -6405,6 +6411,10 @@
     {"kind":"go","package":"internal/harness","name":"TestProvenanceVisibilityIdempotencyAndTamper","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestQAAndBlockedSessionRegistrationPreserveWorkStartBaseline","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestQueuedAgentDiagnosisReportsDispatchBlockerWithoutRecoveryAuthority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestQueuedAgentDiagnosisUsesOnlyItsRunAccountAndFreshPairedHost","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestQuickPauseWaitsForUninterruptibleCommand","tier":"GATED-FULL"}
     ,

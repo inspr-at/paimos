@@ -18,6 +18,9 @@ func TestCoordinatorLargeHandover(t *testing.T) {
 		{"registration", 1001}, {"resume", 1001},
 	} {
 		t.Run(fmt.Sprintf("%s/%d", tc.mode, tc.children), func(t *testing.T) {
+			// Each case owns its database and mux; keep the matrix bounded by
+			// the runner's -parallel setting without sharing lifecycle state.
+			t.Parallel()
 			mode, children := tc.mode, tc.children
 			f := fixtureWithKind(t, nil, "work")
 			base := "/api/projects/" + f.project + "/harness-sessions"
