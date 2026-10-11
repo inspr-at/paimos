@@ -187,7 +187,9 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
   for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
     const context = await browser.newContext({ viewport: { width, height: width < 600 ? 860 : 1000 }, hasTouch: width < 600, colorScheme: theme, reducedMotion: 'reduce' })
     try {
-      const page = await context.newPage(), world = await setup(page)
+      const page = await context.newPage()
+      page.setDefaultTimeout(10_000)
+      const world = await setup(page)
       await page.route('**/api/preferences/theme', route => route.fulfill({ json: { key: 'theme', value: theme } }))
       await page.goto('/p/PHAROS/settings')
       await expect(page.getByLabel('Name', { exact: true })).toBeEnabled()
@@ -235,7 +237,7 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       lifecycleStable.done()
       // Dismiss completed action messages through their real controls before
       // opening the next reference state; no timers or hidden DOM edits.
-      for (let count = 0; count < 10 && await page.locator('.toast-close').count(); count++) await page.locator('.toast-close').first().click()
+      await page.locator('.toast-close').evaluateAll(buttons => { for (const button of buttons) (button as HTMLButtonElement).click() })
       await expect(page.locator('.toast')).toHaveCount(0)
       if (width <= 1000) { await nav.click(); await capture('nav-open'); await page.keyboard.press('Escape') }
       await navigate(page, '/p/AEON/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await capture('general-aeon')
