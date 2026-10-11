@@ -206,7 +206,7 @@ defineExpose({ reveal })
         <div class="rib-bar">
           <template v-if="ribbon.span">
             <span class="night" :class="{ off: !ribbon.nights }" :style="{ width: at24(ribbon.span.start) }"><AppIcon name="moon" :size="12" /><span class="lg">{{ ribbon.nights ? 'agents at night' : 'off' }}</span></span>
-            <span class="day" :style="{ width: at24(ribbon.span.end - ribbon.span.start) }"><AppIcon name="sun" :size="12" />your hours<span class="lg"> · agents work alongside you</span><template v-if="ribbon.keep"><span class="lg"> and</span> leave you {{ ribbon.keep }}</template></span>
+            <span class="day" :style="{ width: at24(ribbon.span.end - ribbon.span.start) }"><AppIcon name="sun" :size="12" /><span class="rt">your hours<span class="lg"> · agents work alongside you</span><template v-if="ribbon.keep"><span class="lg"> and</span> leave you {{ ribbon.keep }}</template></span></span>
             <span class="night" :class="{ off: !ribbon.nights }" :style="{ width: at24(24 - ribbon.span.end) }"><AppIcon name="moon" :size="12" /><span class="lg">{{ ribbon.nights ? 'night' : 'off' }}</span></span>
           </template>
           <span v-else class="night" :class="{ off: !ribbon.nights }" style="width: 100%"><AppIcon name="moon" :size="12" />{{ ribbon.nights ? 'no work days · agents at night' : 'no work days' }}</span>
@@ -295,6 +295,7 @@ defineExpose({ reveal })
 .rib-bar .night.off { background: repeating-linear-gradient(90deg, var(--line) 0 3px, transparent 3px 7px); color: var(--ink-3); font-weight: 500; }
 .rib-bar .day { background: color-mix(in srgb, var(--teal) 14%, transparent); color: var(--teal-ink); }
 .rib-bar svg { flex: none; }
+.rib-bar .rt { min-width: 0; overflow: hidden; }
 .rib-now { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; }
 .rib-now::before, .rib-now::after { content: ''; position: absolute; left: 0; width: 2px; height: 6px; border-radius: 1px; background: var(--ink); }
 .rib-now::before { top: 0; }
