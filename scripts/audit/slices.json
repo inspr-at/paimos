@@ -379,7 +379,10 @@
         "web/src/components/settings/models/ModelOutdatedSheet.vue",
         "web/src/components/settings/ProjectSettings.vue",
         "web/src/components/settings/ProjectGeneralSettings.vue",
-        "web/src/components/settings/ProjectSettingsExplainer.vue"
+        "web/src/components/settings/ProjectSettingsExplainer.vue",
+        "web/src/components/settings/ProjectAdvancedSettings.vue",
+        "web/src/components/settings/ProjectSettingsSheet.vue",
+        "web/src/components/projects/NewProjectSheet.vue"
       ]
     },
     {
@@ -404,7 +407,8 @@
         "web/src/lib/projectSettings.ts",
         "web/src/lib/projectSettingsExplainers.ts",
         "web/tests/project-settings.spec.ts",
-        "web/tests/project-settings-acceptance.mjs"
+        "web/tests/project-settings-acceptance.mjs",
+        "web/src/lib/projectAdvanced.ts"
       ],
       "exclude": [
         "web/src/views/**",

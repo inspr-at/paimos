@@ -113,6 +113,16 @@ export const useProjects = defineStore('projects', () => {
     })
   }
 
+  // Only a confirmed project creation supplies this empty summary. The next
+  // server read replaces it; no sample counts are used for existing projects.
+  function addCreatedProject(node: WorkNode): void {
+    if (!summaries.value.some(project => project.id === node.id)) summaries.value = [...summaries.value, {
+      id: node.id, key: node.key, title: node.title, state: node.state,
+      open: 0, in_progress: 0, done: 0, total: 0, people: [], last_activity: node.updated_at,
+    }]
+    applyNode(node)
+  }
+
   // Archives or restores a project (its node state). The summary shows the new
   // state at once; a failure puts the old one back and rethrows.
   async function setState(id: string, state: string): Promise<void> {
@@ -131,5 +141,5 @@ export const useProjects = defineStore('projects', () => {
     }
   }
 
-  return { projects, loaded, loading, error, load, byRouteKey, byId, setState, applyNode }
+  return { projects, loaded, loading, error, load, byRouteKey, byId, setState, applyNode, addCreatedProject }
 })

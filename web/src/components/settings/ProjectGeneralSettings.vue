@@ -1,13 +1,13 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { APIError, assignProjectGroup, getNode, getProjectGroups, listNodes, undoGroupEvent, updateNode, type NodePatch, type SharedProjectGroup, type WorkNode } from '../../lib/api'
 import { can, myProjectRole, myWorkspaceRole } from '../../lib/authz'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { toast } from '../../lib/toast'
 import { compareRevision } from '../../lib/liveUpdates'
-import { useProjectSettingsOverlay } from '../../lib/projectSettings'
+import { projectSettingsPath, useProjectSettingsOverlay } from '../../lib/projectSettings'
 import { claimSettingsPopover } from '../../lib/settingsOverlays'
 import { useProjects, type Project } from '../../stores/projects'
 import { useProjectGroups } from '../../stores/projectGroups'
@@ -18,7 +18,9 @@ import SettingsCard from './SettingsCard.vue'
 import ProjectSettingsExplainer from './ProjectSettingsExplainer.vue'
 
 const props = defineProps<{ project: Project }>()
-const route = useRoute(), projects = useProjects(), projectGroups = useProjectGroups()
+const route = useRoute(), router = useRouter(), projects = useProjects(), projectGroups = useProjectGroups()
+const nextStep = computed(() => route.query.new === props.project.id)
+function hideNext() { const { new: _new, group_assignment_failed: _failed, ...query } = route.query; void router.replace({ query }) }
 const scope = useIdentityScope(() => can('nodes.read', props.project.id)), reads = scope.lane(), groupReads = scope.lane(), ticketReads = scope.lane()
 const node = ref<WorkNode | null>(null), name = ref(props.project.title), description = ref('')
 const ticketKey = ref(''), ticketError = ref('')
@@ -182,6 +184,7 @@ onBeforeUnmount(() => close(false))
 </script>
 
 <template>
+  <section v-if="nextStep" class="next" aria-label="Next step"><span class="next-ic"><AppIcon name="sparkle" :size="16" /></span><div class="next-t"><b>{{ project.title }} is ready.</b><p>Next: link its GitHub repository, so Delivery can count pull requests, CI runs and merges.</p><p v-if="route.query.group_assignment_failed === '1'" class="error">The selected group was not assigned. Choose it below.</p></div><RouterLink class="btn sm primary" :to="{ path: projectSettingsPath(project.routeKey, 'delivery'), query: { link: '1' }, hash: '#repository' }">Next: link a repository <AppIcon name="chevron-right" :size="13" /></RouterLink><button type="button" class="icon-btn sm" aria-label="Hide this step" @click="hideNext"><AppIcon name="close" :size="14" /></button></section>
   <SettingsCard title="Project" icon="folder" anchor="project-general" variant="project">
     <p v-if="!writable" class="ro-note"><AppIcon name="lock" :size="14" /><span>Project admins and maintainers change the name and description.</span></p>
     <div class="frows">
@@ -222,6 +225,7 @@ onBeforeUnmount(() => close(false))
 </template>
 
 <style scoped>
+.next { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto auto; align-items: center; column-gap: 14px; padding: 14px 12px 14px 16px; border-radius: var(--radius); background: color-mix(in srgb, var(--teal) 7%, var(--surface-raised)); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }.next-ic { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }.next-t { min-width: 0; }.next-t b { font-size: 14px; font-weight: 650; color: var(--ink); }.next-t p { margin-top: 2px; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .frows, .life { border-top: 1px solid var(--line); }
 .frow { display: grid; grid-template-columns: 210px minmax(0, 1fr); align-items: center; column-gap: 24px; min-height: 66px; padding: 12px 2px; border-bottom: 1px solid var(--line); }
 .frow:last-child, .life-r:last-child { border-bottom: 0; }
@@ -258,6 +262,7 @@ form { min-width: 0; } form:focus { outline: none; }
 .delete-key { display: grid; gap: 6px; font-size: 13px; }.delete-key b { font-weight: 600; }.delete-key .field { width: 100%; height: 38px; }
 .sh-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 14px 20px max(14px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 @container project-settings-body (max-width: 600px) {
+  .next { grid-template-columns: 34px minmax(0, 1fr) auto; row-gap: 10px; }.next > .btn { grid-column: 2; grid-row: 2; justify-self: start; }.next > .icon-btn { grid-column: 3; grid-row: 1; }
   .frow { grid-template-columns: minmax(0, 1fr); row-gap: 10px; }.frow select.field { max-width: none; }
   .life-r { grid-template-columns: 24px minmax(0, 1fr); row-gap: 10px; }.life-r > .btn { grid-column: 2; justify-self: start; }
 }

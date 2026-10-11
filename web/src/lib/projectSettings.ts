@@ -16,6 +16,16 @@ export function projectSettingsSection(value: unknown): ProjectSettingsSection {
 export function projectSettingsPath(key: string, section: ProjectSettingsSection = 'general'): string {
   return `/p/${encodeURIComponent(key)}/settings${section === 'general' ? '' : `/${section}`}`
 }
+export function suggestProjectKey(name: string): string {
+  const words = name.toUpperCase().replace(/[^A-Z0-9 ]+/g, ' ').trim().split(/\s+/).filter(Boolean)
+  if (!words.length) return ''
+  if (words.length >= 3) return words.map(word => word[0]).join('').slice(0, 6)
+  return words[0]!.length <= 6 ? words[0]! : words[0]!.slice(0, 3)
+}
+export function projectKeyProblem(key: string): string {
+  if (!key) return 'Enter a key.'
+  return /^[A-Z][A-Z0-9]{1,9}$/.test(key) ? '' : '2 to 10 letters or digits, starting with a letter.'
+}
 // Preserve the hash and query: the existing cards still own routine selection and consent.
 export function legacyProjectSettingsSection(hash: string, query: Record<string, unknown>): ProjectSettingsSection | null {
   if (hash === '#project-work-context') return 'agents'

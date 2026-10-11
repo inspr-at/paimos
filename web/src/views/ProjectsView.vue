@@ -9,6 +9,8 @@ import { useLiveAgents } from '../stores/liveAgents'
 import { activeByProject, activeSessions, liveChanges, liveSummary, type LiveAgent } from '../lib/liveAgents'
 import { onPreferenceFailure, usePreference } from '../lib/preferences'
 import { plural } from '../lib/work'
+import { can } from '../lib/authz'
+import { scopeOwner } from '../lib/identityScope'
 import { toast, type ToastAction } from '../lib/toast'
 import { opensRowMenu, type RowAction, type RowMenuAnchor } from '../lib/rowActions'
 import { ARCHIVED, NO_GROUP, bucket, isShared, isUserGroup, nameProblem, showsHeaders } from '../lib/projectGroups'
@@ -25,6 +27,7 @@ import MoveToGroup, { type MoveOption } from '../components/projects/MoveToGroup
 import ProjectBulkBar from '../components/projects/ProjectBulkBar.vue'
 import ProjectCards from '../components/projects/ProjectCards.vue'
 import ProjectList, { type ProjectSection } from '../components/projects/ProjectList.vue'
+import NewProjectSheet from '../components/projects/NewProjectSheet.vue'
 
 // Each sort has its icon; the Display button shows the current one (AEON-174).
 type SortKey = 'activity' | 'name' | 'open' | 'progress' | 'custom'
@@ -41,6 +44,8 @@ const store = useProjects()
 const groups = useProjectGroups()
 const live = useLiveAgents()
 const session = useSession()
+const newProjectOpen = ref(false)
+watch([() => scopeOwner(session.identity), () => can('nodes.write')], () => { newProjectOpen.value = false }, { flush: 'sync' })
 const route = useRoute()
 const router = useRouter()
 // The person's view of this page: List or Cards and the list's columns. Their own
@@ -853,12 +858,13 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
     <span id="arrange-hint" class="sr-only">Alt and the arrow keys move the project in your own order.</span>
     <WelcomeBlock />
     <header class="page-head">
-      <RouterLink class="btn sm attention-link" to="/tickets?view=needs-attention"><AppIcon name="flag" :size="13" />Needs attention</RouterLink>
+      <div class="head-actions"><RouterLink class="btn sm attention-link" to="/tickets?view=needs-attention"><AppIcon name="flag" :size="13" />Needs attention</RouterLink><button v-if="can('nodes.write')" id="new-proj" type="button" class="btn primary" aria-haspopup="dialog" :aria-expanded="newProjectOpen" @click="newProjectOpen = true"><AppIcon name="plus" :size="14" />New project</button></div>
       <p class="eyebrow">{{ who }}</p>
       <h1 id="projects-title">Projects</h1>
       <p v-if="store.loaded" class="summary">{{ plural(active.length, 'project') }} · {{ plural(openTotal, 'open ticket') }}</p>
       <p v-else class="summary"><span class="skeleton summary-skeleton" /></p>
     </header>
+    <NewProjectSheet v-if="newProjectOpen" @close="newProjectOpen = false" />
 
     <div ref="listCard" class="projects-card glass-card">
       <div class="projects-toolbar">
@@ -952,7 +958,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 <style scoped>
 .projects-page { width: 100%; margin: 0; padding: 22px var(--gutter) 40px; }
 .projects-page.selecting { padding-bottom: 96px; }
-.attention-link { float: right; }
+.head-actions { float: right; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .page-head { margin-bottom: 20px; }
 .page-head h1 { margin-top: 6px; }
 .summary { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); min-height: 20px; }
@@ -1007,6 +1013,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
   .projects-page { padding: 14px 12px 28px; }
   .page-head { margin-bottom: 14px; padding: 0 4px; }
   .attention-link { min-height: 44px; }
+  .head-actions { float: none; justify-content: flex-start; margin-bottom: 12px; }.head-actions .btn { min-height: 44px; }
   .projects-toolbar { grid-template-columns: minmax(0, 1fr); grid-template-areas: "search" "chips" "tools"; gap: 10px; padding: 12px; }
   .project-search .field { height: 44px; font-size: 16px; }
   .chips-skeleton { height: 44px; }

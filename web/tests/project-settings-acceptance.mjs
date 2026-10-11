@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // P1 adapter for AEON-1227 approved check.mjs: the original audit is retained
 // with its scope narrowed to the built P1 surface, rather than the mock shell.
-// Repository, Advanced, New project and override flows belong to P2–P6.
+// P4 also reuses this approved audit for Advanced and the shared project sheet.
 export const approvedCheckSHA = '5f3e1a708081b52a1915d691ce80f300fa67338e4fc9172d02d2dc9392f35429'
 export async function checkProjectSettings(page, name, touch) {
   const results = []
@@ -9,7 +9,7 @@ export async function checkProjectSettings(page, name, touch) {
 async function audit(page, name, touch) {
   const r = await page.evaluate(touch => {
     const vis = e => e.offsetParent !== null || getComputedStyle(e).position === 'fixed'
-    const scope = e => !!e.closest('.project-settings, .explainer, .life-pop, .delete-sheet') && !e.closest('[hidden]') && vis(e)
+    const scope = e => !!e.closest('.project-settings, .explainer, .life-pop, .delete-sheet, .project-settings-sheet') && !e.closest('[hidden]') && vis(e)
     const over = document.documentElement.scrollWidth - innerWidth
     const unnamed = [...document.querySelectorAll('button, [role="switch"], input, select, textarea')].filter(scope).filter(b => !(b.getAttribute('aria-label') || b.getAttribute('aria-labelledby') || b.textContent.trim() || b.closest('label') || b.title || (b.id && document.querySelector(`label[for="${b.id}"]`)))).map(b => b.outerHTML.slice(0, 80))
     const wrapped = [...document.querySelectorAll('.btn, .seg button, .link-label, .how, .ptabs button, .src b, .key-badge')].filter(scope).filter(e => { const lh = parseFloat(getComputedStyle(e).lineHeight) || 18; return e.getBoundingClientRect().height > Math.max(lh * 1.6, 46) }).map(e => e.textContent.trim().slice(0, 30))

@@ -16,6 +16,7 @@ import ProjectGeneralSettings from './ProjectGeneralSettings.vue'
 
 const RecurringWorkCard = defineAsyncComponent(() => import('../recurrences/RecurringWorkCard.vue'))
 const ProjectWorkContextCard = defineAsyncComponent(() => import('./ProjectWorkContextCard.vue'))
+const ProjectAdvancedSettings = defineAsyncComponent(() => import('./ProjectAdvancedSettings.vue'))
 const props = defineProps<{ project: Project }>()
 const route = useRoute(), router = useRouter(), session = useSession()
 const root = ref<HTMLElement>(), navColumn = ref<HTMLElement>(), picker = ref<HTMLButtonElement>()
@@ -45,7 +46,7 @@ function ownsKey(event: KeyboardEvent): boolean {
   const element = overlay.value?.element()
   if (element) return element.contains(event.target as Node)
   // Routines and unrelated menus retain their existing keyboard owner.
-  return (section.value === 'general' || pickerOpen.value) && !!root.value?.contains(event.target as Node)
+  return (section.value === 'general' || section.value === 'delivery' || pickerOpen.value) && !!root.value?.contains(event.target as Node)
     && !document.querySelector('dialog[open], .floating, [role="menu"]')
 }
 const disposeKeys = [
@@ -118,6 +119,7 @@ onBeforeUnmount(() => { focusRun++; overlay.value?.close(); disposeKeys.forEach(
       <slot v-else name="delivery" :project="project">
         <SettingsCard title="Repository & delivery" icon="link" anchor="repository" variant="project"><template #lead>Pull requests, CI runs and merges for this project.</template><RouterLink class="link-btn quiet" :to="`/p/${encodeURIComponent(project.routeKey)}/delivery`">Open Delivery <AppIcon name="chevron-right" :size="12" /></RouterLink></SettingsCard>
       </slot>
+      <ProjectAdvancedSettings v-if="section === 'delivery'" :key="`${owner}/${project.id}`" :project="project" />
     </div>
   </div>
 </template>
