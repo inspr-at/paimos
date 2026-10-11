@@ -163,7 +163,7 @@ export function knowledgeFooter(k: KnowledgeFooter): FooterSummary {
 // How many things need this person in the open part of Accounts, Computers and
 // Capacity (AEON-1171); that part keeps it while it is open.
 export const settingsNeeds = ref(0)
-// Each part's count for the Settings nav, while one of the three parts is open; null otherwise.
+// Each part's count for the Settings nav. The open part keeps it current; Settings clears it when it closes or the person changes.
 export const accountsNeeds = ref<Readonly<Record<'accounts' | 'computers' | 'capacity', number>> | null>(null)
 // where names the part the action opens, e.g. "Computers".
 export interface SettingsFooter { saving: boolean; failed: boolean; needs: number; where?: string; act: { retry: () => void; needs: () => void } }
