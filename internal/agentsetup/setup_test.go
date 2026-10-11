@@ -473,6 +473,7 @@ func TestRunningEnrollmentKeepsEachClaudeLoginPersonGated(t *testing.T) {
 	opts.Candidates[0].Harness = "claude"
 	opts.Candidates[0].Label, opts.Candidates[0].Identity = "a@example.test", "a@example.test"
 	approveFixture(t, e, api, opts)
+	serviceCalls := len(x.calls)
 	e.Store.Unlock()
 	before, err := ReadRuntimeConfig(e.Store.Path())
 	if err != nil {
@@ -524,7 +525,7 @@ func TestRunningEnrollmentKeepsEachClaudeLoginPersonGated(t *testing.T) {
 		t.Fatalf("approved login did not connect: %s %v", p.Stage, err)
 	}
 	after, err := ReadRuntimeConfig(e.Store.Path())
-	if err != nil || len(after.Accounts) != 2 || after.Accounts[0] != before.Accounts[0] || after.Accounts[1].Identity != "b@example.test" || after.Accounts[1].Home != before.Accounts[0].Home || len(x.calls) != 0 {
+	if err != nil || len(after.Accounts) != 2 || after.Accounts[0] != before.Accounts[0] || after.Accounts[1].Identity != "b@example.test" || after.Accounts[1].Home != before.Accounts[0].Home || len(x.calls) != serviceCalls {
 		t.Fatal("login approval lost identity isolation or touched service")
 	}
 	api.approved, api.nextAccountID = false, "66666666-6666-4666-8666-666666666666"

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"reflect"
@@ -658,6 +659,44 @@ func (p *pairedSetup) setup(ctx context.Context, req agentsetup.SetupRequest) (a
 	}
 	defer store.Close()
 	e := &agentsetup.Engine{Store: store, API: agentsetup.HTTPClient{Origin: p.origin}, Local: localPairing{root: p.root, supervisor: p.supervisor}, RunningService: true, InstallMethod: installMethod()}
+	if req.Operation == "add_harness" {
+		// A socket caller can propose enrollment, but cannot assert sign-in or
+		// label another login as the one the person is about to approve.
+		if len(req.Candidates) == 0 || len(req.Candidates) > 7 {
+			return agentsetup.Progress{}, errors.New("select one to seven harness logins")
+		}
+		saved, err := e.SavedOptions()
+		if err != nil {
+			return agentsetup.Progress{}, err
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return agentsetup.Progress{}, errors.New("owner home unavailable")
+		}
+		home, err = filepath.EvalSymlinks(home)
+		if err != nil {
+			return agentsetup.Progress{}, err
+		}
+		for _, local := range req.Candidates {
+			if len(local.Path) > 4096 || len(local.Home) > 4096 || !agentsetup.ValidLoginLabel(local.Identity) {
+				return agentsetup.Progress{}, errors.New("invalid local login binding")
+			}
+			d := agentsetup.Discovery{Home: home, PiHome: local.Home, NodePath: local.Candidate.Interpreter().Path, Workspace: saved.Workspace,
+				LookPath: func(name string) (string, error) {
+					if name == "node" {
+						return exec.LookPath(name)
+					}
+					return local.Path, nil
+				}}
+			verified, err := d.Detect(ctx, local.Candidate.Harness, local.Identity)
+			if err != nil {
+				return agentsetup.Progress{}, err
+			}
+			if verified.Path != local.Path || verified.Home != local.Home || verified.Identity != local.Identity || verified.Label != local.Candidate.Label || verified.Interpreter() != local.Candidate.Interpreter() {
+				return agentsetup.Progress{}, errors.New("vendor login changed before enrollment; rerun add-harness for the active login")
+			}
+		}
+	}
 	return e.SetupExisting(ctx, req)
 }
 

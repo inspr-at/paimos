@@ -211,6 +211,11 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 	}
 	p := e.progress(s)
 	p.AccountingState = v.AccountingState
+	// A revocation can arrive during the request. The running daemon applies
+	// its durable fences above, but its service owner performs cleanup later.
+	if e.RunningService && s.DisconnectAll {
+		return p, errors.New("computer is disconnecting or revoked; enrollment cannot resume")
+	}
 	if s.ComputerCleaned {
 		proof := e.proof(s)
 		proof.Cleaned = s.Cleaned

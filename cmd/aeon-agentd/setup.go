@@ -519,7 +519,6 @@ func setupVersionStatus(ctx context.Context, api agentsetup.PairingAPI, origin s
 }
 
 type setupPoller interface {
-	Status(context.Context) (agentsetup.Progress, error)
 	Step(context.Context) (agentsetup.Progress, error)
 }
 
