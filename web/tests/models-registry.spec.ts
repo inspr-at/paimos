@@ -465,7 +465,8 @@ for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 1000 })
     await page.clock.install({ time: new Date('2026-10-11T08:00:00Z') })
     await setup(page)
-    await page.clock.pauseAt(new Date('2026-10-11T08:00:01Z'))
+    // The clock ran while the page loaded; it stops a second after wherever it is now, never in its past.
+    await page.clock.pauseAt(new Date(await page.evaluate(() => Date.now()) + 1000))
     await open(page, OPUS)
     const pause = body(page, OPUS).locator('[data-reg-pause]'), remove = body(page, OPUS).locator('[data-reg-remove]')
     const guard = await controlStability(page, { row: fold(page, OPUS), pause, remove, add: card(page).locator('[data-reg-add]') })
