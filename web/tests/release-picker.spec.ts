@@ -252,10 +252,19 @@ for (const sourceState of ['released', 'building']) for (const target of ['new',
       await row.getByRole('checkbox', { name: `Select ${key}` }).check()
     }
     await page.getByRole('toolbar', { name: /selected ticket/ }).getByRole('button', { name: 'Add to release' }).click()
-    await page.getByRole('dialog', { name: 'Release for 2 tickets' }).getByRole('option', { name: target === 'new' ? /^Release 3/ : /^Release 2/ }).click()
-    await expect(page.locator('.toast').filter({ hasText: 'released or active tickets cannot move' })).toBeVisible()
+    const blockedNew = target === 'new' && sourceState === 'building'
+    const option = page.getByRole('dialog', { name: 'Release for 2 tickets' }).getByRole('option', { name: target === 'new' ? /^Release 4/ : /^Release 2/ })
+    if (blockedNew) {
+      // Native planning rejects a second active release before any write.
+      await expect(option).toBeDisabled()
+      await expect(option).toHaveAccessibleName('Release 4 Finish the current release first')
+      await page.keyboard.press('Escape')
+    } else {
+      await option.click()
+      await expect(page.locator('.toast').filter({ hasText: 'released or active tickets cannot move' })).toBeVisible()
+    }
     await expect(page.locator('.toast').filter({ hasText: /^Added / })).toHaveCount(0)
-    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith(target === 'new' ? '/releases' : '/membership'))).toHaveLength(1)
+    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith(target === 'new' ? '/releases' : '/membership'))).toHaveLength(blockedNew ? 0 : 1)
     expect({ currentReleaseId: world.currentReleaseId, releases: world.releases, walkers: world.walkers }).toEqual(before)
     await page.goto('/p/PHAROS/PHAROS-11')
     await expect(page.getByRole('complementary', { name: 'Ticket details' }).getByRole('button', { name: 'Release: Held release. Change release' })).toBeVisible()
@@ -331,6 +340,8 @@ test('a lost new-release response is retried with the same key and no membership
 })
 
 function advanceCurrentRelease(world: ReleaseWorld) {
+  // Native planning permits one active release; advancing finishes its predecessor.
+  if (world.currentReleaseId) world.walkers[world.currentReleaseId]!.state = 'released'
   const created = new Date().toISOString()
   world.releases.push({ id: 'r-4', key: 'PHAROS-41', kind_id: 'k-release', title: 'Release 4', body: '', fields: {}, state: 'backlog', parent_id: PROJECT, position: '3', created_at: created, updated_at: created, deleted_at: null })
   world.walkers['r-4'] = { release_node_id: 'r-4', project_node_id: PROJECT, state: 'planning', revision: 1, features: [], tickets: [] }

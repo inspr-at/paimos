@@ -111,7 +111,8 @@ func upsertReportsTx(ctx context.Context, tx pgx.Tx, tid, repository string, rep
 	return nil
 }
 
-// metricsEvent records metric facts after the existing ingress authenticated,
+// metricWebhookFacts records metrics and returns the durable Flow input after
+// ingress authenticated,
 // bound and accepted the delivery. Only content-free timing facts are kept.
 func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte) (webhookOutcome, []metricRun, error) {
 	var e struct {

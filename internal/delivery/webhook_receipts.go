@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/jackc/pgx/v5"
 )
@@ -40,13 +40,11 @@ type webhookReceipt struct {
 // never enter storage; the bounded payload is retained only after authentication,
 // unique-key validation and binding to this installation/repository/tenant.
 func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
-	controller := http.NewResponseController(w)
-	_ = controller.SetReadDeadline(time.Now().Add(5 * time.Second))
-	defer controller.SetReadDeadline(time.Time{})
-	raw, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
+	raw, err := httpapi.ReadRequestBody(w, r, 2<<20, 5*time.Second)
 	if err != nil || len(raw) > 2<<20 {
 		class := webhookClass("body_too_large")
-		if err != nil {
+		var tooLarge *http.MaxBytesError
+		if err != nil && !errors.As(err, &tooLarge) {
 			class = "body_read"
 		}
 		closeAfterFailedRead(w)

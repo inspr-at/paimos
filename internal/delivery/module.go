@@ -10,6 +10,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -65,10 +66,12 @@ func (m *Module) mountWorkQueue(mux *http.ServeMux) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 			defer cancel()
+			r = r.WithContext(ctx)
 			if r.Method != http.MethodGet {
-				controller := http.NewResponseController(w)
-				_ = controller.SetReadDeadline(time.Now().Add(5 * time.Second))
-				defer controller.SetReadDeadline(time.Time{})
+				if err := httpapi.BufferRequestBodyTimeout(w, r, 1<<20, 5*time.Second); err != nil {
+					respondError(w, fail(http.StatusBadRequest, "invalid request body"))
+					return
+				}
 			}
 			handler(w, r.WithContext(ctx))
 		})

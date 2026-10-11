@@ -6,7 +6,13 @@ paths:
       summary: Readiness for new requests
       description: >-
         Load-balancer probe. 200 only while this process is accepting HTTP,
-        is not draining, and the database ping succeeds. The ping is capped
+        is not draining, and the database ping succeeds. A read-only canary also exercises shared
+        session lookup and bootstrap-tenant key reads through authentication
+        transaction admission. Sustained canary failure for at least 15 seconds
+        and three observations disables readiness. Recovery needs 30 seconds
+        and three successful observations; gaps over 30 seconds restart the
+        observation window. Invalid credentials and tenant-specific handler
+        failures do not affect global readiness. The combined checks are capped
         at 500ms, with a 100ms pool acquisition budget, so an unbounded caller cannot hold it open. A cancelled
         request or an earlier caller deadline still cancels or shortens it.
         A drain that starts during the ping still returns 503. GET /health
@@ -31,7 +37,7 @@ paths:
                 required: [status]
                 properties:
                   status: {type: string, enum: [unavailable]}
-                  reason: {type: string, enum: [not_accepting, database_unavailable, pool_exhausted]}
+                  reason: {type: string, enum: [not_accepting, database_unavailable, pool_exhausted, authentication_unavailable]}
                   detail: {type: string, description: "Content-free saturation detail with acquired and waiting counts."}
                   pool: {$ref: "#/components/schemas/DatabasePoolStats"}
 components:

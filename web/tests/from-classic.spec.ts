@@ -33,7 +33,7 @@ test('known and unknown classic links resolve through the API', async ({ page })
   expect(requests).toEqual(['/hours/week?week=2026-09-21'])
   await page.goto('/from-classic/forgotten/place')
   await expect(page).toHaveURL('/')
-  await expect(page.locator('.toast')).toContainText('That old link has moved')
+  await expect(page.locator('.toast').filter({ hasText: 'That old link has moved' })).toContainText('That old link has moved')
 })
 
 test('sign-in returns to the classic resolver before opening its destination', async ({ page }) => {

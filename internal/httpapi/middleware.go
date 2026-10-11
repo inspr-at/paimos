@@ -151,6 +151,10 @@ func attachmentViewPolicy(origin string, next http.Handler) http.Handler {
 }
 
 func requestIDMiddleware(next http.Handler) http.Handler {
+	return requestIDMiddlewareWithMetrics(next, &TransportMetrics{})
+}
+
+func requestIDMiddlewareWithMetrics(next http.Handler, metrics *TransportMetrics) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Caller-supplied IDs can contain tokens. Generate our own trace value
 		// before it enters response headers, context or structured logs.
@@ -169,22 +173,33 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		r = r.WithContext(context.WithValue(conn, requestIDKey{}, id))
 		w.Header().Set(requestIDHeader, id)
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK, conn: conn}
+		r = r.WithContext(context.WithValue(r.Context(), bodyReadFailureKey{}, &sw.bodyFailed))
+		var authenticated atomic.Bool
+		r = r.WithContext(context.WithValue(r.Context(), authenticationKey{}, &authenticated))
 		r = r.WithContext(context.WithValue(r.Context(), failureKey{}, &sw.failureLogged))
 		start := time.Now()
 		defer func() {
 			if sw.status >= 500 && !sw.failureLogged.Load() {
 				LogFailure(r, "handler", conn.Err())
 			}
+			total := metrics.record(r, sw.status, authenticated.Load(), deadOnArrival)
 			attrs := []any{
 				"method", r.Method,
 				"path", requestLogRoute(r),
 				"status", sw.status,
 				"request_id", id,
+				"conn_id", ConnectionID(conn),
+				"route", metricRoute(r),
+				"status_class", statusClass(sw.status),
+				"authenticated", authenticated.Load(),
+				"request_count", 1,
+				"requests_total", total,
+				"cancelled_on_arrival_total", metrics.cancelled.Load(),
 				"duration_ms", time.Since(start).Milliseconds(),
 			}
 			if deadOnArrival {
 				attrs = append(attrs, "connection_context", "cancelled_on_arrival")
-				slog.Warn("request arrived on a cancelled connection; connection closed", "path", requestLogRoute(r), "request_id", id)
+				slog.Warn("request arrived on a cancelled connection; connection closed", "path", requestLogRoute(r), "request_id", id, "conn_id", ConnectionID(conn))
 			} else if sw.closed {
 				attrs = append(attrs, "connection_context", "cancelled")
 			}
@@ -200,11 +215,11 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(sw, r)
 		// A handler that wrote nothing gets its status line from net/http after
 		// this returns; the connection header must be set before that.
-		if !sw.wrote && conn.Err() != nil {
+		if !sw.wrote && (conn.Err() != nil || sw.bodyFailed.Load()) {
 			sw.closed = true
 			w.Header().Set("Connection", "close")
 		}
-		if conn.Err() != nil && sw.wrote && !sw.closeHeader {
+		if (conn.Err() != nil || sw.bodyFailed.Load()) && sw.wrote && !sw.closeHeader {
 			// Headers committed before cancellation cannot be changed. Flush
 			// any buffered response, then let net/http abort this connection
 			// (or only this stream on HTTP/2), rather than return it to reuse.
@@ -298,6 +313,7 @@ type statusWriter struct {
 	closed        bool
 	closeHeader   bool
 	failureLogged atomic.Bool
+	bodyFailed    atomic.Bool
 }
 
 func (w *statusWriter) WriteHeader(status int) {
@@ -309,7 +325,7 @@ func (w *statusWriter) WriteHeader(status int) {
 		w.status = status
 		w.wrote = true
 	}
-	if w.conn != nil && w.conn.Err() != nil {
+	if w.bodyFailed.Load() || w.conn != nil && w.conn.Err() != nil {
 		w.closed = true
 		w.ResponseWriter.Header().Set("Connection", "close")
 		w.closeHeader = final

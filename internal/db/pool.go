@@ -111,17 +111,18 @@ type acquisition struct {
 // reports the p95 of the last 256 completed acquisitions (including failures
 // and worker admission waits), rather than mislabelling a cumulative average.
 type PoolMonitor struct {
-	next         pgx.QueryTracer
-	slots        chan struct{}
-	waiting      atomic.Int64
-	nested       atomic.Int64
-	mu           sync.Mutex
-	held         map[*pgx.Conn]bool
-	samples      [256]time.Duration
-	count        int
-	cursor       int
-	waitingSince time.Time
-	lastWarn     time.Time
+	next          pgx.QueryTracer
+	slots         chan struct{}
+	waiting       atomic.Int64
+	nested        atomic.Int64
+	mu            sync.Mutex
+	held          map[*pgx.Conn]bool
+	samples       [256]time.Duration
+	count         int
+	cursor        int
+	waitingSince  time.Time
+	lastWarn      time.Time
+	acquireErrors map[string]uint64
 }
 
 func (m *PoolMonitor) TraceQueryStart(ctx context.Context, c *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
@@ -172,12 +173,24 @@ func (m *PoolMonitor) TraceAcquireEnd(ctx context.Context, pool *pgxpool.Pool, d
 	m.samples[m.cursor] = time.Since(a.start)
 	m.cursor = (m.cursor + 1) % len(m.samples)
 	m.count = min(m.count+1, len(m.samples))
+	var errorTotal uint64
+	if d.Err != nil {
+		if m.acquireErrors == nil {
+			m.acquireErrors = make(map[string]uint64)
+		}
+		class := AcquireErrorClass(d.Err)
+		m.acquireErrors[class]++
+		errorTotal = m.acquireErrors[class]
+	}
 	if a.permit && d.Err == nil {
 		m.held[d.Conn] = true
 	}
 	m.mu.Unlock()
 	if a.permit && d.Err != nil {
 		<-m.slots
+	}
+	if d.Err != nil {
+		slog.WarnContext(ctx, "pool acquire failed", "error_class", AcquireErrorClass(d.Err), "pool_acquire_error_count", 1, "pool_acquire_errors_total", errorTotal)
 	}
 }
 func (m *PoolMonitor) TraceRelease(pool *pgxpool.Pool, d pgxpool.TraceReleaseData) {
