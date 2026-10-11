@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -119,10 +120,12 @@ func TestRoutineBuilderToolsConstrainEffects(t *testing.T) {
 	}
 	g := routineTestGrant("21")
 	api := &fakeRunTools{}
-	active, done := true, false
+	var active atomic.Bool
+	active.Store(true)
+	done := false
 	const credential = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" // gitleaks:allow synthetic test token
 	binding := toolBinding{routine: &g, api: api, workOrderID: "order", runID: g.AgentRunID,
-		workspace: workspace, branch: "routine/" + g.LaunchID, active: func() bool { return active }, requestDone: func() { done = true }}
+		workspace: workspace, branch: "routine/" + g.LaunchID, active: active.Load, requestDone: func() { done = true }}
 	wrong := binding
 	wrong.runID = "foreign-run"
 	if host, err := startManagedTools(credential, wrong); host != nil || !errors.Is(err, ErrRoutineToolsUnavailable) {
@@ -205,6 +208,7 @@ func TestRoutineBuilderToolsConstrainEffects(t *testing.T) {
 	}
 	for _, path := range []string{"linked.txt", "../foreign.txt", foreign} {
 		call("aeon_write", map[string]any{"file_path": path, "content": "changed"}, "workspace file unavailable")
+		call("aeon_read", map[string]any{"file_path": path}, "workspace file unavailable")
 	}
 	call("aeon_terminal", map[string]any{"command": "git", "args": []string{"push"}}, "terminal command denied")
 	call("aeon_terminal", map[string]any{"command": "sh", "args": []string{"-c", "mutation"}}, "terminal command denied")
@@ -222,10 +226,10 @@ func TestRoutineBuilderToolsConstrainEffects(t *testing.T) {
 		t.Fatal(err)
 	}
 	response.Body.Close()
-	if response.StatusCode < 400 || response.StatusCode >= 500 {
-		t.Fatalf("direct HTTP write did not refuse as a client error: %d", response.StatusCode)
+	if response.StatusCode != http.StatusForbidden {
+		t.Fatalf("direct HTTP write did not refuse at the capability boundary: %d", response.StatusCode)
 	}
-	active = false
+	active.Store(false)
 	request, err = http.NewRequestWithContext(ctx, http.MethodPost, host.tools.URL, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"aeon_write","arguments":{"file_path":"source.txt","content":"late"}}}`))
 	if err != nil {
 		t.Fatal(err)
