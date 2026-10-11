@@ -298,7 +298,7 @@ test('a queue or questions that can’t be read say so below the list instead of
 
 // Tick, 2026-10-11: a read the lead panel could not make says what is missing and offers Try again,
 // never a raw error string; Try again keeps its place and name while it runs, then the section fills in.
-test('Next up and Recent that can’t be read say what is missing and offer Try again', async ({ page }) => {
+test('Next up and Recent that can’t be read say what is missing and offer Try again', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await setup(page)
@@ -319,6 +319,7 @@ test('Next up and Recent that can’t be read say what is missing and offer Try 
   await expect(panel.locator('.facts dd.sub').nth(1)).toHaveText('can’t be read')
   await expect(panel.locator('.facts dd.sub').nth(2)).toHaveText('can’t be read')
   for (const raw of ['queue store unavailable', 'event log unavailable', 'Unmocked route']) await expect(panel).not.toContainText(raw)
+  await page.screenshot({ path: info.outputPath('1440-light-read-failed.png') })
   // Try again on Next up: while the read is held, the button stays where it is, says the same and refuses a second press.
   queueDown = false
   const again = queueFail.getByRole('button', { name: 'Try again' })
@@ -453,6 +454,9 @@ test.describe('phone', () => {
     await page.screenshot({ path: info.outputPath(`390-${theme}-groups.png`), fullPage: true })
     // The chip on the state line opens Next up on a phone too.
     await leadRow(page).locator('.qchip.q-l2').tap()
-    await expect(page.getByRole('complementary', { name: 'PHAROS lead' }).locator('#next-up')).toBeFocused()
+    const panel = page.getByRole('complementary', { name: 'PHAROS lead' })
+    await expect(panel.locator('#next-up')).toBeFocused()
+    await expect(panel.locator('#next-up .wk')).toHaveCount(3)
+    await page.screenshot({ path: info.outputPath(`390-${theme}-next-up.png`) })
   })
 })
