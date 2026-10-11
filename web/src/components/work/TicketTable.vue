@@ -201,32 +201,34 @@ const measuring = ref(false)
 const autoWidths = ref<Partial<Record<string, number>>>({})
 const foldSpace = ref(0)
 let fitGeneration = 0
-let fittedRows = new Set<string>()
 let fittedColumns = new Set<string>()
 async function fitLoaded() {
   const generation = ++fitGeneration
   if (props.loading || phone.value) { measuring.value = false; return }
+  // Fit each column when it first appears. Loading or expanding more rows must
+  // not move controls already on screen; explicit Fit still uses all loaded rows.
+  if (!ids.value.some(id => id !== 'title' && !Number.isFinite(props.prefs?.widths?.[id]) && dragWidths.value[id] === undefined && !fittedColumns.has(id))) {
+    measuring.value = false
+    return
+  }
   // Folded groups still contribute their loaded values. Briefly render their
   // rows out of flow for measurement, then remove them before the next paint.
   measuring.value = true
   await nextTick()
   if (generation !== fitGeneration) return
   if (props.loading || phone.value || !grid.value) { measuring.value = false; return }
-  const rows = new Set([...props.rowsById.keys(), ...(props.outline ?? []).flatMap(entry => entry.type === 'row' ? [entry.row.id] : [])])
-  const newRows = [...rows].some(id => !fittedRows.has(id))
   const next = { ...autoWidths.value }
   for (const id of ids.value) {
     if (id === 'title' || Number.isFinite(props.prefs?.widths?.[id]) || dragWidths.value[id] !== undefined) continue
-    if (!newRows && fittedColumns.has(id)) continue
+    if (fittedColumns.has(id)) continue
     next[id] = loadedFitWidth(definitions.value.get(id)!, Math.max(next[id] ?? 0, fittedWidth(id)))
     fittedColumns.add(id)
   }
-  fittedRows = rows
   autoWidths.value = next
   measuring.value = false
 }
 watch(() => props.loading, (loading, wasLoading) => {
-  if (loading && !wasLoading) { autoWidths.value = {}; foldSpace.value = 0; fittedRows.clear(); fittedColumns.clear() }
+  if (loading && !wasLoading) { autoWidths.value = {}; foldSpace.value = 0; fittedColumns.clear() }
 })
 watch(() => [props.loading, phone.value, props.projectId, [...props.rowsById.keys()].join(','), ids.value.join(','), props.outline], fitLoaded, { flush: 'post' })
 const dragWidths = ref<Partial<Record<string, number>>>({})
@@ -347,7 +349,7 @@ function autofit(id: string) {
   emit('widths', { ...(props.prefs?.widths ?? {}), [id]: next })
 }
 watch(() => props.prefs?.widths, () => { if (!resizing) dragWidths.value = {} })
-watch(() => props.projectId, () => { autoWidths.value = {}; dragWidths.value = {}; foldSpace.value = 0; fittedRows.clear(); fittedColumns.clear(); void fitLoaded() })
+watch(() => props.projectId, () => { autoWidths.value = {}; dragWidths.value = {}; foldSpace.value = 0; fittedColumns.clear(); void fitLoaded() })
 function estimate(row: ListItem) { return estimateDisplay(row).text }
 // An epic with open children and no hours still has coverage to explain.
 function emptyEstimateTip(row: ListItem) {
@@ -742,7 +744,7 @@ defineExpose({
           <!-- Unified Outline: a destination above growing rows. -->
           <template v-else-if="entry.type === 'root'">
             <tr
-              v-if="canDrag" class="outline-root-drop" aria-label="Project root drop destination" :class="{ 'drop-target': dropTarget === 'no-epic' }"
+              v-if="canDrag" class="outline-root-drop" aria-label="Project root drop destination" :class="{ 'drop-target': dropTarget === 'no-epic', 'drag-active': !!dragId }"
               @dragover="dragOver($event, null)" @dragleave="dragLeave($event, 'no-epic')" @drop="drop($event, null)"
             >
               <td :colspan="columns.length">
@@ -1113,7 +1115,10 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .ticket-row.drop-target td, .outline-group.drop-target th { background: var(--row-selected); }
 .ticket-row.drop-target { outline: 2px solid var(--teal); outline-offset: -2px; }
 .outline-group.drop-target th { box-shadow: inset 0 0 0 2px var(--teal); }
-.outline-root-drop td { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface-raised-2); }
+.outline-root-drop td { padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface-raised-2); }
+/* Keep the root destination in reach during a drag, without covering ordinary
+   row controls while browsing or when a pointer scrolls them into view. */
+.outline-root-drop.drag-active td { position: sticky; top: calc(var(--toolbar-h, 0px) + 35px); z-index: 1; }
 .root-drop-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-height: 36px; padding: 6px 0; font-size: 12px; color: var(--ink-3); }
 .root-drop-hint { margin-left: auto; }
 .outline-root-drop.drop-target td { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }
@@ -1174,6 +1179,11 @@ td.c-title { position: relative; overflow: hidden; }
 .row-actions :deep(.icon-btn):hover { color: var(--teal-ink); }
 .compact .row-actions :deep(.icon-btn) { width: 22px; height: 22px; }
 @media (min-width: 721px) and (pointer: coarse) {
+  /* Reserve the arrow's full reach before the type marker. Its centre stays
+     within the row's content line, including the first row's top hairline. */
+  .tree { box-sizing: content-box; margin: 0; padding-inline: 13px; }
+  .twisty { left: calc(var(--twisty-left) + 13px); }
+  .guide { margin-left: 13px; }
   /* Keep the compact visuals, but reserve each full 44px reach plus the
      existing 2px separation before interaction, as on fine pointers above.
      Padding contains the outer edges as well. Touch can set :hover during
@@ -1395,10 +1405,12 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .tree-row .title-cell { position: relative; padding-left: 0; }
   /* Centre the shared hit area on the arrow; desktop indentation is already
      represented by the card's padding, so it must not offset the phone arrow. */
-  .twisty { position: relative; inset: auto; width: 36px; height: 36px; margin: -8px 0 -8px -10px; }
-  .twisty-spacer { display: block; flex-shrink: 0; width: 26px; }
+  .twisty { position: relative; inset: auto; flex: none; width: 36px; height: 36px; margin: 4px; }
+  .twisty-spacer { display: block; flex-shrink: 0; width: 44px; }
   .tree-row .tree { display: contents; }
-  .tree-row .title-link { flex-basis: calc(100% - 60px); }
+  /* The arrow slot (44), type marker (22) and two gaps (16) share one line.
+     Reserve all three so a long title cannot wrap under the arrow's reach. */
+  .tree-row .title-link { flex-basis: calc(100% - 82px); }
   .epic-progress { flex-basis: 100%; margin-left: 22px; padding-left: 0; }
   .epic-progress .bar { display: block; width: 96px; }
   .ticket-row.top td { border-top: 0; }
