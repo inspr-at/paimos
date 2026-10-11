@@ -126,9 +126,15 @@ func TestHarnessProbeRoutesThroughPairedRuntimeMiddleware(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// A revoked pairing no longer authenticates its runtime key (store.go
+	// authenticateAgent), so it is refused before the pairing boundary.
 	for _, path := range paths {
-		if w := request(http.MethodPost, path); w.Code != http.StatusGone || !strings.Contains(w.Body.String(), "pairing_revoked") {
-			t.Fatal("revoked pairing reached a catalog handler")
+		w := request(http.MethodPost, path)
+		var body struct {
+			Error string `json:"error"`
+		}
+		if w.Code != http.StatusUnauthorized || json.Unmarshal(w.Body.Bytes(), &body) != nil || body.Error != "unauthorized" {
+			t.Fatalf("revoked pairing was not refused at authentication: HTTP %d: %s", w.Code, w.Body.String())
 		}
 	}
 	if reached != 2 {

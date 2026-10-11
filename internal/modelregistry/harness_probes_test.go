@@ -96,7 +96,9 @@ func TestCursorHarnessProbeReusesRecordedLaunchIdentity(t *testing.T) {
 				if _, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['models.read','models.report'] WHERE principal_id=$1`, agent.ID); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_daemon_generation='generation' WHERE id=$1`, account); err != nil {
+				// A daemon generation is recorded with its probe outcome, as the
+				// readiness writer does; agent_accounts_check1 pairs the two.
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=now(),last_probe_ok=true,last_daemon_generation='generation' WHERE id=$1`, account); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET auto_add_profiles=false`); err != nil {
@@ -204,7 +206,7 @@ func TestHarnessProbesScheduleCheckNowAndFencePublication(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['models.read','models.report'] WHERE principal_id=$1`, agent.ID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_daemon_generation='generation',capacity_owner=$2 WHERE id=$1`, account, owner.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$3,last_probe_ok=true,last_daemon_generation='generation',capacity_owner=$2 WHERE id=$1`, account, owner.ID, now)
 		return err
 	})
 	m := &Module{pool: appPool, discovery: fixtureCatalogClient(t, nil), validationClock: func(context.Context, pgx.Tx) (time.Time, error) { return now, nil }}
