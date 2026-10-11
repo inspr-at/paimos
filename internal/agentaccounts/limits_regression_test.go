@@ -176,9 +176,18 @@ func TestCostLimitRequiresPricedRunAccounting(t *testing.T) {
 	// A legacy dollar rule on an unpriced account fails closed in admission.
 	now := time.Now().Add(-time.Second)
 	f.report(t, 10, now, now.Add(48*time.Hour))
-	_, denied := f.route(t, 409)
-	if denied.Wait == nil || denied.Wait.Code != "allowance" {
-		t.Fatalf("unpriced legacy limit did not fail closed: %+v", denied)
+	deniedRun, _ := f.route(t, 409)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		wait, err := WaitForRun(t.Context(), tx, deniedRun)
+		if err != nil {
+			return err
+		}
+		if wait == nil || wait.Code != "allowance" {
+			t.Fatalf("unpriced legacy limit did not fail closed: %+v", wait)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if f.capacity(t).CostLimitSupported {
 		t.Fatal("unpriced account offers dollars")
