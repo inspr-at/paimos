@@ -308,6 +308,7 @@ for (const [width, theme] of [[1440, 'dark'], [390, 'light']] as const) {
     await editor(page).getByRole('button', { name: /^Create/ }).click()
     await expect(editor(page)).toHaveAccessibleName('Let agents run it')
     await expectFoldIcons(page)
+    await editor(page).getByRole('button', { name: /^The routine itself/ }).scrollIntoViewIfNeeded()
     await shot(page, info, `consent-${width}-${theme}`)
     expect(errors).toEqual([])
   })
