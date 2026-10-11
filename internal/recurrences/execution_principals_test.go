@@ -126,7 +126,7 @@ func TestRoutineExecutionPrincipalEligibilityParityAndPagination(t *testing.T) {
 				_, err = tx.Exec(t.Context(), `UPDATE principals SET kind='person',linked_to=$2 WHERE id=$1`, id, f.p.ID)
 			case "keyed", "paired":
 				var keyID string
-				err = tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,revoked_at) VALUES($1,$2,'Synthetic fixture',$2::text,repeat('a',64),CASE WHEN $3 THEN clock_timestamp() ELSE NULL END) RETURNING id::text`, f.p.TenantID, id, reason == "paired").Scan(&keyID)
+				err = tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,revoked_at) VALUES($1,$2::uuid,'Synthetic fixture',$2::text,repeat('a',64),CASE WHEN $3 THEN clock_timestamp() ELSE NULL END) RETURNING id::text`, f.p.TenantID, id, reason == "paired").Scan(&keyID)
 				if err != nil || reason != "paired" {
 					return err
 				}
@@ -149,7 +149,7 @@ func TestRoutineExecutionPrincipalEligibilityParityAndPagination(t *testing.T) {
 	}
 	// A revoked key without a pairing is allowed by the existing PUT rules.
 	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,revoked_at) VALUES($1,$2,'Synthetic revoked key',$2::text,repeat('d',64),clock_timestamp())`, f.p.TenantID, secondAgent)
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,revoked_at) VALUES($1,$2::uuid,'Synthetic revoked key',$2::text,repeat('d',64),clock_timestamp())`, f.p.TenantID, secondAgent)
 		return err
 	})
 	// A full page of ineligible rows must have a cursor, even with no items.
