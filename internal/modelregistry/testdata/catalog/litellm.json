@@ -1,0 +1,29 @@
+{
+  "gpt-6.1-sol": {
+    "litellm_provider": "openai",
+    "max_input_tokens": 922000,
+    "max_output_tokens": 128000,
+    "mode": "chat",
+    "supports_max_reasoning_effort": true,
+    "supports_minimal_reasoning_effort": false,
+    "supports_none_reasoning_effort": false,
+    "supports_reasoning": true,
+    "supports_xhigh_reasoning_effort": true
+  },
+  "gemini/gemini-2.5-pro": {
+    "litellm_provider": "gemini",
+    "max_input_tokens": 1048576,
+    "max_output_tokens": 65536,
+    "mode": "chat",
+    "supports_reasoning": true
+  },
+  "claude-opus-5": {
+    "litellm_provider": "anthropic",
+    "max_input_tokens": 1000000,
+    "max_output_tokens": 128000,
+    "mode": "chat",
+    "supports_reasoning": true,
+    "supports_xhigh_reasoning_effort": true,
+    "supports_max_reasoning_effort": true
+  }
+}
