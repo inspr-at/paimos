@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
@@ -26,6 +27,8 @@ import (
 	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/routinebudget"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -149,7 +152,7 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	if paid {
 		billing = "api"
 	}
-	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,label,registered_by_principal_id,owner_person_id,capacity_owner,linked_at,last_probe_at,last_probe_ok,last_daemon_generation,billing_mode,max_parallel_runs) VALUES($1,'budget','codex','budget-daemon','Budget',$2,$3,$3,clock_timestamp()-interval '1 hour',clock_timestamp(),true,'budget-generation',$4,20) RETURNING id::text`, f.owner.TenantID, f.agent.ID, f.owner.ID, billing).Scan(&f.account))
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,label,registered_by_principal_id,owner_person_id,capacity_owner,linked_at,last_probe_at,last_probe_ok,last_daemon_generation,billing_mode,max_parallel_runs) VALUES($1,'budget','codex','budget-daemon','Budget',$2,$3,$3,clock_timestamp()-interval '1 hour',clock_timestamp(),true,'budget-generation',$4,1) RETURNING id::text`, f.owner.TenantID, f.agent.ID, f.owner.ID, billing).Scan(&f.account))
 	if paid {
 		f.gate.PaidAccountIDs = []string{f.account}
 	}
@@ -171,20 +174,22 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	return f
 }
 
-// Risks: duplicate assignments/charges/queue turns, stale or revoked authority,
-// missing mandatory readings, bypassing Arion/host holds and misleading partial
-// recovery. Existing consent/budget/pairing guards are reused. The PostgreSQL
-// barrier proves scheduler and real coordinator pickup overlap on one intent.
-func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
-	f := setup(t, "off", false)
-	// Observe the committed turn writes from both independent connections;
-	// the queue event count alone cannot detect a replay advancing a turn.
-	f.exec(`CREATE TABLE routine_dispatch_turn_observations(tenant_id uuid,project_id uuid,at timestamptz)`)
-	f.exec(`GRANT SELECT,INSERT ON routine_dispatch_turn_observations TO PUBLIC`)
-	f.exec(`CREATE FUNCTION observe_routine_dispatch_turn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
- INSERT INTO routine_dispatch_turn_observations VALUES(NEW.tenant_id,NEW.project_id,NEW.last_turn_at); RETURN NEW; END $$`)
-	f.exec(`CREATE TRIGGER observe_routine_dispatch_turn AFTER UPDATE OF last_turn_at ON project_leads
- FOR EACH ROW WHEN (NEW.last_turn_at IS DISTINCT FROM OLD.last_turn_at) EXECUTE FUNCTION observe_routine_dispatch_turn()`)
+type dispatchFixture struct {
+	*fixture
+	e                        *Executor
+	options                  Options
+	lead                     tenant.Principal
+	session, lease, agentRun string
+	mode                     *atomic.Int32
+}
+
+func setupDispatch(t *testing.T) *dispatchFixture {
+	t.Helper()
+	return setupDispatchOn(t, setup(t, "off", false))
+}
+
+func setupDispatchOn(t *testing.T, f *fixture) *dispatchFixture {
+	t.Helper()
 	var coordinator, session, key, agentRun string
 	lease := "dispatch-test-owned-worker-lease-000000000"
 	leaseDigest := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
@@ -240,6 +245,26 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 			return out, err
 		}}
 	e := New(f.d.App, options)
+	return &dispatchFixture{fixture: f, e: e, options: options, lead: tenant.Principal{ID: coordinator, TenantID: f.owner.TenantID, Kind: tenant.Agent, Scopes: authz.CoordinatorKeyScopes, KeyID: key, AuthKeyID: key, KeyCreatorID: f.owner.ID}, session: session, lease: lease, agentRun: agentRun, mode: &mode}
+}
+
+// Risks: duplicate assignments/charges/queue turns, stale or revoked authority,
+// missing mandatory readings, bypassing Arion/host holds and misleading partial
+// recovery. Existing consent/budget/pairing guards are reused. The PostgreSQL
+// barrier proves scheduler and real coordinator pickup overlap on one intent.
+func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
+	f := setup(t, "off", false)
+	// Observe the committed turn writes from both independent connections;
+	// the queue event count alone cannot detect a replay advancing a turn.
+	f.exec(`CREATE TABLE routine_dispatch_turn_observations(tenant_id uuid,project_id uuid,at timestamptz)`)
+	f.exec(`GRANT SELECT,INSERT ON routine_dispatch_turn_observations TO PUBLIC`)
+	f.exec(`CREATE FUNCTION observe_routine_dispatch_turn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ INSERT INTO routine_dispatch_turn_observations VALUES(NEW.tenant_id,NEW.project_id,NEW.last_turn_at); RETURN NEW; END $$`)
+	f.exec(`CREATE TRIGGER observe_routine_dispatch_turn AFTER UPDATE OF last_turn_at ON project_leads
+ FOR EACH ROW WHEN (NEW.last_turn_at IS DISTINCT FROM OLD.last_turn_at) EXECUTE FUNCTION observe_routine_dispatch_turn()`)
+	d := setupDispatchOn(t, f)
+	e, options, mode := d.e, d.options, d.mode
+	coordinator, session, key, agentRun, lease := d.lead.ID, d.session, d.lead.KeyID, d.agentRun, d.lease
 	dispatch := func(ctx context.Context, pool *pgxpool.Pool, id, expectedSession string, generation int64) (agentruns.RoutineQueueResult, error) {
 		var out agentruns.RoutineQueueResult
 		err := db.InTenant(db.AllProjects(ctx, "routine dispatch fixture"), pool, f.owner.TenantID, func(tx pgx.Tx) error {
@@ -393,5 +418,131 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	must(t, err)
 	if !pass.Partial || pass.Scanned != batchSize || pass.Dispatched != 0 || pass.Waiting != batchSize {
 		t.Fatalf("capped recovery=%+v", pass)
+	}
+}
+
+// Risk: a paired account has exactly one slot. Dispatch and both launch checks
+// must reuse its held slot and allowance, while another owned account cannot
+// supply capacity for the selected account.
+func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
+	d := setupDispatch(t)
+	f := d.fixture
+	f.exec(`UPDATE agent_accounts SET quota_pool_fingerprint=repeat('e',64) WHERE id=$1`, f.account)
+	f.exec(`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model) VALUES($1,$2,clock_timestamp()-interval '1 hour',clock_timestamp()+interval '1 day','requests',1,0,'unrestricted')`, f.owner.TenantID, f.account)
+	var out agentruns.RoutineQueueResult
+	must(t, f.tx(func(tx pgx.Tx) error {
+		var err error
+		out, err = d.e.DispatchTx(t.Context(), tx, f.owner.TenantID, f.run, d.session, 1)
+		return err
+	}))
+	if !out.Routed || out.WaitReason != "" {
+		t.Fatalf("one-slot paired dispatch=%+v", out)
+	}
+	var grant agentsetup.RoutineGrant
+	var raw []byte
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT binding FROM routine_launch_intents WHERE routine_run_id=$1 AND kind='worker'`, f.run).Scan(&raw))
+	must(t, json.Unmarshal(raw, &grant))
+	must(t, f.tx(func(tx pgx.Tx) error { return d.e.LaunchChecks().Admission(t.Context(), tx, f.owner, grant) }))
+	// The ordinary advisory can see a spare owned account; the run-bound gate
+	// must still refuse its selected account when that account is unavailable.
+	var spare string
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,label,registered_by_principal_id,owner_person_id,capacity_owner,linked_at,last_probe_at,last_probe_ok,last_daemon_generation)
+ SELECT tenant_id,'spare',harness,daemon_id,'Spare',registered_by_principal_id,owner_person_id,capacity_owner,linked_at,clock_timestamp(),true,last_daemon_generation FROM agent_accounts WHERE id=$1 RETURNING id::text`, f.account).Scan(&spare))
+	f.exec(`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at)
+ SELECT tenant_id,$2,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at FROM agent_pairing_enrollments WHERE account_id=$1`, f.account, spare)
+	f.exec(`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source)
+ SELECT tenant_id,$2,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source FROM account_allowance_windows WHERE account_id=$1 AND unit='percent'`, f.account, spare)
+	f.exec(`INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,principal_id,scope,$2::uuid::text,$2,schedule FROM account_capacity_schedules WHERE account_id=$1`, f.account, spare)
+	f.exec(`UPDATE agent_accounts SET state='unavailable' WHERE id=$1`, f.account)
+	must(t, f.tx(func(tx pgx.Tx) error {
+		var now time.Time
+		if err := tx.QueryRow(t.Context(), `SELECT clock_timestamp()`).Scan(&now); err != nil {
+			return err
+		}
+		capacity, err := agentaccounts.EngineCapacityTx(t.Context(), tx, f.owner, f.owner.ID, "codex", 1, now, f.project)
+		if err != nil {
+			return err
+		}
+		if capacity.Reason != "allowed" {
+			t.Fatalf("spare account not admitted: %+v", capacity)
+		}
+		return nil
+	}))
+	err := f.tx(func(tx pgx.Tx) error {
+		return engineadmission.RequireRoutineTx(t.Context(), tx, f.owner, f.run, d.agentRun, "codex", 1, d.options.Facts)
+	})
+	var refusal *workorders.Error
+	if !errors.As(err, &refusal) || refusal.Status != 409 || refusal.Message != "account_state" {
+		t.Fatalf("spare account admitted selected offline account: %v", err)
+	}
+}
+
+// Risk: one routine's WAIT must neither stall ordinary lead pickup with the
+// project flag off nor consume the turn of a later consented routine.
+func TestRoutineQueueWaitsDoNotBlockLaterWork(t *testing.T) {
+	d := setupDispatch(t)
+	f := d.fixture
+	module := agentruns.NewWithLeadAdmission(f.d.App, d.options.LeadAdmission)
+	must(t, d.e.Bind(module))
+	mux := http.NewServeMux()
+	module.Mount(mux)
+	pickup := func(target string) (string, string) {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/api/queue/next", strings.NewReader(target)).WithContext(tenant.WithPrincipal(t.Context(), d.lead))
+		req.Header.Set("X-Aeon-Lead-Session", d.session)
+		req.Header.Set("X-Aeon-Lead-Generation", "1")
+		req.Header.Set("X-Aeon-Worker-Lease", d.lease)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != 200 {
+			t.Fatalf("pickup=%d %s", w.Code, w.Body.String())
+		}
+		var out struct {
+			Entry *struct {
+				NodeID string `json:"node_id"`
+			} `json:"entry"`
+			WaitReason string `json:"wait_reason"`
+		}
+		must(t, json.Unmarshal(w.Body.Bytes(), &out))
+		if out.Entry != nil {
+			return out.Entry.NodeID, out.WaitReason
+		}
+		return "", out.WaitReason
+	}
+	var ordinary string
+	must(t, f.tx(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,body,parent_id,fields) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Ordinary work','Validate ordinary routing',$2,'{"status":"open","priority":"high","estimate_hours":1,"acceptance_criteria":["Validate"]}' FROM node_kinds WHERE slug='work' RETURNING id::text`, f.owner.TenantID, f.parent).Scan(&ordinary); err != nil {
+			return err
+		}
+		_, err := workqueue.EnqueueSystem(t.Context(), tx, f.owner, ordinary)
+		return err
+	}))
+	f.exec(`UPDATE project_routine_execution_settings SET automatic_launch_enabled=false WHERE project_id=$1`, f.project)
+	if node, reason := pickup(`{}`); node != ordinary || reason != "" {
+		t.Fatalf("disabled routine blocked ordinary work: node=%s wait=%s", node, reason)
+	}
+	if node, reason := pickup(`{}`); node != ordinary || reason != "" {
+		t.Fatalf("ordinary replay blocked: node=%s wait=%s", node, reason)
+	}
+	f.exec(`UPDATE agent_runs SET status='cancelled' WHERE queue_node_id=$1`, ordinary)
+	if node, reason := pickup(`{}`); node != "" || reason != "automatic_launch_disabled" {
+		t.Fatalf("first routine wait not reported: node=%s wait=%s", node, reason)
+	}
+	if node, reason := pickup(fmt.Sprintf(`{"agent_principal_id":%q,"model_profile_id":%q}`, f.agent.ID, f.profile)); node != "" || reason != "routine_registry_route_required" {
+		t.Fatalf("registry wait not reported: node=%s wait=%s", node, reason)
+	}
+	// A second definition keeps live consent while the earlier definition waits.
+	var later recurrences.Occurrence
+	f.call("POST", "/api/recurrences/"+f.routine.ID+"/run-now", map[string]string{"idempotency_key": "later"}, &later)
+	f.exec(`UPDATE routine_runs SET execute_consent=false WHERE id=$1`, f.run)
+	f.exec(`UPDATE project_routine_execution_settings SET automatic_launch_enabled=true WHERE project_id=$1`, f.project)
+	var out agentruns.RoutineQueueResult
+	must(t, f.tx(func(tx pgx.Tx) error {
+		var err error
+		out, err = d.e.DispatchTx(t.Context(), tx, f.owner.TenantID, later.Run.ID, d.session, 1)
+		return err
+	}))
+	if !out.Routed || out.WaitReason != "" || out.RunID != *later.Run.AgentRunID {
+		t.Fatalf("earlier no-consent routine blocked later routine: %+v", out)
 	}
 }
