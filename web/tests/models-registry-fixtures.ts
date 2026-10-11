@@ -8,8 +8,19 @@ import { expect, type Page } from '@playwright/test'
 export interface MockProfile {
   id: string; slug: string; version: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean; created_at: string
   display_name?: string; short_name?: string; model_version?: string; note?: string; source: 'auto' | 'manual'; retire_at: string | null; retired: boolean; effort_level: number | null; provider?: string
+  identity?: string
 }
 export interface Write { method: string; path: string; body: unknown }
+export interface MockOutdatedUse { label: string; who: string; from: string; to: string | null }
+export interface MockOutdatedVersion { version: string; line: string; state: string | null; date: string | null; successor: string | null; reason: string; source: string; uses: MockOutdatedUse[]; incomplete: boolean }
+/** AEON-1164: the outdated list and its one-step retire with Undo. Retiring marks the version's profiles retired; Undo brings them and their uses back. */
+export interface OutdatedWorld {
+  /** Sorted by identity; GET pages them as the server does, by limit and cursor. */
+  versions: MockOutdatedVersion[]; revision: string; incomplete: boolean
+  /** The next retire answers with this status and error instead (once). */
+  failRetire: { status: number; error: string } | null
+  undo: { token: string; versions: MockOutdatedVersion[] } | null
+}
 export interface RegistryWorld {
   profiles: MockProfile[]; permissions: string[]
   /** AEON-1054: Auto-update is the account matrix's New model versions rule and sends this revision. */
@@ -26,6 +37,8 @@ export interface RegistryWorld {
   /** Registry revision returned with the usage snapshot. */
   usageRevision: string
   usage: { used_by: { column: string; layer: string; person?: string; replacement: { line: string | null; effort: string | null; harness?: string; model?: string } }[]; incomplete: boolean }
+  /** Null answers GET /models/outdated with 404, as servers before AEON-1145 C do. */
+  outdated: OutdatedWorld | null
 }
 const LEVELS: Record<string, number | null> = { off: 0, low: 1, medium: 2, high: 3, xhigh: 4, max: 5, default: null }
 let counter = 0
@@ -57,7 +70,7 @@ export function registryWorld(over: Partial<RegistryWorld> = {}): RegistryWorld 
     profiles: registryProfiles(), permissions: ['models.read', 'models.manage', 'models.refresh', 'account.use.manage'], accountUseRevision: 7,
     settings: { agent_reports_enabled: true, auto_add_profiles: true, api_enabled: true, interval_minutes: 360 }, lastRun: '2026-10-09T04:12:00Z', writes: [], reads: [],
     check: { status: 200 }, failPut: false, conflictPut: false, failSettings: false, failUsage: false, failRetireAfter: null, failList: false, gateRetire: null, gateUsage: null, usageRevision: 'r1',
-    usage: { used_by: [], incomplete: false }, ...over,
+    usage: { used_by: [], incomplete: false }, outdated: null, ...over,
   }
 }
 
@@ -94,6 +107,31 @@ export async function mockRegistry(page: Page, world: RegistryWorld, options: { 
       if (revision !== undefined) world.accountUseRevision++
       world.settings = stored
       return route.fulfill({ json: world.settings })
+    }
+    const old = world.outdated
+    if (path.startsWith('/models/outdated') && !old) return route.fulfill({ status: 404, json: { error: 'not found' } })
+    if (path === '/models/outdated' && method === 'GET') {
+      const after = url.searchParams.get('cursor') ?? '', limit = Number(url.searchParams.get('limit') ?? 20)
+      const rest = old!.versions.filter(version => version.version > after), versions = rest.slice(0, limit)
+      return route.fulfill({ json: { versions, revision: old!.revision, next_cursor: rest.length > limit ? versions.at(-1)!.version : '', incomplete: old!.incomplete } })
+    }
+    if (path === '/models/outdated/retire' && method === 'POST') {
+      if (old!.failRetire) { const fail = old!.failRetire; old!.failRetire = null; return route.fulfill({ status: fail.status, json: { error: fail.error } }) }
+      if (body.revision !== old!.revision) return route.fulfill({ status: 409, json: { error: 'stale outdated preview' } })
+      const chosen = old!.versions.filter(version => (body.versions as string[]).includes(version.version))
+      for (const version of chosen) for (const profile of world.profiles) if (profile.identity === version.version) profile.retired = true
+      old!.versions = old!.versions.filter(version => !chosen.includes(version))
+      old!.revision = old!.revision.replace(/^./, c => c === 'a' ? 'b' : 'a')
+      old!.undo = { token: `41.${'c'.repeat(64)}`, versions: chosen }
+      return route.fulfill({ json: { moved: chosen.flatMap(version => version.uses), removed: chosen.map(version => version.version), undo_token: old!.undo.token } })
+    }
+    if (path === '/models/outdated/undo' && method === 'POST') {
+      if (!old!.undo || body.undo_token !== old!.undo.token) return route.fulfill({ status: 409, json: { error: 'invalid retirement undo' } })
+      const back = old!.undo.versions
+      for (const version of back) for (const profile of world.profiles) if (profile.identity === version.version) profile.retired = false
+      old!.versions = [...back, ...old!.versions].sort((a, b) => a.version < b.version ? -1 : 1)
+      old!.undo = null
+      return route.fulfill({ json: { event_id: 42, restored: true } })
     }
     const line = /^\/models\/lines\/([^/]+)\/([^/]+)(\/usage)?$/.exec(path)
     if (line) {

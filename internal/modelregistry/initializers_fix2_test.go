@@ -20,7 +20,8 @@ func incompleteCatalogFixture(t *testing.T, p tenant.Principal) {
 		if err != nil {
 			return err
 		}
-		return insertRoute(t.Context(), tx, p.TenantID, Route{Role: "build", Priority: 17, ProfileID: profile.ID, State: "available"})
+		// A saved Models choice that catalog preparation must keep.
+		return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "first", "wait", profile.ID)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -73,8 +74,13 @@ func TestInvalidInitializerStructureDoesNotPrepareCatalog(t *testing.T) {
 				}
 				before := catalogSetupState(t, p)
 				status, body := call(t, &p, tc.method, tc.path, tc.body)
-				if status != http.StatusBadRequest || !strings.Contains(string(body), tc.reason) {
-					t.Fatalf("wrong validation refusal %d %s; want %s", status, body, tc.reason)
+				if tc.path == "/api/models/routes" {
+					// The retired ladder writer refuses every body with 410, unread.
+					if !retiredLadderRefusal(status, body) {
+						t.Fatalf("retired writer validated %q instead of answering 410: %d %s", tc.reason, status, body)
+					}
+				} else if status != http.StatusBadRequest || !strings.Contains(string(body), tc.reason) {
+					t.Fatalf("wrong validation refusal %d %s; want 400 %s", status, body, tc.reason)
 				}
 				if after := catalogSetupState(t, p); after != before {
 					t.Fatal("rejected request persisted setup")

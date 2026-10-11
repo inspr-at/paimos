@@ -4,7 +4,7 @@
 // the stop that binds and the room before it.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DAILY_FRESH_MS, nextStale, quotaBar, quotaCaption, quotaInput, quotaLabel, quotaSegments, quotaSentence, ruleLeft, widestSentences, type Said } from '../src/lib/quotaBar.ts'
+import { capacityCaption, DAILY_FRESH_MS, nextStale, quotaBar, quotaCaption, quotaInput, quotaLabel, quotaSegments, quotaSentence, ruleLeft, widestSentences, type Said } from '../src/lib/quotaBar.ts'
 import type { DailyAccount, DailyPlanFields } from '../src/lib/dailyLimits.ts'
 import type { CapacityWindow } from '../src/lib/capacity.ts'
 import type { LimitUse } from '../src/lib/accountLimits.ts'
@@ -204,4 +204,20 @@ test('a reading nearly two minutes old goes stale when the server stops trusting
   assert.equal(nextStale(plan(doors), { asked: NOW }, read + DAILY_FRESH_MS), NOW + 90_000)
   assert.equal(nextStale(plan(doors), { asked: NOW }, NOW + 90_000), null)
   assert.equal(nextStale(plan(doors), null, NOW), null)
+})
+
+// AEON-1175: Capacity's caption under each account's bar. Risk: it claims room the plan does not give.
+test('Capacity’s caption says the room left today, or what stopped agents and what new work does at today’s limit', () => {
+  const o = { period: 'this week', resetsAt: '2026-10-14T17:00:00Z', now: NOW, timezone: 'Europe/Vienna', vendor: 'Claude' }
+  assert.deepEqual(capacityCaption(quotaBar({ used: 47, limit: 57, floor: 10 }), o), { text: '47 % used · 10 more percentage points today · resets Wed 19:00', tone: '', icon: '' })
+  assert.equal(capacityCaption(quotaBar({ used: 56, limit: 57 }), o).text, '56 % used · 1 more percentage point today · resets Wed 19:00')
+  assert.deepEqual(capacityCaption(quotaBar({ used: 50, limit: 50 }), { ...o, atLimit: 'ladder' }), { text: 'At today’s limit until midnight · new Claude work follows Models', tone: 'warn', icon: 'pause' })
+  assert.equal(capacityCaption(quotaBar({ used: 50, limit: 50 }), { ...o, atLimit: 'wait' }).text, 'At today’s limit until midnight · new Claude work waits')
+  // Kept for you, the floor, a low warning, an old reading and no reading say what the list says.
+  assert.equal(capacityCaption(quotaBar({ used: 71, limit: 80, keep: 30 }), o).text, 'Agents stopped · the rest is kept for you')
+  assert.equal(capacityCaption(quotaBar({ used: 91, limit: 90, floor: 10 }), { ...o, low: true }).text, 'Low · 9 % left · agents stopped at the floor')
+  assert.equal(capacityCaption(quotaBar({ used: 22, limit: 32, stale: true }), o).text, '78 % left · reading out of date')
+  assert.equal(capacityCaption(quotaBar({ used: null }), o).text, 'Quota not reported')
+  // Outside the person's plan there is no today's limit: the reading only, never a guessed room.
+  assert.equal(capacityCaption(quotaBar({ used: 30 }), o).text, '70 % left this week · resets Wed 19:00')
 })

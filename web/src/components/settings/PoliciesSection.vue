@@ -1,196 +1,130 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
-import { useSession } from '../../stores/session'
-import { can, onAccessRevalidate, permissionsAvailable, permissionsKnown } from '../../lib/authz'
-import { permissionLabel } from '../../lib/access'
-import { scopeOwner } from '../../lib/identityScope'
-import { createPoliciesReader, deniedPolicy, ELSEWHERE_RULES, keyLimits, ownerLinks, POLICY_ROLES, POLICY_TABS, truncatedLadder, type PolicyRole, type PolicyTab } from '../../lib/policies'
+// Settings › Policies, rules only (AEON-1143/1165): one line, then three cards.
+// Policies say who may do what; which model runs is decided on Models, so this
+// page names no model. Nothing here writes except the cross-family rule.
+import { computed, ref } from 'vue'
+import { can } from '../../lib/authz'
+import { AGENT_ASKS, ASK_RISKS, askPreview, ELSEWHERE_RULES, ruleLink, type AskRisk } from '../../lib/policies'
 import AppIcon from '../AppIcon.vue'
 import CrossFamilyReviewCard from './CrossFamilyReviewCard.vue'
-import PolicyLadderEditor from './PolicyLadderEditor.vue'
+import SettingsCard from './SettingsCard.vue'
 
-const session = useSession()
-const tab = ref<PolicyTab>('ladders'), role = ref<PolicyRole>('review-gate')
-const reader = createPoliciesReader(() => scopeOwner(session.identity))
-const { state, ladder, registry } = reader
-const person = computed(() => session.identity?.principal.kind === 'person')
-const permitted = computed(() => !!session.identity && (tab.value === 'elsewhere' ? person.value : can(tab.value === 'ladders' ? 'models.read' : 'roles.read') && (tab.value !== 'keys' || person.value)))
-const links = computed(() => person.value ? ownerLinks(permission => can(permission)) : [])
-const groups = computed(() => keyLimits(registry.value))
-const roleDetail = computed(() => POLICY_ROLES.find(item => item.id === role.value)!.detail)
-const sheet = ref<HTMLDialogElement | null>(null), detailsButton = ref<HTMLButtonElement | null>(null)
-const ready = computed(() => tab.value === 'elsewhere' || permissionsKnown())
-const statusText = computed(() => state.value === 'loading' ? 'Loading the rules…' : state.value === 'denied' ? deniedPolicy(tab.value) : state.value === 'failed' ? 'The rules could not be loaded. Try opening this tab again; the other tabs still work.' : ladder.value?.truncated ? truncatedLadder() : '')
-const announcement = ref('')
-// Populate the already-mounted region, including the first loading message.
-watch(statusText, async () => { await nextTick(); announcement.value = statusText.value }, { immediate: true })
-function closeDetails() { sheet.value?.close(); detailsButton.value?.focus({ preventScroll: true }) }
-async function openDetails() { await nextTick(); sheet.value?.showModal() }
-function load() {
-  sheet.value?.close()
-  if (!ready.value) { reader.reset(); return }
-  if (tab.value !== 'elsewhere' && !permissionsAvailable()) { reader.reset(); state.value = 'failed'; return }
-  void reader.load(tab.value, role.value, permitted.value)
-}
-// Compare each authority/source value, rather than a newly allocated tuple on
-// every permission-cache revision (including unchanged focus answers).
-watch([() => scopeOwner(session.identity), tab, role, ready, permitted, permissionsAvailable], load, { immediate: true, flush: 'sync' })
-const stopAccess = onAccessRevalidate({ reset: () => { reader.reset(); sheet.value?.close() }, refresh: () => {
-  // Same-person refresh belongs to the mounted ladder editor. Other tabs
-  // replace their read in place without unmounting controls or details.
-  if (tab.value !== 'ladders' || state.value !== 'loaded') void reader.load(tab.value, role.value, permitted.value, true)
-} })
-onBeforeUnmount(() => { stopAccess(); reader.dispose() })
-function tabKey(event: KeyboardEvent, index: number) {
-  if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-  event.preventDefault()
-  const next = event.key === 'Home' ? 0 : event.key === 'End' ? 2 : (index + (event.key === 'ArrowRight' ? 1 : -1) + 3) % 3
-  tab.value = POLICY_TABS[next]!.id
-  const tabs = (event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-  tabs?.[next]?.focus({ preventScroll: true })
-}
+// Settings remounts the section for another person, so open groups never carry over.
+const open = ref<AskRisk[]>([])
+const isOpen = (risk: AskRisk) => open.value.includes(risk)
+function toggle(risk: AskRisk) { open.value = isOpen(risk) ? open.value.filter(item => item !== risk) : [...open.value, risk] }
+const desk = computed(() => can('approvals.read'))
+const rules = computed(() => ELSEWHERE_RULES.map(rule => ({ rule, to: ruleLink(rule, permission => can(permission)) })))
 </script>
 
 <template>
-  <section class="policies" aria-labelledby="policies-title">
-    <header class="policy-head">
-      <p class="eyebrow">Who may do what, when</p>
-      <h2 id="policies-title">Policies</h2>
-      <p class="intro">The rules already in force, and where they belong.</p>
-    </header>
-    <div class="policy-tabs" role="tablist" aria-label="Policy sections">
-      <button v-for="(item, index) in POLICY_TABS" :id="`policy-tab-${item.id}`" :key="item.id" role="tab" data-testid="policies-tab" :aria-selected="tab === item.id" :aria-controls="`policy-panel-${item.id}`" :tabindex="tab === item.id ? 0 : -1" @click="tab = item.id" @keydown="tabKey($event, index)">
-        <span>{{ item.label }}</span><small>{{ item.note }}</small>
-      </button>
-    </div>
-    <p data-testid="policies-announcement" role="status" aria-live="polite" aria-atomic="true" class="sr-only">{{ announcement }}</p>
-    <template v-for="panelTab in POLICY_TABS" :key="panelTab.id">
-      <div v-if="tab !== panelTab.id" :id="`policy-panel-${panelTab.id}`" role="tabpanel" :aria-labelledby="`policy-tab-${panelTab.id}`" hidden />
-    </template>
-    <div :id="`policy-panel-${tab}`" role="tabpanel" :aria-labelledby="`policy-tab-${tab}`" class="policy-panel">
-      <div v-if="permitted" class="policy-controls">
-        <p class="source-note">{{ tab === 'ladders' ? 'Saved job order and model preferences · owned by their model sources.' : tab === 'keys' ? 'Permission registry · owned by Access. These permissions cannot be carried by agent keys.' : 'Existing owners · this page holds no policy values of its own.' }}</p>
-        <button ref="detailsButton" class="detail-link" data-testid="policies-row-link" @click="openDetails">About these rules <AppIcon name="chevron-right" :size="14" /></button>
-        <nav v-if="tab === 'ladders'" class="owner-links"><RouterLink to="/settings/models?layer=rules">Model choices are on the Models page · Open Models <AppIcon name="chevron-right" :size="12" /></RouterLink></nav>
-        <div v-if="tab === 'ladders'" class="role-block">
-          <div class="policy-roles" role="group" aria-label="Model role" data-testid="policies-role-group">
-            <button v-for="item in POLICY_ROLES" :key="item.id" data-testid="policies-role" :aria-pressed="role === item.id" @click="role = item.id">{{ item.label }}</button>
-          </div>
-          <p class="role-detail">{{ roleDetail }}</p>
-        </div>
-        <nav v-if="tab === 'elsewhere' && links.length" class="owner-links" aria-label="Rule owners">
-          <RouterLink v-for="link in links" :key="link.title" :to="link.to!" data-testid="policies-owner-link">{{ link.title }} <AppIcon name="chevron-right" :size="12" /></RouterLink>
-        </nav>
-      </div>
-      <div class="policy-content" :aria-busy="state === 'loading'">
-        <p v-if="state === 'loading' || state === 'denied' || state === 'failed'" class="state-line">{{ statusText }}</p>
-        <template v-else-if="tab === 'ladders'">
-          <PolicyLadderEditor :key="`${scopeOwner(session.identity)}/${role}`" :owner="scopeOwner(session.identity)" :role="role" :person="person" />
-        </template>
-        <template v-else-if="tab === 'keys'">
-          <section v-for="group in groups" :key="group.risk" class="risk-group" :aria-label="`${group.risk} risk permissions`">
-            <h3 class="risk-title">{{ group.risk }} risk</h3>
-            <div v-for="permission in group.items" :key="permission.key" class="policy-row key-row">
-              <div><h3>{{ permissionLabel(permission.key) }}</h3><p>{{ permission.description }}</p><code>{{ permission.key }}</code></div><span class="rule-status">Enforced</span>
+  <div class="policies">
+    <p class="intro"><AppIcon name="info" :size="14" /><span>Policies say who may do what. Which model runs is decided on <RouterLink class="quiet" to="/settings/models">Models</RouterLink>.</span></p>
+    <CrossFamilyReviewCard />
+    <SettingsCard title="What agents must ask you for" icon="key" anchor="agent-asks">
+      <template #lead>Agent keys never carry these. When an agent needs one for a single action, it asks, and you approve on the Decision Desk. Each approval covers that one action, once.</template>
+      <template v-if="desk" #aside><RouterLink class="btn sm desk" to="/decision-desk">Decision Desk<AppIcon name="chevron-right" :size="13" /></RouterLink></template>
+      <div class="risks">
+        <div v-for="group in ASK_RISKS" :key="group.risk" class="risk" :class="{ open: isOpen(group.risk) }">
+          <button type="button" class="risk-head" :data-risk="group.risk" :aria-expanded="isOpen(group.risk)" :aria-controls="`agent-asks-${group.risk}`" @click="toggle(group.risk)">
+            <AppIcon name="chevron-right" :size="13" class="chev" />
+            <span v-clip-tip="isOpen(group.risk) ? undefined : `${group.label} · ${AGENT_ASKS[group.risk].length} · ${askPreview(AGENT_ASKS[group.risk])}`" class="risk-text"><b>{{ group.label }}</b> · {{ AGENT_ASKS[group.risk].length }}<span class="preview"> · {{ askPreview(AGENT_ASKS[group.risk]) }}</span></span>
+          </button>
+          <div :id="`agent-asks-${group.risk}`" class="fold" :inert="!isOpen(group.risk) || undefined">
+            <div class="fold-in">
+              <ul class="asks">
+                <li v-for="item in AGENT_ASKS[group.risk]" :key="item.title" class="ask"><span class="ask-t"><b>{{ item.title }}</b><code>{{ item.keys.join(' · ') }}</code></span><span class="ask-s"><AppIcon name="key" :size="12" />Asks you</span></li>
+              </ul>
             </div>
-          </section>
-          <p v-if="!groups.length" class="state-line">The registry lists no permissions excluded from agent keys.</p>
-        </template>
-        <div v-else class="elsewhere-rows">
-          <article v-for="rule in ELSEWHERE_RULES" :key="rule.title" class="policy-row key-row">
-            <div><h3>{{ rule.title }}</h3><p>{{ rule.text }}</p><small class="owner">Owner: {{ rule.owner }}</small><RouterLink v-if="rule.title === 'Model preferences'" class="detail-link" to="/settings/models?layer=rules">Open Models <AppIcon name="chevron-right" :size="12" /></RouterLink><button v-else-if="rule.title === 'Review ladder editing'" class="detail-link" @click="tab = 'ladders'">Open here <AppIcon name="chevron-right" :size="12" /></button></div><span class="rule-status">{{ rule.status }}</span>
-          </article>
+          </div>
         </div>
       </div>
-    </div>
-    <CrossFamilyReviewCard class="review-card" />
-    <dialog ref="sheet" class="policy-sheet" aria-labelledby="policy-sheet-title" @cancel.prevent="closeDetails">
-      <header><p class="eyebrow">Policy source</p><h2 id="policy-sheet-title">About these rules</h2></header>
-      <div class="sheet-body">
-        <template v-if="tab === 'ladders' && ladder">
-          <h3>Configured ladder · CLI</h3><p>The CLI walks the configured priority and harness health. It has no ticket context. A listed step is not a promise that dispatch can run it.</p>
-          <h3>Qualified routing · Dispatch</h3><p>Dispatch checks platform capability and approved accounts for the work, then applies model preferences.</p>
-          <template v-if="role === 'review-gate'">
-            <p>Dispatch uses {{ ladder.dispatch_family_order.join(', ') }} as its built-in review family order.</p>
-            <p v-for="floor in ladder.review_floors" :key="floor">{{ floor }}</p>
-          </template>
-          <h3>Availability</h3><p>A suspended step records its reason and expiry. Once the suspension expires, it stops excluding that profile. The server decides availability when routing runs.</p>
-          <p v-if="ladder.truncated">{{ truncatedLadder() }}</p>
-        </template>
-        <template v-else-if="tab === 'keys'"><h3>Permission registry · Access</h3><p>These permissions are marked as not grantable to agent keys in the live registry. Holding a role does not bypass a key’s scope ceiling.</p><p>This registry endpoint is available to person sessions with See roles. Bearer keys are refused by the middleware even when they hold See roles.</p></template>
-        <template v-else-if="tab === 'elsewhere'"><h3>The existing owner decides</h3><p>This page reads existing rules. It stores no policy, grants no exception and changes no enforcement.</p><p>Enforced describes existing checks in this workspace. Advisory describes guidance or rules owned elsewhere, including GitHub repository controls.</p><p>Editors are linked only where an existing screen and your permissions allow it. Model preferences and saved job order can be changed on the first tab with the owning source’s permissions. Lane coordination remains with its owner.</p></template>
-        <p v-else>{{ statusText || 'Open this tab again to load its rules.' }}</p>
-      </div>
-      <footer><button class="btn" data-testid="policies-sheet-close" @click="closeDetails">Close <kbd>Esc</kbd></button></footer>
-    </dialog>
-  </section>
+      <p class="foot"><AppIcon name="lock" :size="13" /><span>Also person-only, checked in code: release planning and membership, and changes to locked doctrine rules.</span></p>
+    </SettingsCard>
+    <SettingsCard title="Rules that live elsewhere" icon="link" anchor="rules-elsewhere">
+      <template #lead>Each is set and enforced where it lives. This page only points there.</template>
+      <ul class="rules">
+        <li v-for="{ rule, to } in rules" :key="rule.title" class="rule">
+          <AppIcon :name="rule.icon" :size="15" class="rule-i" />
+          <span class="rule-t"><b>{{ rule.title }}</b><span>{{ rule.text }}</span></span>
+          <span class="rule-s" :class="rule.status === 'Enforced' ? 'enforced' : 'advisory'"><AppIcon :name="rule.status === 'Enforced' ? 'check' : 'info'" :size="12" />{{ rule.status }}</span>
+          <RouterLink v-if="to" class="rule-go quiet" :to="to">{{ rule.owner }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
+          <span v-else class="rule-go none">{{ rule.owner }}</span>
+        </li>
+      </ul>
+    </SettingsCard>
+  </div>
 </template>
 
 <style scoped>
-.review-card { margin-top:30px; }
-.policies { min-width: 0; color: var(--ink); }
-.policy-head { margin-bottom: 22px; }
-.policy-head h2 { font-size: 28px; letter-spacing: -.035em; margin: 5px 0 8px; }
-.intro, .source-note, .role-detail, .policy-row p, .routing-notes, .state-line, .sheet-body p { color: var(--ink-2); font-size: 13px; line-height: 1.6; }
-.policy-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-block: 1px solid var(--line-2); }
-.policy-tabs button { display: flex; flex-direction: column; justify-content: center; gap: 5px; height: 78px; text-align: left; padding: 10px 14px; background: transparent; color: var(--ink-2); border: 0; font-size: 13px; }
-.policy-tabs button[aria-selected="true"] { background: var(--row-selected); color: var(--ink); }
-.policy-tabs button span { font-weight: 650; }
-.policy-tabs small { font-size: 12px; line-height: 1.4; font-weight: 400; }
-.policy-tabs button:focus-visible, .policy-roles button:focus-visible, .detail-link:focus-visible, .owner-links a:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
-.policy-controls { padding-top: 18px; }
-.source-note { min-height: 42px; margin: 0; }
-.detail-link { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0; color: var(--teal-ink); background: none; border: 0; font-size: 12px; font-weight: 600; }
-.model-views { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin-top:12px; }
-.model-views button { min-height:44px; padding:8px; background:transparent; color:var(--ink-2); border:1px solid var(--line-2); font-size:12px; }
-.model-views button[aria-pressed="true"] { background:var(--row-selected); color:var(--ink); font-weight:650; }
-.role-block { margin-top: 12px; }
-.policy-roles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
-.policy-roles button { height: 42px; padding: 6px; font-size: 12px; border: 1px solid var(--line-2); border-radius: 3px; background: transparent; color: var(--ink-2); }
-.policy-roles button[aria-pressed="true"] { background: var(--row-selected); color: var(--ink); font-weight: 650; }
-.role-detail { height: 42px; margin: 10px 0 0; }
-.owner-links { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 12px 0 18px; }
-.owner-links a { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--teal-ink); min-height: 28px; }
-.policy-content { overflow-wrap: anywhere; }
-.state-line { margin: 0; padding: 20px 0; }
-.ladder { list-style: none; padding: 0; margin: 0; }
-.policy-row { display: grid; grid-template-columns: 34px minmax(0, 1fr); gap: 12px; padding: 18px 0; border-top: 1px solid var(--line); align-items: start; }
-.policy-row h3 { font-size: 14px; font-weight: 650; margin: 0 0 4px; }
-.policy-row p { margin: 0; }
-.step-number { color: var(--ink-3); font-variant-numeric: tabular-nums; font-size: 12px; padding-top: 2px; }
-.rule-status { font-size: 11px; color: var(--ink-2); padding-top: 3px; }
-.list-status { font-size: 12px; color: var(--ink-2); margin: 0; padding: 8px 0; }
-.step-state { margin-top: 5px !important; }
-.key-row { grid-template-columns: minmax(0, 1fr) auto; }
-.policy-row code, .owner { display: block; margin-top: 6px; font-size: 11px; color: var(--ink-3); }
-.risk-title { text-transform: capitalize; font-size: 12px; margin: 20px 0 12px; letter-spacing: .04em; color: var(--ink-2); }
-.truncation { font-size: 12px; color: var(--warn-ink); padding: 14px 0; }
-.routing-notes { padding: 16px 0 0; border-top: 1px solid var(--line); }
-.routing-notes p { margin: 0 0 8px; }
-.routing-notes strong { color: var(--ink); margin-right: 4px; }
-.policy-sheet { position: fixed; inset: 8vh 0 auto; margin: 0 auto; padding: 0; width: min(600px, calc(100vw - 40px)); max-height: 84dvh; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); color: var(--ink); }
-.policy-sheet[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
-.policy-sheet::backdrop { background: var(--scrim); }
-.policy-sheet header { padding: 24px 26px 18px; }
-.policy-sheet h2 { margin-top: 8px; font-size: 22px; }
-.sheet-body { padding: 0 26px 20px; overflow-y: auto; overflow-wrap: anywhere; }
-.sheet-body h3 { font-size: 14px; margin: 16px 0 8px; }
-.sheet-body p { margin: 0 0 12px; }
-.policy-sheet footer { padding: 14px 26px max(14px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); display: flex; justify-content: flex-end; }
-.policy-sheet kbd { font-size: 10px; color: var(--ink-2); }
-@media (max-width: 600px) {
-  .policy-tabs button { padding: 8px; height: 100px; font-size: 12px; }
-  .source-note { min-height: 63px; }
-  .policy-roles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
-  .policy-roles button { grid-column: span 2; }
-  .policy-roles button:nth-last-child(-n+2) { grid-column: span 3; }
-  .role-detail { height: 42px; }
-  .policy-row { gap: 8px; grid-template-columns: 22px minmax(0, 1fr); }
-  .key-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .policy-sheet { inset: 0; margin: 0; width: 100%; max-width: none; height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
-  .policy-sheet header { padding: 22px 20px 16px; }
-  .sheet-body { padding-inline: 20px; }
-  .policy-sheet footer { padding-inline: 20px; }
+/* One column that never outgrows the page: the folded previews are a single clipped line. */
+.policies { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; min-width: 0; color: var(--ink); container: policies / inline-size; }
+.intro { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 2px 4px 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.intro > svg { flex: none; margin-top: 3px; color: var(--ink-3); }
+/* Inline links keep the sentence's line height but a 24 px target (44 px on touch). */
+.quiet { display: inline-flex; align-items: center; min-height: 24px; color: var(--ink-2); font-weight: 500; text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 2px; }
+.intro .quiet { margin: -2px 0; }
+.quiet:hover { color: var(--teal-ink); text-decoration-color: currentColor; }
+.quiet:focus-visible, .risk-head:focus-visible { outline: none; border-radius: 6px; box-shadow: var(--focus-ring); }
+.desk { gap: 2px; white-space: nowrap; }
+
+/* What agents must ask you for: three folded risk groups between hairlines. */
+.risks { border-top: 1px solid var(--line); }
+.risk { border-bottom: 1px solid var(--line); }
+.risk-head { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 44px; padding: 0 8px 0 6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 13px; text-align: left; cursor: pointer; }
+.risk-head b { color: var(--ink); font-weight: 600; }
+.chev { flex: none; color: var(--ink-3); transition: transform .2s ease; }
+.risk.open .chev { transform: rotate(90deg); }
+.risk-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preview { color: var(--ink-3); }
+.risk.open .preview { display: none; }
+@media (hover: hover) { .risk-head:hover { background: var(--row-hover); } }
+/* The group grows below its head; nothing above it moves. */
+.fold { display: grid; grid-template-rows: 0fr; visibility: hidden; transition: grid-template-rows .24s ease, visibility 0s .24s; }
+.risk.open .fold { grid-template-rows: 1fr; visibility: visible; transition: grid-template-rows .24s ease, visibility 0s 0s; }
+.fold-in { min-height: 0; overflow: hidden; }
+.asks { display: grid; margin: 0; padding: 0 0 8px 22px; list-style: none; }
+.ask { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 48px; padding: 6px 4px; }
+.ask + .ask { border-top: 1px solid var(--line); }
+.ask-t { display: grid; min-width: 0; }
+.ask-t b { font-size: 13px; font-weight: 600; color: var(--ink); }
+.ask-t code { font: 500 11px/1.45 var(--mono); color: var(--ink-3); overflow-wrap: anywhere; }
+.ask-s { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
+.foot { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding-top: 12px; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+.foot > svg { flex: none; margin-top: 2px; }
+
+/* Rules that live elsewhere: what, owner, Enforced or Advisory, one link. The
+   rows share one set of columns, so status and owner line up down the card. */
+.rules { display: grid; grid-template-columns: 22px minmax(0, 1fr) max-content max-content; column-gap: 12px; margin: 0; padding: 0; border-top: 1px solid var(--line); list-style: none; }
+.rule { display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; align-items: center; min-height: 56px; padding: 8px 4px; }
+.rule + .rule { border-top: 1px solid var(--line); }
+.rule-i { justify-self: center; color: var(--ink-3); }
+.rule-t { display: grid; min-width: 0; }
+.rule-t b { font-size: 13px; font-weight: 600; color: var(--ink); }
+.rule-t span { font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.rule-s { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+.rule-s.enforced > svg { color: var(--ok); }
+.rule-s.advisory { color: var(--ink-3); }
+.rule-go { display: inline-flex; align-items: center; justify-self: end; gap: 2px; min-height: 24px; font-size: 12.5px; white-space: nowrap; }
+.rule-go.none { color: var(--ink-3); }
+
+@media (prefers-reduced-motion: reduce) { .chev, .fold, .risk.open .fold { transition: none; } }
+@container policies (max-width: 600px) {
+  .intro > svg { margin-top: 3px; }
+  .preview { display: none; }
+  .asks { padding-left: 4px; }
+  .ask { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  .rules { grid-template-columns: 22px minmax(0, 1fr) auto; }
+  .rule { align-items: start; row-gap: 2px; }
+  .rule-i { padding-top: 2px; }
+  .rule-t { grid-column: 2 / -1; }
+  .rule-s { grid-column: 2; }
+  .rule-go { grid-column: 3; grid-row: 2; }
+}
+@media (pointer: coarse) {
+  .desk { min-height: 44px; }
+  .quiet, .rule-go { min-height: 44px; }
+  .intro .quiet { margin: -12px 0; }
 }
 </style>

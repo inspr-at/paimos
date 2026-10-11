@@ -63,7 +63,7 @@ func validateSelector(ctx context.Context, tx pgx.Tx, c modelprefs.Cell, kind st
 	var exists, review bool
 	err := tx.QueryRow(ctx, `
  WITH candidates AS NOT MATERIALIZED (
-   SELECT p.id,p.harness,p.effort,p.tier,
+   SELECT p.id,p.harness,p.effort,p.tier,coalesce(p.registered_effort_level,d.effort_level) AS effort_level,
      CASE WHEN p.harness='opencode' THEN regexp_replace(regexp_replace(p.model,'^google/',''),'^ollama/','')
           WHEN p.harness='pi' THEN regexp_replace(p.model,'^anthropic/','')
           ELSE p.model END AS model
@@ -92,8 +92,7 @@ func validateSelector(ctx context.Context, tx pgx.Tx, c modelprefs.Cell, kind st
  )
  SELECT EXISTS(SELECT 1 FROM matches LIMIT 1),
         CASE WHEN $7 THEN EXISTS(SELECT 1 FROM matches p
-          WHERE p.effort='xhigh' AND p.tier IN ('strong','frontier')
-            AND EXISTS(SELECT 1 FROM model_role_routes r WHERE r.profile_id=p.id AND r.role='review-gate' LIMIT 1)
+          WHERE p.effort_level>=4 AND p.tier IN ('strong','frontier')
           LIMIT 1) ELSE true END`, c.Mode, c.ProfileID, c.Family, c.Line, c.Effort, c.Harness, kind == "review").Scan(&exists, &review)
 	if err != nil {
 		return err
@@ -457,4 +456,143 @@ func expectedPreferencePerson(r *http.Request, level string) (string, error) {
 		return "", prefFail(400, "invalid_person_precondition")
 	}
 	return strings.ToLower(values[0]), nil
+}
+
+// A row-level never rule belongs to the workspace, even when a person has
+// their own order. Keep other pins and never rules untouched by these writes.
+func (m *Module) writeNeverRule(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if p.Kind != tenant.Person {
+		writePreferenceError(w, prefFail(403, "person_required"))
+		return
+	}
+	column, line := r.PathValue("column"), r.PathValue("line")
+	if len(column) > 64 || len(line) > 128 || r.URL.Query().Get("project_id") != "" {
+		writePreferenceError(w, prefFail(400, "invalid_rule_scope"))
+		return
+	}
+	var in struct {
+		Why      string `json:"why"`
+		Revision *int64 `json:"revision"`
+	}
+	if r.Method == http.MethodDelete {
+		revision, err := requestedRevision(r)
+		if err != nil {
+			writePreferenceError(w, err)
+			return
+		}
+		in.Revision = &revision
+	} else {
+		if err := workBody(w, r); err != nil {
+			writePreferenceError(w, err)
+			return
+		}
+		if err := decodeJSON(w, r, &in); err != nil {
+			writePreferenceError(w, err)
+			return
+		}
+		in.Why = strings.TrimSpace(in.Why)
+		if in.Why == "" || !boundedText(in.Why, 1000) || strings.ContainsRune(in.Why, '\x00') {
+			writePreferenceError(w, prefFail(422, "invalid_rule"))
+			return
+		}
+	}
+	if in.Revision == nil || *in.Revision < 0 {
+		writePreferenceError(w, prefFail(400, "revision_required"))
+		return
+	}
+	var out rulesDocument
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		ctx := r.Context()
+		if _, err := boardWriteAuthority(ctx, tx, r, p, "default", ""); err != nil {
+			return err
+		}
+		s, err := modelprefs.LoadBoard(ctx, tx, nil, "")
+		if err != nil {
+			return err
+		}
+		if !validBoardColumn(s, column) {
+			return prefFail(422, "unknown_column")
+		}
+		revision, err := ruleRevision(ctx, tx, "workspace", "")
+		if err != nil {
+			return err
+		}
+		if revision != *in.Revision {
+			return prefFail(409, "stale_revision")
+		}
+		c, err := loadBoardCatalog(ctx, tx)
+		if err != nil {
+			return err
+		}
+		// The page shows provider identities, while earlier writers stored
+		// harness-derived aliases. Match, replace and remove every equivalent
+		// line, and store only the provider identity.
+		canonical := modelsIdentity(c)
+		identity := canonical(line)
+		var before *modelprefs.Rule
+		count := 0
+		equivalent := []string{line, identity}
+		for _, rule := range s.Rules {
+			if rule.Column != column {
+				continue
+			}
+			count++
+			if canonical(rule.Line) == identity {
+				if rule.Lock != "not" {
+					return prefFail(409, "rule_conflict")
+				}
+				if before == nil {
+					copy := rule
+					before = &copy
+				}
+				equivalent = append(equivalent, rule.Line)
+			}
+		}
+		if r.Method != http.MethodDelete {
+			if _, ok := modelsWriteCatalog(c).profiles[line]; !ok {
+				return prefFail(422, "unknown_line")
+			}
+			if before == nil && (count >= 512 || len(s.Rules) >= 4096) {
+				return modelprefs.ErrBoardBounds
+			}
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM model_rules WHERE scope='workspace' AND column_key=$1 AND line=ANY($2::text[]) AND lock='not' AND moved_to_models IS NOT TRUE`, column, equivalent); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM model_row_constraints WHERE scope='workspace' AND column_key=$1 AND line=ANY($2::text[]) AND kind='never'`, column, equivalent); err != nil {
+			return err
+		}
+		if r.Method != http.MethodDelete {
+			if _, err := tx.Exec(ctx, `INSERT INTO model_row_constraints(tenant_id,scope,column_key,line,kind,why,set_by) VALUES($1,'workspace',$2,$3,'never',$4,$5)`, p.TenantID, column, identity, in.Why, p.ID); err != nil {
+				return err
+			}
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO model_rule_revisions(tenant_id,scope,scope_key,revision) VALUES($1,'workspace','',1) ON CONFLICT(tenant_id,scope,scope_key) DO UPDATE SET revision=model_rule_revisions.revision+1 RETURNING revision`, p.TenantID).Scan(&out.Revision); err != nil {
+			return err
+		}
+		after, err := modelprefs.LoadBoard(ctx, tx, nil, "")
+		if err != nil {
+			return err
+		}
+		out.Rules = after.Rules
+		// Audit the affected row, like the retained rule editor. The read
+		// response can contain all workspace rows; an event stays bounded.
+		audit := rulesDocument{Revision: out.Revision, Rules: []modelprefs.Rule{}}
+		for _, rule := range after.Rules {
+			if rule.Column == column {
+				audit.Rules = append(audit.Rules, rule)
+			}
+		}
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "model.rules_changed", Before: map[string]any{"column": column, "line": identity, "rule": before}, After: audit})
+		return err
+	})
+	if err != nil {
+		writeBoardError(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, 200, out)
 }

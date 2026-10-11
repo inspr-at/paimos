@@ -1,88 +1,65 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// Risks: Policies claims agent keys never carry a permission they can carry (or
+// forgets one); a rule links somewhere that will not open; the reviewer sentences
+// say something the server's review-policy fields do not; the page names a model.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createPoliciesReader, deniedPolicy, ELSEWHERE_RULES, keyLimits, ownerLinks, stepState, truncatedLadder, type PolicyLadder, type PolicyStep } from '../src/lib/policies.ts'
-import type { Permission } from '../src/lib/access.ts'
+import { readdirSync, readFileSync } from 'node:fs'
+import { AGENT_ASKS, ASK_RISKS, askPreview, ELSEWHERE_RULES, familyOrderWords, floorSentence, reviewerRules, ruleLink, securitySentence, type ReviewerRules } from '../src/lib/policies.ts'
+import ceiling from '../../internal/auth/testdata/key_scope_ceiling.json' with { type: 'json' }
 
-const ladder = (role: PolicyLadder['role'] = 'review-gate'): PolicyLadder => ({ role, setup: true, truncated: false, steps: [], dispatch_family_order: ['openai', 'xai', 'anthropic', 'cursor', 'google', 'local'], review_floors: ['Other family'] })
-function deferred<T>() { let resolve!: (value: T) => void, reject!: (error: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { resolve, reject, promise } }
-
-test('each tab calls its own source and refusals disclose no other tab data', async () => {
-  const paths: string[] = []
-  const reader = createPoliciesReader(() => 'tenant/person', async path => { paths.push(path); return path.startsWith('/models') ? ladder() : [] })
-  await reader.load('ladders', 'review-gate', false)
-  assert.equal(reader.state.value, 'denied'); assert.deepEqual(paths, [])
-  await reader.load('elsewhere', 'review-gate', true)
-  assert.equal(reader.state.value, 'loaded'); assert.deepEqual(paths, [])
-  await reader.load('ladders', 'review-gate', true)
-  assert.equal(reader.state.value, 'loaded'); assert.ok(reader.ladder.value)
-  await reader.load('keys', 'review-gate', true)
-  assert.equal(reader.ladder.value, null)
-  assert.deepEqual(paths, ['/models/routes?role=review-gate', '/authz/permissions'])
-  assert.equal(deniedPolicy('ladders'), "You can't see this: it needs See models.")
-  assert.match(deniedPolicy('keys'), /See roles and a person session/)
-})
-
-test('tab and role switches discard slow successes and failures, even when aborted requests still resolve', async () => {
-  const old = deferred<PolicyLadder>(), newer = deferred<PolicyLadder>()
-  let calls = 0
-  const reader = createPoliciesReader(() => 'tenant/person', () => (++calls === 1 ? old.promise : newer.promise))
-  const a = reader.load('ladders', 'review-gate', true)
-  const b = reader.load('ladders', 'build', true)
-  newer.resolve(ladder('build')); await b
-  old.resolve(ladder()); await a
-  assert.equal(reader.ladder.value?.role, 'build')
-  const stale = deferred<PolicyLadder>()
-  const second = createPoliciesReader(() => 'tenant/person', () => stale.promise)
-  const pending = second.load('ladders', 'review-gate', true)
-  await second.load('elsewhere', 'review-gate', true)
-  stale.reject(new Error('late failure')); await pending
-  assert.equal(second.state.value, 'loaded'); assert.equal(second.ladder.value, null)
-})
-
-test('identity, tenant, permission loss and disposal discard responses and clear read state', async () => {
-  for (const next of ['tenant/another-person', 'another-tenant/person', '']) {
-    let owner = 'tenant/person'
-    const answer = deferred<PolicyLadder>()
-    const reader = createPoliciesReader(() => owner, () => answer.promise)
-    const pending = reader.load('ladders', 'review-gate', true)
-    owner = next; reader.reset(); answer.resolve(ladder()); await pending
-    assert.equal(reader.ladder.value, null); assert.deepEqual(reader.registry.value, [])
+// The server registry in source: one {Key: …, Risk: …, AgentGrantable: …} literal per permission.
+function serverRegistry() {
+  const dir = new URL('../../internal/authz/', import.meta.url)
+  const rows: { key: string; risk: string; agent: boolean }[] = []
+  for (const name of readdirSync(dir).filter(file => /^permissions_.*\.go$/.test(file) && !file.endsWith('_test.go'))) {
+    for (const match of readFileSync(new URL(name, dir), 'utf8').matchAll(/\{Key: "([^"]+)"[^\n]*?Risk: "(\w+)"[^\n]*?AgentGrantable: (true|false)/g)) rows.push({ key: match[1]!, risk: match[2]!, agent: match[3] === 'true' })
   }
-  const held = deferred<PolicyLadder>()
-  const reader = createPoliciesReader(() => 'tenant/person', () => held.promise)
-  const pending = reader.load('ladders', 'review-gate', true)
-  await reader.load('ladders', 'review-gate', false)
-  held.resolve(ladder()); await pending
-  assert.equal(reader.state.value, 'denied'); assert.equal(reader.ladder.value, null)
-  reader.dispose()
+  return rows
+}
+
+test('the asks list is exactly the registry’s never-on-an-agent-key permissions, at their risk', () => {
+  const registry = serverRegistry()
+  // The parse saw every permission the Go parity fixture holds, so nothing hid from the regex.
+  assert.equal(registry.length, ceiling.registry.length)
+  assert.deepEqual(registry.filter(p => !p.agent).map(p => p.key).sort(), ceiling.registry.filter(p => !p.agent_grantable).map(p => p.key).sort())
+  const listed = ASK_RISKS.flatMap(({ risk }) => AGENT_ASKS[risk].flatMap(item => item.keys.map(key => ({ key, risk }))))
+  assert.equal(new Set(listed.map(p => p.key)).size, listed.length, 'a permission is listed twice')
+  assert.deepEqual(listed.sort((a, b) => a.key.localeCompare(b.key)), registry.filter(p => !p.agent).map(({ key, risk }) => ({ key, risk })).sort((a, b) => a.key.localeCompare(b.key)))
+  assert.deepEqual(ASK_RISKS.map(group => group.label), ['High risk', 'Medium risk', 'Low risk'])
+  assert.equal(askPreview(AGENT_ASKS.medium), 'Connect a chat, edit the portal profile, accept a quote in the portal')
 })
 
-test('failures and invalid or over-limit answers never report success; other tabs still work', async () => {
-  for (const answer of [Promise.reject(Object.assign(new Error('denied'), { status: 403 })), Promise.reject(Object.assign(new Error('timeout'), { status: 503 })), Promise.resolve({ ...ladder(), role: 'build' } as PolicyLadder), Promise.resolve({ ...ladder(), steps: Array(51).fill({}) })]) {
-    const reader = createPoliciesReader(() => 'tenant/person', () => answer)
-    await reader.load('ladders', 'review-gate', true)
-    assert.notEqual(reader.state.value, 'loaded'); assert.equal(reader.ladder.value, null)
-    await reader.load('elsewhere', 'review-gate', true)
-    assert.equal(reader.state.value, 'loaded')
-  }
+test('twelve rules elsewhere; a link shows only when every permission of its place is held', () => {
+  assert.equal(ELSEWHERE_RULES.length, 12)
+  assert.equal(new Set(ELSEWHERE_RULES.map(rule => rule.title)).size, 12)
+  const all = () => true, none = () => false
+  assert.deepEqual(ELSEWHERE_RULES.filter(rule => !ruleLink(rule, all)).map(rule => rule.title), ['Fix rounds and lane pause', 'Merge queue and code owners'])
+  assert.deepEqual(ELSEWHERE_RULES.filter(rule => ruleLink(rule, none)).map(rule => rule.to), ['/settings/routines#rules'])
+  const access = ELSEWHERE_RULES.find(rule => rule.title === 'Who holds which permission')!
+  assert.equal(ruleLink(access, key => key === 'members.read'), null)
+  assert.equal(ruleLink(access, key => key === 'members.read' || key === 'roles.read'), '/settings/access/roles')
+  assert.equal(ruleLink(ELSEWHERE_RULES.find(rule => rule.title === 'Approvals in force')!, key => key === 'approvals.read'), '/decision-desk')
+  assert.deepEqual(ELSEWHERE_RULES.filter(rule => rule.status === 'Advisory').map(rule => rule.owner), ['Agent rules', 'Lane coordination', 'GitHub'])
 })
 
-test('live registry exclusions group by risk, and owner links need actual destination permissions', () => {
-  const p = (key: string, risk: Permission['risk'], agent_grantable: boolean): Permission => ({ key, risk, agent_grantable, description: key, group: '', grantable_at: ['workspace'] })
-  assert.deepEqual(keyLimits([p('allowed', 'high', true), p('excluded-low', 'low', false), p('excluded-high', 'high', false)]).map(g => [g.risk, g.items.map(p => p.key)]), [['high', ['excluded-high']], ['low', ['excluded-low']]])
-  assert.deepEqual(ownerLinks(() => false), [])
-  assert.deepEqual(ownerLinks(p => p === 'account.read').map(row => row.to), ['/settings/accounts'])
-  assert.equal(ownerLinks(p => p === 'roles.read').length, 0)
-  assert.equal(ELSEWHERE_RULES.find(row => row.owner === 'GitHub')?.status, 'Advisory')
-  for (const title of ['Model preferences', 'Review ladder editing', 'Fix rounds and lane pause']) assert.equal(ELSEWHERE_RULES.find(row => row.title === title)?.to, undefined)
-  assert.equal(ELSEWHERE_RULES.some(row => /freeze|cutoff|entry_closes_at/i.test(row.title)), false)
+test('reviewer sentences say the review-policy fields and nothing else', () => {
+  const rules: ReviewerRules = { family_order: ['openai', 'xai', 'anthropic', 'cursor', 'google', 'local'], floor: { tiers: ['strong', 'frontier'], min_effort_level: 4 }, security_excludes: ['anthropic'] }
+  assert.equal(familyOrderWords(rules), 'OpenAI, xAI, Anthropic, Cursor, Google, local models')
+  assert.equal(floorSentence(rules), 'Reviews run on a strong or frontier model at its highest level: xhigh, or max where a model has it.')
+  assert.equal(securitySentence(rules), 'Security work is never reviewed by an Anthropic model, nor by the author’s family.')
+  assert.equal(familyOrderWords({ ...rules, family_order: ['google', 'mistral'] }), 'Google, mistral')
+  assert.equal(floorSentence({ ...rules, floor: { tiers: ['frontier'], min_effort_level: 5 } }), 'Reviews run on a frontier model at its highest level, at least max.')
+  assert.equal(securitySentence({ ...rules, security_excludes: [] }), 'Security work is never reviewed by the author’s family.')
+  assert.equal(securitySentence({ ...rules, security_excludes: ['anthropic', 'google'] }), 'Security work is never reviewed by an Anthropic or Google model, nor by the author’s family.')
+  assert.deepEqual(reviewerRules({ ...rules, valid_families: ['openai'] } as Partial<ReviewerRules>), rules)
+  for (const broken of [null, {}, { ...rules, family_order: 'openai' }, { ...rules, floor: { tiers: ['strong'] } }, { ...rules, security_excludes: undefined }]) assert.equal(reviewerRules(broken as Partial<ReviewerRules>), null)
 })
 
-test('truncation and suspension expiry are honest with an injected observation time', () => {
-  const now = Date.parse('2026-10-02T18:00:00Z')
-  const step = { state: 'unavailable', reason: 'out of credit', valid_until: '2026-10-02T19:30:00Z' } as PolicyStep
-  assert.equal(stepState(step, now), 'Unavailable · out of credit · until 19:30 UTC (2 Oct 2026)')
-  assert.equal(stepState(step, now + 7200000), 'Suspension expired · eligible again')
-  assert.match(truncatedLadder(), /first 50 steps; the rest are applied by AEON but not listed here/)
+test('Policies names no model, says no Touch ID yet, and keeps one language', () => {
+  const words = [...ASK_RISKS.flatMap(({ risk }) => AGENT_ASKS[risk].map(item => item.title)), ...ELSEWHERE_RULES.flatMap(rule => [rule.title, rule.text, rule.owner])].join('\n')
+  const page = readFileSync(new URL('../src/components/settings/PoliciesSection.vue', import.meta.url), 'utf8')
+  const card = readFileSync(new URL('../src/components/settings/CrossFamilyReviewCard.vue', import.meta.url), 'utf8')
+  for (const text of [words, page, card]) assert.doesNotMatch(text, /Touch ID|Face ID|GPT-|Opus|Grok 4|Sonnet|Gemini/)
+  assert.doesNotMatch(card, /\bde\b ?\?|Prüf|Regel speichern|deliveryLanguage/)
 })

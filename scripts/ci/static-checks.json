@@ -43,6 +43,9 @@
       "reason": "Hosted aggregate status gate.",
       "runs_sha256": "30b3358a9bb524872b38a4b3484b6233c82165881f3d9432f1f4d90c95df80a3"
     },
+    "web-catalogue": {
+      "kind": "static"
+    },
     "web-setup": {
       "kind": "static"
     },
@@ -57,7 +60,7 @@
     "web": {
       "kind": "not-static",
       "reason": "Hosted aggregate status gate.",
-      "runs_sha256": "019652576f1d2dcf84c52ac3ed191245147ca68f087fe2d7c59707257ba9f746"
+      "runs_sha256": "efc10282c0bf4bf38913318908bb34fe9a84aa82d63fdd04f4fc0dfa55ab0403"
     },
     "release-check": {
       "kind": "not-static",
@@ -87,6 +90,20 @@
     }
   },
   "exclusions": [
+    {
+      "job": "web-catalogue",
+      "step": "Resolve lockfile and Playwright cache keys",
+      "cwd": ".",
+      "command": "set -euo pipefail\npw_version=\"$(node -p \"require('./web/package-lock.json').packages['node_modules/@playwright/test'].version\")\"\necho \"dependencies=web-deps-v1-${RUNNER_OS}-${RUNNER_ARCH}-node24-${LOCKFILE_HASH}-pw${pw_version}\" >> \"$GITHUB_OUTPUT\"\necho \"browsers=web-playwright-v1-${RUNNER_OS}-${RUNNER_ARCH}-${LOCKFILE_HASH}-pw${pw_version}\" >> \"$GITHUB_OUTPUT\"",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
+    {
+      "job": "web-catalogue",
+      "step": "Install web dependencies",
+      "cwd": "web",
+      "command": "npm ci",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
     {
       "job": "web-setup",
       "step": "Resolve lockfile and Playwright cache keys",
@@ -829,7 +846,7 @@
       "command": "node scripts/test-tiers/cli.mjs check web --strict",
       "cwd": ".",
       "ci": {
-        "job": "web-setup",
+        "job": "web-catalogue",
         "step": "Require every web case to be classified",
         "command": "node scripts/test-tiers/cli.mjs check web --strict",
         "cwd": "."

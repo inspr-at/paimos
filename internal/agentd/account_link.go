@@ -12,6 +12,7 @@ import (
 	"unicode"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/client"
 )
 
 type AccountLinkRequest struct {
@@ -47,7 +48,18 @@ func (r *Remote) AccountLink(ctx context.Context, account, operation, id string)
 	}
 	err := r.Client.Do(ctx, "POST", "/api/agent-pairing/account-link", body, &out)
 	if err != nil {
-		return out, err
+		var status *client.StatusError
+		if errors.As(err, &status) {
+			// Admit only the server's fixed account-link reasons, never arbitrary
+			// response text, credential material or terminal control characters.
+			switch status.Message {
+			case "paired runtime required", "connected account proof not found", "account link not found", "account code is still pending", "try again later", "invalid account link request", "account linking needs the configured instance origin and signing key":
+				return out, fmt.Errorf("account link server HTTP %d: %s", status.Status, status.Message)
+			default:
+				return out, fmt.Errorf("account link server HTTP %d: request refused", status.Status)
+			}
+		}
+		return out, errors.New("account link server unavailable")
 	}
 	if out.AccountID != account || id != "" && out.RequestID != id {
 		return agentsetup.AccountLinkView{}, errors.New("account link binding changed")
@@ -92,7 +104,10 @@ func (s *Supervisor) AccountLink(ctx context.Context, in AccountLinkRequest) (ag
 		candidates = kept
 	}
 	if len(candidates) != 1 {
-		return agentsetup.AccountLinkView{}, errors.New("choose your enrolled account; automatic linking is ambiguous")
+		if len(candidates) == 0 {
+			return agentsetup.AccountLinkView{}, errors.New("no usable enrolled login matches; inspect aeon-agentd status, then add-harness for a new login")
+		}
+		return agentsetup.AccountLinkView{}, errors.New("several logins are enrolled; choose the active login's --account-id from aeon-agentd status")
 	}
 	a := candidates[0]
 	if in.Operation != "poll" {
@@ -100,8 +115,20 @@ func (s *Supervisor) AccountLink(ctx context.Context, in AccountLinkRequest) (ag
 		adapter := s.adapters[a.Harness]
 		s.mu.Unlock()
 		prober, ok := adapter.(AccountProber)
-		if !ok || !probeAccount(ctx, prober, a.Key).OK {
-			return agentsetup.AccountLinkView{}, errors.New("enrolled vendor login could not be verified")
+		if !ok {
+			return agentsetup.AccountLinkView{}, errors.New("enrolled vendor login has no account prober")
+		}
+		status := probeAccount(ctx, prober, a.Key)
+		if !status.OK {
+			reason := "probe_failed"
+			if status.Failure == ProbeAuthFailed {
+				reason = "login_required"
+			}
+			detail := agentsetup.SafeProbeDetail(reason, status.ReasonDetail)
+			if detail == "" {
+				detail = "vendor sign-in probe unavailable"
+			}
+			return agentsetup.AccountLinkView{}, errors.New("enrolled vendor login could not be verified: " + detail)
 		}
 	}
 	return api.AccountLink(ctx, a.ID, in.Operation, in.RequestID)

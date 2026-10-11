@@ -61,7 +61,6 @@ func legacyCatalogFixture(ctx context.Context, tx pgx.Tx, p tenant.Principal) er
 	if count > 0 {
 		return nil
 	}
-	ids := map[string]string{}
 	for _, s := range catalogProfiles() {
 		var raw json.RawMessage
 		var scale *int
@@ -72,19 +71,9 @@ func legacyCatalogFixture(ctx context.Context, tx pgx.Tx, p tenant.Principal) er
 		if err := json.Unmarshal(raw, &display); err != nil {
 			return err
 		}
-		pin, err := insertActivatedProfile(ctx, tx, p, profileWrite{Slug: s.Slug, Version: s.Version, Harness: s.Harness, Family: s.Family, Model: s.Model, Effort: s.Effort, Tier: s.Tier, Display: display, RegisteredEffortLevel: scale}, true, modelactivation.ShippedCatalog)
+		_, err := insertActivatedProfile(ctx, tx, p, profileWrite{Slug: s.Slug, Version: s.Version, Harness: s.Harness, Family: s.Family, Model: s.Model, Effort: s.Effort, Tier: s.Tier, Display: display, RegisteredEffortLevel: scale}, true, modelactivation.ShippedCatalog)
 		if err != nil {
 			return err
-		}
-		if pin.Enabled {
-			ids[s.Slug] = pin.ID
-		}
-	}
-	for _, r := range defaultRoutes(catalogProfiles()) {
-		if id := ids[r.Slug]; id != "" {
-			if err := insertRoute(ctx, tx, p.TenantID, Route{Role: r.Role, Priority: r.Priority, ProfileID: id, State: "available"}); err != nil {
-				return err
-			}
 		}
 	}
 	return nil

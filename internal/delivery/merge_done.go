@@ -59,6 +59,7 @@ func (m *Module) mergeWebhook(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			class = "body_read"
 		}
+		closeAfterFailedRead(w)
 		m.rejectWebhook(w, r, "unknown", "parse", 413, class)
 		return
 	}

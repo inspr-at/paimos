@@ -16,7 +16,7 @@
 .models-section .rw-in { min-height: 0; overflow: hidden; }
 .models-section .rw-enter-from, .models-section .rw-leave-to { grid-template-rows: 0fr; opacity: 0; }
 .models-section .rw-enter-active, .models-section .rw-leave-active { transition: grid-template-rows .24s ease, opacity .2s ease; }
-.models-section .row { display: grid; grid-template-columns: clamp(8rem, 30%, 11.75rem) minmax(0, 1fr) 32px 32px; grid-template-areas: 'l p t x' '. n n n'; align-items: center; column-gap: 12px; min-height: 64px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.models-section .row { display: grid; grid-template-columns: clamp(8rem, 30%, 11.75rem) minmax(0, 1fr) 32px 32px; grid-template-areas: 'l p t x' '. n n n' '. f f f'; align-items: center; column-gap: 12px; min-height: 64px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
 .models-section .rl { grid-area: l; display: grid; min-width: 0; overflow-wrap: anywhere; }
 .models-section .rt { display: grid; min-width: 0; }
 .models-section .rn { font-size: 14px; font-weight: 600; color: var(--ink); }
@@ -27,7 +27,7 @@
 
 /* The default: a raised tile, first and strongest. Overrides sit under "Except for" and read as exceptions. */
 /* "yours" is its own line under the label. The line is always reserved, so the centred pick and every control under this tile stay put when the words appear (AEON-541). */
-.models-section .row.def { min-height: 84px; margin-bottom: 4px; border: 0; border-radius: 14px; background: var(--surface-raised); box-shadow: 0 0 0 1px var(--line-2), var(--shadow-btn); grid-template-areas: 'l p t x' 'm . . .' '. n n n'; grid-template-rows: auto 18px auto; }
+.models-section .row.def { min-height: 84px; margin-bottom: 4px; border: 0; border-radius: 14px; background: var(--surface-raised); box-shadow: 0 0 0 1px var(--line-2), var(--shadow-btn); grid-template-areas: 'l p t x' 'm . . .' '. n n n' '. f f f'; grid-template-rows: auto 18px auto auto; }
 .models-section .row.def .rl { display: contents; }
 .models-section .row.def .rt { grid-area: l; }
 .models-section .row.def .mine { grid-area: m; align-self: start; }
@@ -53,10 +53,11 @@
 .models-section .lock:hover, .models-section .lock:focus-visible { background: var(--row-hover); outline: none; }
 .models-section .x { width: 32px; height: 32px; color: var(--ink-3); }
 
-/* Can't run: icon plus words, never colour alone. */
+/* Can't run: icon plus one sentence from one cause, never colour alone, never a code (Models v2). */
 .models-section .na { grid-area: n; display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
-.models-section .na svg { flex: none; margin-top: 2px; color: var(--warn-ink); }
-.models-section .na b { color: var(--ink); font-weight: 600; }
+.models-section .na > svg { flex: none; margin-top: 2px; color: var(--warn-ink); }
+/* The gap around the arrow is margin, not text, so the sentence reads with single spaces ("…, so …"). */
+.models-section .na .ar { display: inline-block; vertical-align: -1px; margin: 0 5px; color: var(--ink-3); }
 
 .models-section .addrow { padding: 10px 16px 10px 30px; }
 .models-section .add { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; margin-left: -10px; padding: 0 12px 0 10px; border: 0; border-radius: 10px; background: transparent; color: var(--teal-ink); font-size: 13.5px; font-weight: 600; }
@@ -105,12 +106,14 @@
 .models-section .m-fold .fold svg.open { transform: rotate(90deg); }
 .models-section .m-fold .fold:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 8px; }
 
-/* Menus: one popover. Model menu = filter field, harness groups, each model with its own thinking levels. */
+/* Menus: one popover. Model menu = filter field, providers, model lines (newest first) with their own levels; older
+   versions fold per provider behind one quiet line. */
 .mdl-pop { position: fixed; z-index: 80; display: flex; flex-direction: column; overflow: hidden; padding: 0; border-radius: 12px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); overscroll-behavior: contain; width: var(--pm-w, 320px); max-width: calc(100vw - 24px); }
 .mdl-pop:focus-visible { outline: none; }
-.mdl-pop .pm-q { display: block; width: 100%; height: 42px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--ink); font-size: 13.5px; box-shadow: none; }
+.mdl-pop .pm-q { display: block; flex: none; width: 100%; height: 42px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--ink); font-size: 13.5px; box-shadow: none; }
 .mdl-pop .pm-q::placeholder { color: var(--ink-3); }
 .mdl-pop .pm-q:focus-visible { outline: none; }
+/* Only the list gives way when a menu has less room; the field, notes and the lock row keep their size. */
 .mdl-pop .pm-l { flex: 1 1 auto; min-height: 0; padding: 6px; overflow: auto; max-height: 460px; }
 .mdl-pop .opt { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 16px; align-items: center; column-gap: 10px; width: 100%; min-height: 48px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
 .mdl-pop .ot { display: grid; min-width: 0; }
@@ -130,18 +133,88 @@
 .mdl-pop .lvc:hover { color: var(--ink); background: var(--surface-sunken); }
 .mdl-pop .lvc[data-on] { color: var(--ink-2); background: var(--surface-sunken); }
 .mdl-pop .opt.on .lvc[data-on], .mdl-pop .opt[aria-selected="true"] .lvc[data-on] { color: var(--teal-ink); background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); font-weight: 600; }
-.mdl-pop .pm-sep { height: 1px; margin: 5px 8px; background: var(--line); }
-.mdl-pop .pm-why { display: flex; gap: 8px; padding: 10px 14px 12px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.45; color: var(--ink-3); }
+.mdl-pop .pm-g + .pm-g { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+.mdl-pop .pm-gh, .mdl-pop .pm-oh { padding: 6px 10px 2px; font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+.mdl-pop .pm-oh { padding-top: 8px; font-size: 11px; letter-spacing: .06em; text-transform: none; }
+/* An older version is shown for what it is: its line always runs the newest version, so it is never picked. */
+.mdl-pop .opt.is-old { cursor: default; }
+.mdl-pop .opt.is-old .t { color: var(--ink-2); }
+.mdl-pop .opt.more { grid-template-columns: 22px minmax(0, 1fr) 16px; min-height: 36px; color: var(--ink-2); }
+.mdl-pop .opt.more .t { font-size: 12.5px; font-weight: 500; color: var(--ink-2); }
+.mdl-pop .opt.more svg { color: var(--ink-3); }
+.mdl-pop .pm-why { display: flex; flex: none; gap: 8px; padding: 10px 14px 12px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.45; color: var(--ink-3); }
 .mdl-pop .pm-why svg { flex: none; margin-top: 1px; }
 .mdl-pop .pm-none { padding: 12px 10px; font-size: 12.5px; color: var(--ink-3); }
-.mdl-pop .pm-lock { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); }
+.mdl-pop .pm-lock { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); }
 .mdl-pop .pm-lock .switch { min-height: 40px; }
-.mdl-pop .pm-foot { padding: 8px 14px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+.mdl-pop .pm-foot { flex: none; padding: 8px 14px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
 .mdl-pop.why { width: min(380px, calc(100vw - 24px)); padding: 16px 18px 14px; overflow: auto; }
 .mdl-pop.why h3 { font-size: 13.5px; }
 .mdl-pop.why ol { display: grid; gap: 7px; margin-top: 10px; padding-left: 18px; list-style: decimal; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
 .mdl-pop.why ol b { color: var(--ink); font-weight: 600; }
 .mdl-pop.why li.skip { color: var(--ink); }
+
+/* Fallback (AEON-1161): one quiet sentence under the pick opens the row's order in place. The fold grows by height
+   only, so nothing above it moves (AEON-541); menus overlay. Steps are hairline-separated rows on a sunken field. */
+.models-section .fb { grid-area: f; min-width: 0; margin-top: 6px; }
+/* On the default tile the reserved "yours" line already sits above the sentence. */
+.models-section .row.def .fb { margin-top: -10px; }
+.models-section .row.def .na ~ .fb { margin-top: 6px; }
+.models-section .fb-sum { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 28px; margin-left: -6px; padding: 0 8px 0 6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-3); font-size: 12.5px; text-align: left; }
+.models-section .fb-sum:hover { background: var(--row-hover); color: var(--ink-2); }
+.models-section .fb-sum[aria-expanded="true"] { color: var(--ink-2); }
+.models-section .fb-sum:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.models-section .fb-chev { flex: none; transition: transform .2s ease; }
+.models-section .fb-sum[aria-expanded="true"] .fb-chev { transform: rotate(90deg); }
+.models-section .fb-s { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.models-section .fb-s .ar, .models-section .ch-end-d .ar { display: inline-block; vertical-align: -1px; margin: 0 5px; }
+.models-section .fb-p { color: var(--ink-2); font-weight: 500; }
+.models-section .fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .24s ease; }
+.models-section .fold.open { grid-template-rows: 1fr; }
+.models-section .fold-in { min-height: 0; overflow: clip; overflow-clip-margin: 4px; }
+
+.models-section .ch-wrap { padding: 8px 0 6px; }
+.models-section .ch { display: grid; margin: 0; padding: 4px; border-radius: 12px; background: var(--surface-sunken); list-style: none; }
+.models-section .ch-it { display: grid; grid-template-columns: 24px 16px minmax(0, max-content) minmax(0, 1fr) auto 32px; align-items: center; column-gap: 8px; min-height: 44px; padding: 2px 4px; border-radius: 9px; }
+.models-section .ch-it + .ch-it { box-shadow: 0 -1px 0 var(--line); }
+.models-section .ch-it.first { grid-template-columns: 24px 16px minmax(0, max-content) minmax(0, 1fr) auto; }
+.models-section .ch-it.first .ch-pick { color: var(--ink-2); }
+.models-section .ch-it.dragging { opacity: .45; }
+.models-section .ch-it.over { background: var(--row-selected); }
+.models-section .ch-n { font: 500 11px/1 var(--mono); color: var(--ink-3); text-align: center; }
+.models-section .grip, .models-section .grip-sp { display: grid; place-items: center; width: 24px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); }
+.models-section .grip { cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; }
+.models-section .ch-it.dragging .grip { cursor: grabbing; }
+.models-section .grip:hover { color: var(--ink); background: var(--row-hover); }
+.models-section .grip:focus-visible { outline: none; color: var(--ink); box-shadow: var(--focus-ring); }
+.models-section .ch-pick { display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 32px; padding: 0 8px 0 4px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 600; text-align: left; }
+.models-section .ch-pick .pn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.models-section .ch-pick .pe { font-weight: 500; color: var(--ink-2); }
+.models-section .ch-pick .hg { width: 20px; height: 20px; border-radius: 6px; }
+.models-section button.ch-pick:hover, .models-section button.ch-pick[aria-expanded="true"] { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); }
+.models-section button.ch-pick:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.models-section .ch-pick.ro { cursor: default; }
+.models-section .ch-d { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-3); }
+.models-section .ch-st { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--warn-ink); white-space: nowrap; }
+.models-section .ch-st.ok { color: var(--ok); }
+.models-section .icon-btn.x.sm { width: 28px; height: 28px; justify-self: end; }
+.models-section .ch-add { padding: 6px 0 0; }
+.models-section .add.sm { min-height: 34px; margin-left: 0; padding: 0 12px 0 8px; font-size: 13px; }
+.models-section .ch-end { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; padding: 10px 4px 2px; font-size: 12.5px; color: var(--ink-2); }
+.models-section .ch-end > svg { flex: none; color: var(--ink-3); }
+.models-section .ch-end b { color: var(--ink); font-weight: 600; }
+.models-section .ch-end-l { font-weight: 600; color: var(--ink); }
+.models-section .ch-end-d { flex: 1 1 200px; min-width: 0; color: var(--ink-3); }
+.models-section .ch-end-d b { color: var(--ink); }
+.models-section .seg.sm { padding: 2px; }
+.models-section .seg.sm button { height: auto; min-height: 26px; padding: 0 10px; font-size: 12px; }
+.models-section .ch-never { display: flex; align-items: center; gap: 8px; margin-top: 8px; padding: 6px 4px 0; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); }
+.models-section .ch-never > svg { flex: none; color: var(--ink-3); }
+.models-section .ch-never > span { flex: 1; min-width: 0; }
+.models-section .ch-never b { color: var(--ink); font-weight: 600; }
+.models-section .ch-never .link-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; min-height: 24px; min-width: 24px; padding: 0 3px; margin: -2px -3px; }
+.models-section .ch-hint { display: flex; align-items: center; gap: 6px; padding: 8px 4px 0; font-size: 11.5px; color: var(--ink-3); }
+.models-section .ch-hint svg { flex: none; }
 
 /* Narrow (phone or a small window): label on its own line, controls under it. */
 @container models-card (max-width: 560px) {
@@ -150,7 +223,7 @@
   .models-section .m-head .titles { flex-basis: 100%; }
   /* The picker keeps the whole width; lock and remove sit on the label line, and "yours" and the can't-run line grow
      downward under the picker, so nothing that is picked moves when one of them appears. */
-  .models-section .row { grid-template-columns: minmax(0, 1fr) 44px 44px; grid-template-areas: 'l t x' 'h h h' 'p p p' 'm m m' 'n n n'; column-gap: 6px; row-gap: 0; padding: 12px; align-items: center; }
+  .models-section .row { grid-template-columns: minmax(0, 1fr) 44px 44px; grid-template-areas: 'l t x' 'h h h' 'p p p' 'm m m' 'n n n' 'f f f'; column-gap: 6px; row-gap: 0; padding: 12px; align-items: center; }
   .models-section .rl { display: contents; }
   .models-section .rt { display: contents; }
   .models-section .rn { grid-area: l; }
@@ -158,7 +231,7 @@
   .models-section .mine { grid-area: m; margin-top: 8px; }
   .models-section .row > .pick { margin-top: 8px; }
   .models-section .na { margin-top: 8px; }
-  .models-section .row.def { min-height: 0; grid-template-rows: none; grid-template-areas: 'l t x' 'h h h' 'p p p' 'm m m' 'n n n'; }
+  .models-section .row.def { min-height: 0; grid-template-rows: none; grid-template-areas: 'l t x' 'h h h' 'p p p' 'm m m' 'n n n' 'f f f'; }
   .models-section .ex-group .row .rl { padding-left: 0; }
   .models-section .ex-h { padding: 0 12px 6px; }
   .models-section .addrow { padding: 8px 12px; }
@@ -168,6 +241,25 @@
   .models-section .next { padding: 16px 12px 18px; }
   .models-section .pick, .models-section .add { min-height: 44px; height: 44px; }
   .models-section .x, .models-section .lock { width: 44px; height: 44px; }
+  /* The sentence wraps and opens the order on a full touch target; each step puts its route and state under its name. */
+  .models-section .fb, .models-section .row.def .fb, .models-section .row.def .na ~ .fb { margin-top: 4px; }
+  .models-section .fb-sum { min-height: 44px; padding-top: 6px; padding-bottom: 6px; }
+  .models-section .fb-s { white-space: normal; line-height: 1.45; }
+  .models-section .ch { padding: 2px; }
+  .models-section .ch-it { grid-template-columns: 44px 14px minmax(0, 1fr) 44px; grid-template-areas: 'g n p x' '. . d d' '. . s s'; column-gap: 6px; padding: 4px 2px; }
+  .models-section .ch-it.first { grid-template-columns: 44px 14px minmax(0, 1fr); grid-template-areas: 'g n p' '. . d' '. . s'; }
+  .models-section .grip, .models-section .grip-sp { width: 44px; height: 44px; }
+  .models-section .ch-it > .grip, .models-section .ch-it > .grip-sp { grid-area: g; }
+  .models-section .ch-n { grid-area: n; }
+  .models-section .ch-pick { grid-area: p; min-height: 44px; }
+  .models-section .ch-d { grid-area: d; padding-left: 4px; white-space: normal; }
+  .models-section .ch-st { grid-area: s; padding-left: 4px; white-space: normal; }
+  .models-section .ch-it > .icon-btn.x.sm { grid-area: x; width: 44px; height: 44px; }
+  .models-section .add.sm { min-height: 44px; }
+  .models-section .seg.sm button { min-height: 44px; padding: 0 12px; }
+  .models-section .ch-end { padding: 10px 2px 2px; }
+  .models-section .ch-end-d:not(.solo) { flex-basis: 100%; }
+  .models-section .ch-never .link-btn { flex: none; }
 }
 /* A small window with a mouse: the levels move under the model's name so nothing is squeezed. */
 @media (max-width: 560px) {
@@ -181,12 +273,15 @@
 /* Touch: every target at least 44 px; inline links grow their hit area without moving the text. */
 @media (pointer: coarse) {
   .models-section .link-btn::before, .mdl-pop .link-btn::before { inset: -14px -8px; }
-  .mdl-pop .pm-q, .mdl-pop .opt.plain, .mdl-pop .pm-lock .switch, .models-section .lock, .models-section .x, .models-section .seg.scope button, .models-section .pick, .models-section .add { min-height: 44px; }
+  .mdl-pop .pm-q, .mdl-pop .opt.plain, .mdl-pop .opt.more, .mdl-pop .pm-lock .switch, .models-section .lock, .models-section .x, .models-section .seg.scope button, .models-section .pick, .models-section .add { min-height: 44px; }
   .models-section .lock, .models-section .x { min-width: 44px; }
+  .models-section .grip, .models-section .ch-pick, .models-section .fb-sum, .models-section .add.sm, .models-section .seg.sm button { min-height: 44px; }
+  .models-section .grip, .models-section .icon-btn.x.sm { min-width: 44px; min-height: 44px; }
+  .models-section .ch-never .link-btn { min-height: 44px; min-width: 44px; padding: 0 8px; margin: -12px -8px; }
   .mdl-pop .opt { grid-template-columns: 22px minmax(0, 1fr) 16px; }
   .mdl-pop .opt .lvp { display: none; }
   .mdl-pop .opt .ok { grid-column: 3; grid-row: 1; }
   .mdl-pop .opt[aria-selected="true"] .lvp { display: flex; flex-wrap: wrap; grid-column: 2 / -1; grid-row: 2; gap: 4px; margin-top: 6px; }
   .mdl-pop .lvc, .mdl-pop .lvp.one { justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; }
 }
-@media (prefers-reduced-motion: reduce) { .models-section .rw-enter-active, .models-section .rw-leave-active { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .models-section .rw-enter-active, .models-section .rw-leave-active, .models-section .fold, .models-section .fb-chev { transition: none; } }

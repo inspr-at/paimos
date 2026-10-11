@@ -17,7 +17,10 @@ paths:
         Daily settings and read-only daily_state use the canonical person's
         IANA local day. Missing settings use pace at the person's default
         (10 percentage points a day), no Boost today, and ladder. Expired boosts
-        read as null. Account usage follows the overview privacy boundary;
+        read as null. At a daily cap new work follows Settings › Models
+        (daily_at_limit follows_models, AEON-1166): the capped route is skipped
+        and the Models order continues; an order that ends in Wait waits until
+        the reset. The per-harness at_limit is deprecated and ignored. Account usage follows the overview privacy boundary;
         withheld or unknown readings remain null and never imply headroom.
         This package publishes daily limits; daily start enforcement is separate.
         Running counts include all unended, unarchived sessions owned by this
@@ -73,6 +76,7 @@ components:
         daily_default_points: {type: integer, minimum: 1, maximum: 50}
         daily_timezone: {type: string, description: 'IANA timezone; UTC when no personal timezone is saved.'}
         daily_until: {type: string, format: date-time, description: 'Next local midnight.'}
+        daily_at_limit: {type: string, enum: [follows_models], description: 'What happens at a daily cap: always follows_models. The capped route is skipped and the Models order continues; an order that ends in Wait waits until the reset.'}
     AgentsDailySettings:
       type: object
       additionalProperties: false
@@ -95,7 +99,7 @@ components:
                 limit_used_pct: {type: number, minimum: 0, maximum: 100}
                 entered_as: {type: string, enum: [used, left]}
                 until: {type: string, format: date-time, description: 'The person next local midnight; used percentage is stored for either input mode.'}
-        at_limit: {type: string, enum: [ladder, wait]}
+        at_limit: {type: string, enum: [ladder, wait], deprecated: true, description: 'Deprecated and ignored (AEON-1166); see daily_at_limit. Writes still send ladder or wait so the previous release can read the plan, and reads report ladder. Removed after one release.'}
     AgentsDailyState:
       type: object
       required: [state, limit_used_pct, today_points_used, today_points_allowed, over_pace_points, active_account_id, next_on_ladder, accounts]

@@ -31,7 +31,8 @@ func TestAccountUseSelectionCallSiteGuard(t *testing.T) {
 		"internal/modelregistry/board_write.go":       1,
 		"internal/modelregistry/daily.go":             2,
 		"internal/modelregistry/preferences_write.go": 1,
-		"internal/modelregistry/refresh_successor.go": 2,
+		// AEON-1158 removed the ladder re-pin; only the successor lookup remains.
+		"internal/modelregistry/refresh_successor.go": 1,
 		"internal/routineexec/dispatch.go":            1,
 		"internal/routineexec/review.go":              1,
 		"internal/workqueue/route.go":                 1,

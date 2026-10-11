@@ -95,7 +95,7 @@ func (m *Module) requestSessionChange(r *http.Request, tx pgx.Tx, p tenant.Princ
 		err = tx.QueryRow(ctx, `SELECT m.model,m.effort FROM agent_accounts a JOIN model_profiles m ON m.tenant_id=a.tenant_id AND m.harness=a.harness
    WHERE a.id=$1 AND m.id=$2 AND a.harness=$3 AND m.enabled
    AND aeon_account_allows_profile(a.harness,a.allowed_model_profile_ids,m.id)
- AND NOT EXISTS (SELECT 1 FROM model_role_routes r WHERE r.profile_id=m.id AND r.role='build' AND r.state<>'available' AND r.valid_until>clock_timestamp())`, in.AccountID, in.ModelProfileID, s.Harness).Scan(&payload.Model, &payload.ReasoningEffort)
+ AND NOT EXISTS (SELECT 1 FROM model_pauses r WHERE r.tenant_id=m.tenant_id AND r.harness=m.harness AND r.model=m.model AND (r.until_at IS NULL OR r.until_at>clock_timestamp()))`, in.AccountID, in.ModelProfileID, s.Harness).Scan(&payload.Model, &payload.ReasoningEffort)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, workorders.Fail(400, "model profile is not granted to this account and harness")
 		}

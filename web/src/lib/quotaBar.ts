@@ -190,6 +190,19 @@ export function quotaCaption(bar: QuotaBar, o: { period?: string; resetsAt?: str
   return { text: `${left}${o.period ? ` ${o.period}` : ''}${resets}`, tone: '', icon: '' }
 }
 
+/**
+ * Settings › Capacity's caption under each account's bar (AEON-1175): what is used, the room
+ * left today and when it resets; or what stopped agents and, at today's limit, what new work
+ * does. Low, stale and unreported readings say what the list says.
+ */
+export function capacityCaption(bar: QuotaBar, o: { period?: string; resetsAt?: string | null; now: number; timezone?: string; low?: boolean; vendor: string; atLimit?: 'ladder' | 'wait' }): QuotaCaption {
+  const short = quotaCaption(bar, o)
+  if (!bar.known || o.low || bar.room === null || (bar.stale && !(bar.by === 'rule' && bar.room === 0))) return short
+  if (bar.room === 0) return bar.by === 'today' ? { text: `${STOPPED.today} · new ${o.vendor} work ${o.atLimit === 'wait' ? 'waits' : 'follows Models'}`, tone: 'warn', icon: 'pause' } : short
+  const resets = o.resetsAt ? ` · resets ${when(o.resetsAt, o.now, o.timezone)}` : ''
+  return { text: `${pct(bar.used)} % used · ${pct(bar.room)} more percentage ${pct(bar.room) === '1' ? 'point' : 'points'} today${resets}`, tone: '', icon: '' }
+}
+
 export interface Said { text: string; strong?: boolean }
 /**
  * The panel's sentence under the bar: how much more agents may use today and what

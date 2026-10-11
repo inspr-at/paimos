@@ -278,7 +278,15 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 	grantModelReporter(t, owner, agent)
 	agent.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
 	enrollEvidenceHarness(t, owner, agent, "grok") // null allowlist
-	before := decode[[]Route](t, &owner, "PUT", "/api/models/routes", "[]", 200)
+	// Saved policy the grant must leave alone (a pause on another model).
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by) VALUES($1,'grok','grok-4.7','Owner hold',$2)`, owner.TenantID, owner.ID)
+		return err
+	})
+	before := modelsPolicy(t, owner)
+	if !strings.Contains(before, "Owner hold") {
+		t.Fatalf("policy snapshot lost the saved pause: %s", before)
+	}
 	o := Observation{ReportID: EvidenceID("observed-disabled"), Harness: "grok", Model: "grok-next", Effort: "xhigh", Status: "advertised"}
 	if result := reportEvidence(t, agent, []Observation{o}, 200); result.Added != 1 {
 		t.Fatal(result)
@@ -327,9 +335,28 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 		return nil
 	})
 	decode[Profile](t, &owner, "POST", "/api/models/proposals/accept", accept, 200)
-	if eventCount(t, owner, "model.proposal_accepted") != 1 || !reflect.DeepEqual(before, registryRoutes(t, owner)) {
+	if eventCount(t, owner, "model.proposal_accepted") != 1 || modelsPolicy(t, owner) != before {
 		t.Fatal("grant replay or grant changed policy")
 	}
+}
+
+// modelsPolicy is the saved Models policy: preference profiles, orders,
+// situation orders, pauses, rules and row constraints, plus the retained
+// ladder tables. Catalog pins are not policy.
+func modelsPolicy(t *testing.T, p tenant.Principal) string {
+	t.Helper()
+	var state string
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
+ 'prefs',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_pref_profiles p),
+ 'orders',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_orders o),
+ 'situations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_situation_orders o),
+ 'pauses',(SELECT jsonb_agg(to_jsonb(o) ORDER BY harness,model) FROM model_pauses o),
+ 'rules',(SELECT jsonb_agg(to_jsonb(r) ORDER BY scope,column_key,line) FROM model_rules r),
+ 'constraints',(SELECT jsonb_agg(to_jsonb(o) ORDER BY scope,column_key,line) FROM model_row_constraints o),
+ 'ladders',(SELECT jsonb_agg(to_jsonb(r) ORDER BY role,priority) FROM model_role_routes r))::text`).Scan(&state)
+	})
+	return state
 }
 
 func TestRefreshReleasesCatalogLockAndSharesIntervalWithAgents(t *testing.T) {

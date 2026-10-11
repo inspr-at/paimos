@@ -12,7 +12,7 @@ vi.mock('../src/lib/api.ts', () => ({
   },
 }))
 import { StaleScopeError } from '../src/lib/identityScope'
-import { RegistryError, addLine, getRefreshStatus, listProfiles, buildLines, changeOf, checkReport, cooldownLabel, draftOf, emptyDraft, familyOf, intervalLabel, lastChecked, lineWriteOf, metaParts, modelSlug, removalText, removeLine, restoreLine, routeOf, routesFor, shortDate, splitLevels, takenText, useText, validateDraft, checkNow, type LineDraft, type LineUsage, type RegistryProfile, type WriteScope } from '../src/lib/modelRegistry'
+import { RegistryError, addLine, getRefreshStatus, listProfiles, buildLines, changeOf, checkReport, cooldownLabel, draftOf, emptyDraft, familyOf, intervalLabel, lastChecked, lineWriteOf, metaParts, modelSlug, removalText, removeLine, restoreLine, routeOf, routesFor, shortDate, splitLevels, takenText, useText, validateDraft, checkNow, lifecycleSource, outdatedBatch, outdatedEntries, outdatedTray, outdatedUseText, outdatedWhy, readOutdated, readOutdatedBatch, refused, retireOutdated, undoOutdated, OUTDATED_LIMIT, OUTDATED_PAGES, type LineDraft, type LineUsage, type OutdatedDocument, type OutdatedVersion, type RegistryProfile, type WriteScope } from '../src/lib/modelRegistry'
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } })
 let counter = 0
@@ -289,5 +289,164 @@ describe('copy', () => {
     expect(useText({ column: 'backend', layer: 'person', person: 'me', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('Backend build (yours)')
     expect(useText({ column: 'docs', layer: 'person', person: 'someone', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('docs (another person)')
     expect(useText({ column: 'review:openai', layer: 'workspace', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('Reviews (for everyone)')
+  })
+})
+
+// AEON-1164. Risks: the tray offers a version whose uses cannot move (no runnable successor),
+// the sheet shows server codes or identities instead of words, and "nothing uses them" is said
+// when uses are only hidden from this person.
+describe('old versions', () => {
+  const REVISION = 'a'.repeat(64)
+  const old = (over: Partial<OutdatedVersion> & Pick<OutdatedVersion, 'version' | 'successor'>): OutdatedVersion => ({
+    line: 'openai:gpt-sol', state: 'superseded', date: null, reason: 'Source reports a successor', source: 'agent-report:codex', uses: [], incomplete: false, ...over,
+  })
+  const doc = (versions: OutdatedVersion[], over: Partial<OutdatedDocument> = {}): OutdatedDocument => ({ versions, revision: REVISION, next_cursor: '', incomplete: false, ...over })
+  const registry = [
+    profile({ harness: 'codex', model: 'gpt-6-sol', effort: 'high', identity: 'openai:gpt-6-sol', display_name: 'GPT Sol', model_version: '6' }),
+    profile({ harness: 'codex', model: 'gpt-6.1-sol', effort: 'high', identity: 'openai:gpt-6.1-sol', display_name: 'GPT Sol', model_version: '6.1' }),
+    profile({ harness: 'pi', model: 'anthropic/claude-opus-5', effort: 'xhigh', family: 'anthropic', identity: 'anthropic:claude-opus-5', display_name: 'Claude Opus', model_version: '5' }),
+    profile({ harness: 'claude', model: 'claude-opus-5-5', effort: 'xhigh', family: 'anthropic', identity: 'anthropic:claude-opus-5-5', display_name: 'Claude Opus', model_version: '5.5' }),
+    profile({ harness: 'grok', model: 'grok-4.5', effort: 'high', family: 'xai', identity: 'xai:grok-4.5', display_name: 'Grok', model_version: '4.5' }),
+    profile({ harness: 'grok', model: 'grok-4.7', effort: 'high', family: 'xai', identity: 'xai:grok-4.7', display_name: 'Grok', model_version: '4.7', enabled: false }),
+    profile({ harness: 'gemini', model: 'gemini-2.5-pro', effort: 'high', family: 'google', identity: 'google:gemini-2.5-pro', display_name: 'Gemini Pro', model_version: '2.5' }),
+  ]
+  const use = (label: string, who = 'Default', from = 'openai:gpt-6-sol', to: string | null = 'openai:gpt-6.1-sol') => ({ label, who, from, to })
+
+  it('reads one bounded page and rejects an answer that is not the outdated list', async () => {
+    http.handle = () => json(doc([old({ version: 'openai:gpt-6-sol', successor: 'openai:gpt-6.1-sol' })]))
+    await expect(readOutdated()).resolves.toMatchObject({ revision: REVISION })
+    expect(http.calls.at(-1)).toMatchObject({ method: 'GET', path: '/models/outdated?limit=50' })
+    for (const wrong of [{}, { versions: [], revision: 'short' }, doc([{ version: 'x' } as OutdatedVersion]), doc([old({ version: 'x', successor: null, uses: [{ label: 1 } as never] })])]) {
+      http.handle = () => json(wrong)
+      await expect(readOutdated()).rejects.toMatchObject({ status: 502 })
+    }
+  })
+  it('retires the versions at the revision read with them and undoes with the token alone', async () => {
+    http.handle = () => json({ moved: [], removed: ['openai:gpt-6-sol'], undo_token: '7.abc' })
+    await retireOutdated(['openai:gpt-6-sol'], REVISION)
+    expect(http.calls.at(-1)).toEqual({ method: 'POST', path: '/models/outdated/retire', body: { versions: ['openai:gpt-6-sol'], revision: REVISION } })
+    http.handle = () => json({ event_id: 8, restored: true })
+    await undoOutdated('7.abc')
+    expect(http.calls.at(-1)).toEqual({ method: 'POST', path: '/models/outdated/undo', body: { undo_token: '7.abc' } })
+  })
+  // AEON-1164 fix2. Risk: old versions without a usable successor fill the first page, so the tray stays hidden
+  // although later pages hold versions that can move; or the walk mixes pages read at different revisions.
+  it('reads on past pages whose versions cannot move, at the first page\'s revision, and stops at a full batch, a changed revision, an unreadable page or the page bound', async () => {
+    const stuck = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => old({ version: `${prefix}:m-${String(i).padStart(3, '0')}`, successor: `${prefix}:unregistered` }))
+    const movable = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => old({ version: `${prefix}:m-${String(i).padStart(3, '0')}`, successor: 'openai:gpt-6.1-sol' }))
+    // The server's keyset page: versions after the cursor in identity order, the last one as the next cursor while more remain.
+    const pager = (versions: OutdatedVersion[], answer: (page: number) => { revision?: string; status?: number } = () => ({})) => (_method: string, path: string) => {
+      const url = new URL(path, 'http://registry'), after = url.searchParams.get('cursor') ?? '', limit = Number(url.searchParams.get('limit'))
+      const { revision = REVISION, status } = answer(http.calls.length)
+      if (status) return json({ error: 'unavailable' }, status)
+      const rest = versions.filter(version => version.version > after), items = rest.slice(0, limit)
+      return json(doc(items, { revision, next_cursor: rest.length > limit ? items.at(-1)!.version : '' }))
+    }
+    const walk = async () => readOutdatedBatch(await readOutdated(), registry)
+    const reads = () => http.calls.map(call => call.path)
+
+    // A first page of versions that cannot move, then one that can: the walk reaches it, bound to the first revision.
+    http.handle = pager([...stuck('aaa', 50), old({ version: 'openai:gpt-6-sol', successor: 'openai:gpt-6.1-sol' })])
+    let read = await walk()
+    expect(reads()).toEqual(['/models/outdated?limit=50', '/models/outdated?limit=50&cursor=aaa%3Am-049'])
+    expect(read).toMatchObject({ revision: REVISION, next_cursor: '' })
+    expect(outdatedBatch(read, registry)).toMatchObject({ entries: [{ version: 'openai:gpt-6-sol' }], more: false })
+
+    // A later page read at another revision is not mixed in; the cursor left over says more exist.
+    http.calls.length = 0
+    http.handle = pager([...stuck('aaa', 50), old({ version: 'openai:gpt-6-sol', successor: 'openai:gpt-6.1-sol' })], page => page > 1 ? { revision: 'b'.repeat(64) } : {})
+    read = await walk()
+    expect(read).toMatchObject({ revision: REVISION, next_cursor: 'aaa:m-049' })
+    expect(read.versions).toHaveLength(50)
+    expect(outdatedBatch(read, registry)).toEqual({ entries: [], more: true })
+
+    // A later page that cannot be read ends the walk the same way, without failing the pages already read.
+    http.calls.length = 0
+    http.handle = pager([...stuck('aaa', 50), old({ version: 'openai:gpt-6-sol', successor: 'openai:gpt-6.1-sol' })], page => page > 1 ? { status: 503 } : {})
+    read = await walk()
+    expect(read).toMatchObject({ revision: REVISION, next_cursor: 'aaa:m-049' })
+    expect(reads()).toHaveLength(2)
+
+    // The walk is bounded: eleven pages reach every version a registry of 512 profiles can hold, and no more are read.
+    http.calls.length = 0
+    http.handle = pager(stuck('aaa', 600))
+    read = await walk()
+    expect(reads()).toHaveLength(OUTDATED_PAGES)
+    expect(read.versions).toHaveLength(OUTDATED_PAGES * OUTDATED_LIMIT)
+    expect(read.next_cursor).not.toBe('')
+
+    // A full batch ends the walk, and the sheet never offers more than the server retires in one step.
+    http.calls.length = 0
+    http.handle = pager([...movable('bbb', 20), ...stuck('ccc', 30), ...movable('ddd', 50)])
+    read = await walk()
+    expect(reads()).toHaveLength(2)
+    const batch = outdatedBatch(read, registry)
+    expect(batch.entries).toHaveLength(OUTDATED_LIMIT)
+    expect(batch.entries.at(-1)!.version).toBe('ddd:m-029')
+    expect(batch.more).toBe(true)
+  })
+  it('tells a refusal from an answer that never came: only a 4xx means nothing was written', async () => {
+    expect(refused(new RegistryError(409, 'stale outdated preview'))).toBe(true)
+    expect(refused(new RegistryError(403, 'forbidden'))).toBe(true)
+    expect(refused(new RegistryError(502, 'bad gateway'))).toBe(false)
+    expect(refused(new RegistryError(504, 'gateway timeout'))).toBe(false)
+    expect(refused(new TypeError('Failed to fetch'))).toBe(false)
+    // A success whose body is not the retirement result is not a confirmed step either.
+    http.handle = () => json({ ok: true })
+    const lost = await retireOutdated(['openai:gpt-6-sol'], REVISION).catch((error: unknown) => error)
+    expect(lost).toBeInstanceOf(RegistryError)
+    expect(refused(lost)).toBe(false)
+  })
+  it('offers only versions whose uses can move: a registered successor, and a runnable one when something uses the old version', () => {
+    const entries = outdatedEntries(doc([
+      old({ version: 'openai:gpt-6-sol', successor: 'openai:gpt-6.1-sol', uses: [use('Default · other · first')] }),
+      old({ version: 'xai:grok-4.5', successor: 'xai:grok-4.7', uses: [use('fallback · other · first', 'Default', 'xai:grok-4.5', 'xai:grok-4.7')] }),
+      old({ version: 'google:gemini-2.5-pro', successor: 'google:gemini-3-pro' }),
+      old({ version: 'anthropic:claude-opus-5', successor: 'anthropic:claude-opus-5-5', state: 'deprecated', date: '2026-09-01T12:00:00Z', source: 'https://api.anthropic.com/v1/models' }),
+      old({ version: 'openai:gpt-6.1-sol', successor: null }),
+    ]), registry, new Date('2026-10-11T12:00:00Z'))
+    expect(entries.map(entry => entry.version)).toEqual(['openai:gpt-6-sol', 'anthropic:claude-opus-5'])
+    expect(entries[0]).toMatchObject({ name: 'GPT Sol 6', successorName: 'GPT Sol 6.1', harness: 'codex', routes: ['Codex · gpt-6-sol'], source: 'harness', why: 'Its source names GPT Sol 6.1 as the next version' })
+    expect(entries[1]).toMatchObject({ name: 'Claude Opus 5', successorName: 'Claude Opus 5.5', routes: ['pi · anthropic/claude-opus-5'], source: 'provider', why: 'Deprecated since 1 Sep' })
+  })
+  it('says why a version is old in words, with a badge only for a named source', () => {
+    const now = new Date('2026-10-11T12:00:00Z')
+    expect(outdatedWhy(old({ version: 'a:b', successor: 'a:c', state: 'retiring', date: '2026-11-04T12:00:00Z' }), 'C', now)).toBe('Retires on 4 Nov')
+    expect(outdatedWhy(old({ version: 'a:b', successor: 'a:c', state: 'deprecated', date: '2027-01-15T12:00:00Z' }), 'C', now)).toBe('Deprecated from 15 Jan 2027')
+    expect(outdatedWhy(old({ version: 'a:b', successor: 'a:c', state: 'vanished' }), 'C', now)).toBe('No longer in its source’s model list')
+    expect(outdatedWhy(old({ version: 'a:b', successor: 'a:c', reason: 'Same model line has a newer sourced version', source: 'aeon_model_line/aeon_model_version_newer' }), 'C', now)).toBe('Newer version in the same line')
+    expect(lifecycleSource('aeon_model_line/aeon_model_version_newer')).toBeNull()
+    expect(lifecycleSource('offline-bootstrap')).toBe('shipped')
+    expect(lifecycleSource('')).toBeNull()
+  })
+  it('names the two successors that take over most uses, counts the rest, and says nothing uses them only when nothing is hidden', () => {
+    const entry = (name: string, successorName: string, uses: number, incomplete = false) => ({ version: name, name, successor: successorName, successorName, harness: null, route: '', routes: [], why: '', source: null, uses: Array.from({ length: uses }, () => use('Default · other · first')), incomplete })
+    const tray = outdatedTray([entry('Grok 4.5', 'Grok 4.7', 1), entry('GPT Sol 6', 'GPT Sol 6.1', 3), entry('Opus 5', 'Opus 5.5', 2)], false, false)
+    expect(tray).toEqual({ named: [{ from: 'GPT Sol 6', to: 'GPT Sol 6.1' }, { from: 'Opus 5', to: 'Opus 5.5' }], count: '3\u00a0old versions', unused: '' })
+    expect(outdatedTray([entry('Grok 4.5', 'Grok 4.7', 0), entry('Opus 5', 'Opus 5.5', 0)], false, false).unused).toBe(', nothing uses them')
+    expect(outdatedTray([entry('Grok 4.5', 'Grok 4.7', 0)], false, false)).toMatchObject({ count: '1\u00a0old version', unused: ', nothing uses it' })
+    expect(outdatedTray([entry('Grok 4.5', 'Grok 4.7', 0, true)], false, false).unused).toBe(', nothing you can see uses them')
+    expect(outdatedTray([entry('Grok 4.5', 'Grok 4.7', 0)], false, true).unused).toBe(', nothing you can see uses them')
+    expect(outdatedTray([entry('Grok 4.5', 'Grok 4.7', 1)], true, false).count).toBe('1+\u00a0old versions')
+  })
+  it('writes each use in words: the row, the person, and what a lock or rule does, never a server code', () => {
+    const kinds = { backend: 'Backend build', design: 'UI design' }, names = new Map([['22222222-2222-4222-8222-222222222222', 'Mia']])
+    const me = '11111111-1111-4111-8111-111111111111', mia = '22222222-2222-4222-8222-222222222222', other = '33333333-3333-4333-8333-333333333333'
+    const words = (label: string, who = 'Default') => outdatedUseText(use(label, who), kinds, names, me)
+    expect(words('Default · other · first')).toEqual({ title: 'Default · all work', who: 'for everyone' })
+    expect(words('Except for · backend · first', mia)).toEqual({ title: 'Backend build', who: 'Mia' })
+    expect(words('Default · other · first', me)).toEqual({ title: 'Default · all work', who: 'yours' })
+    expect(words('Default · other · first', other)).toEqual({ title: 'Default · all work', who: 'another person' })
+    expect(words('fallback · design · first')).toEqual({ title: 'Fallback for UI design', who: 'for everyone' })
+    expect(words('fallback · other · first')).toEqual({ title: 'Fallback for the default', who: 'for everyone' })
+    expect(words('Default · other · fix')).toEqual({ title: 'Fix rounds · Default', who: 'for everyone · situation' })
+    expect(words('fallback · backend · stuck')).toEqual({ title: 'Fallback for Stuck · Backend build', who: 'for everyone · situation' })
+    expect(words('never · design')).toEqual({ title: 'Never for UI design', who: 'for everyone · the rule moves with it' })
+    expect(words('lock · top · design', mia)).toEqual({ title: 'UI design', who: 'locked; the lock moves with it · set by Mia' })
+    expect(words('lock · bottom · other', '')).toEqual({ title: 'Fallback for the default', who: 'last step; it moves with it' })
+    expect(words('lock · not · backend', me)).toEqual({ title: 'Never for Backend build', who: 'the rule moves with it · set by you' })
+    expect(words('fallback · build')).toEqual({ title: 'Older fallback list · build', who: 'for everyone' })
+    expect(words('pinned · complex')).toEqual({ title: 'Pinned pick · complex', who: 'for everyone' })
+    expect(words('something new · x')).toEqual({ title: 'something new · x', who: 'for everyone' })
   })
 })

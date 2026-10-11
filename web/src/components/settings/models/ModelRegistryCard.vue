@@ -4,6 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '../../AppIcon.vue'
 import HarnessMark from '../../agents/HarnessMark.vue'
 import ModelRegistryEditor, { type RemoveQuestion } from './ModelRegistryEditor.vue'
+import ModelOutdatedSheet from './ModelOutdatedSheet.vue'
 import { can, onAccessRevalidate } from '../../../lib/authz'
 import { createScope, scopeOwner } from '../../../lib/identityScope'
 import { toast } from '../../../lib/toast'
@@ -12,8 +13,8 @@ import { useSession } from '../../../stores/session'
 import { PERMISSION, readMatrix } from '../../../lib/accountUse'
 import {
   RegistryError, REMOVED_REASON, UNDONE_REASON, addLine, buildLines, changeOf, checkNow, checkReport, cooldownLabel, draftOf, draftsMatch, editLine, emptyDraft, getRefreshStatus, hasErrors, intervalLabel, lastChecked, lineWriteOf,
-  listProfiles, metaParts, modelSlug, previewRemoval, putRefreshSettings, removalText, removeLine, restoreLine, shortDate, snapshotFromUsage, splitLevels, validateDraft,
-  type DraftErrors, type LineDraft, type LinePick, type LineSnapshot, type LineUsage, type RefreshStatus, type RegistryLine, type RegistryProfile, type WriteScope,
+  listProfiles, metaParts, modelSlug, outdatedBatch, outdatedTray, previewRemoval, putRefreshSettings, readOutdated, readOutdatedBatch, refused, removalText, removeLine, restoreLine, retireOutdated, shortDate, snapshotFromUsage, splitLevels, undoOutdated, validateDraft,
+  type DraftErrors, type LineDraft, type LinePick, type LineSnapshot, type LineUsage, type OutdatedDocument, type RefreshStatus, type RegistryLine, type RegistryProfile, type WriteScope,
 } from '../../../lib/modelRegistry'
 
 // Settings › Models › Model registry (AEON-1012). Admins edit, everyone else reads.
@@ -34,7 +35,7 @@ const scopeKey = computed(() => readable.value ? owner.value : '')
 const scope = createScope(() => scopeKey.value)
 const loadLane = scope.lane(), previewLane = scope.lane()
 
-const profiles = ref<RegistryProfile[]>([]), status = ref<RefreshStatus | null>(null)
+const profiles = ref<RegistryProfile[]>([]), status = ref<RefreshStatus | null>(null), outdated = ref<OutdatedDocument | null>(null)
 const phase = ref<'loading' | 'ready' | 'error'>('loading')
 const lines = computed(() => buildLines(profiles.value))
 const autoOn = computed(() => status.value?.settings.auto_add_profiles === true)
@@ -51,8 +52,13 @@ let editor: EditorHandle | null = null, opener: HTMLElement | null = null, ticke
 const bindEditor = (el: unknown) => { editor = el as EditorHandle | null }
 
 // ---------- loading ----------
-const readAll = (signal: AbortSignal) => Promise.all([listProfiles(signal), getRefreshStatus(signal)])
-function adopt([list, refresh]: [RegistryProfile[], RefreshStatus]) { profiles.value = list; status.value = refresh; phase.value = 'ready' }
+// The outdated read is a hint for admins: when it fails, every version still shows in the list with its tags, so the registry loads without it.
+// Its first page comes with the list; later pages only when the earlier ones offer less than a batch (AEON-1164).
+async function readAll(signal: AbortSignal): Promise<[RegistryProfile[], RefreshStatus, OutdatedDocument | null]> {
+  const [list, refresh, first] = await Promise.all([listProfiles(signal), getRefreshStatus(signal), manageable.value ? readOutdated(signal).catch(() => null) : null])
+  return [list, refresh, first && await readOutdatedBatch(first, list, signal)]
+}
+function adopt([list, refresh, old]: [RegistryProfile[], RefreshStatus, OutdatedDocument | null]) { profiles.value = list; status.value = refresh; outdated.value = old; phase.value = 'ready' }
 function load() {
   phase.value = 'loading'
   void loadLane.run(({ after, signal }) => after(readAll(signal), adopt), { failed: () => { phase.value = 'error' } })
@@ -279,6 +285,62 @@ function remove() {
   })), { failed: error => { if (turn === questionTurn) closeQuestion(); if (stillOn(key)) formError.value = failure(error) } })
 }
 
+// ---------- old versions: the tray and the review sheet (AEON-1164) ----------
+const sheetOpen = ref(false), removingOld = ref(false)
+const cardEl = ref<HTMLElement | null>(null)
+const batch = computed(() => manageable.value && outdated.value ? outdatedBatch(outdated.value, profiles.value, new Date(now.value)) : null)
+const entries = computed(() => batch.value?.entries ?? [])
+const more = computed(() => batch.value?.more === true)
+const tray = computed(() => entries.value.length ? outdatedTray(entries.value, more.value, outdated.value?.incomplete === true) : null)
+// A list read again with nothing left to review closes the sheet.
+watch(entries, list => { if (!list.length) sheetOpen.value = false })
+function openSheet() { if (manageable.value && entries.value.length && phase.value === 'ready') sheetOpen.value = true }
+const RETIRE_CONFLICT: Record<string, string> = {
+  'stale outdated preview': 'The old versions changed meanwhile. Nothing was removed; the list was refreshed, so review it and remove again.',
+  'version is no longer outdated': 'One of them is no longer outdated. Nothing was removed; the list was refreshed.',
+  'successor is also selected for retirement': 'One selected version is the successor of another. Nothing was removed; remove them one at a time.',
+  'used version has no registered successor': 'One of them has no newer version that can run. Nothing was removed; the list was refreshed.',
+  'successor has no matching harness route': 'A newer version doesn’t run through the same harness as an old one. Nothing was removed.',
+  'replacement line has a conflicting rule': 'A rule on the newer version conflicts with one on the old version. Nothing was removed.',
+}
+/** Removes the versions shown in the sheet, at the revision they were read with: every use moves first, in the same step. */
+function retireOld(versions: string[]) {
+  const doc = outdated.value
+  if (!doc || removingOld.value || !manageable.value || !versions.length) return
+  const revision = doc.revision
+  removingOld.value = true
+  void scope.run(({ after, signal }) => after(retireOutdated(versions, revision, signal), done => {
+    sheetOpen.value = false
+    return after(reload(), () => {
+      const n = done.removed.length, moved = done.moved.length
+      const text = `Removed ${n} old version${n === 1 ? '' : 's'} · ${moved} use${moved === 1 ? '' : 's'} moved`
+      // The Review button went with the tray; focus lands on the card's first control instead of the page.
+      void nextTick(() => { if (!cardEl.value?.contains(document.activeElement)) cardEl.value?.querySelector<HTMLElement>('[data-reg-add]')?.focus({ preventScroll: true }) })
+      if (!done.undo_token) { toast(`${text}. Undo is unavailable because the registry did not confirm it.`, { tone: 'error' }); return }
+      const token = done.undo_token
+      toast(text, { timeout: 10_000, action: { label: 'Undo', run: () => undo(scope => undoOutdated(token, scope.signal)) } })
+    })
+  }), {
+    failed: error => {
+      // No answer, a lost or unreadable one, or a gateway error: the step may have happened, so say so and show what the server holds.
+      if (!refused(error)) {
+        toast('The registry didn’t confirm the removal, so it may have happened. The list was refreshed; check it before removing again.', { tone: 'error' })
+        void reload()
+        return
+      }
+      if (error.status === 409) {
+        toast(RETIRE_CONFLICT[error.message] ?? `Nothing was removed: ${error.message}. The list was refreshed.`, { tone: 'error' })
+        void reload()
+        return
+      }
+      toast(error.status === 403 ? 'You can’t remove old versions or move their uses. Ask a workspace admin.'
+        : error.status === 413 ? 'Too many uses move at once. Nothing was removed; select fewer versions.'
+          : 'Nothing was removed. Try again.', { tone: 'error' })
+    },
+    settled: () => { removingOld.value = false },
+  })
+}
+
 // ---------- row text ----------
 const clock = computed(() => new Date(now.value))
 const retiring = (line: RegistryLine) => line.retireAt ? `Retiring ${shortDate(line.retireAt, clock.value)}` : ''
@@ -288,17 +350,18 @@ const meta = (line: RegistryLine) => metaParts(line, clock.value)
 watch(lines, () => { if (editing.value && editing.value !== 'new' && !lineOf(editing.value)) closeEditor(false) })
 function reset() {
   scope.reset(); closeEditor(false); stopTicker(); profiles.value = []; status.value = null; stripError.value = ''; autoBusy.value = false; checking.value = false; cooldownUntil.value = 0; saving.value = false
+  outdated.value = null; sheetOpen.value = false; removingOld.value = false
   phase.value = 'loading'
   if (scopeKey.value) load()
 }
 // Everything above is declared before the first run: a change of person or access starts over.
 watch(scopeKey, reset, { immediate: true, flush: 'sync' })
-const stopAccess = onAccessRevalidate({ reset, refresh: () => { if (scopeKey.value && !saving.value && !autoBusy.value && !checking.value && !question.value?.removing) void reload() } })
+const stopAccess = onAccessRevalidate({ reset, refresh: () => { if (scopeKey.value && !saving.value && !autoBusy.value && !checking.value && !question.value?.removing && !removingOld.value) void reload() } })
 onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
 </script>
 
 <template>
-  <section id="model-refresh" class="reg-card glass-card" data-model-registry aria-labelledby="reg-title" :aria-busy="phase === 'loading'">
+  <section id="model-refresh" ref="cardEl" class="reg-card glass-card" data-model-registry aria-labelledby="reg-title" :aria-busy="phase === 'loading'">
     <header class="reg-head">
       <div class="reg-titles">
         <h2 id="reg-title">Model registry</h2>
@@ -320,6 +383,11 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
           <span :aria-hidden="checkState !== 'cooling'"><AppIcon name="check" :size="14" />Checked · {{ cooldownText }}</span>
         </span>
       </button>
+    </div>
+    <div v-if="tray && phase === 'ready'" class="reg-tray" data-reg-tray>
+      <AppIcon name="history" :size="16" class="reg-tray-ic" />
+      <span class="reg-tray-t" data-reg-tray-text><template v-for="(pair, index) in tray.named" :key="index"><template v-if="index">{{ ' · ' }}</template><b>{{ pair.to }}</b> replaces {{ pair.from }}</template>{{ ' · ' }}{{ tray.count }}{{ tray.unused }}</span>
+      <button type="button" class="btn sm" data-reg-review aria-haspopup="dialog" :aria-expanded="sheetOpen" @click="openSheet">Review…</button>
     </div>
 
     <div class="reg-body">
@@ -353,6 +421,8 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
         <li v-if="!lines.length && editing !== 'new'" class="reg-note" role="status">No models are registered yet.</li>
       </ul>
     </div>
+    <ModelOutdatedSheet v-if="sheetOpen && entries.length" :entries="entries" :auto-on="autoOn" :incomplete="outdated?.incomplete === true" :more="more" :busy="removingOld"
+      @close="sheetOpen = false" @remove="retireOld" />
   </section>
 </template>
 
@@ -373,11 +443,18 @@ h2 { font: 600 18px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); 
 .reg-check[aria-disabled="true"] { cursor: default; color: var(--ink-3); }
 .reg-check[aria-disabled="true"]:hover { background: transparent; }
 
-.reg-check-label { justify-items: end; }
+/* Tabular figures: "again in 1 min" and "again in 5 min" take one width, so the shared box never changes size. */
+.reg-check-label { justify-items: end; font-variant-numeric: tabular-nums; }
 .reg-check-label > span { display: inline-flex; align-items: center; gap: 6px; }
 .reg-check .spin { animation: reg-spin 1s linear infinite; }
 @keyframes reg-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .reg-check .spin { animation: none; } }
+
+.reg-tray { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 8px 8px 14px; border-radius: 12px; background: var(--row-selected); font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.reg-tray-ic { flex: none; color: var(--teal-ink); }
+.reg-tray-t { flex: 1; min-width: 0; }
+.reg-tray-t b { font-weight: 600; color: var(--ink); }
+.reg-tray .btn { flex: none; }
 
 .reg-body { margin-top: 10px; }
 .reg-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 16px; font-size: 13px; color: var(--ink-2); }
@@ -407,6 +484,7 @@ h2 { font: 600 18px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); 
   .reg-strip { flex-wrap: wrap; gap: 4px 10px; padding: 8px 12px; }
   .reg-check { margin-left: auto; }
   .reg-text { order: 3; flex: 1 1 100%; padding-bottom: 4px; }
+  .reg-tray { flex-wrap: wrap; }
   .reg-row { grid-template-columns: 22px minmax(0, 1fr) auto; row-gap: 8px; padding: 12px; }
   .reg-mark { align-self: start; margin-top: 2px; }
   .lv { grid-column: 2 / -1; grid-row: 2; justify-content: flex-start; max-width: none; }

@@ -59,6 +59,11 @@ func reviewSource(t *testing.T, f *fixture, slug, kind string, n int, head strin
 	f.tx(t, func(tx pgx.Tx) error { return saveRoundTx(t.Context(), tx, f.person.TenantID, source) })
 	return ReviewInput{SourceRound: source.ID, AuthorRun: run, Repository: f.m.config.Repository, Base: strings.Repeat("a", 40), Head: head}, source
 }
+
+// shadowReviewModel is the model of seedReviewRoute's reviewer pin; a saved
+// gate's route must name it, or shipping holds with gate_route_changed.
+const shadowReviewModel = "claude-shadow-review-1"
+
 func seedReviewRoute(t *testing.T, f *fixture) string {
 	t.Helper()
 	request := httptest.NewRequest("GET", "/api/models", nil)
@@ -67,13 +72,15 @@ func seedReviewRoute(t *testing.T, f *fixture) string {
 	}
 	var profile, account string
 	f.tx(t, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes WHERE role='review-gate'`); err != nil {
+		// Its own line: Models walks a line's routes in registry order, so a
+		// catalog Opus route would otherwise run before this fixture's pin.
+		// The native level is registered explicitly: inserted pins get no
+		// guessed display level (1331), and reviews need level 4 or above.
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,'shadow-reviewer','test','claude','anthropic',$2,'xhigh','frontier',4) RETURNING id::text`, f.person.TenantID, shadowReviewModel).Scan(&profile); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'shadow-reviewer','test','claude','anthropic','claude-opus-4-6','xhigh','frontier') RETURNING id::text`, f.person.TenantID).Scan(&profile); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state) VALUES($1,'review-gate',1,$2,'available')`, f.person.TenantID, profile); err != nil {
+		// A saved Review order (a saved review ladder before Models v2).
+		if err := dbtest.ModelsOrder(t.Context(), tx, f.person.TenantID, "other", "review", "wait", profile); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner)
