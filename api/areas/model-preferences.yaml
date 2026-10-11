@@ -406,7 +406,7 @@ components:
       additionalProperties: false
       required: [rank, revision]
       properties:
-        efforts: {type: object, maxProperties: 512, additionalProperties: {type: string, maxLength: 32}, description: 'Native effort for ranked lines only. Omitted preserves matching stored entries; an empty object restores automatic levels.'}
+        efforts: {type: object, maxProperties: 512, additionalProperties: {type: string, maxLength: 32}, description: 'Native effort for ranked lines only, from their registered routes. The encoded stored map is bounded to 32 KiB. Omitted preserves matching stored entries; an empty object restores automatic levels.'}
         end: {type: string, enum: [wait, default, row, auto], description: 'Rows use wait or default (the Default itself uses wait); small/fix/stuck use row or wait and review uses auto or wait. Omitted preserves the current ending.'}
         rank: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
         not: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
@@ -525,7 +525,7 @@ components:
         outdated:
           type: object
           required: [count, named, uses]
-          description: 'Registered older versions with a newer active successor, grouped across routes and levels. Named entries use representative immutable profile ids. Uses counts explicit pinned settings in the workspace and canonical caller scopes; latest-line orders already follow the successor. Detailed lifecycle facts remain on the catalog API.'
+          description: 'Non-retired registered older versions with a newer active successor, grouped across routes and levels. Named entries use representative immutable profile ids. Uses counts explicit pinned settings in the workspace and canonical caller scopes; latest-line orders already follow the successor. Detailed lifecycle facts remain on the catalog API.'
           properties:
             count: {type: integer, minimum: 0, maximum: 512}
             named: {type: array, maxItems: 512, items: {type: object, required: [line, successor], properties: {line: {type: string, format: uuid}, successor: {type: string, format: uuid}}}}

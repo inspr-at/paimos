@@ -13,6 +13,9 @@ an empty efforts object restores automatic levels. A member can save a
 workspace column with `for=me` and `If-Prefs-Person`; resetting removes the
 personal order. Workspace top locks return 423 for personal writes. Review
 orders must meet the strong/frontier floor at the highest native level.
+Native efforts are validated across the registered harnesses of the line;
+legacy harness-derived line ids remain accepted. Stored effort maps are
+bounded to 32 KiB.
 
 Workspace administrators can set or lift a row exclusion with
 `PUT`/`DELETE /api/model-preferences/orders/{column}/first/never/{line}`.
@@ -36,7 +39,7 @@ with the skipped route, visible reset/expiry time, replacement, and `waits`.
 The compatibility `reason` remains deprecated. Private account evidence
 retains the resolver's generic explanation and exposes no reset metrics.
 
-The `outdated` summary groups registered older numeric versions across
+The `outdated` summary groups non-retired older numeric versions across
 routes and levels and names representative immutable profile ids and their
 newer active successors. `uses` counts visible explicit pins in workspace
 and canonical caller settings. Detailed provider lifecycle facts and the
