@@ -114,11 +114,12 @@ a table without Computer and the account line, with the ticket key before the na
 A compact row opens line 1 with a 12 px harness mark whose tooltip and name say
 the model, effort, harness and account ("gpt-6.1-sol · xhigh · Codex · ChatGPT
 Pro"), ends line 1 with the short time ("42m", "3m ago"), and reserves one slot
-for ⋯ beside the two lines. The menu appears on hover or focus and stays visible
+for ⋯ beside the two lines. Its trigger appears on hover or focus and stays visible
 on touch. Remove stale session, Pause, Resume and Change tier are in its menu;
-table rows retain the one-tap bin for ended or silent sessions. Family summaries
-have their own row above the first worker. The details name and rename the
-computer; a failed service tier read explains what failed and offers Try again.
+table rows retain the one-tap bin for ended or silent sessions. The lead's second
+line summarizes its workers; the table omits the extra sub-agent count. The
+details name and rename the computer; a failed service tier read explains what
+failed and offers Try again.
 
 **Rows enter and leave calmly.** New sessions, rows leaving the list, rows
 moving to another group or parent, rows that start or stop matching the filter

@@ -872,7 +872,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 <style scoped>
 .row.drop-over { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--ink-2); }
 .move-lead .mi-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lineage { grid-column: 2; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 3px 38px; font-size: 11px; color: var(--ink-2); }
+.lineage { flex-basis: 100%; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 3px 70px; font-size: 11px; color: var(--ink-2); }
 .lineage a, .lineage.adopted { color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lineage a:hover, .lineage.adopted:hover { text-decoration: underline; }
 .lineage .history-toggle { flex-shrink: 0; }
@@ -998,7 +998,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .tree-guide.elbow::after { content: ''; position: absolute; top: calc(var(--tree-joint) - 4px); left: 0; width: var(--tree-step); height: 5px; border: solid currentColor; border-width: 0 0 1px 1px; border-radius: 0 0 0 5px; }
 .tree-stem { top: calc(var(--tree-joint) + 13px); bottom: 0; width: 1px; background: currentColor; }
 /* Every row keeps the fold slot, so names stay on one edge when a parent appears. */
-.tree-fold, .tree-fold-space { grid-column: 1; grid-row: 1; flex: none; width: 24px; height: 24px; margin-top: 8px; }
+.tree-fold, .tree-fold-space { flex: none; width: 24px; height: 24px; margin-top: 8px; }
 .tree-fold { display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); cursor: pointer; }
 @media (hover: hover) { .tree-fold:hover { background: var(--row-hover); color: var(--teal-ink); } }
 .tree-fold:focus-visible { outline: none; box-shadow: var(--focus-ring); }
@@ -1010,7 +1010,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .worker-tools > :not(.roll) { flex: none; }
 .roll.problem { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }
 .roll.ask { background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); color: var(--queue-wait-ink); }
-.worker-tools { grid-column: 2; display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 6px; min-width: 0; min-height: 28px; padding: 0 0 6px 38px; color: var(--ink-2); font-size: 11.5px; }
+.worker-tools { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 6px; flex-basis: 100%; min-width: 0; min-height: 28px; padding: 0 0 6px 70px; color: var(--ink-2); font-size: 11.5px; }
 .worker-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 28px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-weight: 550; white-space: nowrap; }
 .worker-toggle:hover:not(:disabled) { background: var(--row-hover); }
 .worker-toggle:disabled { cursor: default; }
@@ -1022,10 +1022,8 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 /* A filter's context rows (ancestors of a match) stay present and quiet. */
 .row.context-only > :not(.c-agent), .row.context-only .who,
 .row.filter-context > :not(.c-agent), .row.filter-context .who { opacity: .55; }
-/* The family summary is its own intrinsic row, so it contributes to the
-   table's height instead of overflowing into the first worker below it. */
-.row > .c-agent { align-self: start; display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 4px 8px; min-width: 0; padding-block: 10px; }
-.agent-link { grid-column: 2; grid-row: 1; display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
+.row > .c-agent { align-self: start; display: inline-flex; align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; min-width: 0; padding-block: 10px; }
+.agent-link { display: inline-flex; flex: 1 1 0; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
 .agent-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 6px; }
 /* Line 1 names the session (its result, then its own name, which gives way first); line 2 says what it
    works on, asks or how it ended. Two fixed lines: a state change never changes the row's height. */
@@ -1103,6 +1101,12 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 @container sessions (max-width: 880px) {
   .table { grid-template-columns: minmax(108px, 1fr) 84px minmax(96px, .7fr) 64px 108px; }
   .thead > .c-host, .execution-host > .c-host, .exec-account { display: none; }
+}
+/* The table already summarizes a lead's workers on line 2. Keep a separate
+   summary track only where it carries an action or a problem/ask below. */
+@container sessions (min-width: 560px) {
+  .kid-count { display: none; }
+  .worker-tools:not(:has(.worker-toggle, .roll)) { display: none; }
 }
 /* Compact rows (AEON-1211): a list under 560 px (the phone, and later the side list) shows each
    session in two lines. Line 1 opens with the 12 px harness mark, names the session and ends with
