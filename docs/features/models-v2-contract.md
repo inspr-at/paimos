@@ -18,13 +18,18 @@ personal order. Workspace top locks return 423 for personal writes. Review
 orders must meet the strong/frontier floor at the highest native level.
 Native efforts are validated across the registered harnesses of the line;
 legacy harness-derived line ids remain accepted. Stored effort maps are
-bounded to 32 KiB.
+bounded to 32 KiB. The ranked board's `stored` order also returns the
+column's own `end` and `efforts`, so the page's Undo can write a reset order
+back whole.
 
 Workspace administrators can set or lift a row exclusion with
 `PUT`/`DELETE /api/model-preferences/orders/{column}/first/never/{line}`.
 PUT requires `why` and the current workspace `rules_revision`; DELETE uses
 the `revision` query parameter. These writes preserve other rules and record
-the current person, timestamp, and explanation.
+the current person, timestamp, and explanation. Whole-row rule writes
+(`PUT /api/model-rules/workspace/{column}`) keep the author and time of every
+rule they leave unchanged. The page lifts a migrated pin to the bottom this
+way, in the same change, when an administrator moves or removes that step.
 
 People with `models.manage` can pause registered native levels of a harness/model
 route with `PUT /api/models/lines/{harness}/{model}/pause`, using `until`
