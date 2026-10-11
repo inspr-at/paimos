@@ -213,12 +213,58 @@ function overflow(el: HTMLElement) {
   const reach = Math.max(0, ...[...el.children].map(child => child.getBoundingClientRect().right))
   return Math.max(reach - end, el.scrollWidth - el.clientWidth, trail ? trail.scrollWidth - trail.clientWidth : 0, crumb ? crumb.scrollWidth - crumb.clientWidth : 0)
 }
+// Above phone width the trail drops whole segments, never a chip cut mid-way
+// (AEON-1214): a crumb leaves together with the separator that joins it, from the
+// start, so the page you are on goes last; with nothing whole left, the trail
+// steps aside. A project's name ends in an ellipsis first, and steps aside
+// rather than show a sliver. Each fit starts from the whole trail, so one width
+// always gives one trail.
+function cutTrail(trail: HTMLElement) {
+  const frame = trail.getBoundingClientRect(), range = document.createRange()
+  for (const part of trail.children) {
+    if (!(part instanceof HTMLElement)) continue
+    const box = part.getBoundingClientRect(), style = getComputedStyle(part)
+    if (box.width <= 1 || style.display === 'none') continue
+    const inset = (side: 'Left' | 'Right') => parseFloat(style[`padding${side}`]) || 0
+    // A crumb clips to its own box, the trail to its. What must show whole: the
+    // crumb's keys, icons and names, or its text; an ellipsis by design, its box.
+    const left = Math.max(frame.left, style.overflowX === 'hidden' ? box.left : -Infinity)
+    const right = Math.min(frame.right, style.overflowX === 'hidden' ? box.right : Infinity)
+    let atoms: { left: number; right: number }[]
+    if (style.textOverflow === 'ellipsis') atoms = [{ left: box.left + inset('Left'), right: box.right - inset('Right') }]
+    else if (part.children.length) atoms = [...part.children].map(child => child.getBoundingClientRect()).filter(rect => rect.width > 1 && rect.height > 1)
+    else { range.selectNodeContents(part); atoms = [range.getBoundingClientRect()] }
+    if (atoms.some(atom => atom.left < left - 0.5 || atom.right > right + 0.5)) return true
+  }
+  return false
+}
+function fitTrail(trail: HTMLElement | null, wide: boolean) {
+  if (!trail) return
+  delete trail.dataset.empty
+  for (const part of trail.querySelectorAll<HTMLElement>('[data-dropped]')) delete part.dataset.dropped
+  if (!wide) return
+  const name = trail.querySelector<HTMLElement>('.crumb-name')
+  if (name && name.scrollWidth > name.clientWidth && name.clientWidth < 3 * (parseFloat(getComputedStyle(name).fontSize) || 13.5)) name.dataset.dropped = ''
+  const parts = [...trail.children] as HTMLElement[]
+  const crumbs = parts.filter(part => part.classList.contains('crumb') && getComputedStyle(part).display !== 'none')
+  // A trail that continues from a place keeps the separator before its first crumb.
+  const joined = !trail.classList.contains('lead')
+  for (let gone = 1; gone <= crumbs.length && cutTrail(trail); gone++) {
+    const first = crumbs[gone]
+    const from = first ? parts.indexOf(first) - (joined && first.previousElementSibling?.classList.contains('sep') ? 1 : 0) : parts.length
+    for (const part of parts.slice(0, from)) part.dataset.dropped = ''
+    if (!first) trail.dataset.empty = ''
+  }
+}
 function fitHeader() {
   const el = header.value
   if (!el) return
   const order = steps.value
   const show = (n: number) => { const value = order.slice(0, n).join(' '); if (value) el.dataset.away = value; else delete el.dataset.away }
-  if (!narrow.matches) { show(0); awaySteps.value = 0; return }
+  const trail = el.querySelector<HTMLElement>('.crumbs')
+  if (!narrow.matches) { show(0); awaySteps.value = 0; fitTrail(trail, true); return }
+  // Phones keep only where you are; the steps below keep it whole.
+  fitTrail(trail, false)
   const over = (n: number) => { show(n); return overflow(el) }
   let n = Math.min(awaySteps.value, order.length)
   if (over(n) > 0.5) { while (n < order.length && over(++n) > 0.5) { /* the next one steps aside too */ } }
@@ -553,4 +599,6 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 @media (min-width: 380px) and (max-width: 600px) {
   .app-header:has(.places) .lockup.tenant.squarish:not(.compact) { display: inline-flex; min-width: 40px; }
 }
+/* What the measured fit drops leaves whole (fitTrail, AEON-1214). Last, so it wins. */
+.app-header .crumbs [data-dropped], .app-header .crumbs[data-empty] { display: none; }
 </style>

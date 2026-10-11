@@ -51,6 +51,13 @@ runs past the window: the breadcrumb gives way first, then the search pill. The
 pill drops its keys, then its label, and keeps its magnifier. Just above phone
 width the header's controls sit as close as on a phone.
 
+The breadcrumb gives way in whole steps and never shows a cut chip. A project's
+name ends in an ellipsis first and steps aside before it would show only a
+sliver. When a step does not fit whole, its separator and crumb leave together,
+from the start of the trail, so the page you are on goes last. When nothing fits
+whole, the breadcrumb steps aside. Each step comes back as soon as the room holds
+it. This is measured, like the phone header.
+
 ## Phones
 
 On a phone each half is a 44 px target. The preview is a full-height sheet with
