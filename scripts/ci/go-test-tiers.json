@@ -1612,6 +1612,10 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestLaunchErrorCannotProveNoFork","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit","reason":"AEON-1190: lead consent, duplicate native launch and unknown process ownership boundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestLeadRuntimeUnattemptedReceiptDoesNotFreezeStartup","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestLifecycleBoundsProbeAndCapacityWaits","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestLifecycleReadinessIsPerHarness","tier":"GATED-FULL"}
@@ -3609,6 +3613,8 @@
     {"kind":"go","package":"internal/auth","name":"TestKeyTrimRestoreRechecksEditorAndOriginalCreatorCeilings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyTrimTenantIsolationAndBoundedInput","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestLeadRuntimeProductionMiddleware","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestLeadSettingsAgentRoutesReadOnly","tier":"GATED-FULL"}
     ,
@@ -6209,6 +6215,8 @@
     {"kind":"go","package":"internal/harness","name":"TestLeadFairTurnsAndUnavailableContender","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLeadIdleYieldCountsUntilConfirmedExit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestLeadRuntimeConsentAndAdoptionRemainLaunchBarriers","reason":"AEON-1190: lead consent, duplicate native launch and unknown process ownership boundary","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLeadSchedulingBoundAndDependencies","tier":"ESSENTIAL"}
     ,
@@ -8839,6 +8847,8 @@
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetMovedRootKeepsChildBinding","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetUnknownRetainsSlotAndChildBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestLeadRuntimeClaimReplayAndAbandon","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchRaceRecoveryAndAdmission","tier":"ESSENTIAL"}
     ,
