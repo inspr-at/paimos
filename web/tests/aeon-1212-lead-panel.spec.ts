@@ -412,15 +412,21 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
     await page.reload()
     await expect(question(page).getByRole('button', { name: 'Not now', exact: true })).toBeVisible()
     world.state.fail = true
-    await question(page).getByRole('button', { name: 'Not now', exact: true }).click()
-    await expect(question(page)).toContainText('Not recorded. Try again')
-    await expect(question(page).getByRole('button', { name: 'Retry', exact: true })).toBeEnabled()
-    await shot('g3-failed')
-    world.state.question = { ...world.state.question, revision: 2, state: 'answered', answer: { id: 'desk-answer', revision: 2, option_id: 'later', answer: 'Not now', outcome: 'once', decided_by: 'another-person', created_at: NOW, deliver_after: NOW } }
-    await page.evaluate(async () => { await (await import('/src/stores/agentProjection.ts' /* @vite-ignore */)).useAgentProjection().refresh() })
-    await expect(question(page)).toContainText('Answered on the Desk: Not now')
-    await expect(question(page).getByRole('button')).toHaveCount(0)
-    await shot('g3-decided-elsewhere')
+    await expectStableControls({ controls: { ...controls, card: question(page), answer: question(page).locator('.answer-slot'), composer: panel(page).locator('.composer') }, scrollAreas: { chat: panel(page).locator('.thread-scroll') }, interactions: [
+      { name: 'failed answer', run: async () => {
+        await question(page).getByRole('button', { name: 'Not now', exact: true }).click()
+        await expect(question(page)).toContainText('Not recorded. Try again')
+        await expect(question(page).getByRole('button', { name: 'Retry', exact: true })).toBeEnabled()
+        await shot('g3-failed')
+      } },
+      { name: 'decided elsewhere', run: async () => {
+        world.state.question = { ...world.state.question, revision: 2, state: 'answered', answer: { id: 'desk-answer', revision: 2, option_id: 'later', answer: 'Not now', outcome: 'once', decided_by: 'another-person', created_at: NOW, deliver_after: NOW } }
+        await page.evaluate(async () => { await (await import('/src/stores/agentProjection.ts' /* @vite-ignore */)).useAgentProjection().refresh() })
+        await expect(question(page)).toContainText('Answered on the Desk: Not now')
+        await expect(question(page).getByRole('button')).toHaveCount(0)
+        await shot('g3-decided-elsewhere')
+      } },
+    ] })
     world.state.question = makeQuestion(); world.state.denied = true
     await page.reload()
     await expect(question(page)).toContainText('Waits for a project admin')
@@ -429,6 +435,7 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
     expect(world.state.calls).toHaveLength(2)
     await shot('g3-no-permission')
 
+    world.state.denied = false
     await page.goto(`/agents/${LEAD_SESSION}?tab=lead`)
     const caption = panel(page).locator('.admission-caption')
     const checks = panel(page).locator('[data-check]')
