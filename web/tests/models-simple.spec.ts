@@ -28,7 +28,7 @@ test('the default leads, overrides read as exceptions, reviews pick themselves a
   await expect(row(page, 'design')).toContainText('UI design'); await expect(pick(page, 'design')).toContainText('Opus 5.5 · xhigh')
   await expect(row(page, 'concept')).toContainText('Concepts'); await expect(pick(page, 'concept')).toContainText('Opus 5.5 · high')
   await expect(page.locator('[data-reviews]')).toContainText('Automatic · always another family')
-  await expect(page.locator('[data-reviews] a')).toHaveAttribute('href', '/settings/policies')
+  await expect(page.locator('[data-reviews] a')).toHaveAttribute('href', '/settings/policies#cross-family-review')
   await expect(page.locator('[data-next-line]')).toContainText('The next Backend build runs on GPT-6.1 Sol · xhigh, reviewed by Grok 4.7.')
   await expect(page.getByRole('button', { name: 'Why?' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Different model for…' })).toBeVisible()

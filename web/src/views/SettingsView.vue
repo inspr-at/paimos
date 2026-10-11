@@ -142,6 +142,10 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
     const target = document.getElementById(decodeURIComponent(hash.slice(1)))
     if (target) {
       target.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+      // A target that takes focus (tabindex) gets it, unless the person is already in a
+      // control: the next Tab then continues inside it ("Rule in Policies", AEON-1165).
+      const active = document.activeElement
+      if (target.hasAttribute('tabindex') && (!active || active === document.body || active.id === 'main')) target.focus({ preventScroll: true })
       // Legacy bookmarks can now point to a field inside a consolidated card.
       // Keep wrapper links ringing their card, and ring field links themselves.
       const highlight = target.classList.contains('settings-card') ? target : target.querySelector<HTMLElement>('.settings-card, .setup') ?? target
@@ -186,7 +190,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
         </nav>
       </div>
       <div class="body" :class="{ wide: current === 'access' || current === 'agent-rules' }">
-        <p v-if="allowed && current !== 'kinds'" class="who"><AppIcon :name="meta.admin && !meta.permission ? 'shield' : 'eye'" :size="14" /><span>{{ who }}</span></p>
+        <p v-if="allowed && current !== 'kinds' && current !== 'policies'" class="who"><AppIcon :name="meta.admin && !meta.permission ? 'shield' : 'eye'" :size="14" /><span>{{ who }}</span></p>
         <nav v-if="allowed && current === 'theme'" class="theme-links" aria-label="Theme cards"><RouterLink to="/settings/theme#themes">Themes</RouterLink><RouterLink to="/settings/theme#colours">Colours</RouterLink><RouterLink to="/settings/theme#agents">Agents</RouterLink></nav>
         <component :is="VIEW[current]" v-if="allowed" :key="`${mountedOwner}/${current}`" />
         <div v-else-if="deciding" class="set-skeleton" role="status" aria-label="Loading"><span class="skeleton" /><span class="skeleton" /></div>

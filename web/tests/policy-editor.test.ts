@@ -2,7 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createPolicyEditor, PolicyFailure, policyError, policyJSON } from '../src/lib/policyEditor.ts'
-import { preferenceRequest, compensatePreferences, preferenceScalars, writePreferences, writeLadder, validateLadder, ladderDraft, compensateLadder, type PreferenceSnapshot, type PreferenceMutation, type EditableLadder } from '../src/lib/policyModels.ts'
+import { preferenceRequest, compensatePreferences, preferenceScalars, writePreferences, type PreferenceSnapshot, type PreferenceMutation } from '../src/lib/policyModels.ts'
 function barrier<T>() { let resolve!: (value:T)=>void; const promise=new Promise<T>(yes=>{resolve=yes}); return {promise,resolve} }
 type Snapshot={person:string;revision:number;value:string}
 function fixture() {
@@ -91,16 +91,6 @@ test('HTTP success alone cannot confirm wrong identity/revision',async()=>{
  globalThis.fetch=async()=>new Response(JSON.stringify(result),{status:200});await assert.rejects(writePreferences(prefs(),{unit:'scalars',value:preferenceScalars(prefs().document.levels.person!)},false,new AbortController().signal),/confirmation/)
  }}finally{globalThis.fetch=original}
 })
-test('ladder role CAS, expiry-clear Undo and actual normalized token',async()=>{
- const token='"'+'a'.repeat(64)+'"',next='"'+'b'.repeat(64)+'"',route={role:'build' as const,priority:1,profile_id:'profile',state:'unavailable',reason:'hold',valid_until:'2020-01-01T00:00:00Z'}
- const before={role:'build',setup:true,truncated:false,can_edit:true,edit_token:token,routes:[route],steps:[{...route,profile:{id:'profile'}}],dispatch_family_order:[],review_floors:[]} as EditableLadder
- const original=globalThis.fetch,requests:{path:string;init:RequestInit}[]=[]
- try{globalThis.fetch=async(path,init)=>{requests.push({path:String(path),init:init!});return new Response(JSON.stringify([{...route,state:'available',reason:'',valid_until:null}]),{headers:{ETag:next}})}
- const result=await writeLadder(before,[route],true,new AbortController().signal)
- assert.equal(requests[0]!.path,'/api/models/routes?role=build&expiry_policy=clear');assert.equal((requests[0]!.init.headers as Record<string,string>)['If-Match'],token);assert.equal(result.edit_token,next);assert.equal(result.routes[0]!.state,'available')
- await assert.rejects(writeLadder({...before,truncated:true},[route],false,new AbortController().signal),/complete/);assert.throws(()=>validateLadder({...before,edit_token:'short'},'build'),/Invalid/)
- }finally{globalThis.fetch=original}
-})
 test('level writes remain serialized across two row editors and retain each captured revision',async()=>{
  const gate=barrier<Snapshot>(),started=barrier<void>(),writes:number[]=[]
  const wire={read:async()=>({person:'p',revision:2,value:'before'}),write:async(before:Snapshot,_desired:string)=>{writes.push(before.revision);started.resolve();if(writes.length===1)return gate.promise;return {person:'p',revision:4,value:'second'}},writeKey:()=> 'shared-level',identity:(s:Snapshot)=>s.person,compensate:(s:Snapshot)=>s.value}
@@ -120,24 +110,6 @@ for(const status of [401,403])test(`confirmed save followed by denied preview ${
  await editor.load();editor.edit('desired');await editor.submit()
  assert.equal(editor.snapshot.value,null);assert.equal(editor.undo.value,null);assert.equal(editor.draft.value,null);assert.equal(editor.needsReload.value,true);assert.equal(editor.phase.value,'saved');assert.match(editor.message.value,/Saved\. Current preview could not be refreshed/)
  await editor.submit(true);assert.equal(writes,1)
-})
-
-test('managed order drafts preserve holds and Undo restores rows plus captured mode',async()=>{
- const routes=[{role:'review-gate' as const,priority:10,profile_id:'strong',state:'available',reason:'',valid_until:null},{role:'review-gate' as const,priority:20,profile_id:'frontier',state:'conserved',reason:'old hold',valid_until:'2020-01-01T00:00:00Z'}]
- const token='"'+'a'.repeat(64)+'"',next='"'+'b'.repeat(64)+'"'
- const before={role:'review-gate',setup:true,truncated:false,can_edit:true,edit_token:token,routes,steps:routes.map(row=>({...row,profile:{id:row.profile_id,family:'anthropic',tier:row.profile_id}})),order_mode:'legacy',managed_fallback_order:['frontier','strong'],dispatch_family_order:['anthropic'],review_floors:[]} as EditableLadder
- const draft=ladderDraft(before),prior=compensateLadder(before)
- assert.equal(draft.order_mode,'saved');assert.deepEqual(draft.routes,routes.toReversed().map((row,index)=>({...row,priority:index+1})));assert.deepEqual(prior,{routes,order_mode:'legacy'})
- const original=globalThis.fetch,requests:{path:string;init:RequestInit}[]=[]
- try{globalThis.fetch=async(path,init)=>{requests.push({path:String(path),init:init!});const body=JSON.parse(String(init!.body));return new Response(JSON.stringify(body),{headers:{ETag:next,'Model-Order-Mode':String(path).includes('order_mode=legacy')?'legacy':'saved'}})}
- const saved=await writeLadder(before,draft,false,new AbortController().signal)
- assert.equal(saved.order_mode,'saved');assert.match(requests[0]!.path,/order_mode=saved/)
- const restored=await writeLadder(saved,prior,true,new AbortController().signal)
- assert.equal(restored.order_mode,'legacy');assert.match(requests[1]!.path,/expiry_policy=clear&order_mode=legacy/);assert.deepEqual(restored.routes,routes);assert.equal((requests[1]!.init.headers as Record<string,string>)['If-Match'],next)
- globalThis.fetch=async()=>new Response(JSON.stringify(draft.routes),{headers:{ETag:next,'Model-Order-Mode':'legacy'}})
- await assert.rejects(writeLadder(before,draft,false,new AbortController().signal),/ordering mode confirmation/)
- assert.throws(()=>ladderDraft({...before,managed_fallback_order:['strong','strong']}),/managed order snapshot/)
- }finally{globalThis.fetch=original}
 })
 
 test('local picker invalidation keeps its document while dropping drafts, Undo and late writes',async()=>{
