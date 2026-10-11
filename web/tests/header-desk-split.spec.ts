@@ -23,6 +23,37 @@ const deskLink = (page: Page) => places(page).getByRole('link', { name: /^Decisi
 const chevron = (page: Page) => places(page).getByRole('button', { name: 'Preview the Decision Desk', exact: true })
 const preview = (page: Page) => page.getByRole('dialog', { name: 'Decision Desk preview', exact: true })
 const order = (page: Page) => page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.places > [data-place]')].map(place => place.dataset.place))
+// The design gate's probes (AEON-1196 check.mjs), on the split and its preview:
+// no coloured edge accents, SVG icons only, English only, and on phones 44 px targets.
+const designGate = (page: Page, phone: boolean) => page.evaluate(phone => {
+  const scope = [...document.querySelectorAll('.places .split, .hm-panel.desk-panel')]
+  const all = [...new Set(scope.flatMap(root => [root, ...root.querySelectorAll('*')]))]
+  const shown = (el: Element) => { const box = el.getBoundingClientRect(), style = getComputedStyle(el); return box.width > 0 && box.height > 0 && style.visibility !== 'hidden' && style.display !== 'none' }
+  const opaque = (color: string) => !!color && color !== 'transparent' && !/rgba\(.*,\s*0\)$/.test(color)
+  const edges: string[] = []
+  for (const el of all) {
+    const style = getComputedStyle(el), width = (side: string) => parseFloat(style.getPropertyValue(`border-${side}-width`)) || 0
+    for (const [a, b] of [['left', 'right'], ['top', 'bottom'], ['right', 'left'], ['bottom', 'top']]) {
+      if (width(a) >= 2 && width(a) - width(b) >= 1 && opaque(style.getPropertyValue(`border-${a}-color`))) edges.push(`${el.className} border-${a}`)
+    }
+    for (const part of style.boxShadow === 'none' ? [] : style.boxShadow.split(/,(?![^(]*\))/)) {
+      if (!part.includes('inset')) continue
+      const [x = 0, y = 0, blur = 0] = (part.replace(/rgba?\([^)]*\)|inset/g, '').match(/-?[\d.]+px/g) ?? []).map(parseFloat)
+      if ((Math.abs(x) >= 2 || Math.abs(y) >= 2) && blur === 0) edges.push(`${el.className} inset ${part.trim()}`)
+    }
+    for (const pseudo of ['::before', '::after']) {
+      const p = getComputedStyle(el, pseudo)
+      if (p.content === 'none' || p.position !== 'absolute') continue
+      const w = parseFloat(p.width) || 0, h = parseFloat(p.height) || 0
+      if (w >= 2 && w <= 6 && h >= 16 && opaque(p.backgroundColor)) edges.push(`${el.className} ${pseudo} bar`)
+    }
+  }
+  const text = scope.map(root => (root as HTMLElement).innerText).join(' ')
+  const glyphs = text.match(/[←→↑↓↵⏎✓✔✕✖×▾▸▴▲▼◂▶◀★☆●○◉⚠✗✘➜➔⟶]/g) ?? []
+  const german = text.match(/[äöüÄÖÜß]|\b(und|der|die|das|nicht|mit|für|oder|ist|Sitzung|Agenten|Projekt|Fehler|Einstellungen|bitte)\b/g) ?? []
+  const small = phone ? all.filter(el => el.matches('button, a[href]') && shown(el) && !el.closest('[aria-hidden="true"]')).map(el => el.getBoundingClientRect()).filter(box => box.width < 43.5 || box.height < 43.5).map(box => `${Math.round(box.width)}×${Math.round(box.height)}`) : []
+  return { edges, glyphs, german, small }
+}, phone)
 
 for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
   test(`the Desk is the last place; its chevron previews the Desk without moving the header at ${width} ${theme}`, async ({ page }, testInfo) => {
@@ -70,6 +101,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
         } },
       ],
     })
+    expect(await designGate(page, width < 600)).toEqual({ edges: [], glyphs: [], german: [], small: [] })
     // Held decisions come first, each row names its project, kind and age.
     await expect(preview(page).getByRole('region', { name: 'Waiting on you' }).getByRole('link')).toHaveCount(4)
     await expect(preview(page).getByRole('region', { name: 'When you’re ready' }).getByRole('link')).toHaveAccessibleName(/^Doctrine change, Paimos Aeon · Rule change · /)
