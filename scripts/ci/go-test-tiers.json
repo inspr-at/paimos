@@ -3092,6 +3092,8 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestRunningEnrollmentKeepsEachClaudeLoginPersonGated","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestRunningEnrollmentReconcilesDifferentPendingLogin","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestRuntimeHookChangesDuringVerification","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestRuntimeHookReauthenticatesReceiptAndLoadedImage","tier":"GATED-FULL"}
