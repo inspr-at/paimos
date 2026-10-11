@@ -217,15 +217,19 @@ func attachWindowsLimit(ctx context.Context, tx pgx.Tx, accounts []Account, boun
 }
 
 func occupancy(ctx context.Context, tx pgx.Tx) (map[string]int, error) {
+	return occupancyExcept(ctx, tx, "")
+}
+
+func occupancyExcept(ctx context.Context, tx pgx.Tx, runID string) (map[string]int, error) {
 	// A lifecycle release clears the ticket hold, not the process's slot.
 	// Only authenticated exit telemetry clears exit_unconfirmed.
 	rows, err := tx.Query(ctx, `
 		SELECT account_id::text, count(*)
 		FROM agent_runs
-		WHERE account_id IS NOT NULL
+		WHERE account_id IS NOT NULL AND id::text<>$1
 		  AND (status IN ('queued', 'starting', 'running', 'waiting')
 		    OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')
-		GROUP BY account_id`)
+		GROUP BY account_id`, runID)
 	if err != nil {
 		return nil, err
 	}

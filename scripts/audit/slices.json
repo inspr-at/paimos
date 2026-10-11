@@ -179,7 +179,9 @@
         "internal/modelregistry/order_validation.go",
         "internal/modelregistry/pause.go",
         "internal/modelregistry/simple_causes.go",
-        "internal/modelregistry/simple_outdated.go"
+        "internal/modelregistry/simple_outdated.go",
+        "internal/routineexec/**",
+        "internal/modelregistry/routine_reads.go"
       ]
     },
     {
@@ -285,7 +287,13 @@
         "internal/routineactions/**",
         "internal/recurrences/runs.go",
         "internal/recurrences/runs_test.go",
+        "internal/recurrences/templates.go",
+        "internal/recurrences/templates_test.go",
         "internal/routinebudget/**",
+        "internal/recurrences/reads.go",
+        "internal/recurrences/consent_reads.go",
+        "internal/recurrences/reads_test.go",
+        "internal/decisiondesk/routine_consent_test.go",
         "internal/recurrences/run_history.go",
         "internal/recurrences/run_history_test.go"
       ]

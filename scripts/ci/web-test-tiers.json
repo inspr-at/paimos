@@ -412,6 +412,30 @@
     ,
     "browser:tests/business.spec.ts:the overview includes open periods older than a year in its waiting count"
     ,
+    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1024 dark"
+    ,
+    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1024 light"
+    ,
+    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1440 dark"
+    ,
+    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1440 light"
+    ,
+    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 390 dark"
+    ,
+    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 390 light"
+    ,
+    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1024 dark"
+    ,
+    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1024 light"
+    ,
+    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1440 dark"
+    ,
+    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1440 light"
+    ,
+    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 390 dark"
+    ,
+    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 390 light"
+    ,
     "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 dark"
     ,
     "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 light"
@@ -963,6 +987,20 @@
     "browser:tests/role-picker-layout.spec.ts:role choices use the screen and stay still at 390 light"
     ,
     "browser:tests/role-picker-layout.spec.ts:touch and keyboard expose complete role names, descriptions and refusal reasons"
+    ,
+    "browser:tests/routines-editor.spec.ts:an agent routine is created paused, then let run as the picked agent, with every control anchored"
+    ,
+    "browser:tests/routines-editor.spec.ts:closing after a failed consent says the routine is not paused, never “Kept paused”"
+    ,
+    "browser:tests/routines-editor.spec.ts:someone else’s routine says who decides, a stale save keeps unsaved text, and revocation closes the sheet"
+    ,
+    "browser:tests/routines-editor.spec.ts:the Routines box and editor render in dark at 1440px"
+    ,
+    "browser:tests/routines-editor.spec.ts:the Routines box and editor render in light at 390px"
+    ,
+    "browser:tests/routines-editor.spec.ts:the phone sheet scrolls under a pinned footer, and switching who moves nothing"
+    ,
+    "browser:tests/routines-editor.spec.ts:your routines need the right only in their own project, and losing it there closes the sheet"
     ,
     "browser:tests/service-tier.spec.ts:1440: compact Default tier control keeps its box through confirmation and Undo"
     ,
@@ -1535,6 +1573,18 @@
     "vitest:tests/role-picker.unit.test.ts:modified Enter (metaKey) stays native"
     ,
     "vitest:tests/role-picker.unit.test.ts:modified Enter (shiftKey) stays native"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:routine wait reasons > derives one row state: never-consented waits, a consented pause stops, ticket-only stays scheduled"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:routine wait reasons > says every server wait reason in words, naming the owner and the project"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:save, then consent > consents to the revision the resume returned; personal routines run as their owner"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:save, then consent > saves an assignment the server accepts: consistent runtime and no ceilings when off"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:stale and late answers > applies an answer only to the open record at a revision at least the one shown"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:stale and late answers > names exactly the fields the server changed since the shown revision"
     ,
     "vitest:tests/row-store.unit.test.ts:RowStore: revisions only move forward > an authoritative GET clears withheld provenance even at the same revision and while editing"
     ,
@@ -6944,6 +6994,30 @@
     ,
     {"kind":"browser","file":"tests/crm.spec.ts","name":"the list: numbers as the server writes them, search, sort, filters and the keyboard","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/dead-sessions.spec.ts","name":"Lost contact is an ended row with a bin; one click removes, Undo brings it back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/dead-sessions.spec.ts","name":"No heartbeat rows carry a bin; live rows keep the confirm","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10482,12 +10556,6 @@
     ,
     {"kind":"browser","file":"tests/quota-warnings.spec.ts","name":"quota thresholds retain controls through edits, errors and save at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"collaboration status contrast is AA in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"collaboration status contrast is AA in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"collaborator list combines tabs, labels idle people and clears expired sessions","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"dirty reload preserves local text, page reload recovers it, and a lost ACK replays after reconnect","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"loading cannot save and a late reload never replaces an edit made while it waited","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10497,8 +10565,6 @@
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"revision watch backs off after outages and rechecks immediately on focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"same-person tabs keep distinct mutation sessions after window.open clones storage","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"save status keeps remote updates separate and offers keyboard-accessible actions","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"two browser contexts preserve both concurrent edits through CAS and reviewed merge","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11415,6 +11481,20 @@
     {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"role choices use the screen and stay still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"touch and keyboard expose complete role names, descriptions and refusal reasons","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"an agent routine is created paused, then let run as the picked agent, with every control anchored","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"closing after a failed consent says the routine is not paused, never “Kept paused”","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"someone else’s routine says who decides, a stale save keeps unsaved text, and revocation closes the sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the Routines box and editor render in dark at 1440px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the Routines box and editor render in light at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the phone sheet scrolls under a pinned footer, and switching who moves nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"your routines need the right only in their own project, and losing it there closes the sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/row-actions.spec.ts","name":"PDF from the list opens the quote on its page and prints it once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14938,8 +15018,6 @@
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"5000 deterministic colours satisfy ink, line and fill-label contrast in both modes","tier":"ESSENTIAL"}
     ,
-    {"kind":"node","file":"tests/theme-colours.test.ts","name":"AEON-644: the filled approval count badge uses contrast-safe waiting ink in both modes","tier":"ESSENTIAL"}
-    ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"OKLCH round trips sRGB and maps excessive chroma without changing hue","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"Porcelain generated accent blocks cannot drift from the engine in CI","tier":"ESSENTIAL"}
@@ -15558,18 +15636,6 @@
     ,
     {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"reset invalidates pending reads and the shared editor before another sign-in","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"a failed call returns the card to pending, actionable, and passes the error on","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"moves pending → confirming → success → collapsing → collapsed, with success only after the server","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"says the outcome with the human-readable scope","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"shows the server’s decision, not the one asked for, and ignores a second submit in flight","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"stop cancels the timers of a card that is still showing","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"with reduced motion the success state is replaced without a fold","tier":"GATED-FULL"}
-    ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: a mutation between rows and digest retries the entire snapshot","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
@@ -15732,6 +15798,14 @@
     ,
     {"kind":"vitest","file":"tests/crm-undo-receipt.unit.test.ts","name":"S9-002: missing receipts and receipts from a previous sign-in refuse Undo","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"Check computers opens the real Computers settings section without the retired anchor","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"approval evidence opens the canonical Decision Desk route","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"both production roots have no imports of the named retired UI and retain live glob and collaboration dependencies","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"retired Business and compatibility URLs still resolve to their canonical owners, and external account links remain","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"connection chores preserve consent scope, exact expiry and readable history","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"drops a previous person read even if transport ignores abort, and resets the count synchronously","tier":"ESSENTIAL"}
@@ -15749,6 +15823,8 @@
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"retains outcome failure, retryability, exact effect references and required review independently of a handed-off answer","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"uses server permission reasons and refuses doctrine without a confirmed mapping","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"allows routine consent link-outs only for the three approved settings paths","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"hydrates and approves a first tier request with native revision zero","tier":"ESSENTIAL"}
     ,
@@ -16746,18 +16822,6 @@
     ,
     {"kind":"vitest","file":"tests/model-estimates.unit.test.ts","name":"model picker history > shows nothing for insufficient or invalid history","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/model-prefs-editor.unit.test.ts","name":"captures the row, project and revision; saves one row optimistically and rolls back a rejected write","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs-editor.unit.test.ts","name":"drops a held load and held mutation when its person or project context is disposed","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs-editor.unit.test.ts","name":"loads preference evidence with one request and no independent review ladder","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs-editor.unit.test.ts","name":"preserves section locks on provider changes and snapshots inherited residency when locking","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs-editor.unit.test.ts","name":"refreshes a revision conflict without claiming that the write succeeded","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs-editor.unit.test.ts","name":"reports a successful write followed by failed refresh and prevents further edits","tier":"GATED-FULL"}
-    ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > never removes system kinds and scopes add and project-only kinds correctly","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > supports freeze, tighten-only and the approved warn mode under locks","tier":"GATED-FULL"}
@@ -16867,12 +16931,6 @@
     {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"the fallback in words > stores step levels, keeps an inherited pick level inherited and leaves unknown lines automatic","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"the fallback in words > treats a row from an older server as an empty order, and a draft as a new exception","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"binds every legacy person write to the captured canonical person","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"legacy refusal 409 gives a sentence and preserves the HTTP status","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"legacy refusal 428 gives a sentence and preserves the HTTP status","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"preserves project, kind and ticket context when entry points navigate to Models","tier":"ESSENTIAL"}
     ,
@@ -17431,6 +17489,20 @@
     {"kind":"vitest","file":"tests/role-picker.unit.test.ts","name":"modified Enter (metaKey) stays native","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/role-picker.unit.test.ts","name":"modified Enter (shiftKey) stays native","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"routine wait reasons > derives one row state: never-consented waits, a consented pause stops, ticket-only stays scheduled","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"routine wait reasons > says every server wait reason in words, naming the owner and the project","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"save, then consent > consents to the revision the resume returned; personal routines run as their owner","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"save, then consent > saves an assignment the server accepts: consistent runtime and no ceilings when off","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"stale and late answers > applies an answer only to the open record at a revision at least the one shown","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"stale and late answers > names exactly the fields the server changed since the shown revision","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"today’s route > reads as the Models page does: registry name and harness label, never a model or profile id","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/row-actions.unit.test.ts","name":"customer row actions > offers open, a new quote, the number and archive","tier":"GATED-FULL"}
     ,

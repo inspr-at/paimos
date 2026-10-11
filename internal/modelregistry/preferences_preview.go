@@ -123,11 +123,26 @@ func pickerReviewProfiles(ctx context.Context, tx pgx.Tx, profiles []Profile) (m
 // derivedRoleSteps retains the deprecated route response vocabulary while its
 // choices come from the current Models row, situations, Quick jobs and rules.
 func derivedRoleSteps(ctx context.Context, tx pgx.Tx, person *string, role string, limit int) ([]ladderStep, string, error) {
-	s, err := modelprefs.LoadBoardRouting(ctx, tx, person, "")
+	c, err := loadBoardCatalog(ctx, tx)
 	if err != nil {
 		return nil, "", err
 	}
-	c, err := loadBoardCatalog(ctx, tx)
+	return derivedRoleStepsIn(ctx, tx, c, person, role, limit)
+}
+
+// routingRoleSteps derives the role's routes from the enabled catalog live
+// routing reads, so disabled history never counts toward its bound.
+func routingRoleSteps(ctx context.Context, tx pgx.Tx, person *string, role string) ([]ladderStep, error) {
+	c, err := loadBoardCatalog(ctx, tx, true)
+	if err != nil {
+		return nil, err
+	}
+	steps, _, err := derivedRoleStepsIn(ctx, tx, c, person, role, 0)
+	return steps, err
+}
+
+func derivedRoleStepsIn(ctx context.Context, tx pgx.Tx, c boardCatalog, person *string, role string, limit int) ([]ladderStep, string, error) {
+	s, err := modelprefs.LoadBoardRouting(ctx, tx, person, "")
 	if err != nil {
 		return nil, "", err
 	}
@@ -161,7 +176,7 @@ func derivedRoleSteps(ctx context.Context, tx pgx.Tx, person *string, role strin
 		if slices.Contains(d.Not, order.Line) && order.Stage != "quick" {
 			continue
 		}
-		for _, profile := range modelsRouteCandidates(c.profiles[order.Line], order.Effort, order.Level, q.Review) {
+		for _, profile := range modelsWalkCandidates(c.profiles[order.Line], order.Effort, order.Level, q.Review) {
 			if seen[profile.ID] || q.Review && (!qualifiedReviewProfile(profile) || role == "review-gate-security" && profile.Family == "anthropic") {
 				continue
 			}

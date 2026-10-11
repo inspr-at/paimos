@@ -622,8 +622,6 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestAdmissionScheduleClockAndRunNowFences","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/agentaccounts","name":"TestAdvancedSentenceRoundTripsAndCaps","tier":"GATED-FULL"}
-    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestAllowanceProvisionalWithoutMeasuredUnit","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestBConcurrentQueuedClaimsPromoteOneRecovery","tier":"GATED-FULL"}
@@ -684,7 +682,7 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityIngestRouteResetAndRLS","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityLimitingResetIsTheSprintEnd","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityLimitingResetPreservesExistingSprintEnd","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityPacingAtNightAndDay","tier":"GATED-FULL"}
     ,
@@ -733,6 +731,10 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestDailyPlanReadKeepsDecliningWeeklyPercent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestDenialAdmissionInterleavings","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestExistingAdvancedLimitRoundTripsAndCaps","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestExistingRepeatedWindowCapsRequests","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestExpiredCapacityHasNoStartFence","tier":"GATED-FULL"}
     ,
@@ -807,8 +809,6 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestLimitConcurrentReservationsAndClaim","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestLimitPeriodDST","tier":"GATED-FULL"}
-    ,
-    {"kind":"go","package":"internal/agentaccounts","name":"TestMakeThisRepeat","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestMaxOutSoonestResetAndCarefulProjectedOrder","tier":"ESSENTIAL"}
     ,
@@ -955,6 +955,14 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestResidencyEvidenceValidityBound","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResidencyFenceMapsStarterLinkedAfterQueue","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRetiredAccountLimitWrites","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRetiredCapacityOverridesCanStillEnd","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRetiredCapacityOverridesDropExpiredOnSave","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRetiredCapacityOverridesRoundTripUnchanged","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRouteOnlyClaimsLocalDaemonEnrollment","tier":"GATED-FULL"}
     ,
@@ -5602,6 +5610,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestRevocationDecisionExpiryAndFinishedWork","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestRoutineConsentProjectionMatchesNativePolicyAndPages","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestScopeDeniedApprovalReceivesTerminalSkippedClaim","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestSourceClaimDoesNotScanProjectionAndCoverageIsExplicit","tier":"GATED-FULL"}
@@ -7484,6 +7494,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestResolveAPIReturnsLoosenedResidencyTrace","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestResolveHarnessFilterIgnoresDisabledHistoryBound","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestResolvePlacementAuthorizationPrecedesPersonAndTicketMismatch","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestResolveTicketRoute","tier":"GATED-FULL"}
@@ -8450,6 +8462,10 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineRunStateMappings","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineTemplatesValidateApplyWithoutActivationOrDuplicates","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineUIReadsScopeLatestRunAndDraftPolicy","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestSixMonthSpringGapWalksPastOneYear","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestSourceClaimSkipsFilteredEventsInBoundedBatches","tier":"ESSENTIAL"}
@@ -8774,6 +8790,8 @@
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestAccountLimitRequestAndResponseSchemas","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestAccountRetirementResponseSchemas","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/reportercontract","name":"TestCombinedHarnessSessionV15Fixture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestDeployTargetBytesMatchStable100","tier":"GATED-FULL"}
@@ -8849,6 +8867,12 @@
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetMovedRootKeepsChildBinding","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetUnknownRetainsSlotAndChildBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchRaceRecoveryAndAdmission","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchReservedAccountAdmission","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineQueueWaitsDoNotBlockLaterWork","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineguard","name":"TestEvaluationAuthorMatchesPersistedActionAttempt","tier":"ESSENTIAL"}
     ,

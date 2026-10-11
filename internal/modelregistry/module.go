@@ -342,7 +342,7 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 		if query.Harness != "" {
 			// A harness filter must name one of the role's Models routes,
 			// as it named a ladder route before the retirement.
-			steps, _, err := derivedRoleSteps(r.Context(), tx, query.PersonID, query.Role, 0)
+			steps, err := routingRoleSteps(r.Context(), tx, query.PersonID, query.Role)
 			if err != nil {
 				return err
 			}

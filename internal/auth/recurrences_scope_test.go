@@ -11,6 +11,8 @@ func TestRecurrenceAgentScopeIsExplicitAndBounded(t *testing.T) {
 	id := base + "/57000000-0000-4000-8000-000000000001"
 	for _, tc := range []struct{ method, path string }{
 		{"GET", base}, {"POST", base}, {"POST", base + "/preview"},
+		{"GET", base + "/templates"}, {"HEAD", base + "/templates"},
+		{"POST", base + "/templates/weekly-cleanup/1/preview"}, {"POST", base + "/templates/weekly-cleanup/1/apply"},
 		{"GET", id}, {"PUT", id}, {"DELETE", id}, {"HEAD", id + "/history"},
 		{"GET", id + "/preview"}, {"GET", id + "/history"}, {"GET", id + "/releases"}, {"GET", id + "/guardrails"},
 		{"POST", id + "/pause"}, {"POST", id + "/resume"}, {"POST", id + "/run-now"},
@@ -21,6 +23,8 @@ func TestRecurrenceAgentScopeIsExplicitAndBounded(t *testing.T) {
 	}
 	for _, tc := range []struct{ method, path string }{
 		{"PUT", id + "/guardrails"}, {"DELETE", base}, {"PATCH", id}, {"POST", id + "/history"},
+		{"POST", base + "/templates"}, {"PUT", base + "/templates"}, {"GET", base + "/templates/weekly-cleanup/1/apply"},
+		{"POST", base + "/templates/weekly-cleanup/1/resume"}, {"POST", base + "/templates/weekly-cleanup/1/apply/extra"},
 		{"GET", id + "/secrets"}, {"POST", id + "/unknown"}, {"GET", id + "/history/private"},
 	} {
 		if got, ok := coreAgentScope(httptest.NewRequest(tc.method, tc.path, nil)); ok || got != "" {

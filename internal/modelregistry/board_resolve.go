@@ -171,7 +171,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			continue
 		}
 		seen[key] = true
-		profiles := modelsRouteCandidates(c.profiles[order.Line], order.Effort, order.Level, review)
+		profiles := modelsWalkCandidates(c.profiles[order.Line], order.Effort, order.Level, review)
 		if len(profiles) == 0 {
 			d.Held = append(d.Held, modelprefs.HeldLine{Line: order.Line, Reason: "no registered route for this line"})
 			continue
@@ -523,6 +523,20 @@ func modelsBoardIdentities(s modelprefs.BoardState, c boardCatalog) modelprefs.B
 // Select the nearest level separately on each route, so a route lacking the
 // exact name still gets its chance before the next model. Equal distance ties up.
 func modelsRouteCandidates(ps []Profile, effort string, level int, review bool) []Profile {
+	return routeCandidates(ps, effort, level, review, func(p Profile) bool { return p.Enabled && !p.Retired })
+}
+
+// modelsWalkCandidates keeps a line whose every version is retired in the
+// walk at its newest version, so its cause reads "retired" rather than a
+// missing route; skipReasons never selects a retired step.
+func modelsWalkCandidates(ps []Profile, effort string, level int, review bool) []Profile {
+	if out := modelsRouteCandidates(ps, effort, level, review); len(out) > 0 {
+		return out
+	}
+	return routeCandidates(ps, effort, level, review, func(p Profile) bool { return p.Enabled })
+}
+
+func routeCandidates(ps []Profile, effort string, level int, review bool, live func(Profile) bool) []Profile {
 	for _, p := range ps {
 		if effort != "" && p.Effort == effort && p.EffortLevel != nil {
 			level = *p.EffortLevel
@@ -532,7 +546,7 @@ func modelsRouteCandidates(ps []Profile, effort string, level int, review bool) 
 	latest := ""
 	for _, p := range ps {
 		_, version := modelsLine(p)
-		if p.Enabled && !p.Retired && version != "alias" && CompareModelVersions(version, latest) > 0 {
+		if live(p) && version != "alias" && CompareModelVersions(version, latest) > 0 {
 			latest = version
 		}
 	}
@@ -563,7 +577,7 @@ func modelsRouteCandidates(ps []Profile, effort string, level int, review bool) 
 		levels := []int{}
 		exact := false
 		for _, p := range route.profiles {
-			if !p.Enabled || p.Retired {
+			if !live(p) {
 				continue
 			}
 			if p.EffortLevel != nil {

@@ -664,6 +664,52 @@ func RequireCurrentLeadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, pr
 	return nil
 }
 
+// RequireRoutineLeadDispatchTx is the server-owned counterpart to the leased
+// HTTP pickup. It is restricted to a persisted consenting routine, the owner's
+// existing live generation and its exact bound dispatch key. It cannot adopt a
+// session, rebind a credential or grant authority from a queue entry.
+func RequireRoutineLeadDispatchTx(ctx context.Context, tx pgx.Tx, tenantID, routine, project, owner, session string, generation int64, admission LeadAdmission) (tenant.Principal, error) {
+	p := tenant.Principal{TenantID: tenantID, Kind: tenant.Agent}
+	var bound bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_runs WHERE id=$1 AND output_project_id=$2 AND owner_principal_id=$3 AND execute_consent AND consent_revision=definition_revision)`, routine, project, owner).Scan(&bound); err != nil {
+		return p, err
+	}
+	if !bound {
+		return p, workorders.Fail(409, "routine_intent_required")
+	}
+	l, err := loadLead(ctx, tx, project, true)
+	if err != nil {
+		return p, err
+	}
+	if l.owner != owner || l.SessionID == nil || *l.SessionID != session || l.Generation != generation {
+		return p, workorders.Fail(409, "stale_lead_generation")
+	}
+	if err = tx.QueryRow(ctx, `SELECT agent_principal_id::text FROM harness_sessions WHERE id=$1`, session).Scan(&p.ID); err != nil {
+		return p, err
+	}
+	if err = authz.RequireQueueDispatcherTx(ctx, tx, tenantID, p.ID, l.dispatchKey, project); err != nil {
+		return p, err
+	}
+	if err = tx.QueryRow(ctx, `SELECT scopes,coalesce(created_by_principal_id::text,''),full_access FROM agent_keys WHERE id=$1`, l.dispatchKey).Scan(&p.Scopes, &p.KeyCreatorID, &p.FullAccess); err != nil {
+		return p, err
+	}
+	p.Scopes = authz.ResolveKeyScopes(p.Scopes, p.FullAccess)
+	p.KeyID, p.AuthKeyID = l.dispatchKey, l.dispatchKey
+	if err = RequireCurrentLeadTx(ctx, tx, p, project, session, generation); err != nil {
+		return p, err
+	}
+	s, err := load(ctx, tx, project, session, false)
+	if err != nil {
+		return p, err
+	}
+	m := Module{leadAdmission: admission}
+	reason, err := m.checkLeadAdmission(ctx, tx, p, owner, s)
+	if err == nil && reason != "" {
+		err = workorders.Fail(409, "lead admission wait: "+reason)
+	}
+	return p, err
+}
+
 // Existing general coordinator registrations are observational. Once explicitly
 // bound to a project lead, they cannot use stale-ref or automatic child adoption
 // as a shortcut around the project/generation contract.

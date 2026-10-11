@@ -668,8 +668,12 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 			}
 			return rows.Err()
 		}
+		if authz.RequireTx(r.Context(), tx, p, "account.manage", authz.Scope{}) != nil {
+			return fail(http.StatusForbidden, "permission denied")
+		}
 		key := ""
 		var account any
+		var targetAccount Account
 		if in.CarryOverrides && (in.Scope != "user" || in.Schedule == nil) {
 			return fail(400, "carry_overrides needs a user schedule")
 		}
@@ -688,7 +692,9 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 				return fail(400, "invalid account")
 			}
 			key = strings.ToLower(in.AccountID)
-			if _, err := getAccount(r.Context(), tx, key); err != nil {
+			var err error
+			targetAccount, err = getAccount(r.Context(), tx, key)
+			if err != nil {
 				return fail(404, "account not found")
 			}
 			account = key
@@ -719,21 +725,34 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		switch in.Schedule.Override {
-		case "sprint":
-			// Sprint is literal and bounded to the next limiting reset in scope.
-			var until *time.Time
-			if err := tx.QueryRow(r.Context(), `SELECT min(w.ends_at) FROM account_allowance_windows w JOIN agent_accounts a ON a.tenant_id=w.tenant_id AND a.id=w.account_id WHERE `+currentCapacityWindows+` AND ($1='user' OR ($1='pool' AND a.harness=$2) OR ($1='account' AND a.id::text=$2) OR ($1='group' AND a.group_id::text=$2))`, in.Scope, key).Scan(&until); err != nil {
+		case "sprint", "hold":
+			if in.Schedule.OverrideUntil != nil && !now.Before(*in.Schedule.OverrideUntil) {
+				in.Schedule.Override, in.Schedule.OverrideUntil = "", nil
+				break
+			}
+			// Settings can send back the override while changing reserve or work
+			// hours. Compare under the mutation fence against this scope's entry,
+			// or the account's resolved schedule when copying suggested hours.
+			var current capacity.Schedule
+			if in.Scope == "account" {
+				current, err = effectiveSchedule(r.Context(), tx, p.ID, targetAccount)
+			} else {
+				var raw []byte
+				err = tx.QueryRow(r.Context(), `SELECT schedule FROM account_capacity_schedules WHERE principal_id=$1 AND scope=$2 AND scope_key=$3`, p.ID, in.Scope, key).Scan(&raw)
+				if err == nil {
+					err = json.Unmarshal(raw, &current)
+				}
+			}
+			if err != nil && !isNoRows(err) {
 				return err
 			}
-			if until == nil {
-				return fail(400, "Sprint requires a current capacity reset")
+			sameUntil := current.OverrideUntil == nil && in.Schedule.OverrideUntil == nil ||
+				current.OverrideUntil != nil && in.Schedule.OverrideUntil != nil && current.OverrideUntil.Equal(*in.Schedule.OverrideUntil)
+			if current.ActiveOverride(now) != in.Schedule.Override || !sameUntil {
+				return &httpError{status: http.StatusBadRequest, code: "override_retired", msg: "New or changed Sprint and Hold overrides are retired. Clear the override or remove the schedule to end an existing override."}
 			}
-			in.Schedule.OverrideUntil = until
-		case "hold":
-			// Hold for a while, until tomorrow's hours, or until you resume (no date).
-			if u := in.Schedule.OverrideUntil; u != nil && (!u.After(now) || u.After(now.Add(maxHold))) {
-				return fail(400, "Hold must end within 31 days")
-			}
+			// Preserve the stored deadline exactly; never recompute or extend it.
+			in.Schedule.Override, in.Schedule.OverrideUntil = current.Override, current.OverrideUntil
 		case "away":
 			// I'm away until…: the person's own schedule, every pool, until the date.
 			if in.Scope != "user" {
@@ -768,11 +787,8 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// maxHold and maxAway bound dated overrides: a hold is a pause, Away a trip.
-const (
-	maxHold = 31 * 24 * time.Hour
-	maxAway = 366 * 24 * time.Hour
-)
+// maxAway bounds new Away overrides; existing Sprint/Hold dates are preserved.
+const maxAway = 366 * 24 * time.Hour
 
 func awayUntilOK(until, now time.Time) error {
 	if !until.After(now) || until.After(now.Add(maxAway)) {
