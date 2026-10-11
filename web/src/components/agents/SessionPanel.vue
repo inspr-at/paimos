@@ -186,9 +186,9 @@ watch(() => s.value?.id, async id => {
 watch([() => s.value?.id, () => auth.identity?.tenant.id, () => auth.identity?.principal.id], async (_next, previous) => {
   actionsAnchor.value = null; composing.value = false
   if (previous && (_next[1] !== previous[1] || _next[2] !== previous[2])) { tab.value = 'overview'; unread.value = 0 }
-  const id = s.value?.id, owner = auth.identity?.principal.id
+  const id = s.value?.id, owner = `${auth.identity?.tenant.id}/${auth.identity?.principal.id}`
   await nextTick()
-  if (id !== s.value?.id || owner !== auth.identity?.principal.id) return
+  if (id !== s.value?.id || owner !== `${auth.identity?.tenant.id}/${auth.identity?.principal.id}`) return
   for (const body of root.value?.querySelectorAll<HTMLElement>('.scroll') ?? []) body.scrollTop = 0
 }, { flush: 'post' })
 onMounted(() => { root.value?.focus({ preventScroll: true }); phoneMedia.addEventListener('change', syncPhone) })

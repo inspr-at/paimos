@@ -79,7 +79,7 @@ F and / (including numpad slash) search this list; S jumps the presets when they
 fit. These actions, their hints and the focused divider's Left/Right (16 px),
 Home (list 280 px) and End (details 380 px) use the shared shortcut registry.
 Fields and browser shortcuts keep their native behavior. The app header leaves
-slash to `/agents` and its session routes while retaining the Desk split button.
+slash to `/agents` and its session routes alongside the header's Desk navigation.
 
 ## State in the avatar, compact rows and calm enter/leave (AEON-1211, P3)
 
