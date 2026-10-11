@@ -424,7 +424,7 @@ components:
     PersonalProfile:
       type: object
       additionalProperties: false
-      required: [principal_id, email, first_name, last_name, preferred_name, short_name, initials, timezone, locale, greeting_enabled, avatar_color, avatar_hashes, week_start, revision]
+      required: [principal_id, email, first_name, last_name, preferred_name, short_name, initials, timezone, locale, greeting_enabled, avatar_color, avatar_hashes, week_start, daily_points_per_day, revision]
       properties:
         principal_id: {type: string, format: uuid}
         email: {type: [string, 'null'], format: email, readOnly: true}
@@ -439,6 +439,7 @@ components:
         avatar_color: {type: string, description: One of twelve muted palette tokens}
         avatar_hashes: {type: object, additionalProperties: {type: string, pattern: '^[a-f0-9]{64}$'}}
         week_start: {type: integer, minimum: 0, maximum: 6, description: '0=Sunday, 1=Monday'}
+        daily_points_per_day: {type: [integer, 'null'], minimum: 1, maximum: 50, description: 'Default pace: percentage points a day agents may use of an account window. Null follows the built-in 10. GET /agents/plan returns the effective value as daily_default_points.'}
         revision: {type: integer, minimum: 0}
     PersonalProfilePatch:
       type: object
@@ -452,6 +453,7 @@ components:
         timezone: {type: string, description: IANA time zone}
         locale: {type: string, description: BCP 47 language tag}
         greeting_enabled: {type: boolean}
+        daily_points_per_day: {type: [integer, 'null'], minimum: 1, maximum: 50, description: 'Default pace in whole percentage points a day, 1 to 50. Null follows the built-in 10. Undo restores the value before, like the other profile fields.'}
     PhoneApprovalPreferences:
       type: object
       additionalProperties: false

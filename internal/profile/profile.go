@@ -49,7 +49,10 @@ type Profile struct {
 	AvatarColor     string            `json:"avatar_color"`
 	AvatarHashes    map[string]string `json:"avatar_hashes"`
 	WeekStart       int               `json:"week_start"`
-	Revision        int64             `json:"revision"`
+	// DailyPointsPerDay is the default pace (AEON-1175): percentage points a day
+	// agents may use of an account's window; null follows the built-in 10.
+	DailyPointsPerDay *int  `json:"daily_points_per_day"`
+	Revision          int64 `json:"revision"`
 }
 
 // State is the exact reversible profile projection, excluding identity email.
@@ -65,6 +68,7 @@ type State struct {
 	GreetingEnabled    bool              `json:"greeting_enabled"`
 	AvatarOriginalHash string            `json:"avatar_original_hash"`
 	AvatarHashes       map[string]string `json:"avatar_hashes"`
+	DailyPointsPerDay  *int              `json:"daily_points_per_day"`
 	Revision           int64             `json:"revision"`
 }
 
@@ -85,7 +89,7 @@ func (s State) public(email *string) Profile {
 			week = 0
 		}
 	}
-	return Profile{PrincipalID: s.PrincipalID, Email: email, FirstName: s.FirstName, LastName: s.LastName, PreferredName: s.PreferredName, ShortName: s.ShortName, Initials: initials, Timezone: s.Timezone, Locale: s.Locale, GreetingEnabled: s.GreetingEnabled, AvatarColor: palette[int(h[0])%len(palette)], AvatarHashes: s.AvatarHashes, WeekStart: week, Revision: s.Revision}
+	return Profile{PrincipalID: s.PrincipalID, Email: email, FirstName: s.FirstName, LastName: s.LastName, PreferredName: s.PreferredName, ShortName: s.ShortName, Initials: initials, Timezone: s.Timezone, Locale: s.Locale, GreetingEnabled: s.GreetingEnabled, AvatarColor: palette[int(h[0])%len(palette)], AvatarHashes: s.AvatarHashes, WeekStart: week, DailyPointsPerDay: s.DailyPointsPerDay, Revision: s.Revision}
 }
 func derivedInitials(s State) string {
 	first, last := s.FirstName, s.LastName
@@ -117,6 +121,14 @@ func derivedInitials(s State) string {
 func validUUID(s string) bool { var v pgtype.UUID; return len(s) == 36 && v.Scan(s) == nil && v.Valid }
 func validateField(key string, value json.RawMessage) string {
 	var v string
+	if key == "daily_points_per_day" {
+		// The plan reads this as the person's default pace; null follows the built-in default.
+		var n int
+		if string(value) != "null" && (json.Unmarshal(value, &n) != nil || n < 1 || n > 50) {
+			return "must be a whole number from 1 to 50, or null"
+		}
+		return ""
+	}
 	if string(value) == "null" {
 		return "must not be null"
 	}
@@ -196,16 +208,19 @@ func applyPatch(s *State, fields map[string]json.RawMessage) {
 			s.Locale = tag.String()
 		case "greeting_enabled":
 			_ = json.Unmarshal(v, &s.GreetingEnabled)
+		case "daily_points_per_day":
+			s.DailyPointsPerDay = nil
+			_ = json.Unmarshal(v, &s.DailyPointsPerDay)
 		}
 	}
 }
 
-const columns = `principal_id::text,first_name,last_name,preferred_name,short_name,initials_override,timezone,locale,greeting_enabled,avatar_original_hash,avatar_hashes,revision`
+const columns = `principal_id::text,first_name,last_name,preferred_name,short_name,initials_override,timezone,locale,greeting_enabled,avatar_original_hash,avatar_hashes,daily_points_per_day,revision`
 
 func scan(row pgx.Row) (State, error) {
 	var s State
 	var raw []byte
-	err := row.Scan(&s.PrincipalID, &s.FirstName, &s.LastName, &s.PreferredName, &s.ShortName, &s.InitialsOverride, &s.Timezone, &s.Locale, &s.GreetingEnabled, &s.AvatarOriginalHash, &raw, &s.Revision)
+	err := row.Scan(&s.PrincipalID, &s.FirstName, &s.LastName, &s.PreferredName, &s.ShortName, &s.InitialsOverride, &s.Timezone, &s.Locale, &s.GreetingEnabled, &s.AvatarOriginalHash, &raw, &s.DailyPointsPerDay, &s.Revision)
 	if err != nil {
 		return s, err
 	}
@@ -235,9 +250,9 @@ func save(ctx context.Context, tx pgx.Tx, tenantID string, s State) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO personal_profiles(tenant_id,principal_id,first_name,last_name,preferred_name,short_name,initials_override,timezone,locale,greeting_enabled,avatar_original_hash,avatar_hashes,revision)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
- ON CONFLICT(tenant_id,principal_id) DO UPDATE SET first_name=EXCLUDED.first_name,last_name=EXCLUDED.last_name,preferred_name=EXCLUDED.preferred_name,short_name=EXCLUDED.short_name,initials_override=EXCLUDED.initials_override,timezone=EXCLUDED.timezone,locale=EXCLUDED.locale,greeting_enabled=EXCLUDED.greeting_enabled,avatar_original_hash=EXCLUDED.avatar_original_hash,avatar_hashes=EXCLUDED.avatar_hashes,revision=EXCLUDED.revision`, tenantID, s.PrincipalID, s.FirstName, s.LastName, s.PreferredName, s.ShortName, s.InitialsOverride, s.Timezone, s.Locale, s.GreetingEnabled, s.AvatarOriginalHash, hashes, s.Revision)
+	_, err = tx.Exec(ctx, `INSERT INTO personal_profiles(tenant_id,principal_id,first_name,last_name,preferred_name,short_name,initials_override,timezone,locale,greeting_enabled,avatar_original_hash,avatar_hashes,daily_points_per_day,revision)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+ ON CONFLICT(tenant_id,principal_id) DO UPDATE SET first_name=EXCLUDED.first_name,last_name=EXCLUDED.last_name,preferred_name=EXCLUDED.preferred_name,short_name=EXCLUDED.short_name,initials_override=EXCLUDED.initials_override,timezone=EXCLUDED.timezone,locale=EXCLUDED.locale,greeting_enabled=EXCLUDED.greeting_enabled,avatar_original_hash=EXCLUDED.avatar_original_hash,avatar_hashes=EXCLUDED.avatar_hashes,daily_points_per_day=EXCLUDED.daily_points_per_day,revision=EXCLUDED.revision`, tenantID, s.PrincipalID, s.FirstName, s.LastName, s.PreferredName, s.ShortName, s.InitialsOverride, s.Timezone, s.Locale, s.GreetingEnabled, s.AvatarOriginalHash, hashes, s.DailyPointsPerDay, s.Revision)
 	return err
 }
 func identityEmail(ctx context.Context, tx pgx.Tx, tenantID, id string) (*string, error) {
