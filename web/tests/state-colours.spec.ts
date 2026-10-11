@@ -104,7 +104,11 @@ test('saved theme palette/opacity and personal heartbeat thresholds persist acro
   await expect(page.locator('[data-project-id="p-sc1-unresponsive"] .live-bot')).toHaveAttribute('data-state', 'awaiting')
   for (const view of ['Cards', 'List']) {
     await page.getByRole('radio', { name: `${view} view`, exact: true }).click()
-    await expect(page.locator('[data-project-id="p-sc1-working"] .agent-state-mark')).toHaveCSS('color', 'rgb(0, 117, 204)')
+    // The live chip marks its state twice (AEON-750): on the robot and beside the state word; both take the saved palette.
+    const project = page.locator('[data-project-id="p-sc1-working"]')
+    await expect(project.locator('.agent-state-mark')).toHaveCount(2)
+    await expect(project.locator('.live-bot .agent-state-mark')).toHaveCSS('color', 'rgb(0, 117, 204)')
+    await expect(project.locator('.chip-state .agent-state-mark')).toHaveCSS('color', 'rgb(0, 117, 204)')
   }
   await page.goto('/settings/theme#agents')
   await page.getByRole('switch', { name: 'Dim inactive' }).uncheck()
