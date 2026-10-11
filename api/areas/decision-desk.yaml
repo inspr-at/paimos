@@ -30,6 +30,10 @@ paths:
         Key trim proposals require keys.manage and remain quiet; their own protected approval API rechecks scopes and recent use. Sign-ins count as separate chores. Doctrine retains its existing toast claim and is never pushed by this adapter.
         Counts describe all visible open sources, independently of page size. Keyset pages recheck current access;
         counts and ordering are a current snapshot, not a frozen review round. Coverage above 1000 projects returns 422 with an explicit coverage error.
+        Routine consent is a quiet link-out source for the interactive canonical owner only, with an assignment,
+        missing or stale revision consent, live management authority and an effective output-project qualification gate.
+        It opens exactly project settings, personal settings or workspace routine settings at the consent step.
+        Routine candidate coverage above 1000 returns 422; partial counts are never presented as exact.
         The existing question-only decision-desk endpoint remains available.
       parameters:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
@@ -48,7 +52,7 @@ components:
       required: [id, kind, revision, title, created_at, held, href, source]
       properties:
         id: {type: string, format: uuid}
-        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup, tier_request, account_matrix]}
+        kind: {type: string, enum: [question, approval, action_request, doctrine, key_trim, stepup, tier_request, account_matrix, routine_consent]}
         project_id: {type: string, format: uuid}
         revision: {type: integer, minimum: 0, description: "Native tier revisions can begin at zero; other source revisions begin at one."}
         title: {type: string}
