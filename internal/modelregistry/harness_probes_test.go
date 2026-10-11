@@ -207,6 +207,7 @@ func TestHarnessProbesScheduleCheckNowAndFencePublication(t *testing.T) {
 		t.Fatal(code, string(raw))
 	}
 	account := enrollEvidenceHarness(t, owner, agent, "codex")
+	otherAgent := addPrincipal(t, owner.TenantID, "agent", "Other daemon", nil)
 	var now time.Time
 	inRegistry(t, owner, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `SELECT now()`).Scan(&now); err != nil {
@@ -363,14 +364,14 @@ func TestHarnessProbesScheduleCheckNowAndFencePublication(t *testing.T) {
 		{"revision", `UPDATE agent_accounts SET link_revision=link_revision+1 WHERE id=$1`, 409},
 		{"generation", `UPDATE agent_accounts SET last_daemon_generation='replaced' WHERE id=$1`, 409},
 		{"owner", `UPDATE agent_accounts SET registered_by_principal_id=$2 WHERE id=$1`, 409},
-		{"archived", `UPDATE agent_accounts SET archived_at=now() WHERE id=$1`, 409},
+		{"archived", `UPDATE agent_accounts SET state='unavailable',archived_at=now(),archived_by_principal_id=$2 WHERE id=$1`, 409},
 		{"reporting", `UPDATE model_refresh_settings SET agent_reports_enabled=false`, 403},
 		{"scope", `UPDATE agent_keys SET scopes=ARRAY['models.read'] WHERE principal_id=$3`, 403},
 		{"key", `UPDATE agent_keys SET revoked_at=now() WHERE principal_id=$3`, 403},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			inRegistry(t, owner, func(tx pgx.Tx) error {
-				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET registered_by_principal_id=$2,last_daemon_generation='generation',link_revision=$3,archived_at=NULL WHERE id=$1`, account, agent.ID, request.BindingRevision); err != nil {
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET registered_by_principal_id=$2,last_daemon_generation='generation',link_revision=$3,archived_at=NULL,archived_by_principal_id=NULL,state='available' WHERE id=$1`, account, agent.ID, request.BindingRevision); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET agent_reports_enabled=true`); err != nil {
@@ -394,6 +395,10 @@ func TestHarnessProbesScheduleCheckNowAndFencePublication(t *testing.T) {
 				var err error
 				switch test.name {
 				case "owner":
+					// Registrants are agents (0203 guard): move the account to another daemon.
+					_, err = tx.Exec(t.Context(), test.sql, account, otherAgent.ID)
+				case "archived":
+					// An archive records its person actor and never routes (1043).
 					_, err = tx.Exec(t.Context(), test.sql, account, owner.ID)
 				case "reporting":
 					_, err = tx.Exec(t.Context(), test.sql)
