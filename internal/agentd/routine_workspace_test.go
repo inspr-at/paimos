@@ -619,8 +619,8 @@ func TestRoutineSupervisorReleasesObsoleteRouting(t *testing.T) {
 	}
 }
 
-// Risk: capacity continuation must retain committed and uncommitted work and
-// refuse a changed lineage or unknown fixture/process exit before allocation.
+// Risk: capacity and completed-writer fix continuations must retain work and
+// refuse a changed artifact/lineage or unknown exit before allocation.
 func TestRoutineContinuationRetainsOriginalCheckout(t *testing.T) {
 	s, api, _, repository, _ := routineSupervisorFixture(t)
 	oldRun, oldGrant := api.run, api.grant
@@ -675,6 +675,30 @@ func TestRoutineContinuationRetainsOriginalCheckout(t *testing.T) {
 	if _, err := s.prepareRoutineWorkspace(t.Context(), next, changedGrant, repository); !errors.Is(err, ErrProcessesUnconfirmed) {
 		t.Fatal("changed owner adopted retained checkout", err)
 	}
+	prior.record.State = "completed"
+	if _, err := s.routineContinuation(t.Context(), next, nextGrant, repository); !errors.Is(err, ErrProcessesUnconfirmed) {
+		t.Fatal("completed writer gained capacity retry authority", err)
+	}
+	fixRun, fixGrant := next, nextGrant
+	fixRun.CapacityHandoff = false
+	fixGrant.Lineage = &agentsetup.RoutineLineage{Role: "fix", PreviousRunID: oldRun.ID, ReviewOrderID: oldGrant.LaunchID, Repository: "example/routine", BaseSHA: repository.BaseCommit, HeadSHA: strings.TrimSpace(retainedHEAD), PolicyDigest: strings.Repeat("a", 64)}
+	if err := fixGrant.Validate(); err != nil {
+		t.Fatal("invalid fix continuation fixture", err)
+	}
+	prior.record.ExitObserved = false
+	if _, err := s.routineContinuation(t.Context(), fixRun, fixGrant, repository); !errors.Is(err, ErrProcessesUnconfirmed) {
+		t.Fatal("fix started before confirmed writer exit", err)
+	}
+	prior.record.ExitObserved = true
+	fixGrant.Lineage.HeadSHA = repository.BaseCommit
+	if _, err := s.routineContinuation(t.Context(), fixRun, fixGrant, repository); !errors.Is(err, ErrProcessesUnconfirmed) {
+		t.Fatal("fix adopted a different reviewed head", err)
+	}
+	fixGrant.Lineage.HeadSHA = strings.TrimSpace(retainedHEAD)
+	if retained, err := s.routineContinuation(t.Context(), fixRun, fixGrant, repository); err != nil || retained.Path != w.Path || retained.ID != w.ID || retained.Grant.Lineage == nil {
+		t.Fatal("fix lost exact completed-writer lineage", retained, err)
+	}
+	prior.record = record
 	api.grant = nextGrant
 	next.RoutineLaunchID = &api.grant.LaunchID
 	next.Trace, _ = json.Marshal(map[string]any{"routine_launch": nextGrant, "routine_run_id": nextGrant.RoutineRunID})

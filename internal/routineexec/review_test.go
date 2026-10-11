@@ -24,7 +24,7 @@ import (
 // Decision Desk services; fixture process/usage receipts represent qualified
 // adapter observations, never elapsed-time or sleep-based proof.
 func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
-	d := setupDispatch(t)
+	d := setupDispatchOn(t, setup(t, "both", false))
 	f := d.fixture
 	request := httptest.NewRequest(http.MethodGet, "/api/models", nil)
 	must(t, modelregistry.PrepareCatalog(t.Context(), f.d.App, f.owner, modelregistry.CatalogPreparation{Operation: modelregistry.CatalogRead, Request: request}))
@@ -151,7 +151,7 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	}
 	var g agentsetup.RoutineGrant
 	must(t, f.tx(func(tx pgx.Tx) error { return loadActorGrant(t.Context(), tx, reviewRun, &g) }))
-	if g.Lineage == nil || g.Lineage.PreviousRunID != d.agentRun || g.RoutineRunID != f.run || g.Lineage.HeadSHA != cr.HeadSHA {
+	if g.Lineage == nil || g.Lineage.PreviousRunID != d.agentRun || g.RoutineRunID != f.run || g.Lineage.HeadSHA != cr.HeadSHA || g.BudgetMode != "both" || g.RemainingTokens == nil || g.RemainingCostMicros == nil {
 		t.Fatalf("lost lineage: %+v", g)
 	}
 	reviewFinished := report(reviewRun, "completed", "FINDING: high internal/example.go:1 Broken.\nVERDICT: changes", nil)
