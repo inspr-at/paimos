@@ -118,8 +118,11 @@ export function useAccountsSettings(part: AccountsPart) {
     } catch { /* a failed read keeps the last plan; without one the bars show only what was read */ }
     finally { if (planRead === controller) planRead = null }
   }
-  /** The long window is the daily one; a 5-hour reading alone still beats "not reported". */
-  const longWindow = (a: OverviewAccount) => a.windows.find(w => w.reading.window_kind !== '5h' && !w.reading.bucket) ?? a.windows.find(w => w.reading.window_kind !== '5h') ?? a.windows[0] ?? null
+  /** The long window is the daily one; a 5-hour reading alone still beats "not reported". An estimate is no reading. */
+  function longWindow(a: OverviewAccount) {
+    const read = a.windows.filter(w => w.reading.source !== 'estimate')
+    return read.find(w => w.reading.window_kind !== '5h' && !w.reading.bucket) ?? read.find(w => w.reading.window_kind !== '5h') ?? read[0] ?? null
+  }
   const allowed = (r: AgentAccount) => r.state === 'available' && r.ongoing_use_approved !== false
   function quotaOf(a: OverviewAccount) {
     const ids = new Set(a.records.map(r => r.id))

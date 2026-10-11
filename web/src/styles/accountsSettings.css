@@ -46,5 +46,16 @@
 .lim-sec .legacy .lbl small { color: var(--ink-2); }
 .two-btn { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .lim-sec { container: lim / inline-size; }
-@container lim (max-width: 420px) { .lim-sec .lim { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim > .btn, .lim-sec .lim > .switch, .lim-sec .lim > .two-btn { justify-self: start; } }
-@media(pointer:coarse) { .list-row.acc { min-height: 68px; }.lim-sec .lim .btn { min-height: 44px; }.ref-row { min-height: 52px; } }
+/* "Agents may use it": the switch moved here from the login rows (AEON-1172), same look and confirmations. */
+.lim-sec .use { display: inline-grid; place-items: center; width: 50px; height: 32px; margin-right: -8px; padding: 0; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
+@media (hover: hover) { .lim-sec .use:not(:disabled, [aria-disabled="true"]):hover { background: var(--row-selected); } }
+.lim-sec .use:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.lim-sec .use:disabled, .lim-sec .use[aria-disabled="true"] { cursor: default; }
+.lim-sec .track { position: relative; flex: none; width: 34px; height: 20px; border-radius: 999px; background: var(--track); box-shadow: inset 0 0 0 1px var(--line-2); transition: background-color .15s ease; }
+.lim-sec .thumb { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--switch-knob); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-black) 25%, transparent); transition: transform .15s ease; }
+.lim-sec .use[aria-checked="true"] .track { background: linear-gradient(90deg, var(--primary), var(--primary-hi)); box-shadow: none; }
+.lim-sec .use[aria-checked="true"] .thumb { transform: translateX(14px); }
+.lim-sec .use:disabled .track, .lim-sec .use[aria-disabled="true"] .track { opacity: .55; }
+@media (prefers-reduced-motion: reduce) { .lim-sec .track, .lim-sec .thumb { transition: none; } }
+@container lim (max-width: 420px) { .lim-sec .lim { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim > .btn, .lim-sec .lim > .use, .lim-sec .lim > .two-btn { justify-self: start; } .lim-sec .use { margin: 0 0 0 -8px; } }
+@media(pointer:coarse) { .lim-sec .lim .btn { min-height: 44px; }.lim-sec .use { width: 50px; height: 44px; }.ref-row { min-height: 52px; } }

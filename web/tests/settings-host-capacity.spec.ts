@@ -192,7 +192,7 @@ test('a matching login joins the shared quota from the account panel and Sign ou
   await page.locator(`.list-row[data-accounts~="${main.id}"]`).click()
   const pane=page.locator('section.pane'), use=pane.locator('.use-sec')
   await expect(use.locator('[data-account]')).toHaveCount(1)
-  await expect(use.getByRole('switch',{name:'Agents may use it · Main'})).toBeEnabled()
+  await expect(pane.locator('[data-limits]').getByRole('switch',{name:'Agents may use it · Main'})).toBeEnabled()
   await use.getByRole('button',{name:'Details for Main'}).click()
   await use.getByRole('button',{name:'Pool with Studio · studio',exact:true}).click()
   const confirm=page.getByRole('dialog',{name:'Same login — pool them?'})

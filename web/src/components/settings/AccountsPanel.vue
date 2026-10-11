@@ -80,9 +80,9 @@ async function removeRule(r: AgentAccount, seen: string) {
   finally { if (identity === owner.value) busy.value = false }
 }
 // The switch shows the saved state until the write is confirmed; turning it off asks first (Drain).
-async function toggleUse(r: AgentAccount, event: Event) {
-  const input = event.target as HTMLInputElement, want = input.checked
-  input.checked = allowed(r)
+// A busy switch stays focusable (aria-disabled), so focus returns to it when its confirmation closes.
+async function toggleUse(r: AgentAccount) {
+  const want = !allowed(r)
   if (!manage.value || useBusy.value) return
   const identity = owner.value
   useBusy.value = r.id
@@ -117,7 +117,7 @@ async function toggleUse(r: AgentAccount, event: Event) {
               <div v-if="ruleOf(record)" class="lim legacy" :data-rule="record.id"><span class="lbl"><b>Set by you · {{ ruleWords(ruleOf(record)!) }}</b><small>{{ confirmRule === ruleKey(record) ? 'Remove it for good? This kind of limit can’t be set again; the daily limit paces every account.' : 'An older limit on this account only. It still applies until you remove it; the daily limit does this for every account now.' }}</small></span><span v-if="manage && confirmRule === ruleKey(record)" class="two-btn"><button type="button" class="btn sm" :disabled="busy" @click="confirmRule = ''">Keep</button><button type="button" class="btn sm danger" :disabled="busy" @click="removeRule(record, ruleKey(record))">Remove</button></span><button v-else-if="manage" type="button" class="btn sm" :disabled="busy" @click="confirmRule = ruleKey(record)">Remove</button></div>
             </AccountUsagePosture>
             <div v-if="held" class="lim legacy" data-held><span class="lbl"><b>{{ held.title }}</b><small>{{ held.text }}</small></span><button v-if="manage" type="button" class="btn sm" :disabled="busy" @click="endHeld(account, held.key)">End now</button></div>
-            <div v-for="record in account.records" :key="`use:${record.id}`" class="lim" data-use><span class="lbl"><b>Agents may use it</b><small>{{ account.records.length > 1 ? `${accountName(record)} · ` : '' }}Off: agents leave this account alone. Running work finishes.</small></span><label class="switch"><input type="checkbox" role="switch" :checked="allowed(record)" :aria-label="`Agents may use it · ${accountName(record)}`" :disabled="!manage" :aria-busy="useBusy === record.id" @change="toggleUse(record, $event)" /></label></div>
+            <div v-for="record in account.records" :key="`use:${record.id}`" class="lim" :data-use="record.id"><span class="lbl"><b>Agents may use it</b><small>{{ account.records.length > 1 ? `${accountName(record)} · ` : '' }}Off: agents leave this account alone. Running work finishes.</small></span><button type="button" role="switch" class="use" :aria-checked="allowed(record)" :aria-label="`Agents may use it · ${accountName(record)}`" :disabled="!manage" :aria-disabled="useBusy === record.id || undefined" :data-tip="manage ? undefined : 'People who can manage accounts change this'" @click="toggleUse(record)"><span class="track" aria-hidden="true"><span class="thumb" /></span></button></div>
           </section>
           <section class="p-sec"><div class="p-head"><h3>Signed in on</h3><span>Details and actions live with each computer</span></div><button v-for="s in account.signins" :key="`${s.computer.computer_id}:${s.enrollment.account_id}`" type="button" class="ref-row" @click="openSignin(s)"><AppIcon name="monitor" /><span><b>{{ s.computer.computer_name }}</b><small>{{ computerState(s.computer) }}</small></span><span class="st">{{ status(s.computer, s.enrollment.account_id) }}</span><AppIcon name="chevron-right" /></button><p v-if="!account.signins.length">No paired computer is associated with this account.</p></section>
           <section class="p-sec use-sec"><div class="p-head"><h3>Logins</h3><span>{{ account.records.length === 1 ? 'One login' : `${account.records.length} logins share this quota` }}</span></div><AccountsCard :accounts="account.records" :all="agents.accounts" state="ready" :now="agents.now" :admin="manage" @away="goPacing" /></section>

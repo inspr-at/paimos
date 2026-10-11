@@ -70,6 +70,30 @@
   "postGateCases": [
     "browser:tests/account-use-matrix.spec.ts:screenshots of the matrix, light and dark"
     ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: a floor save and its Undo move no control in the panel"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: a floor save and its Undo move no control in the panel"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
     "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › keeps sort actions and the other blocks still when a sort key is added or removed (±0.5px)"
@@ -922,9 +946,11 @@
     ,
     "browser:tests/settings-account-pacing.spec.ts:Capacity and load: work days, nights and the editors, with controls that stay put"
     ,
-    "browser:tests/settings-account-pacing.spec.ts:a failed Sprint is said as a failure, not as saved"
+    "browser:tests/settings-account-pacing.spec.ts:a failed End now is said as a failure, and the hold stays"
     ,
-    "browser:tests/settings-account-pacing.spec.ts:a menu opened before the pool changed acts on nothing and says so"
+    "browser:tests/settings-account-pacing.spec.ts:an older Hold shows until it ends; End now ends it with the same write"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:no menu offers Sprint, Hold or Back to the plan, not even while an older Sprint runs"
     ,
     "browser:tests/settings-account-pacing.spec.ts:people without account management get no account menu and read-only pacing"
     ,
@@ -961,6 +987,12 @@
     "browser:tests/settings-account-parts.spec.ts:the one-time plan: Needs you only in its own part, and the nav counts match"
     ,
     "browser:tests/settings-account-parts.spec.ts:without a paired computer Accounts offers Connect a computer where Add an account would be"
+    ,
+    "browser:tests/settings-accounts.spec.ts:an API key shows money, and no account offers a limit by hand"
+    ,
+    "browser:tests/settings-accounts.spec.ts:an older rule shows as Set by you; Remove asks in place and removes it for good"
+    ,
+    "browser:tests/settings-accounts.spec.ts:old windows set by hand show as Set by you with Remove, and never repeat"
     ,
     "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
     ,
@@ -4881,6 +4913,30 @@
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head keeps its height, and the toggle stays put, whether or not Verify again is shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the wide status scan encounters Away beside Verify again","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/activity-history.spec.ts","name":"automatic history is Aeon, and a person named System stays a person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11726,15 +11782,15 @@
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Remove account… says what stays untouched, and only Remove account removes it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a failed Sprint is said as a failure, not as saved","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a failed End now is said as a failure, and the hold stays","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a menu opened before the pool changed acts on nothing and says so","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"an older Hold shows until it ends; End now ends it with the same write","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"no menu offers Sprint, Hold or Back to the plan, not even while an older Sprint runs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"people without account management get no account menu and read-only pacing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"phone: the editor is a full-height sheet and nothing scrolls sideways","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the account menu sprints, holds until the time it showed, and goes back to the plan","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the plan card for an existing schedule: Turn off keeps nothing for you","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11776,9 +11832,9 @@
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"accounts are a list by vendor with how each is read, and no allowance form","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"accounts without priced run usage never offer dollar limits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an API key shows money, and no account offers a limit by hand","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an API key shows money, and a dollar limit reads back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule shows as Set by you; Remove asks in place and removes it for good","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an unpooled account joins every existing member and can leave them sharing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11786,7 +11842,7 @@
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"names that clash ask to be named, and a rename changes only the name","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"old limits set by hand show as Set by you, with Make this repeat and Remove","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"old windows set by hand show as Set by you with Remove, and never repeat","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"owner login usage switch stays put and failed saves preserve consent","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -11815,8 +11871,6 @@
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"sheet: drain and pool confirmations keep Tab and Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"side: drain and pool confirmations keep Tab and Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"the Advanced sentence round-trips and caps on top of the plan","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"without account.manage the list is read-only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13206,23 +13260,15 @@
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"the last active owner comes from the server, never from role keys","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/account-limits.test.ts","name":"a bad amount names the one thing to fix","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/account-limits.test.ts","name":"Remove and rename use the account routes; nothing creates or repeats a limit","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/account-limits.test.ts","name":"how an account is read, and its windows and last readings","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/account-limits.test.ts","name":"limits read as a person says them","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/account-limits.test.ts","name":"limits set by hand before the sentence show while they still apply","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/account-limits.test.ts","name":"names that repeat within one vendor ask to be named","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/account-limits.test.ts","name":"the sentence binds before the plan only when it leaves less for today","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/account-limits.test.ts","name":"the sentence round-trips through its draft for every unit","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/account-limits.test.ts","name":"the sentence, Remove, Make this repeat and rename use the account routes","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/account-limits.test.ts","name":"the unit menu offers what the account can count, likeliest first","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/account-limits.test.ts","name":"older limits read as a person says them","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/account-link.test.ts","name":"account code accepts the one-line format without URL or command parsing","tier":"GATED-FULL"}
     ,
@@ -14415,6 +14461,22 @@
     {"kind":"node","file":"tests/queue-filter.test.ts","name":"Queued alternatives deduplicate, exclusions combine, and live reads restrict IDs","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/queue-filter.test.ts","name":"Queued reads all projection IDs in batches of 200 and pages without truncating membership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"Boost today sets today’s limit and names the tick","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"Keep for you binds before today’s limit while you work","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"a Hold from before or the switch off leaves the account alone","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"an older limit set by hand binds when it leaves less than today’s limit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"at the limit: no room, and new work follows the harness’s own choice","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"no reading: a dashed track and “Quota not reported”, never a guess","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"room: agents may use the points up to today’s limit, and the tick sits there","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"the floor binds when today’s limit is capped at it, and a low warning says so first","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/quotaWarnings.test.ts","name":"quota thresholds accept whole percentages only, with urgent below early","tier":"GATED-FULL"}
     ,
@@ -16657,6 +16719,8 @@
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"preserves project, kind and ticket context when entry points navigate to Models","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the account reset switch discards a held save after switching records and keeps failures honest","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the floor saves on change with an Undo bound to the record it was made on","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"orders and locks > keeps a locked line and a fallback the resolved list omitted","tier":"ESSENTIAL"}
     ,

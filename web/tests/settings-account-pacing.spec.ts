@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-786: Settings carries what the Agents page offered before AEON-782
-// removes it there: the account menu (Back to the plan, Sprint until reset,
-// Hold, Remove account…) in Settings › Accounts, the one-time plan card and the
-// pacing editors under Capacity and load in Settings › Capacity (AEON-1171).
+// removes it there: the account menu (Remove account…) in Settings › Accounts,
+// the one-time plan card and the pacing editors under Capacity and load in
+// Settings › Capacity (AEON-1171). AEON-1172 retires Sprint, Hold and Back to the
+// plan: an older one shows in the account panel with End now until it ends.
 // AEON786_SHOTS=1 also writes screenshots into this test's output directory.
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
@@ -53,63 +54,61 @@ async function shots(page: Page, info: TestInfo, name: string) {
   await page.emulateMedia({ colorScheme: 'light' })
 }
 
-test('the account menu sprints, holds until the time it showed, and goes back to the plan', async ({ page }, info) => {
+test('no menu offers Sprint, Hold or Back to the plan, not even while an older Sprint runs', async ({ page }, info) => {
+  // AEON-1172 (design AEON-1149): Sprint, Hold and Back to the plan are retired.
   const errors = watchErrors(page)
   await page.setViewportSize({ width: 1280, height: 1000 })
   const { capacity } = await setup(page)
   await open(page)
   let menu = await accountMenu(page, ACCOUNTS.main)
-  await expect(menu.getByRole('menuitem', { name: /Back to the plan/ })).toHaveCount(0)
-  await expect(menu.getByRole('group', { name: 'Hold Codex' })).toBeVisible()
+  await expect(menu.getByRole('menuitem')).toHaveText([/^Read quota now/, /^Sign out everywhere…/, /^Remove account…/])
+  await expect(menu).not.toContainText(/Sprint|Hold|Back to the plan/)
   await shots(page, info, 'account-menu')
-  await menu.getByRole('menuitem', { name: /Sprint Codex until reset/ }).click()
-  await expect.poll(() => pools(capacity).length).toBe(1)
-  expect(pools(capacity)[0]).toMatchObject({ pool: 'codex', schedule: { override: 'sprint' } })
-  await expect(page.getByText('Sprint: agents may use everything left on Codex until it resets.')).toBeVisible()
-
-  // Sprinting: the menu now offers Back to the plan and Hold, not Sprint again.
+  await page.keyboard.press('Escape')
+  capacity.schedules.push({ scope: 'pool', pool: 'codex', schedule: { ...capacity.schedules.find(e => e.scope === 'user')!.schedule, override: 'sprint', override_until: '2026-09-30T16:02:00.000Z' } })
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.locator('section.pane [data-held]')).toContainText('Sprint until reset')
   menu = await page.locator('section.pane').getByRole('button', { name: /^More actions for / }).click().then(() => page.getByRole('menu'))
-  await expect(menu.getByRole('menuitem', { name: /Sprint Codex/ })).toHaveCount(0)
-  // Hold for 2 hours saves the instant the menu named (14:02 + 2 h, on the minute).
-  await menu.getByRole('menuitem', { name: 'Hold for 2 hours' }).click()
-  await expect.poll(() => pools(capacity).length).toBe(2)
-  expect(pools(capacity)[1]).toMatchObject({ pool: 'codex', schedule: { override: 'hold', override_until: new Date(NOW + 2 * 3600e3 - (NOW % 60_000)).toISOString() } })
-  await expect(page.getByText('Holding Codex until 16:02. Running steps finish.')).toBeVisible()
-
-  menu = await page.locator('section.pane').getByRole('button', { name: /^More actions for / }).click().then(() => page.getByRole('menu'))
-  await expect(menu.getByRole('group', { name: 'Hold Codex' })).toHaveCount(0)
-  await menu.getByRole('menuitem', { name: /Back to the plan/ }).click()
-  await expect.poll(() => pools(capacity).length).toBe(3)
-  expect(pools(capacity)[2]).toMatchObject({ pool: 'codex', schedule: null })
-  await expect(page.getByText('Codex follows your work week again.')).toBeVisible()
+  await expect(menu).not.toContainText(/Sprint|Hold|Back to the plan/)
+  expect(pools(capacity)).toEqual([])
   expect(errors).toEqual([])
 })
 
-test('a failed Sprint is said as a failure, not as saved', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 1000 })
-  await setup(page)
-  await page.route('**/api/agent-accounts/capacity/schedule', route => route.request().method() === 'PUT' ? route.fulfill({ status: 422, json: { error: 'schedule rejected' } }) : route.fallback())
-  await open(page)
-  const menu = await accountMenu(page, ACCOUNTS.claude)
-  await menu.getByRole('menuitem', { name: /Sprint Claude until reset/ }).click()
-  await expect(page.locator('.toast.error')).toBeVisible()
-  await expect(page.locator('.toast').filter({ hasText: /^Sprint: agents may use/ })).toHaveCount(0)
-})
-
-test('a menu opened before the pool changed acts on nothing and says so', async ({ page }) => {
+test('an older Hold shows until it ends; End now ends it with the same write', async ({ page }, info) => {
+  const errors = watchErrors(page)
   await page.setViewportSize({ width: 1280, height: 1000 })
   const { capacity } = await setup(page)
+  const until = new Date(NOW + 2 * 3600e3 - (NOW % 60_000)).toISOString()
+  capacity.schedules.push({ scope: 'pool', pool: 'codex', schedule: { ...capacity.schedules.find(e => e.scope === 'user')!.schedule, override: 'hold', override_until: until } })
   await open(page)
-  const menu = await accountMenu(page, ACCOUNTS.main)
-  // Another tab sprints Codex while this menu still offers Sprint; a refresh brings it in.
-  capacity.schedules.push({ scope: 'pool', pool: 'codex', schedule: { ...capacity.schedules.find(e => e.scope === 'user')!.schedule, override: 'sprint', override_until: '2026-09-30T16:02:00.000Z' } })
-  const reread = page.waitForResponse(response => response.url().endsWith('/api/agent-accounts/capacity/schedule') && response.request().method() === 'GET')
-  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
-  await reread
-  await expect(menu.getByRole('menuitem', { name: /Sprint Codex until reset/ })).toBeVisible()
-  await menu.getByRole('menuitem', { name: /Sprint Codex until reset/ }).click()
-  await expect(page.locator('.toast.error').filter({ hasText: 'This record changed. Reopen its menu.' })).toBeVisible()
-  expect(pools(capacity)).toEqual([])
+  await listRow(page, ACCOUNTS.main).click()
+  const held = page.locator('section.pane [data-held]')
+  await expect(held.locator('b')).toHaveText('Held until 16:02')
+  await expect(held).toContainText('Set before Hold was retired. Agents leave Codex alone until then; “Agents may use it” replaces Hold.')
+  // While held, the bar says agents leave the account alone.
+  await expect(page.locator('section.pane [data-quota-say]')).toHaveText('Agents leave it alone until the hold ends.')
+  await shots(page, info, 'account-held')
+  await held.getByRole('button', { name: 'End now' }).click()
+  await expect.poll(() => pools(capacity).length).toBe(1)
+  expect(pools(capacity)[0]).toMatchObject({ pool: 'codex', schedule: null })
+  await expect(page.locator('.toast').filter({ hasText: 'Codex: hold ended · agents may use it again' })).toBeVisible()
+  await expect(held).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('a failed End now is said as a failure, and the hold stays', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  const { capacity } = await setup(page)
+  capacity.schedules.push({ scope: 'pool', pool: 'claude', schedule: { ...capacity.schedules.find(e => e.scope === 'user')!.schedule, override: 'hold' } })
+  await page.route('**/api/agent-accounts/capacity/schedule', route => route.request().method() === 'PUT' ? route.fulfill({ status: 422, json: { error: 'schedule rejected' } }) : route.fallback())
+  await open(page)
+  await listRow(page, ACCOUNTS.claude).click()
+  const held = page.locator('section.pane [data-held]')
+  await expect(held.locator('b')).toHaveText('Held until you end it')
+  await held.getByRole('button', { name: 'End now' }).click()
+  await expect(page.locator('.toast.error')).toBeVisible()
+  await expect(page.locator('.toast').filter({ hasText: 'hold ended' })).toHaveCount(0)
+  await expect(held).toBeVisible()
 })
 
 test('Remove account… says what stays untouched, and only Remove account removes it', async ({ page }) => {
