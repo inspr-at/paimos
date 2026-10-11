@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1329_retired_model_auto_update.sql",
+      "sha256": "c7fbe004586c9fdc9cb04d49aab89b81c986d647c04b3c8bc04ead00f7cc7884",
+      "ticket": "AEON-1148",
+      "reason": "Reserved migration 1329 maps the retired shipped_only new-model policy, released with 1309, to deny in one DO block, so both settings pages show allow or deny. Automatic model additions stay off, the revision advances to reject pre-upgrade forms, the existing 1309 activation trigger marks the changed rules enforced as a deny save already does, and only changed tenants get an account_use.rules_changed event from the System principal. The block fences every tenant and its registry and account-use locks in id order before resource writes and appends events last. FORCE RLS, tables, columns, constraints, policies and functions are unchanged. DO blocks are outside the conservative expand-safe allowlist. This exact-byte draft is a coordinator review artifact; independent review and previous-binary compatibility gates remain required before merge or release. It grants no acceptance, push or deployment authority."
+    }
+  ]
+}
