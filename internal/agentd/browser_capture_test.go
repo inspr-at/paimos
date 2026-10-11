@@ -127,6 +127,7 @@ func captureRuntimeFixture(g agentsetup.RoutineGrant, now time.Time) agentsetup.
 	return agentsetup.NativeBrowserRuntime{TenantID: g.TenantID, OwnerID: g.OwnerID, ProjectID: g.ProjectID, AccountID: g.AccountID, ComputerID: g.ComputerID,
 		DaemonID: g.DaemonID, DaemonGeneration: g.DaemonGeneration, DaemonDigest: g.DaemonDigest, CapabilityDigest: g.CapabilityDigest, HostMappingDigest: g.HostMappingDigest,
 		ChromeDigest: strings.Repeat("1", 64), InterpreterDigest: strings.Repeat("2", 64), LauncherDigest: strings.Repeat("3", 64), Platform: "darwin", Adapter: Claude,
+		QualifiedChromeDigest: strings.Repeat("1", 64), QualifiedInterpreterDigest: strings.Repeat("2", 64), QualifiedLauncherDigest: strings.Repeat("3", 64),
 		Capabilities: []string{agentsetup.RoutineExecutionCapability, agentsetup.RoutineBrowserCapability}, ReportedAt: now,
 		OwnerApproved: true, LauncherReady: true, Qualified: true, Native: true, ReadOnlyNetwork: true, EphemeralProfile: true}
 }
@@ -222,8 +223,11 @@ func TestNativeBrowserCaptureBrokerBoundsAndReceipts(t *testing.T) {
 			a.runtime.ProjectID = routineTestGrant("44").LaunchID
 		},
 		"missing Chrome pin": func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) { a.runtime.ChromeDigest = "" },
-		"OPS not ready":      func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) { a.runtime.LauncherReady = false },
-		"revoked owner":      func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) { a.runtime.OwnerApproved = false },
+		"changed Chrome pin": func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) {
+			a.runtime.ChromeDigest = strings.Repeat("4", 64)
+		},
+		"OPS not ready": func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) { a.runtime.LauncherReady = false },
+		"revoked owner": func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) { a.runtime.OwnerApproved = false },
 	} {
 		t.Run(name, func(t *testing.T) {
 			b, a, s := fixture()

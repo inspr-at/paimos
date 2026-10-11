@@ -158,7 +158,12 @@ func TestRoutineLaunchClaimReplayAndCurrentAuthority(t *testing.T) {
 		if _, err = local.Exec(t.Context(), `UPDATE agent_accounts SET harness='claude' WHERE id=$1`, g.AccountID); err != nil {
 			return err
 		}
-		if _, err = local.Exec(t.Context(), `UPDATE model_profiles SET harness='claude' WHERE id=$1`, f.profile); err != nil {
+		browserProfile := uuid()
+		if _, err = local.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier)
+ VALUES($1,$2,'browser-fixture','1','claude','anthropic','requested-browser-fixture','high','strong')`, g.TenantID, browserProfile); err != nil {
+			return err
+		}
+		if _, err = local.Exec(t.Context(), `UPDATE agent_runs SET model_profile_id=$2 WHERE id=$1`, g.AgentRunID, browserProfile); err != nil {
 			return err
 		}
 		if _, err = local.Exec(t.Context(), `UPDATE agent_pairing_computers SET capacity_signals='{"unattended":{"login_session":"ready","idle_sleep":"disabled","filevault":"off"}}',capacity_reported_at=clock_timestamp() WHERE id=$1`, g.ComputerID); err != nil {
@@ -168,6 +173,7 @@ func TestRoutineLaunchClaimReplayAndCurrentAuthority(t *testing.T) {
 			return agentsetup.NativeBrowserRuntime{TenantID: grant.TenantID, OwnerID: grant.OwnerID, ProjectID: grant.ProjectID, AccountID: grant.AccountID, ComputerID: grant.ComputerID,
 				DaemonID: grant.DaemonID, DaemonGeneration: grant.DaemonGeneration, DaemonDigest: grant.DaemonDigest, CapabilityDigest: grant.CapabilityDigest, HostMappingDigest: grant.HostMappingDigest,
 				ChromeDigest: strings.Repeat("1", 64), InterpreterDigest: strings.Repeat("2", 64), LauncherDigest: strings.Repeat("3", 64), Platform: "darwin", Adapter: "claude",
+				QualifiedChromeDigest: strings.Repeat("1", 64), QualifiedInterpreterDigest: strings.Repeat("2", 64), QualifiedLauncherDigest: strings.Repeat("3", 64),
 				Capabilities: []string{agentsetup.RoutineExecutionCapability, agentsetup.RoutineBrowserCapability}, ReportedAt: grant.ExpiresAt.Add(-90 * time.Second),
 				OwnerApproved: true, LauncherReady: true, Qualified: true, Native: true, ReadOnlyNetwork: true, EphemeralProfile: true}, nil
 		}

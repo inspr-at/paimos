@@ -16,15 +16,16 @@ var ErrNativeBrowserUnavailable = errors.New("native_browser_qualification_unava
 // OPS qualification binds all pins into CapabilityDigest/HostMappingDigest;
 // a matching server qualification alone cannot supply a missing launcher.
 type NativeBrowserRuntime struct {
-	TenantID, OwnerID, ProjectID, AccountID, ComputerID  string
-	DaemonID, DaemonGeneration                           string
-	DaemonDigest, CapabilityDigest, HostMappingDigest    string
-	ChromeDigest, InterpreterDigest, LauncherDigest      string
-	Platform, Adapter                                    string
-	Capabilities                                         []string
-	ReportedAt                                           time.Time
-	OwnerApproved, LauncherReady, Qualified              bool
-	Native, Sandboxed, ReadOnlyNetwork, EphemeralProfile bool
+	TenantID, OwnerID, ProjectID, AccountID, ComputerID                        string
+	DaemonID, DaemonGeneration                                                 string
+	DaemonDigest, CapabilityDigest, HostMappingDigest                          string
+	ChromeDigest, InterpreterDigest, LauncherDigest                            string
+	QualifiedChromeDigest, QualifiedInterpreterDigest, QualifiedLauncherDigest string
+	Platform, Adapter                                                          string
+	Capabilities                                                               []string
+	ReportedAt                                                                 time.Time
+	OwnerApproved, LauncherReady, Qualified                                    bool
+	Native, Sandboxed, ReadOnlyNetwork, EphemeralProfile                       bool
 }
 
 func (r NativeBrowserRuntime) Require(g RoutineGrant, now time.Time) error {
@@ -36,6 +37,7 @@ func (r NativeBrowserRuntime) Require(g RoutineGrant, now time.Time) error {
 		r.Platform != "darwin" || r.Adapter != "claude" || !r.Native || r.Sandboxed ||
 		!r.OwnerApproved || !r.LauncherReady || !r.Qualified || !r.ReadOnlyNetwork || !r.EphemeralProfile ||
 		!RoutineDigest(r.ChromeDigest) || !RoutineDigest(r.InterpreterDigest) || !RoutineDigest(r.LauncherDigest) ||
+		r.ChromeDigest != r.QualifiedChromeDigest || r.InterpreterDigest != r.QualifiedInterpreterDigest || r.LauncherDigest != r.QualifiedLauncherDigest ||
 		len(r.Capabilities) > 32 || !slices.Contains(r.Capabilities, RoutineExecutionCapability) || !slices.Contains(r.Capabilities, RoutineBrowserCapability) ||
 		now.IsZero() || r.ReportedAt.IsZero() || r.ReportedAt.After(now) || now.Sub(r.ReportedAt) > 2*time.Minute ||
 		!now.Before(g.ExpiresAt) || g.ExpiresAt.Sub(now) > 2*time.Minute {
