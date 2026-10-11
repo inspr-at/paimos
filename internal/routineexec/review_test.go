@@ -20,7 +20,9 @@ import (
 
 // Risks: duplicate reviews/charges after replay or restart, unverified or stale
 // review advancement, budget escape through child orders, and infinite failed
-// fix pickup. Reuse the real consent, dispatch, telemetry, parser, budget and
+// fix pickup. A fix re-review must retain the original build range and reject
+// a completed artifact from a different checkout. Reuse the real consent,
+// dispatch, telemetry, parser, budget and
 // Decision Desk services; fixture process/usage receipts represent qualified
 // adapter observations, never elapsed-time or sleep-based proof.
 func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
@@ -194,8 +196,37 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 		}
 		return nil
 	}))
-	fixFinished := report(fixRun, "failed", "", nil)
+	fixedRange := reviewgate.CommitRange{Repository: cr.Repository, BaseSHA: cr.HeadSHA, HeadSHA: strings.Repeat("c", 40)}
+	fixFinished := report(fixRun, "completed", "", &fixedRange)
 	settle(fixRun)
+	// The daemon reports only the fix's commits. The next reviewer must see
+	// the entire original build plus fix, including any unresolved finding.
+	rereview := advance(fixFinished, true)
+	rereviewRun := rereview["agent_run_id"].(string)
+	rereviewOrder := rereview["review_order_id"].(string)
+	var reviewedRange reviewgate.CommitRange
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT repository,base_sha,head_sha FROM work_order_reviews WHERE work_order_id=$1`, rereviewOrder).Scan(&reviewedRange.Repository, &reviewedRange.BaseSHA, &reviewedRange.HeadSHA))
+	if reviewedRange.Repository != cr.Repository || reviewedRange.BaseSHA != cr.BaseSHA || reviewedRange.HeadSHA != fixedRange.HeadSHA {
+		t.Fatalf("fix re-review lost original build range: %+v; original=%+v fix=%+v", reviewedRange, cr, fixedRange)
+	}
+	must(t, f.tx(func(tx pgx.Tx) error { return loadActorGrant(t.Context(), tx, rereviewRun, &g) }))
+	if g.Lineage == nil || g.Lineage.PreviousRunID != fixRun || g.Lineage.BaseSHA != cr.BaseSHA || g.Lineage.HeadSHA != fixedRange.HeadSHA {
+		t.Fatalf("fix re-review lost cumulative lineage: %+v", g)
+	}
+	advance(fixFinished, false)
+	rereviewFinished := report(rereviewRun, "completed", "FINDING: high internal/example.go:1 Still broken.\nVERDICT: changes", nil)
+	settle(rereviewRun)
+	// Permit a second fix for the retained finding, then keep the original
+	// failed-writer escalation assertions at that configured finite cap.
+	f.exec(`UPDATE model_situation_limits SET fix_rounds=2 WHERE tenant_id=$1`, f.owner.TenantID)
+	secondFix := advance(rereviewFinished, true)
+	secondFixRun := secondFix["agent_run_id"].(string)
+	must(t, f.tx(func(tx pgx.Tx) error { return loadActorGrant(t.Context(), tx, secondFixRun, &g) }))
+	if g.Lineage == nil || g.Lineage.PreviousRunID != fixRun || g.Lineage.BaseSHA != cr.BaseSHA || g.Lineage.HeadSHA != fixedRange.HeadSHA {
+		t.Fatalf("second fix lost original build lineage: %+v", g)
+	}
+	fixFinished = report(secondFixRun, "failed", "", nil)
+	settle(secondFixRun)
 	escalated := advance(fixFinished, true)
 	if escalated["state"] != "awaiting_decision" || escalated["question_id"] == nil {
 		t.Fatalf("missing desk escalation: %+v", escalated)
