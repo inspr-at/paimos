@@ -17,14 +17,15 @@ export interface NeedsYouItem {
 import { computed, useId } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import VerificationButton from '../agents/VerificationButton.vue'
-const props = defineProps<{ items: readonly NeedsYouItem[]; heading?: string; aside?: string; showCalm?: boolean }>()
+// hideWhenCalm (AEON-1171): nothing needs you means no block at all; a calm row kept after Verify again still shows.
+const props = defineProps<{ items: readonly NeedsYouItem[]; heading?: string; aside?: string; showCalm?: boolean; hideWhenCalm?: boolean }>()
 const emit = defineEmits<{ action: [id: string] }>()
 const titleId = useId()
 const count = computed(() => props.items.reduce((total, item) => total + Math.max(0, item.count), 0))
 const title = computed(() => props.heading ?? (count.value === 0 ? 'Nothing needs you' : `${count.value.toLocaleString()} ${count.value === 1 ? 'thing needs' : 'things need'} you`))
 </script>
 <template>
-  <section class="needs-block" :aria-labelledby="titleId">
+  <section v-if="!hideWhenCalm || count || showCalm" class="needs-block" :aria-labelledby="titleId">
     <header class="needs-head"><h2 :id="titleId">{{ title }}</h2><div class="needs-aside"><slot name="aside"><p v-if="aside">{{ aside }}</p></slot></div></header>
     <ul v-if="count || showCalm" class="attention">
       <li v-for="item in items" :key="item.id" class="att-row" :data-need="item.id" :class="{ calm: item.count === 0 }">
