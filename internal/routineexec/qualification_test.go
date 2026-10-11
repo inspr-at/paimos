@@ -532,7 +532,13 @@ func TestRoutineControlledQualification(t *testing.T) {
 		result := make(chan routineactions.Receipt, 1)
 		failure := make(chan error, 1)
 		go func() { out, err := actions.Execute(ctx, f.agent, f.run, current); result <- out; failure <- err }()
-		dbtest.Await(t, ctx, pulls.created)
+		select {
+		case <-pulls.created:
+		case err := <-failure:
+			t.Fatalf("PR creator returned before committed-effect barrier: %v", err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
 		// A concurrent recovering server can observe the committed PR while its
 		// creator still waits for the lost reply; neither may POST again.
 		var actionID string
