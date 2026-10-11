@@ -74,7 +74,7 @@ func TestPlatform(t *testing.T) {}
 	if len(actual) != 3 || !reflect.DeepEqual(actual, golden.Tests) {
 		t.Fatalf("incremental inventory differs: got %#v, uncached %#v", actual, golden.Tests)
 	}
-	if _, err := collect(request{Package: "internal/fixture", Files: []source{{File: "../outside_test.go"}}}); err == nil {
-		t.Fatal("accepted a source outside the requested package")
+	if _, err := collect(request{Package: "internal/fixture", Files: []source{{File: "../outside_test.go"}}}); err == nil || err.Error() != "source outside requested package" {
+		t.Fatalf("expected the package-boundary rejection, got %v", err)
 	}
 }
