@@ -285,8 +285,8 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 	t.Run("bounded_evidence_escalates_once", func(t *testing.T) {
 		d := setupDispatch(t)
 		f := d.fixture
-		f.exec(`INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,state)
-   SELECT $1,$2,'unknown:'||n,'fixture.external','unknown' FROM generate_series(1,257) n`, f.owner.TenantID, f.run)
+		f.exec(`INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,state,payload)
+   SELECT $1,$2,'unknown:'||n,'fixture.external','unknown','{}'::jsonb FROM generate_series(1,257) n`, f.owner.TenantID, f.run)
 		for range 4 {
 			must(t, d.e.recoverRun(db.AllProjects(t.Context(), "bounded evidence fixture"), f.owner.TenantID, f.run))
 		}
