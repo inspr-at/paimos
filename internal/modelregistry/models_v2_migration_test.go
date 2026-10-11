@@ -21,10 +21,17 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+func modelsMigrationFixture(t *testing.T) (tenant.Principal, tenant.Principal) {
+	t.Helper()
+	admin, member := boardFixture(t)
+	boardDecode[boardDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/board", nil, ""), 200)
+	return admin, member
+}
+
 // Risk: migration changes a saved fallback/Wait, drops a hold or a rule's
 // ownership, or emits an incomplete/duplicate migration audit.
 func TestModelsV2MigrationGolden(t *testing.T) {
-	admin, waiter := boardFixture(t)
+	admin, waiter := modelsMigrationFixture(t)
 	runner := addPrincipal(t, admin.TenantID, "agent", "Migration runner", nil)
 	var now, until time.Time
 	var workspace string
@@ -140,6 +147,9 @@ func TestModelsV2MigrationGolden(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		if len(s.Rules) != 2 {
+			t.Fatalf("lost row constraints: %+v", s.Rules)
+		}
 		for _, rule := range s.Rules {
 			if rule.Why == "Keep the owner rule" || rule.Why == "Last resort" {
 				if rule.SetBy == nil || *rule.SetBy != admin.ID || !rule.SetAt.Equal(now) {
@@ -219,7 +229,7 @@ func TestModelsV2NoRuntimeLadderReaders(t *testing.T) {
 
 // Risk: the deprecated endpoint still grants writes or exposes stale ladders.
 func TestModelsV2RoutesRetiredAndDerived(t *testing.T) {
-	admin, _ := boardFixture(t)
+	admin, _ := modelsMigrationFixture(t)
 	status, raw := call(t, &admin, http.MethodPut, "/api/models/routes", "not JSON")
 	if status != http.StatusGone || !strings.Contains(string(raw), "moved") {
 		t.Fatalf("retirement: %d %s", status, raw)
@@ -242,7 +252,7 @@ func TestModelsV2RoutesRetiredAndDerived(t *testing.T) {
 // Risk: editing a line moves its pick but strands a fallback, situation,
 // never rule or indefinite pause, or loses the source rule's stamps.
 func TestModelsV2SuccessorMovesAllReferences(t *testing.T) {
-	admin, _ := boardFixture(t)
+	admin, _ := modelsMigrationFixture(t)
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		ctx := t.Context()
 		var old Profile
