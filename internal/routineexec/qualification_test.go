@@ -356,7 +356,7 @@ func TestRoutineControlledQualification(t *testing.T) {
 		if handoff.BriefSHA256 != "" {
 			body["handoff"] = agentruns.WorkerPickup{TicketRevision: handoff.TicketRevision, WorkOrderRevision: handoff.WorkOrderRevision, BriefSHA256: handoff.BriefSHA256, WorktreeID: worktree}
 		}
-		headers := map[string]string{"Authorization": "Bearer " + f.token, agentpairing.LedgerGenerationHeader: g.LedgerGeneration}
+		headers := map[string]string{"Authorization": "Bearer " + f.token, agentpairing.LedgerGenerationHeader: g.LedgerGeneration, reviewgate.PolicyHeader: reviewgate.Policy}
 		call(f.agent, "POST", "/api/runs/"+run+"/claim", body, headers, 200)
 		restart() // A lost claim reply must retain the original committed recipe.
 		raw, err := json.Marshal(body)
@@ -381,7 +381,7 @@ func TestRoutineControlledQualification(t *testing.T) {
 	}
 	report := func(run string, g agentsetup.RoutineGrant, payload agentruns.Telemetry) {
 		t.Helper()
-		headers := map[string]string{"Authorization": "Bearer " + f.token, agentpairing.LedgerGenerationHeader: g.LedgerGeneration, agentruns.DaemonHeader: g.DaemonID, agentruns.GenerationHeader: g.DaemonGeneration}
+		headers := map[string]string{"Authorization": "Bearer " + f.token, agentpairing.LedgerGenerationHeader: g.LedgerGeneration, agentruns.DaemonHeader: g.DaemonID, agentruns.GenerationHeader: g.DaemonGeneration, reviewgate.PolicyHeader: reviewgate.Policy}
 		call(f.agent, "POST", "/api/runs/"+run+"/telemetry", payload, headers, 200)
 		restart()
 		call(f.agent, "POST", "/api/runs/"+run+"/telemetry", payload, headers, 200)
