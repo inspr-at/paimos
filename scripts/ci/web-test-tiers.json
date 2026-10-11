@@ -696,7 +696,7 @@
     ,
     "browser:tests/models-outdated.spec.ts:with auto-update on the uses already moved, so the tray says nothing uses them and Remove only removes"
     ,
-    "browser:tests/models-registry.spec.ts:screenshots of the registry at 1440, 1024 and 390 px, light and dark"
+    "browser:tests/models-registry-shots.spec.ts:screenshots of the registry at 1440, 1024 and 390 px, light and dark"
     ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
     ,
@@ -9440,6 +9440,12 @@
     ,
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"with auto-update on the uses already moved, so the tray says nothing uses them and Remove only removes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/models-registry-shots.spec.ts","name":"on a phone, the design check › passes on the built registry at 400 px with 44 px targets, light and dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry-shots.spec.ts","name":"screenshots of the registry at 1440, 1024 and 390 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-registry-shots.spec.ts","name":"the design check passes on the built registry at 1440 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Add model with several levels registers them in order, and a failure after the first level is never reported as saved","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Add model: Undo removes what was added","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -9497,8 +9503,6 @@
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"people without models.manage read the registry and get no controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"provider and harness facts are read-only: only a route added by hand has Edit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"screenshots of the registry at 1440, 1024 and 390 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"the registry groups lines by provider, folded by default, each with its source, levels and state, and never says Auto-discovered","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,

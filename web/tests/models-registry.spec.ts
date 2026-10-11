@@ -15,6 +15,8 @@ const editor = (page: Page) => page.locator('[data-reg-editor]')
 const confirm = (page: Page, key: string) => row(page, key).locator('[data-reg-confirm]')
 const menu = (page: Page) => page.locator('[data-reg-pause-menu]')
 const toasts = (page: Page) => page.locator('.toast')
+/** One fact row of an open line, by its exact label. */
+const fact = (page: Page, key: string, label: string) => body(page, key).locator('.fact').filter({ has: page.locator('.fact-k').getByText(label, { exact: true }) })
 const SOL = 'openai:sol', ASTRA = 'openai:astra', LUNA = 'openai:luna', OPUS = 'anthropic:opus', GROK = 'xai:grok', PREVIEW = 'xai:grok-preview', QWEN = 'unknown:openrouter/qwen/qwen3-coder'
 async function setup(page: Page, over: Partial<RegistryWorld> = {}) {
   const world = await mockRegistry(page, registryWorld(over))
@@ -33,7 +35,7 @@ const retires = (world: RegistryWorld) => world.writes.filter(write => write.pat
 test('the registry groups lines by provider, folded by default, each with its source, levels and state, and never says Auto-discovered', async ({ page }) => {
   await setup(page)
   await expect(card(page).locator('.pg-h')).toHaveText([/^OpenAI\s*3 lines$/, /^Anthropic\s*2 lines$/, /^xAI\s*2 lines$/, /^Cursor\s*1 line$/, /^Unknown provider\s*1 line$/])
-  await expect(card(page).locator('[data-reg-count]')).toHaveText('9 models · 10 routes · 8 lines')
+  await expect(card(page).locator('[data-reg-count]')).toHaveText('9 models · 10 routes · 9 lines')
   await expect(card(page).locator('[data-reg-fold][aria-expanded="true"]')).toHaveCount(0)
   const sol = fold(page, SOL)
   await expect(sol.locator('.ln-name')).toHaveText('GPT Sol')
@@ -67,14 +69,13 @@ test('a line opens in place: its routes with their own levels and source, provid
   await expect(route(page, OPUS, 'pi:anthropic/claude-opus-5-5').locator('.rt-h')).toHaveText('pi via Anthropic')
   await expect(route(page, OPUS, 'pi:anthropic/claude-opus-5-5').locator('.lv span')).toHaveText(['high', 'xhigh'])
   await expect(route(page, OPUS, 'pi:anthropic/claude-opus-5-5').locator('.srcb')).toHaveText('From harness')
-  const facts = body(page, OPUS).locator('.fact')
-  await expect(facts.filter({ hasText: 'Provider' })).toHaveText(/Provider\s*Anthropic/)
-  await expect(facts.filter({ hasText: 'Lifecycle' })).toHaveText(/Lifecycle\s*Active\s*From provider/)
-  await expect(facts.filter({ hasText: 'Note' })).toHaveText(/Note\s*best for design and concepts · shown under its name in every picker/)
+  await expect(fact(page, OPUS, 'Provider')).toHaveText(/^Provider\s*Anthropic$/)
+  await expect(fact(page, OPUS, 'Lifecycle')).toHaveText(/^Lifecycle\s*Active\s*From provider$/)
+  await expect(fact(page, OPUS, 'Note')).toHaveText(/^Note\s*best for design and concepts · shown under its name in every picker$/)
   // A fact nobody reported says so, and a version taken on says what it replaced.
   await open(page, SOL)
   await expect(body(page, SOL).locator('[data-reg-lifecycle]')).toHaveText(/Lifecycle\s*unknown · the provider reports none/)
-  await expect(body(page, SOL).locator('.fact').filter({ hasText: 'Version' })).toHaveText(/6\.1 · was 6, taken on 3 Oct/)
+  await expect(fact(page, SOL, 'Version')).toHaveText(/^Version\s*6\.1 · was 6, taken on 3 Oct$/)
 })
 
 test('people without models.manage read the registry and get no controls', async ({ page }) => {
@@ -742,36 +743,4 @@ test('How new models are found: a quiet fold whose settings never touch auto-upd
   await expect(panel.locator('[data-reg-waiting]')).toHaveCount(0)
   expect(world.writes.find(write => write.path === '/models/proposals/accept')?.body).toEqual({ harness: 'codex', model: 'gpt-7-sol', effort: 'high' })
   expect(world.writes.filter(write => write.path === '/models/refresh/settings').every(write => !('account_use_revision' in (write.body as object)))).toBe(true)
-})
-
-test('screenshots of the registry at 1440, 1024 and 390 px, light and dark', async ({ page }, testInfo) => {
-  await mockRegistry(page, registryWorld({ profiles: manyProfiles(), usage: { incomplete: false, used_by: [{ column: 'other', layer: 'default', replacement: { line: 'openai:astra', effort: 'xhigh', harness: 'codex', model: 'gpt-6.1-astra' } }] } }))
-  await openRegistry(page)
-  await expect(row(page, OPUS)).toBeVisible()
-  // Tall enough for the whole card: the harness scrolls inside its own frame.
-  for (const [width, height] of [[1440, 3200], [1024, 3400], [390, 5200]] as const) {
-    for (const scheme of ['light', 'dark'] as const) {
-      await page.setViewportSize({ width, height }); await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' })
-      const shot = async (name: string) => card(page).screenshot({ path: testInfo.outputPath(`${name}-${width}-${scheme}.png`) })
-      await shot('list')
-      await open(page, OPUS); await open(page, GROK)
-      await shot('folds')
-      await body(page, OPUS).getByRole('button', { name: 'Remove…' }).click()
-      await expect(confirm(page, OPUS)).toContainText('takes over')
-      await body(page, OPUS).locator('[data-reg-pause]').click()
-      await expect(menu(page)).toBeVisible()
-      await page.screenshot({ path: testInfo.outputPath(`pause-menu-${width}-${scheme}.png`) })
-      await page.keyboard.press('Escape')
-      await shot('remove-question')
-      await confirm(page, OPUS).getByRole('button', { name: 'Keep it' }).click()
-      await fold(page, OPUS).click(); await fold(page, GROK).click()
-      await card(page).locator('[data-reg-discovery-fold]').click()
-      await card(page).getByRole('button', { name: 'Add model' }).click()
-      await editor(page).getByRole('button', { name: /^Add/ }).click()
-      await shot('discovery-add-errors')
-      await editor(page).getByRole('button', { name: /^Cancel/ }).click()
-      await card(page).locator('[data-reg-discovery-fold]').click()
-      await expect(card(page).locator('[data-reg-fold][aria-expanded="true"]')).toHaveCount(0)
-    }
-  }
 })

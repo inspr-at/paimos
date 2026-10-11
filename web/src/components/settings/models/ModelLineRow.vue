@@ -82,11 +82,11 @@ const olderSource = (version: RegistryModel) => version.lifecycle ? lifecycleSou
                 <template v-if="lifecycle">{{ lifecycle }}<template v-if="why"> · {{ why }}</template>
                   <span v-if="lifecycleFrom" class="srcb sm" :data-tip="SOURCE_TIP[lifecycleFrom]"><AppIcon :name="SOURCE_ICON[lifecycleFrom]" :size="11" />{{ SOURCE_NAME[lifecycleFrom] }}</span>
                 </template>
-                <template v-else><span class="unk">unknown</span><small> · the provider reports none</small></template>
+                <span v-else><span class="unk">unknown</span><small> · the provider reports none</small></span>
               </span>
             </div>
             <div v-if="took" class="fact"><span class="fact-k">Version</span><span class="fact-v">{{ model.versionLabel }} · {{ took }}</span></div>
-            <div v-if="model.note" class="fact"><span class="fact-k">Note</span><span class="fact-v">{{ model.note }}<small> · shown under its name in every picker</small></span></div>
+            <div v-if="model.note" class="fact"><span class="fact-k">Note</span><span class="fact-v"><span>{{ model.note }}<small> · shown under its name in every picker</small></span></span></div>
             <div v-if="row.older.length" class="fact" data-reg-older>
               <span class="fact-k">Older versions</span>
               <span class="fact-v ov">

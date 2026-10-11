@@ -388,9 +388,7 @@ function choosePause(choice: PauseChoice | 'resume') {
   if (!row || !open || pausing.value || !manageable.value) return
   const model = row.model, anchor = open.anchor, until = choice === 'resume' ? null : pauseUntil(choice, new Date())
   pausing.value = row.key
-  const refocus = () => void nextTick(() => { if (anchor.isConnected) anchor.focus({ preventScroll: true }) })
   void scope.run(({ after, signal }) => after(pauseModel(model, model.family, choice === 'resume' ? 'resume' : { until }, writeScope(signal)), result => after(reload(), () => {
-    refocus()
     const back = result.done
     const undoAction = back.length ? { action: { label: 'Undo', run: () => undo(scope => undoPause(back, new Date(), scope).then(failed => { if (failed) throw new Error(failed) })) } } : {}
     const steps = model.routes.length
@@ -400,8 +398,9 @@ function choosePause(choice: PauseChoice | 'resume') {
     }
     toast(choice === 'resume' ? `Resumed ${model.name}` : `Paused ${model.name} ${untilText(until, new Date())}`, undoAction)
   })), {
-    failed: error => { refocus(); toast(error instanceof RegistryError && error.status === 403 ? 'You can’t pause models. Ask a workspace admin.' : 'It could not be changed. Try again.', { tone: 'error' }) },
-    settled: () => { pausing.value = null },
+    failed: error => { toast(error instanceof RegistryError && error.status === 403 ? 'You can’t pause models. Ask a workspace admin.' : 'It could not be changed. Try again.', { tone: 'error' }) },
+    // The row's buttons are disabled while the pause runs; focus returns to Pause… once it can take it again.
+    settled: () => { pausing.value = null; void nextTick(() => { if (anchor.isConnected) anchor.focus({ preventScroll: true }) }) },
   })
 }
 

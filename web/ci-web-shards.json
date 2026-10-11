@@ -530,7 +530,9 @@
         ,
         {"file":"tests/model-refresh.spec.ts","listedTests":1,"tierTiming":{"caseSeconds":{"max":4.248,"median":4.248,"min":4.248},"seconds":7.561739,"selectedTests":1},"weightSeconds":3.5,"weightSource":"e2e-4"}
         ,
-        {"file":"tests/models-registry.spec.ts","listedTests":32,"weightSeconds":30,"weightSource":"AEON-1163 grouped registry: six new cases and screenshots at three widths; estimate until measured"}
+        {"file":"tests/models-registry-shots.spec.ts","listedTests":3,"weightSeconds":20,"weightSource":"AEON-1163 screenshots at three widths and the design check at 1440 and 400; estimate until measured"}
+        ,
+        {"file":"tests/models-registry.spec.ts","listedTests":31,"weightSeconds":30,"weightSource":"AEON-1163 grouped registry: six new cases; screenshots moved to models-registry-shots; estimate until measured"}
         ,
         {"file":"tests/models-simple-shots.spec.ts","listedTests":18,"weightSeconds":8,"weightSource":"AEON-1011 local-single-worker-5.3s-plus-margin"}
         ,
