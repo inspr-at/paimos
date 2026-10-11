@@ -173,7 +173,7 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
 
     // AEON-1172 fix round 2: a successful Remove or End now used to drop its row, and
     // "Agents may use it" with everything below moved up under the pointer (AEON-541).
-    test(`accounts ${width} ${theme}: Remove and End now leave “Agents may use it” and everything below in place`, async ({ page }) => {
+    test(`accounts ${width} ${theme}: Remove and End now leave “Agents may use it” and everything below in place`, async ({ page }, info) => {
       const errors = watchErrors(page)
       const { capacity } = await setup(page, { limits: true })
       // A Hold set before it was retired, saved as the old menu saved it: the schedule without its Keep for you.
@@ -201,6 +201,8 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
         await expect(pane(page).locator('[data-quota-say]')).toHaveText('Agents may use 4 more percentage points today. They stop at today’s limit (62 %) first.')
       })
       guard.done()
+      await limits.scrollIntoViewIfNeeded()
+      await page.screenshot({ path: info.outputPath(`accounts-limits-settled-${width}-${theme}.png`), fullPage: false })
       expect(capacity.writes.filter(w => w.method === 'DELETE')).toEqual([expect.objectContaining({ path: `/api/agent-accounts/${ACCOUNTS.main}/limit` })])
       expect(errors).toEqual([])
     })
