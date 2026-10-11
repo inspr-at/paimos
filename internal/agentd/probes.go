@@ -535,6 +535,12 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 	if !*status.LoggedIn {
 		return ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeSignedOut}
 	}
+	// Local status may identify a subscription login, but never carry arbitrary
+	// vendor output, terminal controls, or API-key identity into diagnostics.
+	active := ""
+	if status.AuthMethod == "claude.ai" && agentsetup.ValidLoginLabel(status.Email) {
+		active = strings.TrimSpace(status.Email)
+	}
 	if a.Emails != nil {
 		if a.Emails[key] == "" {
 			return unavailable(agentsetup.ProbeIdentityMissing)
@@ -548,7 +554,7 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 			return unavailable(agentsetup.ProbeEmailMissing)
 		}
 		if !strings.EqualFold(status.Email, a.Emails[key]) {
-			return ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeDifferentIdentity}
+			return ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeDifferentIdentity, ActiveIdentity: active}
 		}
 	}
 	if code != 0 {
@@ -559,7 +565,7 @@ func (a *ClaudeAdapter) probeResolved(ctx context.Context, key string) ProbeStat
 	}
 	switch status.AuthMethod {
 	case "claude.ai":
-		return ProbeStatus{OK: true, BillingMode: "subscription"}
+		return ProbeStatus{OK: true, BillingMode: "subscription", ActiveIdentity: active}
 	case "api_key":
 		// Only an unfenced adapter reaches this case. Email-fenced API-key
 		// logins fail authentication above and never establish billing.
