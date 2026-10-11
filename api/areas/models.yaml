@@ -484,6 +484,8 @@ components:
         who: {type: string, description: "Default or the person who owns or set the reference"}
         from: {type: string}
         to: {type: [string, 'null']}
+        from_effort: {type: [string, 'null'], description: "Native level this use runs the old version at; null when the use carries no level, such as a rule, lock or pause"}
+        to_effort: {type: [string, 'null'], description: "Nearest native level of the successor, ties going up, that the use moves to; null when the use carries no level or no successor route runs it"}
     ModelOutdatedVersion:
       allOf:
         - {$ref: '#/components/schemas/ModelCatalogLifecycle'}

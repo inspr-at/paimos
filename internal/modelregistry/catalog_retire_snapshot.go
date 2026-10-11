@@ -167,12 +167,47 @@ func undoRetireSnapshots(ctx context.Context, tx pgx.Tx, before, after, current 
 }
 
 type retireUse struct {
-	Label    string  `json:"label"`
-	Who      string  `json:"who"`
-	From     string  `json:"from"`
-	To       *string `json:"to"`
-	project  string
-	personal string
+	Label string  `json:"label"`
+	Who   string  `json:"who"`
+	From  string  `json:"from"`
+	To    *string `json:"to"`
+	// The native level the use runs the old version at, and the successor level
+	// it moves to. Rules, locks and pauses carry no level.
+	FromEffort *string `json:"from_effort"`
+	ToEffort   *string `json:"to_effort"`
+	project    string
+	personal   string
+}
+
+// successorProfiles are the routes a use can move to: the enabled, active
+// profiles of the named successor, as the retirement transfer selects them.
+func successorProfiles(model lifecycleModel, all []lifecycleModel) []Profile {
+	out := []Profile{}
+	if model.Lifecycle.Successor == nil {
+		return out
+	}
+	for _, next := range all {
+		if next.Identity != *model.Lifecycle.Successor {
+			continue
+		}
+		for _, p := range next.Profiles {
+			if p.Enabled && !p.Retired {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+// moveLevel is the successor level a use at effort lands on: nearestProfile,
+// ties going up, exactly as transferModelLineReferences and the pinned-cell
+// move write it. No effort or no successor route means no level to show.
+func moveLevel(effort string, level *int, candidates []Profile) *string {
+	if effort == "" || len(candidates) == 0 {
+		return nil
+	}
+	next := nearestProfile(candidates, effort, level).Effort
+	return &next
 }
 
 func retirementLines(model lifecycleModel, all []lifecycleModel) map[string]bool {
@@ -221,11 +256,21 @@ func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel
 		row := rowFields(raw)
 		scopes[rowString(row, "id")] = row
 	}
-	add := func(label, who, project, person string) {
+	after := successorProfiles(model, all)
+	// A level a chain step stores by name takes its shared scale from the old version's own profile.
+	levelOf := func(effort string) *int {
+		for _, p := range model.Profiles {
+			if !p.Retired && p.Effort == effort {
+				return p.EffortLevel
+			}
+		}
+		return nil
+	}
+	add := func(label, who, project, person string, from, to *string) {
 		if len(out) > 2048 {
 			return
 		}
-		out = append(out, retireUse{Label: label, Who: who, From: model.Identity, To: model.Lifecycle.Successor, project: project, personal: person})
+		out = append(out, retireUse{Label: label, Who: who, From: model.Identity, To: model.Lifecycle.Successor, FromEffort: from, ToEffort: to, project: project, personal: person})
 	}
 	for _, raw := range append(append([]json.RawMessage{}, s["model_pref_orders"]...), s["model_pref_situation_orders"]...) {
 		row := rowFields(raw)
@@ -236,43 +281,56 @@ func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel
 			who = person
 		}
 		var rank, not []string
+		var efforts map[string]string
+		var pickLevel *int
 		_ = json.Unmarshal(row["rank"], &rank)
 		_ = json.Unmarshal(row["not_allowed"], &not)
+		_ = json.Unmarshal(row["efforts"], &efforts)
+		_ = json.Unmarshal(row["effort_level"], &pickLevel)
 		for i, line := range rank {
 			if lines[line] {
 				label := "fallback"
+				// The pick's own level is the row's effort; a chain step's is its entry in efforts.
+				effort, level := efforts[line], levelOf(efforts[line])
 				if i == 0 {
 					label = "Default"
 					if rowString(row, "column_key") != "other" {
 						label = "Except for"
 					}
+					if pick := rowString(row, "effort"); pick != "" {
+						effort, level = pick, pickLevel
+					}
 				}
-				add(label+" · "+rowString(row, "column_key")+" · "+rowString(row, "situation"), who, rowString(pref, "project_id"), person)
+				var from *string
+				if effort != "" {
+					from = &effort
+				}
+				add(label+" · "+rowString(row, "column_key")+" · "+rowString(row, "situation"), who, rowString(pref, "project_id"), person, from, moveLevel(effort, level, after))
 			}
 		}
 		for _, line := range not {
 			if lines[line] {
-				add("never · "+rowString(row, "column_key"), who, rowString(pref, "project_id"), person)
+				add("never · "+rowString(row, "column_key"), who, rowString(pref, "project_id"), person, nil, nil)
 			}
 		}
 	}
 	for _, raw := range s["model_rules"] {
 		row := rowFields(raw)
 		if lines[rowString(row, "line")] && string(row["moved_to_models"]) != "true" {
-			add("lock · "+rowString(row, "lock")+" · "+rowString(row, "column_key"), rowString(row, "set_by"), rowString(row, "project_id"), "")
+			add("lock · "+rowString(row, "lock")+" · "+rowString(row, "column_key"), rowString(row, "set_by"), rowString(row, "project_id"), "", nil, nil)
 		}
 	}
 	for _, raw := range s["model_row_constraints"] {
 		row := rowFields(raw)
 		if lines[rowString(row, "line")] {
-			add("lock · "+rowString(row, "kind")+" · "+rowString(row, "column_key"), rowString(row, "set_by"), rowString(row, "project_id"), "")
+			add("lock · "+rowString(row, "kind")+" · "+rowString(row, "column_key"), rowString(row, "set_by"), rowString(row, "project_id"), "", nil, nil)
 		}
 	}
 	for _, raw := range s["model_pauses"] {
 		row := rowFields(raw)
 		for _, p := range model.Profiles {
 			if !p.Retired && p.Harness == rowString(row, "harness") && p.Model == rowString(row, "model") {
-				add("pause · "+p.Harness, rowString(row, "set_by"), "", "")
+				add("pause · "+p.Harness, rowString(row, "set_by"), "", "", nil, nil)
 				break
 			}
 		}
@@ -286,7 +344,16 @@ func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel
 			if person != "" {
 				who = person
 			}
-			add("pinned · "+rowString(row, "bucket"), who, project, person)
+			// A pinned cell keeps its harness: it moves to the nearest level of the successor's same route.
+			var from, to *string
+			for _, old := range model.Profiles {
+				if old.ID == rowString(row, "profile_id") {
+					effort := old.Effort
+					from, to = &effort, moveLevel(old.Effort, old.EffortLevel, sameRouteProfiles(after, old))
+					break
+				}
+			}
+			add("pinned · "+rowString(row, "bucket"), who, project, person, from, to)
 		}
 	}
 	return out

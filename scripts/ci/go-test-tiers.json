@@ -7236,6 +7236,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedSourcedAliasIsNotSuccessor","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedUseLevels","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogProfileLifecycleBestEffort","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogProfileLifecycleReleasesTenantFence","tier":"ESSENTIAL"}
