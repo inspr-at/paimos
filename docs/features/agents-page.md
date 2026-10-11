@@ -126,7 +126,7 @@ never decides or closes a question. Selection and identity changes discard
 late results.
 
 The panel's own worker rows use Session, Time, Execution, Computer and Beat.
-Compact rows keep the name and time together; the Session tab carries the
+Compact rows keep the name and time together; opening a worker shows the
 remaining details. Model names come from the matching harness registry, with
 an explicit unavailable label when display metadata cannot be read.
 
