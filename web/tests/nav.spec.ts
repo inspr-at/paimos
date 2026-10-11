@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The header's three places (Projects · Agents · Business), the breadcrumb that
-// continues from the active one, the g-sequences, and the Business tabs.
+// The header's places (Projects · Agents · Business · Decision Desk, AEON-1214),
+// the breadcrumb that continues from the active one, the g-sequences, and the
+// Business tabs.
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
@@ -19,7 +20,7 @@ test('three places in order of use; the active one is highlighted and the breadc
   const errors = watchErrors(page)
   await setup(page)
   await page.goto('/')
-  await expect(places(page).getByRole('link')).toHaveText(['Projects', 'Agents', 'Business'])
+  await expect(places(page).getByRole('link')).toHaveText(['Projects', 'Agents', 'Business', /^Decision Desk/])
   await expect(places(page).getByRole('link', { name: 'Projects' })).toHaveAttribute('aria-current', 'page')
   await expect(crumbs(page)).toHaveCount(0)
 
@@ -47,7 +48,7 @@ test('Business shows only while one of its parts is open', async ({ page }) => {
   await setup(page, { enabled: [] })
   await page.goto('/')
   await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-  await expect(places(page).getByRole('link')).toHaveText(['Projects', 'Agents'])
+  await expect(places(page).getByRole('link')).toHaveText(['Projects', 'Agents', /^Decision Desk/])
 })
 
 test('g then b crosses the release menu g opened; another menu blocks a new arm, and an expired arm or a field stays on the ticket', async ({ page }) => {

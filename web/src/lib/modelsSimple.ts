@@ -3,6 +3,7 @@
 // qualification and the automatic fallback. Everything here is pure so the card can be tested without a browser.
 import { compareModelVersions, profileLine, type PrefProfile } from './modelPrefs'
 import { harnessLabel } from './agentState'
+import { HARNESS_NAME as ACCOUNT_NAME } from './capacity'
 
 export type Scope = 'me' | 'default'
 export interface SimplePick { line: string | null; effort: string | null; harness?: string; model?: string }
@@ -10,7 +11,14 @@ export interface SimpleLock { by: string | null; at: string | null; reason: stri
 export interface SimpleRow extends SimplePick { column: string; mine: boolean; lock: SimpleLock | null }
 export interface SimpleTrace { line: string; stage: 'column' | 'default' | 'role'; role?: string; reason: string; selected: boolean }
 export interface SimpleNext { column?: string; line?: string | null; effort?: string | null; ticket?: string; reviewer?: SimplePick; trace?: SimpleTrace[] }
-export interface SimpleUnavailable { column: string; line: string; runs_instead: string | null; effort: string | null; reason: string; ticket: string | null }
+/** Why a row's pick can't run right now, one cause per entry (AEON-1159). The page writes the words; reason is legacy. */
+export type UnavailableCause = 'daily_cap' | 'paused' | 'no_tools' | 'no_account' | 'retired' | 'residency'
+export interface SimpleUnavailable {
+  column: string; line: string; runs_instead: string | null; effort: string | null; reason: string; ticket: string | null
+  cause?: UnavailableCause; until?: string | null; route?: string | null; waits?: boolean
+  /** Harness of the route that runs instead; tells "runs through Cursor instead" apart from another model. */
+  runs_via?: string | null
+}
 export interface SimpleNewLine { line: string; can_do: string[] }
 export interface SimpleDocument {
   all: SimpleRow; exceptions: SimpleRow[]; reviews: { mode: 'cross_family' }; next: SimpleNext | null
@@ -33,19 +41,38 @@ export interface ModelRule { scope: 'workspace' | 'project'; project_id: string 
 export interface RulesDocument { revision: number; rules: ModelRule[] }
 export interface RulesBody { top: { line: string; why: string }[]; bottom: { line: string; why: string }[]; not: Record<string, string> }
 export interface WriteResult { revision: number; person_id?: string | null }
-export type RegistryProfile = PrefProfile & { effort_level?: number | null; note?: string; source?: 'auto' | 'manual'; retire_at?: string | null; retired?: boolean; short_name?: string; created_at?: string; version?: string; slug?: string }
+export interface CatalogLifecycle { state: string | null; date: string | null; successor: string | null; reason: string; source: string }
+export type RegistryProfile = PrefProfile & { effort_level?: number | null; note?: string; source?: 'auto' | 'manual'; retire_at?: string | null; retired?: boolean; short_name?: string; created_at?: string; version?: string; slug?: string; identity?: string; lifecycle?: CatalogLifecycle | null }
 
 export const ALL_COLUMN = 'other'
 /** The shared effort scale, used only when the server reports no level for a name. */
 const NAMED_LEVEL: Record<string, number> = { off: 0, default: 0, minimal: 1, low: 1, medium: 2, high: 3, xhigh: 4, max: 5 }
 const HARNESS_ORDER = ['codex', 'claude', 'grok', 'gemini', 'cursor', 'pi', 'opencode']
+/** Providers in the picker's fixed order; a maker the registry doesn't know sorts last. */
+const PROVIDER_ORDER = ['openai', 'anthropic', 'xai', 'google', 'cursor', 'local', 'unknown']
+export const PROVIDER_LABEL: Record<string, string> = { openai: 'OpenAI', anthropic: 'Anthropic', xai: 'xAI', google: 'Google', cursor: 'Cursor', local: 'Local', unknown: 'Unknown provider' }
+export const providerLabel = (provider: string) => PROVIDER_LABEL[provider] ?? (provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : PROVIDER_LABEL.unknown!)
 
 export interface EffortName { name: string; level: number | null }
+/** One way to run a model: a harness and its model id, with that route's own level names. */
+export interface EntryRoute { harness: string; model: string; via: string; efforts: EffortName[] }
 export interface ModelEntry {
-  line: string; harness: string; name: string; slug: string; route: string
+  /** The provider line ("anthropic:opus") a pick stores; a pick always runs the line's newest version. */
+  line: string
+  /** Unique per option: the line for its newest version, line@version for an older one. */
+  key: string
+  harness: string; name: string; slug: string; route: string
   efforts: EffortName[]; note: string; retiring: string | null; source: 'auto' | 'manual' | ''
+  provider: string; version: string
+  /** Every route of this version, the first one first; Cursor's per-level ids fold into one route. */
+  routes: EntryRoute[]
+  /** Older registered versions of the line, newest first. Only set on the newest version. */
+  older: ModelEntry[]
+  /** Set on an older version: the name of the version its line runs instead. */
+  replacedBy?: string
 }
 const harnessRank = (harness: string) => { const index = HARNESS_ORDER.indexOf(harness); return index < 0 ? HARNESS_ORDER.length : index }
+const providerRank = (provider: string) => { const index = PROVIDER_ORDER.indexOf(provider); return index < 0 ? PROVIDER_ORDER.length - 1 : index }
 const levelValue = (effort: EffortName) => effort.level ?? NAMED_LEVEL[effort.name] ?? 2
 /** "GPT-6.1 Sol", "Opus 5.5": the model's own name and version, never a harness or a profile revision. */
 export function fullName(profile: RegistryProfile): string {
@@ -57,45 +84,86 @@ export function fullName(profile: RegistryProfile): string {
 }
 
 /**
- * One entry per model line in its latest version, as the server resolves it: the newest enabled version, its
- * active profiles, and the levels of the harness that runs it first. Every entry is offered, whatever it can do.
+ * The server's provider line for a profile (modelsLine in board_resolve.go): Anthropic and OpenAI models are one line
+ * whichever harness runs them, so Opus through Claude Code, Cursor and pi is one model with three routes.
  */
-export function buildEntries(profiles: RegistryProfile[], now = Date.now()): ModelEntry[] {
-  const lines = new Map<string, { profile: RegistryProfile; version: string }[]>()
+export function modelLine(profile: PrefProfile): { line: string; version: string } {
+  let identity = profile
+  if (profile.family === 'anthropic') identity = { ...profile, harness: 'claude', model: profile.model.replace(/^anthropic\//, '') }
+  if (profile.family === 'openai' && profile.model.startsWith('gpt-')) identity = { ...profile, harness: 'codex' }
+  const { line, version } = profileLine(identity)
+  return { line: `${profile.family}:${line}`, version }
+}
+const via = (model: string) => model.startsWith('openrouter/') ? 'OpenRouter' : model.startsWith('ollama/') ? 'Local' : ''
+const routeKey = (profile: RegistryProfile) => profile.harness === 'cursor' ? `cursor:${profile.model.replace(/-(low|medium|high|xhigh|max|ultra)(-fast)?$/, '$2')}` : `${profile.harness}:${profile.model}`
+function routesOf(profiles: RegistryProfile[]): EntryRoute[] {
+  const routes = new Map<string, EntryRoute>()
   for (const profile of profiles) {
-    const { line, version } = profileLine(profile), id = `${profile.family}:${line}`
-    lines.set(id, [...(lines.get(id) ?? []), { profile, version }])
+    const key = routeKey(profile), route = routes.get(key) ?? { harness: profile.harness, model: profile.model, via: via(profile.model), efforts: [] }
+    if (!route.efforts.some(effort => effort.name === profile.effort)) route.efforts.push({ name: profile.effort, level: profile.effort_level ?? null })
+    routes.set(key, route)
   }
-  const out: { entry: ModelEntry; order: number }[] = []
-  for (const [id, items] of lines) {
-    const enabled = items.filter(item => item.profile.enabled)
-    if (!enabled.length) continue
-    const latest = enabled.reduce((version, item) => compareModelVersions(item.version, version) > 0 ? item.version : version, '')
-    const active = items.some(item => item.version === latest && item.profile.enabled && !item.profile.retired)
-    const current = items.filter(item => item.version === latest && !(active && (item.profile.retired || !item.profile.enabled)))
-    if (!current.length) continue
-    const harness = current.map(item => item.profile.harness).sort((a, b) => harnessRank(a) - harnessRank(b))[0]!
-    const here = current.filter(item => item.profile.harness === harness), first = here[0]!.profile
-    const efforts: EffortName[] = []
-    for (const { profile } of here) if (!efforts.some(effort => effort.name === profile.effort)) efforts.push({ name: profile.effort, level: profile.effort_level ?? null })
-    efforts.sort((a, b) => levelValue(a) - levelValue(b) || a.name.localeCompare(b.name))
-    const retire = here.map(item => item.profile.retire_at).filter((at): at is string => !!at && Date.parse(at) > now).sort()[0] ?? null
-    out.push({ order: harnessRank(harness), entry: {
-      line: id, harness, name: fullName(first), slug: first.model,
-      route: first.model.startsWith('openrouter/') ? 'OpenRouter' : '',
-      efforts, note: here.map(item => item.profile.note ?? '').find(note => note.trim()) ?? '', retiring: retire,
-      source: first.source ?? '',
-    } })
+  for (const route of routes.values()) route.efforts.sort((a, b) => levelValue(a) - levelValue(b) || a.name.localeCompare(b.name))
+  // Array sort is stable: routes of one harness keep the registry's order.
+  return [...routes.values()].sort((a, b) => harnessRank(a.harness) - harnessRank(b.harness))
+}
+function entryOf(line: string, key: string, profiles: RegistryProfile[], now: number): ModelEntry {
+  const routes = routesOf(profiles), first = routes[0]!
+  // The name comes from the route that runs first: its registry display is the model's own.
+  const ordered = [...profiles].sort((a, b) => harnessRank(a.harness) - harnessRank(b.harness)), named = ordered[0]!
+  const retire = profiles.flatMap(profile => [profile.retire_at, profile.lifecycle?.state === 'retiring' ? profile.lifecycle.date : null])
+    .filter((at): at is string => !!at && Date.parse(at) > now).sort()[0] ?? null
+  return {
+    line, key, harness: first.harness, name: fullName(named), slug: first.model, route: first.via,
+    efforts: first.efforts, note: ordered.map(profile => profile.note ?? '').find(note => note.trim()) ?? '', retiring: retire,
+    source: named.source ?? '', provider: named.provider || named.family || 'unknown', version: modelLine(named).version,
+    routes, older: [],
   }
-  // Array sort is stable: models keep the registry's own order inside their harness.
-  return out.sort((a, b) => a.order - b.order).map(item => item.entry)
 }
 
-/** Entries grouped under their harness, in the fixed harness order. */
-export function groupByHarness(entries: ModelEntry[]): { harness: string; label: string; entries: ModelEntry[] }[] {
-  const groups = new Map<string, ModelEntry[]>()
-  for (const entry of entries) groups.set(entry.harness, [...(groups.get(entry.harness) ?? []), entry])
-  return [...groups].sort((a, b) => harnessRank(a[0]) - harnessRank(b[0])).map(([harness, items]) => ({ harness, label: harnessLabel(harness), entries: items }))
+/**
+ * One entry per provider line in its newest version, as the server resolves it: the newest enabled version that is
+ * not retired (an alias follows it), every route of that version, and the levels of the route that runs first.
+ * Older versions hang off their line. Every entry is offered, whatever it can do.
+ */
+export function buildEntries(profiles: RegistryProfile[], now = Date.now()): ModelEntry[] {
+  const lines = new Map<string, { profile: RegistryProfile; version: string; order: number }[]>()
+  profiles.forEach((profile, order) => {
+    const { line, version } = modelLine(profile)
+    lines.set(line, [...(lines.get(line) ?? []), { profile, version, order }])
+  })
+  const out: { entry: ModelEntry; order: number }[] = []
+  for (const [line, items] of lines) {
+    const enabled = items.filter(item => item.profile.enabled)
+    if (!enabled.length) continue
+    const live = enabled.filter(item => !item.profile.retired), pool = live.length ? live : enabled
+    const latest = pool.reduce((version, item) => item.version !== 'alias' && compareModelVersions(item.version, version) > 0 ? item.version : version, '')
+    const current = pool.filter(item => item.version === latest || item.version === 'alias')
+    // An alias names no version; the newest concrete version names the line.
+    const concrete = current.filter(item => item.version !== 'alias')
+    const entry = entryOf(line, line, (concrete.length ? [...concrete, ...current.filter(item => item.version === 'alias')] : current).map(item => item.profile), now)
+    const versions = [...new Set(live.filter(item => item.version && item.version !== 'alias' && compareModelVersions(item.version, latest) < 0).map(item => item.version))]
+      .sort((a, b) => compareModelVersions(b, a))
+    entry.older = versions.map(version => ({ ...entryOf(line, `${line}@${version}`, live.filter(item => item.version === version).map(item => item.profile), now), replacedBy: entry.name }))
+    out.push({ entry, order: Math.min(...items.map(item => item.order)) })
+  }
+  // Providers in their fixed order; lines keep the registry's own order inside their provider.
+  return out.sort((a, b) => providerRank(a.entry.provider) - providerRank(b.entry.provider) || a.order - b.order).map(item => item.entry)
+}
+
+export interface ProviderGroup { provider: string; label: string; entries: ModelEntry[]; older: ModelEntry[] }
+/** Entries under their provider, newest versions first, then the provider's older versions (folded in the picker). */
+export function groupByProvider(entries: ModelEntry[], match: (entry: ModelEntry) => boolean = () => true): ProviderGroup[] {
+  const groups = new Map<string, ProviderGroup>()
+  for (const entry of entries) {
+    const shown = match(entry), older = entry.older.filter(match)
+    if (!shown && !older.length) continue
+    const group = groups.get(entry.provider) ?? { provider: entry.provider, label: providerLabel(entry.provider), entries: [], older: [] }
+    if (shown) group.entries.push(entry)
+    group.older.push(...older)
+    groups.set(entry.provider, group)
+  }
+  return [...groups.values()].sort((a, b) => providerRank(a.provider) - providerRank(b.provider))
 }
 
 /**
@@ -207,10 +275,10 @@ export const lockTip = (lock: SimpleLock, input: { mine: boolean; name: (id: str
 }
 export const retiringText = (entry: ModelEntry) => entry.retiring ? `Retiring ${formatDate(entry.retiring)}` : ''
 
-/** A sentence in plain text for the "Can't run" line, from the server's own words. */
+/** A trace reason in plain words, for the steps behind "Why?". Rows use cantSentence instead. */
 export const reasonText = (reason: string) => {
   const words: Record<string, string> = {
-    allowance: 'the account is at its allowance or floor',
+    allowance: 'the account has no room left until its limit resets',
     'account availability': 'the account has no recent successful sign-in check or free agent slot',
     daily_limit: 'the account is at its daily cap',
     daily_limit_unknown: 'the daily cap could not be checked',
@@ -226,17 +294,63 @@ export const reasonText = (reason: string) => {
   return plain ? plain.charAt(0).toLowerCase() + plain.slice(1) : 'no qualified account has room right now'
 }
 
+/** "04:00" within a day, else "14 Oct" (with the year when it differs); nothing for a time that has passed. */
+export function untilText(at: string | null | undefined, now = Date.now()): string {
+  const time = at ? Date.parse(at) : NaN
+  if (!Number.isFinite(time) || time <= now) return ''
+  const date = new Date(time)
+  if (time - now < 24 * 3_600_000) return date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', ...(date.getFullYear() !== new Date(now).getFullYear() ? { year: 'numeric' } : {}) })
+}
+
+export interface CantSentence { cause: string; then: string }
+/**
+ * Why a row's pick can't run, as one sentence from one cause (AEON-1146): "Claude account is at its daily cap until
+ * 04:00", then what happens instead: "GPT-6.1 Sol · high runs instead", "Opus 5.5 runs through Cursor instead" or
+ * "work waits until then". The server sends codes; the words are the page's. Never a code, never repeated.
+ */
+export function cantSentence(item: SimpleUnavailable | null | undefined, entries: ModelEntry[], now = Date.now()): CantSentence | null {
+  if (!item) return null
+  const name = entryFor(entries, item.line)?.name ?? lineFallback(item.line)
+  const until = untilText(item.until, now), by = until ? ` until ${until}` : ''
+  // Accounts carry the vendor's name ("Claude account"); routes carry the harness's ("runs through Cursor").
+  const vendor = item.route ? ACCOUNT_NAME[item.route] ?? harnessLabel(item.route) : ''
+  const account = vendor ? `${vendor} account` : 'The account'
+  const causes: Record<UnavailableCause, string> = {
+    daily_cap: `${account} is at its daily cap${by}`,
+    paused: `${name} is paused${by}`,
+    no_tools: `${name} has no tools in PAIMOS`,
+    no_account: vendor ? `No ${vendor} account can run ${name} right now` : `No account can run ${name} right now`,
+    retired: `${name} has been retired`,
+    residency: `Data residency rules out ${name}`,
+  }
+  const plain = reasonText(item.reason)
+  const cause = item.cause && causes[item.cause] ? causes[item.cause] : plain.charAt(0).toUpperCase() + plain.slice(1)
+  if (item.waits || !item.runs_instead) return { cause, then: until ? 'work waits until then' : 'work waits' }
+  if (item.runs_instead === item.line) return { cause, then: `${name} runs through ${item.runs_via ? harnessLabel(item.runs_via) : 'another route'} instead` }
+  return { cause, then: `${pickText(entryFor(entries, item.runs_instead), item.effort, lineFallback(item.runs_instead))} runs instead` }
+}
+
 export type Part = { text: string; strong?: boolean }
 export interface WhyView { title: string; steps: Part[][] }
 export interface NextView { parts: Part[]; why: WhyView | null }
 /** The one quiet line under the rows, and the numbered trace behind "Why?". */
-export function nextView(input: { next: SimpleNext | null; rows: RowView[]; entries: ModelEntry[]; labels: Map<string, string> }): NextView {
+export function nextView(input: { next: SimpleNext | null; rows: RowView[]; entries: ModelEntry[]; labels: Map<string, string>; now?: number }): NextView {
   const { next, rows, entries, labels } = input
   const name = (line: string | null | undefined, effort: string | null | undefined) => pickText(entryFor(entries, line), effort ?? null, lineFallback(line))
+  // A skipped step says the row's own cause sentence when the page has one for that model, else the trace's words.
+  const basisRow = rows.find(row => row.column === (next?.column ?? ALL_COLUMN)) ?? rows.find(row => row.isDefault)
+  const knownFor = (line: string) => basisRow?.unavailable?.line === line ? basisRow.unavailable : null
+  const skip = (step: SimpleTrace) => {
+    const known = knownFor(step.line), cause = known ? cantSentence(known, entries, input.now)?.cause : ''
+    // The same model skipped on one route and run on another names the route it skipped.
+    const route = known?.route && step.line === next?.line ? ` through ${harnessLabel(known.route)}` : ''
+    return `Skipped ${entryFor(entries, step.line)?.name ?? lineFallback(step.line)}${route}: ${cause || reasonText(step.reason)}.`
+  }
   if (!next || (!next.ticket && !next.line)) return { parts: [{ text: 'No work is queued right now.' }], why: null }
   if (!next.line) {
     const skipped = (next.trace ?? []).filter(step => step.role !== 'review-gate' && step.reason)
-    const steps = skipped.map(step => [{ text: `Skipped ${entryFor(entries, step.line)?.name ?? lineFallback(step.line)}: ${reasonText(step.reason)}.` }])
+    const steps = skipped.map(step => [{ text: skip(step) }])
     if (!steps.length) steps.push([{ text: 'Nothing in the order can run it.' }])
     const ticket = next.ticket ?? 'Work'
     return { parts: [{ text: `${ticket} is queued, but nothing available can run it.` }], why: { title: `Why is ${ticket} waiting?`, steps } }
@@ -244,9 +358,12 @@ export function nextView(input: { next: SimpleNext | null; rows: RowView[]; entr
   const column = next.column ?? ALL_COLUMN, kind = column === ALL_COLUMN ? 'work' : labels.get(column) ?? column
   const trace = (next.trace ?? []).filter(step => step.role !== 'review-gate'), skipped = trace.filter(step => !step.selected && step.reason)
   const runs = name(next.line, next.effort), reviewer = next.reviewer?.line ? entryFor(entries, next.reviewer.line)?.name ?? lineFallback(next.reviewer.line) : ''
-  const wanted = skipped[0] ? entryFor(entries, skipped[0].line)?.name ?? lineFallback(skipped[0].line) : ''
+  // Only another model is "instead of"; the same model on another route says the route (never "Opus instead of Opus").
+  const other = skipped.find(step => step.line !== next.line), wanted = other ? entryFor(entries, other.line)?.name ?? lineFallback(other.line) : ''
+  const via = !wanted && skipped.length ? knownFor(next.line)?.runs_via ?? null : null
   const parts: Part[] = [{ text: `The next ${kind} runs on ` }, { text: runs, strong: true }]
   if (wanted) parts.push({ text: ` instead of ${wanted}` })
+  else if (via) parts.push({ text: ` through ${harnessLabel(via)}` })
   if (reviewer) parts.push({ text: ', reviewed by ' }, { text: reviewer, strong: true })
   parts.push({ text: '.' })
   const own = rows.find(row => row.column === column && !row.isDefault), basis = own ?? rows.find(row => row.isDefault)
@@ -254,8 +371,45 @@ export function nextView(input: { next: SimpleNext | null; rows: RowView[]; entr
     ? [{ text: `${kind} has its own model: ` }, { text: name(basis?.line, basis?.effort), strong: true }, { text: '.' }]
     : [{ text: `${kind} has no override, so it uses the default: ` }, { text: name(basis?.line, basis?.effort), strong: true }, { text: '.' }]
   const steps: Part[][] = [first]
-  for (const step of skipped) steps.push([{ text: `Skipped ${entryFor(entries, step.line)?.name ?? lineFallback(step.line)}: ${reasonText(step.reason)}.` }])
-  if (skipped.length) steps.push([{ text: `Next in its order that can do ${kind}: ` }, { text: runs, strong: true }, { text: '.' }])
+  for (const step of skipped) steps.push([{ text: skip(step) }])
+  if (via) steps.push([{ text: `It takes its next route, ${harnessLabel(via)}: ` }, { text: runs, strong: true }, { text: '.' }])
+  else if (skipped.length) steps.push([{ text: `Next in its order that can do ${kind}: ` }, { text: runs, strong: true }, { text: '.' }])
   if (reviewer) steps.push([{ text: 'Reviews always use another family: ' }, { text: reviewer, strong: true }, { text: '.' }])
   return { parts, why: { title: `Why ${entryFor(entries, next.line)?.name ?? lineFallback(next.line)}?`, steps } }
+}
+
+/** What /models/resolve says about one ticket: the profile that runs it and every step its walk skipped. */
+export interface TicketResolution {
+  profile: RegistryProfile | null; owner_required: boolean
+  ladder: { stage?: string; profile_id: string; selected: boolean; skip_reasons: string[] }[]
+}
+const SKIPS_SHOWN = 8
+/**
+ * "Why?" for the ticket a person clicked (Tick, AEON-1138): its own resolution, never the next queued ticket's.
+ * A long walk is cut after eight skipped steps and says how many more there were.
+ */
+export function ticketWhy(input: { ticket: string; resolution: TicketResolution; profiles: RegistryProfile[]; entries: ModelEntry[] }): WhyView {
+  const { ticket, resolution, profiles, entries } = input
+  const byId = new Map(profiles.map(profile => [profile.id, profile] as const))
+  // A route's own display can be a raw id (Cursor's "claude-opus-5.5"); the line's entry names the version.
+  const title = (profile: RegistryProfile) => {
+    const { line, version } = modelLine(profile), entry = entryFor(entries, line)
+    return [entry, ...(entry?.older ?? [])].find(item => item?.version === version)?.name ?? fullName(profile)
+  }
+  const named = (profile: RegistryProfile) => `${title(profile)}${showsEffort(entryFor(entries, modelLine(profile).line)) ? ` · ${profile.effort}` : ''}`
+  const through = (profile: RegistryProfile) => (entryFor(entries, modelLine(profile).line)?.routes.length ?? 0) > 1 ? ` through ${harnessLabel(profile.harness)}` : ''
+  const skipped = resolution.ladder.filter(step => !step.selected && step.skip_reasons.length)
+  const steps: Part[][] = skipped.slice(0, SKIPS_SHOWN).map(step => {
+    const profile = byId.get(step.profile_id)
+    const who = profile ? `${title(profile)}${through(profile)}` : 'A model no longer in the registry'
+    return [{ text: `Skipped ${who}: ${reasonText(step.skip_reasons.join('; '))}.` }]
+  })
+  if (skipped.length > SKIPS_SHOWN) steps.push([{ text: `${skipped.length - SKIPS_SHOWN} more skipped for the same kinds of reasons.` }])
+  const runs = resolution.profile
+  if (!runs || resolution.owner_required) {
+    steps.push([{ text: `Nothing in the order of ${ticket} can run it right now, so it waits.` }])
+    return { title: `Why is ${ticket} waiting?`, steps }
+  }
+  steps.push([{ text: `${ticket} runs on ` }, { text: named(runs), strong: true }, { text: `${through(runs)}.` }])
+  return { title: `Why ${title(runs)} for ${ticket}?`, steps }
 }

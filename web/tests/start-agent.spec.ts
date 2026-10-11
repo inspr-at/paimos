@@ -251,7 +251,7 @@ test('changing host replaces the granted model', async ({ page }) => {
   await open(page, true)
   await expect(dialog(page).getByLabel('Model', { exact: true }).locator('option:checked')).toHaveText('workspace-build')
   await dialog(page).getByLabel('Host', { exact: true }).selectOption({ label: 'Laptop' })
-  await expect(dialog(page).getByLabel('Harness', { exact: true }).locator('option:checked')).toHaveText('Claude')
+  await expect(dialog(page).getByLabel('Harness', { exact: true }).locator('option:checked')).toHaveText('Claude Code')
   await expect(dialog(page).getByLabel('Model', { exact: true }).locator('option:checked')).toHaveText('other-model')
   await expect(dialog(page).getByRole('option', { name: 'workspace-build' })).toHaveCount(0)
   await expect(dialog(page).getByLabel('Thinking', { exact: true }).locator('option:checked')).toHaveText('Medium')

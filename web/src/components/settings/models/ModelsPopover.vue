@@ -9,6 +9,10 @@ const props = defineProps<{ open: boolean; anchor: HTMLElement | null; label: st
 const emit = defineEmits<{ 'update:open': [open: boolean]; close: [refocus: boolean] }>()
 const panel = ref<HTMLElement>()
 let release: (() => void) | undefined, frame = 0
+// The side is chosen once per opening. A fold that opens, a scroll or a resize never flips the menu over its trigger,
+// and above its trigger the menu keeps the height it opened with: more content scrolls in its list rather than
+// pushing the field and the options under the pointer away (AEON-541).
+let side: 'above' | 'below' | null = null, openedHeight = 0
 
 function place() {
   const a = props.anchor, p = panel.value
@@ -18,9 +22,11 @@ function place() {
   p.style.maxHeight = ''
   const rect = a.getBoundingClientRect(), width = p.offsetWidth, roomBelow = innerHeight - rect.bottom - 18, roomAbove = rect.top - 18
   let height = p.offsetHeight
-  const up = height > roomBelow && roomAbove > roomBelow
-  const room = up ? roomAbove : roomBelow
+  side ??= height > roomBelow && roomAbove > roomBelow ? 'above' : 'below'
+  const up = side === 'above'
+  const room = up ? Math.min(roomAbove, openedHeight || roomAbove) : roomBelow
   if (height > room) { p.style.maxHeight = `${room}px`; height = room }
+  if (up && !openedHeight) openedHeight = height
   p.style.left = `${Math.max(12, Math.min(rect.left, innerWidth - width - 12))}px`
   p.style.top = `${Math.max(12, up ? rect.top - height - 6 : rect.bottom + 6)}px`
 }
@@ -60,6 +66,7 @@ watch(() => props.open, async open => {
   await nextTick()
   if (!props.open) return
   if (!props.anchor?.isConnected) { close(false); return }
+  side = null; openedHeight = 0
   place(); attach()
   panel.value?.querySelector<HTMLElement>('[data-autofocus]')?.focus({ preventScroll: true })
 }, { immediate: true })
