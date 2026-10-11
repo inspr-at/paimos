@@ -164,7 +164,7 @@ const layoutTip = computed(() => [layouts[preset.value][0], `Next: ${layouts[nex
 const layoutEnabled = computed(() => canSplit.value && agents.loaded && !!(sessionId.value || agents.views.length || agents.historyViews.length) && !ticketPeekOpen.value)
 const willClose = computed(() => dragWidth.value !== null && workWidth.value - DIVIDER - handle.value < DETAILS_MIN)
 const layoutSaveFailed = computed(() => preferenceSaves.failed.has(`${person.value}/agents:layout`))
-let lastSession = '', layoutResize: ResizeObserver | undefined
+let lastSession = '', layoutResize: ResizeObserver | undefined, layoutFrame: number | undefined
 let rowAnchor: { id: string; top: number } | null = null
 let drag: { pointer: number; x: number; width: number; person: string } | null = null
 function rememberHandle(width: number) { layoutPref.save({ ...(layoutPref.value.value ?? {}), handle: clampHandle(width) }) }
@@ -475,9 +475,15 @@ function changed(event?: string, identity?: AgentEventIdentity) {
 let stopTierWatch: (() => void) | undefined
 onMounted(() => {
   layoutResize = new ResizeObserver(() => {
-    workWidth.value = Math.floor(work.value?.getBoundingClientRect().width ?? 0)
-    paneHeight.value = Math.max(0, (work.value?.closest('main')?.clientHeight ?? 0) - 8)
-    if (!canSplit.value) { drag = null; dragWidth.value = null }
+    // Applying a breakpoint changes the observed work area's height. Read on
+    // the next frame so that write cannot feed the same observer delivery.
+    if (layoutFrame !== undefined) return
+    layoutFrame = requestAnimationFrame(() => {
+      layoutFrame = undefined
+      workWidth.value = Math.floor(work.value?.getBoundingClientRect().width ?? 0)
+      paneHeight.value = Math.max(0, (work.value?.closest('main')?.clientHeight ?? 0) - 8)
+      if (!canSplit.value) { drag = null; dragWidth.value = null }
+    })
   })
   if (work.value) layoutResize.observe(work.value)
   const main = work.value?.closest('main')
@@ -492,6 +498,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   layoutResize?.disconnect(); drag = null; dragWidth.value = null
+  if (layoutFrame !== undefined) cancelAnimationFrame(layoutFrame)
   evidenceRefresh.stop(); document.removeEventListener('visibilitychange', evidenceVisible)
   stopTierWatch?.()
   stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)

@@ -218,6 +218,7 @@ test('AEON-1213: a person change closes details and cancels the previous handle 
 })
 
 test('AEON-1213: the work-area threshold and 240 ms presets honor reduced motion', async ({ page }) => {
+  const errors = watchErrors(page)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   const { data } = await setup(page)
@@ -231,6 +232,7 @@ test('AEON-1213: the work-area threshold and 240 ms presets honor reduced motion
   await expect(pane(page)).toHaveClass(/sheet/); await expect(dock(page)).toBeHidden()
   await page.locator('.agents-work').evaluate(el => { (el as HTMLElement).style.width = '1056px' })
   await expect(pane(page)).toHaveClass(/docked/); await expect(dock(page)).toBeVisible()
+  expect(errors).toEqual([])
 })
 
 test('AEON-1213: a failed handle save is visible without moving the preset', async ({ page }) => {
