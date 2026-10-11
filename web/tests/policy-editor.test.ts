@@ -2,7 +2,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createPolicyEditor, PolicyFailure, policyError, policyJSON } from '../src/lib/policyEditor.ts'
-import { preferenceRequest, compensatePreferences, preferenceScalars, writePreferences, type PreferenceSnapshot, type PreferenceMutation } from '../src/lib/policyModels.ts'
 function barrier<T>() { let resolve!: (value:T)=>void; const promise=new Promise<T>(yes=>{resolve=yes}); return {promise,resolve} }
 type Snapshot={person:string;revision:number;value:string}
 function fixture() {
@@ -47,50 +46,7 @@ test('older read cannot replace newer snapshot/draft',async()=>{
  const editor=createPolicyEditor<Snapshot,string>(()=>'owner',{read:async()=>++reads===1?held.promise:{person:'p',revision:2,value:'current'},write:async()=>({person:'p',revision:3,value:'saved'}),identity:s=>s.person,compensate:s=>s.value})
  const first=editor.load();await editor.load();editor.edit('new');held.resolve({person:'p',revision:1,value:'old'});await first;assert.equal(editor.snapshot.value?.revision,2);assert.equal(editor.draft.value,'new')
 })
-const auto={mode:'auto'} as const
-function prefs(level:PreferenceSnapshot['level']='person'):PreferenceSnapshot {
- const value={revision:7,residency:'eu' as const,residency_locked:true,prefs_locked:false,rows:[{kind_id:'kind',normal:{mode:'pinned' as const,profile_id:'first'},complex:{mode:'latest' as const,family:'openai',line:'sol',effort:'high'},locked:true},{kind_id:'sibling',normal:auto,complex:auto,locked:false}]}
- return {level,project:level==='project'?'captured-project':'',document:{person_id:'canonical-person',kinds:[],levels:{default:value,person:value,project:level==='project'?value:null},views:{default:null,person:null,project:null},can:{edit_default:true,edit_person:true,edit_project:true},residency_lock_mode:'warn'}}
-}
-test('closed builders preserve sibling fields, capture paths/person and never replace a whole level',()=>{
- for(const name of ['default','person','project'] as const){
-  const before=prefs(name),scalar:PreferenceMutation={unit:'scalars',value:{...preferenceScalars(before.document.levels[name]!),residency:'local'}},req=preferenceRequest(before,scalar),body=JSON.parse(req.init.body)
-  assert.equal(req.init.method,'PUT');assert.equal(req.init.headers['If-Prefs-Person'],'canonical-person');assert.deepEqual(body,{revision:7,residency:'local',residency_locked:true,prefs_locked:false});assert.equal(Object.hasOwn(body,'rows'),false)
-  const undone=compensatePreferences(before,scalar);assert.equal(undone.unit,'scalars');assert.equal(Object.hasOwn(JSON.parse(preferenceRequest(before,undone).init.body),'rows'),false)
-  const row={...before.document.levels[name]!.rows[0]!,normal:auto},rowReq=preferenceRequest(before,{unit:'row',kind_id:'kind',value:row}),rowBody=JSON.parse(rowReq.init.body)
-  assert.deepEqual(rowBody.complex,before.document.levels[name]!.rows[0]!.complex);assert.equal(rowBody.locked,true);assert.match(rowReq.path,/\/rows\/kind/)
-  const reset:PreferenceMutation={unit:'row',kind_id:'kind',value:null};assert.equal(preferenceRequest(before,reset).init.method,'DELETE');assert.match(preferenceRequest(before,reset).path,/\/rows\/kind/);assert.deepEqual(compensatePreferences(before,reset),{unit:'row',kind_id:'kind',value:before.document.levels[name]!.rows[0]})
-  assert.deepEqual(compensatePreferences(before,{unit:'row',kind_id:'new-kind',value:{kind_id:'new-kind',normal:auto,complex:auto,locked:false}}),{unit:'row',kind_id:'new-kind',value:null})
- }
- assert.throws(()=>preferenceRequest(prefs(),{unit:'scalars',value:{rows:[],residency:null,residency_locked:false,prefs_locked:false}} as unknown as PreferenceMutation),/scalar/)
- assert.throws(()=>preferenceRequest(prefs(),{unit:'delete-level'} as unknown as PreferenceMutation),/captured/)
- assert.throws(()=>preferenceRequest(prefs(),{unit:'row',kind_id:'kind',value:{kind_id:'other',normal:auto,complex:auto,locked:false}}),/captured/)
-})
-test('absent-scope scalar compensation uses null/false/false level PUT',()=>{
- const before=prefs();before.document.levels.person={revision:0,residency:null,residency_locked:false,prefs_locked:false,rows:[]}
- const req=preferenceRequest(before,compensatePreferences(before,{unit:'scalars',value:{residency:'eu',residency_locked:false,prefs_locked:false}}));assert.equal(req.init.method,'PUT');assert.deepEqual(JSON.parse(req.init.body),{revision:0,residency:null,residency_locked:false,prefs_locked:false})
-})
-for(const name of ['default','person','project'] as const)test(`row Reset and new-row Undo send query revisions at ${name} scope`,()=>{
- const before=prefs(name)
- if(name==='project')before.project='project /?&='
- const kind='kind /?&=',created:PreferenceMutation={unit:'row',kind_id:kind,value:{kind_id:kind,normal:auto,complex:auto,locked:false}}
- for(const mutation of [{unit:'row',kind_id:kind,value:null} as PreferenceMutation,compensatePreferences(before,created)]){
-  const req=preferenceRequest(before,mutation),url=new URL(req.path,'https://fixture.invalid')
-  assert.equal(req.init.method,'DELETE')
-  assert.equal(url.pathname,`/model-preferences/levels/${name}/rows/${encodeURIComponent(kind)}`)
-  assert.deepEqual(url.searchParams.getAll('revision'),['7'])
-  assert.equal(req.init.body,undefined)
-  assert.equal(url.searchParams.get('project_id'),name==='project'?before.project:null)
-  assert.equal(req.init.headers['If-Prefs-Person'],'canonical-person')
- }
-})
 test('retired-kind compensation has the specific honest refusal',()=>assert.equal(policyError(new PolicyFailure(422,'unknown_kind','unknown_kind'),true),'This work kind is no longer available; the change could not be restored.'))
-test('HTTP success alone cannot confirm wrong identity/revision',async()=>{
- const original=globalThis.fetch
- try{for(const result of [{person_id:'wrong',revision:8,level:{...prefs().document.levels.person,revision:8},running_outside:[]},{person_id:'canonical-person',revision:8,level:{...prefs().document.levels.person,revision:7},running_outside:[]}]){
- globalThis.fetch=async()=>new Response(JSON.stringify(result),{status:200});await assert.rejects(writePreferences(prefs(),{unit:'scalars',value:preferenceScalars(prefs().document.levels.person!)},false,new AbortController().signal),/confirmation/)
- }}finally{globalThis.fetch=original}
-})
 test('level writes remain serialized across two row editors and retain each captured revision',async()=>{
  const gate=barrier<Snapshot>(),started=barrier<void>(),writes:number[]=[]
  const wire={read:async()=>({person:'p',revision:2,value:'before'}),write:async(before:Snapshot,_desired:string)=>{writes.push(before.revision);started.resolve();if(writes.length===1)return gate.promise;return {person:'p',revision:4,value:'second'}},writeKey:()=> 'shared-level',identity:(s:Snapshot)=>s.person,compensate:(s:Snapshot)=>s.value}

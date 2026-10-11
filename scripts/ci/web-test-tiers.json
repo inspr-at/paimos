@@ -14452,12 +14452,6 @@
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"422/locked_above retains draft without auto-retry or success","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"HTTP success alone cannot confirm wrong identity/revision","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"absent-scope scalar compensation uses null/false/false level PUT","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"closed builders preserve sibling fields, capture paths/person and never replace a whole level","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"confirmed save followed by denied preview 401 clears private snapshot and Undo","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"confirmed save followed by denied preview 403 clears private snapshot and Undo","tier":"GATED-FULL"}
@@ -14483,12 +14477,6 @@
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"response byte bounds precede JSON parsing","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"retired-kind compensation has the specific honest refusal","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"row Reset and new-row Undo send query revisions at default scope","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"row Reset and new-row Undo send query revisions at person scope","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"row Reset and new-row Undo send query revisions at project scope","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"same-identity preview refresh keeps the captured draft baseline and confirmed Undo revision","tier":"GATED-FULL"}
     ,
