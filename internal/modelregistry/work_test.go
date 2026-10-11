@@ -196,6 +196,7 @@ func TestResolveWorkEmptyMatrixEquivalence(t *testing.T) {
 		return nil
 	})
 }
+
 // Risk: a paused or retired model in a saved order still runs instead of the
 // order's next step, or a residency requirement lets any role run on an
 // account outside it. Pauses are Models v2's ladder holds.

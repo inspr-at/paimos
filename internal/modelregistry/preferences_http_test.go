@@ -212,6 +212,7 @@ func TestWorkKindLifecyclePaginationAndTenantIsolation(t *testing.T) {
 		t.Fatal("kind audit mismatch")
 	}
 }
+
 // Risk: a retired route still runs or retirement is not audited and
 // reversible, another person's or an operator key's call gains a person's row,
 // or a person's kind row changes calls that name no kind. Models v2: GET
