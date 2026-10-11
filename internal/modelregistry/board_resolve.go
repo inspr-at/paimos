@@ -78,7 +78,12 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if !boardDispatchAdopted(s) && !(q.ExplicitBoard && boardInitialized(s)) {
 		return nil, nil
 	}
-	c, err := loadBoardCatalog(ctx, tx, true)
+	var c boardCatalog
+	if preview, ok := ctx.Value(previewBoardKey{}).(*preferencePreviewCatalog); ok && preview != nil {
+		c, err = preview.routingBoard(ctx, tx)
+	} else {
+		c, err = loadBoardCatalog(ctx, tx, true)
+	}
 	if err != nil {
 		return nil, err
 	}

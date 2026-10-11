@@ -21,6 +21,7 @@ type reviewLookupFailure struct {
 	pgx.Tx
 	profiles bool
 	accounts int
+	failAt   int
 	err      error
 }
 
@@ -31,7 +32,7 @@ func (f *reviewLookupFailure) Query(ctx context.Context, sql string, args ...any
 	}
 	if !f.profiles && strings.HasPrefix(query, "SELECT id::text, account_key, harness, daemon_id") {
 		f.accounts++
-		if f.accounts == 2 {
+		if f.err != nil && f.accounts == f.failAt {
 			return nil, f.err
 		}
 	}
@@ -93,7 +94,12 @@ func TestResolveWorkPropagatesLateReviewLookupErrors(t *testing.T) {
 				q := WorkQuery{Role: "review-gate", AuthorFamily: "openai", Harness: "claude"}
 				now := time.Now()
 				injected := errors.New("review lookup unavailable")
-				failing := &reviewLookupFailure{Tx: tx, profiles: profiles, err: injected}
+				// Count the walk's account lookups; the last follows the choice.
+				counting := &reviewLookupFailure{Tx: tx}
+				if _, err := ResolveReviewFor(t.Context(), counting, p, q, now); err != nil {
+					return err
+				}
+				failing := &reviewLookupFailure{Tx: tx, profiles: profiles, err: injected, failAt: counting.accounts}
 				partial, err := ResolveReviewFor(t.Context(), failing, p, q, now)
 				if profiles {
 					// Models reads its catalog before the walk: the fault

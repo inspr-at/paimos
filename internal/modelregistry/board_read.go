@@ -41,11 +41,6 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx, routing ...bool) (boardCat
 	if err != nil {
 		return out, err
 	}
-	for _, p := range profiles {
-		family, line, _ := ProfileLine(p)
-		id := family + ":" + line
-		out.profiles[id] = append(out.profiles[id], p)
-	}
 	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(d.introduced_at,p.created_at) FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id`+strings.Replace(filter, "enabled", "p.enabled", 1)+` LIMIT 513`)
 	if err != nil {
 		return out, err
@@ -64,6 +59,18 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx, routing ...bool) (boardCat
 	rows.Close()
 	if err != nil {
 		return out, err
+	}
+	return boardCatalogFrom(profiles, stamp), nil
+}
+
+// boardCatalogFrom groups already bounded pins into lines. Introduction
+// stamps only date cards; routing may pass none.
+func boardCatalogFrom(profiles []Profile, stamp map[string]time.Time) boardCatalog {
+	out := boardCatalog{profiles: map[string][]Profile{}, introduced: map[string]time.Time{}, lines: []modelprefs.BoardLine{}}
+	for _, p := range profiles {
+		family, line, _ := ProfileLine(p)
+		id := family + ":" + line
+		out.profiles[id] = append(out.profiles[id], p)
 	}
 	keys := []string{}
 	for id := range out.profiles {
@@ -87,7 +94,7 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx, routing ...bool) (boardCat
 		}
 		out.lines = append(out.lines, l)
 	}
-	return out, nil
+	return out
 }
 func (c boardCatalog) candidates(id string, level int, review bool) []Profile {
 	return c.effortCandidates(id, "", level, review)

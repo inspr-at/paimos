@@ -173,6 +173,10 @@ func TestSecurityRoutesReplaceExpireAndRemainTenantScoped(t *testing.T) {
 		t.Fatal("revision ignored the security override")
 	}
 	inRegistry(t, p, func(tx pgx.Tx) error {
+		// Refresh the reviewer's heartbeat at the controlled instant.
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$1`, until.Add(time.Minute)); err != nil {
+			return err
+		}
 		expired, err := ResolveWork(t.Context(), tx, p, WorkQuery{Role: "review-gate-security", AuthorFamily: "openai"}, until.Add(time.Minute))
 		if err != nil {
 			return err
@@ -230,6 +234,10 @@ func TestRefreshLaddersPreserveRetirementAndSuppression(t *testing.T) {
 					return err
 				}
 				for _, at := range []time.Time{now, now.Add(2 * time.Hour)} {
+					// Refresh the independent account heartbeats at the controlled instant.
+					if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$1`, at); err != nil {
+						return err
+					}
 					out, err := ResolveWork(t.Context(), tx, p, q, at)
 					if err != nil {
 						return err

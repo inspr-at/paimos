@@ -24,6 +24,36 @@ type preferencePreviewCatalog struct {
 	ladders       map[string][]ladderStep
 	ladderErrors  map[string]error
 	orderModes    map[string]string
+	board         *boardCatalog
+	boardError    error
+}
+
+// previewBoardKey carries a preview's catalog into the Models walk.
+type previewBoardKey struct{}
+
+// routingBoard groups the preview's one bounded profile read into the
+// routing catalog every cell's Models walk reuses. An over-limit catalog
+// stays incomplete rather than being re-read unbounded per cell.
+func (c *preferencePreviewCatalog) routingBoard(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
+	if c.board == nil && c.boardError == nil {
+		profiles, err := c.profiles(ctx, tx)
+		if err != nil {
+			c.boardError = err
+		} else {
+			enabled := make([]Profile, 0, len(profiles))
+			for _, p := range profiles {
+				if p.Enabled {
+					enabled = append(enabled, p)
+				}
+			}
+			board := boardCatalogFrom(enabled, nil)
+			c.board = &board
+		}
+	}
+	if c.boardError != nil {
+		return boardCatalog{}, c.boardError
+	}
+	return *c.board, nil
 }
 
 func (c *preferencePreviewCatalog) profiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {

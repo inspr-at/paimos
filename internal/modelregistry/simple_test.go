@@ -308,7 +308,7 @@ func TestMinimalQueuedScoutUsesRoleLadderWhenBoardDoesNotApply(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,queue_node_id,queue_by_principal_id,queue_at,queue_security_review_required) VALUES($1,$2,$3,$4,$5,now(),false)`, admin.TenantID, order, runner, ticket, member.ID)
 		return err
 	})
-	var want string
+	var want, column string
 	inRegistry(t, member, func(tx pgx.Tx) error {
 		now, err := dbNow(t.Context(), tx)
 		if err != nil {
@@ -336,11 +336,11 @@ func TestMinimalQueuedScoutUsesRoleLadderWhenBoardDoesNotApply(t *testing.T) {
 		if resolved.Profile == nil || resolved.Profile.ID != board.Profile.ID {
 			t.Fatalf("dispatch and the Models walk disagree: %+v vs %+v", resolved.Profile, board.Profile)
 		}
-		want = boardLineID(*resolved.Profile)
+		want, column = boardLineID(*resolved.Profile), board.Trace.Column
 		return nil
 	})
 	doc := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple", nil, ""), 200)
-	if doc.Next == nil || doc.Next.Ticket != "SCOUT-1" || doc.Next.Column != "backend" || doc.Next.Line == nil || *doc.Next.Line != want {
+	if doc.Next == nil || doc.Next.Ticket != "SCOUT-1" || doc.Next.Column != column || doc.Next.Line == nil || *doc.Next.Line != want {
 		t.Fatalf("queued scout was reported blocked or on another line: next=%+v want=%s", doc.Next, want)
 	}
 }

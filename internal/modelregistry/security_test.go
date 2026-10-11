@@ -278,8 +278,20 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 	grantModelReporter(t, owner, agent)
 	agent.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
 	enrollEvidenceHarness(t, owner, agent, "grok") // null allowlist
-	// Routing is derived from Models; the retired ladder writer cannot reset it.
-	before := registryRoutes(t, owner)
+	// Models policy is its saved orders, rules, constraints and pauses.
+	policy := func() string {
+		var state string
+		inRegistry(t, owner, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
+ 'orders',(SELECT jsonb_agg(to_jsonb(o) ORDER BY o.profile_id,o.column_key,o.situation) FROM model_pref_orders o),
+ 'situations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY o.profile_id,o.column_key,o.situation) FROM model_pref_situation_orders o),
+ 'rules',(SELECT jsonb_agg(to_jsonb(r) ORDER BY r.scope,r.column_key,r.line) FROM model_rules r),
+ 'constraints',(SELECT jsonb_agg(to_jsonb(c) ORDER BY c.scope,c.column_key,c.line) FROM model_row_constraints c),
+ 'pauses',(SELECT jsonb_agg(to_jsonb(x) ORDER BY x.harness,x.model) FROM model_pauses x))::text`).Scan(&state)
+		})
+		return state
+	}
+	before := policy()
 	o := Observation{ReportID: EvidenceID("observed-disabled"), Harness: "grok", Model: "grok-next", Effort: "xhigh", Status: "advertised"}
 	if result := reportEvidence(t, agent, []Observation{o}, 200); result.Added != 1 {
 		t.Fatal(result)
@@ -328,7 +340,7 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 		return nil
 	})
 	decode[Profile](t, &owner, "POST", "/api/models/proposals/accept", accept, 200)
-	if eventCount(t, owner, "model.proposal_accepted") != 1 || !reflect.DeepEqual(before, registryRoutes(t, owner)) {
+	if eventCount(t, owner, "model.proposal_accepted") != 1 || before != policy() {
 		t.Fatal("grant replay or grant changed policy")
 	}
 }
