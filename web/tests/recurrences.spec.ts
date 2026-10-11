@@ -181,6 +181,8 @@ test('a delayed Run now read is discarded when the project changes', async ({ pa
   await row(page).getByRole('button', { name: 'Run now', exact: true }).click(); await arrived
   await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects', exact: true }).click()
   await page.locator('a[href="/p/AEON"]').first().click(); await page.getByRole('tab', { name: 'Settings', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Project settings sections' }).getByRole('link', { name: /^Routines/ }).click()
+  await expect(page).toHaveURL('/p/AEON/settings/routines')
   release()
   await expect(page.getByText('No routines yet. Use New routine…, or Repeat… on a ticket.', { exact: true })).toBeVisible()
   await expect(page.getByRole('dialog', { name: 'Run recurring work now' })).toHaveCount(0)
