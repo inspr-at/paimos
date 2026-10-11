@@ -404,20 +404,8 @@ func (e *Executor) dispatch(ctx context.Context, tx pgx.Tx, tenantID string, r i
 	}
 	// Shared routing/fairness can materialize account windows. Enforce S09's
 	// exact input bounds before entering those helpers, rather than after work.
-	for _, bound := range []struct {
-		query string
-		limit int
-	}{
-		{`SELECT count(*) FROM (SELECT 1 FROM agent_accounts LIMIT 1025) x`, 1024},
-		{`SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows w WHERE w.removed_at IS NULL OR EXISTS(SELECT 1 FROM account_limit_rules l WHERE l.tenant_id=w.tenant_id AND l.from_window_id=w.id AND l.removed_at IS NULL) LIMIT 4097) x`, 4096},
-	} {
-		var count int
-		if err := tx.QueryRow(ctx, bound.query).Scan(&count); err != nil {
-			return out, err
-		}
-		if count > bound.limit {
-			return out, workorders.Fail(409, "account_inputs_unreadable")
-		}
+	if err := routingBounds(ctx, tx); err != nil {
+		return out, err
 	}
 	var session *string
 	var generation int64
@@ -629,8 +617,9 @@ func (e *Executor) finishActor(ctx context.Context, tx pgx.Tx, owner tenant.Prin
 	if a.Budget.TokenCeiling != nil {
 		maximum.Tokens = *a.Budget.TokenCeiling
 	}
-	if a.Budget.MoneyCeilingMicroUSD != nil {
-		maximum.PaidMicroUSD = *a.Budget.MoneyCeilingMicroUSD
+	var billing string
+	if err := tx.QueryRow(ctx, `SELECT billing_mode FROM agent_accounts WHERE id=$1`, account).Scan(&billing); err != nil {
+		return nil, err
 	}
 	// Continuations reuse the frozen run balance. Settled usage is counted once;
 	// every outstanding actor/evaluator hold stays unavailable to the next actor.
@@ -655,14 +644,9 @@ func (e *Executor) finishActor(ctx context.Context, tx pgx.Tx, owner tenant.Prin
 			}
 			a.Budget.MoneyCeilingMicroUSD = &remaining
 		}
-		var billing string
-		if err := tx.QueryRow(ctx, `SELECT billing_mode FROM agent_accounts WHERE id=$1`, account).Scan(&billing); err != nil {
-			return nil, err
-		}
-		maximum.PaidMicroUSD = 0
-		if billing == "api" && a.Budget.MoneyCeilingMicroUSD != nil {
-			maximum.PaidMicroUSD = *a.Budget.MoneyCeilingMicroUSD
-		}
+	}
+	if billing == "api" && a.Budget.MoneyCeilingMicroUSD != nil {
+		maximum.PaidMicroUSD = *a.Budget.MoneyCeilingMicroUSD
 	}
 	broker := routinebudget.Broker{Runtime: e.options.Runtime, Gates: e.options.Gates}
 	held, err := broker.ReserveTx(ctx, tx, owner, routinebudget.Reservation{RunID: r.id, AttemptID: attempt, ActionID: action, GrantKey: key, AgentRunID: run.ID, AccountID: account, Maximum: maximum})
@@ -712,7 +696,7 @@ func (e *Executor) LaunchChecks() agentruns.RoutineLaunchChecks {
 		}
 		worker := tenant.Principal{ID: g.PrincipalID, TenantID: p.TenantID, Kind: tenant.Agent, Scopes: []string{"run.claim"}}
 		var bound bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_budget_grants WHERE id=$1 AND run_id=$2 AND agent_run_id=$3 AND account_id=$4 AND parent_id IS NULL AND state='held' AND ($5::bigint IS NULL OR maximum_tokens=$5) AND ($6::bigint IS NULL OR maximum_microusd=$6))`, g.BudgetGrantID, g.RoutineRunID, g.AgentRunID, g.AccountID, g.RemainingTokens, g.RemainingCostMicros).Scan(&bound); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_budget_grants WHERE id=$1 AND run_id=$2 AND agent_run_id=$3 AND account_id=$4 AND parent_id IS NULL AND state='held' AND ($5::bigint IS NULL OR maximum_tokens=$5) AND CASE WHEN billing_mode='subscription' THEN maximum_microusd=0 ELSE ($6::bigint IS NULL OR maximum_microusd=$6) END)`, g.BudgetGrantID, g.RoutineRunID, g.AgentRunID, g.AccountID, g.RemainingTokens, g.RemainingCostMicros).Scan(&bound); err != nil {
 			return err
 		}
 		if !bound {

@@ -579,10 +579,21 @@ func (m *Module) RoutineResultTx(ctx context.Context, tx pgx.Tx, order string, a
 	}
 	var current, evidence bool
 	var fixing any
+	if len(admittedFix) > 1 {
+		return v, workorders.Fail(409, "routine_fix_binding_unavailable")
+	}
 	if len(admittedFix) == 1 {
 		fixing = admittedFix[0]
+		var bound bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_attempts a JOIN routine_runs rr ON rr.id=a.run_id JOIN agent_runs fix ON fix.id=a.agent_run_id JOIN work_order_reviews v ON v.work_order_id=$1 JOIN routine_attempts author ON author.agent_run_id=v.author_run_id AND author.run_id=rr.id WHERE a.agent_run_id=$2 AND a.role='fix' AND a.assignment_digest=rr.assignment_digest AND fix.retry_of_run_id=v.author_run_id AND fix.work_order_id=(SELECT work_order_id FROM agent_runs WHERE id=v.author_run_id))`, order, fixing).Scan(&bound); err != nil {
+			return v, err
+		}
+		if !bound {
+			return v, workorders.Fail(409, "routine_fix_binding_unavailable")
+		}
 	}
-	err = tx.QueryRow(ctx, `SELECT v.evidence_id IS NOT NULL,
+	err = tx.QueryRow(ctx, `SELECT v.evidence_id IS NOT NULL
+ AND EXISTS(SELECT 1 FROM agent_runs reviewer JOIN model_profiles p ON p.id=reviewer.model_profile_id WHERE reviewer.id=v.run_id AND reviewer.requested_model=p.model),
  v.work_order_id=(SELECT x.work_order_id FROM work_order_reviews x WHERE x.ticket_node_id=v.ticket_node_id ORDER BY x.created_at DESC,x.work_order_id DESC LIMIT 1)
  AND NOT EXISTS(SELECT 1 FROM agent_runs newer JOIN nodes n ON n.id=newer.work_order_id JOIN work_orders w ON w.node_id=n.id WHERE n.parent_id=v.ticket_node_id AND w.kind='build' AND newer.created_at>ar.created_at AND ($2::uuid IS NULL OR newer.id<>$2))
  FROM work_order_reviews v JOIN agent_runs ar ON ar.id=v.author_run_id WHERE v.work_order_id=$1`, order, fixing).Scan(&evidence, &current)

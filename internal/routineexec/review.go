@@ -35,6 +35,26 @@ type completion struct {
 	Range      *reviewgate.CommitRange `json:"range,omitempty"`
 }
 
+// Both initial dispatch and continuation use the same bounded routing inputs.
+func routingBounds(ctx context.Context, tx pgx.Tx) error {
+	for _, bound := range []struct {
+		query string
+		limit int
+	}{
+		{`SELECT count(*) FROM (SELECT 1 FROM agent_accounts LIMIT 1025) x`, 1024},
+		{`SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows w WHERE w.removed_at IS NULL OR EXISTS(SELECT 1 FROM account_limit_rules l WHERE l.tenant_id=w.tenant_id AND l.from_window_id=w.id AND l.removed_at IS NULL) LIMIT 4097) x`, 4096},
+	} {
+		var count int
+		if err := tx.QueryRow(ctx, bound.query).Scan(&count); err != nil {
+			return err
+		}
+		if count > bound.limit {
+			return workorders.Fail(409, "account_inputs_unreadable")
+		}
+	}
+	return nil
+}
+
 // Accepted daemon telemetry only persists demand. No worker requests an
 // approval, selects a reviewer, creates a retry or settles guessed usage.
 func (e *Executor) recordCompletion(ctx context.Context, tx pgx.Tx, p tenant.Principal, v agentruns.Run, t agentruns.Telemetry, _ *[]events.Change) error {
@@ -239,12 +259,12 @@ func policyPin(ctx context.Context, tx pgx.Tx, project string) (string, error) {
 }
 
 func authorProof(ctx context.Context, tx pgx.Tx, run string) error {
-	var status, evidence, model, effective, h, f string
-	err := tx.QueryRow(ctx, `SELECT r.status,r.model_evidence,p.model,coalesce(r.effective_model,''),p.harness,p.family FROM agent_runs r JOIN model_profiles p ON p.id=r.model_profile_id WHERE r.id=$1`, run).Scan(&status, &evidence, &model, &effective, &h, &f)
+	var status, evidence, model, requested, effective, h, f string
+	err := tx.QueryRow(ctx, `SELECT r.status,r.model_evidence,p.model,coalesce(r.requested_model,''),coalesce(r.effective_model,''),p.harness,p.family FROM agent_runs r JOIN model_profiles p ON p.id=r.model_profile_id WHERE r.id=$1`, run).Scan(&status, &evidence, &model, &requested, &effective, &h, &f)
 	if err != nil {
 		return err
 	}
-	if status != "completed" || evidence != "vendor_reported" || !reviewgate.ModelMatches(model, effective) || !harnesslaunch.FamilyMatches(h, model, f) {
+	if status != "completed" || evidence != "vendor_reported" || requested != model || !reviewgate.ModelMatches(requested, effective) || !harnesslaunch.FamilyMatches(h, model, f) {
 		return workorders.Fail(409, "author_model_proof_unavailable")
 	}
 	return nil
@@ -289,6 +309,9 @@ func (e *Executor) advance(ctx context.Context, tx pgx.Tx, tid string, r intent,
 	}
 	if e.options.Reviews == nil {
 		return nil, workorders.Fail(409, "coordinator_review_unavailable")
+	}
+	if err := routingBounds(ctx, tx); err != nil {
+		return nil, err
 	}
 	var pending []events.Change
 	var result map[string]any

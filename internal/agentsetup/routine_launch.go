@@ -124,8 +124,13 @@ func RoutineDigest(value string) bool {
 
 func (g RoutineGrant) Validate() error {
 	if l := g.Lineage; l != nil {
-		if (l.Role != "review" && l.Role != "fix") || !routineUUID.MatchString(l.PreviousRunID) || l.PreviousRunID == g.AgentRunID || !RoutineDigest(l.PolicyDigest) || !routineRepository.MatchString(l.Repository) || len(l.Repository) > 200 || strings.Contains(l.Repository, "../") || !routineSHA.MatchString(l.BaseSHA) || !routineSHA.MatchString(l.HeadSHA) || l.BaseSHA == l.HeadSHA || !routineUUID.MatchString(l.ReviewOrderID) {
+		if (l.Role != "review" && l.Role != "fix") || !routineUUID.MatchString(l.PreviousRunID) || l.PreviousRunID == g.AgentRunID || !RoutineDigest(l.PolicyDigest) || !routineRepository.MatchString(l.Repository) || len(l.Repository) > 200 || !routineSHA.MatchString(l.BaseSHA) || !routineSHA.MatchString(l.HeadSHA) || l.BaseSHA == l.HeadSHA || !routineUUID.MatchString(l.ReviewOrderID) {
 			return errors.New("routine continuation binding unavailable")
+		}
+		for _, part := range strings.Split(l.Repository, "/") {
+			if part == "." || part == ".." {
+				return errors.New("routine continuation repository unavailable")
+			}
 		}
 	}
 	for _, id := range []string{g.LedgerGeneration, g.LaunchID, g.TenantID, g.OwnerID, g.ProjectID, g.RoutineRunID, g.AgentRunID, g.PrincipalID, g.ExecutionPrincipalID, g.AccountID, g.ComputerID, g.QualificationID, g.BudgetGrantID} {

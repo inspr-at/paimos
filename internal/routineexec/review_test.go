@@ -107,13 +107,13 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 			advanced, err = d.e.ContinueTx(t.Context(), tx, f.owner.TenantID, receipt)
 			return err
 		}))
-		if advanced != want {
-			t.Fatalf("advance=%v want %v", advanced, want)
-		}
 		var raw []byte
 		must(t, f.d.Admin.QueryRow(t.Context(), `SELECT coalesce(result,'{}') FROM routine_effect_outbox WHERE id=$1`, receipt).Scan(&raw))
 		out := map[string]any{}
 		must(t, json.Unmarshal(raw, &out))
+		if advanced != want {
+			t.Fatalf("advance=%v want %v; result=%+v", advanced, want, out)
+		}
 		return out
 	}
 	wait := func(receipt, reason string) {
@@ -132,6 +132,14 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	d.mode.Store(2)
 	wait(finished, "main_red")
 	d.mode.Store(0)
+	f.exec(`UPDATE project_routine_execution_settings SET automatic_launch_enabled=false WHERE project_id=$1`, f.project)
+	wait(finished, "main_red") // disabled execution retains the existing receipt
+	var provisional int
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM routine_budget_grants WHERE run_id=$1`, f.run).Scan(&provisional))
+	if provisional != 1 {
+		t.Fatalf("disabled continuation created grants: %d", provisional)
+	}
+	f.exec(`UPDATE project_routine_execution_settings SET automatic_launch_enabled=true WHERE project_id=$1`, f.project)
 	first := advance(finished, true)
 	reviewRun := first["agent_run_id"].(string)
 	reviewOrder := first["review_order_id"].(string)
@@ -154,6 +162,12 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	f.exec(`UPDATE agent_runs SET effective_model='different-model' WHERE id=$1`, reviewRun)
 	wait(reviewFinished, "routine_review_proof_unavailable")
 	f.exec(`UPDATE agent_runs SET effective_model='review-model' WHERE id=$1`, reviewRun)
+	f.exec(`UPDATE model_profiles SET family='openai' WHERE id=$1`, reviewer)
+	wait(reviewFinished, "routine_review_proof_unavailable")
+	f.exec(`UPDATE model_profiles SET family='anthropic' WHERE id=$1`, reviewer)
+	f.exec(`UPDATE work_order_reviews SET head_sha=$2 WHERE work_order_id=$1`, reviewOrder, strings.Repeat("c", 40))
+	wait(reviewFinished, "review_head_changed")
+	f.exec(`UPDATE work_order_reviews SET head_sha=$2 WHERE work_order_id=$1`, reviewOrder, cr.HeadSHA)
 	f.exec(`INSERT INTO cross_family_policies(tenant_id,project_id,mode,allowed_families,updated_by) VALUES($1,$2,'allowlist',ARRAY['anthropic'],$3)`, f.owner.TenantID, f.project, f.owner.ID)
 	wait(reviewFinished, "review_policy_changed")
 	f.exec(`DELETE FROM cross_family_policies WHERE project_id=$1`, f.project)
