@@ -16,13 +16,14 @@ const DONE = '5e000000-0000-4000-8000-000000000031'
 async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
   await page.clock.install({ time: NOW })
   const work = fixtures(); work.preferences.theme = { choice: theme }
+  work.preferences['ui.agents.sections'] = { dial: false }
   await mockWork(page, work, { admin: true })
   const data = agentData({
     now: NOW, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' },
     nodes: { 'n-1': { key: 'PHAROS-7', title: 'Fleet list' }, 'n-2': { key: 'PHAROS-12', title: 'Wiederherstellung der Sicherungskopien für alle Produktionsserver überprüfen' } },
   })
   const worker = data.sessions[1]!
-  Object.assign(worker, { model: 'gpt-6.1-sol', reasoning_effort: 'xhigh', account_label: 'ChatGPT Pro', agent_activity_mode: 'agent_summary', current_activity: { text: 'Überprüfe die Wiederherstellungsprotokolle auf allen Rechnern im Rechenzentrum', source: 'auto', at: ago(1) } })
+  Object.assign(worker, { model: 'gpt-6.1-sol', reasoning_effort: 'xhigh', account_label: 'ChatGPT Pro', agent_activity_mode: 'agent_summary', current_activity: { text: 'Prüfe die Sicherungen auf allen Rechnern im Rechenzentrum und vergleiche die Protokolle mit gestern', source: 'auto', at: ago(1) } })
   Object.assign(data.sessions[0]!, { model: 'claude-opus-5-5', reasoning_effort: 'xhigh', account_label: 'Claude Max' })
   // Done three minutes ago: it keeps its place until 10:07.
   data.sessions.push({ ...data.sessions[0]!, id: DONE, role: 'worker', display_label: 'Release notes worker', ticket_node_id: null, ticket: null, run_id: null, phase: 'stopped', activity: 'idle', heartbeat_at: ago(3.2), stopped_at: ago(3), stop_reason: 'completed', finished: true, created_at: ago(40) })
@@ -33,6 +34,9 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
 const rows = (page: Page) => page.locator('.sessions .row[data-row]')
 const row = (page: Page, id: string) => page.locator(`.sessions [data-row="s:${id}"]`)
 const note = (page: Page) => page.locator('.sessions [data-held-note]')
+// A box in document coordinates (main scrolls), so a scroll is never mistaken for a move.
+const docBox = (locator: ReturnType<Page['locator']>) => locator.evaluate(el => { const r = el.getBoundingClientRect(), top = document.querySelector('main')!.scrollTop; return [Math.round(r.x), Math.round(r.y + top), Math.round(r.width), Math.round(r.height)] })
+const showList = (page: Page) => page.locator('.sessions').evaluate(el => el.scrollIntoView({ block: 'start' }))
 // Layout boxes of every row (document coordinates: main's scroll added back).
 const boxes = (page: Page) => page.locator('.sessions .row[data-row]').evaluateAll(els => {
   const main = document.querySelector('main')!
@@ -107,10 +111,11 @@ for (const theme of ['light', 'dark'] as const) {
       expect(p.glyphs).toEqual([])
       expect(p.english).toEqual([])
       expect(p.hscroll).toBe(false)
+      await showList(page)
+      await page.screenshot({ path: info.outputPath(`${width}-${theme}-rows.png`) })
       // Two lines whatever the state: every row with no tools line has one height.
-      const heights = await page.locator('.sessions .row[data-row]:not(:has(.worker-tools, .lineage))').evaluateAll(els => [...new Set(els.map(el => Math.round(el.getBoundingClientRect().height)))])
-      expect(heights).toHaveLength(1)
-      await page.screenshot({ path: info.outputPath(`${width}-${theme}-rows.png`), fullPage: true })
+      const heights = await page.locator('.sessions .row[data-row]:not(:has(.worker-tools, .lineage))').evaluateAll(els => els.map(el => `${el.getAttribute('data-row')} ${Math.round(el.getBoundingClientRect().height)}`))
+      expect(new Set(heights.map(h => h.split(' ')[1])).size, heights.join(', ')).toBe(1)
       expect(errors).toEqual([])
     })
   }
@@ -136,16 +141,19 @@ for (const theme of ['light', 'dark'] as const) {
     expect(p.edges).toEqual([])
     expect(p.glyphs).toEqual([])
     expect(p.hscroll, 'no sideways scroll at 390').toBe(false)
-    await page.screenshot({ path: info.outputPath(`390-${theme}-rows.png`), fullPage: true })
+    await showList(page)
+    await page.screenshot({ path: info.outputPath(`390-${theme}-rows.png`) })
   })
 }
 
 test.describe('touch', () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 900 } })
-  test('390: every target in the Sessions card is 44 px', async ({ page }) => {
+  test('390: every target in the Sessions card is 44 px', async ({ page }, info) => {
     await setup(page)
     await page.goto('/agents')
     await expect(rows(page).first()).toBeVisible()
+    await showList(page)
+    await page.screenshot({ path: info.outputPath('390-touch.png') })
     const small = await page.locator('.sessions').evaluate(card => {
       const out: string[] = []
       for (const el of card.querySelectorAll<HTMLElement>('button, a[href], input:not([type="checkbox"]), select')) {
@@ -173,7 +181,8 @@ test('a refresh never adds, moves or removes a row under the pointer; the change
   const first = row(page, data.sessions[0]!.id)
   await expect(first).toBeVisible()
   await expect(note(page)).toContainText('Live · updated')
-  const noteBox = await note(page).boundingBox()
+  await showList(page)
+  const noteBox = await docBox(note(page))
   // The pointer rests on a row; a new worker arrives and a working one leaves the list.
   await first.locator('.l2').hover()
   const before = await boxes(page)
@@ -185,8 +194,7 @@ test('a refresh never adds, moves or removes a row under the pointer; the change
   expect(await boxes(page), 'nothing moved, arrived or left under the pointer').toEqual(before)
   await expect(row(page, gone.id)).toBeVisible()
   // The note keeps its box whichever text it shows (AEON-541).
-  const heldBox = await note(page).boundingBox()
-  expect(Math.abs(heldBox!.x - noteBox!.x) + Math.abs(heldBox!.width - noteBox!.width) + Math.abs(heldBox!.y - noteBox!.y)).toBeLessThanOrEqual(1)
+  expect(await docBox(note(page))).toEqual(noteBox)
   await page.screenshot({ path: info.outputPath('1440-light-held.png') })
   // The pointer leaves: still held for 1.5 s, then the list follows.
   await page.mouse.move(700, 8)

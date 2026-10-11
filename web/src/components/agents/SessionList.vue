@@ -1025,7 +1025,8 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .exec-model { font-size: 12.5px; color: var(--ink); }
 .exec-account { font-size: 11.5px; color: var(--ink-3); }
 /* The estimate follows the key on its line and wraps below it only when the column is narrow. */
-.row > .c-ticket { display: flex; flex-wrap: wrap; align-items: center; align-content: center; gap: 3px 8px; padding-block: 10px; }
+/* Stacked under a narrow key, the chip and the estimate still fit the row's two lines: its height never depends on an estimate. */
+.row > .c-ticket { display: flex; flex-wrap: wrap; align-items: center; align-content: center; gap: 3px 8px; padding-block: 0; }
 .row-eta { font-size: 12px; }
 .ticket-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); text-decoration: none; font-variant-ligatures: none; white-space: nowrap; }
 .ticket-chip:hover { filter: brightness(1.04); text-decoration: underline; }
@@ -1082,41 +1083,51 @@ function sessionLinkClick(event: MouseEvent, id: string) {
    ends with its time; line 2 says what it works on. Execution, Tier, Host, Heartbeat and the ticket
    move to the details and the row menu. 16 px per tree level (AEON-784). */
 @container sessions (max-width: 880px) {
-  .table { --tree-step: 16px; display: block; }
-  .thead, .c-time, .c-ticket, .execution-host, .c-beat { display: none; }
+  /* A 44 px fold column on touch and phones; 28 px beside a fine pointer. */
+  .table { --tree-step: 16px; --fold: 28px; display: block; }
+  .thead, .row > :is(.c-time, .c-ticket, .execution-host, .c-beat) { display: none; }
   /* Flex, not an inline line box: the Ended toggle is a button and its baseline
      made that header ~20px taller than the text headers, so the row jumped
      when a phone session moved from Pausing to Ended (AEON-790). */
   .group-row { display: flex; align-items: center; height: 26px; margin: 12px 8px 2px; padding: 0 8px; }
   /* Two 20 + 18 px lines (gap 2) beside the 30 px avatar put its centre, the fold's and the tree's
      joint 29 px below the row's top. */
-  .row { --tree-joint: 29px; display: grid; grid-template-columns: 44px 30px minmax(0, 1fr) auto; column-gap: 8px; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
+  .row { --tree-joint: 29px; display: grid; grid-template-columns: var(--fold) 30px minmax(0, 1fr) auto; column-gap: 8px; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }
   .row > .c-agent { grid-column: 1 / 4; display: grid; grid-template-columns: subgrid; align-items: start; row-gap: 0; padding-block: 0; }
   .row.worker .c-agent { padding-left: 0; }
-  /* The 44 px fold button is centred on the avatar's centre line. */
-  .tree-fold, .tree-fold-space { grid-column: 1; grid-row: 1; width: 44px; height: 44px; margin-top: calc(var(--tree-joint) - 10px - 22px); }
+  /* The fold button is centred on the avatar's centre line. */
+  .tree-fold, .tree-fold-space { grid-column: 1; grid-row: 1; width: var(--fold); height: var(--fold); margin-top: calc(var(--tree-joint) - 10px - var(--fold) / 2); }
   .agent-link { grid-column: 2 / -1; grid-row: 1; display: grid; grid-template-columns: subgrid; align-items: center; }
   .who { gap: 2px; }
   .l1 { gap: 6px; font-size: 14px; }
   .opener { display: inline-grid; }
   .key-inline { display: inline; }
   .t-inline { display: inline; }
-  .session-name { display: none; }
+  /* One name per compact row; the avatar says Lead (design AEON-1196). A list without parents needs no fold column. */
+  .session-name, .role { display: none; }
+  .table:not(:has(.tree-fold)) { --fold: 0px; }
   .l2-listen, .no-inbox { margin-left: auto; }
-  /* Lines run beside the fold buttons: 16 px per level. Content inset 10px and a
-     44px fold put its centre at 32px, on the stem. The elbow is one step long,
+  /* Lines run beside the fold buttons: 16 px per level. The content inset (10px)
+     and half the fold put its centre on the stem. The elbow is one step long,
      so it ends on the child fold's centre. */
-  .row > .tree-lines { left: 32px; }
+  .row > .tree-lines { left: calc(10px + var(--fold) / 2); }
   .tree-guide.elbow::after { width: var(--tree-step); }
-  .tree-stem { top: calc(var(--tree-joint) + 22px); }
+  .tree-stem { top: calc(var(--tree-joint) + var(--fold) / 2); }
   .lineage { grid-column: 2 / -1; padding: 4px 0 0; min-height: 24px; }
   .worker-tools { grid-column: 2 / -1; grid-row: 2; flex-wrap: nowrap; white-space: nowrap; min-height: 44px; margin: 0 0 0 -4px; padding: 0; }
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
-  /* The actions sit beside the two lines, centred on them, side by side when there are several. */
+  /* Beside the two lines sits ⋯, centred on them: Pause, Resume and Remove are in its menu.
+     A row without a menu keeps its bin. */
   .row > .c-actions { grid-column: 4; grid-row: 1; flex-direction: row; gap: 0; margin-top: calc(var(--tree-joint) - 10px - 22px); padding: 0; }
-  .act { display: none; }
+  .act, .c-actions > .pause-controls, .c-actions:has(> .more) > .bin { display: none; }
   .c-actions .icon-btn:is(.more, .bin) { width: 44px; height: 44px; opacity: 1; }
+}
+@media (pointer: coarse), (max-width: 720px) {
+  .table { --fold: 44px; }
+  /* The Ended toggle is a 44 px target on touch, in a header of its own height. */
+  .group-row { height: 44px; margin-block: 4px 0; }
+  .group-toggle { height: 44px; }
 }
 /* Phone tools: 44 px icon buttons; their names stay for screen readers. The list's tools take
    their own line under the title, the search first and widest. */
