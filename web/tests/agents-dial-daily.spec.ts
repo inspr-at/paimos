@@ -83,7 +83,7 @@ test('AEON-1036: folded, the dial is one light control in the capacity row and f
   await expect(control(page).locator('.cd-flag svg')).toHaveCount(1)
   await expect(flag(page, 'claude')).toHaveClass(/st-over_pace/)
   expect(await flag(page, 'claude').evaluate(el => getComputedStyle(el).backgroundColor)).toMatch(/rgba\(0, 0, 0, 0\)|transparent/)
-  await expect(chip(page, 'claude')).toHaveAccessibleName('Claude Code: at most 2, 4 percentage points over pace')
+  await expect(chip(page, 'claude')).toHaveAccessibleName('Claude: at most 2, 4 percentage points over pace')
   await expect(flag(page, 'codex').locator('svg')).toHaveCount(0)
   await expect(flag(page, 'cursor').locator('svg')).toHaveCount(0)
   // Everything else is hover and focus text: each unit says its limit and today's state.
@@ -98,7 +98,7 @@ test('AEON-1036: at the limit the flag is a gold pause mark and the unit says wh
   await setup(page, { example: 'limit', folded: true })
   await page.goto('/agents')
   await expect(flag(page, 'claude')).toHaveClass(/st-at_limit/)
-  await expect(chip(page, 'claude')).toHaveAccessibleName('Claude Code: at most 2, at today’s limit · Codex next')
+  await expect(chip(page, 'claude')).toHaveAccessibleName('Claude: at most 2, at today’s limit · Codex next')
   await expect(chip(page, 'claude')).toHaveAccessibleDescription(`${CLAUDE} · at most 2 · at today’s limit · Codex next`)
   const sample = await flag(page, 'claude').evaluate(el => ({ background: getComputedStyle(el).backgroundColor, width: el.getBoundingClientRect().width }))
   expect(sample.background).toMatch(/rgba\(0, 0, 0, 0\)|transparent/)

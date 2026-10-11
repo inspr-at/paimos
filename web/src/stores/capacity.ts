@@ -8,6 +8,7 @@
 // rides on the person's schedule until its date.
 import { defineStore } from 'pinia'
 import { computed, onScopeDispose } from 'vue'
+import { APIError } from '../lib/api'
 import { listPairingComputers, PairingError, type PairingView } from '../lib/agentPairing'
 import {
   activeOverride, buildPools, buildRows, clone, confirmsSave, uncertainFailure, defaultSchedule, listCapacity, listSchedules, putSchedule, sameShape, stripOverride, stripReserve, withReserve,
@@ -29,7 +30,7 @@ export const useCapacity = defineStore('capacity', () => {
   // Pairing access is optional. A failed read is not an empty inventory:
   // preserve the previous snapshot and report the failure to its consumers.
   const computersRead = usePolledData(() => listPairingComputers().catch(error => {
-    if (error instanceof PairingError && error.status === 403) return [] as PairingView[]
+    if (error instanceof PairingError && error.status === 403) throw new APIError(403, error.message)
     throw error
   }), [] as PairingView[])
   const computersState = computed(() => computersRead.status.value.state)
@@ -209,8 +210,9 @@ export const useCapacity = defineStore('capacity', () => {
   const setGauge = (next: GaugePreference) => gaugePref.save(next, 0)
 
   return {
+    capacityStatus: capacityRead.status, computersStatus: computersRead.status, schedulesStatus: schedulesRead.status,
     state, loaded, stale, load, inputs, rows, accountLines, byAccount, computers: computersRead.data, computersLoaded: computed(() => computersRead.status.value.updatedAt !== null), computersState, computersStale, refreshCapacity: capacityRead.refresh, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
-    schedulesLoaded, away, reserveConfirmed, hasUserSchedule, poolReserves, saveKeep, confirmReserve, endAway,
+    refreshSchedules: schedulesRead.refresh, schedulesLoaded, away, reserveConfirmed, hasUserSchedule, poolReserves, saveKeep, confirmReserve, endAway,
     invalidate,
     refreshComputers,
   }

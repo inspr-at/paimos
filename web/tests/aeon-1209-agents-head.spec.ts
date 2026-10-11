@@ -30,7 +30,7 @@ async function setup(page: Page, options: DailyPlanOptions & { open?: boolean; s
   })
   await mockDailyPlan(page, { example: 'limit', ...options })
   await page.route('**/api/queue', route => route.fulfill({ json: { items: [{ node_id: 'waiting-0', key: 'AEON-0', title: 'Waiting work', state: 'open', priority: 'normal', estimate_hours: 1, queued: { model_profile_id: null, waiting: true, wait_reason: '' } }], manual_order: false, capacity: {} } }))
-  return { data }
+  return { data, capacity }
 }
 
 const capRow = (page: Page) => page.locator('.cap-row')
@@ -499,4 +499,103 @@ test.describe('touch targets', () => {
     expect(await page.locator('main').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(.5)
     await page.screenshot({ path: info.outputPath('1280-touch-seven.png') })
   })
+})
+
+// AEON-1209 G7 · risk: independent read failures are shown as empty or green;
+// last-good data lose their stale label, or a recovery moves the controls.
+test('AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart', async ({ page }, info) => {
+  test.setTimeout(180_000)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { data } = await setup(page)
+  const paths = { accounts: '/api/agent-accounts', computers: '/api/agent-pairing/computers', capacity: '/api/agent-accounts/capacity', schedules: '/api/agent-accounts/capacity/schedule' }
+  const failures: Partial<Record<keyof typeof paths, number>> = {}
+  let empty = false, release!: () => void
+  const initialRead = new Promise<void>(resolve => { release = resolve })
+  let waiting = true
+  for (const [source, path] of Object.entries(paths)) await page.route(`**${path}`, async route => {
+    if (source === 'accounts' && waiting) await initialRead
+    const status = failures[source as keyof typeof paths]
+    if (status) return route.fulfill({ status, json: { error: `${source} unavailable`, message: `${source} unavailable` } })
+    if (source === 'accounts' && empty) return route.fulfill({ json: [] })
+    return route.fallback()
+  })
+  failures.accounts = 500
+  await page.goto('/agents')
+  await expect(page.locator('.acc-slot .acc-sk')).toBeVisible()
+  await expect(capRow(page)).not.toContainText('No accounts yet')
+  waiting = false; release()
+  const chip = capRow(page).locator('.acc-chip')
+  await expect(chip).toHaveText('Accounts unreadable')
+  await expect(chip).toHaveAttribute('data-tip', /accounts unavailable/)
+  await chip.click()
+  const pop = page.getByRole('dialog', { name: 'Accounts and computers' })
+  const tile = (part: string) => pop.locator(`.tile-shell[data-part="${part}"]`)
+  await expect(tile('accounts')).toContainText("Couldn't read accounts")
+  await expect(tile('accounts')).not.toContainText(/\d+.*ready|No accounts yet/)
+  await expect(tile('computers')).toContainText(/\d+ of \d+ online/)
+  await expect(tile('capacity')).toHaveAttribute('data-state', 'ready')
+  const evidence = async (state: string) => {
+    for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+      await expect(pop).toBeVisible()
+      expect(await page.locator('main').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0.5)
+      await page.screenshot({ path: info.outputPath(`${width}-${theme}-g7-${state}.png`) })
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 })
+  }
+  await evidence('unreadable')
+  await expectStableControls({
+    controls: { chip, accounts: tile('accounts').locator('.tile'), computers: tile('computers').locator('.tile'), capacity: tile('capacity').locator('.tile') },
+    interactions: [{ name: 'retry the accounts read', run: async () => {
+      delete failures.accounts
+      await tile('accounts').getByRole('button', { name: 'Try again' }).click()
+      await expect(tile('accounts')).toHaveAttribute('data-state', 'ready')
+    } }],
+  })
+  await evidence('ready')
+  const count = await chip.locator('.sc-t').innerText()
+  for (const [source, part] of [['accounts', 'accounts'], ['capacity', 'accounts'], ['computers', 'computers'], ['schedules', 'capacity']] as const) {
+    failures[source] = 500
+    await page.evaluate(() => window.dispatchEvent(new Event('online')))
+    await expect(tile(part)).toHaveAttribute('data-state', 'stale')
+    await expect(chip.locator('.sc-t')).toHaveText(count)
+    await expect(tile(part)).toContainText(/as of \d{2}:\d{2}/)
+    await expect(pop.locator('.acc-state .dot.ok')).toHaveCount(0)
+    if (source === 'accounts') { await expect(tile('computers')).toHaveAttribute('data-state', 'ready'); await expect(tile('capacity')).toHaveAttribute('data-state', 'ready') }
+    if (source === 'computers') await evidence('stale')
+    delete failures[source]
+    await pop.getByRole('button', { name: 'Refresh', exact: true }).click()
+    await expect(chip).toHaveAttribute('data-state', 'ready')
+  }
+  // Forbidden after a successful read suppresses the values immediately.
+  failures.computers = 403
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  await expect(tile('computers')).toContainText('Owners and admins see computers here')
+  await expect(tile('computers')).not.toContainText(/online|as of/)
+  await expect(chip.locator('.sc-t')).toHaveText('Accounts')
+  await expect(chip.locator('.flag')).toHaveCount(0)
+  await evidence('forbidden')
+  delete failures.computers
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  await expect(chip).toHaveAttribute('data-state', 'ready')
+  empty = true
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  await expect(tile('accounts')).toContainText('No accounts yet')
+  await expect(tile('accounts').getByRole('link', { name: 'Connect', exact: true })).toBeVisible()
+  await evidence('empty')
+  empty = false
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  await expect(tile('accounts')).toHaveAttribute('data-state', 'ready')
+  expect(data.accounts.length).toBeGreaterThan(0)
+  // Every source also fails on an initial read, with no snapshot to keep.
+  for (const [source, part] of [['capacity', 'accounts'], ['computers', 'computers'], ['schedules', 'capacity']] as const) {
+    failures[source] = 500
+    await page.goto('/agents')
+    await expect(chip).toHaveText('Accounts unreadable')
+    await chip.click()
+    await expect(tile(part)).toContainText(`Couldn't read ${part}`)
+    await expect(tile(part)).not.toContainText(/No accounts yet|\d+.*ready|\d+ of \d+ online/)
+    delete failures[source]
+  }
 })

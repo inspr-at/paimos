@@ -147,10 +147,10 @@ watch([sessionId, () => agents.loaded, () => agents.historyState], ([id, loaded,
   else if (state === 'ready' && agents.historyMore) void agents.loadOlderHistory()
 }, { immediate: true })
 const writable = computed(() => can('harness.control'))
-const showCapacity = computed(() => agents.loaded && capacity.state !== 'forbidden' && agents.accountsState !== 'forbidden')
+const showCapacity = computed(() => agents.loaded)
 
 // ---------- Accounts and computers: one computer-first panel (AEON-499) ----------
-const showSetup = computed(() => agents.loaded && (showCapacity.value || (pairingAccess.value.canListComputers && capacity.computers.length > 0)))
+const showSetup = computed(() => agents.loaded)
 const pageTitle = ref<HTMLElement>()
 const attachRows = ref<AttachQueueRow[]>([])
 const attachHistory = ref<AttachQueueRow[]>([])

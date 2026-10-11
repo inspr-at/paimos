@@ -35,6 +35,16 @@ or a More item for it.
   first thing that blocks agents with its one fix command and Verify again
   where the person may verify, and the status line. The Needs-you list and the
   sign-ins table live in those Settings parts.
+  Each claim follows its own reads: account readiness needs accounts, quota
+  and computers; connectivity needs computers; the pacing summary needs the
+  schedule. The chip combines all four sources. Loading uses a same-size
+  skeleton; an unreadable source shows a warning and a retry for that part.
+  Last-good values carry a clock and “as of” time. Forbidden reads show a lock
+  with no values, including after a previously successful read. “No accounts
+  yet” requires an authorized successful accounts read; admins can Connect.
+  Chip and tile controls keep their size through these states. The inline
+  pace edit uses the shared guarded writer and follows the default with null;
+  a changed revision is re-read. At the limit follows Settings › Models.
 
 **Sessions card head.** The card's head carries the list's own tools: the
 title with the count of sessions on show, Search sessions (it filters this list;

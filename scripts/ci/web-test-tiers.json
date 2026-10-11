@@ -5496,6 +5496,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"768: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"F and / search this list; typing in the search only types; Esc clears, then leaves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"a search that hides the session under the cursor moves the cursor to a match; Enter and p never act on a hidden session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -15656,6 +15658,8 @@
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > treats provisional windows as unknown and does not rank unmeasured zero as the greatest allowance","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"AEON-1209: a multi-source claim requires every read, preserves stale timestamps and hides forbidden values","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the accounts chip and its tiles > names what there is, and flags sign-ins before anything else","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the accounts chip and its tiles > opens the three parts of Settings, each with its own state words","tier":"ESSENTIAL"}
@@ -15826,7 +15830,7 @@
     ,
     {"kind":"vitest","file":"tests/agents-after-write.unit.test.ts","name":"AEON-623: an initial service or parse failure is not an empty inventory","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/agents-after-write.unit.test.ts","name":"AEON-623: only explicit optional pairing access denial becomes an empty successful read","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/agents-after-write.unit.test.ts","name":"AEON-623: explicit pairing access denial remains forbidden","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-after-write.unit.test.ts","name":"Cancel run: no older read brings queued or its held capacity back","tier":"GATED-FULL"}
     ,
@@ -16133,6 +16137,8 @@
     {"kind":"vitest","file":"tests/capacity-pace.unit.test.ts","name":"the stored pace > changes one harness and copies the others, never sharing their objects","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/capacity-pace.unit.test.ts","name":"the stored pace > follows the default when the number equals it, keeps the number under \"use everything\", and reads back as the choice","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/capacity-reset.unit.test.ts","name":"AEON-1209: a refused computer read stays forbidden and never becomes a successful empty inventory","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/capacity-reset.unit.test.ts","name":"clears person-owned snapshots and load state before a failed read after clearPermissions","tier":"ESSENTIAL"}
     ,
