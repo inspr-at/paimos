@@ -272,6 +272,7 @@
         "internal/routineguard/evaluation.go",
         "internal/routineguard/evaluation_test.go",
         "internal/routineguard/evaluation_tx_test.go",
+        "internal/routineactions/**",
         "internal/recurrences/runs.go",
         "internal/recurrences/runs_test.go",
         "internal/routinebudget/**"

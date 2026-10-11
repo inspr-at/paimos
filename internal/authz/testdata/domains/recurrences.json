@@ -16,7 +16,8 @@
   },
   "project_decided": {
     "POST /api/recurrences": true,
-    "POST /api/recurrences/preview": true
+    "POST /api/recurrences/preview": true,
+    "POST /api/routine-runs/{runId}/actions": true
   },
   "project_filtered": {
     "GET /api/recurrences": true
@@ -50,6 +51,7 @@
     "POST /api/recurrences/{recurrenceId}/pause": "recurrences.manage",
     "POST /api/recurrences/{recurrenceId}/resume": "recurrences.manage",
     "POST /api/recurrences/{recurrenceId}/run-now": "recurrences.manage",
+    "POST /api/routine-runs/{runId}/actions": "nodes.write|knowledge.write",
     "PUT /api/recurrences/{recurrenceId}": "recurrences.manage",
     "PUT /api/recurrences/{recurrenceId}/execution-consent": "recurrences.manage",
     "PUT /api/recurrences/{recurrenceId}/guardrails": "recurrences.manage"

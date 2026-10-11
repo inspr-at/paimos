@@ -40,6 +40,10 @@ func init() {
 		"POST /api/models/{id}/retire":                                     "models.manage",
 		"POST /api/work-kinds":                                             "model_prefs.manage",
 		"POST /api/work-kinds/{kindId}/restore":                            "model_prefs.manage",
+		"GET /api/models/outdated":                                         "models.read",
+		"POST /api/models/outdated/retire":                                 "models.manage",
+		"POST /api/models/outdated/undo":                                   "models.manage",
+		"GET /api/models/catalog":                                          "models.read",
 		// Level-specific, person-only authority is rechecked under the mutation fence.
 		"PUT /api/model-preferences/levels/{level}":                       "models.read|model_prefs.manage",
 		"PUT /api/model-preferences/levels/{level}/rows/{kindId}":         "models.read|model_prefs.manage",

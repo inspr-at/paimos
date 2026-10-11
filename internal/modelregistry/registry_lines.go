@@ -208,17 +208,17 @@ func (m *Module) editLine(w http.ResponseWriter, r *http.Request) {
 		family := harnesslaunch.ModelFamily(h, nextModel)
 		source := before[0].Origin
 		out.Profiles = []Profile{}
-		for i, e := range in.Efforts {
-			// Known efforts keep the shared scale; novel native names use their
-			// explicitly ordered registration, bounded to the scale's endpoints.
+		for _, e := range in.Efforts {
+			// Retain explicit historical scale metadata only for the exact
+			// existing effort. New native names acquire no invented number.
 			var scale *int
-			if err := tx.QueryRow(ctx, `SELECT aeon_model_effort_level($1,$2)::integer`, family, e).Scan(&scale); err != nil {
-				return err
+			for _, old := range before {
+				if old.Effort == e {
+					scale = old.EffortLevel
+					break
+				}
 			}
-			if scale == nil {
-				v := min(i, 5)
-				scale = &v
-			}
+
 			sum := sha256.Sum256([]byte(h + "/" + nextModel + "/" + e))
 			pin := profileWrite{Display: Display{DisplayName: strings.TrimSpace(in.DisplayName), ShortName: strings.TrimSpace(in.DisplayName)}, Slug: "edited-" + h + "-" + hex.EncodeToString(sum[:12]), Version: now.UTC().Format("20060102T150405.000000000"), Harness: h, Family: family, Model: nextModel, Effort: e, Tier: before[0].Tier, Note: strings.TrimSpace(in.Note), Source: source, RegisteredEffortLevel: scale}
 			if err := validateProfile(pin); err != nil {
@@ -259,7 +259,20 @@ func (m *Module) editLine(w http.ResponseWriter, r *http.Request) {
 func boardLineID(p Profile) string { f, l, _ := ProfileLine(p); return f + ":" + l }
 
 // Caller holds the tenant and registry fences. All transfers precede events.
-func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile) error {
+func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile, moveLines ...bool) error {
+	moveLine := len(moveLines) == 0 || moveLines[0]
+	for _, old := range before {
+		candidates := sameRouteProfiles(after, old)
+		if len(candidates) == 0 {
+			continue
+		}
+		if err := copyModelPause(ctx, tx, old, nearestProfile(candidates, old.Effort, old.EffortLevel)); err != nil {
+			return err
+		}
+	}
+	if !moveLine {
+		return nil
+	}
 	newLine, _ := modelsLine(after[0])
 	oldLine, _ := modelsLine(before[0])
 	aliases := []string{oldLine}
@@ -309,11 +322,6 @@ func transferModelLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Princi
 	}
 	if _, err := tx.Exec(ctx, `UPDATE model_rule_revisions SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_rules r WHERE r.scope=model_rule_revisions.scope AND coalesce(r.project_id::text,'')=model_rule_revisions.scope_key AND r.line IN ($1,$2))`, oldLine, newLine); err != nil {
 		return err
-	}
-	for _, old := range before {
-		if err := copyModelPause(ctx, tx, old, nearestProfile(after, old.Effort, old.EffortLevel)); err != nil {
-			return err
-		}
 	}
 	if _, err := tx.Exec(ctx, `UPDATE model_rule_revisions SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_row_constraints r WHERE r.scope=model_rule_revisions.scope AND coalesce(r.project_id::text,'')=model_rule_revisions.scope_key AND r.line IN ($1,$2))`, oldLine, newLine); err != nil {
 		return err

@@ -3,6 +3,7 @@ package modelregistry
 
 import (
 	"net/http"
+	"reflect"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -10,7 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) {
+// Risk: reading catalog facts appends guessed harness pins or replaces a saved policy.
+func TestExistingTenantCatalogFactsPreservePolicyAndPins(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "upgrade", "person", "Ada", []string{"admin"})
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
@@ -33,7 +35,7 @@ func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) 
 		t.Fatal(err)
 	}
 	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
-	if len(profiles) != 51 {
+	if len(profiles) != 40 {
 		t.Fatal("upgrade profiles", len(profiles))
 	}
 	readRoutes := func() []Route {
@@ -66,31 +68,17 @@ func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) 
 	if !foundPolicy {
 		t.Fatal("saved person policy missing or replaced", routes)
 	}
-	// Catalog additions retain source policy and wait for an explicit Models
-	// choice. Each account still has to qualify for its chosen native route.
-	for _, h := range []string{"gemini", "opencode"} {
-		slug := "gemini-gemini-2-5-pro-16384"
-		if h == "opencode" {
-			slug = "opencode-ollama-qwen3-coder-default"
-		}
-		profile := profileBySlug(profiles, slug)
-		if profile.ID == "" {
-			t.Fatal("missing added native route", slug)
-		}
-		minimalAccount(t, p, profile)
-		inRegistry(t, p, func(tx pgx.Tx) error {
-			return dbtest.SetModelOrder(t.Context(), tx, p.TenantID, "", "other", "first", profile.ID)
-		})
-		r := decode[Resolution](t, &p, http.MethodGet, "/api/models/resolve?role=build&harness="+h, "", http.StatusOK)
-		if r.Profile == nil || r.Profile.Harness != h {
-			t.Fatal("new harness not routable", r)
-		}
-		if h == "gemini" && (r.Profile.EffortLevel == nil || *r.Profile.EffortLevel != 3) {
-			t.Fatal("budget level missing", r.Profile)
+	if len(routes) != 1 || routes[0].Role != "build" || routes[0].Priority != 40 {
+		t.Fatal("catalog added automatic routes", routes)
+	}
+	for _, prof := range profiles {
+		if prof.Harness == "gemini" || prof.Harness == "opencode" {
+			t.Fatal("catalog fabricated additional harness pin", prof)
 		}
 	}
+	decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
 	again := readRoutes()
-	if len(again) != len(routes) || eventCount(t, p, evSeeded) != 1 {
+	if !reflect.DeepEqual(again, routes) || eventCount(t, p, evSeeded) != 1 {
 		t.Fatal("upgrade replay changed policy")
 	}
 }

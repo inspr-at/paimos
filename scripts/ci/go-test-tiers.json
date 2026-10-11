@@ -7172,6 +7172,32 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardUsagePosturePersonPreconditionAndRevision","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogIdentityFoldsCursorEffortsAndProviderRoutes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogKeylessRefreshPersistsFactsWithoutAccountAuthority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogNewPinsKeepUnknownAndLegacyMetadataReadable","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedBulkRetireAndUndo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedCompleteListingPresence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedLifecycleEvidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedRetireRevocationFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedRetireSafetyAndPrivacy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedSourcedAliasIsNotSuccessor","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogProfileLifecycleBestEffort","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogProfileLifecycleReleasesTenantFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogScheduledRefreshRequiresOptInAndRechecksIt","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogSourcesPreserveNativePrecedenceAndUnknown","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogV3Ladders","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch","tier":"GATED-FULL"}
@@ -7252,7 +7278,7 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestEveryAgentObservationRequiresAvailableOwnedHarnessAccount","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/modelregistry","name":"TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/modelregistry","name":"TestExistingTenantCatalogFactsPreservePolicyAndPins","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestExplicitPlacementModeSelectsManagedReview","tier":"GATED-FULL"}
     ,
@@ -8362,6 +8388,8 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRollbackUniqueKeyAndInvalidTarget","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineConsentBindsQualificationAndScopedIdentity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineConsentRechecksOwnerBehindAccessFence","tier":"ESSENTIAL"}
@@ -8759,6 +8787,10 @@
     {"kind":"go","package":"internal/reviewgate","name":"TestModelMatchesRequiresRequestedPin","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reviewgate","name":"TestParseFinalVerdict","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/routineactions","name":"TestRoutineActionCatalogueClosedAndBounded","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineactions","name":"TestRoutineActionsAtomicReplayAndTargets","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetAdmissionAndOwnership","tier":"ESSENTIAL"}
     ,

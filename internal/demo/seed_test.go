@@ -50,12 +50,23 @@ func TestDemoSeedTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := seedRows(t, database, id)
+	// Risk: ID-only catalog bootstrap must not leave fresh demo tenants
+	// dependent on production model pins or role routes.
+	if pins := scalar(t, database, id, `SELECT count(*) FROM model_profiles`); pins != 0 {
+		t.Fatalf("fresh demo tenant already has %d model pins", pins)
+	}
 	first, err := Seed(ctx, database.App, "lumen-demo")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if first.Already || first.Projects != 3 || first.Tickets < 40 || first.Stage != "" {
 		t.Fatalf("summary %+v", first)
+	}
+	if pins := scalar(t, database, id, `SELECT count(*) FROM model_profiles WHERE slug='demo-'||harness||'-fictional' AND model='demo-'||harness AND effort='default' AND source='manual' AND note='Fictional demo history; no provider model or runner executed.' AND enabled AND harness IN ('codex','claude','grok')`); pins != 3 {
+		t.Fatalf("fresh demo must register its three fictional model pins, got %d", pins)
+	}
+	if routes := scalar(t, database, id, `SELECT count(*) FROM model_role_routes`); routes != 0 {
+		t.Fatalf("fictional history created %d production role routes", routes)
 	}
 	if missing := scalar(t, database, id, `SELECT count(*) FROM agent_keys k LEFT JOIN principals p ON p.tenant_id=k.tenant_id AND p.id=k.created_by_principal_id WHERE p.id IS NULL OR p.kind<>'person'`); missing != 0 {
 		t.Fatalf("demo keys missing person creator: %d", missing)
