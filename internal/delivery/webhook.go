@@ -149,6 +149,7 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			class = "body_read"
 		}
+		closeAfterFailedRead(w)
 		m.rejectWebhook(w, r, "unknown", "audit", 413, class)
 		return
 	}

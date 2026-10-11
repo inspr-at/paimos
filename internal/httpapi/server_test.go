@@ -304,7 +304,15 @@ func TestReadyProbeDeadlineAndDrain(t *testing.T) {
 		reqCtx, cancel := context.WithCancel(context.Background())
 		cancel()
 		start := time.Now()
-		rec := serveReady(t, s, reqCtx)
+		// The outer connection guard now rejects cancelled arrivals before
+		// routing. Call the readiness handler directly to retain this unit
+		// proof that its probe inherits cancellation; the transport regression
+		// separately proves cancelled arrivals never run downstream handlers.
+		rec := httptest.NewRecorder()
+		s.handleReady(rec, httptest.NewRequest(http.MethodGet, "/api/ready", nil).WithContext(reqCtx))
+		if rec.Header().Get("Cache-Control") != "no-store" {
+			t.Fatal("cancelled readiness response was cacheable")
+		}
 		if time.Since(start) >= readyProbeTimeout {
 			t.Fatalf("cancelled caller waited %s", time.Since(start))
 		}
