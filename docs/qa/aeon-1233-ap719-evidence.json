@@ -182,5 +182,47 @@
     "existing_log": "web/test-results/AEON-1233/fix3-static.log"
   },
   "visual_inspection": "Fresh general-pharos-1440-light.png and delete-sheet-400-dark.png inspected; no package-owned spec failure or source change.",
-  "post_commit_evidence": "The browser spec will run again after this evidence-only commit; its check-result report, screenshot inventory and every pass line are recorded at the local post-commit handoff paths above. Screenshots stay git-ignored."
+  "post_commit_evidence": "The browser spec will run again after this evidence-only commit; its check-result report, screenshot inventory and every pass line are recorded at the local post-commit handoff paths above. Screenshots stay git-ignored.",
+  "fix_round_4": {
+    "review_report": "review-ci583-0016.out (the brief duplicated the review filename suffix)",
+    "implementation_commits": [
+      "20db8d13f4e5f956d28a3b75ca56252d26d0168e",
+      "05b93e7e866b716f65ebd090291fac900821378d",
+      "f83c053d51767f97c119d8c0f85b8d593913bd66"
+    ],
+    "baseline_commit": "79e69e7964acec553e26246e2b1586cc0984b9f8",
+    "changes": [
+      "Three router source harnesses now load the actual projectSettings module; existing routing assertions remain.",
+      "Project context tests use the Agents section; routine tests use Routines. Canonical URL assertions were added. The delayed Run now identity test also opens Routines on the destination project before releasing its held old-project read.",
+      "Phone hold click suppression is bound to its row and pointer and cleared in document capture on a fresh gesture, including clipped names.",
+      "The approved AEON-1227 map and P1 copy remain byte-for-byte unchanged. Seventeen exact-line prose exceptions distinguish approved breadcrumbs and state-transition words from icons; additional icons on those lines and unapproved files still fail the guard."
+    ],
+    "regression": {
+      "risk": "A native context menu can omit the hold compatibility click and leave suppression armed for the next tap.",
+      "test": "tests/clip-tip.unit.test.ts: a phone selection hold suppresses only its own row and pointer click",
+      "proof": "Injected clock rejects selection at 479 ms, establishes it at 480 ms, checks fresh same-row and other-row pointer actions, and retains suppression of the original hold compatibility click.",
+      "negative_control": "AEON_RECORD_BASELINE=79e69e79: exactly the new regression failed because the next selection event was missing; the four existing tests passed.",
+      "negative_log": "web/test-results/AEON-1233/fix4/gesture-negative.log",
+      "native_browser": "Both 390 px themes passed the strengthened same-row fresh-tap and original clipped-name selection/disclosure scenario."
+    },
+    "completed_validation": {
+      "runner": "LEAD guarded remote-test.sh and ci-static-remote.sh; remote-spec.sh used its approved single-worker fallback when the remote lane was full.",
+      "go": "internal/reportercontract passed remotely.",
+      "vitest": "68 tests across settings-routing, dead-screens, work-kinds, clip-tip and shortcuts passed remotely.",
+      "glyph_guard": "3 tests passed remotely and locally; no glyph or stale-entry assertion was removed.",
+      "static": "ci-static --merge-main passed all 42 checks, zero skips, exit 0 on 05b93e7e8.",
+      "static_log": "web/test-results/AEON-1233/fix4/static.log",
+      "ci_inventory_and_shards": "321 tests passed with zero skips through the shared heavy-run slot; audit toolkit and ownership checks also passed in remote static validation.",
+      "account_context_browser": "Full account-use-matrix spec: 20 passed, zero failed; one pre-existing AEON1054_SHOTS-only screenshot case skipped. Both project-context regressions and all six width/theme design checks passed.",
+      "account_context_log": "web/test-results/AEON-1233/fix4/account-use-browser.log",
+      "clip_touch_browser": "Full clip-tip-touch spec: 39 passed, zero skips and zero failures, including all production and disclosure scenarios across widths/themes; owned browser processes returned to zero.",
+      "clip_touch_log": "web/test-results/AEON-1233/fix4/clip-full-browser.log",
+      "routines_browser": "Full recurrences spec: 15 passed, zero failures/skips, including delayed old-project reads, stale Undo, permissions, keyboard convention and control stability.",
+      "routines_log": "web/test-results/AEON-1233/fix4/recurrences-final-browser.log",
+      "phone_selection_browser": "Both phone-select cases passed: manual multi-select/Add to release/Cancel and long-press checkbox selection; zero failed/skipped, owned browser processes returned to zero.",
+      "phone_selection_log": "web/test-results/AEON-1233/fix4/phone-browser.log"
+    },
+    "post_commit_evidence": "Fresh complete Project Settings and clip-tip-touch specs will run after this documentation-only final commit, with one headless browser worker. The exact HEAD, source-tree identity, screenshots, acceptance-check report and final static result will be recorded in web/test-results/AEON-1233/fix4/final-evidence.json. The approved runner exposes macOS Chromium; no guarded Linux browser lane is available here, so Linux PR CI remains coordinator-owned.",
+    "review_and_release": "The existing policy-preview failure reports no trusted gate verdict for the PR head. The coordinator runs the cross-family review after this worker exits. No origin push, deployment, review gate, other model CLI, ticket-status change, credential read or other-worker edits."
+  }
 }
