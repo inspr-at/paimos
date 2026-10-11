@@ -315,10 +315,10 @@ function groupedServer(refusePause = '') {
   const base = http.handler
   http.handler = async (path, init) => {
     const method = init.method ?? 'GET'
-    if (path.endsWith('/usage')) {
+    if (/\/usage(\?|$)/.test(path)) {
       state.usage.push(path)
-      const column = path.includes('/pi/') ? 'backend' : 'other'
-      return answer({ used_by: [{ column, layer: 'default', replacement: { line: null, effort: null } }], incomplete: false, replacement: { line: null, effort: null }, revision: 'r1' })
+      const sol = { line: 'openai:sol', effort: 'high', harness: 'codex', model: 'gpt-6.1-sol' }
+      return answer({ used_by: [{ column: 'other', layer: 'default', situation: 'first', replacement: { line: null, effort: null } }, { column: 'backend', layer: 'default', situation: 'review', replacement: sol }], incomplete: false, replacement: { line: null, effort: null }, revision: 'r1' })
     }
     if (/^\/models\/[^/]+\/retire$/.test(path) && method === 'POST') { state.retired.push(path.split('/')[2]!); return answer({ profile_id: path.split('/')[2], retired: true }) }
     if (path.endsWith('/pause')) {
@@ -338,17 +338,20 @@ async function mountGrouped(): Promise<GroupedCard> {
   return card
 }
 
-it('Remove on a version reads where every one of its routes is used before anything is removed, then retires every level of every route', async () => {
+// AEON-1163 risk: one read per route excludes only that route, so the question names a sibling route that Remove retires
+// in the same step as what takes over, and a use in the review situation reads as the plain row.
+it('Remove on a version asks one read about every level of every route it removes, then retires exactly those', async () => {
   const state = groupedServer()
   const card = await mountGrouped()
   expect(card.rows.value.map(row => row.model.name)).toEqual(['Opus 5.5'])
   const row = card.rows.value[0]!
   card.askRemove(row, null)
   await settle()
-  expect(state.usage).toEqual(['/models/lines/claude/claude-opus-5-5/usage', '/models/lines/pi/anthropic%2Fclaude-opus-5-5/usage'])
+  expect(row.model.profileIds).toHaveLength(5)
+  expect(state.usage).toEqual([`/models/lines/claude/claude-opus-5-5/usage?${row.model.profileIds.map(id => `profile=${id}`).join('&')}`])
   expect(state.retired).toEqual([])
   expect(card.question.value).toMatchObject({ key: row.key, state: 'ready' })
-  expect(card.question.value!.text).toBe('Opus 5.5 is in use: Default · all work (for everyone) — no qualified fallback; backend (for everyone) — no qualified fallback. Auto-update won’t add it back.')
+  expect(card.question.value!.text).toBe('Opus 5.5 is in use: Default · all work (for everyone) — no qualified fallback; Review · backend (for everyone) — gpt-6.1-sol at high takes over. Auto-update won’t add it back.')
   card.remove()
   await settle()
   expect(state.retired.slice().sort()).toEqual(row.model.profileIds.slice().sort())

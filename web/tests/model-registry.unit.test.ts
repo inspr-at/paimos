@@ -14,7 +14,7 @@ vi.mock('../src/lib/api.ts', () => ({
 import { StaleScopeError } from '../src/lib/identityScope'
 import { buildEntries } from '../src/lib/modelsSimple'
 import { LEVEL, manyRoutes } from './fixtures/registry-many'
-import { RegistryError, addLine, getRefreshStatus, listProfiles, buildLines, changeOf, checkReport, cooldownLabel, draftOf, emptyDraft, familyOf, intervalLabel, lastChecked, lineWriteOf, profileSource, modelSlug, removalText, removeLine, restoreLine, routeOf, routesFor, shortDate, splitLevels, takenText, useText, validateDraft, checkNow, lifecycleSource, outdatedBatch, outdatedEntries, outdatedTray, outdatedUseText, outdatedWhy, readOutdated, readOutdatedBatch, refused, retireOutdated, undoOutdated, OUTDATED_LIMIT, OUTDATED_PAGES, type LineDraft, type LineUsage, type OutdatedDocument, type OutdatedVersion, type RegistryProfile, type WriteScope, buildRegistry, registryCount, pauseUntil, pauseOptions, untilText, pauseTag, pauseModel, undoPause, mergeUsage, atLevel, lifecycleText, olderWhy, pauseTargets, PAUSED_REASON, type RegistryModel } from '../src/lib/modelRegistry'
+import { RegistryError, addLine, getRefreshStatus, listProfiles, buildLines, changeOf, checkReport, cooldownLabel, draftOf, emptyDraft, familyOf, intervalLabel, lastChecked, lineWriteOf, profileSource, modelSlug, removalText, removeLine, restoreLine, routeOf, routesFor, shortDate, splitLevels, takenText, useText, validateDraft, checkNow, lifecycleSource, outdatedBatch, outdatedEntries, outdatedTray, outdatedUseText, outdatedWhy, readOutdated, readOutdatedBatch, refused, retireOutdated, undoOutdated, OUTDATED_LIMIT, OUTDATED_PAGES, type LineDraft, type LineUsage, type OutdatedDocument, type OutdatedVersion, type RegistryProfile, type WriteScope, buildRegistry, registryCount, pauseUntil, pauseOptions, untilText, pauseTag, pauseModel, undoPause, previewRemoval, atLevel, lifecycleText, olderWhy, pauseTargets, PAUSED_REASON, type RegistryModel } from '../src/lib/modelRegistry'
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } })
 let counter = 0
@@ -284,6 +284,10 @@ describe('copy', () => {
     expect(useText({ column: 'backend', layer: 'person', person: 'me', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('Backend build (yours)')
     expect(useText({ column: 'docs', layer: 'person', person: 'someone', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('docs (another person)')
     expect(useText({ column: 'review:openai', layer: 'workspace', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('Reviews (for everyone)')
+    // A situation is named as the outdated sheet names it (AEON-1163); the first build is the row itself.
+    expect(useText({ column: 'other', layer: 'default', situation: 'review', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('Review · Default (for everyone)')
+    expect(useText({ column: 'backend', layer: 'person', person: 'me', situation: 'small', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('First build · Backend build (yours)')
+    expect(useText({ column: 'backend', layer: 'default', situation: 'first', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('Backend build (for everyone)')
   })
 })
 
@@ -605,13 +609,14 @@ describe('the grouped registry', () => {
     await expect(pauseModel(grok, grok.family, 'resume', { live: () => live })).rejects.toBeInstanceOf(StaleScopeError)
     expect(http.calls).toHaveLength(1)
   })
-  it('reads one remove question for a version with several routes: each use once, hidden uses from any route', () => {
-    const use = (column: string) => ({ column, layer: 'default' as const, replacement: { line: null, effort: null } })
-    const merged = mergeUsage([
-      { used_by: [use('other'), use('backend')], replacement: { line: null, effort: null }, revision: 'r1', incomplete: false },
-      { used_by: [use('other')], replacement: { line: null, effort: null }, revision: 'r2', incomplete: true },
+  // AEON-1163 risk: one read per route excludes only that route, so a sibling route removed in the same step is named as the fallback.
+  it('reads one remove question for a whole version: every profile it removes goes with that one read', async () => {
+    http.handle = () => json({ used_by: [], replacement: { line: null, effort: null }, revision: 'r1', incomplete: false })
+    await previewRemoval('pi', 'anthropic/claude-opus-5-5', undefined, ['claude-high', 'pi high'])
+    await previewRemoval('codex', 'gpt-6.1-sol')
+    expect(http.calls.map(call => `${call.method} ${call.path}`)).toEqual([
+      'GET /models/lines/pi/anthropic%2Fclaude-opus-5-5/usage?profile=claude-high&profile=pi%20high',
+      'GET /models/lines/codex/gpt-6.1-sol/usage',
     ])
-    expect(merged.used_by.map(item => item.column)).toEqual(['other', 'backend'])
-    expect(merged.incomplete).toBe(true)
   })
 })

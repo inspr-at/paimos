@@ -16,7 +16,7 @@ import { useSession } from '../../../stores/session'
 import { PERMISSION, readMatrix } from '../../../lib/accountUse'
 import {
   RegistryError, REMOVED_REASON, UNDONE_REASON, acceptProposal, addLine, buildLines, buildRegistry, changeOf, checkNow, checkReport, cooldownLabel, draftOf, draftsMatch, editLine, emptyDraft, getRefreshStatus, hasErrors,
-  intervalLabel, lastChecked, lineWriteOf, listProfiles, mergeUsage, modelSlug, outdatedBatch, outdatedTray, pauseModel, pauseOptions, pauseUntil, previewRemoval, putDiscoveryKey, putRefreshSettings, readOutdated,
+  intervalLabel, lastChecked, lineWriteOf, listProfiles, modelSlug, outdatedBatch, outdatedTray, pauseModel, pauseOptions, pauseUntil, previewRemoval, putDiscoveryKey, putRefreshSettings, readOutdated,
   readOutdatedBatch, refused, registryCount, removalText, removeLine, restoreLine, retireOutdated, snapshotFromUsage, splitLevels, undoOutdated, undoPause, untilText, validateDraft,
   type DraftErrors, type LineDraft, type LinePick, type LineSnapshot, type Observation, type OutdatedDocument, type PauseChoice, type RefreshSettings, type RefreshStatus, type RegistryLine, type RegistryProfile,
   type RegistryModel, type RegistryRoute, type RegistryRow, type WriteScope,
@@ -324,7 +324,10 @@ function replacementName(pick: LinePick): string {
   if (!pick.model) return pick.line ?? ''
   return lines.value.find(other => other.harness === pick.harness && other.model === pick.model)?.name ?? pick.model
 }
-/** Asks where the version shown in a row is used: one read per route, one sentence for all of them. */
+/**
+ * Asks where the version shown in a row is used: one read of every level of every route Remove retires, so a route
+ * that goes in the same step is never named as what takes over (AEON-1163).
+ */
 function askRemove(row: RegistryRow, trigger: HTMLElement | null) {
   if (!manageable.value || saving.value || question.value?.removing) return
   if (question.value?.key === row.key) { closeQuestion(true); return }
@@ -333,11 +336,12 @@ function askRemove(row: RegistryRow, trigger: HTMLElement | null) {
   questionOpener = trigger
   const turn = ++questionTurn, model = row.model
   question.value = { key: row.key, model, state: 'loading' }
-  const routes = model.routes.filter(route => route.models[0])
-  void previewLane.run(({ after, signal }) => after(Promise.all([Promise.all(routes.map(route => previewRemoval(route.harness, route.models[0]!, signal))), kindLabels(signal)]), ([answers, kinds]) => {
+  const route = model.routes.find(candidate => candidate.models[0])
+  const read = (signal: AbortSignal) => route ? previewRemoval(route.harness, route.models[0]!, signal, model.profileIds) : Promise.reject(new RegistryError(404, 'model line not found'))
+  void previewLane.run(({ after, signal }) => after(Promise.all([read(signal), kindLabels(signal)]), ([usage, kinds]) => {
     if (turn !== questionTurn || question.value?.key !== row.key) return
-    const source = model.routes.every(route => route.hand) ? 'manual' : 'auto'
-    question.value = { key: row.key, model, state: 'ready', text: removalText(model.name, source, mergeUsage(answers), kinds, session.identity?.principal.id ?? '', replacementName) }
+    const source = model.routes.every(candidate => candidate.hand) ? 'manual' : 'auto'
+    question.value = { key: row.key, model, state: 'ready', text: removalText(model.name, source, usage, kinds, session.identity?.principal.id ?? '', replacementName) }
   }), { failed: () => { if (turn === questionTurn) question.value = { key: row.key, model, state: 'error' } } })
 }
 function retryRemove() { const row = rowOf(question.value?.key ?? null), back = questionOpener; if (!row) return; closeQuestion(); askRemove(row, back) }

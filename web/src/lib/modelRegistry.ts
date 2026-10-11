@@ -40,7 +40,8 @@ export interface RefreshStatus {
   observations?: Observation[]
 }
 export interface LinePick { line: string | null; effort: string | null; harness?: string; model?: string }
-export interface LineUse { column: string; layer: 'default' | 'person' | 'workspace' | 'project'; person?: string; replacement: LinePick }
+/** One use of a line. situation (AEON-1163): the order's own situation; a rule, which applies to its whole row, has none. */
+export interface LineUse { column: string; layer: 'default' | 'person' | 'workspace' | 'project'; situation?: string; person?: string; replacement: LinePick }
 export interface LineUsage { used_by: LineUse[]; replacement: LinePick; revision: string; incomplete: boolean; line_profiles?: RegistryProfile[] }
 export interface LineWrite { display_name: string; note: string; efforts: string[]; route: string; model?: string; revision?: string }
 
@@ -83,7 +84,12 @@ export const checkNow = (signal?: AbortSignal) => request<CheckResult>('/models/
 export const createProfile = (body: Record<string, unknown>, signal?: AbortSignal) => request<RegistryProfile>('/models', 'POST', body, signal)
 const linePath = (harness: string, model: string) => `/models/lines/${encodeURIComponent(harness)}/${encodeURIComponent(model)}`
 export const editLine = (harness: string, model: string, body: LineWrite, signal?: AbortSignal) => request<{ profiles: RegistryProfile[]; revision: string }>(linePath(harness, model), 'PUT', body, signal)
-export const previewRemoval = (harness: string, model: string, signal?: AbortSignal) => request<LineUsage>(`${linePath(harness, model)}/usage`, 'GET', undefined, signal)
+/**
+ * Where a line is used and what takes over. With profiles it previews everything removed in the same step (AEON-1163),
+ * every route of one version, so a route that goes with it is never named as the fallback.
+ */
+export const previewRemoval = (harness: string, model: string, signal?: AbortSignal, profiles: readonly string[] = []) =>
+  request<LineUsage>(`${linePath(harness, model)}/usage${profiles.length ? `?${profiles.map(id => `profile=${encodeURIComponent(id)}`).join('&')}` : ''}`, 'GET', undefined, signal)
 export const retireProfile = (id: string, reason: string, signal?: AbortSignal) => request<{ profile_id: string; retired: boolean }>(`/models/${encodeURIComponent(id)}/retire`, 'POST', { reason }, signal)
 export const restoreProfile = (id: string, signal?: AbortSignal) => request<{ profile_id: string; retired: boolean }>(`/models/${encodeURIComponent(id)}/retire`, 'DELETE', undefined, signal)
 /** Pauses every native level of one harness/model route until a time, or until resumed (null). */
@@ -438,17 +444,6 @@ export async function undoPause(steps: PauseStep[], now = new Date(), scope?: Wr
   return failed ? `${failed} of ${steps.length} routes could not be put back` : null
 }
 
-/** One usage answer for a model with several routes: every visible use once, hidden uses if any route had them. */
-export function mergeUsage(answers: LineUsage[]): LineUsage {
-  const seen = new Set<string>(), used: LineUse[] = []
-  for (const answer of answers) for (const use of answer.used_by) {
-    const key = `${use.column}\u0000${use.layer}\u0000${use.person ?? ''}`
-    if (!seen.has(key)) { seen.add(key); used.push(use) }
-  }
-  const first = answers[0]
-  return { used_by: used, replacement: first?.replacement ?? { line: null, effort: null }, revision: first?.revision ?? '', incomplete: answers.some(answer => answer.incomplete) }
-}
-
 // ---------- copy helpers ----------
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -707,7 +702,11 @@ export function removalText(name: string, source: 'auto' | 'manual', usage: Line
 
 const columnName = (column: string, kinds: Record<string, string>) => column === 'other' ? 'Default · all work' : column === 'concept' ? 'Concepts' : column.startsWith('review:') ? 'Reviews' : kinds[column] ?? column
 const layerName = (use: LineUse, me: string) => use.layer === 'person' ? (use.person && use.person === me ? 'yours' : 'another person') : use.layer === 'project' ? 'a project' : 'for everyone'
-export function useText(use: LineUse, kinds: Record<string, string>, me: string) { return `${columnName(use.column, kinds)} (${layerName(use, me)})` }
+/** A use names its situation the way the outdated sheet does ("Review · Default"); the first build is the row itself. */
+export function useText(use: LineUse, kinds: Record<string, string>, me: string) {
+  const where = use.situation && use.situation !== 'first' ? `${SITUATION[use.situation] ?? use.situation} · ${use.column === 'other' ? 'Default' : kindName(use.column, kinds)}` : columnName(use.column, kinds)
+  return `${where} (${layerName(use, me)})`
+}
 
 // ---------- outdated versions: the tray and the review sheet (AEON-1164) ----------
 
