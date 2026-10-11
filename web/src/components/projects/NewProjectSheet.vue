@@ -51,7 +51,7 @@ function submit() {
     created = node
     if (!snapshot.group) { finish(node); return }
     if (!can('project_groups.write')) { finish(node, true); return }
-    return after(assignProjectGroup({ group_id: snapshot.group, project_ids: [node.id] }), () => finish(node))
+    return after(assignProjectGroup(snapshot.group, [node.id]), () => finish(node))
   }), {
     failed: cause => {
       if (created) { finish(created, true); return }
