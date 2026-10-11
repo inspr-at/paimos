@@ -185,7 +185,7 @@ test('a pick that cannot run says one sentence from one cause under its row, and
   await expect(why).toBeVisible()
   const steps = await why.locator('li').allTextContents()
   expect(steps).toHaveLength(4)
-  expect(steps[0]).toBe('UI design has its own model: Opus 5.5 · xhigh.'); expect(steps[1]).toMatch(/^Skipped Opus 5\.5 through Claude: Claude account is at its daily cap until \d\d:\d\d\.$/)
+  expect(steps[0]).toBe('UI design has its own model: Opus 5.5 · xhigh.'); expect(steps[1]).toMatch(/^Skipped Opus 5\.5 through Claude Code: Claude account is at its daily cap until \d\d:\d\d\.$/)
   expect(steps.slice(2)).toEqual(['It takes its next route, Cursor: Opus 5.5 · max.', 'Reviews always use another family: GPT-6.1 Sol.'])
   await page.keyboard.press('Escape'); await expect(why).toHaveCount(0); await expect(page.getByRole('button', { name: 'Why?' })).toBeFocused()
 })
@@ -285,7 +285,7 @@ test('many models stay calm: one option per line, older versions fold per provid
   const menu = page.locator('.mdl-pop')
   expect(await menu.locator('[role="group"]').evaluateAll(groups => groups.map(group => group.getAttribute('aria-label')))).toEqual(['OpenAI', 'Anthropic', 'xAI', 'Google', 'Cursor', 'Unknown provider'])
   await expect(menu.locator('.opt.is-old')).toHaveCount(0)
-  await expect(option(page, 'anthropic:opus')).toContainText('Claude, Cursor · best for design and concepts')
+  await expect(option(page, 'anthropic:opus')).toContainText('Claude Code, Cursor · best for design and concepts')
   const older = menu.locator('[data-older="anthropic"]')
   await expect(older).toHaveText('Older versions · 3'); await expect(older).toHaveAttribute('aria-label', 'Show 3 older Anthropic versions')
   // The fold opens in place: the filter and the options above it stay where they were (AEON-541).
@@ -293,7 +293,7 @@ test('many models stay calm: one option per line, older versions fold per provid
   await guard.check(async () => { await older.click(); await expect(menu.locator('[data-provider="anthropic"] .opt.is-old')).toHaveCount(3) }); guard.done()
   await expect(menu.locator('[data-provider="anthropic"] .pm-oh')).toHaveText('Older versions')
   const opus48 = menu.locator('[data-old="anthropic:opus@4.8"]')
-  await expect(opus48).toContainText('Claude · replaced by Opus 5.5'); await expect(opus48).toHaveAttribute('aria-disabled', 'true')
+  await expect(opus48).toContainText('Claude Code · replaced by Opus 5.5'); await expect(opus48).toHaveAttribute('aria-disabled', 'true')
   await opus48.click(); await expect(menu).toBeVisible(); expect(state.writes).toHaveLength(0)
   // Typing searches older versions too; Enter on one says why it isn't picked, Enter on the newest picks it.
   await page.getByRole('combobox').fill('opus')

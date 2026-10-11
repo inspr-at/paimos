@@ -224,7 +224,7 @@ describe('the can’t-run sentence', () => {
     const next = nextView({ now, rows, entries, labels: label, next: { ticket: 'AEON-1011', column: 'design', line: 'anthropic:opus', effort: 'max', reviewer: { line: 'openai:sol', effort: 'xhigh' }, trace: [{ line: 'anthropic:opus', stage: 'column', role: 'build', reason: 'Claude account is at its daily cap', selected: false }, { line: 'anthropic:opus', stage: 'column', role: 'build', reason: '', selected: true }] } })
     expect(next.parts.map(part => part.text).join('')).toBe('The next UI design runs on Opus 5.5 · max through Cursor, reviewed by GPT-6.1 Sol.')
     expect(next.why!.steps.map(step => step.map(part => part.text).join(''))).toEqual([
-      'UI design has its own model: Opus 5.5 · xhigh.', `Skipped Opus 5.5 through Claude: Claude account is at its daily cap until ${time}.`, 'It takes its next route, Cursor: Opus 5.5 · max.', 'Reviews always use another family: GPT-6.1 Sol.',
+      'UI design has its own model: Opus 5.5 · xhigh.', `Skipped Opus 5.5 through Claude Code: Claude account is at its daily cap until ${time}.`, 'It takes its next route, Cursor: Opus 5.5 · max.', 'Reviews always use another family: GPT-6.1 Sol.',
     ])
   })
 })
@@ -238,7 +238,7 @@ describe('Why? for the ticket a person clicked', () => {
       { profile_id: 'gone', selected: false, skip_reasons: ['retired'] }, { profile_id: profile('claude-opus-5.5', 'max').id, selected: true, skip_reasons: [] }] } })
     expect(why.title).toBe('Why Opus 5.5 for AEON-7?')
     expect(why.steps.map(step => step.map(part => part.text).join(''))).toEqual([
-      'Skipped Sonnet 5.5: the account is at its daily cap.', 'Skipped Opus 5.5 through Claude: the account has no room left until its limit resets.',
+      'Skipped Sonnet 5.5: the account is at its daily cap.', 'Skipped Opus 5.5 through Claude Code: the account has no room left until its limit resets.',
       'Skipped A model no longer in the registry: the model has been retired.', 'AEON-7 runs on Opus 5.5 · max through Cursor.',
     ])
   })

@@ -3,6 +3,7 @@
 // qualification and the automatic fallback. Everything here is pure so the card can be tested without a browser.
 import { compareModelVersions, profileLine, type PrefProfile } from './modelPrefs'
 import { harnessLabel } from './agentState'
+import { HARNESS_NAME as ACCOUNT_NAME } from './capacity'
 
 export type Scope = 'me' | 'default'
 export interface SimplePick { line: string | null; effort: string | null; harness?: string; model?: string }
@@ -312,12 +313,14 @@ export function cantSentence(item: SimpleUnavailable | null | undefined, entries
   if (!item) return null
   const name = entryFor(entries, item.line)?.name ?? lineFallback(item.line)
   const until = untilText(item.until, now), by = until ? ` until ${until}` : ''
-  const account = item.route ? `${harnessLabel(item.route)} account` : 'The account'
+  // Accounts carry the vendor's name ("Claude account"); routes carry the harness's ("runs through Cursor").
+  const vendor = item.route ? ACCOUNT_NAME[item.route] ?? harnessLabel(item.route) : ''
+  const account = vendor ? `${vendor} account` : 'The account'
   const causes: Record<UnavailableCause, string> = {
     daily_cap: `${account} is at its daily cap${by}`,
     paused: `${name} is paused${by}`,
     no_tools: `${name} has no tools in PAIMOS`,
-    no_account: item.route ? `No ${harnessLabel(item.route)} account can run ${name} right now` : `No account can run ${name} right now`,
+    no_account: vendor ? `No ${vendor} account can run ${name} right now` : `No account can run ${name} right now`,
     retired: `${name} has been retired`,
     residency: `Data residency rules out ${name}`,
   }

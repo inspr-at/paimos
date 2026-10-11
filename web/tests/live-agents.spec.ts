@@ -113,7 +113,7 @@ test('hover and focus show who works on what; an agent opens its session', async
   await expect(camy).toHaveAttribute('href', '/agents/s-camy')
   await expect(pop.getByRole('link', { name: /AEON-184/ })).toHaveAttribute('href', '/p/AEON/AEON-184')
   await expect(pop.getByRole('link', { name: /AEON-184/ })).toContainText('Live agents on project cards and rows')
-  await expect(pop.getByRole('link', { name: /^aeon-coordinator, Claude, working for 2h 20m/ })).toBeVisible()
+  await expect(pop.getByRole('link', { name: /^aeon-coordinator, Claude Code, working for 2h 20m/ })).toBeVisible()
   // An agent without a ticket has no ticket line (no filler).
   await expect(pop.locator('.pop-agent', { hasText: 'aeon-coordinator' }).locator('.ticket-line')).toHaveCount(0)
   // Leaving closes it; the keyboard opens it on focus and walks into it with Enter.
@@ -154,8 +154,8 @@ test('without permission to know the agent the chip still says an agent works', 
   const data = world('none')
   data.live.push(liveAgent({ project_id: 'p-hausv', harness: 'claude', ticket: { id: 'n-h1', key: 'HAUSV-887', title: 'Yearly statement preview', project_id: 'p-hausv' } }, 3))
   await cards(page, data)
-  const chip = card(page, 'p-hausv').getByRole('button', { name: '1 agent working: Claude agent on HAUSV-887. Who works on what' })
-  await expect(chip).toContainText('Claude agent')
+  const chip = card(page, 'p-hausv').getByRole('button', { name: '1 agent working: Claude Code agent on HAUSV-887. Who works on what' })
+  await expect(chip).toContainText('Claude Code agent')
   await chip.click()
   const pop = page.getByRole('dialog', { name: 'Active agents on Hausverwaltung' })
   // No session to open: the agent is a line, not a link. History stays a plain /agents link.

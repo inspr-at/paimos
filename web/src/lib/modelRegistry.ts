@@ -9,7 +9,7 @@ import { fullModelName } from './planning'
 
 export type Harness = 'codex' | 'claude' | 'grok' | 'gemini' | 'cursor' | 'pi' | 'opencode'
 export const HARNESS_ORDER: Harness[] = ['codex', 'claude', 'grok', 'gemini', 'cursor', 'pi', 'opencode']
-export const HARNESS_NAME: Record<Harness, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', gemini: 'Gemini', cursor: 'Cursor', pi: 'pi', opencode: 'OpenCode' }
+export const HARNESS_NAME: Record<Harness, string> = { codex: 'Codex', claude: 'Claude Code', grok: 'Grok', gemini: 'Gemini', cursor: 'Cursor', pi: 'pi', opencode: 'OpenCode' }
 const isHarness = (value: string): value is Harness => (HARNESS_ORDER as string[]).includes(value)
 
 export interface RegistryProfile {

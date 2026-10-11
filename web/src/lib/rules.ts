@@ -21,7 +21,7 @@ export type CheckState = 'on' | 'off' | 'mixed'
 
 export const LAYER_LABEL: Record<LayerName, string> = { company: 'Company', project: 'Project', person: 'Person', agent: 'Agent' }
 export const ROLE_LABEL: Record<RoleName, string> = { coordinator: 'Coordinator', builder: 'Builder', reviewer: 'Reviewer', operator: 'Operator' }
-export const HARNESS_LABEL: Record<HarnessName, string> = { 'claude-code': 'Claude', codex: 'Codex', grok: 'Grok', pi: 'Pi', cursor: 'Cursor', gemini: 'Gemini CLI', opencode: 'OpenCode' }
+export const HARNESS_LABEL: Record<HarnessName, string> = { 'claude-code': 'Claude Code', codex: 'Codex', grok: 'Grok', pi: 'Pi', cursor: 'Cursor', gemini: 'Gemini CLI', opencode: 'OpenCode' }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const IDENTITY = /^[a-z][a-z0-9._-]{0,95}$/
