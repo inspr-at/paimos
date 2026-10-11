@@ -195,6 +195,10 @@ type boardColumn struct {
 type boardStoredOrder struct {
 	Rank []string `json:"rank"`
 	Not  []string `json:"not"`
+	// End and Efforts belong to this column's own order only, so an Undo can
+	// write back the whole order a reset deleted (AEON-1161).
+	End     string            `json:"end,omitempty"`
+	Efforts map[string]string `json:"efforts,omitempty"`
 }
 type boardDocument struct {
 	PersonID  *string                 `json:"person_id"`
@@ -337,6 +341,7 @@ func boardDocumentFor(ctx context.Context, tx pgx.Tx, s modelprefs.BoardState, c
 				col.Thinking.Own = order.Thinking
 				if order.Rank != nil {
 					col.StoredEffort = order.Effort
+					col.Stored.End, col.Stored.Efforts = order.End, order.Efforts
 				}
 				break
 			}

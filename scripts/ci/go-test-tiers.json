@@ -7366,6 +7366,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelWaitReasonsRespectCurrentAccountSharing","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2BoardStoredOrderCarriesEndingAndLevels","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2CrossHarnessNativeWrites","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2CursorPauseCoversNativeIDs","tier":"ESSENTIAL"}
@@ -7374,11 +7376,15 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2InheritedDefaultExclusionsAreNotExceptions","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigratedTailFoldsThroughRulesAndKeepsStamps","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigrationGolden","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NativeLevelsPerRoute","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NoRuntimeLadderReaders","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2OrderAndPauseWritesFenceConcurrentWritersAndRevocation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2OrderNativeEffortCompatibility","tier":"ESSENTIAL"}
     ,

@@ -389,6 +389,8 @@ components:
           properties:
             rank: {type: array, maxItems: 512, items: {type: string, maxLength: 128}}
             not: {type: array, maxItems: 512, items: {type: string, maxLength: 128}}
+            end: {type: string, enum: [wait, default, row, auto], description: 'Ending stored on this column order. Omitted when the column has no order of its own or its order stores no ending.'}
+            efforts: {type: object, maxProperties: 512, additionalProperties: {type: string, maxLength: 32}, description: 'Native levels stored on this column order, by line. Omitted when the column has no order of its own or its order stores none.'}
         stored_effort: {type: [string, 'null'], description: 'Native effort stored on this column order. Null when that order has none. Omitted when this column has no order of its own.'}
     ModelBoardCoverage:
       type: object
