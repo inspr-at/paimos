@@ -162,7 +162,11 @@
         "internal/agentruns/queue_notifications_test.go",
         "internal/runisolation/**",
         "internal/agentd/routine_tools.go",
-        "internal/agentd/routine_tools_test.go"
+        "internal/agentd/routine_tools_test.go",
+        "internal/agentd/browser_capture.go",
+        "internal/agentd/browser_capture_test.go",
+        "internal/agentsetup/browser_runtime.go",
+        "internal/workqueue/native_browser.go"
       ]
     },
     {

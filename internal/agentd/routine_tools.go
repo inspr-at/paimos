@@ -22,12 +22,26 @@ type RoutineToolAdapter interface {
 	RoutineToolsSupported(agentsetup.RoutineGrant) bool
 }
 
+// Separate from coding: a native capture coordinator has a capture-only
+// inventory. Implementations must qualify its external launcher boundary.
+type RoutineBrowserToolAdapter interface {
+	RoutineBrowserToolsSupported(agentsetup.RoutineGrant) bool
+}
+
 func validRoutineToolMode(run Run, adapter Adapter) error {
 	grant, err := routineGrant(run)
 	if err != nil {
 		return err
 	}
 	if grant == nil {
+		return nil
+	}
+	if grant.RuntimeCapability == agentsetup.RoutineBrowserCapability {
+		browser, ok := adapter.(RoutineBrowserToolAdapter)
+		if !ok || adapter.Name() != Claude || !browser.RoutineBrowserToolsSupported(*grant) ||
+			run.ReadOnlyReview || run.Purpose != "" && run.Purpose != "managed" {
+			return ErrRoutineToolsUnavailable
+		}
 		return nil
 	}
 	qualified, ok := adapter.(RoutineToolAdapter)

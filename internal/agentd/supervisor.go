@@ -36,6 +36,9 @@ import (
 
 type Config struct {
 	RoutineWorkspaces *RoutineWorkspaceConfig
+	// Internal executor wiring only. Nil yields an explicit capture WAIT;
+	// coding adapters submit jobs rather than starting a browser themselves.
+	BrowserCaptures   func(agentsetup.RoutineGrant) BrowserCaptureRequester
 	Power             Power
 	UsageProbes       usageprobe.Probe
 	StepUps           *StepUpManager
@@ -164,6 +167,7 @@ type harnessMetadata struct {
 
 type Supervisor struct {
 	routineConfig          *RoutineWorkspaceConfig
+	browserCaptures        func(agentsetup.RoutineGrant) BrowserCaptureRequester
 	routineCheckouts       map[string]*agentsetup.Store
 	routineResources       map[string]RoutineResourceLease
 	power                  Power
@@ -442,6 +446,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		config.Repositories = append([]RoutineRepository(nil), config.Repositories...)
 		s.routineConfig = &config
 	}
+	s.browserCaptures = c.BrowserCaptures
 	s.routineCheckouts = map[string]*agentsetup.Store{}
 	s.routineResources = map[string]RoutineResourceLease{}
 	s.capacityWake = make(chan struct{}, 1)
@@ -1513,8 +1518,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				s.observe(entry, AdapterEvent{Doing: doing})
 				return mode, true
 			}
+			var browser BrowserCaptureRequester
+			if grant != nil && s.browserCaptures != nil {
+				browser = s.browserCaptures(*grant)
+			}
 			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
-				toolBinding{routine: grant, resourceEnvironment: resourceEnvironment, api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
+				toolBinding{routine: grant, browser: browser, resourceEnvironment: resourceEnvironment, api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
 			if err != nil {
 				closeHarness("process_failed")
 				return err

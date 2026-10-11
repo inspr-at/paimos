@@ -23,7 +23,8 @@ const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
 const AEON_TOOLS = ["aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence",
   "aeon_request_approval", "aeon_reply", "aeon_terminal", "aeon_read", "aeon_write",
   "aeon_edit", "aeon_glob", "aeon_grep", "aeon_activity"];
-const ROUTINE_TOOLS = ["aeon_terminal", "aeon_read", "aeon_write", "aeon_edit", "aeon_glob", "aeon_grep"];
+const ROUTINE_TOOLS = ["aeon_terminal", "aeon_read", "aeon_write", "aeon_edit", "aeon_glob", "aeon_grep", "aeon_browser_capture"];
+const BROWSER_CAPTURE_TOOLS = ["aeon_browser_capture"];
 
 function managedToolHook(allowedTools) {
   return async (input) => allowedTools.includes(input?.tool_name) ? {} : {
@@ -405,12 +406,15 @@ try {
   if (toolBinding !== undefined &&
       (typeof toolBinding?.url !== "string" || !/^http:\/\/127\.0\.0\.1:[0-9]+$/u.test(toolBinding.url) ||
        typeof toolBinding?.token !== "string" || !/^[0-9a-f]{64}$/u.test(toolBinding.token) ||
-       (toolBinding.routine !== undefined && typeof toolBinding.routine !== "boolean"))) {
+       (toolBinding.routine !== undefined && typeof toolBinding.routine !== "boolean") ||
+       (toolBinding.browser_capture_only !== undefined && typeof toolBinding.browser_capture_only !== "boolean") ||
+       (toolBinding.browser_capture_only === true && toolBinding.routine !== true))) {
     throw new Error("invalid managed tool binding");
   }
   const mcpServers = toolBinding ? { aeon: { type: "http", url: toolBinding.url,
     headers: { Authorization: `Bearer ${toolBinding.token}` } } } : {};
-  const toolInventory = toolBinding?.routine === true ? ROUTINE_TOOLS : AEON_TOOLS;
+  const toolInventory = toolBinding?.browser_capture_only === true ? BROWSER_CAPTURE_TOOLS
+    : toolBinding?.routine === true ? ROUTINE_TOOLS : AEON_TOOLS;
   const allowedTools = !verification && toolBinding ? toolInventory.map((name) => `mcp__aeon__${name}`) : [];
   start.tools = undefined;
   input = new InputStream(userMessage(start.prompt));
