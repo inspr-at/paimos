@@ -9,15 +9,18 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -59,6 +62,33 @@ func TestIncident1228MiddlewareRecordsFailureClass(t *testing.T) {
 				return fixture.err
 			}
 			req := httptest.NewRequest(http.MethodGet, "/api/me?private-fixture-value", nil)
+			if fixture.name == "cancelled" {
+				// Exercise the real acquisition path without a database. Any attempted
+				// dial fails the proof that this 500 originates before PostgreSQL.
+				cfg, err := db.ParsePoolConfig("host=127.0.0.1 port=1 dbname=fixture user=fixture sslmode=disable pool_min_conns=0 pool_min_idle_conns=0")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var dials atomic.Int32
+				cfg.ConnConfig.DialFunc = func(context.Context, string, string) (net.Conn, error) {
+					dials.Add(1)
+					return nil, errors.New("unexpected fixture dial")
+				}
+				pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(pool.Close)
+				t.Cleanup(func() {
+					if dials.Load() != 0 || pool.Stat().CanceledAcquireCount() != 1 {
+						t.Error("cancelled authentication did not fail before dialing")
+					}
+				})
+				mod.pool, mod.inTenant = pool, db.InTenant
+				cancelled, cancel := context.WithCancel(req.Context())
+				cancel()
+				req = req.WithContext(cancelled)
+			}
 			req.Pattern = "GET /api/me"
 			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: strings.Repeat("0", 64)})
 			rec := httptest.NewRecorder()
