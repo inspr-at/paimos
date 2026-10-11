@@ -59,6 +59,7 @@ export const useProjects = defineStore('projects', () => {
     const started = generation
     if (request) return request
     if (loaded.value && !force && Date.now() - loadedAt < 60_000) return Promise.resolve()
+    const knownIDs = new Set(summaries.value.map(project => project.id))
     loading.value = true
     if (!loaded.value) error.value = ''
     request = (async () => {
@@ -67,6 +68,13 @@ export const useProjects = defineStore('projects', () => {
         if (started !== generation) return
         const map = new Map<string, { routeKey: string; description: string; updatedAt: string }>()
         const current = new Map(summaries.value.map(item => [item.id, item]))
+        // Only a confirmed creation adds a summary while this read is pending.
+        // Keep it and its node details until a read started after creation.
+        const created = summaries.value.filter(item => !knownIDs.has(item.id))
+        for (const project of created) {
+          const detail = details.value.get(project.id)
+          if (detail) map.set(project.id, detail)
+        }
         const names = new Map<string, { title: string; state: string }>()
         for (const node of nodes.items) {
           const cached = details.value.get(node.id), shown = current.get(node.id)
@@ -77,10 +85,11 @@ export const useProjects = defineStore('projects', () => {
             names.set(node.id, node)
           }
         }
-        summaries.value = summary.items.map(item => {
+        const listedIDs = new Set(summary.items.map(item => item.id))
+        summaries.value = [...summary.items.map(item => {
           const latest = names.get(item.id)
           return latest ? { ...item, title: latest.title, state: latest.state } : item
-        })
+        }), ...created.filter(item => !listedIDs.has(item.id))]
         details.value = map
         loaded.value = true
         loadedAt = Date.now()
@@ -113,8 +122,9 @@ export const useProjects = defineStore('projects', () => {
     })
   }
 
-  // Only a confirmed project creation supplies this empty summary. The next
-  // server read replaces it; no sample counts are used for existing projects.
+  // Only a confirmed project creation supplies this empty summary. A server
+  // read started after creation replaces it; no sample counts are used for
+  // existing projects.
   function addCreatedProject(node: WorkNode): void {
     if (!summaries.value.some(project => project.id === node.id)) summaries.value = [...summaries.value, {
       id: node.id, key: node.key, title: node.title, state: node.state,

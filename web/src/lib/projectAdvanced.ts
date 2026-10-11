@@ -5,6 +5,7 @@ export type ShadowMode = 'off' | 'shadow'
 export interface ShadowSettings { mode: ShadowMode; revision: number }
 export interface QueueSettings extends ShadowSettings { freeze: boolean; release_set: string[]; held_slugs: string[]; held_pull_requests: number[] }
 export interface AdmissionSettings { project_id: string; shadow_enabled: boolean; revision: number }
+export interface AdmissionSettingsInput { expected_revision: number; shadow_enabled: boolean }
 export interface MergeBackfillInput { pull_requests: number[]; target: 'delivered'; release_id: string; apply?: boolean; preview_event_id?: number }
 export interface MergeBackfillItem {
   ticket_node_id: string; key: string; project_id: string | null; pull_request: number

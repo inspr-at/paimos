@@ -2,6 +2,8 @@
 // Risks: revisioned admin controls and repair previews must stay on the record
 // acted on; failures cannot claim success, and project creation must retain a
 // key-conflict draft or report partial group assignment without creating twice.
+// Admission must use its strict write contract; pre-creation list snapshots
+// must not remove a project whose creation has since been confirmed.
 import { test, expect, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
@@ -70,8 +72,14 @@ async function setup(page: Page, options: { admin?: boolean; principalKind?: 'pe
       if (control.held?.path === path) { const hold = control.held; control.held = null; hold.entered(); await hold.until }
       if (path === MACHINE_PATHS.reviews && control.failReviews) return route.fulfill({ status: 409, json: { error: 'revision changed' } })
       const previous = states.get(settingsKey)!
-      if (path !== MACHINE_PATHS.routing && body.revision !== previous.revision) return route.fulfill({ status: 409, json: { error: 'revision changed' } })
-      states.set(settingsKey, { ...body, ...(path === MACHINE_PATHS.routing ? {} : { revision: Number(previous.revision) + 1 }) })
+      if (path === MACHINE_PATHS.admission) {
+        if (Object.keys(body).sort().join(',') !== 'expected_revision,shadow_enabled' || !Number.isSafeInteger(body.expected_revision) || Number(body.expected_revision) < 0 || typeof body.shadow_enabled !== 'boolean') return route.fulfill({ status: 400, json: { error: 'Invalid admission settings request' } })
+        if (body.expected_revision !== previous.revision) return route.fulfill({ status: 409, json: { error: 'revision changed' } })
+        states.set(settingsKey, { project_id: project, shadow_enabled: body.shadow_enabled, revision: Number(previous.revision) + 1 })
+      } else {
+        if (path !== MACHINE_PATHS.routing && body.revision !== previous.revision) return route.fulfill({ status: 409, json: { error: 'revision changed' } })
+        states.set(settingsKey, { ...body, ...(path === MACHINE_PATHS.routing ? {} : { revision: Number(previous.revision) + 1 }) })
+      }
     }
     return route.fulfill({ json: states.get(settingsKey) })
   })
@@ -100,11 +108,44 @@ test('AEON-1235: New project retains key conflicts and reports partial group ass
   await expect(name).toHaveValue('Website relaunch with a long German project name'); await expect(create).toBeDisabled()
   world.control.conflict = false; world.control.failGroup = true
   await stable.check(() => key.fill('WEB')); await stable.check(() => group.selectOption('g-platform')); stable.done()
+  // Both list snapshots precede creation. Hold the summaries response until
+  // the confirmed project is already displayed in General.
+  const staleSummary = await page.evaluate(() => {
+    const app = (document.querySelector('#app') as unknown as { __vue_app__: { config: { globalProperties: { $pinia: { _s: Map<string, { projects: unknown[] }> } } } } }).__vue_app__
+    return app.config.globalProperties.$pinia._s.get('projects')!.projects
+  }), staleNodes = structuredClone([...world.nodes.values()])
+  let refreshEntered!: () => void, releaseRefresh!: () => void
+  const reading = new Promise<void>(resolve => { refreshEntered = resolve }), reply = new Promise<void>(resolve => { releaseRefresh = resolve })
+  const staleSummaryReader = async (route: import('@playwright/test').Route) => {
+    refreshEntered(); await reply
+    await route.fulfill({ json: { items: staleSummary } })
+  }
+  const staleNodeReader = async (route: import('@playwright/test').Route) => {
+    if (new URL(route.request().url()).searchParams.get('kind') !== 'project') return route.fallback()
+    await route.fulfill({ json: { items: staleNodes, next_cursor: null } })
+  }
+  await page.route('**/api/projects?**', staleSummaryReader)
+  await page.route('**/api/nodes?**', staleNodeReader)
+  await page.evaluate(() => {
+    const app = (document.querySelector('#app') as unknown as { __vue_app__: { config: { globalProperties: { $pinia: { _s: Map<string, { load(force: boolean): Promise<void> }> } } } } }).__vue_app__
+    Reflect.set(window, '__projectCreationRefresh', app.config.globalProperties.$pinia._s.get('projects')!.load(true))
+  })
+  await reading
   await create.click()
   await expect(page).toHaveURL(/\/p\/WEB\/settings\?new=p-created-2&group_assignment_failed=1$/)
   await expect(page.getByRole('region', { name: 'Next step' })).toContainText('The selected group was not assigned.')
   expect(world.creates).toHaveLength(2); expect(world.creates[1]).toMatchObject({ kind_id: 'k-project', key_prefix: 'WEB', fields: { project_key: 'WEB' } })
   expect(world.assignments).toEqual([{ group_id: 'g-platform', project_ids: ['p-created-2'] }])
+  releaseRefresh(); await page.evaluate(() => Reflect.get(window, '__projectCreationRefresh'))
+  await expect(page.locator('#project-title')).toHaveText('Website relaunch with a long German project name')
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Website relaunch with a long German project name')
+  await page.unroute('**/api/projects?**', staleSummaryReader)
+  await page.unroute('**/api/nodes?**', staleNodeReader)
+  await page.evaluate(async () => {
+    const app = (document.querySelector('#app') as unknown as { __vue_app__: { config: { globalProperties: { $pinia: { _s: Map<string, { load(force: boolean): Promise<void> }> } } } } }).__vue_app__
+    await app.config.globalProperties.$pinia._s.get('projects')!.load(true)
+  })
+  await expect(page.locator('#project-title')).toHaveText('Website relaunch with a long German project name')
   await page.getByRole('link', { name: 'Next: link a repository' }).click(); await expect(page).toHaveURL('/p/WEB/settings/delivery?link=1#repository')
   await navigate(page, '/p/PHAROS/settings'); await expect(page.getByRole('region', { name: 'Next step' })).toHaveCount(0)
   expect(world.errors).toEqual([])
@@ -116,6 +157,13 @@ test('AEON-1235: Advanced writes preserve revisions, bounds and honest repair re
   const review = modeButton(page, 'reviews', 'shadow')
   await expect(review).toBeEnabled()
   const stable = await controlStability(page, { queueOff: modeButton(page, 'queue', 'off'), queueShadow: modeButton(page, 'queue', 'shadow'), review, shipping: modeButton(page, 'shipping', 'off'), routing: modeButton(page, 'routing', 'off'), admission: page.getByRole('switch', { name: 'Record shadow admission' }) })
+  const admission = page.getByRole('switch', { name: 'Record shadow admission' })
+  await expect(admission).toBeEnabled()
+  await stable.check(async () => { await admission.click(); await expect(admission).toBeChecked(); await expect(admission).toBeEnabled() })
+  expect(world.writes.at(-1)).toEqual({ project: 'p-pharos', path: MACHINE_PATHS.admission, body: { expected_revision: 2, shadow_enabled: true } })
+  await expect(page.locator('.toast').filter({ hasText: 'Admission saved. Recorded in history.' })).toBeVisible()
+  await stable.check(async () => { await admission.click(); await expect(admission).not.toBeChecked(); await expect(admission).toBeEnabled() })
+  expect(world.writes.at(-1)).toEqual({ project: 'p-pharos', path: MACHINE_PATHS.admission, body: { expected_revision: 3, shadow_enabled: false } })
   await stable.check(async () => { await review.click(); await expect(review).toHaveAttribute('aria-pressed', 'true') })
   expect(world.writes.at(-1)).toMatchObject({ project: 'p-pharos', body: { mode: 'shadow', revision: 3 } })
   world.control.failReviews = true

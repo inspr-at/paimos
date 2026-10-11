@@ -6,7 +6,7 @@ import type { Project } from '../../stores/projects'
 import { useSession } from '../../stores/session'
 import { can, myProjectRole, myWorkspaceRole } from '../../lib/authz'
 import { APIError } from '../../lib/api'
-import { advancedRequest, MACHINE_PATHS, pullRequestNumbers, queueSlugs, type AdmissionSettings, type Machine, type MergeBackfillInput, type MergeBackfillResult, type QueueSettings, type ShadowMode, type ShadowSettings } from '../../lib/projectAdvanced'
+import { advancedRequest, MACHINE_PATHS, pullRequestNumbers, queueSlugs, type AdmissionSettings, type AdmissionSettingsInput, type Machine, type MergeBackfillInput, type MergeBackfillResult, type QueueSettings, type ShadowMode, type ShadowSettings } from '../../lib/projectAdvanced'
 import { listPlanningReleases, type PlanningRelease } from '../../lib/releaseData'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { toast } from '../../lib/toast'
@@ -22,6 +22,7 @@ const admin = computed(() => [myWorkspaceRole()?.key, myProjectRole(props.projec
 const scope = useIdentityScope(() => admin.value)
 const open = ref(route.hash === '#advanced')
 type Settings = ShadowSettings | QueueSettings | AdmissionSettings | { mode: ShadowMode }
+type SettingsInput = ShadowSettings | QueueSettings | AdmissionSettingsInput | { mode: ShadowMode }
 type Row = { id: Machine; name: string; description: string; icon: IconName; read: string; write: string; state: Settings | null; busy: boolean; error: string; loading: boolean }
 const rows = reactive<Row[]>([
   { id: 'queue', name: 'Delivery queue', description: 'Orders, holds and releases finished work in Shadow.', icon: 'queue', read: 'delivery_queue.read', write: 'delivery_queue.manage', state: null, busy: false, error: '', loading: false },
@@ -59,7 +60,7 @@ function load(row: Row) {
     validate(row, state, project); row.state = state
   }), { failed: error => { failed(row, error); row.state = null }, settled: () => { row.loading = false } })
 }
-function save(row: Row, body: Settings) {
+function save(row: Row, body: SettingsInput) {
   if (!row.state || row.busy || !writable(row)) return
   const project = props.project.id
   row.busy = true; row.loading = false; row.error = ''; reads.get(row.id)!.cancel()
@@ -76,7 +77,7 @@ function setMode(row: Row, value: ShadowMode) {
 function admission(event: Event, row: Row) {
   const checked = (event.target as HTMLInputElement).checked
   ;(event.target as HTMLInputElement).checked = mode(row) === 'shadow'
-  if (row.state && 'shadow_enabled' in row.state) save(row, { ...row.state, shadow_enabled: checked })
+  if (row.state && 'shadow_enabled' in row.state) save(row, { expected_revision: row.state.revision, shadow_enabled: checked })
 }
 function freeze(event: Event) {
   const checked = (event.target as HTMLInputElement).checked
