@@ -23,7 +23,8 @@ function source(state: State): MetricSource | null {
 async function setup(page: Page) {
   const data = fixtures(), errors = watchErrors(page)
   await mockWork(page, data)
-  const world = { state: 'none' as State, readOnly: false, fail: false, leadReason: false, metrics: [] as unknown[], source: null as MetricSource | null, overrides: { deadlines: { ci_green: 30 } } as DeliverySettings, revision: 1, writes: [] as { id: string; body: DeliverySettings; revision: string }[], links: [] as Record<string, unknown>[], history: [] as Record<string, unknown>[], held: null as null | { entered: () => void; until: Promise<void> }, pendingLoad: null as null | { entered: () => void; until: Promise<void> } }
+  const world = { state: 'none' as State, readOnly: false, fail: false, actionsReadable: false, leadReason: false, metrics: [] as unknown[], source: null as MetricSource | null, overrides: { deadlines: { ci_green: 30 } } as DeliverySettings, revision: 1, writes: [] as { id: string; body: DeliverySettings; revision: string }[], links: [] as Record<string, unknown>[], history: [] as Record<string, unknown>[], checks: [] as { id: string; body: string | null }[], held: null as null | { entered: () => void; until: Promise<void> }, pendingLoad: null as null | { entered: () => void; until: Promise<void> } }
+  const historyPosition = () => ({ state: 'running', since: world.source?.backfill_since, phase: 'pulls', day: '2026-09-30', calls: 4, runs: 412, pulls: 96, jobs: 0, truncated: false })
   const otherSettings = new Map<string, { overrides: DeliverySettings; revision: number }>()
   await page.route('**/api/me/permissions**', route => {
     const id = new URL(route.request().url()).searchParams.get('project_id') ?? undefined
@@ -41,13 +42,20 @@ async function setup(page: Page) {
   await page.route('**/api/projects/*/delivery/metrics/source', route => {
     const body = route.request().postDataJSON(); world.links.push(body)
     if (world.readOnly || world.fail) return route.fulfill({ status: world.readOnly ? 403 : 503, json: { error: 'The repository was not saved.' } })
-    world.state = 'noactions'; world.source = { ...source('noactions')!, repository: body.repository, ci_workflow: body.ci_workflow, nightly_workflow: body.nightly_workflow, backfill_since: new Date(Date.parse('2026-10-12T00:00:00Z') - body.days * 86_400_000).toISOString() }
+    world.state = 'noactions'; world.source = { ...source('noactions')!, repository: body.repository, ci_workflow: body.ci_workflow, nightly_workflow: body.nightly_workflow, backfill_since: new Date(Date.parse('2026-10-12T00:00:00Z') - body.days * 86_400_000).toISOString(), retry_at: '2026-10-12T12:28:00Z' }
     return route.fulfill({ json: world.source })
   })
   await page.route('**/api/projects/*/delivery/metrics/backfill', route => {
-    world.history.push(route.request().postDataJSON())
+    const body = route.request().postDataJSON(); world.history.push(body)
+    if (!body.restart && world.source?.retry_at && Date.parse(world.source.retry_at) > Date.parse(NOW)) return route.fulfill({ json: { ...historyPosition(), retry_at: world.source.retry_at } })
     if (world.state === 'noactions') return route.fulfill({ status: 502, json: { error: 'GitHub could not be read; the server retries.' } })
-    return route.fulfill({ json: { state: 'running', since: '2026-09-12T00:00:00Z', phase: 'pulls', day: '2026-09-30', calls: 4, runs: 412, pulls: 96, jobs: 0, truncated: false } })
+    return route.fulfill({ json: historyPosition() })
+  })
+  await page.route('**/api/projects/*/delivery/metrics/check-again', route => {
+    world.checks.push({ id: new URL(route.request().url()).pathname.split('/')[3]!, body: route.request().postData() })
+    if (!world.actionsReadable) return route.fulfill({ status: 502, json: { error: 'GitHub could not be read; the server retries.' } })
+    world.state = 'reading'; world.source = { ...world.source!, last_read_error: null, retry_at: null }
+    return route.fulfill({ json: historyPosition() })
   })
   await page.route('**/api/projects/*/delivery-settings**', async route => {
     const url = new URL(route.request().url()), method = route.request().method()
@@ -117,10 +125,26 @@ test('AEON-1226: repository states stay put and delivery edits preserve authorit
   await expect(page.locator('.repo-slot')).toHaveAttribute('data-state', 'noactions')
   await expect(page.locator('.ds-h')).toHaveText('Linked. History can’t be read: the GitHub App lacks Actions read access.')
   expect(world.links.at(-1)).toEqual({ repository: 'inspr-at/aeon', ci_workflow: '.github/workflows/ci.yml', nightly_workflow: '.github/workflows/nightly-full.yml', days: 60 })
+  await expect.poll(() => world.history.at(-1)).toEqual({ days: 60, restart: false })
+  // Risk: Check again silently waits for retry_at after Actions access is granted.
+  // The fixed API clock keeps the retry in the future throughout both clicks.
+  expect(Date.parse(world.source!.retry_at!)).toBeGreaterThan(Date.parse(NOW))
+  const historyBeforeCheck = structuredClone(world.history), linkedSince = world.source!.backfill_since
   await page.setViewportSize({ width: 400, height: 1000 })
   const linked = await controlStability(page, { change: page.locator('[data-act=change]'), check: page.locator('[data-act=check]'), checks: page.locator('#checks') })
   await linked.check(async () => { await page.locator('[data-act=check]').click(); await expect(page.locator('[data-act=check]')).toBeEnabled() })
-  linked.done(); expect(world.history.at(-1)).toEqual({ days: 60, restart: false })
+  linked.done(); expect(world.checks).toEqual([{ id: 'p-aeon', body: null }])
+  expect(world.history).toEqual(historyBeforeCheck)
+  await expect(page.locator('.repo-slot')).toHaveAttribute('data-state', 'noactions')
+  expect(world.source!.last_read_error?.reason).toBe('actions_read_missing')
+  expect(Date.parse(world.source!.retry_at!)).toBeGreaterThan(Date.parse(NOW))
+  world.actionsReadable = true
+  const retry = await controlStability(page, { change: page.locator('[data-act=change]'), more: page.locator('[data-act=repo-more]'), slot: page.locator('.repo-slot'), checks: page.locator('#checks') })
+  await retry.check(async () => { await page.locator('[data-act=check]').click(); await expect(page.locator('.repo-slot')).toHaveAttribute('data-state', 'reading') })
+  retry.done(); expect(world.checks).toEqual([{ id: 'p-aeon', body: null }, { id: 'p-aeon', body: null }])
+  expect(world.history).toEqual(historyBeforeCheck)
+  expect(world.source!.retry_at).toBeNull(); expect(world.source!.last_read_error).toBeNull()
+  expect(world.source!.backfill_since).toBe(linkedSince)
   await page.locator('[data-act=repo-more]').click(); await page.getByRole('menuitem', { name: /Read history again/ }).click()
   await expect.poll(() => world.history.at(-1)).toEqual({ days: 60, restart: true })
   await page.setViewportSize({ width: 1440, height: 1000 })
