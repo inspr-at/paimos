@@ -4,6 +4,7 @@ package modelprefs
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -21,6 +22,11 @@ func EmptyBoardProfile(scope string, person *string) BoardProfile {
 	}
 	return p
 }
+
+// OrdersSQL includes additive v2 situations without relaxing legacy writers' CHECK.
+const OrdersSQL = `SELECT tenant_id,profile_id,column_key,situation,rank,not_allowed,thinking,effort,effort_level,end_mode,efforts,set_by,set_at FROM model_pref_orders
+ UNION ALL SELECT tenant_id,profile_id,column_key,situation,rank,not_allowed,thinking,effort,effort_level,end_mode,efforts,set_by,set_at FROM model_pref_situation_orders`
+
 func LoadBoard(ctx context.Context, tx pgx.Tx, person *string, project string) (BoardState, error) {
 	s := BoardState{Workspace: EmptyBoardProfile("workspace", nil), Orders: []BoardOrder{}, Rules: []Rule{}, Kinds: []Kind{}, SmallHours: 2, FixRounds: 3}
 	if person != nil {
@@ -53,19 +59,27 @@ func LoadBoard(ctx context.Context, tx pgx.Tx, person *string, project string) (
 	if len(ids) > 2 {
 		return s, ErrBoardBounds
 	}
-	rows, err = tx.Query(ctx, `SELECT profile_id::text,column_key,situation,rank,not_allowed,thinking,effort,effort_level FROM model_pref_orders WHERE profile_id=ANY($1::uuid[]) ORDER BY profile_id,column_key,situation LIMIT 1537`, ids)
+	rows, err = tx.Query(ctx, `SELECT profile_id::text,column_key,situation,rank,not_allowed,thinking,effort,effort_level,coalesce(end_mode,''),CASE WHEN octet_length(coalesce(efforts,'{}')::text)<=32768 AND jsonb_typeof(coalesce(efforts,'{}'))='object' THEN coalesce(efforts,'{}') ELSE '{}' END,
+ (octet_length(coalesce(efforts,'{}')::text)>32768 OR jsonb_typeof(coalesce(efforts,'{}'))<>'object') FROM (`+OrdersSQL+`) orders WHERE profile_id=ANY($1::uuid[]) ORDER BY profile_id,column_key,situation LIMIT 1537`, ids)
 	if err != nil {
 		return s, err
 	}
 	for rows.Next() {
 		var o BoardOrder
-		if err := rows.Scan(&o.ProfileID, &o.Column, &o.Situation, &o.Rank, &o.Not, &o.Thinking, &o.Effort, &o.EffortLevel); err != nil {
+		var invalidEfforts bool
+		if err := rows.Scan(&o.ProfileID, &o.Column, &o.Situation, &o.Rank, &o.Not, &o.Thinking, &o.Effort, &o.EffortLevel, &o.End, &o.Efforts, &invalidEfforts); err != nil {
 			rows.Close()
 			return s, err
 		}
-		if len(o.Rank) > 512 || len(o.Not) > 512 {
+		if len(o.Rank) > 512 || len(o.Not) > 512 || invalidEfforts || len(o.Efforts) > 512 {
 			rows.Close()
 			return s, ErrBoardBounds
+		}
+		for line, effort := range o.Efforts {
+			if len(line) == 0 || len(line) > 128 || len(effort) > 32 || strings.ContainsAny(line+effort, "\x00\r\n") {
+				rows.Close()
+				return s, ErrBoardBounds
+			}
 		}
 		s.Orders = append(s.Orders, o)
 	}
@@ -77,7 +91,8 @@ func LoadBoard(ctx context.Context, tx pgx.Tx, person *string, project string) (
 	if len(s.Orders) > 1536 {
 		return s, ErrBoardBounds
 	}
-	rows, err = tx.Query(ctx, `SELECT scope,project_id::text,column_key,line,lock,position,why,set_by::text,set_at FROM model_rules WHERE scope='workspace' OR project_id=$1::uuid ORDER BY scope,position,line LIMIT 4097`, optional(project))
+	rows, err = tx.Query(ctx, `SELECT scope,project_id::text,column_key,line,lock,position,why,set_by::text,set_at FROM (SELECT scope,project_id,column_key,line,lock,position,why,set_by,set_at FROM model_rules WHERE moved_to_models IS NOT TRUE
+ UNION ALL SELECT scope,project_id,column_key,line,CASE kind WHEN 'chain' THEN 'bottom' ELSE 'not' END,position,why,set_by,set_at FROM model_row_constraints) rules WHERE scope='workspace' OR project_id=$1::uuid ORDER BY scope,position,line LIMIT 4097`, optional(project))
 	if err != nil {
 		return s, err
 	}

@@ -87,6 +87,9 @@
         "internal/agentpairing/routine_launch.go",
         "internal/agentaccounts/probe_batch.go",
         "internal/agentaccounts/probe_batch_test.go"
+      ],
+      "exclude": [
+        "internal/db/migrations/1333_models_v2_migration.sql"
       ]
     },
     {
@@ -168,14 +171,31 @@
         "internal/agentruns/queue_notifications.go",
         "internal/agentruns/queue_notifications_test.go",
         "internal/runisolation/**",
+        "internal/db/migrations/1333_models_v2_migration.sql",
+        "internal/modelregistry/models_v2_migration_test.go",
+        "internal/modelregistry/legacy_deprecation_test.go",
+        "internal/modelregistry/contract_v2_test.go",
+        "internal/modelregistry/order_validation.go",
+        "internal/modelregistry/pause.go",
+        "internal/modelregistry/simple_causes.go",
+        "internal/modelregistry/simple_outdated.go",
         "internal/agentd/routine_tools.go",
         "internal/agentd/routine_tools_test.go",
+        "internal/agentd/browser_capture.go",
+        "internal/agentd/browser_capture_test.go",
+        "internal/agentsetup/browser_runtime.go",
+        "internal/workqueue/native_browser.go",
         "internal/routineexec/**",
         "internal/harness/lead_runtime.go",
         "internal/harness/lead_runtime_test.go",
         "internal/agentd/lead_runtime.go",
         "internal/agentd/lead_runtime_test.go",
-        "internal/modelregistry/routine_reads.go"
+        "internal/modelregistry/routine_reads.go",
+        "internal/routineexec/landing.go",
+        "internal/delivery/routine.go",
+        "internal/delivery/routine_test.go",
+        "internal/crossreview/routine_pr.go",
+        "internal/crossreview/routine_pr_app.go"
       ]
     },
     {
@@ -290,7 +310,11 @@
         "internal/recurrences/reads_test.go",
         "internal/decisiondesk/routine_consent_test.go",
         "internal/recurrences/run_history.go",
-        "internal/recurrences/run_history_test.go"
+        "internal/recurrences/run_history_test.go",
+        "internal/routineactions/pr.go",
+        "internal/routineactions/evidence/evidence.go",
+        "internal/routineactions/pipeline.go",
+        "internal/routineactions/pr_test.go"
       ]
     },
     {
@@ -304,6 +328,7 @@
         "internal/releases/**",
         "internal/releasesettlement/**",
         "internal/reportercontract/**",
+        "internal/reportercontract/models_v2_test.go",
         "internal/ciproof/**",
         "internal/ciexecutor/**",
         "internal/deploytarget/**",
@@ -363,7 +388,9 @@
         "web/tests/lead-adoption.spec.ts",
         "web/tests/access-refresh-panels.unit.test.ts",
         "web/src/stores/decisionDesk.ts",
-        "web/tests/models-outdated.spec.ts"
+        "web/tests/models-outdated.spec.ts",
+        "web/src/lib/shortcuts.ts",
+        "web/tests/shortcuts.unit.test.ts"
       ],
       "exclude": [
         "web/src/views/**",

@@ -36,20 +36,35 @@ re-check their existing permission; enabling a pin under deny additionally
 requires workspace `account.use.manage`.
 
 Settings › Accounts › "Where accounts may work" shows the matrix to people with
-`account.use.manage`: the four switches for new accounts, contexts, projects
-and model versions; Allow all and Allow none; tri-state row and column boxes;
-single cells; Undo (button or U outside text fields) for the last save; and the
-context menu for rename, "New accounts: never" and archive. A failed save takes
-back what it showed at once, reads the stored state again and says nothing was
-saved; when that read fails too, the screen says the state may be out of date.
-Rename, "never" and archive carry the revision the menu opened on, so a change
-made meanwhile is refused rather than overwritten. A migrated "Only with PAIMOS
-updates" model rule keeps its place once left, as a choice that can no longer be
-picked. Running work outside the matrix is listed and keeps running. Project
-settings choose the project's context and find it on any matrix page; the
-account count spans up to 1,000 accounts and says when it stops short. The
-pairing review shows the ticks the rule gives new accounts, and model
-Auto-update sends the matrix revision as the "New model versions" rule.
+`account.use.manage`. "For new things" folds the rules into one line; opened, New
+accounts, New contexts and New projects each offer Automatic or Ask first, with
+one sentence and one example for the chosen value, and New model versions shows
+read-only with a link to Models, whose Auto-update is its only editor. A rule
+save names only its rule (`PUT /api/account-use/rules` keeps every rule a save
+leaves out), so Settings never overwrites the model rule. The corner, row and
+column boxes are tri-state and save in bulk; single cells save at once. Every
+cell or rule save says so with Undo in its message, and U outside text fields
+undoes the last one. Add context sits under the table; footnotes explain Default,
+Unassigned (naming the projects waiting there, with a link to the first one's
+Work context card) and Undo. The context menu offers rename, "New accounts:
+never" and archive. A failed save takes back what it showed at once, reads the
+stored state again and says nothing was saved; when that read fails too, the
+screen says the state may be out of date. Rename, "never" and archive carry the
+revision the menu opened on, so a change made meanwhile is refused rather than
+overwritten. `GET /api/account-use` marks an account `awaiting` while it was
+added under New accounts Ask first and no live context allows it; the mark is
+recorded with the account (migration 1336) and the first person save that
+touches its cells ends the wait. Such rows carry a tint and a New tag, and
+"Choose where" in Needs you opens For new things and brings the row with its
+first box focused. When a save ends the wait, the tint and the tag go but the
+tag's room stays until the screen opens again, so the row keeps its height. `holding_projects` counts the visible live projects in
+Unassigned and names up to 20, newest first. On a phone each account is a
+stacked row with named context boxes, and nothing scrolls sideways. Running
+work outside the matrix is listed and keeps running. Project settings choose
+the project's context and find it on any matrix page; the account count spans
+up to 1,000 accounts and says when it stops short. The pairing review shows the
+ticks the rule gives new accounts, and model Auto-update sends the matrix
+revision as the "New model versions" rule.
 
 Model activation, Go selection filters and daemon enrolment are separate
 slices of the same release. This core alone is not a complete release

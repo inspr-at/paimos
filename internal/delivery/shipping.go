@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/routineactions/evidence"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -29,35 +30,9 @@ type ShipInput struct {
 	Head         string  `json:"head_sha"`
 	ScriptAction *string `json:"script_action,omitempty"`
 }
-type ShipRun struct {
-	ID         int64   `json:"id"`
-	Attempt    int     `json:"attempt"`
-	Head       string  `json:"head_sha"`
-	Workflow   string  `json:"workflow"`
-	Event      string  `json:"event"`
-	Status     string  `json:"status"`
-	Conclusion string  `json:"conclusion"`
-	Jobs       []Check `json:"jobs"`
-}
+type ShipRun = evidence.Run
+type ShipFacts = evidence.Facts
 
-// ShipFacts are bounded, normalized read-only observations. They are never
-// accepted in a request, or replayed as GitHub writes.
-type ShipFacts struct {
-	PushedHead     string    `json:"pushed_head"`
-	Base           string    `json:"base_sha"`
-	Behind         bool      `json:"behind"`
-	PR             *int64    `json:"pull_request"`
-	PullHead       string    `json:"pull_head"`
-	Open           bool      `json:"open"`
-	Merged         bool      `json:"merged"`
-	Draft          bool      `json:"draft"`
-	Conflict       bool      `json:"conflict"`
-	MergeableKnown bool      `json:"mergeable_known"`
-	Queued         bool      `json:"queued"`
-	QueueHead      string    `json:"queue_head"`
-	Checks         []Check   `json:"checks"`
-	Runs           []ShipRun `json:"runs"`
-}
 type ShipDecision struct {
 	ShipInput
 	Project    string      `json:"project_id"`

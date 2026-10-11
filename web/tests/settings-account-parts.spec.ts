@@ -211,7 +211,7 @@ test('Verify again keeps its calm row; the count leaves and nothing in the nav o
   const verify = row.getByRole('button', { name: 'Verify again' })
   const guard = await controlStability(page, {
     accounts: navLink(page, 'accounts'), computers: navLink(page, 'computers'), capacity: navLink(page, 'capacity'),
-    head: page.locator('.page-head h2'), grid: page.locator('.matrix-scroll'),
+    head: page.locator('.page-head h2'), grid: page.locator('.ct-wrap'),
   })
   await guard.check(async () => {
     await verify.click()

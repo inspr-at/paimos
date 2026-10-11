@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestModelKeyMatchesAliasesAndAPIIDs(t *testing.T) {
@@ -24,12 +25,15 @@ func TestModelKeyMatchesAliasesAndAPIIDs(t *testing.T) {
 	}
 }
 
-// The revision is empty before the registry is seeded and changes whenever a
-// route changes, so a list can name what it resolved against.
+// The revision is empty before the registry is seeded and changes whenever
+// the Models state a route resolves through changes, so a list can name what
+// it resolved against. It digests content, not row ids: shared planning
+// fixtures captured in one database must match the next run's tenants.
 func TestRevisionFollowsRoutes(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "route-revision", "person", "lead", []string{"admin"})
-	revision := func() string {
+	twin := makePrincipal(t, "route-revision-twin", "person", "lead", []string{"admin"})
+	revision := func(p tenant.Principal) string {
 		t.Helper()
 		var out string
 		err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
@@ -42,29 +46,62 @@ func TestRevisionFollowsRoutes(t *testing.T) {
 		}
 		return out
 	}
-	if got := revision(); got != "" {
+	if got := revision(p); got != "" {
 		t.Fatalf("unseeded revision %q", got)
 	}
-	if code, body := call(t, &p, http.MethodGet, "/api/models", ""); code != http.StatusOK {
-		t.Fatalf("seed: %d %s", code, body)
+	for _, who := range []tenant.Principal{p, twin} {
+		if code, body := call(t, &who, http.MethodGet, "/api/models", ""); code != http.StatusOK {
+			t.Fatalf("seed: %d %s", code, body)
+		}
 	}
-	if got := revision(); got != "" {
-		t.Fatalf("ID-only catalog created routing revision %q", got)
+	for _, who := range []tenant.Principal{p, twin} {
+		if got := revision(who); got != "" {
+			t.Fatalf("ID-only catalog created routing revision %q", got)
+		}
+		inRegistry(t, who, func(tx pgx.Tx) error { return ensureCatalog(t.Context(), tx, who) })
 	}
-	// The routing revision belongs to explicit fixture policy, not model IDs.
-	inRegistry(t, p, func(tx pgx.Tx) error { return ensureCatalog(t.Context(), tx, p) })
-	seeded := revision()
-	if !regexp.MustCompile(`^[0-9a-f]{8}$`).MatchString(seeded) || revision() != seeded {
+	seeded := revision(p)
+	if !regexp.MustCompile(`^[0-9a-f]{8}$`).MatchString(seeded) || revision(p) != seeded {
 		t.Fatalf("seeded revision %q", seeded)
 	}
-	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+	inRegistry(t, p, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes WHERE role='scout' AND priority=1`)
 		return err
 	})
-	if err != nil {
-		t.Fatal(err)
+	if unchanged := revision(p); unchanged != seeded {
+		t.Fatalf("retired ladder history changed the routing revision: %q → %q", seeded, unchanged)
 	}
-	if changed := revision(); changed == seeded || changed == "" {
-		t.Fatalf("revision did not follow the routes: %q → %q", seeded, changed)
+	if revision(twin) != seeded {
+		t.Fatalf("equal Models state named differently: %q and %q", seeded, revision(twin))
+	}
+	change := func(who tenant.Principal, sql string) {
+		t.Helper()
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, who.TenantID, func(tx pgx.Tx) error {
+			var opus string
+			if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh' AND version=$1`, CatalogVersion).Scan(&opus); err != nil {
+				return err
+			}
+			if sql == "" {
+				return dbtest.ModelsOrder(t.Context(), tx, who.TenantID, "other", "first", "wait", opus)
+			}
+			_, err := tx.Exec(t.Context(), sql)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ordered := ""
+	for _, who := range []tenant.Principal{p, twin} {
+		change(who, "")
+		if ordered == "" {
+			ordered = revision(who)
+		}
+		if got := revision(who); got == seeded || got != ordered {
+			t.Fatalf("revision did not follow the Default order: %q → %q (twin %q)", seeded, got, ordered)
+		}
+	}
+	change(p, `INSERT INTO model_pauses(tenant_id,harness,model,reason) SELECT tenant_id,harness,model,'paused' FROM model_profiles WHERE slug='claude-opus-xhigh' LIMIT 1`)
+	if paused := revision(p); paused == ordered || paused == "" {
+		t.Fatalf("revision did not follow the pause: %q → %q", ordered, paused)
 	}
 }

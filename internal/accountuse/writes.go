@@ -125,6 +125,14 @@ func WriteCells(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CellWrite
 			return CellResult{}, err
 		}
 	}
+	// A person's save that touches an account is a choice for it: it no longer waits (AEON-1173).
+	touched := make([]string, 0, len(changes))
+	for _, c := range changes {
+		touched = append(touched, c.AccountID)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM account_use_awaiting WHERE account_id=ANY($1::uuid[])`, touched); err != nil {
+		return CellResult{}, err
+	}
 	after, err := bump(ctx, tx)
 	if err != nil {
 		return CellResult{}, err
@@ -136,13 +144,13 @@ func WriteCells(ctx context.Context, tx pgx.Tx, p tenant.Principal, in CellWrite
 
 func (m *Module) rules(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		RuleValues
+		RulePatch
 		ExpectedRevision int64 `json:"expected_revision"`
 	}
 	if err := decode(r, &in); err != nil {
 		return nil, err
 	}
-	return WriteRules(r.Context(), tx, p, in.ExpectedRevision, in.RuleValues)
+	return WriteRulePatch(r.Context(), tx, p, in.ExpectedRevision, in.RulePatch)
 }
 func (m *Module) confirm(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {

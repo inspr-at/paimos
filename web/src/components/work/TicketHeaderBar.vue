@@ -57,7 +57,8 @@ onMounted(() => { void kinds().then(rows => { catalog.value = rows }).catch(() =
 // The bar folds only when its actions do not fit, measured rather than guessed
 // from a width (wider Linux fonts pushed Close out of the default dock): first
 // the wide-only actions (also in More), then the position, then Queue's word,
-// then Edit's word (its aria-label keeps the name; tablet docks need it).
+// then Edit's word (its aria-label keeps the name; tablet docks need it), then
+// the Unsaved word, which becomes a dot while screen readers keep the word.
 // Each fit starts unfolded and runs synchronously inside the observer callback,
 // so nothing paints in between; folding never changes the bar's own width, so
 // it cannot oscillate. data-fold is outside Vue's class patching.
@@ -68,7 +69,7 @@ function fit() {
   if (!el || !bar) return
   let level = 0
   bar.dataset.fold = '0'
-  while (level < 4 && el.clientWidth > 0 && el.scrollWidth > el.clientWidth) bar.dataset.fold = String(++level)
+  while (level < 5 && el.clientWidth > 0 && el.scrollWidth > el.clientWidth) bar.dataset.fold = String(++level)
 }
 onMounted(() => {
   if (!main.value || typeof ResizeObserver === 'undefined') return
@@ -121,7 +122,9 @@ void props
     </div>
     <span class="spacer" />
     <template v-if="editing">
-      <span v-if="dirty" class="unsaved" aria-live="polite">Unsaved</span>
+      <!-- Reserved for the whole edit, so the first change shows it in place
+           instead of pushing Cancel and Save past a tight dock. -->
+      <span class="unsaved" :class="{ off: !dirty }" aria-live="polite" :data-tip="dirty ? 'Unsaved changes' : undefined"><span class="unsaved-dot" aria-hidden="true" /><span class="unsaved-word">Unsaved</span></span>
       <button type="button" class="btn sm ghost" :disabled="saving" aria-keyshortcuts="Escape" data-tip="Cancel · Esc" @click="emit('cancel')">Cancel</button>
       <button type="button" class="btn sm primary" :disabled="saving" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :data-tip="`Save · ${mac ? 'Cmd' : 'Ctrl'} Enter`" @click="emit('save')"><AppIcon name="check" :size="13" />{{ saving ? 'Saving…' : 'Save' }}</button>
     </template>
@@ -193,7 +196,9 @@ void props
 .trail-more { display: none; padding: 0 2px; color: var(--ink-3); }
 .trail-more.always { display: inline; }
 .edit-btn { gap: 6px; margin-right: 4px; }
-.unsaved { font-size: 12px; color: var(--warn-ink); font-weight: 600; margin-right: 4px; }
+.unsaved { display: inline-flex; align-items: center; font-size: 12px; color: var(--warn-ink); font-weight: 600; white-space: nowrap; margin-right: 4px; }
+.unsaved.off > * { visibility: hidden; }
+.unsaved-dot { display: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .more-menu { display: grid; gap: 1px; }
 .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 .menu-item svg { color: var(--ink-2); }
@@ -212,9 +217,11 @@ void props
   .wide-only, .position { display: none; }
 }
 /* Measured folds (see fit); each level keeps the ones before it. */
-.panel-bar:is([data-fold="1"], [data-fold="2"], [data-fold="3"], [data-fold="4"]) .wide-only, .panel-bar:is([data-fold="2"], [data-fold="3"], [data-fold="4"]) .position { display: none; }
-.panel-bar:is([data-fold="3"], [data-fold="4"]) :deep(.q-word), .panel-bar:is([data-fold="3"], [data-fold="4"]) :deep(.q-key) { display: none; }
-.panel-bar[data-fold="4"] .edit-word { display: none; }
+.panel-bar:is([data-fold="1"], [data-fold="2"], [data-fold="3"], [data-fold="4"], [data-fold="5"]) .wide-only, .panel-bar:is([data-fold="2"], [data-fold="3"], [data-fold="4"], [data-fold="5"]) .position { display: none; }
+.panel-bar:is([data-fold="3"], [data-fold="4"], [data-fold="5"]) :deep(.q-word), .panel-bar:is([data-fold="3"], [data-fold="4"], [data-fold="5"]) :deep(.q-key) { display: none; }
+.panel-bar:is([data-fold="4"], [data-fold="5"]) .edit-word { display: none; }
+.panel-bar[data-fold="5"] .unsaved-dot { display: block; }
+.panel-bar[data-fold="5"] .unsaved-word { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); }
 @media (max-width: 720px) {
   .panel-bar { padding: 0 6px 0 12px; }
   .panel-bar-main { height: 56px; }
