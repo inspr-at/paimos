@@ -280,7 +280,7 @@ test('provider and harness facts are read-only: only a route added by hand has E
   await setup(page)
   await open(page, SOL)
   await expect(body(page, SOL).locator('[data-reg-edit]')).toHaveCount(0)
-  await expect(body(page, SOL).locator('[data-reg-pause]')).toHaveText('Pause…')
+  await expect(body(page, SOL).locator('[data-reg-pause]')).toHaveAccessibleName('Pause…')
   await expect(body(page, SOL).locator('[data-reg-remove]')).toHaveText('Remove…')
   await open(page, OPUS)
   await expect(body(page, OPUS).locator('[data-reg-edit]')).toHaveCount(0)
@@ -438,9 +438,11 @@ test('Pause… offers tomorrow, a week or until resumed; every route pauses, the
     expect(Date.parse((write.body as { until: string }).until) - Date.parse('2026-10-11T08:00:01Z')).toBe(7 * 86_400_000)
   }
   await expect(fold(page, OPUS).locator('[data-reg-paused]')).toHaveText('Paused until 18 Oct')
-  await expect(pause).toHaveText('Paused until 18 Oct')
+  await expect(pause).toHaveAccessibleName('Paused until 18 Oct')
   await expect(pause).toBeFocused()
-  await expect(route(page, OPUS, 'claude:claude-opus-5-5').locator('.rt-note.warn')).toHaveText('Paused until 18 Oct')
+  // Paused alike on every route: the row and Pause… say it; nothing is added above the actions (AEON-541).
+  await expect(body(page, OPUS).locator('.rt-note')).toHaveCount(0)
+  await expect(body(page, OPUS).locator('[data-reg-route-pauses]')).toHaveCount(0)
   // Undo removes the pauses it added, nothing else.
   await toasts(page).filter({ hasText: 'Paused Opus 5.5' }).getByRole('button', { name: 'Undo' }).click()
   await expect(fold(page, OPUS).locator('[data-reg-paused]')).toHaveCount(0)
@@ -456,6 +458,39 @@ test('Pause… offers tomorrow, a week or until resumed; every route pauses, the
   await expect(toasts(page).filter({ hasText: 'Resumed Opus 5.5' })).toBeVisible()
 })
 
+// AEON-541 risk (gate finding, AEON-1163): applying a pause turns Pause… into a longer label and adds route notes above
+// the actions, so Pause…, Remove… and the row move under the pointer, and on a phone Remove… wraps to another line.
+for (const width of [1440, 390]) {
+  test(`pausing, resuming and their Undo never move a line's row or actions (±0.5 px) at ${width} px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.clock.install({ time: new Date('2026-10-11T08:00:00Z') })
+    await setup(page)
+    await page.clock.pauseAt(new Date('2026-10-11T08:00:01Z'))
+    await open(page, OPUS)
+    const pause = body(page, OPUS).locator('[data-reg-pause]'), remove = body(page, OPUS).locator('[data-reg-remove]')
+    const guard = await controlStability(page, { row: fold(page, OPUS), pause, remove, add: card(page).locator('[data-reg-add]') })
+    const choose = async (name: RegExp, label: RegExp | string) => {
+      await pause.click()
+      await menu(page).getByRole('menuitem', { name }).click()
+      await expect(pause).toHaveAccessibleName(label)
+      await expect(pause).toBeEnabled()
+    }
+    const undo = async (toast: string, label: RegExp | string) => {
+      await toasts(page).filter({ hasText: toast }).getByRole('button', { name: 'Undo' }).click()
+      await expect(toasts(page).filter({ hasText: 'Undone' }).last()).toBeVisible()
+      await expect(pause).toHaveAccessibleName(label)
+    }
+    await guard.check(() => choose(/For a week/, 'Paused until 18 Oct'))
+    await guard.check(() => undo('Paused Opus 5.5 until 18 Oct', 'Pause…'))
+    await guard.check(() => choose(/Until tomorrow/, /^Paused until (tomorrow, )?04:00$/))
+    await expect(fold(page, OPUS).locator('[data-reg-paused]')).toHaveText(/^Paused until (tomorrow, )?04:00$/)
+    await guard.check(() => choose(/Resume now/, 'Pause…'))
+    await guard.check(() => undo('Resumed Opus 5.5', /^Paused until (tomorrow, )?04:00$/))
+    await guard.check(() => choose(/Until I resume it/, 'Paused until resumed'))
+    guard.done()
+  })
+}
+
 test('a pause refused on one route says how far it got and never reports the version paused', async ({ page }) => {
   const world = await setup(page, { failPause: 'anthropic/claude-opus-5-5' })
   await open(page, OPUS)
@@ -464,6 +499,9 @@ test('a pause refused on one route says how far it got and never reports the ver
   await expect(toasts(page).filter({ hasText: 'Paused only 1 of its routes: model_pause_limit. Try again to finish.' })).toBeVisible()
   await expect(toasts(page).filter({ hasText: /^Paused Opus 5\.5/ })).toHaveCount(0)
   await expect(fold(page, OPUS).locator('[data-reg-paused]')).toHaveText('Claude Code paused')
+  // The routes differ, so each paused one is named below the actions, never above them.
+  await expect(body(page, OPUS).locator('[data-reg-route-pause]')).toHaveText(['Claude Code paused until resumed'])
+  await expect(body(page, OPUS).locator('.ln-acts ~ [data-reg-route-pauses]')).toHaveCount(1)
   expect(world.profiles.filter(profile => profile.model === 'claude-opus-5-5').every(profile => profile.pause?.until === null)).toBe(true)
 })
 

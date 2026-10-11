@@ -13,6 +13,8 @@ import {
 // shows the routes that run this version (harness, id, native levels, source), the provider, lifecycle and note facts
 // with their source or "unknown", the older versions, and for admins Pause…, Remove… and Edit for routes added by
 // hand. The fold grows below its row, so nothing above it moves (AEON-541); a remove question grows under the actions.
+// A pause, a resume or its Undo never moves the actions either: Pause… keeps one box for every label it can show,
+// and how each route is paused, when the routes differ, is said below the actions.
 const props = defineProps<{ row: RegistryRow; open: boolean; manage: boolean; now: Date; editing: string | null; pausing: boolean; busy: boolean }>()
 const emit = defineEmits<{ toggle: []; edit: [route: RegistryRoute, trigger: HTMLElement]; pause: [trigger: HTMLElement]; remove: [trigger: HTMLElement] }>()
 const uid = useId()
@@ -34,7 +36,14 @@ const why = computed(() => model.value.lifecycle?.state === 'retiring' && model.
 const took = computed(() => takenText(model.value, props.now))
 const hand = computed(() => model.value.routes.filter(route => route.hand))
 const pauseLabel = computed(() => paused.value && model.value.routes.every(route => route.pause) ? paused.value : 'Pause…')
-const routeNote = (route: RegistryRoute) => route.pause ? `Paused ${untilText(route.pause.until, props.now)}` : route.partlyPaused ? 'Some of its levels are paused' : ''
+// The widest label a pause from the menu gives ("Paused until tomorrow, 04:00"), held invisibly in the same box.
+const PAUSE_WIDEST = 'Paused until tomorrow, 00:00'
+// Routes paused unlike the version as a whole. A version paused alike everywhere says so on its row and on Pause….
+const routePauses = computed(() => {
+  const routes = model.value.routes, until = routes[0]?.pause?.until
+  return routes.every(route => route.pause && !route.partlyPaused && route.pause.until === until) ? [] : routes.filter(route => route.pause || route.partlyPaused)
+})
+const routePause = (route: RegistryRoute) => route.pause ? `${HARNESS_NAME[route.harness]} paused ${untilText(route.pause.until, props.now)}` : `Some ${HARNESS_NAME[route.harness]} levels are paused`
 const via = (route: RegistryRoute) => route.via && route.via !== HARNESS_NAME[route.harness] ? route.via : ''
 const routesOf = (version: RegistryModel) => version.routes.map(route => HARNESS_NAME[route.harness]).filter((name, index, all) => all.indexOf(name) === index).join(', ')
 const olderSource = (version: RegistryModel) => version.lifecycle ? lifecycleSource(version.lifecycle.source) : null
@@ -71,7 +80,6 @@ const olderSource = (version: RegistryModel) => version.lifecycle ? lifecycleSou
               <span v-if="route.source" class="srcb sm" :data-tip="SOURCE_TIP[route.source]"><AppIcon :name="SOURCE_ICON[route.source]" :size="11" />{{ SOURCE_NAME[route.source] }}</span>
               <span v-else class="srcb sm unk" data-tip="No provider or harness has reported this route.">unknown</span>
               <span v-if="route.models.length > 1" class="rt-note">{{ route.models.length }} ids in {{ HARNESS_NAME[route.harness] }}, one per level</span>
-              <span v-if="routeNote(route)" class="rt-note warn"><AppIcon name="pause" :size="12" />{{ routeNote(route) }}</span>
             </div>
           </div>
           <div class="facts">
@@ -102,11 +110,20 @@ const olderSource = (version: RegistryModel) => version.lifecycle ? lifecycleSou
           </div>
           <div v-if="manage" class="ln-acts">
             <button v-for="route in hand" :key="route.key" type="button" class="btn sm ghost" data-reg-edit :aria-expanded="editing === route.lineKeys[0]" :disabled="busy" @click="emit('edit', route, $event.currentTarget as HTMLElement)"><AppIcon name="edit" :size="13" />Edit {{ HARNESS_NAME[route.harness] }} route</button>
-            <button type="button" class="btn sm ghost" data-reg-pause aria-haspopup="menu" :aria-expanded="pausing" :disabled="busy" @click="emit('pause', $event.currentTarget as HTMLElement)"><AppIcon name="pause" :size="13" />{{ pauseLabel }}</button>
+            <button type="button" class="btn sm ghost ln-pause" data-reg-pause aria-haspopup="menu" :aria-expanded="pausing" :disabled="busy" @click="emit('pause', $event.currentTarget as HTMLElement)">
+              <span class="btn-label">
+                <span :aria-hidden="pauseLabel !== 'Pause…'"><AppIcon name="pause" :size="13" />Pause…</span>
+                <span v-if="pauseLabel !== 'Pause…'"><AppIcon name="pause" :size="13" />{{ pauseLabel }}</span>
+                <span aria-hidden="true"><AppIcon name="pause" :size="13" />{{ PAUSE_WIDEST }}</span>
+              </span>
+            </button>
             <span class="grow" />
             <button type="button" class="btn sm ghost danger-t" data-reg-remove :disabled="busy" @click="emit('remove', $event.currentTarget as HTMLElement)"><AppIcon name="trash" :size="13" />Remove…</button>
           </div>
           <slot />
+          <ul v-if="routePauses.length" class="ln-pauses" aria-label="Paused routes" data-reg-route-pauses>
+            <li v-for="route in routePauses" :key="route.key" :data-reg-route-pause="`${route.harness}:${route.id}`"><AppIcon name="pause" :size="12" />{{ routePause(route) }}</li>
+          </ul>
         </div>
       </div>
     </div>
@@ -155,7 +172,6 @@ const olderSource = (version: RegistryModel) => version.lifecycle ? lifecycleSou
 .rt-s { min-width: 0; overflow-wrap: anywhere; font: 500 11.5px/1.4 var(--mono); color: var(--ink-2); }
 .rt-r .lv span { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); }
 .rt-note { grid-column: 2 / -1; display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-3); }
-.rt-note.warn { color: var(--warn-ink); }
 .facts { display: grid; gap: 2px; margin-top: 10px; }
 .fact { display: grid; grid-template-columns: 116px minmax(0, 1fr); column-gap: 12px; align-items: baseline; padding: 4px 0; font-size: 12.5px; }
 .fact-k { color: var(--ink-3); }
@@ -169,6 +185,10 @@ const olderSource = (version: RegistryModel) => version.lifecycle ? lifecycleSou
 .ln-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
 .ln-acts .grow { flex: 1; }
 .ln-acts .btn { white-space: normal; }
+.ln-pause .btn-label { justify-items: start; font-variant-numeric: tabular-nums; }
+.ln-pause .btn-label > span { display: inline-flex; align-items: center; gap: 7px; }
+.ln-pauses { display: grid; gap: 4px; margin: 8px 0 0; padding: 0; list-style: none; }
+.ln-pauses li { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--warn-ink); }
 .btn.ghost.danger-t { color: var(--danger); }
 
 @container (max-width: 600px) {
