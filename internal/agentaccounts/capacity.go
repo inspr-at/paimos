@@ -636,10 +636,6 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
-		if in.Schedule != nil && (in.Schedule.Override == "sprint" || in.Schedule.Override == "hold") {
-			writeErr(w, &httpError{status: http.StatusBadRequest, code: "override_retired", msg: "Sprint and Hold writes are retired. Clear the override or remove the schedule to end an existing override."})
-			return
-		}
 	}
 	out := []scheduleOverride{}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
@@ -677,6 +673,7 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 		}
 		key := ""
 		var account any
+		var targetAccount Account
 		if in.CarryOverrides && (in.Scope != "user" || in.Schedule == nil) {
 			return fail(400, "carry_overrides needs a user schedule")
 		}
@@ -695,7 +692,9 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 				return fail(400, "invalid account")
 			}
 			key = strings.ToLower(in.AccountID)
-			if _, err := getAccount(r.Context(), tx, key); err != nil {
+			var err error
+			targetAccount, err = getAccount(r.Context(), tx, key)
+			if err != nil {
 				return fail(404, "account not found")
 			}
 			account = key
@@ -726,6 +725,34 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		switch in.Schedule.Override {
+		case "sprint", "hold":
+			if in.Schedule.OverrideUntil != nil && !now.Before(*in.Schedule.OverrideUntil) {
+				in.Schedule.Override, in.Schedule.OverrideUntil = "", nil
+				break
+			}
+			// Settings can send back the override while changing reserve or work
+			// hours. Compare under the mutation fence against this scope's entry,
+			// or the account's resolved schedule when copying suggested hours.
+			var current capacity.Schedule
+			if in.Scope == "account" {
+				current, err = effectiveSchedule(r.Context(), tx, p.ID, targetAccount)
+			} else {
+				var raw []byte
+				err = tx.QueryRow(r.Context(), `SELECT schedule FROM account_capacity_schedules WHERE principal_id=$1 AND scope=$2 AND scope_key=$3`, p.ID, in.Scope, key).Scan(&raw)
+				if err == nil {
+					err = json.Unmarshal(raw, &current)
+				}
+			}
+			if err != nil && !isNoRows(err) {
+				return err
+			}
+			sameUntil := current.OverrideUntil == nil && in.Schedule.OverrideUntil == nil ||
+				current.OverrideUntil != nil && in.Schedule.OverrideUntil != nil && current.OverrideUntil.Equal(*in.Schedule.OverrideUntil)
+			if current.ActiveOverride(now) != in.Schedule.Override || !sameUntil {
+				return &httpError{status: http.StatusBadRequest, code: "override_retired", msg: "New or changed Sprint and Hold overrides are retired. Clear the override or remove the schedule to end an existing override."}
+			}
+			// Preserve the stored deadline exactly; never recompute or extend it.
+			in.Schedule.Override, in.Schedule.OverrideUntil = current.Override, current.OverrideUntil
 		case "away":
 			// I'm away until…: the person's own schedule, every pool, until the date.
 			if in.Scope != "user" {

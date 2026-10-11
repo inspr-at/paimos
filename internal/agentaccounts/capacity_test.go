@@ -163,14 +163,22 @@ func TestRetiredCapacityOverridesDropExpiredOnSave(t *testing.T) {
 					if got := storedCapacitySchedule(t, f.mod, f.admin, target); encoded(t, got) != encoded(t, next) {
 						t.Fatalf("expired override survived or lost work hours: got %s, want %s", encoded(t, got), encoded(t, next))
 					}
+					if source.Scope != target.Scope {
+						if got := storedCapacitySchedule(t, f.mod, f.admin, source); encoded(t, got) != encoded(t, s) {
+							t.Fatal("account save changed its expired inherited source")
+						}
+						cleared := target
+						cleared.Schedule = nil
+						callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, cleared), 204, nil)
+					}
 				}
 			}
 		})
 	}
 }
 
-// AEON-1177: all schedule scopes reject creating, replaying and extending
-// Sprint/Hold; clearing or removing an existing override remains possible.
+// AEON-1177: all schedule scopes reject creating or changing Sprint/Hold;
+// unchanged active overrides can round-trip, and ending one stays possible.
 func TestRetiredCapacityOverridesCanStillEnd(t *testing.T) {
 	f := limitWorld(t, "override-retired", 3)
 	path := "/api/agent-accounts/capacity/schedule"
@@ -207,10 +215,24 @@ func TestRetiredCapacityOverridesCanStillEnd(t *testing.T) {
 			s.OverrideUntil = &until
 			reject(target)
 			seedExistingSchedule(t, f.admin, target)
-			reject(target) // replay cannot revive or renew a retired override
+			callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, target), 204, nil)
+			if got := storedCapacitySchedule(t, f.mod, f.admin, target); encoded(t, got) != encoded(t, s) {
+				t.Fatal("replay changed the existing override or deadline")
+			}
 			later := until.Add(time.Hour)
 			s.OverrideUntil = &later
 			reject(target) // extension also cannot change the stored deadline
+			earlier := until.Add(-time.Minute)
+			s.OverrideUntil = &earlier
+			reject(target)
+			s.OverrideUntil = nil
+			reject(target) // dropping the deadline would make it indefinite
+			s.OverrideUntil = &until
+			s.Override = "hold"
+			if kind == "hold" {
+				s.Override = "sprint"
+			}
+			reject(target)
 			s.Override = ""
 			callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, target), 204, nil)
 			var rows []scheduleOverride
