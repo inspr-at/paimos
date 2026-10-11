@@ -5,7 +5,8 @@ import AppIcon from '../../AppIcon.vue'
 import HarnessMark from '../../agents/HarnessMark.vue'
 import { lineFallback, lineFamily, pickText, showsEffort, type RowView } from '../../../lib/modelsSimple'
 
-// One row: label | picker | lock | remove, then a "can't run" line under it when the pick cannot run right now.
+// One row: label | picker | lock | remove, then a "can't run" line under it when the pick cannot run right now, and
+// last the row's fallback (the default slot, AEON-1161).
 const props = defineProps<{ row: RowView; harness?: string; expanded: boolean; lockTip: string; instead: string; reason: string }>()
 const emit = defineEmits<{ open: [button: HTMLElement]; reset: []; remove: [] }>()
 const name = computed(() => props.row.isDefault ? 'Default for all work' : props.row.label)
@@ -37,5 +38,6 @@ const family = computed(() => props.row.entry ? '' : lineFamily(props.row.line))
     <div class="c3"><span v-if="row.lock" class="lock" data-lock tabindex="0" role="img" :data-tip="lockTip" :aria-label="`Locked for everyone. ${lockTip}`"><AppIcon name="lock" :size="15" /></span></div>
     <div class="c4"><button v-if="row.remove" type="button" class="icon-btn flat x" data-remove :aria-label="`Remove ${row.label}; it uses the default again`" data-tip="Use the default again" @click="emit('remove')"><AppIcon name="close" :size="14" /></button></div>
     <p v-if="row.unavailable" class="na" data-unavailable><AppIcon name="alert" :size="14" /><span><b>Can’t run right now</b> · {{ instead ? `${instead} runs instead` : 'work waits' }} · {{ reason }}</span></p>
+    <slot />
   </div>
 </template>

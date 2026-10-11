@@ -23,6 +23,7 @@ export type IconName =
   | 'sticky-note' | 'scroll-text' | 'presentation' | 'palette' | 'pen-tool' | 'brush' | 'shapes' | 'puzzle' | 'beaker' | 'flask-conical'
   | 'telescope' | 'lightbulb' | 'triangle-alert' | 'siren' | 'flame' | 'shield-alert' | 'messages-square' | 'handshake' | 'megaphone'
   | 'gavel' | 'scale' | 'vote' | 'calendar-check' | 'timer' | 'hourglass' | 'trending-up' | 'sprout'
+  | 'wait' | 'route'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -102,6 +103,8 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'halt'"><path d="M5.5 1.9h5l3.6 3.6v5l-3.6 3.6h-5l-3.6-3.6v-5Z" /><rect x="6" y="6" width="4" height="4" rx=".6" fill="currentColor" stroke="none" /></template>
     <path v-else-if="name === 'send'" d="M14 2 7.2 8.8M14 2 9.6 14 7.2 8.8 2 6.4Z" />
     <path v-else-if="name === 'bolt'" d="M9 1.8 3.6 9h4l-.8 5.2L12.4 7h-4Z" />
+    <template v-else-if="name === 'wait'"><circle cx="8" cy="8" r="5.7" /><path d="M6.7 6v4M9.3 6v4" /></template>
+    <template v-else-if="name === 'route'"><circle cx="4" cy="4" r="1.7" /><circle cx="12" cy="12" r="1.7" /><path d="M4 5.7v1.8A2.5 2.5 0 0 0 6.5 10h3.2M5.7 4h4.8a2 2 0 0 1 0 4H9" /></template>
     <template v-else-if="name === 'gauge'"><path d="M2.4 11.6a5.6 5.6 0 1 1 11.2 0" /><path d="m8 11.6 2.6-3.4" /></template>
     <path v-else-if="name === 'minus'" d="M3.6 8h8.8" />
     <template v-else-if="name === 'compare'"><rect x="1.9" y="2.8" width="12.2" height="10.4" rx="1.8" /><path d="M8 1.6v12.8" /><path d="m5 6.4-1.4 1.6L5 9.6M11 6.4l1.4 1.6L11 9.6" /></template>

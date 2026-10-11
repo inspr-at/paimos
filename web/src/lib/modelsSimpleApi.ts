@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api'
 import { policyJSON } from './policyEditor'
-import type { OrderBody, RegistryProfile, RulesBody, RulesDocument, Scope, SimpleDocument, TailBoard, WriteResult } from './modelsSimple'
+import type { ChainEnd, OrderBody, RegistryProfile, RulesBody, RulesDocument, Scope, SimpleDocument, TailBoard, WriteResult } from './modelsSimple'
 
 async function request<T>(path: string, method = 'GET', body?: unknown, person?: string | null, signal?: AbortSignal): Promise<T> {
   const response = await api(path, { method, signal, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(person ? { 'If-Prefs-Person': person } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
@@ -29,3 +29,13 @@ export const putEffort = (scope: Scope, column: string, effort: string | null, r
 export const putWorkspaceRules = (column: string, body: RulesBody, revision: number) => request<RulesDocument>(`/model-rules/workspace/${encodeURIComponent(column)}`, 'PUT', { ...body, revision })
 export const dismissLine = (scope: Scope, line: string, revision: number, person: string | null) => request<WriteResult>(`/model-preferences/tray/${encodeURIComponent(line)}/dismiss?for=${scope}`, 'POST', { revision }, who(scope, person))
 export const putDismissed = (scope: Scope, lines: string[], revision: number, person: string | null) => request<WriteResult>(`/model-preferences/profile?for=${scope}`, 'PUT', { dismissed_lines: lines, revision }, who(scope, person))
+/**
+ * A row's order (AEON-1161): rank is the pick and its fallback. Omitted efforts, end and not keep what is stored;
+ * a personal write on a workspace row creates the person's own order.
+ */
+export interface ChainBody { rank: string[]; efforts?: Record<string, string>; end?: ChainEnd; not?: string[] }
+export const putChain = (scope: Scope, column: string, body: ChainBody, revision: number, person: string | null) => request<WriteResult>(`${first(column)}?for=${scope}`, 'PUT', { ...body, revision }, who(scope, person))
+// Never rules are workspace rules: admins only, written against the rules revision.
+const never = (column: string, line: string) => first(column, `/never/${encodeURIComponent(line)}`)
+export const putNever = (column: string, line: string, why: string, revision: number) => request<RulesDocument>(never(column, line), 'PUT', { why, revision })
+export const deleteNever = (column: string, line: string, revision: number) => request<RulesDocument>(`${never(column, line)}?revision=${revision}`, 'DELETE')
