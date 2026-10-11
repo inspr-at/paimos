@@ -292,12 +292,12 @@ func (m *Module) reportHarnessProbe(w http.ResponseWriter, r *http.Request) {
 			if harness == "cursor" && effort == "" {
 				// An ID-only list does not establish effort. Reuse a recorded
 				// tuple for this exact route, preferring immutable launch pins.
-				err = tx.QueryRow(ctx, `SELECT effort FROM (
+				lookupErr := tx.QueryRow(ctx, `SELECT effort FROM (
  SELECT effort,0 AS priority FROM model_profiles WHERE harness=$1 AND model=$2
  UNION ALL SELECT effort,1 AS priority FROM model_observations WHERE harness=$1 AND model=$2
  ) tuples ORDER BY priority,effort LIMIT 1`, harness, model.Model).Scan(&effort)
-				if err != nil && err != pgx.ErrNoRows {
-					return err
+				if lookupErr != nil && lookupErr != pgx.ErrNoRows {
+					return lookupErr
 				}
 			}
 			provider, id := CatalogIdentity(model.Provider, harness, model.Model, effort)

@@ -30,6 +30,19 @@ func TestCursorHarnessProbeReusesRecordedLaunchIdentity(t *testing.T) {
 			grantModelReporter(t, owner, agent)
 			agent.Scopes = []string{"models.read", "models.report"}
 			decode[catalogPage](t, &agent, "GET", "/api/models/catalog", "", 200)
+			// Use mounted production handlers without decode's legacy pin setup:
+			// the observation-only case must remain free of launch profiles.
+			send := func(path string, body any, out any) {
+				t.Helper()
+				raw, err := json.Marshal(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				code, response := call(t, &agent, "POST", path, string(raw))
+				if code != 200 || json.Unmarshal(response, out) != nil {
+					t.Fatalf("%s: HTTP %d: %s", path, code, response)
+				}
+			}
 			account := enrollEvidenceHarness(t, owner, agent, "cursor")
 			model, effort := "grok-4.7-xhigh", "xhigh"
 			inRegistry(t, owner, func(tx pgx.Tx) error {
@@ -51,7 +64,9 @@ func TestCursorHarnessProbeReusesRecordedLaunchIdentity(t *testing.T) {
 			seedEvidenceSession(t, owner, agent, "cursor", model, effort)
 			reportRunStart := func() {
 				t.Helper()
-				if got := reportEvidence(t, agent, []Observation{{ReportID: EvidenceID("cursor-run-start"), Harness: "cursor", Model: model, Effort: effort, Status: "working"}}, 200); got.Recorded != 1 {
+				var got ReportResult
+				send("/api/models/reports", []Observation{{ReportID: EvidenceID("cursor-run-start"), Harness: "cursor", Model: model, Effort: effort, Status: "working"}}, &got)
+				if got.Recorded != 1 {
 					t.Fatal("run-start report was not recorded", got)
 				}
 			}
@@ -68,9 +83,10 @@ func TestCursorHarnessProbeReusesRecordedLaunchIdentity(t *testing.T) {
 				}
 				return nil
 			})
-			claim := decode[struct {
+			var claim struct {
 				Items []modelreport.CatalogProbe `json:"items"`
-			}](t, &agent, "POST", "/api/models/harness-probes/claim", `{"daemon_id":"fixture","daemon_generation":"generation"}`, 200)
+			}
+			send("/api/models/harness-probes/claim", map[string]string{"daemon_id": "fixture", "daemon_generation": "generation"}, &claim)
 			if len(claim.Items) != 1 || claim.Items[0].AccountID != account {
 				t.Fatal("Cursor probe was not claimed", claim)
 			}
@@ -79,11 +95,11 @@ func TestCursorHarnessProbeReusesRecordedLaunchIdentity(t *testing.T) {
 				{Model: model, Facts: map[string]modelreport.CatalogField{"display_name": {Value: json.RawMessage(`"Grok native fixture"`), Path: "models[].name"}}},
 				{Model: unknown, Facts: map[string]modelreport.CatalogField{}},
 			}}
-			raw, err := json.Marshal(report)
-			if err != nil {
-				t.Fatal(err)
+			var result map[string]any
+			send("/api/models/harness-probes/"+account, report, &result)
+			if result["recorded"] != true {
+				t.Fatal("probe publication was not recorded")
 			}
-			decode[map[string]any](t, &agent, "POST", "/api/models/harness-probes/"+account, string(raw), 200)
 			if withPin {
 				reportRunStart()
 			}

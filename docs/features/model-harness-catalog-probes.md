@@ -12,8 +12,10 @@ cooldown. Provider refresh and harness collection complete independently:
 pending, probing, fresh, limited, unsupported, stale or timeout states. Reporting
 can be disabled through the existing `agent_reports_enabled` setting.
 
-Claims use bounded account keyset pages, one-minute retry leases, exact daemon
-generations and account binding revisions. Reports recheck the exact live agent
+Both probe endpoints require `models.report` and admit paired runtime keys for
+the exact claim and UUID report routes. Claims use bounded account keyset pages,
+one-minute retry leases, exact daemon generations and account binding revisions.
+Reports recheck the exact live agent
 key and `models.report` permission under tenant, tree, pairing, catalog and
 account fences. Revoked, archived, draining, rebound or unapproved accounts
 cannot publish. Same-request identical replay appends no second event; changed
