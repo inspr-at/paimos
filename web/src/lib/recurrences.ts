@@ -139,7 +139,7 @@ export const routineScope = (item: Pick<RecurrenceInput, 'definition'>): Routine
 export const ROUTINE_EFFORTS = [['scout', 'Look around'], ['build', 'Build'], ['build-hard', 'Hard build']] as const
 export const effortWord = (role: string) => ({ scout: 'Look around', mechanical: 'Small change', build: 'Build', 'build-hard': 'Hard build' } as Record<string, string>)[role] ?? role
 export const effortVerb = (role: string) => role === 'scout' ? 'looks around' : role === 'mechanical' ? 'makes it' : 'builds it'
-// Today's route in the Models page's own words, "Opus 5.5 via Claude": its model name and
+// Today's route in the Models page's own words, "Opus 5.5 via Claude Code": its model name and
 // harness label, never a model or profile id; a profile without a name reads as one.
 export function routeWords(profile: RegistryProfile): string {
   const name = fullName(profile)
