@@ -1187,6 +1187,9 @@ components:
           description: 'Why a role has no model: area (no area set), review_gate (chosen against the author''s family at dispatch), registry (no available route).'
           type: string
           enum: [area, review_gate, registry]
+        route_truncated:
+          description: 'Present and true on a registry gap when the model registry exceeds the Models bounds, so no route was resolved; dispatch refuses it too.'
+          type: boolean
         models:
           description: 'Actually used models from visible sessions on this node and its open/done work descendants. Ordered by measured tokens descending, then harness/model. Session profile identity wins; normalized model and raw metadata are fallbacks. Contains no billing or prices.'
           type: array

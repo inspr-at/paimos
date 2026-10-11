@@ -76,27 +76,32 @@ func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
 		if err := modelregistry.PrepareCatalog(t.Context(), f.d.App, f.person, modelregistry.CatalogPreparation{Operation: modelregistry.CatalogRead, Request: request}); err != nil {
 			t.Fatal(err)
 		}
-		// An explicit saved policy narrows the complete catalog to this fixture's
-		// three profiles and two unavailable cross-provider fallback entries.
-		f.tx(t, func(tx pgx.Tx) error { _, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes`); return err })
 	}
 	f.profile = testID()
 	f.account = testID()
 	f.tx(t, func(tx pgx.Tx) error {
+		// An explicit saved Review order narrows the complete catalog to this
+		// fixture's three profiles and two unavailable cross-provider fallbacks.
+		review := []string{}
 		if len(cold) == 0 || !cold[0] {
-			for i, row := range []struct{ id, harness, family string }{{testID(), "codex", "openai"}, {testID(), "cursor", "xai"}, {f.profile, "claude", "anthropic"}} {
+			for _, row := range []struct{ id, harness, family string }{{testID(), "codex", "openai"}, {testID(), "cursor", "xai"}, {f.profile, "claude", "anthropic"}} {
 				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,$3,'test-version',$4,$5,'review-model','xhigh','frontier')`, tid, row.id, "review-"+row.id, row.harness, row.family); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state) VALUES($1,'review-gate',$2,$3,'available')`, tid, i+1, row.id); err != nil {
-					return err
-				}
+				review = append(review, row.id)
 			}
 		}
 		if complete {
-			if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state)
-          SELECT $1,'review-gate',CASE harness WHEN 'gemini' THEN 4 ELSE 5 END,id,'available'
-          FROM model_profiles WHERE slug IN ('gemini-gemini-2-5-pro-32768','opencode-google-gemini-2-5-pro-default')`, tid); err != nil {
+			for _, slug := range []string{"gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default"} {
+				var id string
+				if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug=$1`, slug).Scan(&id); err != nil {
+					return err
+				}
+				review = append(review, id)
+			}
+		}
+		if len(review) > 0 {
+			if err := dbtest.ModelsOrder(t.Context(), tx, tid, "other", "review", "wait", review...); err != nil {
 				return err
 			}
 		}
@@ -239,7 +244,7 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 	f.call(t, f.person, "GET", "/api/work-orders/"+v.OrderID, nil, 200, &o)
 	f.call(t, f.person, "PATCH", "/api/work-orders/"+v.OrderID, map[string]any{"expected_revision": o.Revision, "assignee_principal_id": f.other.ID}, 409, nil)
 	f.tx(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET state='unavailable',valid_until=now()+interval '1 hour',reason='fixture unavailable' WHERE profile_id=$1`, f.profile)
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason) SELECT tenant_id,harness,model,now()+interval '1 hour','fixture unavailable' FROM model_profiles WHERE id=$1`, f.profile)
 		return err
 	})
 	unavailable := f.input()

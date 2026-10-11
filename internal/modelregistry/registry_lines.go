@@ -61,21 +61,8 @@ func lineProfiles(c boardCatalog, h, model string) []Profile {
 // Unlike the role-ladder token, this digest includes all registry pins and
 // preference/rule revisions, including lines that no ladder currently uses.
 func registryRevision(ctx context.Context, tx pgx.Tx) (string, error) {
-	// Limit every contributing set before building the digest.
-	var large bool
-	if err := tx.QueryRow(ctx, `SELECT
- (SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles LIMIT 513) p) OR
- (SELECT count(*)>512 FROM (SELECT 1 FROM model_profile_retirements LIMIT 513) r) OR
- (SELECT count(*)>4096 FROM (SELECT 1 FROM model_pref_profiles LIMIT 4097) p) OR
- (SELECT count(*)>1536 FROM (SELECT 1 FROM model_rule_revisions LIMIT 1537) r) OR
- (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_orders LIMIT 1537) o) OR
- (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_situation_orders LIMIT 1537) o) OR
- (SELECT count(*)>4096 FROM (SELECT 1 FROM model_row_constraints LIMIT 4097) r) OR
- (SELECT count(*)>512 FROM (SELECT 1 FROM model_pauses LIMIT 513) p)`).Scan(&large); err != nil {
+	if err := registryBounds(ctx, tx); err != nil {
 		return "", err
-	}
-	if large {
-		return "", modelprefs.ErrBoardBounds
 	}
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT jsonb_build_array(
@@ -91,6 +78,27 @@ func registryRevision(ctx context.Context, tx pgx.Tx) (string, error) {
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// registryBounds limits every set a registry digest reads before building it.
+func registryBounds(ctx context.Context, tx pgx.Tx) error {
+	var large bool
+	if err := tx.QueryRow(ctx, `SELECT
+ (SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles LIMIT 513) p) OR
+ (SELECT count(*)>512 FROM (SELECT 1 FROM model_profile_retirements LIMIT 513) r) OR
+ (SELECT count(*)>4096 FROM (SELECT 1 FROM model_pref_profiles LIMIT 4097) p) OR
+ (SELECT count(*)>1536 FROM (SELECT 1 FROM model_rule_revisions LIMIT 1537) r) OR
+ (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_orders LIMIT 1537) o) OR
+ (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_situation_orders LIMIT 1537) o) OR
+ (SELECT count(*)>4096 FROM (SELECT 1 FROM model_row_constraints LIMIT 4097) r) OR
+ (SELECT count(*)>512 FROM (SELECT 1 FROM model_pauses LIMIT 513) p) OR
+ (SELECT count(*)>4096 FROM (SELECT 1 FROM model_rules LIMIT 4097) r)`).Scan(&large); err != nil {
+		return err
+	}
+	if large {
+		return modelprefs.ErrBoardBounds
+	}
+	return nil
 }
 
 func validateLineWrite(in lineWrite, h, oldModel string) error {
