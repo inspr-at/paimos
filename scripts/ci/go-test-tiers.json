@@ -8190,6 +8190,8 @@
     ,
     {"kind":"go","package":"internal/profile","name":"TestCompressedImageBombs","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/profile","name":"TestDefaultPaceIsBoundedAndUndoable","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/profile","name":"TestImageAdmissionRejectsCanceledAndInvalid","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/profile","name":"TestImageAdmissionReleasedOnErrors","tier":"GATED-FULL"}
