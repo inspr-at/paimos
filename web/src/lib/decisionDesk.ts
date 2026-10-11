@@ -106,7 +106,7 @@ export function deskItemID(item: Pick<DeskProjectionItem, 'kind' | 'id'>): strin
   return `${prefix}:${item.id}`
 }
 // Link-out rows are decided on their own settings page, never in the memo.
-// Only a known in-app settings path is followed; anything else stays inert.
+// Only the approved in-app settings paths are followed; anything else stays inert.
 export function deskLinkOut(item: Pick<DeskProjectionItem, 'kind' | 'href'>): string {
   if (item.kind === 'routine_consent') return typeof item.href === 'string' && /^\/(?:p\/[A-Za-z0-9_-]{1,40}\/settings|settings\/(?:personal|routines))\?recurrence=[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}&consent=1$/.test(item.href) ? item.href : ''
   return item.kind === 'account_matrix' && typeof item.href === 'string' && /^\/settings\/[a-z0-9-]{1,40}(#[a-z0-9-]{1,40})?$/.test(item.href) ? item.href : ''

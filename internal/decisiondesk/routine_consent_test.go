@@ -22,6 +22,8 @@ import (
 func TestRoutineConsentProjectionMatchesNativePolicyAndPages(t *testing.T) {
 	f := setup(t)
 	f.person.BrowserSession = true
+	f.reader.BrowserSession = true
+	dbtest.BindRole(t, f.d, f.person.TenantID, f.reader.ID, "owner")
 	var kind, projectKey string
 	seed := func(fn func(pgx.Tx) error) {
 		t.Helper()
@@ -132,6 +134,8 @@ func TestRoutineConsentProjectionMatchesNativePolicyAndPages(t *testing.T) {
 		}
 	}
 	request(f.agent, "GET", "/api/decision-desk/projection", nil, 403)
+	projectRoutine := items["project"]
+	request(f.reader, "PUT", "/api/recurrences/"+projectRoutine.ID+"/execution-consent", map[string]any{"expected_revision": projectRoutine.Revision, "execute_consent": true, "execution_principal_id": nil}, 403)
 	// A one-row page preserves exact totals and advances through all scopes.
 	seen := map[string]bool{}
 	var cursor *cursor
