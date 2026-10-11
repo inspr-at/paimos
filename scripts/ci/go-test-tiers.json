@@ -311,6 +311,8 @@
     "scripts/releaseworkflow:TestRehearsedBuilderPins"
     ,
     "scripts/releaseworkflow:TestRootAptTimeoutReapsBeforeRetry"
+    ,
+    "scripts/test-tiers/go-package:TestPackageInventoryMatchesUncachedCollector"
   ]
   ,
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)"
@@ -10145,6 +10147,8 @@
     {"kind":"go","package":"scripts/rules-bootstrap","name":"TestUnsafeFiles","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/test-tier-go","name":"TestSourceInventoryUsesTestingSignatureAndBuildActivity","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/test-tiers/go-package","name":"TestPackageInventoryMatchesUncachedCollector","tier":"NIGHTLY"}
   ]
   ,
   "ticket": "AEON-681"

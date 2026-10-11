@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process'
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { collectGo, collectWeb, command, root, web, evidence, saveJSON, saveManifest } from './collect.mjs'
+import { collectGo, collectWeb, collectNativeGo, command, root, web, evidence, saveJSON, saveManifest } from './collect.mjs'
 import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights, tierManifestPattern, knownFlakyOwners } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { goFailures, nodeFailures, vitestFailures, outputTail, printFailures, printFlakeWarnings } from './failures.mjs'
@@ -19,14 +19,8 @@ import { createGoRunner } from './go-runner.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
-// Collection spawns the Vitest, Node and Playwright listers. One process may
-// plan repeatedly (tests, multi-step runs), so collect each inventory once.
-const inventories = new Map()
-const target = (kind, options = {}) => {
-  const scope = `${kind}:${options.browserOnly ? 'browser' : 'all'}`
-  if (!inventories.has(scope)) inventories.set(scope, kind==='go' ? collectGo() : collectWeb(options))
-  return inventories.get(scope)
-}
+// The collectors own content-aware reuse, including across CLI processes.
+const target = (kind, options = {}) => kind === 'go' ? collectGo(options) : collectWeb(options)
 
 // Planner input is authoritative. Candidate uncertainty can widen it to full,
 // but candidate graph additions can never narrow the base planner's full gate.
@@ -52,13 +46,12 @@ export function runnerSelection(tests,options,candidate,planner) {
 
 // A caller that already holds a native collection passes it as `inventory`.
 // Programmatic comparisons can share one native snapshot of an unchanged
-// checkout through `collect`. Otherwise every plan collects the catalogue
-// (minutes of Playwright and Vitest listing when several plans run in one
-// process). Normal CLI invocations always use fresh discovery.
-export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false,inventory:supplied}={}, { collect=target }={}) {
+// checkout through `collect`. Otherwise content-keyed discovery reuses the
+// catalogue across processes and invalidates it when registration inputs change.
+export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false,cache,inventory:supplied}={}, { collect=target }={}) {
   if(supplied!==undefined&&!Array.isArray(supplied?.tests)) throw new Error('Supplied inventory needs a tests array')
   const begin=performance.now()
-  const inventory=supplied??collect(kind,{browserOnly:kind==='web'&&!unit})
+  const inventory=supplied??collect(kind,{browserOnly:kind==='web'&&!unit,...(cache===undefined?{}:{cache})})
   const collected=performance.now()
   const manifest=load(kind)
   // Unit rows remain planner metadata: removing them would change decisions
@@ -383,6 +376,7 @@ export function classifyArgs(flags) {
   if (legacy) { options.kind = flags[0]; rest = flags.slice(1) }
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i]
+    if (flag === '--no-cache' && options.cache === undefined) { options.cache = false; continue }
     if (!['--tier', '--kind', '--only'].includes(flag) || Object.hasOwn(options, flag.slice(2))) throw new Error(`Unknown or repeated classify flag: ${flag}`)
     const value = rest[++i]
     if (!value || value.startsWith('--')) throw new Error(`Missing value: ${flag}`)
@@ -398,7 +392,7 @@ export function classifyArgs(flags) {
 export function classify(flags, { collect = target, read = load, save = saveManifest } = {}) {
   const options = classifyArgs(flags), outputs = []
   for (const kind of options.kind ? [options.kind] : ['go', 'web']) {
-    const inventory = collect(kind), manifest = read(kind)
+    const inventory = collect(kind, { cache: options.cache }), manifest = read(kind)
     validate(manifest, inventory.tests, undefined, { warn: () => {} })
     const result = classifyManifest(manifest, inventory.tests, options)
     validate(result.manifest, inventory.tests, undefined, { strict: options.strict, warn: () => {} })
@@ -413,13 +407,14 @@ export function classify(flags, { collect = target, read = load, save = saveMani
 
 export async function main(args, dependencies={}) {
   if (args[0] === 'manifests') return manifestsMain(args.slice(1), root)
-  if (args[0] === 'classify') return classify(args.slice(1))
+  if (args[0] === 'classify') return classify(args.slice(1), dependencies)
   const [mode,kind,...flags]=args
   if(!['go','web'].includes(kind)||!['collect','check','classify','plan','run'].includes(mode)) throw new Error('Usage: cli.mjs collect|check|classify|plan|run go|web [--full | --all] [--unit] [--shard i/N] [--paths JSON] [check: --strict]')
   const options={unit:false,full:false,all:false,job:`${kind}-tiers`}
   for(let i=0;i<flags.length;i++) {
     const flag=flags[i]
     if(flag==='--full'||flag==='--all'||flag==='--unit') options[flag.slice(2)]=true
+    else if(flag==='--no-cache') options.cache=false
     else if(flag==='--paths') options.paths=JSON.parse(flags[++i])
     else if(flag==='--event') options.event=flags[++i]
     else if(flag==='--job') options.job=flags[++i]
@@ -431,27 +426,23 @@ export async function main(args, dependencies={}) {
       options.index=Number(match[1]);options.count=Number(match[2])
     } else throw new Error(`Unknown flag: ${flag}`)
   }
-  if(mode==='collect') { saveJSON(resolve(evidence,`${kind}-inventory.json`),target(kind));return 0 }
+  if(mode==='collect') { saveJSON(resolve(evidence,`${kind}-inventory.json`),target(kind,options));return 0 }
   if(mode==='check') {
-    const all=validate(load(kind),target(kind).tests,undefined,{strict:options.strict})
+    const inventory=target(kind,options)
+    const all=validate(load(kind),inventory.tests,undefined,{strict:options.strict})
     const checked=load(kind)
     measuredWeights(checked,all) // malformed timing weights fail the manifest check, not a later plan
     shard(all,1,1,{}, {ownerTimings:kind==='go'?checked.timingWeights?.owners:undefined})
     if(kind==='web') { console.log(JSON.stringify({inventory:counts(all)}));return 0 }
-    let output
+    let listed
     try {
-      output=command('go',['test','-p','2','-json','-list','^(Test|Fuzz)','./...'],{env:{...process.env,GOMAXPROCS:'2'},timeout:15*60*1000})
+      listed=collectNativeGo(inventory,options)
     } catch(error) {
       let failures=[]
       try { failures=goFailures(error.stdout??'') } catch {}
       if(failures.length)printFailures(failures)
       else if(error.stdout)console.error(outputTail(error.stdout))
       throw error
-    }
-    const listed=[]
-    for(const line of output.split('\n').filter(Boolean)) {
-      const event=JSON.parse(line)
-      if(event.Action==='output'&&/^(?:Test|Fuzz)\S*\n$/.test(event.Output??'')) listed.push(`${event.Package.replace(/^github\.com\/inspr-at\/paimos\//,'')}:${event.Output.trim()}`)
     }
     const expected=all.filter(row=>row.active).map(key).sort()
     if(JSON.stringify(listed.sort())!==JSON.stringify(expected))throw new Error('Native Go -list inventory differs from classified source')
