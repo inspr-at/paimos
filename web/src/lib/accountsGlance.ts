@@ -226,6 +226,8 @@ export function glanceFlag(signins: number, items: GlanceItem[]): string {
 
 export interface GlanceTilesInput {
   accounts: OverviewAccount[]; computers: PairingView[]; items: GlanceItem[]; summary: GlanceSummary
+  /** When supplied, the connectivity tile uses only computer-owned evidence. */
+  computerItems?: GlanceItem[]
   /** Accounts waiting for a new sign-in on their computer. */
   signins: number
   /** The plan in words ("5 days · keep auto · no nights"); empty while unread. */
@@ -237,7 +239,7 @@ export interface GlanceTilesInput {
 /** Accounts, Computers, Capacity. Quota warnings belong to Accounts; sign-in problems and cleanups to Computers. */
 export function glanceTiles(input: GlanceTilesInput): GlanceTile[] {
   const { accounts, computers, items, summary, signins } = input
-  const quota = items.filter(i => i.kind === 'quota'), fix = items.filter(i => i.kind !== 'quota')
+  const quota = items.filter(i => i.kind === 'quota'), fix = (input.computerItems ?? items).filter(i => i.kind !== 'quota')
   const online = onlineComputers(computers)
   const vendors = [...new Set(accounts.map(a => a.vendor))]
   const names = computers.map(c => c.computer_name)

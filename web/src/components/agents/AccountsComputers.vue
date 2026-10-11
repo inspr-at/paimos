@@ -96,9 +96,9 @@ const awayWords = computed(() => capacity.away ? `until ${when(capacity.away, no
 const shownAway = computed(() => hasValues(chipState.value) && capacity.away)
 const tiles = computed(() => glanceTiles({
   accounts: accounts.value, computers: computers.value,
-  // Only computer-owned updates and cleanup affect the connectivity tile. Account
-  // verification/usage claims require the joined sources and appear below instead.
-  items: glanceItems([], computers.value, thresholds.value, now.value), summary: summary.value, signins: signins.value,
+  // Accounts keeps its quota warnings; connectivity uses computer-owned updates
+  // and cleanup. Joined verification claims appear below the tiles.
+  items: openItems.value, computerItems: glanceItems([], computers.value, thresholds.value, now.value), summary: summary.value, signins: signins.value,
   pacing: capacity.schedulesLoaded ? pacingSummary(capacity.schedule) : '', away: awayWords.value, showAccounts: true,
 }).map(tile => {
   const state = tileStates.value[tile.part]
