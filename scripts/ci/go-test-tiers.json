@@ -8454,6 +8454,8 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineRunStateMappings","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineTemplatesValidateApplyWithoutActivationOrDuplicates","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineUIReadsScopeLatestRunAndDraftPolicy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestSixMonthSpringGapWalksPastOneYear","tier":"NIGHTLY"}
