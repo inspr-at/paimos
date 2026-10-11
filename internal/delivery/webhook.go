@@ -161,7 +161,7 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 		if queueErr != nil {
 			return webhookFailed, queueErr
 		}
-		return webhookNothingToRecord, nil
+		return webhookRecorded, nil
 	}
 	if name == "push" && (e.Repository.Default == "" || e.Ref != "refs/heads/"+e.Repository.Default) {
 		return webhookNothingToRecord, nil

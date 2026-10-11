@@ -70,8 +70,9 @@ logs or credentials.
   Verified GitHub deliveries are saved before any downstream read or write
   (AEON-1241). Separate checkpoints cover projection, review fan-out, check
   audit, merge audit, metrics, Flow and merge completion. The delivery worker
-  resumes unfinished receipts after restart, with retries beginning after
-  five seconds and backing off to five minutes. Failed processing still
+  resumes unfinished receipts after restart. Retries become eligible after
+  five seconds and back off to five minutes; reconciliation can delay a pass.
+  Failed processing still
   returns 502; recovery also runs internally without a GitHub redelivery.
   Repeated attempts use the existing idempotent fact and event identities.
   A delivery ID reused with different authenticated content returns 409.
