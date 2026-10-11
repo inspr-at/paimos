@@ -15,7 +15,8 @@ use the revision shown when the action starts; the server remains the authority.
 Freeze and Archive enforcement across agents, routines and delivery is owned by
 AEON-1234. This UI does not grant a permission or bypass a server restriction.
 
-“How this works” uses the approved AEON-1227 explainer map unchanged. It focuses
+“How this works” uses the approved AEON-1227 explainer map. Its computer example
+uses a tenant-data placeholder to keep operator hosts out of public sources. It focuses
 its heading, overlays the page, returns focus on Escape and uses a bottom sheet
 on phones. Escape leaves a field before closing its overlay; Command+Enter on
 macOS or Ctrl+Enter elsewhere submits through the shared shortcut registry.

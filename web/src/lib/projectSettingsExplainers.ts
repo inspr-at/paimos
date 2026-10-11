@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+// Approved AEON-1227 map; its computer example is filled from tenant data
+// to satisfy the public-source name guard. Every other text is retained.
 // AEON-1227 · “How this works”: every explainer in one place (id → { title, what, effect, who, where? }).
 // The build reuses this map as is. Plain words, technical, no metaphors; each one names a real example from the project.
 // {K} is the project key, {N} a ticket number of that project, {R} its repository, {O} its GitHub owner.
@@ -80,7 +82,7 @@ const EXPL = {
     who: 'Project admins. Freeze and Archive undo with one click; Delete asks you to type the key.' },
   lead: { title: 'The lead’s policy',
     what: 'The rules this project’s lead follows when it starts workers: where it runs, which accounts it may use, what kind of work it does and how often it retries.',
-    effect: 'Set “Runs on” to mbp2607 and the lead starts only there; its workers still go wherever the checks pass. Lower Recovery to 1 attempt and a failing round of {K}-{N} stops after one retry and asks you on the Decision Desk.',
+    effect: 'Set “Runs on” to {C} and the lead starts only there; its workers still go wherever the checks pass. Lower Recovery to 1 attempt and a failing round of {K}-{N} stops after one retry and asks you on the Decision Desk.',
     who: 'The person who owns the lead, with model-preference rights.' },
   review: { title: 'Cross-family review',
     what: 'Whether a change needs a review by a model of another family (OpenAI, Anthropic, xAI and others) before it counts as reviewed. PAIMOS reads the author’s family from its own run records.',
