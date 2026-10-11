@@ -16,7 +16,7 @@ func historyNodeReader(f *fixture) tenant.Principal {
 	p := projectPrincipal(f, "viewer")
 	f.tx(func(tx pgx.Tx) error {
 		var role string
-		if err := tx.QueryRow(f.t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,$2,'History node reader') RETURNING id::text`, p.TenantID, "history_"+p.ID).Scan(&role); err != nil {
+		if err := tx.QueryRow(f.t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,$2,'History node reader') RETURNING id::text`, p.TenantID, "history_"+strings.ReplaceAll(p.ID, "-", "_")).Scan(&role); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(f.t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'nodes.read')`, p.TenantID, role); err != nil {
@@ -269,7 +269,9 @@ func TestRoutineRunHistoryPrivacyUsageAndPagination(t *testing.T) {
 					}
 				}
 			}
-			if !foundAction || !foundPR { t.Fatal("reference fixtures were absent from the assertion") }
+			if !foundAction || !foundPR {
+				t.Fatal("reference fixtures were absent from the assertion")
+			}
 		}
 	})
 	t.Run("immutable keysets and independent evidence cursors", func(t *testing.T) {

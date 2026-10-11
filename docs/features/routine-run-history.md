@@ -31,8 +31,9 @@ to `held`, `ownership_lost` to `failed`, `succeeded`/`completed` to `done`, and
 attempt evidence with successful, confirmed exit; missing evidence remains held.
 Go enforces the new writer and read vocabulary. No CHECK, enum or backfill is
 added because previously released writers still use `pending`; a constraint
-would reject them and violate the expansion policy. Terminal overlap and budget
-admission checks understand the new states and refuse unknown admission states.
+would reject them and violate the expansion policy. Preparation accepts created intent and legacy pending rows. Terminal overlap and
+budget admission checks understand the new states and refuse unknown admission
+states.
 
 Usage reads share one transaction snapshot with the evidence. A run ID appears
 once even if several attempts reference it. Current cumulative session/model
