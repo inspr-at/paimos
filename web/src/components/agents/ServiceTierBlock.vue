@@ -45,6 +45,9 @@ async function checkResult() {
     <div class="tier-title"><h3 class="eyebrow">Service tier</h3>
       <button v-if="!tiers.unavailable(session) || tiers.canAsk(session)" type="button" class="btn sm ghost tier-change" :disabled="!canOpen" aria-haspopup="dialog" @click="tiers.open(session, name, $event.currentTarget as HTMLElement)">{{ tiers.canAsk(session) ? 'Ask for a tier' : 'Change tier' }}</button>
     </div>
+    <div class="tier-head"><TierCell :session="session" :name="name" /><strong :class="{ paid: state.active_tier && state.active_tier !== 'default' }">{{ state.active_tier ? TIER_NAME[state.active_tier] : 'Not reported' }}</strong>
+      <span>{{ tierSpeed(active) }} · {{ tierPrice(active) }}</span>
+    </div>
     <div v-if="request" class="tier-request" :class="{ settled: request.state !== 'pending' }" role="note">
       <!-- Actions retain their boxes when the outcome appears below them. -->
       <div class="request-actions">
@@ -54,9 +57,6 @@ async function checkResult() {
       <strong><AppIcon name="shield" :size="14" />{{ request.state === 'pending' ? `${tiers.canAsk(session) ? 'You asked' : name + ' asks'} for ${TIER_NAME[request.tier]}` : `${request.state === 'approved' ? 'Approved' : 'Declined'} · ${TIER_NAME[request.tier]}` }}</strong>
       <p>{{ request.reason }}</p>
       <p v-if="request.state === 'pending'">{{ tierPrice(options.find(t => t.tier === request?.tier)) }} · nothing changes until a person approves.</p>
-    </div>
-    <div class="tier-head"><TierCell :session="session" :name="name" /><strong :class="{ paid: state.active_tier && state.active_tier !== 'default' }">{{ state.active_tier ? TIER_NAME[state.active_tier] : 'Not reported' }}</strong>
-      <span>{{ tierSpeed(active) }} · {{ tierPrice(active) }}</span>
     </div>
     <p class="tier-applies">{{ explanation }}</p>
     <div class="compare" role="table" aria-label="Service tiers for this session">
