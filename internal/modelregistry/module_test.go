@@ -295,16 +295,11 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("review without author %d %s", status, body)
 	}
-	// A harness filter never switches harnesses: no cursor route can run a
-	// Quick job or the Default here, so scout waits instead of running Luna.
-	cursorScout := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "", http.StatusOK)
-	if cursorScout.Profile != nil || !cursorScout.OwnerRequired || cursorScout.CommandTemplate != "" || len(cursorScout.Ladder) == 0 {
-		t.Fatalf("cursor scout switched harnesses: %+v", cursorScout)
-	}
-	for _, c := range cursorScout.Ladder {
-		if harness := profileByID(profiles, c.ProfileID).Harness; c.Selected || harness != "cursor" && !slices.Contains(c.SkipReasons, "harness filter") {
-			t.Fatalf("cursor scout considered a %s route: %+v", harness, c)
-		}
+	// A harness filter never switches harnesses: a role whose Models routes
+	// never use that harness is refused rather than run on another one.
+	status, body = call(t, &agent, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "")
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "role and harness combination is unsupported") {
+		t.Fatalf("cursor scout should be unsupported: %d %s", status, body)
 	}
 	// Automatic review takes the first family after the author's in the family
 	// order with a qualified no-tools adapter (Models v2): Codex cannot verify

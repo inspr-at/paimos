@@ -255,7 +255,8 @@ func TestPreferenceFallbackAndResidencyBlocksEveryRole(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `DELETE FROM model_pauses`); err != nil {
 			return err
 		}
-		// Retiring every version of the line leaves it no route to run.
+		// Retiring every version of the line leaves it no route to run; the
+		// walk keeps the line with its retired cause.
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by)
  SELECT tenant_id,id,'retired fixture',$2 FROM model_profiles WHERE aeon_models_line(family,harness,model)=$1`, pinLine, p.ID); err != nil {
 			return err
@@ -264,7 +265,7 @@ func TestPreferenceFallbackAndResidencyBlocksEveryRole(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if got.Profile == nil || !held(got, "no registered route for this line") {
+		if got.Profile == nil || !held(got, "retired") {
 			t.Fatalf("retired line ran or lost its cause: %+v", got)
 		}
 		if line, _ := modelsLine(*got.Profile); line != opusLine {
