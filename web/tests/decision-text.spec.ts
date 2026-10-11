@@ -109,7 +109,9 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     const heading = page.locator('.memo-heading h2'), summary = page.getByTestId('desk-answer-summary')
     await expect(heading).toHaveAttribute('data-tip', title)
     await expect(page.getByTestId('desk-full-title')).toHaveText('Question in full' + title)
-    await heading.focus()
+    // The source link now precedes the heading in the keyboard path.
+    await page.getByTestId('desk-close').press('Tab')
+    for (let tabs = 0; tabs < 12 && !await heading.evaluate(el => el === document.activeElement); tabs++) await page.keyboard.press('Tab')
     await expect(heading).toBeFocused()
     await expect(page.locator('.tooltip')).toHaveText(title)
     await page.getByTestId('desk-paper').focus()
