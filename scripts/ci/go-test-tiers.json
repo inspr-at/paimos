@@ -2418,6 +2418,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestGuideCommandsHaveNoPlaceholders","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestHandlerTransportReportsAbortedResponses","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestHookCapabilityReconcileProjectsConservatively","tier":"GATED-FULL"}
