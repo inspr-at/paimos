@@ -1160,6 +1160,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .group-row.keyed .group-label { font-size: 13px; color: var(--ink); }
 .eh-note { min-width: 0; color: var(--ink-3); font-size: 12px; font-weight: 450; }
 .group-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; margin-left: -6px; padding: 0 8px 0 4px; border: 0; border-radius: 8px; background: transparent; font: inherit; color: inherit; }
+@media (pointer: coarse), (max-width: 720px) { .group-toggle { min-height: 44px; } }
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
 .group-toggle:focus-visible { box-shadow: var(--focus-ring); }
 .chev.turned { transform: rotate(90deg); }

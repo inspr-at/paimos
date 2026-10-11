@@ -21,6 +21,7 @@ async function setup(page: Page, options: { folded?: string[]; workers?: number 
   // WEB has queued work and no lead; AEON first in the person's own project order.
   work.projects.push({ id: 'p-web', key: 'PRJ-40', title: 'Website', state: 'active', classic: 'WEB', description: '', last: new Date(NOW).toISOString() })
   work.preferences['projects:order'] = { ids: ['p-aeon'] }
+  work.preferences['ui.agents.sections'] = { dial: false }
   if (options.folded) work.preferences['agents:layout'] = { folded_projects: options.folded }
   const calls = await mockWork(page, work, { admin: true })
   const data = agentData({ me: me.id, now: NOW, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
@@ -31,7 +32,11 @@ async function setup(page: Page, options: { folded?: string[]; workers?: number 
   const capacity = capacityWorld()
   data.accounts = (capacity.accounts as unknown as typeof data.accounts).filter(a => ['codex', 'claude', 'cursor'].includes(a.harness)).map(a => ({ ...a, registered_by_principal_id: me.id }))
   await mockAgents(page, data, { capacity })
-  await page.route('**/api/me/permissions*', route => route.fulfill({ json: mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined) }))
+  await page.route('**/api/me/permissions*', route => {
+    const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    answer.workspace.permissions.push('run.create', 'account.read')
+    return route.fulfill({ json: answer })
+  })
   await mockDailyPlan(page, { example: 'limit' })
   const lead = (project: string, state: ProjectLead['state'], session: string | null = null): ProjectLead => ({ project_id: project, state, reason: '', revision: state === 'none' ? 0 : 3, generation: state === 'none' ? 0 : 1, session_id: session, process_active: !!session, automatic_launch_enabled: true })
   const leads: Record<string, ProjectLead> = { 'p-pharos': lead('p-pharos', 'working', LEAD), 'p-aeon': lead('p-aeon', 'waiting_for_room'), 'p-frozen': lead('p-frozen', 'none'), 'p-web': lead('p-web', 'none') }
@@ -49,7 +54,11 @@ const row = (page: Page, id: string) => page.locator(`.sessions [data-row="s:${i
 const leadRow = (page: Page) => row(page, LEAD)
 const stick = (page: Page) => page.locator('.sessions [data-stick]')
 const layoutWrites = (calls: { method: string; path: string; body?: unknown }[]) => calls.filter(c => c.method === 'PUT' && c.path === '/api/preferences/agents:layout').map(c => (c.body as { value: { folded_projects: string[] } }).value.folded_projects)
-const box = async (page: Page, selector: string) => { const b = (await page.locator(selector).first().boundingBox())!; return [Math.round(b.x * 2) / 2, Math.round(b.y * 2) / 2, Math.round(b.width * 2) / 2, Math.round(b.height * 2) / 2] }
+// Layout boxes in the page's own coordinates: main's scroll is added back, so scrolling a row into view is not a move.
+const box = (page: Page, selector: string) => page.locator(selector).first().evaluate(el => {
+  const r = el.getBoundingClientRect(), top = document.querySelector('main')!.scrollTop
+  return [r.x, r.y + top, r.width, r.height].map(v => Math.round(v * 2) / 2)
+})
 
 for (const theme of ['light', 'dark'] as const) test(`${theme} 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip`, async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
