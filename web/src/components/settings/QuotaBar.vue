@@ -3,17 +3,17 @@
 // AEON-1172 (design AEON-1149): one picture of every limit on an account. Used (teal),
 // room left today (pale teal), kept for you while you work (gold hatch), the floor
 // (ink hatch) and today's limit (a tick). No reading draws a dashed track, never a
-// guess. "sm" is the account list's bar; "lg" names the tick above the bar.
+// guess. "sm" is the account list's bar; "md" (Capacity) and "lg" (the panel) name the tick above the bar.
 import { computed } from 'vue'
 import { quotaSegments, type QuotaBar } from '../../lib/quotaBar'
-const props = withDefaults(defineProps<{ bar: QuotaBar; label: string; size?: 'sm' | 'lg' }>(), { size: 'sm' })
+const props = withDefaults(defineProps<{ bar: QuotaBar; label: string; size?: 'sm' | 'md' | 'lg' }>(), { size: 'sm' })
 const seg = computed(() => quotaSegments(props.bar))
 const w = (n: number) => `${n}%`
 </script>
 <template>
   <div class="qb" :class="[size, { none: !bar.known }]" role="img" :aria-label="label" :data-tip="size === 'sm' ? label : undefined" data-quota-bar>
     <div class="qb-in"><template v-if="bar.known"><i class="u" :style="{ width: w(seg.used) }" /><i v-if="seg.room" class="room" :style="{ left: w(seg.room.at), width: w(seg.room.width) }" /><i v-if="seg.keep" class="keep" :style="{ width: w(seg.keep) }" /><i v-if="seg.floor" class="floor" :style="{ width: w(seg.floor) }" /></template></div>
-    <span v-if="seg.tick" class="tick" :class="seg.tick.edge" :style="{ left: w(seg.tick.at) }"><b v-if="size === 'lg'">{{ seg.tick.label }}</b></span>
+    <span v-if="seg.tick" class="tick" :class="seg.tick.edge" :style="{ left: w(seg.tick.at) }"><b v-if="size !== 'sm'">{{ seg.tick.label }}</b></span>
   </div>
 </template>
 <style scoped>

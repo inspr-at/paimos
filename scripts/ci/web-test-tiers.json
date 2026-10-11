@@ -452,6 +452,26 @@
     ,
     "browser:tests/business.spec.ts:the overview includes open periods older than a year in its waiting count"
     ,
+    "browser:tests/capacity-pace.spec.ts:1024 dark › capacity 1024 dark: named controls, no sideways scroll, one-line labels stay on one line"
+    ,
+    "browser:tests/capacity-pace.spec.ts:1024 light › capacity 1024 light: named controls, no sideways scroll, one-line labels stay on one line"
+    ,
+    "browser:tests/capacity-pace.spec.ts:1440 dark › capacity 1440 dark: named controls, no sideways scroll, one-line labels stay on one line"
+    ,
+    "browser:tests/capacity-pace.spec.ts:1440 light › capacity 1440 light: named controls, no sideways scroll, one-line labels stay on one line"
+    ,
+    "browser:tests/capacity-pace.spec.ts:390 dark › capacity 390 dark: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line"
+    ,
+    "browser:tests/capacity-pace.spec.ts:390 light › capacity 390 light: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line"
+    ,
+    "browser:tests/capacity-pace.spec.ts:the bars, Boost today and what happens at the limit say what the plan says"
+    ,
+    "browser:tests/capacity-pace.spec.ts:the default pace saves on Enter with Undo; harnesses that follow it follow along, the others keep their own"
+    ,
+    "browser:tests/capacity-pace.spec.ts:the picker overlays and a save moves nothing; the picker keeps its width whatever it says"
+    ,
+    "browser:tests/capacity-pace.spec.ts:without account management, Capacity reads: no picker, no default field, no pacing controls"
+    ,
     "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1024 dark"
     ,
     "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1024 light"
@@ -6729,6 +6749,36 @@
     {"kind":"browser","file":"tests/capacity-learning.spec.ts","name":"learned evidence 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/capacity-learning.spec.ts","name":"learning suggestions cannot write without account.manage","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"1024 dark › capacity 1024 dark: named controls, no sideways scroll, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"1024 light › capacity 1024 light: named controls, no sideways scroll, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"1440 dark › capacity 1440 dark: named controls, no sideways scroll, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"1440 light › capacity 1440 light: named controls, no sideways scroll, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"390 dark › capacity 390 dark: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"390 light › capacity 390 light: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"Undo of a harness’s pace puts back the whole pace before, the number “use everything” keeps included","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"a number equal to the default follows the default in Capacity too, and Undo writes the value before","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"a pace changed elsewhere meanwhile is read again and said; nothing is overwritten","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"one value, two editors: the dial’s pace shows in Capacity, Capacity’s on the dial, both through the same guarded write","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"the bars, Boost today and what happens at the limit say what the plan says","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"the default pace saves on Enter with Undo; harnesses that follow it follow along, the others keep their own","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"the default pace’s Undo puts back the value stored when it saved, never a stale copy, and never overwrites a change made since","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"the picker overlays and a save moves nothing; the picker keeps its width whatever it says","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"without account management, Capacity reads: no picker, no default field, no pacing controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/classic-invite.spec.ts","name":"a member cannot invite an imported colleague","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14778,6 +14828,8 @@
     ,
     {"kind":"node","file":"tests/quota-bar.test.ts","name":"Boost today sets today’s limit and names the tick","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"Capacity’s caption says the room left today, or what stopped agents and what new work does at today’s limit","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/quota-bar.test.ts","name":"Keep for you binds before today’s limit while you work","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/quota-bar.test.ts","name":"a Hold from before or the switch off leaves the account alone","tier":"ESSENTIAL"}
@@ -15841,6 +15893,16 @@
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > includes the oldest supported open period with the explicit approval bound","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/business-periods.unit.test.ts","name":"period history bounds and honest paging > keeps the selected historical week and principal on every keyset page","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/capacity-pace.unit.test.ts","name":"the guarded write > a 409 is PlanChanged, any other failure or an unconfirmed save an error, never a success","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/capacity-pace.unit.test.ts","name":"the guarded write > a harness the plan has no settings for starts from the defaults","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/capacity-pace.unit.test.ts","name":"the guarded write > writes the plan as read with one pace changed, guarded by the revision it read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/capacity-pace.unit.test.ts","name":"the stored pace > changes one harness and copies the others, never sharing their objects","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/capacity-pace.unit.test.ts","name":"the stored pace > follows the default when the number equals it, keeps the number under \"use everything\", and reads back as the choice","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/capacity-reset.unit.test.ts","name":"clears person-owned snapshots and load state before a failed read after clearPermissions","tier":"ESSENTIAL"}
     ,
