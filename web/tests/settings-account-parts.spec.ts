@@ -181,6 +181,7 @@ test('every old link lands in the right part with the same panel open', async ({
   await expect(page).toHaveURL('/settings/accounts#quota-warnings')
   // #capacity-and-load opens Capacity with the pacing editors focused.
   await page.goto('/settings/accounts#capacity-and-load')
+  await expect(page.locator('#when')).toHaveClass(/arrived/)
   await expect(page).toHaveURL('/settings/capacity')
   await expect(page.locator('#capacity-and-load').getByRole('radio', { name: '5' })).toBeFocused()
   await page.goto('/settings/workspace#capacity-and-load')
@@ -236,17 +237,20 @@ test('without a paired computer Accounts offers Connect a computer where Add an 
   await expect(page.locator('section[aria-labelledby="accounts-list-title"]').getByRole('link', { name: 'Connect a computer' })).toHaveAttribute('href', '/agents/register-agent')
 })
 
-test('every part at 1440 and 390, light and dark, without sideways scrolling', async ({ page }, info) => {
-  test.skip(!process.env.AEON1171_SHOTS, 'evidence run only')
-  await setup(page, { expired: true, low: true, planCard: 'first' })
-  for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
-    await page.setViewportSize({ width, height: width > 600 ? 1000 : 860 })
-    await page.emulateMedia({ colorScheme: theme })
-    for (const part of PARTS) {
-      await visit(page, part)
-      await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
-      await page.screenshot({ path: info.outputPath(`${part}-${width}-${theme}.png`), fullPage: true })
-      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), `${part} at ${width}`).toBeLessThanOrEqual(0)
+for (const [state, options] of [['things need you', { expired: true, low: true, planCard: 'first' }], ['nothing needs you', {}]] as const) {
+  test(`every part at 1440 and 390, light and dark, without sideways scrolling: ${state}`, async ({ page }, info) => {
+    test.skip(!process.env.AEON1171_SHOTS, 'evidence run only')
+    await setup(page, options)
+    for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: width > 600 ? 1000 : 860 })
+      await page.emulateMedia({ colorScheme: theme })
+      await page.addInitScript(value => localStorage.setItem('aeon-theme', value), theme)
+      for (const part of PARTS) {
+        await visit(page, part)
+        await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+        await page.screenshot({ path: info.outputPath(`${part}-${state.replaceAll(' ', '-')}-${width}-${theme}.png`), fullPage: true })
+        expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), `${part} at ${width}`).toBeLessThanOrEqual(0)
+      }
     }
-  }
-})
+  })
+}

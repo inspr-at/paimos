@@ -35,7 +35,8 @@ watch(() => route.hash, async hash => {
         </span>
       </div>
     </template>
-    <PacingSettings ref="pacing" :manage="manage" :owner-key="owner" />
+    <!-- #when lands here and rings on arrival, as #capacity-and-load did on the combined page. -->
+    <div id="when"><PacingSettings ref="pacing" :manage="manage" :owner-key="owner" /></div>
   </AccountsPanel>
 </template>
 
