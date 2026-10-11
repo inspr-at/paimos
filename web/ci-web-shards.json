@@ -968,6 +968,8 @@
         ,
         {"file":"tests/project-sections.spec.ts","listedTests":24,"weightSeconds":53.268293,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/project-settings.spec.ts","listedTests":4,"weightSeconds":120,"weightSource":"unmeasured-estimate"}
+        ,
         {"file":"tests/project-sort.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/project-status-counts.spec.ts","weightSeconds":60,"weightSource":"unmeasured-estimate"}

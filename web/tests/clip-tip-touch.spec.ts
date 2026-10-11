@@ -216,6 +216,15 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
         await page.clock.resume()
         await expect(selectedKeys).toHaveText(['PHAROS-12'])
         await expect(page.locator('.tooltip')).toHaveCount(0)
+        // A browser may omit the completed hold's click. A fresh tap on the
+        // same row must still toggle it, even if the pointer id is reused.
+        await short.tap()
+        await expect(selectedKeys).toHaveCount(0)
+        await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
+        // Selection mode remains armed with no rows selected; another tap
+        // selects the row again before the original clipped-row scenario.
+        await short.tap()
+        await expect(selectedKeys).toHaveText(['PHAROS-12'])
         // Ordinary taps continue to toggle when selection is already active.
         await name.tap()
         await expect(selectedKeys).toHaveText(['PHAROS-11', 'PHAROS-12'])

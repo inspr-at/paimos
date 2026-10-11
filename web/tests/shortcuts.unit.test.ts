@@ -7,6 +7,28 @@ import { renderToString } from '@vue/server-renderer'
 import ShortcutSheet from '../src/components/work/ShortcutSheet.vue'
 import { createShortcutRegistry, onAction, SHORTCUT_ENTRIES, shortcutConflicts, type ShortcutEntry } from '../src/lib/shortcuts'
 
+it('project settings owns only its focused form or overlay and retains native shortcuts', () => {
+  const registry = createShortcutRegistry(() => ({ editing: true, layers: ['Delete project'] }))
+  let owns = false
+  const submit = vi.fn(), dismiss = vi.fn(), global = vi.fn()
+  registry.onAction('project.settings.submit', submit, { when: () => owns })
+  registry.onAction('project.settings.dismiss', dismiss, { when: () => owns })
+  registry.onAction('agents.row.open', global)
+  const send = (key: string, extra: Partial<KeyboardEvent> = {}) => {
+    const event = { key, shiftKey: false, metaKey: false, ctrlKey: false, altKey: false, isComposing: false, defaultPrevented: false, preventDefault: vi.fn(), stopImmediatePropagation: vi.fn(), ...extra } as unknown as KeyboardEvent
+    registry.dispatch(event, 'capture'); return event
+  }
+  send('Enter', { metaKey: true }); send('Escape')
+  expect(submit).not.toHaveBeenCalled(); expect(dismiss).not.toHaveBeenCalled()
+  owns = true
+  send('Enter', { metaKey: true }); send('Escape')
+  expect(submit).toHaveBeenCalledOnce(); expect(dismiss).toHaveBeenCalledOnce()
+  for (const key of ['s', 'r', 'd', 'p', 'a', 'Enter']) expect(send(key).preventDefault).not.toHaveBeenCalled()
+  for (const key of ['s', 'r', 'd', 'p', 'a']) expect(send(key, { ctrlKey: true }).preventDefault).not.toHaveBeenCalled()
+  expect(send('Enter', { metaKey: true, isComposing: true }).preventDefault).not.toHaveBeenCalled()
+  expect(global).not.toHaveBeenCalled()
+})
+
 it('shortcut help preserves approved transition labels with SVG arrows and accessible words', async () => {
   // Risk: approved transition copy must keep its arrows without text glyphs,
   // and screen readers must still hear the direction between the named states.

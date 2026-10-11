@@ -471,7 +471,11 @@ function statusClick(event: MouseEvent, row: ListItem) {
   emit('status', row, event.currentTarget as HTMLElement)
 }
 function rowClick(event: MouseEvent, row: ListItem) {
-  if (swallowClick) { swallowClick = false; return }
+  const held = swallowClick
+  swallowClick = null
+  // A native context menu can prevent the hold's compatibility click. Keep
+  // suppression on that row and pointer; the next gesture still acts normally.
+  if (held?.rowId === row.id && held.pointerId === (event as PointerEvent).pointerId) { event.preventDefault(); return }
   if (props.selectable && phone.value && selecting.value && !(event.target as HTMLElement).closest('.phone-check')) {
     emit('select', row, 'toggle')
     return
@@ -499,21 +503,22 @@ function checkClick(event: MouseEvent, row: ListItem) {
 // both fire for one press; the click that follows must not undo it.
 const HOLD_MS = 480
 let pressTimer = 0
-let pressOrigin: { x: number; y: number } | null = null
+let pressOrigin: { x: number; y: number; pointerId: number } | null = null
 let pointerDown = false
-let swallowClick = false
+let swallowClick: { rowId: string; pointerId: number } | null = null
+function clearHoldClick() { swallowClick = null }
 function pressBegin(event: PointerEvent, row: ListItem) {
   if (!props.selectable || props.selectionDisabled || props.rowSelectable?.(row) === false || !phone.value || selecting.value || event.button !== 0) return
   if ((event.target as HTMLElement).closest('button, input')) return
   pointerDown = true
-  swallowClick = false
-  pressOrigin = { x: event.clientX, y: event.clientY }
+  swallowClick = null
+  pressOrigin = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
   window.clearTimeout(pressTimer)
   pressTimer = window.setTimeout(() => {
     pressTimer = 0
     const current = props.rowsById.get(row.id)
     if (!current || current.updated_at !== row.updated_at || props.selectionDisabled || props.rowSelectable?.(current) === false) return
-    swallowClick = true
+    swallowClick = { rowId: row.id, pointerId: event.pointerId }
     emit('select', current, 'toggle')
   }, HOLD_MS)
 }
@@ -527,16 +532,16 @@ function pressFinish(fromPointerUp: boolean) {
   if (!pressTimer) return
   window.clearTimeout(pressTimer)
   pressTimer = 0
-  if (fromPointerUp) swallowClick = false
+  if (fromPointerUp) swallowClick = null
 }
 function longPress(event: Event, row: ListItem) {
   if (!props.selectable || props.selectionDisabled || props.rowSelectable?.(row) === false || !phone.value) return
   event.preventDefault()
-  if (swallowClick) return
+  if (swallowClick?.rowId === row.id) return
   if (pressTimer) { window.clearTimeout(pressTimer); pressTimer = 0 }
   // A later click belongs to this press only while the finger is still down.
   // A dispatched context menu (no pointer) must leave the next tap alone.
-  swallowClick = pointerDown
+  swallowClick = pointerDown && pressOrigin ? { rowId: row.id, pointerId: pressOrigin.pointerId } : null
   emit('select', row, 'toggle')
 }
 function linkClick(event: MouseEvent) {
@@ -598,9 +603,14 @@ function observe() {
   observer.observe(sentinel.value)
 }
 let stopLive: (() => void) | undefined
-onMounted(() => { stopLive = live.watch(); observe() })
+onMounted(() => {
+  stopLive = live.watch(); observe()
+  // Disclosure may stop a clipped name's pointerdown before it reaches the
+  // row. Clear the previous gesture in document capture, even for that name.
+  document.addEventListener('pointerdown', clearHoldClick, true)
+})
 watch(() => [props.scrollRoot, props.hasMore, props.loadingMore, !!props.outline], observe)
-onBeforeUnmount(() => { stopLive?.(); observer?.disconnect(); window.clearTimeout(pressTimer) })
+onBeforeUnmount(() => { stopLive?.(); observer?.disconnect(); window.clearTimeout(pressTimer); document.removeEventListener('pointerdown', clearHoldClick, true) })
 defineExpose({
   focusGrid, scrollToRow, el: grid,
   focusCreate: () => (inlineQuick.value[0] ?? quick.value)?.focus(),

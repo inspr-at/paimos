@@ -397,6 +397,9 @@
         "web/src/components/agents/DecisionDeskPanel.vue",
         "web/src/components/header/DeskPreview.vue",
         "web/src/components/settings/models/ModelOutdatedSheet.vue",
+        "web/src/components/settings/ProjectSettings.vue",
+        "web/src/components/settings/ProjectGeneralSettings.vue",
+        "web/src/components/settings/ProjectSettingsExplainer.vue",
         "web/src/components/settings/models/ModelLineRow.vue",
         "web/src/components/settings/models/ModelDiscovery.vue"
       ]
@@ -419,7 +422,11 @@
         "web/src/stores/decisionDesk.ts",
         "web/tests/models-outdated.spec.ts",
         "web/src/lib/shortcuts.ts",
-        "web/tests/shortcuts.unit.test.ts"
+        "web/tests/shortcuts.unit.test.ts",
+        "web/src/lib/projectSettings.ts",
+        "web/src/lib/projectSettingsExplainers.ts",
+        "web/tests/project-settings.spec.ts",
+        "web/tests/project-settings-acceptance.mjs"
       ],
       "exclude": [
         "web/src/views/**",
