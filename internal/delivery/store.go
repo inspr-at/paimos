@@ -67,6 +67,29 @@ func settingsTx(ctx context.Context, tx pgx.Tx, project *string) (Settings, erro
 	}
 	return out, nil
 }
+
+// Read the sparse saved values, rather than pinning inherited values when a
+// person edits one field. The row timestamp fences replacement writes.
+func storedSettingsTx(ctx context.Context, tx pgx.Tx, project *string) (Settings, string, error) {
+	out := Settings{}
+	var checks []string
+	var raw []byte
+	var updated time.Time
+	err := tx.QueryRow(ctx, `SELECT required_checks,deadlines,required_workflow,updated_at FROM delivery_settings WHERE project_id IS NOT DISTINCT FROM $1::uuid`, project).Scan(&checks, &raw, &out.RequiredWorkflow, &updated)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return out, `"none"`, nil
+	}
+	if err != nil {
+		return out, "", err
+	}
+	if checks != nil {
+		out.RequiredChecks = &checks
+	}
+	if err = json.Unmarshal(raw, &out.Deadlines); err != nil {
+		return out, "", err
+	}
+	return out, `"` + updated.UTC().Format(time.RFC3339Nano) + `"`, nil
+}
 func linkTx(ctx context.Context, tx pgx.Tx, o *Observation, title string) error {
 	var ticket string
 	var project *string

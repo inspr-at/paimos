@@ -28,6 +28,9 @@ import { onPreferenceFailure, preferenceSaves, usePreference } from '../../lib/p
 import { usePoller } from '../../lib/usePolledData'
 import { vClipTip } from '../../directives/clipTip'
 import { useProfile } from '../../stores/profile'
+import { can } from '../../lib/authz'
+import { projectSettingsPath } from '../../lib/projectSettings'
+import { repositoryState } from '../../lib/projectDeliverySettings'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title: string } }>()
 const route = useRoute()
@@ -124,6 +127,9 @@ const tiles = computed(() => state.value === 'ready' && numbers.value ? numbers.
 const charts = computed(() => state.value === 'ready' && numbers.value ? numbers.value.charts : empty.value.charts)
 const source = computed(() => data.value?.source ?? null)
 const noData = computed(() => state.value === 'ready' && !!data.value && !hasAnyData(data.value))
+const canManage = computed(() => can('delivery.manage', props.project.id))
+const repositoryLink = computed(() => ({ path: projectSettingsPath(props.project.routeKey, 'delivery'), hash: '#repository', ...(!source.value && canManage.value ? { query: { link: '1' } } : {}) }))
+const settingsLabel = computed(() => !source.value ? canManage.value ? lang.value === 'de' ? 'Repository verknüpfen' : 'Link repository' : lang.value === 'de' ? 'Zuständigkeit anzeigen' : 'See who' : lang.value === 'de' ? 'Repository & Lieferung' : 'Repository & delivery')
 const updated = computed(() => {
   if (view.value === 'flow') {
     // Flow names its own moment: Live says what "now" is; Replay and Compare show recorded runs.
@@ -142,9 +148,9 @@ const chips = computed(() => {
     : s.backfill === 'running' ? { icon: 'history' as const, b: t.srcRun[0], rest: s.covered_since ? fill(t.srcRun[1], { d: day(s.covered_since) }) : t.srcRunNone[1] }
       : { icon: 'history' as const, b: t.srcNone[0], rest: t.srcNone[1] }
   return [
-    { icon: 'pulse' as const, b: s.app_connected ? t.srcApp[0] : t.srcAppOff[0], rest: s.app_connected ? t.srcApp[1] : t.srcAppOff[1] },
-    back,
-    { icon: 'merge' as const, b: t.srcTool[0], rest: t.srcTool[1] },
+    { icon: 'pulse' as const, b: s.app_connected ? t.srcApp[0] : t.srcAppOff[0], rest: s.app_connected ? t.srcApp[1] : t.srcAppOff[1], problem: !s.app_connected || repositoryState(s, Date.parse(data.value?.generated_at ?? '')) === 'stale' },
+    { ...back, problem: s.backfill !== 'done' || !!s.last_read_error },
+    { icon: 'merge' as const, b: t.srcTool[0], rest: t.srcTool[1], problem: false },
   ]
 })
 const unit = computed(() => bucketOf(prefs.value.window))
@@ -246,13 +252,15 @@ watch(state, (next, prev) => {
         <div v-else-if="!source" class="banner" role="status">
           <AppIcon name="info" :size="16" />
           <span v-clip-tip class="grow"><b>{{ text.norepoT }}</b> {{ text.norepoB }}</span>
+          <RouterLink class="btn sm" :class="{ primary: canManage }" :to="repositoryLink"><AppIcon name="link" :size="13" />{{ settingsLabel }}</RouterLink>
         </div>
         <div v-else-if="noData" class="banner" role="status">
           <AppIcon name="info" :size="16" />
           <span v-clip-tip class="grow"><b>{{ text.nodataT }}</b> {{ fill(text.nodataB, { repo: source.repository }) }}</span>
+          <RouterLink class="btn sm" :to="repositoryLink">{{ settingsLabel }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
         </div>
         <div v-else class="sources">
-          <span v-for="chip in chips" :key="chip.b" class="src"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span></span>
+          <template v-for="chip in chips" :key="chip.b"><RouterLink v-if="chip.problem" class="src go-src" :to="repositoryLink"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span><AppIcon name="chevron-right" :size="12" /></RouterLink><span v-else class="src"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span></span></template>
         </div>
       </div>
 
@@ -405,6 +413,7 @@ watch(state, (next, prev) => {
   .half .btn { width: 44px; }
 }
 @container delivery (max-width: 460px) { .tiles { grid-template-columns: minmax(0, 1fr); } }
+.go-src { text-decoration:none; color:inherit; } .go-src:hover { box-shadow:inset 0 0 0 1px var(--teal); }
 </style>
 
 <style>
@@ -414,4 +423,5 @@ watch(state, (next, prev) => {
 .dl-tip p { margin: 0; color: inherit; opacity: .92; }
 .dl-tip p + p { margin-top: 6px; }
 .dl-tip .meta { font: 500 11px/1.5 var(--mono); opacity: .75; }
+.go-src { text-decoration:none; color:inherit; } .go-src:hover { box-shadow:inset 0 0 0 1px var(--teal); }
 </style>

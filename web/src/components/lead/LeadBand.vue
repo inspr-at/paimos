@@ -12,6 +12,7 @@ import { useLeadSummary } from '../../lib/useLeadSummary'
 import { useProjectLeads } from '../../stores/projectLeads'
 import { useSession } from '../../stores/session'
 import { useWorkQueue } from '../../stores/workQueue'
+import { projectSettingsPath } from '../../lib/projectSettings'
 import AppIcon from '../AppIcon.vue'
 import LeadBot from './LeadBot.vue'
 import LeadAdoption from './LeadAdoption.vue'
@@ -133,7 +134,7 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
       </div>
     </div>
 
-    <p v-if="['start', 'resume'].includes(band.action) && !canLaunchLead(lead)" id="lead-launch-reason-band" class="lead-now" data-launch-reason>{{ leadLaunchReason(lead) }}</p>
+    <p v-if="['start', 'resume'].includes(band.action) && !canLaunchLead(lead)" id="lead-launch-reason-band" class="lead-now" data-launch-reason>{{ leadLaunchReason(lead) }} <RouterLink :to="`${projectSettingsPath(routeKey, 'agents')}#lead`" class="settings-link">Settings › Agents<AppIcon name="chevron-right" :size="12" /></RouterLink></p>
 
     <LeadAdoption v-if="band.state !== 'none' && mayStart && lead && !lead.session_id && lead.state !== 'paused'" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
     <p v-if="unmanaged" class="lead-now small" data-unmanaged>{{ unmanagedLeadCopy }}</p>
@@ -239,4 +240,5 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
 }
 @media (pointer: coarse) { .fold-btn { width: 44px; height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .lead.moving .lead-fold, .fold-btn :deep(svg) { transition: none; } }
+.settings-link { display:inline-flex; align-items:center; gap:3px; min-height:30px; color:var(--ink-2); } @media(pointer:coarse) { .settings-link { min-height:44px; } }
 </style>
