@@ -34,7 +34,7 @@ const props = defineProps<{ ctx: AccountsSettings }>()
 const {
   agents, capacity, accounts, owner, manage, open, opener, computer, account, selectedKey, title, busy, focusSignIn, bindRoot, computerState, status, mayVerify,
   verificationBusy, verificationMessage, vendorName, windowLabel, show, refresh, verify, goPacing, cleanupRemoval, renameOpen, renameName, menuOpen,
-  menuAnchor, menuItems, menuContext, menuError, openMenu, renameComputer, menuAction, setAccount, primarySignin, quota, paceWords, heldOf, endHeld,
+  menuAnchor, menuItems, menuContext, menuError, openMenu, renameComputer, menuAction, setAccount, primarySignin, quota, paceWords, planFailed, heldOf, endHeld,
 } = toRefs(props.ctx)
 const fact = computed(() => computer.value ? `${computerState.value(computer.value)} · ${platformCaption(computer.value.platform, computer.value.arch)}` : account.value?.identity)
 const cleanupText = (value?: string) => ({ confirmed: 'confirmed', pending: 'pending', settled: 'settled', unconfirmed: 'awaiting confirmation' }[value ?? ''] ?? 'not reported')
@@ -56,8 +56,8 @@ function openSignin(s: SignInReference) {
 }
 const shown = computed(() => account.value ? quota.value(account.value) : null)
 const said = computed(() => account.value && shown.value ? quotaSentence(shown.value.bar, { vendor: account.value.vendor, atLimit: shown.value.atLimit }) : [])
-// An account that reports its quota keeps the height of its longest sentence: Limits below never move.
-const sizers = computed(() => account.value && shown.value?.bar.known ? widestSentences(account.value.vendor) : [])
+// The sentence keeps the height of the longest one its Limits can reach: the controls below never move.
+const sizers = computed(() => account.value && shown.value ? widestSentences(account.value.vendor, shown.value.bar.known) : [])
 // The legend names Keep for you whenever the person keeps something, so a hold ending or a Sprint never re-wraps it.
 const keeps = computed(() => capacity.value.schedule.reserve !== 'off')
 const readWindow = computed(() => shown.value?.window ?? account.value?.windows[0] ?? null)
@@ -66,24 +66,53 @@ const held = computed(() => account.value ? heldOf.value(account.value) : null)
 const allowed = (r: AgentAccount) => r.state === 'available' && r.ongoing_use_approved !== false
 const ruleOf = (r: AgentAccount) => capacity.value.byAccount.get(r.id)?.limit
 const ruleKey = (r: AgentAccount) => `${r.id}:${ruleOf(r)?.id ?? ''}`
+// A removed rule or an ended Hold keeps its row, saying so, until the panel shows another
+// account or closes: "Agents may use it" and everything below stay put after the write
+// (AEON-541). Each row holds the height of its tallest state and its action slot the width
+// of its widest, so asking, confirming and the result never move a neighbour either.
+interface Words { title: string; text: string }
 // Removing an older rule asks in place, without Undo: the server refuses to create one again.
 // Focus moves to Keep (the safe choice) and back to Remove when the question closes.
 const confirmRule = ref(''), useBusy = ref('')
-watch(selectedKey, () => { confirmRule.value = ''; useBusy.value = '' })
+const removed = ref(new Map<string, string>()), ended = ref<(Words & { key: string; done: Words }) | null>(null)
+const RULE_TEXT = { ask: 'An older limit on this account only. It still applies until you remove it; the daily limit does this for every account now.', confirm: 'Remove it for good? This kind of limit can’t be set again; the daily limit paces every account.', done: 'Removed for good. The daily limit paces this account now.' }
+function ruleRow(r: AgentAccount) {
+  // A removal the server confirmed shows at once, before the next read drops the rule.
+  const rule = ruleOf(r), gone = removed.value.get(r.id), words = gone ?? (rule ? ruleWords(rule) : '')
+  if (!words) return null
+  const state = gone ? 'done' as const : confirmRule.value === ruleKey(r) ? 'confirm' as const : 'ask' as const
+  return { state, title: `Set by you · ${words}`, text: RULE_TEXT[state], sizers: Object.values(RULE_TEXT).filter(t => t !== RULE_TEXT[state]) }
+}
+const limitRows = computed(() => account.value?.records.map(record => ({ record, rule: ruleRow(record) })) ?? [])
+const heldRow = computed(() => {
+  const live = held.value, gone = ended.value
+  // The hold that ended shows as ended; a different one in force since shows as it is.
+  if (gone && (!live || live.key === gone.key)) return { state: 'done' as const, ...gone.done, sizers: [{ title: gone.title, text: gone.text }] }
+  return live ? { state: 'held' as const, title: live.title, text: live.text, sizers: [heldDone(live.kind)] } : null
+})
+function heldDone(kind: string): Words { return kind === 'sprint' ? { title: 'Sprint ended', text: 'The daily limit paces it again.' } : { title: 'Hold ended', text: 'Agents may use it again.' } }
+async function endHold(a: OverviewAccount) {
+  const h = held.value, screen = selectedKey.value
+  if (!h) return
+  if (await endHeld.value(a, h.key) && screen === selectedKey.value) ended.value = { key: h.key, title: h.title, text: h.text, done: heldDone(h.kind) }
+}
+function forget() { confirmRule.value = ''; useBusy.value = ''; removed.value = new Map(); ended.value = null }
+watch(selectedKey, forget)
+watch(open, shown => { if (!shown) forget() })
 async function askRule(r: AgentAccount, open: boolean) {
   confirmRule.value = open ? ruleKey(r) : ''
   await nextTick()
   document.querySelector<HTMLElement>(`section.pane [data-rule="${r.id}"] ${open ? '[data-keep]' : '[data-remove]'}`)?.focus({ preventScroll: true })
 }
 async function removeRule(r: AgentAccount, seen: string) {
-  const identity = owner.value, screen = selectedKey.value
+  const identity = owner.value, screen = selectedKey.value, rule = ruleOf(r)
   if (!manage.value || busy.value) return
-  if (ruleKey(r) !== seen) { confirmRule.value = ''; toast('This limit changed. The panel shows it as it is now.', { tone: 'error' }); return }
+  if (!rule || ruleKey(r) !== seen) { confirmRule.value = ''; toast('This limit changed. The panel shows it as it is now.', { tone: 'error' }); return }
   busy.value = true
   try {
     await removeLimit(r.id)
     if (identity !== owner.value || screen !== selectedKey.value) return
-    confirmRule.value = ''
+    confirmRule.value = ''; removed.value = new Map(removed.value).set(r.id, ruleWords(rule))
     toast(`Removed the older limit on ${accountName(r)}. The daily limit paces it now.`)
     await agents.value.afterWrite()
   } catch (error) { if (identity === owner.value && screen === selectedKey.value) toast(error instanceof Error ? error.message : 'The limit was not removed. Please try again.', { tone: 'error' }) }
@@ -107,7 +136,7 @@ async function toggleUse(r: AgentAccount) {
     <SettingsDockedPanel v-model:open="open" :title="title" :fact="fact" :icon="computer ? 'monitor' : 'gauge'" :opener="opener" :context-key="owner" :record-key="selectedKey" layout-frame-selector=".settings-page">
       <slot name="head" />
       <p v-if="!manage" class="member-note">Only account owners with management permission can act. This view shows the status available to you.</p>
-      <div class="loading-state" role="status"><template v-if="agents.accountsState === 'forbidden'">Accounts are visible to workspace admins.</template><template v-else-if="agents.accountsState === 'error' || capacity.computersState === 'error'">Accounts or computers could not be loaded. <button type="button" class="btn sm" @click="refresh">Try again</button></template><template v-else-if="!capacity.loaded">Loading accounts and computers…</template><template v-else-if="capacity.stale || capacity.computersStale">Some readings may be out of date. <button type="button" class="btn sm" @click="refresh">Refresh</button></template></div>
+      <div class="loading-state" role="status"><template v-if="agents.accountsState === 'forbidden'">Accounts are visible to workspace admins.</template><template v-else-if="agents.accountsState === 'error' || capacity.computersState === 'error'">Accounts or computers could not be loaded. <button type="button" class="btn sm" @click="refresh">Try again</button></template><template v-else-if="!capacity.loaded">Loading accounts and computers…</template><template v-else-if="capacity.stale || capacity.computersStale || planFailed">Some readings may be out of date. <button type="button" class="btn sm" @click="refresh">Refresh</button></template></div>
       <slot />
       <template #overflow><button v-if="manage && (computer || account)" class="icon-btn" type="button" :aria-label="`More actions for ${title}`" @click="openMenu(computer ? { kind: 'computer', computer } : { kind: 'account', account: account! }, $event)"><AppIcon name="more" /></button></template>
       <template #panel>
@@ -123,10 +152,10 @@ async function toggleUse(r: AgentAccount) {
           <div v-if="primarySignin" class="needs"><AppIcon name="alert" /><strong>Verification on {{ primarySignin.computer.computer_name }}</strong><p role="status">{{ verificationMessage(primarySignin) || verificationWords(primarySignin) }}</p></div>
           <section class="p-sec" data-quota><div class="p-head"><h3>Quota</h3><span>{{ sharedByComputers(account, displayLanguage()) }}</span></div><QuotaBar v-if="shown" size="lg" :bar="shown.bar" :label="shown.label" /><QuotaLegend v-if="shown?.bar.known" class="q-legend" :keep="keeps" /><div class="p-say-slot"><p class="p-say" data-quota-say><template v-for="(part, i) in said" :key="i"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></p><p v-for="(parts, i) in sizers" :key="`sizer-${i}`" class="p-say sizer" aria-hidden="true"><template v-for="(part, j) in parts" :key="j"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></p></div><dl class="p-win"><div v-for="w in account.windows" :key="w.reading.window_kind + w.reading.bucket"><dt>{{ windowLabel(w) }}</dt><dd><b>{{ Math.round(w.remaining_percent) }} % left</b> · resets {{ when(w.reading.resets_at, agents.now) }}</dd></div><div v-if="readWindow"><dt>Read</dt><dd :class="{ stale: account.windows.some(w => w.freshness !== 'fresh') }">{{ when(readWindow.reading.read_at, agents.now) }} on {{ quotaSource(account, readWindow) }}<template v-if="account.windows.some(w => w.freshness !== 'fresh')"> · may be out of date</template></dd></div><div v-if="planLine"><dt>Plan</dt><dd>{{ planLine }}</dd></div></dl></section>
           <section class="p-sec lim-sec" data-limits><div class="p-head"><h3>Limits on this account</h3><span>{{ manage ? 'For this account only' : 'Read only · set by its owner' }}</span></div>
-            <AccountUsagePosture v-for="(record, i) in account.records" :key="record.id" :account-id="record.id" :who="account.records.length > 1 ? accountName(record) : ''" :pace="i === 0 ? paceWords(account) : ''" :german="displayLanguage() === 'de'" @changed="refresh">
-              <div v-if="ruleOf(record)" class="lim legacy" :data-rule="record.id"><span class="lbl"><b>Set by you · {{ ruleWords(ruleOf(record)!) }}</b><small>{{ confirmRule === ruleKey(record) ? 'Remove it for good? This kind of limit can’t be set again; the daily limit paces every account.' : 'An older limit on this account only. It still applies until you remove it; the daily limit does this for every account now.' }}</small></span><span v-if="manage && confirmRule === ruleKey(record)" class="two-btn"><button type="button" class="btn sm" data-keep :disabled="busy" @click="askRule(record, false)">Keep</button><button type="button" class="btn sm danger" :disabled="busy" @click="removeRule(record, ruleKey(record))">Remove</button></span><button v-else-if="manage" type="button" class="btn sm" data-remove :disabled="busy" @click="askRule(record, true)">Remove</button></div>
+            <AccountUsagePosture v-for="({ record, rule }, i) in limitRows" :key="record.id" :account-id="record.id" :who="account.records.length > 1 ? accountName(record) : ''" :pace="i === 0 ? paceWords(account) : ''" :german="displayLanguage() === 'de'" @changed="refresh">
+              <div v-if="rule" class="lim legacy" :class="{ settled: rule.state === 'done' }" :data-rule="record.id"><span class="lbl stack"><span class="say" data-say><b>{{ rule.title }}</b><small>{{ rule.text }}</small></span><span v-for="(text, j) in rule.sizers" :key="j" class="say sizer" aria-hidden="true"><b>{{ rule.title }}</b><small>{{ text }}</small></span></span><span v-if="manage" class="act"><span v-if="rule.state === 'confirm'" class="two-btn"><button type="button" class="btn sm" data-keep :disabled="busy" @click="askRule(record, false)">Keep</button><button type="button" class="btn sm danger" :disabled="busy" @click="removeRule(record, ruleKey(record))">Remove</button></span><button v-else-if="rule.state === 'ask'" type="button" class="btn sm" data-remove :disabled="busy" @click="askRule(record, true)">Remove</button><span v-else class="done"><AppIcon name="check" :size="14" />Removed</span><span class="two-btn sizer" aria-hidden="true"><span class="btn sm">Keep</span><span class="btn sm">Remove</span></span></span></div>
             </AccountUsagePosture>
-            <div v-if="held" class="lim legacy" data-held><span class="lbl"><b>{{ held.title }}</b><small>{{ held.text }}</small></span><button v-if="manage" type="button" class="btn sm" :disabled="busy" @click="endHeld(account, held.key)">End now</button></div>
+            <div v-if="heldRow" class="lim legacy" :class="{ settled: heldRow.state === 'done' }" data-held><span class="lbl stack"><span class="say" data-say><b>{{ heldRow.title }}</b><small>{{ heldRow.text }}</small></span><span v-for="(words, i) in heldRow.sizers" :key="i" class="say sizer" aria-hidden="true"><b>{{ words.title }}</b><small>{{ words.text }}</small></span></span><span v-if="manage" class="act"><button v-if="heldRow.state === 'held'" type="button" class="btn sm" :disabled="busy" @click="endHold(account)">End now</button><span v-else class="done"><AppIcon name="check" :size="14" />Ended</span><span class="btn sm sizer" aria-hidden="true">End now</span></span></div>
             <div v-for="record in account.records" :key="`use:${record.id}`" class="lim" :data-use="record.id"><span class="lbl"><b>Agents may use it</b><small>{{ account.records.length > 1 ? `${accountName(record)} · ` : '' }}Off: agents leave this account alone. Running work finishes.</small></span><button type="button" role="switch" class="use" :aria-checked="allowed(record)" :aria-label="`Agents may use it · ${accountName(record)}`" :disabled="!manage" :aria-disabled="useBusy === record.id || undefined" :data-tip="manage ? undefined : 'People who can manage accounts change this'" @click="toggleUse(record)"><span class="track" aria-hidden="true"><span class="thumb" /></span></button></div>
           </section>
           <section class="p-sec"><div class="p-head"><h3>Signed in on</h3><span>Details and actions live with each computer</span></div><button v-for="s in account.signins" :key="`${s.computer.computer_id}:${s.enrollment.account_id}`" type="button" class="ref-row" @click="openSignin(s)"><AppIcon name="monitor" /><span><b>{{ s.computer.computer_name }}</b><small>{{ computerState(s.computer) }}</small></span><span class="st">{{ status(s.computer, s.enrollment.account_id) }}</span><AppIcon name="chevron-right" /></button><p v-if="!account.signins.length">No paired computer is associated with this account.</p></section>

@@ -3,7 +3,8 @@
 // Risks: a row or the panel claims room agents do not have; a limit save moves the
 // controls; a touch target in the new rows is under 44 px; the legend or bars push
 // the page sideways on a phone. The plan's daily_state drives the bars; accounts
-// outside it show only their reading.
+// outside it show only their reading. A plan that could not refresh says so and stops
+// promising room on time; Remove and End now leave every control below in place.
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
@@ -169,5 +170,77 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
       guard.done()
       expect(floors).toEqual([{ floor_percent: 15, revision: 1, binding_revision: 2 }, { floor_percent: 10, revision: 2, binding_revision: 2 }])
     })
+
+    // AEON-1172 fix round 2: a successful Remove or End now used to drop its row, and
+    // "Agents may use it" with everything below moved up under the pointer (AEON-541).
+    test(`accounts ${width} ${theme}: Remove and End now leave “Agents may use it” and everything below in place`, async ({ page }) => {
+      const errors = watchErrors(page)
+      const { capacity } = await setup(page, { limits: true })
+      // A Hold set before it was retired, saved as the old menu saved it: the schedule without its Keep for you.
+      const { reserve: _r, reserve_percent: _p, ...shape } = capacity.schedules.find(e => e.scope === 'user')!.schedule
+      capacity.schedules.push({ scope: 'pool', pool: 'codex', schedule: { ...shape, override: 'hold', override_until: new Date(NOW + 2 * 3600e3 - (NOW % 60_000)).toISOString() } })
+      await page.goto('/settings/accounts')
+      await listRow(page, ACCOUNTS.main).click()
+      const limits = pane(page).locator('[data-limits]'), rule = limits.locator(`[data-rule="${ACCOUNTS.main}"]`), held = limits.locator('[data-held]')
+      await expect(held.locator('[data-say] b')).toHaveText('Held until 16:02')
+      await expect(pane(page).locator('[data-quota-say]')).toHaveText('Agents leave it alone until the hold ends.')
+      const guard = await controlStability(page, { use: limits.locator(`[data-use="${ACCOUNTS.main}"]`).getByRole('switch'), signedIn: pane(page).getByRole('heading', { name: 'Signed in on' }), close: pane(page).getByRole('button', { name: 'Close details' }) })
+      await guard.check(async () => {
+        await rule.getByRole('button', { name: 'Remove' }).click()
+        await expect(rule.locator('[data-say] small')).toHaveText(/^Remove it for good\?/)
+      })
+      await guard.check(async () => {
+        await rule.getByRole('button', { name: 'Remove' }).click()
+        await expect(rule.locator('[data-say] small')).toHaveText('Removed for good. The daily limit paces this account now.')
+        await expect(rule.getByRole('button')).toHaveCount(0)
+      })
+      await guard.check(async () => {
+        await held.getByRole('button', { name: 'End now' }).click()
+        await expect(held.locator('[data-say] b')).toHaveText('Hold ended')
+        await expect(held.getByRole('button')).toHaveCount(0)
+        await expect(pane(page).locator('[data-quota-say]')).toHaveText('Agents may use 4 more percentage points today. They stop at today’s limit (62 %) first.')
+      })
+      guard.done()
+      expect(capacity.writes.filter(w => w.method === 'DELETE')).toEqual([expect.objectContaining({ path: `/api/agent-accounts/${ACCOUNTS.main}/limit` })])
+      expect(errors).toEqual([])
+    })
   })
 }
+
+// AEON-1172 fix round 2: a failed plan read kept the last plan, and with it a door the
+// server had called fresh, for good. The page now says the readings may be out of
+// date, and two minutes after the plan arrived (the server's own trust in a reading)
+// the bars stop promising room. The clock is injected; nothing waits on real time.
+test('a plan that could not refresh says so, and its bars stop promising room after two minutes', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const errors = watchErrors(page)
+  await setup(page, { limits: true })
+  let planFails = false
+  await page.route('**/api/agents/plan', route => planFails && route.request().method() === 'GET' ? route.fulfill({ status: 503, json: { error: 'unavailable' } }) : route.fallback())
+  const read = () => page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await page.goto('/settings/accounts')
+  const caption = listRow(page, ACCOUNTS.main).locator('[data-quota-caption]'), status = page.locator('.loading-state')
+  await expect(caption).toHaveText('42 % left this week · resets Fri 09:14')
+  await listRow(page, ACCOUNTS.main).click()
+  const say = pane(page).locator('[data-quota-say]'), room = 'Agents may use 4 more percentage points today. They stop at today’s limit (62 %) first.'
+  await expect(say).toHaveText(room)
+  await expect(listRow(page, ACCOUNTS.main).locator('[data-quota-bar] .room')).toHaveCount(1)
+  await expect(status).not.toContainText('out of date')
+  // The next read fails: the page says so at once; the plan that arrived a moment ago still holds.
+  planFails = true
+  await read()
+  await expect(status).toContainText('Some readings may be out of date.')
+  await expect(say).toHaveText(room)
+  // Five minutes on, the plan is older than the server trusts a reading: no room is promised.
+  await page.clock.setSystemTime(NOW + 5 * 60_000)
+  await read()
+  await expect(say).toHaveText('The last reading is out of date. Agents wait for a fresh one before they use more.')
+  await expect(caption).toHaveText('42 % left · reading out of date')
+  await expect(listRow(page, ACCOUNTS.main).locator('[data-quota-bar] .room')).toHaveCount(0)
+  // A read that works again brings the room back and the warning goes.
+  planFails = false
+  await read()
+  await expect(say).toHaveText(room)
+  await expect(status).not.toContainText('out of date')
+  expect(errors).toEqual([])
+})

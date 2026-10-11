@@ -70,11 +70,15 @@
   "postGateCases": [
     "browser:tests/account-use-matrix.spec.ts:screenshots of the matrix, light and dark"
     ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: Remove and End now leave “Agents may use it” and everything below in place"
+    ,
     "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: a floor save and its Undo move no control in the panel"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: the design's checks hold on the built page"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: Remove and End now leave “Agents may use it” and everything below in place"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel"
     ,
@@ -82,11 +86,15 @@
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: the design's checks hold on the built page"
     ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: Remove and End now leave “Agents may use it” and everything below in place"
+    ,
     "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: the design's checks hold on the built page"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: Remove and End now leave “Agents may use it” and everything below in place"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel"
     ,
@@ -94,17 +102,23 @@
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: the design's checks hold on the built page"
     ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: Remove and End now leave “Agents may use it” and everything below in place"
+    ,
     "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: the design's checks hold on the built page"
     ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: Remove and End now leave “Agents may use it” and everything below in place"
+    ,
     "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: a floor save and its Undo move no control in the panel"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: each row carries the bar and one caption; the panel says what stops agents first"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: the design's checks hold on the built page"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:a plan that could not refresh says so, and its bars stop promising room after two minutes"
     ,
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
@@ -4926,11 +4940,15 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the wide status scan encounters Away beside Verify again","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -4938,11 +4956,15 @@
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -4950,17 +4972,23 @@
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"a plan that could not refresh says so, and its bars stop promising room after two minutes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/activity-history.spec.ts","name":"automatic history is Aeon, and a person named System stays a person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14491,6 +14519,10 @@
     {"kind":"node","file":"tests/quota-bar.test.ts","name":"Keep for you binds before today’s limit while you work","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/quota-bar.test.ts","name":"a Hold from before or the switch off leaves the account alone","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"a plan that could not refresh goes stale on time and claims no room","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"a used-up older limit stops agents in any unit, runs, tokens or money as much as percent","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/quota-bar.test.ts","name":"an older limit set by hand binds when it leaves less than today’s limit","tier":"ESSENTIAL"}
     ,

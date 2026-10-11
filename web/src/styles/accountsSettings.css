@@ -48,6 +48,16 @@
 .lim-sec .lbl small { font-size: 12.5px; line-height: 1.45; color: var(--ink-3); }
 .lim-sec .legacy .lbl small { color: var(--ink-2); }
 .two-btn { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+/* A Set by you or Held row keeps its size through ask, confirm and done (AEON-541): its words and its
+   action slot each stack every state in one cell, the ones not shown hidden. A settled row loses the wait tint. */
+.lim-sec .lbl.stack { gap: 0; }
+.lim-sec .lbl.stack > .say { grid-area: 1/1; display: grid; gap: 2px; min-width: 0; }
+.lim-sec .act { display: grid; align-items: center; justify-items: end; }
+.lim-sec .act > * { grid-area: 1/1; }
+.lim-sec .sizer { visibility: hidden; }
+.lim-sec .done { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+.lim-sec .done svg { color: var(--ok); }
+.lim-sec .lim.legacy.settled { background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line-2); }
 .lim-sec { container: lim / inline-size; }
 /* "Agents may use it": the switch moved here from the login rows (AEON-1172), same look and confirmations. */
 .lim-sec .use { display: inline-grid; place-items: center; width: 50px; height: 32px; margin-right: -8px; padding: 0; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
@@ -61,6 +71,6 @@
 .lim-sec .use:disabled .track, .lim-sec .use[aria-disabled="true"] .track { opacity: .55; }
 @media (prefers-reduced-motion: reduce) { .lim-sec .track, .lim-sec .thumb { transition: none; } }
 /* The docked panel keeps controls on the right; a phone sheet or a very narrow panel stacks them (design §phone). */
-@container lim (max-width: 320px) { .lim-sec .lim { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim > .btn, .lim-sec .lim > .use, .lim-sec .lim > .two-btn { justify-self: start; } .lim-sec .use { margin: 0 0 0 -8px; } }
-@media (max-width: 600px) { .lim-sec .lim { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim > .btn, .lim-sec .lim > .use, .lim-sec .lim > .two-btn { justify-self: start; } .lim-sec .use { margin: 0 0 0 -8px; } }
-@media (max-width: 720px), (pointer: coarse) { .lim-sec .lim .btn { min-height: 44px; }.lim-sec .use { width: 50px; height: 44px; }.ref-row { min-height: 52px; } }
+@container lim (max-width: 320px) { .lim-sec .lim { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim > .btn, .lim-sec .lim > .use, .lim-sec .lim > .two-btn, .lim-sec .lim > .act { justify-self: start; } .lim-sec .act { justify-items: start; } .lim-sec .use { margin: 0 0 0 -8px; } }
+@media (max-width: 600px) { .lim-sec .lim { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim > .btn, .lim-sec .lim > .use, .lim-sec .lim > .two-btn, .lim-sec .lim > .act { justify-self: start; } .lim-sec .act { justify-items: start; } .lim-sec .use { margin: 0 0 0 -8px; } }
+@media (max-width: 720px), (pointer: coarse) { .lim-sec .lim .btn, .lim-sec .done { min-height: 44px; }.lim-sec .use { width: 50px; height: 44px; }.ref-row { min-height: 52px; } }

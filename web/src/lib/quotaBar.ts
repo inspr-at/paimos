@@ -6,6 +6,8 @@
 // Capacity. It only words what the plan and the readings carry: an account without
 // a reading is "Quota not reported", never a guess, and a reading that is out of
 // date claims no room (the server waits for a fresh one before it starts more).
+// An older limit set by hand that is used up stops agents in any unit, runs,
+// tokens or money as much as percent (AEON-384 rules still bind until removed).
 import type { DailyAccount } from './dailyLimits.ts'
 import type { LimitUse } from './accountLimits.ts'
 import { when, type CapacityWindow } from './capacity.ts'
@@ -25,6 +27,8 @@ export interface QuotaBarInput {
   keep?: number | null
   /** An older percent limit set by hand (AEON-384): the percentage points it still allows this period. */
   ruleLeft?: number | null
+  /** An older limit set by hand is used up this period, in whatever unit it counts. */
+  ruleSpent?: boolean
   /** Agents leave the account alone: a Hold from before, or "Agents may use it" is off. */
   paused?: 'held' | 'off' | null
   /** The reading is out of date. */
@@ -49,7 +53,9 @@ const round = (n: number) => Math.round(n * 10) / 10
 export const pct = (n: number) => String(round(n))
 
 export function quotaBar(input: QuotaBarInput): QuotaBar {
-  if (!finite(input.used)) return { known: false, used: 0, left: 100, limit: null, keepAt: null, floorAt: null, ruleAt: null, stopAt: null, room: null, by: null, boost: false, stale: false }
+  // Without a reading the bar draws nothing, yet a used-up rule still stops agents.
+  const spent = !!input.ruleSpent && !input.paused
+  if (!finite(input.used)) return { known: false, used: 0, left: 100, limit: null, keepAt: null, floorAt: null, ruleAt: null, stopAt: null, room: spent ? 0 : null, by: spent ? 'rule' : null, boost: false, stale: false }
   const used = round(clamp(input.used))
   const floor = finite(input.floor) ? clamp(input.floor) : 0, keep = finite(input.keep) ? clamp(input.keep) : 0
   const floorAt = floor > 0 ? round(100 - floor) : null
@@ -59,6 +65,7 @@ export function quotaBar(input: QuotaBarInput): QuotaBar {
   const stale = !!input.stale
   const base = { known: true, used, left: round(100 - used), limit, keepAt, floorAt, ruleAt, boost: !!input.boost && limit !== null, stale }
   if (input.paused) return { ...base, stopAt: used, room: 0, by: input.paused }
+  if (spent) return { ...base, stopAt: used, room: 0, by: 'rule' }
   if (limit === null) return { ...base, stopAt: null, room: null, by: null }
   // Ties go to the stop a person set on purpose: today's limit is capped at the
   // floor, so a limit level with the floor means the floor binds.
@@ -72,6 +79,22 @@ export function ruleLeft(rule: LimitUse | null | undefined): number | null {
   if (!rule || rule.unit !== 'percent' || !finite(rule.amount) || !finite(rule.used)) return null
   return Math.max(0, rule.amount - rule.used)
 }
+/** An older rule has counted all it allows this period: runs, requests, tokens and money stop agents like percent. */
+export function ruleSpent(rule: LimitUse | null | undefined): boolean {
+  return !!rule && finite(rule.amount) && finite(rule.used) && rule.used >= rule.amount
+}
+
+/** The server trusts a reading for two minutes (agentplan.DailyFreshness); then agents wait for a new one. */
+export const DAILY_FRESH_MS = 2 * 60_000
+/**
+ * Until when a door the plan called fresh may still be trusted: two minutes after the
+ * plan arrived at most, never past the door's reset or the end of the plan's day. A
+ * refresh that fails never extends it. The two minutes run from the arrival on this
+ * browser's clock, so a clock that runs fast or slow does not stretch them.
+ */
+export function freshUntil(door: Pick<DailyAccount, 'resets_at'>, arrived: number, dayEnds?: string | null): number {
+  return Math.min(arrived + DAILY_FRESH_MS, ...[door.resets_at, dayEnds].map(at => Date.parse(at ?? '')).filter(Number.isFinite))
+}
 
 export interface QuotaSource {
   /** The account's door in the viewer's plan (daily_state), when the plan carries it. */
@@ -83,18 +106,23 @@ export interface QuotaSource {
   /** Sprint and Away leave nothing kept for you; a Hold or the switch leaves the account alone. */
   override?: '' | 'sprint' | 'hold' | 'away'
   off?: boolean
+  /** The clock, when the plan arrived and when its day ends: a door the plan called fresh goes stale on time ({@link freshUntil}). */
+  now?: number
+  planAt?: number | null
+  dayEnds?: string | null
 }
 /** The bar's input from the plan, the capacity reading and the account's own state. */
 export function quotaInput(s: QuotaSource): QuotaBarInput {
   const d = s.daily && !s.daily.details_redacted && finite(s.daily.used_pct) ? s.daily : null
+  const expired = !!d && finite(s.now) && finite(s.planAt) && s.now >= freshUntil(d, s.planAt, s.dayEnds)
   const w = s.window ?? null
   const used = d ? d.used_pct : w ? 100 - w.remaining_percent : null
   const free = s.override === 'sprint' || s.override === 'away'
   const keep = free || used === null ? 0 : Math.min(100 - used, w?.pacing.reserve_effective_percent ?? 0)
   return {
-    used, limit: d?.limit_used_pct ?? null, boost: !!s.boost && !!d, floor: d?.floor_pct ?? null, keep, ruleLeft: ruleLeft(s.rule),
+    used, limit: d?.limit_used_pct ?? null, boost: !!s.boost && !!d, floor: d?.floor_pct ?? null, keep, ruleLeft: ruleLeft(s.rule), ruleSpent: ruleSpent(s.rule),
     paused: s.off ? 'off' : s.override === 'hold' ? 'held' : null,
-    stale: d ? d.freshness !== 'fresh' : !!w && (w.freshness === 'stale' || w.freshness === 'expired'),
+    stale: d ? d.freshness !== 'fresh' || expired : !!w && (w.freshness === 'stale' || w.freshness === 'expired'),
   }
 }
 
@@ -117,11 +145,12 @@ export function quotaSegments(bar: QuotaBar): QuotaSegments {
 }
 /** The bar in words, for its image role and its tip. */
 export function quotaLabel(bar: QuotaBar, name: string, period = ''): string {
-  if (!bar.known) return `${name}: quota not reported`
+  if (!bar.known) return `${name}: quota not reported${bar.by === 'rule' ? '; the limit set by you is used up' : ''}`
   const parts = [`${pct(bar.used)} % used${period ? ` ${period}` : ''}`]
   if (bar.limit !== null) parts.push(`${bar.boost ? 'Boost today' : 'today’s limit'} ${pct(bar.limit)} %`)
   if (bar.keepAt !== null) parts.push(`kept for you ${pct(100 - bar.keepAt)} % while you work`)
   if (bar.ruleAt !== null) parts.push(`limit set by you at ${pct(bar.ruleAt)} %`)
+  else if (bar.by === 'rule') parts.push('the limit set by you is used up')
   if (bar.floorAt !== null) parts.push(`floor ${pct(100 - bar.floorAt)} %`)
   return `${name}: ${parts.join('; ')}.`
 }
@@ -136,11 +165,12 @@ const STOPPED: Record<QuotaStop, string> = {
 export interface QuotaCaption { text: string; tone: '' | 'warn'; icon: '' | 'gauge' | 'pause' | 'alert' }
 /** The one caption under a list row's bar. A low warning says so first; warnings never stop agents. */
 export function quotaCaption(bar: QuotaBar, o: { period?: string; resetsAt?: string | null; now: number; timezone?: string; low?: boolean }): QuotaCaption {
-  if (!bar.known) return { text: 'Quota not reported', tone: '', icon: '' }
-  const left = `${pct(bar.left)} % left`, resets = o.resetsAt ? ` · resets ${when(o.resetsAt, o.now, o.timezone)}` : ''
   const stopped = bar.room === 0 && bar.by ? STOPPED[bar.by] : ''
+  if (!bar.known) return stopped ? { text: stopped, tone: 'warn', icon: 'pause' } : { text: 'Quota not reported', tone: '', icon: '' }
+  const left = `${pct(bar.left)} % left`, resets = o.resetsAt ? ` · resets ${when(o.resetsAt, o.now, o.timezone)}` : ''
   if (o.low) return { text: `Low · ${left}${stopped ? ` · ${stopped.charAt(0).toLowerCase()}${stopped.slice(1)}` : resets}`, tone: 'warn', icon: 'gauge' }
-  if (bar.stale) return { text: `${left} · reading out of date`, tone: '', icon: '' }
+  // A used-up rule stops agents whatever the reading says; an old reading alone only claims no room.
+  if (bar.stale && bar.by !== 'rule') return { text: `${left} · reading out of date`, tone: '', icon: '' }
   if (stopped) return { text: stopped, tone: 'warn', icon: 'pause' }
   return { text: `${left}${o.period ? ` ${o.period}` : ''}${resets}`, tone: '', icon: '' }
 }
@@ -152,9 +182,11 @@ export interface Said { text: string; strong?: boolean }
  * harness's own choice (the model ladder, or wait until midnight).
  */
 export function quotaSentence(bar: QuotaBar, o: { vendor: string; atLimit?: 'ladder' | 'wait' }): Said[] {
-  if (!bar.known) return [{ text: 'This account doesn’t report its quota, so agents can’t pace it. The agent count on the dial still caps it.' }]
+  const ruleUsedUp: Said[] = [{ text: 'Agents have stopped using it.', strong: true }, { text: ' The limit set by you is used up for now.' }]
+  if (!bar.known) return bar.by === 'rule' ? ruleUsedUp : [{ text: 'This account doesn’t report its quota, so agents can’t pace it. The agent count on the dial still caps it.' }]
   if (bar.by === 'held') return [{ text: 'Agents leave it alone', strong: true }, { text: ' until the hold ends.' }]
   if (bar.by === 'off') return [{ text: 'Agents leave it alone', strong: true }, { text: ' while “Agents may use it” is off. Running work finishes.' }]
+  if (bar.by === 'rule' && bar.room === 0) return ruleUsedUp
   if (bar.stale) return [{ text: 'The last reading is out of date.', strong: true }, { text: ' Agents wait for a fresh one before they use more.' }]
   if (bar.room === null || bar.stopAt === null) return [{ text: `${pct(bar.left)} % left.`, strong: true }, { text: ' Today’s limit comes from its owner’s plan.' }]
   if (bar.room > 0) {
@@ -163,17 +195,19 @@ export function quotaSentence(bar: QuotaBar, o: { vendor: string; atLimit?: 'lad
     return [{ text: 'Agents may use ' }, { text: `${pct(bar.room)} more percentage points today`, strong: true }, { text: `. They stop at ${at} first.` }]
   }
   if (bar.by === 'today') return [{ text: 'At today’s limit until midnight.', strong: true }, { text: o.atLimit === 'wait' ? ` New ${o.vendor} work waits until then.` : ` New ${o.vendor} work follows the model ladder meanwhile.` }]
-  return [{ text: 'Agents have stopped using it.', strong: true }, { text: bar.by === 'keep' ? ' The rest is kept for you while you work.' : bar.by === 'rule' ? ' The limit set by you is used up for now.' : ' Only the floor is left.' }]
+  return [{ text: 'Agents have stopped using it.', strong: true }, { text: bar.by === 'keep' ? ' The rest is kept for you while you work.' : ' Only the floor is left.' }]
 }
 /**
  * The longest sentence of every state the panel's own controls can reach (the switch,
  * End now, Remove, a floor). The panel reserves the tallest of them, so a change in
- * Limits never moves the controls below the sentence (AEON-541).
+ * Limits never moves the controls below the sentence (AEON-541). An account without a
+ * reading only says so, or that a used-up rule stopped it, until Remove.
  */
-export function widestSentences(vendor: string): Said[][] {
-  return [
+export function widestSentences(vendor: string, known = true): Said[][] {
+  const bars = known ? [
     quotaBar({ used: 10.5, limit: 99, keep: 22.5 }), quotaBar({ used: 10.5, limit: 77.5, boost: true }), quotaBar({ used: 10.5, limit: 100 }),
-    quotaBar({ used: 50.5, limit: 50.5 }), quotaBar({ used: 50.5, limit: 60.5, ruleLeft: 0 }), quotaBar({ used: 50.5, limit: 60.5, paused: 'off' }),
+    quotaBar({ used: 50.5, limit: 50.5 }), quotaBar({ used: 50.5, limit: 60.5, ruleSpent: true }), quotaBar({ used: 50.5, limit: 60.5, paused: 'off' }),
     quotaBar({ used: 50.5, limit: 60.5, paused: 'held' }), quotaBar({ used: 50.5, limit: 60.5, stale: true }), quotaBar({ used: 50.5 }),
-  ].map(bar => quotaSentence(bar, { vendor, atLimit: 'ladder' }))
+  ] : [quotaBar({ used: null }), quotaBar({ used: null, ruleSpent: true })]
+  return bars.map(bar => quotaSentence(bar, { vendor, atLimit: 'ladder' }))
 }

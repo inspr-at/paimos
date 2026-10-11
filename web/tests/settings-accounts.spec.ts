@@ -244,8 +244,8 @@ test('an older rule shows as Set by you; Remove asks in place and removes it for
   const { capacity } = await setup(page, { limits: true })
   await open(page)
   await show(page, ACCOUNTS.main)
-  const rule = oldRule(page, ACCOUNTS.main)
-  await expect(rule.locator('b')).toHaveText('Set by you · at most 20 % a day')
+  const rule = oldRule(page, ACCOUNTS.main), say = rule.locator('[data-say] small')
+  await expect(rule.locator('[data-say] b')).toHaveText('Set by you · at most 20 % a day')
   await expect(row(page, ACCOUNTS.main).locator('.chip.mine')).toHaveCount(0)
   // Nothing creates or edits a limit: the Advanced sentence is gone.
   const main = await details(page, ACCOUNTS.main)
@@ -255,21 +255,27 @@ test('an older rule shows as Set by you; Remove asks in place and removes it for
   const top = async () => Math.round((await rule.boundingBox())!.y)
   const before = await top(), writes = capacity.writes.length
   await rule.getByRole('button', { name: 'Remove' }).click()
-  await expect(rule).toContainText('Remove it for good? This kind of limit can’t be set again')
+  await expect(say).toContainText('Remove it for good? This kind of limit can’t be set again')
   expect(await top()).toBe(before)
   await rule.getByRole('button', { name: 'Keep' }).click()
-  await expect(rule).toContainText('It still applies until you remove it')
+  await expect(say).toContainText('It still applies until you remove it')
   expect(capacity.writes.length).toBe(writes)
   await rule.getByRole('button', { name: 'Remove' }).click()
   await rule.getByRole('button', { name: 'Remove' }).click()
-  await expect(rule).toHaveCount(0)
+  // The row stays where it was and says it is gone, with nothing left to press (AEON-541).
+  await expect(say).toHaveText('Removed for good. The daily limit paces this account now.')
+  await expect(rule.getByRole('button')).toHaveCount(0)
+  expect(await top()).toBe(before)
   expect(capacity.writes.at(-1)).toMatchObject({ method: 'DELETE', path: `/api/agent-accounts/${ACCOUNTS.main}/limit` })
   // No Undo: the server refuses to create this kind of limit again.
   await expect(page.locator('.toast').filter({ hasText: 'Removed the older limit on Main' })).toBeVisible()
   await expect(page.locator('.toast').filter({ hasText: 'Removed the older limit on Main' }).getByRole('button', { name: 'Undo' })).toHaveCount(0)
   // Other units read as they were set.
   await show(page, ACCOUNTS.grok)
-  await expect(oldRule(page, ACCOUNTS.grok).locator('b')).toHaveText('Set by you · at most 5 runs a week')
+  await expect(oldRule(page, ACCOUNTS.grok).locator('[data-say] b')).toHaveText('Set by you · at most 5 runs a week')
+  // Back on Main the removed rule is gone for good.
+  await show(page, ACCOUNTS.main)
+  await expect(oldRule(page, ACCOUNTS.main)).toHaveCount(0)
 })
 
 test('old windows set by hand show as Set by you with Remove, and never repeat', async ({ page }) => {

@@ -63,7 +63,7 @@ export function useAccountsSettings(part: AccountsPart) {
   let root: HTMLElement | null = null
   const bindRoot = (element: unknown) => { root = element instanceof HTMLElement ? element : null }
   let generation = 0
-  function reset() { generation++; selected.value = null; open.value = false; add.value = false; menuOpen.value = false; renameOpen.value = false; busy.value = false; focusSignIn.value = ''; thresholds.value = { ...DEFAULT_QUOTA_THRESHOLDS }; facts.value = NO_MATRIX_FACTS; plan.value = null; void readThresholds(); void readFacts(); void readPlan() }
+  function reset() { generation++; selected.value = null; open.value = false; add.value = false; menuOpen.value = false; renameOpen.value = false; busy.value = false; focusSignIn.value = ''; thresholds.value = { ...DEFAULT_QUOTA_THRESHOLDS }; facts.value = NO_MATRIX_FACTS; plan.value = null; planAt.value = null; planFailed.value = false; void readThresholds(); void readFacts(); void readPlan() }
   watch(owner, reset)
   watch(manage, allowed => { if (!allowed) { menuOpen.value = false; add.value = false } })
   watch(selectedKey, () => { menuOpen.value = false; renameOpen.value = false; busy.value = false })
@@ -103,19 +103,21 @@ export function useAccountsSettings(part: AccountsPart) {
   // ---------- The quota bar (AEON-1172): one picture of every limit, from the viewer's plan and the readings ----------
   // Today's limit, the floor and Boost come with the viewer's own plan (GET /agents/plan,
   // daily_state); accounts outside it show their reading only, never a guessed limit.
-  const plan = ref<DailyPlanFields | null>(null)
+  // A failed read keeps the last plan but says so, and its doors go stale on time
+  // (freshUntil): the bars never promise room the server would refuse.
+  const plan = ref<DailyPlanFields | null>(null), planAt = ref<number | null>(null), planFailed = ref(false)
   let planRead: AbortController | null = null
   async function readPlan() {
     planRead?.abort()
     const identity = owner.value
-    if (session.identity?.principal.kind !== 'person') { plan.value = null; return }
+    if (session.identity?.principal.kind !== 'person') { plan.value = null; planAt.value = null; planFailed.value = false; return }
     const controller = new AbortController(); planRead = controller
     try {
       const response = await api('/agents/plan', { signal: controller.signal })
       if (!response.ok) throw new Error('plan')
       const body = await response.json() as DailyPlanFields
-      if (planRead === controller && identity === owner.value) plan.value = body
-    } catch { /* a failed read keeps the last plan; without one the bars show only what was read */ }
+      if (planRead === controller && identity === owner.value) { plan.value = body; planAt.value = Date.now(); planFailed.value = false }
+    } catch { if (planRead === controller && !controller.signal.aborted && identity === owner.value) planFailed.value = true }
     finally { if (planRead === controller) planRead = null }
   }
   /** The long window is the daily one; a 5-hour reading alone still beats "not reported". An estimate is no reading. */
@@ -130,7 +132,7 @@ export function useAccountsSettings(part: AccountsPart) {
     const window = longWindow(a), record = a.records.find(r => r.id === daily?.account_id) ?? a.records[0]
     const settings = plan.value?.daily?.[a.harness]
     const boost = !!settings?.boost_today && Date.parse(settings.boost_today.until) > agents.now
-    const bar = quotaBar(quotaInput({ daily, window, boost, rule: record ? capacity.byAccount.get(record.id)?.limit : null, override: poolOf(a)?.override ?? '', off: !a.records.some(allowed) }))
+    const bar = quotaBar(quotaInput({ daily, window, boost, rule: record ? capacity.byAccount.get(record.id)?.limit : null, override: poolOf(a)?.override ?? '', off: !a.records.some(allowed), now: agents.now, planAt: planAt.value, dayEnds: plan.value?.daily_until }))
     const period = periodWords(window)
     const low = a.windows.some(w => quotaWindowWarns(w, thresholds.value, agents.now))
     const problem = problemSignins.value.find(p => p.account.id === a.id && isProblemSignin(p.signin))
@@ -181,10 +183,16 @@ export function useAccountsSettings(part: AccountsPart) {
 
   // ---------- Reads: accounts, capacity and computers every 20 s; thresholds and matrix facts with them ----------
   async function refresh() {
-    void readFacts(); void readPlan()
-    await agents.refreshAccounts(); await capacity.load()
-    const result = await capacity.refreshComputers()
-    if (!result.ok && capacity.computersLoaded) toast('Computer status could not refresh. The previous report stays visible.', { tone: 'error' })
+    void readFacts()
+    const planned = readPlan()
+    try {
+      await agents.refreshAccounts(); await capacity.load()
+      const result = await capacity.refreshComputers()
+      if (!result.ok && capacity.computersLoaded) toast('Computer status could not refresh. The previous report stays visible.', { tone: 'error' })
+    } finally {
+      // The clock moves with every read, even when reads fail, so an old plan goes stale on time.
+      await planned; agents.tick()
+    }
   }
   let thresholdTurn = 0
   async function readThresholds() {
@@ -396,16 +404,18 @@ export function useAccountsSettings(part: AccountsPart) {
         : `Set before Hold was retired. Agents leave ${alone ? 'this account' : pool.name} alone until then; “Agents may use it” replaces Hold.`,
     }
   }
-  /** End now removes the override with the same schedule write; the shown hold must still be the one in force. */
-  async function endHeld(a: OverviewAccount, seen: string) {
+  /** End now removes the override with the same schedule write; the shown hold must still be the one in force. True once it ended. */
+  async function endHeld(a: OverviewAccount, seen: string): Promise<boolean> {
     const identity = owner.value, turn = generation, pool = poolOf(a), held = heldOf(a)
-    if (!manage.value || busy.value) return
-    if (!pool || !held || held.key !== seen) { toast('This hold changed. The panel shows it as it is now.', { tone: 'error' }); return }
+    if (!manage.value || busy.value) return false
+    if (!pool || !held || held.key !== seen) { toast('This hold changed. The panel shows it as it is now.', { tone: 'error' }); return false }
     busy.value = true
     try {
       await capacity.setPoolOverride(pool.id, '')
-      if (identity === owner.value && turn === generation) toast(held.kind === 'sprint' ? `${pool.name}: Sprint ended · the daily limit paces it again` : `${pool.name}: hold ended · agents may use it again`)
-    } catch (error) { if (identity === owner.value && turn === generation) toast(error instanceof Error ? error.message : 'That did not save. Please try again.', { tone: 'error' }) }
+      if (identity !== owner.value || turn !== generation) return false
+      toast(held.kind === 'sprint' ? `${pool.name}: Sprint ended · the daily limit paces it again` : `${pool.name}: hold ended · agents may use it again`)
+      return true
+    } catch (error) { if (identity === owner.value && turn === generation) toast(error instanceof Error ? error.message : 'That did not save. Please try again.', { tone: 'error' }); return false }
     finally { if (identity === owner.value && turn === generation) busy.value = false }
   }
 
@@ -459,7 +469,7 @@ export function useAccountsSettings(part: AccountsPart) {
   return reactive({
     part, agents, capacity, owner, manage, computers, accounts, machines, add, open, opener, computer, account, selectedKey, title, thresholds, busy, focusSignIn,
     bindRoot, computerState, status, references, mayVerify, verificationBusy, verificationMessage, retained, vendorName, expired,
-    needs, counts, allReady, quota, paceWords, heldOf, endHeld, computerSummary, windowLabel: (w: CapacityWindow) => windowLabel(w),
+    needs, counts, allReady, quota, paceWords, planFailed, heldOf, endHeld, computerSummary, windowLabel: (w: CapacityWindow) => windowLabel(w),
     show, actAttention, refresh, verify, goPacing, bindPacing, planCard, planBusy, confirmPlan, cardSecondary,
     cleanupRemoval, renameOpen, renameName, menuOpen, menuAnchor, menuItems, menuContext, menuError, openMenu, renameComputer, menuAction,
     setAccount, primarySignin,

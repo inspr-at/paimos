@@ -4,7 +4,7 @@
 // the stop that binds and the room before it.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { quotaBar, quotaCaption, quotaInput, quotaLabel, quotaSegments, quotaSentence, ruleLeft, type Said } from '../src/lib/quotaBar.ts'
+import { DAILY_FRESH_MS, quotaBar, quotaCaption, quotaInput, quotaLabel, quotaSegments, quotaSentence, ruleLeft, widestSentences, type Said } from '../src/lib/quotaBar.ts'
 import type { DailyAccount } from '../src/lib/dailyLimits.ts'
 import type { CapacityWindow } from '../src/lib/capacity.ts'
 import type { LimitUse } from '../src/lib/accountLimits.ts'
@@ -114,4 +114,51 @@ test('a Hold from before or the switch off leaves the account alone', () => {
   assert.equal(quotaCaption(held, { now: NOW }).text, 'Held · agents leave it alone')
   const off = quotaBar(quotaInput({ daily: door(), window: window(53), off: true }))
   assert.equal(said(quotaSentence(off, { vendor: 'Claude' })), '**Agents leave it alone** while “Agents may use it” is off. Running work finishes.')
+})
+
+// AEON-1172 fix round 2: admission refuses once an older rule has counted all it
+// allows, whatever it counts. The bar must not promise room in percentage points then.
+test('a used-up older limit stops agents in any unit, runs, tokens or money as much as percent', () => {
+  const base: LimitUse = { id: 'r1', account_id: 'a1', amount: 5, unit: 'runs', period: 'week', created_at: '2026-09-01T00:00:00Z', used: 5, period_end: '2026-10-12T22:00:00Z' }
+  for (const rule of [base, { ...base, unit: 'tokens' as const, amount: 2_000_000, used: 2_000_400 }, { ...base, unit: 'cost_micros' as const, amount: 50e6, used: 50e6 }, { ...base, unit: 'requests' as const, amount: 300, used: 301 }]) {
+    const bar = quotaBar(quotaInput({ daily: door(), window: window(53), rule }))
+    assert.deepEqual([bar.room, bar.by, bar.stopAt, bar.ruleAt], [0, 'rule', 47, null], rule.unit)
+    assert.equal(quotaSegments(bar).room, null, rule.unit)
+    assert.equal(said(quotaSentence(bar, { vendor: 'Codex' })), '**Agents have stopped using it.** The limit set by you is used up for now.', rule.unit)
+    assert.deepEqual(quotaCaption(bar, { now: NOW }), { text: 'Agents stopped at the limit set by you', tone: 'warn', icon: 'pause' }, rule.unit)
+    assert.equal(quotaLabel(bar, 'Codex · markus'), 'Codex · markus: 47 % used; today’s limit 50 %; the limit set by you is used up; floor 10 %.', rule.unit)
+  }
+  // One run left still leaves today's room; the rule's own unit does not map onto the bar.
+  assert.deepEqual(((b) => [b.room, b.by])(quotaBar(quotaInput({ daily: door(), window: window(53), rule: { ...base, used: 4 } }))), [3, 'today'])
+  // A used-up rule stops agents even while the reading is old or missing: never "agents can't pace it".
+  const stale = quotaBar(quotaInput({ daily: door({ freshness: 'stale' }), window: window(53), rule: base }))
+  assert.deepEqual([stale.room, stale.by], [0, 'rule'])
+  assert.equal(quotaCaption(stale, { now: NOW }).text, 'Agents stopped at the limit set by you')
+  const blind = quotaBar(quotaInput({ rule: base }))
+  assert.deepEqual([blind.known, blind.room, blind.by], [false, 0, 'rule'])
+  assert.deepEqual(quotaCaption(blind, { now: NOW }), { text: 'Agents stopped at the limit set by you', tone: 'warn', icon: 'pause' })
+  assert.equal(said(quotaSentence(blind, { vendor: 'Grok' })), '**Agents have stopped using it.** The limit set by you is used up for now.')
+  // The panel reserves both sentences of an account without a reading, so Remove moves nothing below.
+  assert.deepEqual(widestSentences('Grok', false).map(said), [said(quotaSentence(quotaBar({ used: null }), { vendor: 'Grok' })), said(quotaSentence(blind, { vendor: 'Grok' }))])
+  // A Hold or the switch still says why first.
+  assert.equal(quotaBar(quotaInput({ daily: door(), window: window(53), rule: base, override: 'hold' })).by, 'held')
+})
+
+// AEON-1172 fix round 2: a plan read that fails keeps the last plan. Its doors were
+// fresh when it arrived; the server trusts a reading for two minutes, so the bar
+// stops promising room then, at the door's reset, or when the plan's day ends.
+test('a plan that could not refresh goes stale on time and claims no room', () => {
+  const arrived = NOW, source = { daily: door(), window: window(53), planAt: arrived, dayEnds: '2026-10-11T22:00:00Z' }
+  const at = (now: number, over: Partial<typeof source> = {}) => quotaBar(quotaInput({ ...source, ...over, now }))
+  assert.deepEqual(((b) => [b.stale, b.room])(at(arrived + DAILY_FRESH_MS - 1)), [false, 3])
+  const old = at(arrived + DAILY_FRESH_MS)
+  assert.deepEqual([old.stale, old.room, old.stopAt], [true, null, 50])
+  assert.equal(said(quotaSentence(old, { vendor: 'Codex' })), '**The last reading is out of date.** Agents wait for a fresh one before they use more.')
+  assert.equal(quotaCaption(old, { now: arrived + DAILY_FRESH_MS }).text, '53 % left · reading out of date')
+  // The door's reset or the end of the plan's day comes first.
+  assert.equal(at(Date.parse('2026-10-11T13:11:00Z'), { daily: door({ resets_at: '2026-10-11T13:11:00Z' }) }).stale, true)
+  assert.equal(at(Date.parse('2026-10-11T13:11:00Z'), { dayEnds: '2026-10-11T13:11:00Z' }).stale, true)
+  // A fresh arrival is fresh again; without a clock the server's word stands.
+  assert.equal(at(arrived + 3 * DAILY_FRESH_MS, { planAt: arrived + 2 * DAILY_FRESH_MS + 1 }).stale, false)
+  assert.equal(quotaBar(quotaInput({ daily: door(), window: window(53) })).stale, false)
 })
