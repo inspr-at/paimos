@@ -100,6 +100,7 @@ func (m *Module) outdatedModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := outdatedDocument{Versions: []outdatedVersion{}}
+	usageBudget := 4096
 	err := m.readSnapshot(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		current, err := currentModelReader(r, tx, p)
 		if err != nil {
@@ -130,7 +131,8 @@ func (m *Module) outdatedModels(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 			allUses := retirementUses(model, snapshot, models)
-			if len(allUses) > 2048 {
+			usageBudget -= len(allUses)
+			if len(allUses) > 2048 || usageBudget < 0 {
 				return fail(413, "retirement usage limit")
 			}
 			uses, incomplete, err := visibleRetireUses(r.Context(), tx, current, allUses)
@@ -292,7 +294,7 @@ func (m *Module) retireOutdated(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, tr := range transfers {
 			if len(tr.after) > 0 && len(tr.uses) > 0 {
-				if err := transferLineReferences(ctx, tx, p, tr.before, tr.after); err != nil {
+				if err := transferLineReferences(ctx, tx, p, tr.before, tr.after, len(retirementLines(tr.model, models)) > 0); err != nil {
 					return err
 				}
 				for _, old := range tr.before {

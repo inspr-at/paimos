@@ -174,15 +174,12 @@ type retireUse struct {
 	personal string
 }
 
-func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel) []retireUse {
-	out := []retireUse{}
-	ids := map[string]bool{}
+func retirementLines(model lifecycleModel, all []lifecycleModel) map[string]bool {
 	lines := map[string]bool{}
 	for _, p := range model.Profiles {
 		if p.Retired {
 			continue
 		}
-		ids[p.ID] = true
 		lines[boardLineID(p)] = true
 	}
 	// Stable line references already choose a newer active version automatically.
@@ -192,11 +189,23 @@ func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel
 			continue
 		}
 		for _, p := range next.Profiles {
-			if !p.Retired && p.Enabled && lines[boardLineID(p)] && CompareModelVersions(next.Version, model.Version) > 0 {
+			if !p.Retired && p.Enabled && lines[boardLineID(p)] && compareCatalogVersions(next.Version, model.Version) > 0 {
 				delete(lines, boardLineID(p))
 			}
 		}
 	}
+	return lines
+}
+
+func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel) []retireUse {
+	out := []retireUse{}
+	ids := map[string]bool{}
+	for _, p := range model.Profiles {
+		if !p.Retired {
+			ids[p.ID] = true
+		}
+	}
+	lines := retirementLines(model, all)
 	prefs := map[string]map[string]json.RawMessage{}
 	for _, raw := range s["model_pref_profiles"] {
 		row := rowFields(raw)

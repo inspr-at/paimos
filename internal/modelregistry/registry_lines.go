@@ -246,9 +246,10 @@ func (m *Module) editLine(w http.ResponseWriter, r *http.Request) {
 func boardLineID(p Profile) string { f, l, _ := ProfileLine(p); return f + ":" + l }
 
 // Caller holds the tenant and registry fences. All transfers precede events.
-func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile) error {
+func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile, moveLines ...bool) error {
+	moveLine := len(moveLines) == 0 || moveLines[0]
 	oldLine, newLine := boardLineID(before[0]), boardLineID(after[0])
-	if oldLine != newLine {
+	if moveLine && oldLine != newLine {
 		var collision bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_rules a JOIN model_rules b ON b.tenant_id=a.tenant_id AND b.scope=a.scope AND b.project_id IS NOT DISTINCT FROM a.project_id AND b.column_key=a.column_key WHERE a.line=$1 AND b.line=$2)`, oldLine, newLine).Scan(&collision); err != nil {
 			return err
@@ -265,11 +266,13 @@ func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE model_pref_profiles SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_pref_orders o WHERE o.profile_id=model_pref_profiles.id AND ($1=ANY(o.rank) OR $2=ANY(o.rank) OR $1=ANY(o.not_allowed) OR $2=ANY(o.not_allowed)))`, oldLine, newLine); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE model_rule_revisions SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_rules r WHERE r.scope=model_rule_revisions.scope AND coalesce(r.project_id::text,'')=model_rule_revisions.scope_key AND r.line IN ($1,$2))`, oldLine, newLine); err != nil {
-		return err
+	if moveLine {
+		if _, err := tx.Exec(ctx, `UPDATE model_pref_profiles SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_pref_orders o WHERE o.profile_id=model_pref_profiles.id AND ($1=ANY(o.rank) OR $2=ANY(o.rank) OR $1=ANY(o.not_allowed) OR $2=ANY(o.not_allowed)))`, oldLine, newLine); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE model_rule_revisions SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_rules r WHERE r.scope=model_rule_revisions.scope AND coalesce(r.project_id::text,'')=model_rule_revisions.scope_key AND r.line IN ($1,$2))`, oldLine, newLine); err != nil {
+			return err
+		}
 	}
 	for _, old := range before {
 		candidates := sameRouteProfiles(after, old)
@@ -278,17 +281,25 @@ func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		}
 		replacement := nearestProfile(candidates, old.Effort, old.EffortLevel)
 		for _, table := range []string{"model_role_routes", "model_security_role_routes"} {
-			var collision bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+table+` a JOIN `+table+` b ON b.tenant_id=a.tenant_id AND b.role=a.role WHERE a.profile_id=$1 AND b.profile_id=$2)`, old.ID, replacement.ID).Scan(&collision); err != nil {
+			var incompatible bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+table+` a JOIN `+table+` b ON b.tenant_id=a.tenant_id AND b.role=a.role WHERE a.profile_id=$1 AND b.profile_id=$2 AND (a.state<>b.state OR a.reason<>b.reason OR a.valid_until IS DISTINCT FROM b.valid_until))`, old.ID, replacement.ID).Scan(&incompatible); err != nil {
 				return err
 			}
-			if collision {
-				return fail(409, "successor has a conflicting role route")
+			if incompatible {
+				return fail(409, "successor has a conflicting role hold")
+			}
+			// Equal policies collapse into their earliest priority. Differing
+			// pause/hold evidence rejects the transaction instead of dropping it.
+			if _, err := tx.Exec(ctx, `DELETE FROM `+table+` t USING `+table+` a,`+table+` b WHERE a.tenant_id=b.tenant_id AND a.role=b.role AND a.profile_id=$1 AND b.profile_id=$2 AND t.tenant_id=a.tenant_id AND t.role=a.role AND t.priority=greatest(a.priority,b.priority)`, old.ID, replacement.ID); err != nil {
+				return err
 			}
 			if _, err := tx.Exec(ctx, `UPDATE `+table+` SET profile_id=$2 WHERE profile_id=$1 AND NOT EXISTS(SELECT 1 FROM `+table+` n WHERE n.tenant_id=`+table+`.tenant_id AND n.role=`+table+`.role AND n.profile_id=$2)`, old.ID, replacement.ID); err != nil {
 				return err
 			}
 		}
+	}
+	if !moveLine {
+		return nil
 	}
 	// Reconcile native names for all affected rows without touching situations,
 	// not-allowed entries, templates, profile knobs or unrelated rules.
