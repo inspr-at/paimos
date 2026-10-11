@@ -13,6 +13,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/crossreview"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -102,6 +103,9 @@ func webhookLogAction(raw []byte, event string) string {
 }
 
 func (m *Module) rejectWebhook(w http.ResponseWriter, r *http.Request, action, step string, status int, err error) {
+	if status >= 500 {
+		httpapi.LogFailure(r, "webhook_"+step, err)
+	}
 	class := webhookErrorClass(err)
 	if emit, suppressed := m.webhookFailures.admit(m.now(), webhookFailureKey{step, class}); emit {
 		event, id := r.Header.Get("X-GitHub-Event"), r.Header.Get("X-GitHub-Delivery")
@@ -129,4 +133,12 @@ func (m *Module) rejectWebhook(w http.ResponseWriter, r *http.Request, action, s
 		logger.WarnContext(r.Context(), "GitHub webhook delivery failed", attrs...)
 	}
 	w.WriteHeader(status)
+}
+
+// closeAfterFailedRead ends the keep-alive connection after a body read that
+// failed or overran its deadline. net/http has already cancelled the
+// connection's context in that read; if it drained the late body and reused
+// the connection, every later request on it would start cancelled (AEON-1228).
+func closeAfterFailedRead(w http.ResponseWriter) {
+	w.Header().Set("Connection", "close")
 }

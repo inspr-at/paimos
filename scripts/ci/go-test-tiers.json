@@ -2418,6 +2418,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestGuideCommandsHaveNoPlaceholders","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestHandlerTransportReportsAbortedResponses","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestHookCapabilityReconcileProjectsConservatively","tier":"GATED-FULL"}
@@ -3575,6 +3577,8 @@
     {"kind":"go","package":"internal/auth","name":"TestHasScopeAcceptsDotAndColon","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestImportedSignInHintRequiresVerifiedTenantEmail","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestIncident1228MiddlewareRecordsFailureClass","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestInstructionProvenanceQueryScopeAtMiddleware","tier":"GATED-FULL"}
     ,
@@ -5458,6 +5462,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestBriefingMigrationDoesNotBlockLogWritersRegression","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestCancelledInTenantDoesNotPoisonTheOnlyConnection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestCatalogRefreshExpansionPreservesPublishedRoutes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestCatalogRefreshObservationsAcceptModelHarnesses","tier":"GATED-FULL"}
@@ -5917,6 +5923,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryIncludesCreatorProjectForWorkspaceAgent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryOmitsProjectsWithoutDeliveryRead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestWebhookBodyTimeoutDoesNotPoisonKeepAliveConnection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureAudit","tier":"ESSENTIAL"}
     ,
@@ -6750,9 +6758,13 @@
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestAttachmentFramePolicyComposesWithAithema","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/httpapi","name":"TestCancelledConnectionContextClosesConnection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/httpapi","name":"TestCapabilityAndPanicDetailsNeverEnterRequestLogs","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestClassicAPIPathsAreGone","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestHandlerFailureLoggingIsContentFree","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestHandlersAndMiddleware","tier":"ESSENTIAL"}
     ,
@@ -6767,6 +6779,8 @@
     {"kind":"go","package":"internal/httpapi","name":"TestReadyProbeDeadlineAndDrain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestRequestLogRoutes","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestRequestOnCancelledConnectionClosesIt","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/identity","name":"TestFromEnvDefaultAndCredentialFile","tier":"GATED-FULL"}
     ,
