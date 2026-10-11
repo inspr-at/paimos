@@ -365,7 +365,7 @@ watch([() => props.selected, () => props.history?.length, () => current.value.le
 // overflow holds the rest; it is hidden when the bin already says it all.
 const menuOf = (view: SessionView): SessionMenu => sessionMenu(view, { grant: grant.value, canRemove: removal.canRemove(view.session), pending: props.controls[view.session.id], product: brand.value.short_name, now: props.now })
 const bin = (view: SessionView) => removal.canRemove(view.session) && quickRemoval(view)
-// Compact rows have no Tier cell: the menu's Change tier… is its way in there (AEON-1211).
+// Rows have no Tier cell; the tier lives in the details, and the menu's Change tier… reaches it from the row (AEON-1211).
 const hasMenu = (view: SessionView) => { const m = menuOf(view); return m.control.length > 0 || m.other.length > 0 || !!m.note || (m.remove && !bin(view)) || !serviceTiers.unavailable(view.session) || serviceTiers.canAsk(view.session) }
 const menu = ref<{ view: SessionView; anchor: HTMLElement } | null>(null)
 const menuItems = computed(() => menu.value ? menuOf(menu.value.view) : null)
@@ -1018,7 +1018,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 /* Compact rows only: the opener mark and the time at the end of line 1. */
 .opener, .t-inline { display: none; }
 .t-inline { flex: none; margin-left: auto; padding-left: 6px; font: 500 11.5px/1 var(--mono); color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
-.row:hover .result { color: var(--teal-ink); }
+.row:hover :is(.result, .key-inline) { color: var(--teal-ink); }
 .role { flex: none; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--secondary-tint-3); color: var(--secondary-ink); font: 600 9px/16px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .c-exec { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 /* Marks differ in width (Claude narrow, xAI wide): a fixed slot keeps every row's text on one left edge. */
