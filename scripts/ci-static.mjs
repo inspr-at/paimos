@@ -175,6 +175,8 @@ export function fixedEnvironment(source = process.env, scratch) {
   }
   Object.assign(env, { CI: 'true', CI_LANE: 'full', AEON_TEST_TIER_MODE: 'full', GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', npm_config_audit: 'false', npm_config_fund: 'false' })
+  // Hosted/self-hosted gates must not consume a developer listing cache.
+  if (source.GITHUB_ACTIONS === 'true' || source.AEON_TEST_TIER_CACHE === '0') env.AEON_TEST_TIER_CACHE = '0'
   if (scratch) Object.assign(env, { npm_config_cache: join(scratch, 'npm'), XDG_CACHE_HOME: scratch,
     VITE_CACHE_DIR: join(scratch, 'vite'), VITEST_CACHE_DIR: join(scratch, 'vitest') })
   return env
