@@ -72,6 +72,17 @@ export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
       queued: { run_id: `run-${id}`, position: i + 1, by: { ...me, kind: 'person' as const }, at: '2026-10-06T09:30:00Z', target_agent_id: null, expected_agent_id: null, model_profile_id: null, expected_start_at: null, waiting: options.lead === 'waiting_for_room', wait_reason: options.lead === 'waiting_for_room' ? 'Waiting for room' : '' } }
   }).filter(entry => !project || entry.project_id === project)
 
+  // One full session row per live session, as the session list and the single-session read both answer it,
+  // the worker under its lead (AEON-1210: workers bind to a lead by their real parent session).
+  const sessionRow = (a: LiveAgentMock) => ({
+    id: a.session_id, project_id: a.project_id, agent_principal_id: a.principal_id, parent_harness_session_id: a.role === 'worker' ? LEAD_SESSION : null,
+    work_order_id: null, run_id: null, ticket_node_id: a.ticket?.id ?? null, ticket: a.ticket ? { id: a.ticket.id, key: a.ticket.key, title: a.ticket.title } : null,
+    project: { id: a.project_id, key: 'PHAROS', title: 'Pharos' }, harness: a.harness, host: 'imac0', management_mode: a.management_mode, role: a.role,
+    advertised_capabilities: ['inbox', 'status'], activity_sequence: 1, revision: 1, work_shape: 'ship', phase: a.phase, activity: a.activity,
+    heartbeat_at: a.heartbeat_at, created_at: a.since, stopped_at: a.phase === 'stopped' ? '2026-10-06T09:31:00Z' : null, stop_reason: null, finished: false, display_label: a.name,
+  })
+  const pausedLead = { project_id: 'p-pharos', session_id: LEAD_SESSION, principal_id: LEAD_AGENT, name: 'Claude lead', harness: 'claude', management_mode: 'managed', role: 'coordinator', phase: 'stopped', activity: 'idle', ticket: null,
+    since: '2026-10-06T08:02:00Z', heartbeat_at: '2026-10-06T09:30:00Z', finished: true } as LiveAgentMock
   // Controlled HTTP snapshots: a quiet stream keeps an unmocked SSE disconnect from invalidating the live read.
   await page.addInitScript(() => {
     class QuietStream extends EventTarget { close() {} }
@@ -116,23 +127,15 @@ export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
       return json(state.settings)
     }
     if (/^\/api\/projects\/p-pharos\/lead-decisions$/.test(path)) return json({ items: decisions.filter(d => d.event_id > Number(url.searchParams.get('after') ?? 0)), next_after: null })
-    // The session list carries the same live sessions as the live read, the worker under its lead
-    // (AEON-1210: workers bind to a lead by their real parent session).
+    // The session list carries the same live sessions as the live read (AEON-1210).
     if (path === '/api/harness-sessions' && method === 'GET') {
       const project = url.searchParams.get('project')
-      const items = data.live.filter(a => a.session_id && (!project || a.project_id === project)).map(a => ({
-        id: a.session_id, project_id: a.project_id, agent_principal_id: a.principal_id, parent_harness_session_id: a.role === 'worker' ? LEAD_SESSION : null,
-        work_order_id: null, run_id: null, ticket_node_id: a.ticket?.id ?? null, ticket: a.ticket ? { id: a.ticket.id, key: a.ticket.key, title: a.ticket.title } : null,
-        project: { id: a.project_id, key: 'PHAROS', title: 'Pharos' }, harness: a.harness, host: 'imac0', management_mode: a.management_mode, role: a.role,
-        advertised_capabilities: ['inbox', 'status'], activity_sequence: 1, revision: 1, work_shape: 'ship', phase: a.phase, activity: a.activity,
-        heartbeat_at: a.heartbeat_at, created_at: a.since, stopped_at: null, stop_reason: null, finished: false, display_label: a.name,
-      }))
-      return json({ items, next_cursor: null })
+      return json({ items: data.live.filter(a => a.session_id && (!project || a.project_id === project)).map(sessionRow), next_cursor: null })
     }
     if (path === '/api/decision-desk') return json({ items: options.question ? [{ ...question, askers }] : [], has_more: false })
     if (path === '/api/projects/p-pharos/questions') return json({ items: options.question ? [{ ...question, askers }] : [], has_more: false })
     // The lead's agent, read once per session so its questions outlive the session.
-    if (path === `/api/projects/p-pharos/harness-sessions/${LEAD_SESSION}` && method === 'GET') return json({ id: LEAD_SESSION, project_id: 'p-pharos', agent_principal_id: LEAD_AGENT, role: 'coordinator', harness: 'claude', phase: options.lead === 'paused' ? 'stopped' : 'working' })
+    if (path === `/api/projects/p-pharos/harness-sessions/${LEAD_SESSION}` && method === 'GET') return json(sessionRow(data.live.find(a => a.session_id === LEAD_SESSION) ?? pausedLead))
     if (path === '/api/agents/plan') return json({ principal_id: me.id, total: 5, limits: {}, running: { codex: 1, claude: 2 }, running_total: 3, source: 'plan', updated_at: NOW })
     if (path === '/api/agent-pairing/computers') return json({ computers: [
       pairedComputer({ request_id: '88888888-8888-4888-8888-888888888881', computer_id: HOST_A, computer_name: 'build-7' }),
