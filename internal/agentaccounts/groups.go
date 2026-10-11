@@ -1074,7 +1074,8 @@ func quotaOccupancy(ctx context.Context, tx pgx.Tx) (map[string]int, error) {
 		FROM agent_runs r
 		JOIN agent_accounts a ON a.tenant_id=r.tenant_id AND a.id=r.account_id
 		WHERE a.quota_pool_fingerprint<>'' AND r.account_id IS NOT NULL
-		  AND r.status IN ('queued','starting','running','waiting')
+		  AND (r.status IN ('queued','starting','running','waiting')
+		    OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')
 		GROUP BY a.harness, a.quota_pool_fingerprint`)
 	if err != nil {
 		return nil, err
