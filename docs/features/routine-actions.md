@@ -47,9 +47,10 @@ Identical authorized replay returns the original receipt; different content
 with the same key conflicts. Failed
 writes roll back their receipts. A retry must still have current run authority.
 
-Tests exercise mutation/receipt replay and rollback below the admission boundary
-without fabricating independent evaluation evidence. Separate route tests prove
-that pending runs, absent evaluation and barrier-controlled owner revocation
+Tests exercise mutation/receipt replay and rollback below the admission boundary.
+External-effect tests use synthetic evaluator fixtures through the real verifier
+and persisted decision latch; they claim no native qualification. Route and
+barrier tests prove that pending runs, absent evaluation and owner revocation
 cannot produce an effect. Native integration and activation remain subject to
 the coordinator and OPS qualification.
 

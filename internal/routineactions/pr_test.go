@@ -398,7 +398,7 @@ func TestRoutineMergeObservationKeepsDoneRevisionAndApproval(t *testing.T) {
 	}
 	// Represent the exact receipt and revision produced by the existing writer.
 	f.exec(`UPDATE nodes SET state='done',updated_at=updated_at+interval '1 second' WHERE id=$1`, f.target)
-	f.exec(`INSERT INTO events(tenant_id,node_id,actor_principal_id,type,metadata) VALUES($1,$2,$3,'delivery.merge_done',jsonb_build_object('repository',$4::text,'head_sha',$5::text,'merge_sha',$6::text,'pull_request',7))`, f.agent.TenantID, f.target, f.person.ID, prIn.PROpen.Repository, prIn.PROpen.HeadSHA, strings.Repeat("e", 40))
+	f.exec(`INSERT INTO events(tenant_id,node_id,actor_principal_id,type,after,metadata) VALUES($1,$2,$3,'delivery.merge_done','{}',jsonb_build_object('repository',$4::text,'head_sha',$5::text,'merge_sha',$6::text,'pull_request',7))`, f.agent.TenantID, f.target, f.person.ID, prIn.PROpen.Repository, prIn.PROpen.HeadSHA, strings.Repeat("e", 40))
 	f.exec(`UPDATE agent_permission_grants SET revoked_at=clock_timestamp() WHERE approval_request_id=$1`, holdID)
 	if _, done, err := f.b.observeMerge(t.Context(), f.agent.TenantID, out.ID); err != nil || done {
 		t.Fatalf("revoked approval falsely completed: done=%v %v", done, err)

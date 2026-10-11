@@ -56,7 +56,7 @@ func TestRoutinePipelineRefreshesQueueProofAndObservesDone(t *testing.T) {
 	// This is the exact observation emitted by the existing AEON-1008 writer,
 	// not a new status mutation. An unrelated merge/head cannot match it.
 	f.tx(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,node_id,actor_principal_id,type,metadata) VALUES($1,$2,$3,'delivery.merge_done',jsonb_build_object('repository',$4::text,'head_sha',$5::text,'merge_sha',$6::text,'pull_request',7))`, f.person.TenantID, f.ticket, f.person.ID, f.m.config.Repository, head, queue)
+		_, err := tx.Exec(t.Context(), `INSERT INTO events(tenant_id,node_id,actor_principal_id,type,after,metadata) VALUES($1,$2,$3,'delivery.merge_done','{}',jsonb_build_object('repository',$4::text,'head_sha',$5::text,'merge_sha',$6::text,'pull_request',7))`, f.person.TenantID, f.ticket, f.person.ID, f.m.config.Repository, head, queue)
 		return err
 	})
 	f.tx(t, func(tx pgx.Tx) error {
