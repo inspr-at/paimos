@@ -674,6 +674,16 @@
     ,
     "browser:tests/header-desk-split.spec.ts:on a 390 px phone the chevron gives way to a ticket key and returns on the home page"
     ,
+    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 1024 the header fits the window and the search pill gives way last"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 601 the header fits the window and the search pill gives way last"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 640 the header fits the window and the search pill gives way last"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 721 the header fits the window and the search pill gives way last"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 768 the header fits the window and the search pill gives way last"
+    ,
     "browser:tests/header-desk-split.spec.ts:on a ticket at 375 px the preview is one entry away in the avatar sheet"
     ,
     "browser:tests/header-desk-split.spec.ts:on a ticket at 390 px the preview is one entry away in the avatar sheet"
@@ -8191,6 +8201,16 @@
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a 375 px phone the chevron gives way to a ticket key and returns on the home page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a 390 px phone the chevron gives way to a ticket key and returns on the home page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 1024 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 601 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 640 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 721 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 768 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a ticket at 375 px the preview is one entry away in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

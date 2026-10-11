@@ -444,18 +444,30 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .sep { color: var(--ink-3); font-weight: 300; font-size: 16px; }
 .mono-crumb { font: 500 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .spacer { flex: 1 1 0; min-width: 0; }
-.search-pill, .header-btn { flex-shrink: 0; }
+.header-btn { flex-shrink: 0; }
 .needs-badge { display: inline-grid; place-items: center; min-width: 3ch; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--gold-2); color: var(--gold-on); font: 700 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface-raised); }
 .needs-badge.empty { visibility: hidden; }
 .search-pill {
-  display: inline-flex; align-items: center; gap: 9px; width: 240px; height: 34px; padding: 0 6px 0 12px; border: 1px solid var(--glass-edge); border-radius: 999px;
+  --pill-start: 12px; --pill-end: 6px;
+  display: inline-flex; align-items: center; gap: 9px; width: 240px; height: 34px; padding: 0 var(--pill-end) 0 var(--pill-start); border: 1px solid var(--glass-edge); border-radius: 999px;
   background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink-3); font-size: 13px;
 }
 .search-pill:hover { color: var(--ink-2); box-shadow: var(--field-inset), 0 0 0 1px var(--glass-rim); }
 .search-pill:active { background: var(--row-selected); }
 .search-pill:focus-visible { box-shadow: var(--focus-ring); }
-.pill-text { flex: 1; text-align: left; }
+.pill-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
 .pill-keys { display: inline-flex; gap: 3px; }
+/* The pill holds its width while the breadcrumb clips. Only when the trail has
+   nothing left to give does it yield the rest, so the row never runs past the
+   window: on a project's tickets at tablet widths the Desk's split place and the
+   density switch leave it short (AEON-1214). Its keys drop out first, then its
+   label; the magnifier stays, centred. */
+.search-pill { flex-shrink: .001; min-width: 44px; overflow: hidden; container: search-pill / inline-size; }
+@container search-pill (max-width: 140px) { .pill-keys { display: none; } }
+@container search-pill (max-width: 74px) {
+  .pill-text { display: none; }
+  .search-pill > svg { margin-inline: auto; translate: calc((var(--pill-end) - var(--pill-start)) / 2) 0; }
+}
 /* Narrower desktops: the wordmark steps back on inner pages, then the place labels. */
 @media (max-width: 1180px) { .lockup.compact .wordmark, .lockup.compact.has-logo .tenant-name { display: none; } }
 @media (max-width: 1180px) {
@@ -470,10 +482,12 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 /* The search pill gives up width before a breadcrumb has to clip. */
 @media (max-width: 1100px) { .search-pill { width: 200px; } }
 @media (max-width: 900px) { .search-pill { width: 180px; } }
-/* Just wider than the phone header, the fixed pill is a few pixels too wide for the row. */
+/* Just wider than the phone header, the fixed pill is a few pixels too wide for the
+   row and gives way with the trail; the row's gaps tighten, so the Desk's split place
+   fits beside Business and a project's density switch (AEON-1214). */
 @media (max-width: 720px) {
-  .search-pill { flex-shrink: 1; min-width: 44px; overflow: hidden; }
-  .search-pill .pill-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .app-header { gap: 8px; }
+  .search-pill { flex-shrink: 1; }
 }
 @media (max-width: 600px) {
   .app-header { gap: 4px; padding: 0 10px; }
@@ -519,7 +533,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .crumb-name { display: none; }
   .crumb-long { display: none; }
   .crumb-short { display: inline; }
-  .search-pill { width: 44px; height: 44px; padding: 0; justify-content: center; }
+  .search-pill { width: 44px; height: 44px; --pill-start: 0px; --pill-end: 0px; justify-content: center; }
   .pill-text, .pill-keys { display: none; }
   .app-header :deep(.header-btn) { width: 44px; height: 44px; }
 }

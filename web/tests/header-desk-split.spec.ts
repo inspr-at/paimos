@@ -212,6 +212,45 @@ for (const width of [375, 390]) test(`on a ${width} px phone the chevron gives w
   expect(reach).toBeLessThanOrEqual(0.5)
 })
 
+// AEON-1214 fix round 3: on tablets the split Desk is wider than a plain place, and
+// a project's tickets add the density switch (and here Business). Once the
+// breadcrumb has nothing left to give, the search pill yields the rest, its keys
+// first, and just above phone width the row's gaps tighten, so the header never
+// runs past the window. With room to spare the pill keeps its full width and keys.
+for (const width of [601, 640, 721, 768, 1024]) test(`on a project's tickets at ${width} the header fits the window and the search pill gives way last`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 })
+  await page.emulateMedia({ colorScheme: 'light' })
+  await setup(page)
+  await page.goto('/p/PHAROS/tickets')
+  await expect(page.locator('.app-header .app-density')).toBeVisible()
+  await expect(chevron(page)).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Search everything' })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0)
+  const fit = await page.locator('.app-header').evaluate(header => {
+    const end = header.getBoundingClientRect().right - parseFloat(getComputedStyle(header).paddingRight)
+    const pill = header.querySelector<HTMLElement>('.search-pill')!, box = pill.getBoundingClientRect()
+    const shown = [...pill.children].filter(el => getComputedStyle(el).display !== 'none')
+    return {
+      reach: Math.max(...[...header.children].map(child => child.getBoundingClientRect().right)) - end,
+      width: box.width,
+      shown: shown.map(el => el.classList.contains('pill-text') ? 'text' : el.classList.contains('pill-keys') ? 'keys' : 'icon'),
+      // Whatever the pill still shows lies whole inside its border, and its label is never cut.
+      cut: shown.filter(el => { const r = el.getBoundingClientRect(); return r.left < box.left + 0.5 || r.right > box.right - 0.5 || (el instanceof HTMLElement && el.scrollWidth > el.clientWidth) }).length,
+      offCentre: (() => { const icon = pill.querySelector('svg')!.getBoundingClientRect(); return Math.abs(icon.left + icon.width / 2 - (box.left + box.width / 2)) })(),
+    }
+  })
+  expect(fit.reach, 'nothing runs past the header').toBeLessThanOrEqual(0.5)
+  expect(fit.cut, `the pill shows ${fit.shown.join(', ')} whole`).toBe(0)
+  expect(fit.shown[0]).toBe('icon')
+  if (width === 1024) {
+    expect(fit.width).toBe(200)
+    expect(fit.shown).toEqual(['icon', 'text', 'keys'])
+  } else {
+    expect(fit.width, 'the pill gave way').toBeLessThan(180)
+    if (fit.shown.length === 1) expect(fit.offCentre, 'a lone magnifier sits centred').toBeLessThanOrEqual(0.5)
+  }
+})
+
 // AEON-1214 fix round 2: inside the Desk place the preview must not inherit the
 // place's one-line label, so a long request wraps beside its Open, never under it.
 const LONG_TITLE = 'Decide whether the release train may ship the tenant isolation migration together with the reporter contract bump before Monday: https://github.com/inspr-at/paimos/pull/181/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef'

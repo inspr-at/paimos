@@ -43,6 +43,14 @@ chevron under the header and stays inside the window. Keyboard focus moves to
 its first row; Escape closes it and returns focus to the chevron, and the down
 arrow on the chevron opens it.
 
+## Tablets
+
+The split place is wider than a plain place. On a project's tickets, where it
+shares the row with Business and the density switch, the header still never
+runs past the window: the breadcrumb gives way first, then the search pill. The
+pill drops its keys, then its label, and keeps its magnifier. Just above phone
+width the gaps between the header's controls tighten.
+
 ## Phones
 
 On a phone each half is a 44 px target. The preview is a full-height sheet with
