@@ -12,7 +12,8 @@ import { useSession } from '../stores/session'
 import { textForKinds } from '../lib/workKindsCopy'
 import { doctrineInbox } from '../lib/doctrineInbox'
 import { scopeOwner } from '../lib/identityScope'
-import { settingsFooter, settingsNeeds } from '../lib/footerProviders'
+import { accountsNeeds, settingsFooter, settingsNeeds } from '../lib/footerProviders'
+import { isAccountsPart, needsPart, PART_LABEL } from '../lib/accountsNeeds'
 import { useFooterSummary } from '../lib/footerSummary'
 import { preferenceSaves, retryFailedPreferences } from '../lib/preferences'
 
@@ -30,8 +31,11 @@ const WorkspaceSection = defineAsyncComponent(() => import('../components/settin
 const AccessSection = defineAsyncComponent(() => import('../components/access/AccessSection.vue'))
 const AgentRulesSection = defineAsyncComponent(() => import('../components/rules/AgentRulesSection.vue'))
 const AccountsSection = defineAsyncComponent(() => import('../components/settings/AccountsSection.vue'))
+const ComputersSection = defineAsyncComponent(() => import('../components/settings/ComputersSection.vue'))
+const CapacitySection = defineAsyncComponent(() => import('../components/settings/CapacitySection.vue'))
 const PoliciesSection = defineAsyncComponent(() => import('../components/settings/PoliciesSection.vue'))
 const ModelsSection = defineAsyncComponent(() => import('../components/settings/ModelsSection.vue'))
+const RoutinesSection = defineAsyncComponent(() => import('../components/settings/RoutinesSection.vue'))
 
 // Settings groups share one frame; explicit grants gate Access, rules and accounts.
 // /settings/<section>#<target> deep-links to a card or field, ringed on arrival.
@@ -56,6 +60,7 @@ const mountedOwner = ref(scopeOwner(session.identity))
 watch(() => scopeOwner(session.identity), now => {
   if (!now || now === mountedOwner.value) return
   mountedOwner.value = now
+  accountsNeeds.value = null
   shown.clear()
   sections.value = liveSections.value
   closePicker()
@@ -66,13 +71,16 @@ const current = computed(() => sectionOf(route.params.section))
 // Access says its own line.
 useFooterSummary(() => {
   if (!session.identity || current.value === 'access') return null
+  // Accounts, Computers and Capacity each count their own; the action opens the part that has the need (AEON-1171).
+  const part = needsPart(accountsNeeds.value ?? {}, current.value)
   return settingsFooter({
-    saving: preferenceSaves.saving.size > 0, failed: preferenceSaves.failed.size > 0, needs: settingsNeeds.value,
+    saving: preferenceSaves.saving.size > 0, failed: preferenceSaves.failed.size > 0, needs: settingsNeeds.value, where: PART_LABEL[part ?? 'accounts'],
     act: {
       retry: retryFailedPreferences,
       needs: () => {
-        if (current.value !== 'accounts') void router.push('/settings/accounts')
-        void nextTick(() => document.querySelector('.needs-block')?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }))
+        const target = part ?? 'accounts'
+        if (current.value !== target) void router.push(`/settings/${target}`)
+        void nextTick(() => document.querySelector('.needs-block, .plan-card')?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }))
       },
     },
   })
@@ -87,8 +95,10 @@ const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so
 // the nav never re-flows under the pointer (usually a few milliseconds).
 void refreshPermissions()
-const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, models: ModelsSection, workspace: WorkspaceSection, vocabulary: VocabularySection, kinds: KindsOfWorkSection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
-const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', models: 'columns', workspace: 'building', vocabulary: 'tag', kinds: 'list', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'monitor', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
+const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, models: ModelsSection, routines: RoutinesSection, workspace: WorkspaceSection, vocabulary: VocabularySection, kinds: KindsOfWorkSection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, computers: ComputersSection, capacity: CapacitySection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
+const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', models: 'columns', routines: 'repeat', workspace: 'building', vocabulary: 'tag', kinds: 'list', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'key', computers: 'monitor', capacity: 'gauge', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
+// While Accounts, Computers or Capacity is open, the nav says how many things need you in each (AEON-1171).
+const navNeeds = (id: SectionId) => isAccountsPart(id) && isAccountsPart(current.value) ? accountsNeeds.value?.[id] ?? 0 : 0
 const groups = computed(() => SETTINGS_GROUPS.map(label => ({ label, sections: sections.value.filter(section => section.group === label) })).filter(group => group.sections.length))
 const pickerOpen = ref(false)
 const picker = ref<HTMLButtonElement>()
@@ -119,7 +129,7 @@ watch(current, async () => {
 }, { flush: 'post' })
 watch(sections, () => closePicker())
 onMounted(() => { document.addEventListener('pointerdown', outside); window.addEventListener('resize', resize) })
-onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', resize); clearTimeout(arrival); disposed = true })
+onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', resize); clearTimeout(arrival); disposed = true; accountsNeeds.value = null })
 let disposed = false
 
 // A deep link scrolls to its target once the section has rendered it.
@@ -168,6 +178,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
               <span class="link-icon" aria-hidden="true"><BizIcon :name="ICON[section.id]" :size="15" /></span>
               <span class="link-text"><span class="link-label">{{ sectionLabel(section) }}</span><span v-clip-tip="sectionSummary(section)" class="link-summary">{{ sectionSummary(section) }}</span></span>
               <span v-if="section.admin && !section.permission" class="admin-mark" role="img" aria-label="Admins only" data-tip="Only workspace admins see this"><AppIcon name="shield" :size="12" /></span>
+              <span v-else-if="navNeeds(section.id)" class="nav-n" role="img" :aria-label="`${navNeeds(section.id)} ${navNeeds(section.id) === 1 ? 'thing needs' : 'things need'} you`">{{ navNeeds(section.id) }}</span>
               <span v-else-if="section.fresh" class="new-mark">{{ modelText('New', 'Neu') }}</span>
               <span v-else-if="section.id === 'agent-rules' && doctrineInbox.pending" class="waiting-dot" role="img" :aria-label="`${doctrineInbox.pending} doctrine ${doctrineInbox.pending === 1 ? 'proposal waits' : 'proposals wait'}`" :data-tip="`${doctrineInbox.pending} doctrine proposals wait for review`" />
             </RouterLink>
@@ -221,6 +232,8 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
 .link-label { font-weight: 600; font-size: 13.5px; }
 .link-summary { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .new-mark { font-size: 10px; font-weight: 600; color: var(--teal-ink); }
+/* How many things need you in Accounts, Computers or Capacity (AEON-1149). */
+.nav-n { display: grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); color: var(--queue-wait-ink); font: 600 11px/1 var(--mono); }
 .admin-mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: var(--ink-3); }
 /* Doctrine proposals wait (AEON-444): a small neutral dot. */
 .waiting-dot { justify-self: center; width: 7px; height: 7px; margin: 0 7px; border-radius: 50%; background: var(--ink-2); }

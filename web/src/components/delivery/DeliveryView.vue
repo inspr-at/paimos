@@ -284,11 +284,6 @@ watch(state, (next, prev) => {
       </div>
     </template>
     <template v-else>
-      <!-- Without any recorded run, Flow shows the approved example, and says so. -->
-      <div v-if="flow.example.value" class="flow-empty banner" role="status">
-        <AppIcon name="flow" :size="16" />
-        <span class="grow"><b>{{ text.flowNone }}</b> {{ flowText(lang).example }}</span>
-      </div>
       <!-- In Flow a refused save takes the headline's fixed slot, so the mode switch and the card never move (AEON-1007). -->
       <FlowView :data="flow.data.value" :data-key="flow.key.value" :mode="flowMode" :status="flow.status.value" :empty="flow.empty.value"
         :choices="flow.choices.value" :choice="flow.runId.value" :truncated="flow.truncated.value" :level="prefs.level" :lang="lang"
@@ -352,7 +347,6 @@ watch(state, (next, prev) => {
 /* While a read is in flight or has failed, the row keeps the height measured from the chips (AEON-541). */
 .dl-status .banner { min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
 .dl-status .banner .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.flow-empty { margin-top: 16px; }
 .banner.flow-pref-warn { margin: 0; min-height: 40px; padding-block: 0; flex-wrap: nowrap; }
 .banner.flow-pref-warn .grow { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .tiles-cap { margin: 18px 0 0; font: 500 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }

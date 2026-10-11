@@ -4,13 +4,13 @@ import assert from 'node:assert/strict'
 import { keyState, sectionOf, senderLine, settingsLink, visibleSections, type AgentKey } from '../src/lib/settings.ts'
 
 test('Personal, Developer and Policies are for everyone; workspace sections follow their grants', () => {
-  assert.deepEqual(visibleSections(false).map(s => s.id), ['personal', 'theme', 'developer', 'vocabulary', 'policies'])
-  assert.deepEqual(visibleSections(true).map(s => s.label), ['Personal', 'Theme', 'Developer', 'Workspace', 'Vocabulary', 'Policies', 'Agents', 'Autopilot', 'Business', 'Product portal'])
+  assert.deepEqual(visibleSections(false).map(s => s.id), ['personal', 'theme', 'developer', 'vocabulary', 'policies', 'routines'])
+  assert.deepEqual(visibleSections(true).map(s => s.label), ['Personal', 'Theme', 'Developer', 'Workspace', 'Vocabulary', 'Policies', 'Routines', 'Agents', 'Autopilot', 'Business', 'Product portal'])
   assert.equal(sectionOf('kinds'), 'kinds')
   assert.equal(visibleSections(false, permission => permission === 'models.read').some(section => section.id === 'kinds'), true)
   assert.equal(visibleSections(true).some(section => section.id === 'kinds'), false)
   assert.equal(visibleSections(true).some(section => section.id === 'models'), false)
-  assert.deepEqual(visibleSections(true, permission => permission === 'models.read').map(section => section.id), ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'kinds', 'policies', 'models', 'agents', 'autopilot', 'business', 'portal'])
+  assert.deepEqual(visibleSections(true, permission => permission === 'models.read').map(section => section.id), ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'kinds', 'policies', 'models', 'routines', 'agents', 'autopilot', 'business', 'portal'])
   assert.equal(sectionOf('projects'), 'vocabulary')
   assert.equal(sectionOf('agents'), 'agents')
   assert.equal(sectionOf('autopilot'), 'autopilot')
@@ -23,6 +23,17 @@ test('Personal, Developer and Policies are for everyone; workspace sections foll
   assert.equal(settingsLink('business', 'quotes'), '/settings/business#quotes')
   assert.equal(visibleSections(false, permission => permission === 'rules.read').some(section => section.id === 'agent-rules'), true)
   assert.equal(visibleSections(true).some(section => section.id === 'agent-rules'), false)
+})
+
+test('Accounts, Computers and Capacity are three sections, each for people who may read accounts (AEON-1171)', () => {
+  const parts = visibleSections(false, permission => permission === 'account.read').filter(section => ['accounts', 'computers', 'capacity'].includes(section.id))
+  assert.deepEqual(parts.map(s => [s.id, s.group, s.label, s.summary, s.permission]), [
+    ['accounts', 'Agents and automation', 'Accounts', 'Which logins agents use', 'account.read'],
+    ['computers', 'Agents and automation', 'Computers', 'Where agents run', 'account.read'],
+    ['capacity', 'Agents and automation', 'Capacity', 'How much, and when', 'account.read'],
+  ])
+  assert.equal(visibleSections(true).some(section => ['accounts', 'computers', 'capacity'].includes(section.id)), false)
+  for (const id of ['accounts', 'computers', 'capacity']) assert.equal(sectionOf(id), id)
 })
 
 test('agent keys read as active, expired or revoked', () => {

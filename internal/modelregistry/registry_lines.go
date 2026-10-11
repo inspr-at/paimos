@@ -193,19 +193,19 @@ func (m *Module) editLine(w http.ResponseWriter, r *http.Request) {
 			return fail(409, "replacement model already has active profiles")
 		}
 		family := harnesslaunch.ModelFamily(h, nextModel)
-		source := before[0].Source
+		source := before[0].Origin
 		out.Profiles = []Profile{}
-		for i, e := range in.Efforts {
-			// Known efforts keep the shared scale; novel native names use their
-			// explicitly ordered registration, bounded to the scale's endpoints.
+		for _, e := range in.Efforts {
+			// Retain explicit historical scale metadata only for the exact
+			// existing effort. New native names acquire no invented number.
 			var scale *int
-			if err := tx.QueryRow(ctx, `SELECT aeon_model_effort_level($1,$2)::integer`, family, e).Scan(&scale); err != nil {
-				return err
+			for _, old := range before {
+				if old.Effort == e {
+					scale = old.EffortLevel
+					break
+				}
 			}
-			if scale == nil {
-				v := min(i, 5)
-				scale = &v
-			}
+
 			sum := sha256.Sum256([]byte(h + "/" + nextModel + "/" + e))
 			pin := profileWrite{Display: Display{DisplayName: strings.TrimSpace(in.DisplayName), ShortName: strings.TrimSpace(in.DisplayName)}, Slug: "edited-" + h + "-" + hex.EncodeToString(sum[:12]), Version: now.UTC().Format("20060102T150405.000000000"), Harness: h, Family: family, Model: nextModel, Effort: e, Tier: before[0].Tier, Note: strings.TrimSpace(in.Note), Source: source, RegisteredEffortLevel: scale}
 			if err := validateProfile(pin); err != nil {
@@ -246,9 +246,10 @@ func (m *Module) editLine(w http.ResponseWriter, r *http.Request) {
 func boardLineID(p Profile) string { f, l, _ := ProfileLine(p); return f + ":" + l }
 
 // Caller holds the tenant and registry fences. All transfers precede events.
-func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile) error {
+func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile, moveLines ...bool) error {
+	moveLine := len(moveLines) == 0 || moveLines[0]
 	oldLine, newLine := boardLineID(before[0]), boardLineID(after[0])
-	if oldLine != newLine {
+	if moveLine && oldLine != newLine {
 		var collision bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_rules a JOIN model_rules b ON b.tenant_id=a.tenant_id AND b.scope=a.scope AND b.project_id IS NOT DISTINCT FROM a.project_id AND b.column_key=a.column_key WHERE a.line=$1 AND b.line=$2)`, oldLine, newLine).Scan(&collision); err != nil {
 			return err
@@ -265,19 +266,40 @@ func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE model_pref_profiles SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_pref_orders o WHERE o.profile_id=model_pref_profiles.id AND ($1=ANY(o.rank) OR $2=ANY(o.rank) OR $1=ANY(o.not_allowed) OR $2=ANY(o.not_allowed)))`, oldLine, newLine); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE model_rule_revisions SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_rules r WHERE r.scope=model_rule_revisions.scope AND coalesce(r.project_id::text,'')=model_rule_revisions.scope_key AND r.line IN ($1,$2))`, oldLine, newLine); err != nil {
-		return err
+	if moveLine {
+		if _, err := tx.Exec(ctx, `UPDATE model_pref_profiles SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_pref_orders o WHERE o.profile_id=model_pref_profiles.id AND ($1=ANY(o.rank) OR $2=ANY(o.rank) OR $1=ANY(o.not_allowed) OR $2=ANY(o.not_allowed)))`, oldLine, newLine); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE model_rule_revisions SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_rules r WHERE r.scope=model_rule_revisions.scope AND coalesce(r.project_id::text,'')=model_rule_revisions.scope_key AND r.line IN ($1,$2))`, oldLine, newLine); err != nil {
+			return err
+		}
 	}
 	for _, old := range before {
-		replacement := nearestProfile(after, old.Effort, old.EffortLevel)
+		candidates := sameRouteProfiles(after, old)
+		if len(candidates) == 0 {
+			continue
+		}
+		replacement := nearestProfile(candidates, old.Effort, old.EffortLevel)
 		for _, table := range []string{"model_role_routes", "model_security_role_routes"} {
+			var incompatible bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+table+` a JOIN `+table+` b ON b.tenant_id=a.tenant_id AND b.role=a.role WHERE a.profile_id=$1 AND b.profile_id=$2 AND (a.state<>b.state OR a.reason<>b.reason OR a.valid_until IS DISTINCT FROM b.valid_until))`, old.ID, replacement.ID).Scan(&incompatible); err != nil {
+				return err
+			}
+			if incompatible {
+				return fail(409, "successor has a conflicting role hold")
+			}
+			// Equal policies collapse into their earliest priority. Differing
+			// pause/hold evidence rejects the transaction instead of dropping it.
+			if _, err := tx.Exec(ctx, `DELETE FROM `+table+` t USING `+table+` a,`+table+` b WHERE a.tenant_id=b.tenant_id AND a.role=b.role AND a.profile_id=$1 AND b.profile_id=$2 AND t.tenant_id=a.tenant_id AND t.role=a.role AND t.priority=greatest(a.priority,b.priority)`, old.ID, replacement.ID); err != nil {
+				return err
+			}
 			if _, err := tx.Exec(ctx, `UPDATE `+table+` SET profile_id=$2 WHERE profile_id=$1 AND NOT EXISTS(SELECT 1 FROM `+table+` n WHERE n.tenant_id=`+table+`.tenant_id AND n.role=`+table+`.role AND n.profile_id=$2)`, old.ID, replacement.ID); err != nil {
 				return err
 			}
 		}
+	}
+	if !moveLine {
+		return nil
 	}
 	// Reconcile native names for all affected rows without touching situations,
 	// not-allowed entries, templates, profile knobs or unrelated rules.

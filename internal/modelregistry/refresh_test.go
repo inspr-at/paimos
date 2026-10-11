@@ -13,12 +13,83 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/linkvault"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// AEON-1148: the Models switch must persist the same allow/deny rule as
+// Accounts. A legacy shipped_only rule is read as off; stale writes stay fenced.
+func TestRefreshAutoUpdateUsesCanonicalModelRule(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "canonical-auto-update", "person", "Owner", []string{"admin"})
+	decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
+	read := func() (accountuse.Rules, RefreshSettings) {
+		t.Helper()
+		var rules accountuse.Rules
+		var refresh RefreshSettings
+		inRegistry(t, p, func(tx pgx.Tx) (err error) {
+			rules, err = accountuse.ReadRules(t.Context(), tx)
+			if err == nil {
+				refresh, err = settings(t.Context(), tx)
+			}
+			return err
+		})
+		return rules, refresh
+	}
+	for _, on := range []bool{false, true} {
+		before, refresh := read()
+		refresh.AutoAddProfiles = on
+		refresh.APIEnabled = false
+		body, err := json.Marshal(struct {
+			RefreshSettings
+			Revision int64 `json:"account_use_revision"`
+		}{refresh, before.Revision})
+		if err != nil {
+			t.Fatal(err)
+		}
+		saved := decode[RefreshSettings](t, &p, "PUT", "/api/models/refresh/settings", string(body), 200)
+		after, stored := read()
+		want := "deny"
+		if on {
+			want = "allow"
+		}
+		if after.NewModels != want || after.Revision != before.Revision+1 || stored.AutoAddProfiles != on || saved != stored {
+			t.Fatalf("on=%t: saved %+v, stored %+v, rules %+v", on, saved, stored, after)
+		}
+		refresh.AutoAddProfiles = !on
+		stale, err := json.Marshal(struct {
+			RefreshSettings
+			Revision int64 `json:"account_use_revision"`
+		}{refresh, before.Revision})
+		if err != nil {
+			t.Fatal(err)
+		}
+		refusal := decode[struct {
+			Error string `json:"error"`
+		}](t, &p, "PUT", "/api/models/refresh/settings", string(stale), 409)
+		if refusal.Error != "account_use_revision_conflict" {
+			t.Fatalf("wrong stale-toggle refusal: %s", refusal.Error)
+		}
+		unchanged, unchangedRefresh := read()
+		if !reflect.DeepEqual(unchanged, after) || unchangedRefresh != stored {
+			t.Fatal("stale toggle changed the stored setting")
+		}
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE account_use_rules SET new_models='shipped_only'; SELECT set_config('aeon.account_use_rule_write','on',true); UPDATE model_refresh_settings SET auto_add_profiles=false`)
+		return err
+	})
+	legacy := decode[struct {
+		Settings RefreshSettings `json:"settings"`
+	}](t, &p, "GET", "/api/models/refresh", "", 200)
+	if legacy.Settings.AutoAddProfiles {
+		t.Fatal("legacy shipped_only read as on")
+	}
+}
 
 func inRegistry(t *testing.T, p tenant.Principal, fn func(pgx.Tx) error) {
 	t.Helper()
@@ -224,54 +295,72 @@ func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 						}
 					}
 				}
+				// The previously configured security gate is historical policy,
+				// not a route added by the ID-only catalog upgrade.
+				if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "review-gate-security", Priority: 1, ProfileID: ids["codex-sol-high"], State: "available"}); err != nil {
+					return err
+				}
 				// Custom build-hard order must survive. Both versions match seed values,
 				// but it is structurally different from the v2 default.
-				_, err = tx.Exec(t.Context(), `UPDATE model_role_routes SET priority=priority+10 WHERE role='build-hard'`)
+				if _, err = tx.Exec(t.Context(), `UPDATE model_role_routes SET priority=priority+10 WHERE role='build-hard'`); err != nil {
+					return err
+				}
+				_, err = tx.Exec(t.Context(), `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,'2')`, p.TenantID)
 				return err
 			})
+			var oldProfiles []Profile
+			inRegistry(t, p, func(tx pgx.Tx) error { var err error; oldProfiles, err = listProfiles(t.Context(), tx); return err })
 			var before []Route
 			inRegistry(t, p, func(tx pgx.Tx) error { var err error; before, err = listRoutes(t.Context(), tx); return err })
-			NewWithVault(appPool, nil).sweep(t.Context())
-			profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
-			if profileBySlug(profiles, "codex-6-1-sol-high").ID == "" || profileBySlug(profiles, "grok-4-7-xhigh").ID == "" {
-				t.Fatal("v3 profiles missing")
-			}
+			m := NewWithVault(appPool, nil)
+			m.discovery = fixtureCatalogClient(t, nil)
+			m.sweep(t.Context())
+			// Compare stored rows before crossing the HTTP boundary, retaining
+			// every pin and metadata field as well as the exact timestamp.
 			inRegistry(t, p, func(tx pgx.Tx) error {
-				steps, err := loadLadder(t.Context(), tx, "build")
+				stored, err := listProfiles(t.Context(), tx)
 				if err != nil {
 					return err
 				}
-				if steps[0].Profile.Model != "gpt-6.1-sol" {
-					t.Fatalf("build still selects %s", steps[0].Profile.Model)
+				for _, old := range oldProfiles {
+					if got := profileBySlug(stored, old.Slug); !reflect.DeepEqual(got, old) {
+						t.Fatalf("historical stored pin or metadata changed: before=%+v after=%+v", old, got)
+					}
 				}
-				profile := steps[0].Profile
-				if profile.FullName() != "Codex Sol 6.1" || profile.ShortName != "Sol" || profile.Provider != "openai" || profile.EffortLevel == nil || *profile.EffortLevel != 3 {
-					t.Fatalf("upgraded ladder lost display or effort metadata: %+v", profile)
+				return nil
+			})
+			// pgx retains time.Local on UTC hosts; JSON decodes Z as time.UTC.
+			// Put both snapshots through the same wire conversion, preserving
+			// all fields rather than comparing those internal location pointers.
+			rawProfiles, err := json.Marshal(oldProfiles)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var oldWire []Profile
+			if err := json.Unmarshal(rawProfiles, &oldWire); err != nil {
+				t.Fatal(err)
+			}
+			profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
+			for _, old := range oldWire {
+				if got := profileBySlug(profiles, old.Slug); !reflect.DeepEqual(got, old) {
+					t.Fatalf("historical pin or metadata changed: before=%+v after=%+v", old, got)
 				}
+			}
+			inRegistry(t, p, func(tx pgx.Tx) error {
 				after, err := listRoutes(t.Context(), tx)
 				if err != nil {
 					return err
 				}
-				filter := func(in []Route, role string) []Route {
-					out := []Route{}
-					for _, r := range in {
-						if r.Role == role {
-							out = append(out, r)
-						}
-					}
-					return out
+				if !reflect.DeepEqual(before, after) {
+					t.Fatal("catalog facts changed saved routes or active override")
 				}
-				oldHard, newHard := filter(before, "build-hard"), filter(after, "build-hard")
-				additional := 2
-				if expanded {
-					additional = 0
+				var version string
+				var facts int
+				if err := tx.QueryRow(t.Context(), `SELECT catalog_version,(SELECT count(*) FROM model_catalog_facts WHERE source_kind='bootstrap') FROM model_refresh_settings`).Scan(&version, &facts); err != nil {
+					return err
 				}
-				if len(newHard) != len(oldHard)+additional || !reflect.DeepEqual(oldHard, newHard[:len(oldHard)]) {
-					t.Fatal("custom routes changed instead of appending additional harnesses")
-				}
-				oldGate, newGate := filter(before, "review-gate"), filter(after, "review-gate")
-				if !reflect.DeepEqual(oldGate[1], newGate[1]) {
-					t.Fatal("active override changed")
+				if version != CatalogVersion || facts == 0 {
+					t.Fatal("catalog provenance upgrade not prepared", version, facts)
 				}
 				return nil
 			})
@@ -417,6 +506,9 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 	o.ReportID = EvidenceID("working")
 	o.Status = "working"
 	send(agent, o, 200)
+	if profileBySlug(decode[[]Profile](t, &p, "GET", "/api/models", "", 200), sol.Slug).Origin != "shipped" {
+		t.Fatal("working report relabeled a shipped profile")
+	}
 	inRegistry(t, p, func(tx pgx.Tx) error {
 		var count int
 		var suppressed *time.Time
@@ -453,24 +545,34 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 	if got := send(agent, o, 200); got.Added != 0 {
 		t.Fatal("added duplicate profile")
 	}
+	foundHarness := false
+	for _, profile := range decode[[]Profile](t, &p, "GET", "/api/models", "", 200) {
+		if profile.Model != o.Model {
+			continue
+		}
+		foundHarness = true
+		if profile.Source != "auto" || profile.Origin != "harness" {
+			t.Fatal("harness discovery lost its origin", profile)
+		}
+	}
+	if !foundHarness {
+		t.Fatal("reported model missing")
+	}
 }
 
 func TestDefaultRefreshNoNetworkAndOneAuditPerRun(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "no-network", "person", "Owner", []string{"admin"})
-	called := false
+	seen := []string{}
 	m := NewWithVault(appPool, []byte(strings.Repeat("x", 32)))
-	m.discovery = &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
-		called = true
-		t.Error("unexpected outbound call")
-		return nil, io.EOF
-	})}
+	m.discovery = fixtureCatalogClient(t, &seen)
 	if _, err := m.runRefresh(tenant.WithPrincipal(t.Context(), p), p, false); err != nil {
 		t.Fatal(err)
 	}
-	if called {
-		t.Fatal("default called vendor")
+	if !reflect.DeepEqual(seen, publicCatalogSources) {
+		t.Fatalf("default keyless discovery did not use exactly the recorded sources: %v", seen)
 	}
+
 	if eventCount(t, p, "model.catalog_refreshed") != 1 {
 		t.Fatal("refresh audit missing")
 	}
@@ -491,6 +593,15 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestVendorListBoundsPaginationRedirectionAndSanitizedErrors(t *testing.T) {
+	// A tiny row repeated beyond the limit must be rejected before model
+	// identifiers are processed; the error cannot be an invalid-ID failure.
+	tooMany := []byte(`{"data":[` + strings.Repeat(`{},`, maxDiscoveryModels) + `{}` + `]}`)
+	if _, err := ParseProviderCatalog("openai", tooMany, time.Now()); err == nil || err.Error() != "model list identifier limit" {
+		t.Fatalf("collection limit not enforced before processing: %v", err)
+	}
+	if _, err := ParseProviderCatalog("openai", []byte(`{"data":[],"data":[]}`), time.Now()); err == nil || err.Error() != "duplicate catalog key" {
+		t.Fatalf("ambiguous source fields accepted: %v", err)
+	}
 	calls := 0
 	client := &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		calls++
@@ -591,6 +702,9 @@ func TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy(t *testing.T) {
 	}
 	outage := false
 	m.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != vendorURLs["openai"] {
+			return fixtureCatalogClient(t, nil).Transport.RoundTrip(r)
+		}
 		if r.URL.String() != vendorURLs["openai"] || r.Header.Get("Authorization") != "Bearer "+key {
 			t.Fatal("unexpected discovery destination")
 		}
@@ -604,12 +718,33 @@ func TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy(t *testing.T) {
 	if err := json.Unmarshal(send(p, "POST", "/api/models/refresh", "{}", 200), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Added != 1 || len(result.Sources) != 1 || result.Sources[0].State != "fresh" || result.LadderChanged {
+	if len(result.Sources) != 4 || result.Sources[0].State != "fresh" || result.LadderChanged {
 		t.Fatalf("refresh result %+v", result)
 	}
 	current := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
-	if len(current) != len(profiles)+1 {
-		t.Fatal("advertised API profiles missing")
+	if len(current) != len(profiles)+result.Added {
+		t.Fatal("sourced proposals did not match reported additions")
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var guessed int
+		err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_profiles WHERE model='gpt-future'`).Scan(&guessed)
+		if err == nil && guessed != 0 {
+			t.Fatal("OpenAI ID-only list invented an effort/profile")
+		}
+		return err
+	})
+	foundProvider := false
+	for _, profile := range current {
+		if profile.Harness != "pi" || profile.Model != "anthropic/claude-opus-5" || profile.Version != "observed-2" {
+			continue
+		}
+		foundProvider = true
+		if profile.Source != "auto" || profile.Origin != "provider" {
+			t.Fatal("provider discovery lost its origin", profile)
+		}
+	}
+	if !foundProvider {
+		t.Fatal("provider model missing")
 	}
 	send(p, "POST", "/api/models/refresh", "{}", 429)
 	outage = true

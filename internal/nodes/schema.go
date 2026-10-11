@@ -31,8 +31,14 @@ func validateFields(schema *jsSchema, raw json.RawMessage) (json.RawMessage, err
 	if err != nil {
 		return nil, badRequest("fields must be a JSON object")
 	}
-	if _, ok := v.(map[string]any); !ok {
+	fields, ok := v.(map[string]any)
+	if !ok {
 		return nil, badRequest("fields must be a JSON object")
+	}
+	if marked, present := fields["no_release_needed"]; present {
+		if _, ok := marked.(bool); !ok {
+			return nil, unprocessable("no_release_needed must be a boolean")
+		}
 	}
 	if schema != nil {
 		if err := schema.Validate(v); err != nil {

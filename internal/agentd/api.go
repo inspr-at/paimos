@@ -7,6 +7,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -18,9 +19,11 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/modelreport"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/version"
@@ -36,9 +39,12 @@ type Remote struct {
 	accountLinkProof     string
 	ledgerGeneration     string
 	ledgerPeerTelemetry  bool
+	catalogRetryAt       time.Time // Negative capability cache; never discovery authority.
+	probeBatchRetryAt    time.Time // Negative capability cache only; never dispatch authority.
 	// Host capacity is negotiated from the server's own computer view; see
 	// hostCapacitySupported. now is injectable for tests.
 	hostCapacitySupport   int8
+	hostUnattendedSupport bool
 	hostCapacityCheckedAt time.Time
 	now                   func() time.Time
 }
@@ -400,22 +406,38 @@ func (r *Remote) WorkOrder(ctx context.Context, id string) (WorkOrder, error) {
 }
 
 func (r *Remote) Route(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64) (Route, error) {
+	return r.route(ctx, runID, daemonID, accountIDs, estimates, nil)
+}
+
+func (r *Remote) RouteRoutine(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64, pickup agentsetup.RoutinePickup) (Route, error) {
+	raw, err := json.Marshal(pickup)
+	if err != nil {
+		return Route{}, err
+	}
+	return r.route(ctx, runID, daemonID, accountIDs, estimates, map[string]string{agentsetup.RoutinePickupHeader: string(raw)})
+}
+
+func (r *Remote) route(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64, headers map[string]string) (Route, error) {
 	var route Route
 	err := r.Client.DoWithHeaders(ctx, "POST", "/api/agent-accounts/route", map[string]any{
 		"run_id": runID, "daemon_id": daemonID, "account_ids": accountIDs, "estimated_units": estimates,
-	}, &route, r.ledgerHeaders(nil))
+	}, &route, r.ledgerHeaders(headers))
 	return route, err
 }
 
 func (r *Remote) Claim(ctx context.Context, runID, daemonID, generation string, reservations []string) error {
-	return r.claim(ctx, runID, daemonID, generation, reservations, nil)
+	return r.claim(ctx, runID, daemonID, generation, reservations, nil, nil)
 }
 
 func (r *Remote) ClaimHandoff(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup WorkerPickup) error {
-	return r.claim(ctx, runID, daemonID, generation, reservations, &pickup)
+	return r.claim(ctx, runID, daemonID, generation, reservations, &pickup, nil)
 }
 
-func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup) error {
+func (r *Remote) ClaimRoutine(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup, routine agentsetup.RoutinePickup) error {
+	return r.claim(ctx, runID, daemonID, generation, reservations, pickup, &routine)
+}
+
+func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup, routine *agentsetup.RoutinePickup) error {
 	// Retain the attempted binding even if the HTTP response is lost. It is
 	// only a header hint; the server remains the authority for claim ownership.
 	r.mu.Lock()
@@ -424,6 +446,9 @@ func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, 
 	body := map[string]any{"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations}
 	if pickup != nil {
 		body["handoff"] = pickup
+	}
+	if routine != nil {
+		body["routine"] = routine
 	}
 	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", body, nil, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy}))
 	return err
@@ -574,4 +599,26 @@ func (r *Remote) SessionActivityMode(id string) string {
 		return mode
 	}
 	return agentactivity.Off
+}
+
+// LeadDemand is bounded to one owner-approved project mapping. Missing routes
+// on older servers are unavailable, never a fallback to ordinary queue pickup.
+func (r *Remote) LeadDemand(ctx context.Context, project string) (*agentsetup.LeadDemand, error) {
+	var out struct {
+		Demand *agentsetup.LeadDemand `json:"demand"`
+		State  string                 `json:"state"`
+		Reason string                 `json:"reason"`
+	}
+	err := r.Client.Do(ctx, "GET", "/api/projects/"+url.PathEscape(project)+"/lead-runtime", nil, &out)
+	return out.Demand, err
+}
+func (r *Remote) ClaimLead(ctx context.Context, in agentsetup.LeadPickup) (agentsetup.LeadLaunch, error) {
+	var out agentsetup.LeadLaunch
+	err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(in.Demand.ProjectID)+"/lead-runtime/claim", in, &out)
+	return out, err
+}
+func (r *Remote) ReportLead(ctx context.Context, in agentsetup.LeadPickup, kind string, ownership *ownedprocess.Identity) (agentsetup.LeadLaunch, error) {
+	var out agentsetup.LeadLaunch
+	err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(in.Demand.ProjectID)+"/lead-runtime/report", map[string]any{"pickup": in, "kind": kind, "ownership": ownership}, &out)
+	return out, err
 }

@@ -1069,13 +1069,18 @@ func keepGroup(accounts []Account, id string) []Account {
 }
 
 func quotaOccupancy(ctx context.Context, tx pgx.Tx) (map[string]int, error) {
+	return quotaOccupancyExcept(ctx, tx, "")
+}
+
+func quotaOccupancyExcept(ctx context.Context, tx pgx.Tx, runID string) (map[string]int, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT a.harness || ':' || a.quota_pool_fingerprint, count(*)
 		FROM agent_runs r
 		JOIN agent_accounts a ON a.tenant_id=r.tenant_id AND a.id=r.account_id
-		WHERE a.quota_pool_fingerprint<>'' AND r.account_id IS NOT NULL
-		  AND r.status IN ('queued','starting','running','waiting')
-		GROUP BY a.harness, a.quota_pool_fingerprint`)
+		WHERE a.quota_pool_fingerprint<>'' AND r.account_id IS NOT NULL AND r.id::text<>$1
+		  AND (r.status IN ('queued','starting','running','waiting')
+		    OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')
+		GROUP BY a.harness, a.quota_pool_fingerprint`, runID)
 	if err != nil {
 		return nil, err
 	}

@@ -33,6 +33,8 @@ func TestAgentsTierShowSetAsk(t *testing.T) {
 		switch r.URL.Path {
 		case "/api/kinds":
 			json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{{"id": "project-kind", "slug": "project"}}})
+		case "/api/projects/lookup":
+			json.NewEncoder(w).Encode(map[string]string{"id": project})
 		case "/api/nodes":
 			json.NewEncoder(w).Encode(map[string]any{"items": []map[string]any{{"id": project, "key": "PROJECT", "kind_id": "project-kind", "fields": map[string]any{"project_key": "PROJECT"}}}})
 		case base + "/tier":

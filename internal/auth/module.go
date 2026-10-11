@@ -192,6 +192,16 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				}
 			}
 			scope, controlled := coreAgentScope(r)
+			// Preference reads are a coordinator exception to the outer route
+			// ceiling. RequirePattern below still checks live grants and creator
+			// authority; a models.read-only key retains its placement ceiling.
+			if authz.IsCoordinatorKey(p.Scopes) {
+				switch r.Pattern {
+				case "GET /api/model-preferences", "GET /api/model-preferences/board", "GET /api/model-preferences/coverage",
+					"GET /api/model-preferences/evidence", "GET /api/model-preferences/simple", "GET /api/model-preferences/situations":
+					scope, controlled = "models.read", true
+				}
+			}
 			if authz.OwnerWorkstation(p) && workstationGovernance(r) && !strings.HasSuffix(r.Pattern, "/owner-workstation") {
 				scope, controlled = authz.RoutePermissions[r.Pattern], true
 			}
@@ -355,6 +365,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "recurrences":
 		// This is an explicit agent allowlist. Every recurrence handler also
 		// checks the custom role and recurrences.manage key scope in its tenant.
+		if len(parts) >= 2 && parts[1] == "templates" {
+			if len(parts) == 2 && read || len(parts) == 5 && parts[2] != "" && parts[3] != "" && r.Method == http.MethodPost && (parts[4] == "preview" || parts[4] == "apply") {
+				return "recurrences.manage", true
+			}
+			return "", false
+		}
 		if len(parts) == 1 && (read || r.Method == http.MethodPost) {
 			return "recurrences.manage", true
 		}
@@ -365,7 +381,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "recurrences.manage", true
 		}
 		if len(parts) == 3 && parts[1] != "" {
-			if read && (parts[2] == "preview" || parts[2] == "history" || parts[2] == "releases") || r.Method == http.MethodPost && (parts[2] == "pause" || parts[2] == "resume" || parts[2] == "run-now") {
+			if read && (parts[2] == "preview" || parts[2] == "history" || parts[2] == "releases" || parts[2] == "guardrails") || r.Method == http.MethodPost && (parts[2] == "pause" || parts[2] == "resume" || parts[2] == "run-now") {
 				return "recurrences.manage", true
 			}
 		}
@@ -376,6 +392,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "agents":
 		if len(parts) == 2 && parts[1] == "plan" && read {
 			return "agents.plan.read", true
+		}
+	case "status-autopilot":
+		if read && (len(parts) == 2 && (parts[1] == "attention" || parts[1] == "changes" || parts[1] == "projects" || parts[1] == "proposals") || len(parts) == 3 && parts[1] == "attention" && parts[2] == "groups") {
+			return "nodes.read", true
 		}
 	case "decision-desk":
 		if len(parts) == 1 && read {
@@ -418,16 +438,24 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "harness.read", true
 		}
 	case "projects":
-		if len(parts) == 1 && read {
+		if read && (len(parts) == 1 || len(parts) == 2 && parts[1] == "lookup") {
 			return "nodes.read", true
 		}
 		if len(parts) < 3 {
 			break
 		}
 		switch parts[2] {
+		case "status-autopilot":
+			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
+				return "nodes.read", true
+			}
 		case "lead-settings":
 			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
 				return "nodes.read", true
+			}
+		case "lead-runtime":
+			if validRouteUUID(parts[1]) && (len(parts) == 3 && read || len(parts) == 4 && r.Method == http.MethodPost && (parts[3] == "claim" || parts[3] == "report")) {
+				return "harness.worker", true
 			}
 		case "lead":
 			if len(parts) == 4 && parts[3] == "usage" && read {
@@ -561,6 +589,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "search.read", true
 		}
 	case "settings":
+		if len(parts) == 2 && parts[1] == "status-autopilot" && read {
+			return "nodes.read", true
+		}
 		if len(parts) == 2 && parts[1] == "review-policy" {
 			if read {
 				return "reviewpolicy.read", true
@@ -599,6 +630,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		return "inbox.send", true
 	case "models":
+		if r.Method == http.MethodPost && len(parts) == 3 && parts[1] == "harness-probes" && (parts[2] == "claim" || validRouteUUID(parts[2])) {
+			return "models.report", true
+		}
 		if r.Method == http.MethodPost && len(parts) == 2 {
 			if parts[1] == "refresh" {
 				return "models.refresh", true

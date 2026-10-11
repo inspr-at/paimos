@@ -128,12 +128,18 @@ func Load(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*Queued, err
 		return nil, err
 	}
 	rows.Close()
+	waitIDs := make([]string, 0, len(out))
 	for _, q := range out {
 		if q.ExpectedAgentID != nil && q.Waiting && q.WaitReason != "Blocked; waits until unblocked" && !strings.HasPrefix(q.WaitReason, "Blocked by ") {
-			wait, err := agentaccounts.WaitForRun(ctx, tx, q.RunID)
-			if err != nil {
-				return nil, err
-			}
+			waitIDs = append(waitIDs, q.RunID)
+		}
+	}
+	waits, err := agentaccounts.WaitForRuns(ctx, tx, waitIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, q := range out {
+		if wait, ok := waits[q.RunID]; ok {
 			if wait == nil {
 				now := time.Now().UTC()
 				q.ExpectedStart = &now

@@ -114,111 +114,188 @@ func TestNoteSnapshotConcurrentMembershipAndFields(t *testing.T) {
 }
 
 func TestPublishedNoteSnapshotIgnoresLaterTicketEdits(t *testing.T) {
-	f := ticketSetup(t)
-	visible := f.existing("ticket", f.project, "Shown", "open")
-	hidden := f.existing("ticket", f.project, "Quiet", "open")
-	membershipOK(t, f.addExisting([]string{visible, hidden}, 1, false))
-	visibleFields := `{"pill_en":"Clear release notes","pill_de":"Verständliche Release Notes","benefit_en":"Know what changed.","benefit_de":"Änderungen werden verständlich.","hide_from_release_notes":false}`
-	hiddenFields := `{"pill_en":"Keep this private","pill_de":"Nicht öffentlich zeigen","benefit_en":"Stay out of the notes.","benefit_de":"Bleibt aus den Release Notes.","hide_from_release_notes":true}`
-	f.tx(func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, visible, visibleFields); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, hidden, hiddenFields)
-		return err
-	})
-	path := "/api/projects/" + f.project + "/releases/" + f.release + "/note-snapshot"
-	before := f.request(f.person, http.MethodGet, path, "")
-	if before.Code != 200 || !strings.Contains(before.Body.String(), "Know what changed.") || strings.Contains(before.Body.String(), `"frozen": true`) {
-		t.Fatalf("live preview: %d %s", before.Code, before.Body.String())
-	}
-	var stored int
-	f.tx(func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_release_note_snapshots WHERE release_node_id=$1`, f.release).Scan(&stored)
-	})
-	if stored != 0 {
-		t.Fatal("planning release froze notes")
-	}
-	edited := strings.Replace(visibleFields, "Know what changed.", "Edited before publication.", 1)
-	edited = strings.Replace(edited, `{`, `{"tags":[{"name":"bug"}],`, 1)
-	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, visible, edited)
-		return err
-	})
-	f.tx(func(tx pgx.Tx) error {
-		tag, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released', released_at=clock_timestamp() WHERE release_node_id=$1`, f.release)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() != 1 {
-			return fmt.Errorf("publish affected %d", tag.RowsAffected())
-		}
-		return nil
-	})
-	afterEdit := strings.Replace(edited, "Edited before publication.", "Edited after publication.", 1)
-	afterEdit = strings.Replace(afterEdit, `"tags":[{"name":"bug"}],`, "", 1)
-	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, visible, afterEdit)
-		return err
-	})
-	frozen := f.request(f.person, http.MethodGet, path, "")
-	if frozen.Code != 200 || !strings.Contains(frozen.Body.String(), "Edited before publication.") || strings.Contains(frozen.Body.String(), "Edited after publication.") {
-		t.Fatalf("frozen snapshot: %d %s", frozen.Code, frozen.Body.String())
-	}
-	var snap releasehistory.NoteSnapshot
-	if err := json.Unmarshal(frozen.Body.Bytes(), &snap); err != nil {
-		t.Fatal(err)
-	}
-	if !snap.Frozen {
-		t.Fatal("published snapshot is not frozen")
-	}
-	notes, err := releasehistory.NotesFromSnapshot(frozen.Body.Bytes(), "260928120000.0.0", "test")
-	if err != nil || notes.Hidden != 1 || len(notes.Items) != 1 || notes.Items[0].ID != visible || notes.Items[0].Group != releasehistory.GroupFixes || notes.Items[0].BenefitEN != "Edited before publication." || notes.Fallback != "" {
-		t.Fatalf("notes from benefits: %+v %v body %s", notes, err, frozen.Body.String())
-	}
-	encoded := string(mustNotes(t, notes))
-	if strings.Contains(encoded, hidden) || strings.Contains(encoded, "Stay out of the notes.") {
-		t.Fatal("hidden ticket copied into notes")
-	}
-	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE journey_release_note_snapshots SET snapshot=snapshot WHERE release_node_id=$1`, f.release)
-		return err
-	})
-	if err == nil || !strings.Contains(err.Error(), "immutable") {
-		t.Fatalf("update: %v", err)
-	}
-	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `DELETE FROM journey_release_note_snapshots WHERE release_node_id=$1`, f.release)
-		return err
-	})
-	if err == nil || !strings.Contains(err.Error(), "immutable") {
-		t.Fatalf("delete: %v", err)
-	}
+	for _, flag := range []string{"hide_from_release_notes", "no_release_needed"} {
+		t.Run(flag, func(t *testing.T) {
+			f := ticketSetup(t)
+			visible := f.existing("ticket", f.project, "Shown", "open")
+			hidden := f.existing("ticket", f.project, "Quiet", "open")
+			membershipOK(t, f.addExisting([]string{visible, hidden}, 1, false))
+			visibleFields := `{"pill_en":"Clear release notes","pill_de":"Verständliche Release Notes","benefit_en":"Know what changed.","benefit_de":"Änderungen werden verständlich.","hide_from_release_notes":false}`
+			hiddenFields := `{"pill_en":"Keep this private","pill_de":"Nicht öffentlich zeigen","benefit_en":"Stay out of the notes.","benefit_de":"Bleibt aus den Release Notes.","` + flag + `":true}`
+			f.tx(func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, visible, visibleFields); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, hidden, hiddenFields)
+				return err
+			})
+			path := "/api/projects/" + f.project + "/releases/" + f.release + "/note-snapshot"
+			before := f.request(f.person, http.MethodGet, path, "")
+			if before.Code != 200 || !strings.Contains(before.Body.String(), "Know what changed.") || strings.Contains(before.Body.String(), `"frozen": true`) {
+				t.Fatalf("live preview: %d %s", before.Code, before.Body.String())
+			}
+			previewNotes, err := releasehistory.NotesFromSnapshot(before.Body.Bytes(), "260928120000.0.0", "test")
+			if err != nil || previewNotes.Hidden != 1 || len(previewNotes.Items) != 1 || previewNotes.Items[0].ID != visible || previewNotes.Fallback != "" {
+				t.Fatalf("live preview included marked work: %+v %v", previewNotes, err)
+			}
+			var stored int
+			f.tx(func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_release_note_snapshots WHERE release_node_id=$1`, f.release).Scan(&stored)
+			})
+			if stored != 0 {
+				t.Fatal("planning release froze notes")
+			}
+			edited := strings.Replace(visibleFields, "Know what changed.", "Edited before publication.", 1)
+			edited = strings.Replace(edited, `{`, `{"tags":[{"name":"bug"}],`, 1)
+			f.tx(func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, visible, edited)
+				return err
+			})
+			f.tx(func(tx pgx.Tx) error {
+				tag, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released', released_at=clock_timestamp() WHERE release_node_id=$1`, f.release)
+				if err != nil {
+					return err
+				}
+				if tag.RowsAffected() != 1 {
+					return fmt.Errorf("publish affected %d", tag.RowsAffected())
+				}
+				return nil
+			})
+			afterEdit := strings.Replace(edited, "Edited before publication.", "Edited after publication.", 1)
+			afterEdit = strings.Replace(afterEdit, `"tags":[{"name":"bug"}],`, "", 1)
+			if flag == "hide_from_release_notes" {
+				afterEdit = strings.Replace(afterEdit, `"hide_from_release_notes":false`, `"hide_from_release_notes":true`, 1)
+			} else {
+				afterEdit = strings.Replace(afterEdit, `{`, `{"no_release_needed":true,`, 1)
+			}
+			f.tx(func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, visible, afterEdit); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, hidden, strings.Replace(hiddenFields, `"`+flag+`":true`, `"`+flag+`":false`, 1))
+				return err
+			})
+			frozen := f.request(f.person, http.MethodGet, path, "")
+			if frozen.Code != 200 || !strings.Contains(frozen.Body.String(), "Edited before publication.") || strings.Contains(frozen.Body.String(), "Edited after publication.") {
+				t.Fatalf("frozen snapshot: %d %s", frozen.Code, frozen.Body.String())
+			}
+			var snap releasehistory.NoteSnapshot
+			if err := json.Unmarshal(frozen.Body.Bytes(), &snap); err != nil {
+				t.Fatal(err)
+			}
+			if !snap.Frozen {
+				t.Fatal("published snapshot is not frozen")
+			}
+			notes, err := releasehistory.NotesFromSnapshot(frozen.Body.Bytes(), "260928120000.0.0", "test")
+			if err != nil || notes.Hidden != 1 || len(notes.Items) != 1 || notes.Items[0].ID != visible || notes.Items[0].Group != releasehistory.GroupFixes || notes.Items[0].BenefitEN != "Edited before publication." || notes.Fallback != "" {
+				t.Fatalf("notes from benefits: %+v %v body %s", notes, err, frozen.Body.String())
+			}
+			encoded := string(mustNotes(t, notes))
+			if strings.Contains(encoded, hidden) || strings.Contains(encoded, "Stay out of the notes.") {
+				t.Fatal("hidden ticket copied into notes")
+			}
+			err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE journey_release_note_snapshots SET snapshot=snapshot WHERE release_node_id=$1`, f.release)
+				return err
+			})
+			if err == nil || !strings.Contains(err.Error(), "immutable") {
+				t.Fatalf("update: %v", err)
+			}
+			err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `DELETE FROM journey_release_note_snapshots WHERE release_node_id=$1`, f.release)
+				return err
+			})
+			if err == nil || !strings.Contains(err.Error(), "immutable") {
+				t.Fatalf("delete: %v", err)
+			}
 
-	// A release inserted already published freezes membership committed with it.
-	born := f.existing("release", f.project, "Born published", "open")
-	member := f.existing("ticket", f.project, "Member at birth", "open")
-	bornFields := `{"pill_en":"Born with notes","pill_de":"Mit Notizen geboren","benefit_en":"The first text stays.","benefit_de":"Der erste Text bleibt.","hide_from_release_notes":false}`
-	f.tx(func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, member, bornFields); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number,state,released_at) VALUES($1,$2,$3,2,'released',clock_timestamp())`, f.person.TenantID, born, f.project); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source) VALUES($1,$2,$3,$4,0,'manual')`, f.person.TenantID, member, f.project, born)
-		return err
-	})
-	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, member, strings.Replace(bornFields, "The first text stays.", "Rewritten later.", 1))
-		return err
-	})
-	got := f.request(f.person, http.MethodGet, "/api/projects/"+f.project+"/releases/"+born+"/note-snapshot", "")
-	if got.Code != 200 || !strings.Contains(got.Body.String(), "The first text stays.") || strings.Contains(got.Body.String(), "Rewritten later.") {
-		t.Fatalf("created published: %d %s", got.Code, got.Body.String())
+			// A release inserted already published freezes membership committed with it.
+			born := f.existing("release", f.project, "Born published", "open")
+			member := f.existing("ticket", f.project, "Member at birth", "open")
+			bornFields := `{"pill_en":"Born with notes","pill_de":"Mit Notizen geboren","benefit_en":"The first text stays.","benefit_de":"Der erste Text bleibt.","hide_from_release_notes":false}`
+			f.tx(func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, member, bornFields); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number,state,released_at) VALUES($1,$2,$3,2,'released',clock_timestamp())`, f.person.TenantID, born, f.project); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,release_node_id,walker_position,source) VALUES($1,$2,$3,$4,0,'manual')`, f.person.TenantID, member, f.project, born)
+				return err
+			})
+			f.tx(func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, member, strings.Replace(bornFields, "The first text stays.", "Rewritten later.", 1))
+				return err
+			})
+			got := f.request(f.person, http.MethodGet, "/api/projects/"+f.project+"/releases/"+born+"/note-snapshot", "")
+			if got.Code != 200 || !strings.Contains(got.Body.String(), "The first text stays.") || strings.Contains(got.Body.String(), "Rewritten later.") {
+				t.Fatalf("created published: %d %s", got.Code, got.Body.String())
+			}
+
+		})
+	}
+	for _, unavailable := range []string{"deleted", "non_work"} {
+		t.Run("no_release_needed/"+unavailable, func(t *testing.T) {
+			f := ticketSetup(t)
+			visible := f.existing("ticket", f.project, "Shown", "open")
+			content := f.existing("ticket", f.project, "Unavailable content", "open")
+			membershipOK(t, f.addExisting([]string{visible, content}, 1, false))
+			f.tx(func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"pill_en":"Software change","pill_de":"Neue Software","benefit_en":"Visible software benefit.","benefit_de":"Sichtbarer Software-Nutzen."}'::jsonb WHERE id=$1`, visible); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"no_release_needed":true,"hide_from_release_notes":false,"benefit_en":"Content benefit must not leak.","private_other_field":"not exported"}'::jsonb WHERE id=$1`, content); err != nil {
+					return err
+				}
+				if unavailable == "deleted" {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=statement_timestamp() WHERE id=$1`, content)
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id=(SELECT id FROM node_kinds WHERE tenant_id=$2 AND slug='memory') WHERE id=$1`, content, f.person.TenantID)
+				return err
+			})
+			path := "/api/projects/" + f.project + "/releases/" + f.release + "/note-snapshot"
+			check := func(frozen bool) {
+				t.Helper()
+				response := f.request(f.person, http.MethodGet, path, "")
+				if response.Code != http.StatusOK {
+					t.Fatalf("snapshot: %d %s", response.Code, response.Body.String())
+				}
+				var snapshot releasehistory.NoteSnapshot
+				if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
+					t.Fatal(err)
+				}
+				if snapshot.Frozen != frozen || len(snapshot.Tickets) != 2 || snapshot.Tickets[1].ID != content || snapshot.Tickets[1].Unavailable == "" {
+					t.Fatalf("unavailable member was not retained: %+v", snapshot)
+				}
+				var fields map[string]any
+				if err := json.Unmarshal(snapshot.Tickets[1].Fields, &fields); err != nil {
+					t.Fatal(err)
+				}
+				if len(fields) != 2 || fields["no_release_needed"] != true || fields["hide_from_release_notes"] != false {
+					t.Fatalf("unavailable member flags: %s", snapshot.Tickets[1].Fields)
+				}
+				notes, err := releasehistory.NotesFromSnapshot(response.Body.Bytes(), "260928120000.0.0", "test")
+				if err != nil || notes.Hidden != 1 || len(notes.Items) != 1 || notes.Items[0].ID != visible || len(notes.Gaps) != 1 {
+					t.Fatalf("unavailable content included in notes or gaps: %+v %v", notes, err)
+				}
+				if strings.Contains(response.Body.String(), "private_other_field") || strings.Contains(string(mustNotes(t, notes)), content) {
+					t.Fatal("unavailable content leaked into release notes")
+				}
+			}
+			check(false)
+			f.tx(func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released', released_at=statement_timestamp() WHERE release_node_id=$1`, f.release)
+				return err
+			})
+			f.tx(func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"no_release_needed":false}'::jsonb WHERE id=$1`, content)
+				return err
+			})
+			check(true)
+		})
 	}
 }
-
 func TestPublishedBeforeSnapshotsDoesNotFollowTicketEdits(t *testing.T) {
 	f := ticketSetup(t)
 	visible := f.existing("ticket", f.project, "Historical member", "open")

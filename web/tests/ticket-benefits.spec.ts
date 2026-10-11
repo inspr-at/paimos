@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { controlStability } from './control-stability'
 
 test('ticket benefits edit together with a precondition and preserve unrelated fields', async ({ page }) => {
   const errors = watchErrors(page)
@@ -16,15 +17,25 @@ test('ticket benefits edit together with a precondition and preserve unrelated f
   await ws.getByLabel('Pill · Deutsch').fill('Verständliche Release Notes')
   await ws.getByLabel('Benefit · English').fill('Tickets explain what you gain.')
   await ws.getByLabel('Benefit · Deutsch').fill('Tickets erklären den Nutzen.')
-  await ws.getByLabel('Hide from release notes').check()
+  const releaseControls = await controlStability(page, {
+    noRelease: ws.getByLabel('No release needed', { exact: true }),
+    hidden: ws.getByLabel('Hide from release notes', { exact: true }),
+    group: ws.locator('.release-controls'),
+    save: ws.getByRole('button', { name: 'Save', exact: true }),
+  })
+  await releaseControls.check(() => ws.getByLabel('No release needed', { exact: true }).check())
+  await releaseControls.check(() => ws.getByLabel('No release needed', { exact: true }).uncheck())
+  await releaseControls.check(() => ws.getByLabel('No release needed', { exact: true }).check())
+  await releaseControls.check(() => ws.getByLabel('Hide from release notes').check())
+  releaseControls.done()
   await ws.getByRole('button', { name: 'Save', exact: true }).click()
   const benefits = ws.getByRole('region', { name: 'User benefit' })
   await expect(benefits).toContainText('Tickets erklären den Nutzen.')
-  await expect(benefits).toContainText('Hidden from release notes')
+  await expect(benefits).toContainText('No release needed')
   await expect(benefits).not.toContainText('Before Done')
   const write = calls.find(c => c.method === 'PATCH' && c.path === `/api/nodes/${target.id}`)!
   expect(write.headers['if-unmodified-since']).toBeTruthy()
-  expect(write.body).toEqual({ fields: { ...prior, pill_en: 'Clear release notes', pill_de: 'Verständliche Release Notes', benefit_en: 'Tickets explain what you gain.', benefit_de: 'Tickets erklären den Nutzen.', hide_from_release_notes: true } })
+  expect(write.body).toEqual({ fields: { ...prior, pill_en: 'Clear release notes', pill_de: 'Verständliche Release Notes', benefit_en: 'Tickets explain what you gain.', benefit_de: 'Tickets erklären den Nutzen.', hide_from_release_notes: true, no_release_needed: true } })
   expect(errors).toEqual([])
 })
 

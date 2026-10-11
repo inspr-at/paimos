@@ -440,6 +440,11 @@ func queueCompatDeliveryWith(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	if err != nil {
 		return err
 	}
+	if state == "pending" && strings.HasPrefix(in.To, "grok_bot:") {
+		if err := notifyRoutineTarget(ctx, tx, p.TenantID, target); err != nil {
+			return err
+		}
+	}
 	return appendEvent(events.Change{Type: "inbox.delivery_queued", After: d})
 }
 func (m *messaging) getDeliveries(w http.ResponseWriter, r *http.Request) {

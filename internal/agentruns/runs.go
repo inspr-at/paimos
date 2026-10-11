@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/accountuse"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
@@ -28,6 +30,7 @@ import (
 )
 
 type Run struct {
+	RoutineLaunchID           *string `json:"routine_launch_id,omitempty"`
 	ReservationsSettled       *bool   `json:"reservations_settled,omitempty"`
 	RecoveryBrief             string  `json:"recovery_brief,omitempty"`
 	RecoveryTier              string  `json:"recovery_service_tier,omitempty"`
@@ -88,12 +91,16 @@ type UsageRecorder func(context.Context, pgx.Tx, tenant.Principal, Run, Telemetr
 type CompletionReviewer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange, *[]events.Change) error
 type CompletionPreparer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange) (bool, error)
 type module struct {
-	queueTimeout  func(context.Context, time.Duration) (context.Context, context.CancelFunc)
-	leadAdmission harness.LeadAdmission
-	reviews       CompletionReviewer
-	prepare       CompletionPreparer
-	pool          *pgxpool.Pool
-	usage         UsageRecorder
+	routines         RoutineLaunchChecks
+	routineQueue     RoutineQueueDispatcher
+	queueHintMu      sync.Mutex
+	queueHintReaders map[string]int
+	queueTimeout     func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	leadAdmission    harness.LeadAdmission
+	reviews          CompletionReviewer
+	prepare          CompletionPreparer
+	pool             *pgxpool.Pool
+	usage            UsageRecorder
 }
 
 // New returns the /api/runs and /api/work-orders/{id}/runs module. The optional
@@ -120,6 +127,7 @@ func NewWithReviews(pool *pgxpool.Pool, usage UsageRecorder, reviews CompletionR
 	return &module{pool: pool, usage: usage, reviews: reviews, prepare: prepare}
 }
 func (m *module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/runs/queued/notifications", m.queueNotifications)
 	m.mountQueue(mux)
 	for _, route := range []struct {
 		pattern, scope string
@@ -187,11 +195,11 @@ const columns = `id::text,work_order_id::text,agent_principal_id::text,model_pro
  EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at,trace,waiting_ms,
  coalesce((SELECT q.handover FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),'null'::jsonb),
  coalesce((SELECT q.service_tier FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),''),
- (SELECT q.display_label FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id)`
+ (SELECT q.display_label FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),routine_launch_id::text`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.WaitingMS, &v.recoveryHandover, &v.RecoveryTier, &v.RecoveryLabel)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.WaitingMS, &v.recoveryHandover, &v.RecoveryTier, &v.RecoveryLabel, &v.RoutineLaunchID)
 
 	var compact bytes.Buffer
 	if err == nil && json.Compact(&compact, v.recoveryHandover) == nil {
@@ -530,11 +538,12 @@ func releaseObsoleteClaim(ctx context.Context, tx pgx.Tx, p tenant.Principal, v 
 
 func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Daemon       string        `json:"daemon_id"`
-		Generation   string        `json:"daemon_generation"`
-		Reservations []string      `json:"reservation_ids"`
-		Refusal      string        `json:"verification_unavailable"`
-		Handoff      *WorkerPickup `json:"handoff,omitempty"`
+		Daemon       string                    `json:"daemon_id"`
+		Generation   string                    `json:"daemon_generation"`
+		Reservations []string                  `json:"reservation_ids"`
+		Refusal      string                    `json:"verification_unavailable"`
+		Handoff      *WorkerPickup             `json:"handoff,omitempty"`
+		Routine      *agentsetup.RoutinePickup `json:"routine,omitempty"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -577,6 +586,21 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, err
 	}
 	if err = validatePickupHandoff(ctx, tx, p, v, o, in.Handoff); err != nil {
+		return nil, err
+	}
+	if in.Routine != nil && in.Handoff != nil && in.Routine.WorktreeID != in.Handoff.WorktreeID {
+		return nil, workorders.Fail(409, "routine_handoff_worktree_changed")
+	}
+	if v.RoutineLaunchID != nil {
+		grant, err := routineTrace(v)
+		if err != nil {
+			return nil, err
+		}
+		if grant == nil || r.Header.Get(agentpairing.LedgerGenerationHeader) != grant.LedgerGeneration {
+			return nil, workorders.Fail(409, "routine_ledger_generation_changed")
+		}
+	}
+	if err = m.validateRoutinePickup(ctx, tx, p, v, o, in.Routine, in.Daemon, in.Generation); err != nil {
 		return nil, err
 	}
 	if v.ReadOnlyReview && r.Header.Get(reviewgate.PolicyHeader) != reviewgate.Policy {
@@ -731,7 +755,11 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			return nil, workorders.Fail(409, "escalation waits for fresh measured account room")
 		}
 	}
-	if err := agentaccounts.ValidateReservedCapacity(ctx, tx, v.ID, *v.AccountID); err != nil {
+	var starts []agentaccounts.RoutineStartCheck
+	if v.RoutineLaunchID != nil && m.routines.Start != nil {
+		starts = append(starts, m.routines.Start(p))
+	}
+	if err := agentaccounts.ValidateReservedCapacity(ctx, tx, v.ID, *v.AccountID, starts...); err != nil {
 		if v.Purpose == "managed" && agentaccounts.ReservedRouteChanged(err) {
 			return releaseObsoleteClaim(ctx, tx, p, v, "account_moved_out_of_group")
 		}
@@ -747,6 +775,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, err
 	}
 	if err = acceptPickupHandoff(ctx, tx, v, in.Handoff); err != nil {
+		return nil, err
+	}
+	if err = acceptRoutinePickup(ctx, tx, v, in.Routine); err != nil {
 		return nil, err
 	}
 	before := v

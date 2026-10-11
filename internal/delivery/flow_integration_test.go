@@ -20,6 +20,7 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func flowEventCount(t *testing.T, f *fixture) int {
@@ -291,6 +292,93 @@ func appendFlowSource(t *testing.T, f *fixture, c events.Change) {
 		_, err := events.Append(t.Context(), tx, f.agent, c)
 		return err
 	})
+}
+
+func TestDeliveryFlowProjectorUsesPartialEventIndex(t *testing.T) {
+	// Risk (migrations): installations without OPS's manual index scan the
+	// unrelated event tail every round; predicate drift makes the index unusable.
+	f := newFixture(t)
+	ctx := t.Context()
+	const migration = "1328_delivery_flow_event_index.sql"
+	var originalOID uint32
+	if err := f.d.App.QueryRow(ctx, `SELECT indexrelid FROM pg_index
+		WHERE indexrelid='events_delivery_flow_idx'::regclass AND indisvalid`).Scan(&originalOID); err != nil {
+		t.Fatal(err)
+	}
+	// Model an installation where OPS created the index before migration 1328.
+	if tag, err := f.d.App.Exec(ctx, `DELETE FROM schema_migrations WHERE version=$1`, migration); err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("remove migration record: %v (%d rows)", err, tag.RowsAffected())
+	}
+	if err := db.MigrateWithHook(ctx, f.d.App, nil); err != nil {
+		t.Fatal(err)
+	}
+	var oid uint32
+	if err := f.d.App.QueryRow(ctx, `SELECT indexrelid FROM pg_index
+		WHERE indexrelid='events_delivery_flow_idx'::regclass AND indisvalid`).Scan(&oid); err != nil {
+		t.Fatal(err)
+	}
+	if oid != originalOID {
+		t.Fatal("migration rebuilt the existing valid index")
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO events(tenant_id,actor_principal_id,node_id,type,after)
+			SELECT $1,$2,$3,CASE WHEN n=2049 THEN 'delivery.workxqueue.queued' ELSE 'node.updated' END,'{}'::jsonb
+			FROM generate_series(1,2049) AS n`, f.person.TenantID, f.agent.ID, f.ticket)
+		return err
+	})
+	for _, kind := range []string{"delivery.work_queue.queued", "delivery.review.queued", "delivery.state_changed"} {
+		appendFlowSource(t, f, events.Change{NodeID: &f.ticket, Type: kind, After: map[string]any{}})
+	}
+	if _, err := f.d.Admin.Exec(ctx, `ANALYZE events`); err != nil {
+		t.Fatal(err)
+	}
+	// Use the production query, normal planner settings, and the projector's
+	// restricted app role and read snapshot: tenant_id comes from RLS.
+	err := db.InTenantReadSnapshot(db.AllProjects(ctx, "delivery flow index test"), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, "EXPLAIN "+flowSourceEventsSQL, int64(1024), flowSyncBatch)
+		if err != nil {
+			return err
+		}
+		var plan strings.Builder
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				rows.Close()
+				return err
+			}
+			plan.WriteString(line + "\n")
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if !strings.Contains(plan.String(), "Index Scan using events_delivery_flow_idx") || !strings.Contains(plan.String(), "id >") {
+			return fmt.Errorf("projector did not use the partial cursor index:\n%s", plan.String())
+		}
+		rows, err = tx.Query(ctx, flowSourceEventsSQL, int64(1024), flowSyncBatch)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		var kinds []string
+		for rows.Next() {
+			var e flowSourceEvent
+			if err := rows.Scan(&e.ID, &e.Type, &e.NodeID, &e.At, &e.Before, &e.After, &e.Metadata); err != nil {
+				return err
+			}
+			kinds = append(kinds, e.Type)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if got := strings.Join(kinds, ","); got != "delivery.work_queue.queued,delivery.review.queued,delivery.state_changed" {
+			return fmt.Errorf("projector event types: %s", got)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestDeliveryFlowProjectsPaimosRoundsReviewsAndHolds(t *testing.T) {
@@ -1501,5 +1589,201 @@ func TestDeliveryFlowStepKeyCheckKeepsGuardingAfterWidening(t *testing.T) {
 	var pgErr *pgconn.PgError
 	if err := update("catalog"); !errors.As(err, &pgErr) || pgErr.Code != "23514" || pgErr.ConstraintName != "delivery_flow_steps_step_key_check" {
 		t.Fatalf("an unknown key must violate the step_key check: %v", err)
+	}
+}
+
+type flowScanTraceKey struct{}
+
+// flowScanBarrier pauses after the source rows are read, while their transaction
+// is still open. Separate pools give each pass its own deterministic barrier.
+type flowScanBarrier struct {
+	paused      chan struct{}
+	resume      chan struct{}
+	tenantLocks atomic.Int32
+	rows        atomic.Int64
+}
+
+func (b *flowScanBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if data.SQL == db.TenantFenceSQL {
+		b.tenantLocks.Add(1)
+	}
+	if strings.Contains(data.SQL, "FROM events") && strings.Contains(data.SQL, `delivery.work\_queue.%`) {
+		return context.WithValue(ctx, flowScanTraceKey{}, true)
+	}
+	return ctx
+}
+
+func (b *flowScanBarrier) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if ctx.Value(flowScanTraceKey{}) != true {
+		return
+	}
+	b.rows.Store(data.CommandTag.RowsAffected())
+	select {
+	case b.paused <- struct{}{}:
+	case <-ctx.Done():
+		return
+	}
+	select {
+	case <-b.resume:
+	case <-ctx.Done():
+	}
+}
+
+func flowBarrierModule(t *testing.T, f *fixture) (*Module, *flowScanBarrier) {
+	t.Helper()
+	b := &flowScanBarrier{paused: make(chan struct{}, 1), resume: make(chan struct{})}
+	cfg := f.d.App.Config()
+	cfg.ConnConfig.Tracer = b
+	cfg.MaxConns = 2
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	m := New(pool, f.m.config, nil, f.gh, nil)
+	m.now = f.m.now
+	return m, b
+}
+
+func waitFlowBarrier(t *testing.T, ctx context.Context, reached <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-reached:
+	case <-ctx.Done():
+		t.Fatalf("flow barrier not reached: %v", ctx.Err())
+	}
+}
+
+func startFlowPass(ctx context.Context, m *Module, tid string) <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		more, err := m.SyncFlow(ctx, tid)
+		if err == nil && more {
+			err = errors.New("small flow batch unexpectedly reports more events")
+		}
+		done <- err
+	}()
+	return done
+}
+
+func waitFlowPass(t *testing.T, ctx context.Context, done <-chan error) {
+	t.Helper()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatalf("flow pass did not finish: %v", ctx.Err())
+	}
+}
+
+func TestDeliveryFlowEmptyPassDoesNotLockTenant(t *testing.T) {
+	// Risk: an idle projector stalls all tenant writers while scanning an
+	// unrelated event tail, or takes the tenant lock after that scan.
+	f := newFixture(t)
+	appendFlowSource(t, f, events.Change{NodeID: &f.ticket, Type: "node.updated", After: map[string]any{"title": "Unrelated event"}})
+	m, scan := flowBarrierModule(t, f)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	pass := startFlowPass(ctx, m, f.person.TenantID)
+	waitFlowBarrier(t, ctx, scan.paused)
+	acquired, release := make(chan struct{}), make(chan struct{})
+	writer := make(chan error, 1)
+	go func() {
+		writer <- db.InTenant(db.AllProjects(ctx, "concurrent flow test writer"), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+			if err := db.LockTenant(ctx, tx, f.person.TenantID); err != nil {
+				return err
+			}
+			close(acquired)
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+	}()
+	waitFlowBarrier(t, ctx, acquired)
+	close(scan.resume)
+	// Keep the writer's lock until the entire empty pass has returned.
+	waitFlowPass(t, ctx, pass)
+	close(release)
+	waitFlowPass(t, ctx, writer)
+	if scan.rows.Load() != 0 || scan.tenantLocks.Load() != 0 {
+		t.Fatalf("empty pass read %d matching events and took %d tenant locks", scan.rows.Load(), scan.tenantLocks.Load())
+	}
+	var cursors int
+	f.tx(t, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_flow_cursors`).Scan(&cursors)
+	})
+	if cursors != 0 || flowEventCount(t, f) != 0 {
+		t.Fatalf("empty pass wrote %d cursors or flow events", cursors)
+	}
+}
+
+func TestDeliveryFlowConcurrentPassesApplyEachEventOnce(t *testing.T) {
+	// Risk: passes that read the same cursor duplicate intermediate actor
+	// changes, regress the cursor, or drop the unapplied tail of a newer batch.
+	for _, partial := range []bool{false, true} {
+		name := "same_batch"
+		if partial {
+			name = "overlapping_batch"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			round := Round{RoundInput: RoundInput{Ticket: f.ticket, Slug: "aeon-848", Kind: "first_build", Number: 1}, ID: requestID(1), Project: f.project}
+			appendRound := func(state, claimant string, at time.Time) {
+				r := round
+				r.State, r.Claimant = state, &claimant
+				appendFlowSource(t, f, queueChange(f.project, "transition", nil, queueSnapshot{Project: f.project, Round: &r}, at))
+			}
+			appendRound("claimed", f.agent.ID, f.at)
+			appendRound("running", f.person.ID, f.at.Add(time.Minute))
+			first, firstScan := flowBarrierModule(t, f)
+			firstPass := startFlowPass(ctx, first, f.person.TenantID)
+			waitFlowBarrier(t, ctx, firstScan.paused)
+			if partial {
+				appendRound("done", f.person.ID, f.at.Add(2*time.Minute))
+			}
+			second, secondScan := flowBarrierModule(t, f)
+			secondPass := startFlowPass(ctx, second, f.person.TenantID)
+			waitFlowBarrier(t, ctx, secondScan.paused)
+			want := int64(2)
+			if partial {
+				want = 3
+			}
+			if firstScan.rows.Load() != 2 || secondScan.rows.Load() != want {
+				t.Fatalf("passes did not read overlapping source events: %d, %d", firstScan.rows.Load(), secondScan.rows.Load())
+			}
+			close(firstScan.resume)
+			waitFlowPass(t, ctx, firstPass)
+			close(secondScan.resume)
+			waitFlowPass(t, ctx, secondPass)
+			var changes, steps int64
+			var cursor, last int64
+			var actor string
+			var ended *time.Time
+			f.tx(t, func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='delivery.step'`).Scan(&changes); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_flow_steps`).Scan(&steps); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `SELECT actor_principal_id::text,ended_at FROM delivery_flow_steps WHERE source_key=$1`, "work/"+round.ID).Scan(&actor, &ended); err != nil {
+					return err
+				}
+				return tx.QueryRow(t.Context(), `SELECT last_event_id,(SELECT max(id) FROM events WHERE type LIKE 'delivery.work\_queue.%') FROM delivery_flow_cursors`).Scan(&cursor, &last)
+			})
+			if changes != want || steps != 1 || actor != f.person.ID || cursor != last {
+				t.Fatalf("changes %d want %d, steps %d, actor %s, cursor %d last source %d", changes, want, steps, actor, cursor, last)
+			}
+			if partial && (ended == nil || !ended.Equal(f.at.Add(2*time.Minute))) || !partial && ended != nil {
+				t.Fatalf("unapplied tail completion: %v", ended)
+			}
+		})
 	}
 }

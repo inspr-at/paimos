@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -189,10 +190,16 @@ func projectLeadWait(l Lead, now time.Time) Lead {
 	return l
 }
 
-func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead) (Lead, error) {
-	// AEON-734: the production launch policy remains OFF until AEON-603 proof.
-	// Admission injection supplies checks only; it must never enable launch.
-	l.AutomaticLaunchEnabled = false
+func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead, readers ...modelregistry.ExecutionRuntimeReader) (Lead, error) {
+	var reader modelregistry.ExecutionRuntimeReader
+	if len(readers) > 0 {
+		reader = readers[0]
+	}
+	policy, err := modelregistry.ProjectExecutionTx(ctx, tx, p.TenantID, l.ProjectID, reader)
+	if err != nil {
+		return l, err
+	}
+	l.AutomaticLaunchEnabled = policy.AutomaticLaunchEnabled
 	active, err := leadProject(ctx, tx, l.ProjectID)
 	if err != nil {
 		return l, err
@@ -253,7 +260,7 @@ func (m *Module) readLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if err != nil {
 		return nil, err
 	}
-	return projectLead(r.Context(), tx, p, l)
+	return m.projectLead(r.Context(), tx, p, l)
 }
 func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
@@ -315,7 +322,7 @@ func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = workorders.Record(ctx, tx, p, id, "lead.start_requested", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }
 
 // Removing an intent never erases a generation's immutable history. The same
@@ -538,7 +545,7 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err = workorders.Record(ctx, tx, p, id, "lead.claim_checked", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }
 
 func (m *Module) pauseLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
@@ -616,7 +623,7 @@ func (m *Module) pauseLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if err = record(ctx, tx, p, Session{ProjectID: id}, "lead_paused", before, l); err != nil {
 		return nil, err
 	}
-	return projectLead(ctx, tx, p, l)
+	return m.projectLead(ctx, tx, p, l)
 }
 
 // RequireCurrentLeadTx is the shared fence for accepted assignments (AEON-735)
@@ -655,6 +662,52 @@ func RequireCurrentLeadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, pr
 		return authz.ErrForbidden
 	}
 	return nil
+}
+
+// RequireRoutineLeadDispatchTx is the server-owned counterpart to the leased
+// HTTP pickup. It is restricted to a persisted consenting routine, the owner's
+// existing live generation and its exact bound dispatch key. It cannot adopt a
+// session, rebind a credential or grant authority from a queue entry.
+func RequireRoutineLeadDispatchTx(ctx context.Context, tx pgx.Tx, tenantID, routine, project, owner, session string, generation int64, admission LeadAdmission) (tenant.Principal, error) {
+	p := tenant.Principal{TenantID: tenantID, Kind: tenant.Agent}
+	var bound bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_runs WHERE id=$1 AND output_project_id=$2 AND owner_principal_id=$3 AND execute_consent AND consent_revision=definition_revision)`, routine, project, owner).Scan(&bound); err != nil {
+		return p, err
+	}
+	if !bound {
+		return p, workorders.Fail(409, "routine_intent_required")
+	}
+	l, err := loadLead(ctx, tx, project, true)
+	if err != nil {
+		return p, err
+	}
+	if l.owner != owner || l.SessionID == nil || *l.SessionID != session || l.Generation != generation {
+		return p, workorders.Fail(409, "stale_lead_generation")
+	}
+	if err = tx.QueryRow(ctx, `SELECT agent_principal_id::text FROM harness_sessions WHERE id=$1`, session).Scan(&p.ID); err != nil {
+		return p, err
+	}
+	if err = authz.RequireQueueDispatcherTx(ctx, tx, tenantID, p.ID, l.dispatchKey, project); err != nil {
+		return p, err
+	}
+	if err = tx.QueryRow(ctx, `SELECT scopes,coalesce(created_by_principal_id::text,''),full_access FROM agent_keys WHERE id=$1`, l.dispatchKey).Scan(&p.Scopes, &p.KeyCreatorID, &p.FullAccess); err != nil {
+		return p, err
+	}
+	p.Scopes = authz.ResolveKeyScopes(p.Scopes, p.FullAccess)
+	p.KeyID, p.AuthKeyID = l.dispatchKey, l.dispatchKey
+	if err = RequireCurrentLeadTx(ctx, tx, p, project, session, generation); err != nil {
+		return p, err
+	}
+	s, err := load(ctx, tx, project, session, false)
+	if err != nil {
+		return p, err
+	}
+	m := Module{leadAdmission: admission}
+	reason, err := m.checkLeadAdmission(ctx, tx, p, owner, s)
+	if err == nil && reason != "" {
+		err = workorders.Fail(409, "lead admission wait: "+reason)
+	}
+	return p, err
 }
 
 // Existing general coordinator registrations are observational. Once explicitly

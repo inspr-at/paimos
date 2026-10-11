@@ -6,8 +6,11 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/agentsetup"
 )
 
 const (
@@ -24,6 +27,17 @@ func noLocalProcess(r Record) bool {
 }
 
 func validateLaunchRecord(r Record) error {
+	if w := r.RoutineWorkspace; w != nil {
+		checkoutLaunch := w.CheckoutLaunchID
+		if checkoutLaunch == "" {
+			checkoutLaunch = w.Grant.LaunchID
+		}
+		if w.Grant.Validate() != nil || w.Grant.TenantID != r.TenantID || w.Grant.PrincipalID != r.PrincipalID || w.Grant.AgentRunID != r.RunID || w.Grant.DaemonGeneration != r.Generation ||
+			w.Path != r.Workspace || !filepath.IsAbs(w.Path) || !agentsetup.RoutineDigest(w.ID) || !uuidPattern.MatchString(checkoutLaunch) || w.Branch != "routine/"+checkoutLaunch ||
+			r.AccountID != "" && r.AccountID != w.Grant.AccountID || r.WorkerPickup != nil && r.WorkerPickup.WorktreeID != w.ID {
+			return errors.New("invalid durable routine workspace")
+		}
+	}
 	if r.LedgerGroup != "" {
 		if len(r.LedgerGroup) != 32 || !uuidPattern.MatchString(r.LedgerGeneration) {
 			return errors.New("invalid durable ledger coordinates")

@@ -13,7 +13,8 @@ import KeyCap from '../KeyCap.vue'
 // Once open, each block keeps the place that count gave it, so a sort key cannot
 // rebalance the menu. A narrow window gets a sheet: a pinned title and action
 // around a body that scrolls. `plain` is every other header: just the display
-// options, in the popover as it was.
+// options, in the popover as it was, or in the same sheet when the filter sheet's
+// link opens Display with no Display button in sight (AEON-1188).
 const props = defineProps<{ anchor: HTMLElement | null; sheet: boolean; plain?: boolean }>()
 const emit = defineEmits<{ columns: [count: number]; done: [] }>()
 const body = ref<HTMLElement>()
@@ -223,12 +224,14 @@ onBeforeUnmount(() => { alive = false; cancelAnimationFrame(frame); window.remov
 </script>
 
 <template>
-  <slot v-if="plain" />
+  <slot v-if="plain && !sheet" />
   <div v-else class="display-menu" :class="{ 'as-sheet': sheet }" :style="{ '--col-w': `${MENU_COLUMN_WIDTH}px`, '--col-gap': `${MENU_COLUMN_GAP}px` }">
     <header v-if="sheet"><h2>Display</h2></header>
     <div ref="body" class="menu-body" :data-columns="columns">
-      <slot name="nav" />
-      <slot name="hide" />
+      <template v-if="!plain">
+        <slot name="nav" />
+        <slot name="hide" />
+      </template>
       <slot />
     </div>
     <footer v-if="sheet"><button type="button" class="btn primary done" @click="emit('done')"><AppIcon name="check" :size="14" />Done<KeyCap k="esc" /></button></footer>

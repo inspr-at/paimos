@@ -36,6 +36,7 @@ func (d Display) FullName() string { return strings.TrimSpace(d.DisplayName + " 
 // Profile is one immutable model pin.
 type Profile struct {
 	Source   string     `json:"source"`
+	Origin   string     `json:"origin"`
 	Note     string     `json:"note"`
 	RetireAt *time.Time `json:"retire_at"`
 	Retired  bool       `json:"retired"`
@@ -85,70 +86,28 @@ func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, eventType st
 }
 
 func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
-	var n int
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
-		return nil, err
-	}
-	if n > 0 {
-		changes, err := prepareAdditionalCatalog(ctx, tx, p)
-		if err != nil {
-			return nil, err
-		}
-		upgraded, err := prepareCatalogUpgrade(ctx, tx, p)
-		return append(changes, upgraded...), err
-	}
 	if err := catalogLock(ctx, tx); err != nil {
 		return nil, err
 	}
-	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
+	var version string
+	err := tx.QueryRow(ctx, `SELECT catalog_version FROM model_refresh_settings`).Scan(&version)
+	if err != nil && err != pgx.ErrNoRows {
 		return nil, err
 	}
-	if n > 0 {
-		changes, err := prepareAdditionalCatalog(ctx, tx, p)
-		if err != nil {
-			return nil, err
-		}
-		upgraded, err := prepareCatalogUpgrade(ctx, tx, p)
-		return append(changes, upgraded...), err
+	if version == CatalogVersion {
+		return nil, nil
 	}
-	profiles := catalogProfiles()
-	ids := make(map[string]string, len(profiles))
-	disabled := make(map[string]bool, len(profiles))
-	seeded := make([]Profile, 0, len(profiles))
-	for _, profile := range profiles {
-		row, err := insertActivatedProfile(ctx, tx, p, profileWrite{
-			Slug: profile.Slug, Version: profile.Version, Harness: profile.Harness,
-			Family: profile.Family, Model: profile.Model, Effort: profile.Effort, Tier: profile.Tier,
-		}, true, modelactivation.ShippedCatalog)
-		if err != nil {
-			return nil, err
-		}
-		ids[profile.Slug] = row.ID
-		disabled[profile.Slug] = !row.Enabled
-		seeded = append(seeded, row)
-	}
-	routes := make([]Route, 0)
-	for _, route := range defaultRoutes(profiles) {
-		id := ids[route.Slug]
-		if id == "" {
-			return nil, fail(http.StatusInternalServerError, "catalog route is missing its profile")
-		}
-		if disabled[route.Slug] {
-			continue
-		}
-		stored := Route{Role: route.Role, Priority: route.Priority, ProfileID: id, State: "available"}
-		if err := insertRoute(ctx, tx, p.TenantID, stored); err != nil {
-			return nil, err
-		}
-		routes = append(routes, stored)
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2) ON CONFLICT (tenant_id) DO UPDATE SET catalog_version=EXCLUDED.catalog_version`, p.TenantID, CatalogVersion); err != nil {
+	if err := bootstrapCatalogFacts(ctx, tx, p.TenantID); err != nil {
 		return nil, err
 	}
-	return []events.Change{{Type: evSeeded, After: struct {
-		Profiles []Profile `json:"profiles"`
-		Routes   []Route   `json:"routes"`
-	}{seeded, routes}}}, nil
+	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2) ON CONFLICT(tenant_id) DO UPDATE SET catalog_version=EXCLUDED.catalog_version`, p.TenantID, CatalogVersion); err != nil {
+		return nil, err
+	}
+	event := "model.catalog_upgraded"
+	if err == pgx.ErrNoRows {
+		event = evSeeded
+	}
+	return []events.Change{{Type: event, After: map[string]any{"version": CatalogVersion, "bootstrap": "ids_only"}}}, nil
 }
 
 // Discovery records a pin without granting it to wildcard accounts.
@@ -158,6 +117,14 @@ func insertObservedProfile(ctx context.Context, tx pgx.Tx, tenantID string, in p
 
 func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite, enabled bool, cause modelactivation.Cause) (Profile, error) {
 	var out Profile
+	if in.DisplayName == "" {
+		display, err := catalogPinDisplay(ctx, tx, in)
+		if err != nil {
+			return out, err
+		}
+		in.Display = display
+	}
+
 	overrides := map[string]string{}
 	if in.DisplayName != "" {
 		overrides["display_name"] = in.DisplayName
@@ -167,6 +134,15 @@ func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	}
 	if in.ModelVersion != "" {
 		overrides["model_version"] = in.ModelVersion
+	}
+	if cause == modelactivation.ShippedCatalog {
+		in.Source = "shipped"
+	}
+	// Keep the stored auto/manual contract readable by older servers. Origin
+	// is server-owned metadata, ignored by the existing display projection.
+	switch in.Source {
+	case "manual", "shipped", "provider", "harness":
+		overrides["origin"] = in.Source
 	}
 	stored, err := modelactivation.Activate(ctx, tx, p, modelactivation.Pin{
 		Slug: in.Slug, Version: in.Version, Harness: in.Harness, Family: in.Family,
@@ -182,10 +158,9 @@ func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			FROM model_profile_display WHERE tenant_id=$1::uuid AND profile_id=$2::uuid`, p.TenantID, out.ID).
 			Scan(&out.DisplayName, &out.ShortName, &out.ModelVersion, &out.EffortLevel, &out.Provider)
 	}
-	if out.Harness == "gemini" {
-		out.EffortLevel = harnesslaunch.GeminiEffortLevel(out.Effort)
-	}
+
 	out.Source, out.Note = profileSource(in.Source), in.Note
+	out.Origin = profileOrigin(out, in.Source)
 	if in.RegisteredEffortLevel != nil {
 		out.EffortLevel = in.RegisteredEffortLevel
 	}
@@ -220,7 +195,7 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 
 func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, error) {
 	query := `
-		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.note,''),
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.display_overrides->>'origin',''), coalesce(p.note,''),
  (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
  EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
@@ -234,7 +209,7 @@ func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, er
 // listPickerProfiles bounds editor metadata before decoding and excludes retired revisions.
 func listPickerProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	return readProfiles(ctx, tx, `
-		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.note,''),
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.display_overrides->>'origin',''), coalesce(p.note,''),
  (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
  EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
@@ -251,12 +226,11 @@ func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 	out := []Profile{}
 	for rows.Next() {
 		var profile Profile
-		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Note, &profile.RetireAt, &profile.Retired); err != nil {
+		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Origin, &profile.Note, &profile.RetireAt, &profile.Retired); err != nil {
 			return nil, err
 		}
-		if profile.Harness == "gemini" {
-			profile.EffortLevel = harnesslaunch.GeminiEffortLevel(profile.Effort)
-		}
+		profile.Source = profileSource(profile.Source)
+		profile.Origin = profileOrigin(profile, profile.Origin)
 		out = append(out, profile)
 	}
 	return out, rows.Err()
@@ -547,4 +521,17 @@ func flushCatalogChanges(ctx context.Context, tx pgx.Tx, p tenant.Principal, cha
 		}
 	}
 	return nil
+}
+
+// Origin preserves the legacy auto/manual source contract while exposing provenance.
+// Later working observations cannot relabel an immutable shipped pin.
+func profileOrigin(p Profile, stored string) string {
+	switch stored {
+	case "manual", "shipped", "provider", "harness":
+		return stored
+	}
+	if p.Source == "manual" {
+		return "manual"
+	}
+	return "harness"
 }

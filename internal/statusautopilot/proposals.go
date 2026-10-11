@@ -241,7 +241,7 @@ func proposalEligible(ctx context.Context, tx pgx.Tx, c candidate, s Settings, d
 		}
 		return nil
 	}
-	if !s.Enabled || !s.Rules["publish"].Enabled || pending(c.Node) || normaliseState(c.Node.State) != "done" || c.Node.ProjectID == nil {
+	if !s.Enabled || !s.Rules["publish"].Enabled || pending(c.Node) || noReleaseNeeded(c.Node) || normaliseState(c.Node.State) != "done" || c.Node.ProjectID == nil {
 		return events.ErrConflict
 	}
 	var title, version string

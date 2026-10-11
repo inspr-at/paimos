@@ -297,7 +297,7 @@ func manifestSnapshot(ctx context.Context, tx pgx.Tx, actor tenant.Principal, pr
 	// Capture the complete field set in one MVCC statement. Only current tickets
 	// in this tenant/project can resolve the manifest's approximate membership.
 	rows, err := tx.Query(ctx, `SELECT n.id::text,n.key,n.updated_at,coalesce(n.state,''),
-  (SELECT coalesce(jsonb_object_agg(f.key,f.value),'{}'::jsonb) FROM jsonb_each(n.fields) f WHERE f.key IN ('pill_en','pill_de','benefit_en','benefit_de','hide_from_release_notes')),
+  (SELECT coalesce(jsonb_object_agg(f.key,f.value),'{}'::jsonb) FROM jsonb_each(n.fields) f WHERE f.key IN ('pill_en','pill_de','benefit_en','benefit_de','hide_from_release_notes','no_release_needed')),
   statement_timestamp(), aeon_release_note_group(n.fields)
   FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
   WHERE n.project_id=$1 AND n.key=ANY($2::text[]) AND n.deleted_at IS NULL AND k.slug IN ('work','ticket')
@@ -333,11 +333,7 @@ func manifestSnapshot(ctx context.Context, tx pgx.Tx, actor tenant.Principal, pr
 func snapshotNoteCounts(tickets []releasehistory.NoteTicket) (notes, hidden int, gapKeys []string) {
 	gapKeys = []string{}
 	for _, ticket := range tickets {
-		var flags struct {
-			Hidden bool `json:"hide_from_release_notes"`
-		}
-		_ = json.Unmarshal(ticket.Fields, &flags)
-		if flags.Hidden {
+		if ticketbenefits.OmitFromReleaseNotes(ticket.Fields) {
 			hidden++
 			continue
 		}

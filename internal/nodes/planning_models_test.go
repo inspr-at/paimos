@@ -20,7 +20,9 @@ func TestPlanningRegistryVersionAndEffortPins(t *testing.T) {
 		for _, version := range []string{"5", "5.5"} {
 			raw, _ := json.Marshal(map[string]string{"display_name": "Claude Opus", "short_name": "Opus", "model_version": version})
 			var profile string
-			if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,display_overrides) VALUES($1,$2,'profile-revision','claude','anthropic','opus','high','strong',$3) RETURNING id::text`, w.admin.TenantID, "pin-"+strings.ReplaceAll(version, ".", "-"), string(raw)).Scan(&profile); err != nil {
+			// Risk: planning must honor explicit registered metadata while
+			// leaving a mismatched or unregistered session's effort unknown.
+			if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,display_overrides,registered_effort_level) VALUES($1,$2,'profile-revision','claude','anthropic','opus','high','strong',$3,3) RETURNING id::text`, w.admin.TenantID, "pin-"+strings.ReplaceAll(version, ".", "-"), string(raw)).Scan(&profile); err != nil {
 				return err
 			}
 			_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET model_profile_id=$2::uuid WHERE ticket_node_id=$1 AND model=$3`, n.ID, profile, "legacy-"+strings.ReplaceAll(version, ".", "-"))

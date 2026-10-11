@@ -46,6 +46,14 @@ func TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes(t *testing.T) {
 	project := "/api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	for _, tc := range []struct{ method, path, want string }{
 		{"GET", "/api/projects", "nodes.read"},
+		{"GET", "/api/projects/lookup?ref=AEON", "nodes.read"},
+		{"HEAD", "/api/projects/lookup?ref=AEON", "nodes.read"},
+		{"POST", "/api/projects/lookup", ""},
+		{"PUT", "/api/projects/lookup", ""},
+		{"PATCH", "/api/projects/lookup", ""},
+		{"DELETE", "/api/projects/lookup", ""},
+		{"GET", "/api/projects/lookup/extra", ""},
+		{"GET", "/api/projects/unlisted", ""},
 		{"GET", "/api/releases", "releases.read"},
 		{"HEAD", "/api/releases", "releases.read"},
 		{"GET", "/api/releases/260929113854.0.0", "releases.read"},
@@ -226,6 +234,7 @@ func TestCoordinatorScopesReachWorkRoutes(t *testing.T) {
 		"GET /api/inbox/messages", "POST /api/inbox/messages/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/ack",
 		"POST /api/inbox/messages", "POST /api/inbox/session-binding",
 		"GET /api/nodes/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		"GET /api/projects/lookup?ref=AEON", "HEAD /api/projects/lookup?ref=AEON",
 		"GET /api/projects", "GET /api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/messages/listen",
 		"POST /api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/messages/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/ack",
 	} {

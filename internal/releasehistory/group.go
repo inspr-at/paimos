@@ -5,6 +5,8 @@ package releasehistory
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/ticketbenefits"
 )
 
 // Display groups for one change. The version bump has no group.
@@ -60,8 +62,7 @@ func ParseTicketMeta(kind string, fields json.RawMessage) TicketMeta {
 	if bugTag(raw["tags"]) {
 		meta.Bug = true
 	}
-	var hidden bool
-	_ = json.Unmarshal(raw["hide_from_release_notes"], &hidden)
+	hidden := ticketbenefits.OmitFromReleaseNotes(fields)
 	note := TicketNote{
 		PillEN: textField(raw["pill_en"]), PillDE: textField(raw["pill_de"]),
 		BenefitEN: textField(raw["benefit_en"]), BenefitDE: textField(raw["benefit_de"]),

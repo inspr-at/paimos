@@ -192,6 +192,7 @@ const went = computed(() => ctx.value && props.mode !== 'live' ? sets.value.map(
 const releaseRecord = computed(() => ctx.value && sets.value[0] ? recordOf(sets.value[0].main, ctx.value) : null)
 const emptyText = computed(() => {
   const t = text.value
+  if (props.empty === 'none') return [t.none, t.noneB]
   return props.empty === 'live' ? [t.nothingLive, t.nothingLiveB] : props.empty === 'release' ? [t.noRelease, ''] : [t.noRuns, '']
 })
 </script>

@@ -66,7 +66,8 @@ func queueReleaseTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string) 
  ) members ON members.id=n.id::text
  JOIN journey_releases r ON r.release_node_id=$1 AND r.tenant_id=n.tenant_id AND n.project_id=r.project_node_id
  JOIN nodes release ON release.tenant_id=r.tenant_id AND release.id=r.release_node_id AND release.deleted_at IS NULL
- WHERE n.deleted_at IS NULL AND `+candidateStateSQL+`='done' ON CONFLICT DO NOTHING`, releaseID, tenantID)
+ WHERE n.deleted_at IS NULL AND `+candidateStateSQL+`='done'
+ AND n.fields->'no_release_needed' IS DISTINCT FROM 'true'::jsonb ON CONFLICT DO NOTHING`, releaseID, tenantID)
 	return err
 }
 
@@ -128,7 +129,7 @@ func deliveryBatchTx(ctx context.Context, tx pgx.Tx, tenantID, releaseID string,
 		c, _, err := loadCandidate(ctx, item, d.id, d.published)
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = nil
-		} else if err == nil && c.Node.ProjectID != nil && *c.Node.ProjectID == d.project && normaliseState(c.Node.State) == "done" && !c.Since.After(d.published) {
+		} else if err == nil && c.Node.ProjectID != nil && *c.Node.ProjectID == d.project && normaliseState(c.Node.State) == "done" && !noReleaseNeeded(c.Node) && !c.Since.After(d.published) {
 			waiting = pending(c.Node)
 			suggesting = s.ModeAt(now) == "suggest"
 			err = enact(ctx, item, p, c.Node, deliveryDecision(c.Node, d.release, d.title, d.version), s.ModeAt(now))

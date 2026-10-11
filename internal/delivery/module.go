@@ -25,7 +25,8 @@ type Module struct {
 	flowSlots      chan struct{}
 	// flowStreamNow is the live stream's authorization clock. Nil uses the
 	// wall clock, so a frozen business clock cannot expire every heartbeat.
-	flowStreamNow func() time.Time
+	flowStreamNow   func() time.Time
+	webhookFailures webhookFailureLog
 }
 
 func New(pool *pgxpool.Pool, config crossreview.AppConfig, secret []byte, github GitHub, fanout func(context.Context, []byte) error) *Module {

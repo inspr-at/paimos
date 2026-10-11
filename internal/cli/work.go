@@ -32,6 +32,7 @@ type issueView struct {
 	BenefitEN           string            `json:"benefit_en,omitempty"`
 	BenefitDE           string            `json:"benefit_de,omitempty"`
 	Hide                bool              `json:"hide_from_release_notes,omitempty"`
+	NoReleaseNeeded     bool              `json:"no_release_needed,omitempty"`
 	Warnings            []string          `json:"warnings,omitempty"`
 	IssueKey            string            `json:"issue_key"`
 	Title               string            `json:"title"`
@@ -90,6 +91,7 @@ func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 		}
 	}
 	hidden, _ := fields["hide_from_release_notes"].(bool)
+	noRelease, _ := fields["no_release_needed"].(bool)
 	var estimate *float64
 	if h, ok := fieldNumber(fields["estimate_hours"]); ok && validEstimate(h) {
 		estimate = &h
@@ -98,7 +100,7 @@ func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 		IsLeaf: n.IsLeaf, Depth: n.Depth, LevelName: n.LevelName, LevelIcon: n.LevelIcon,
 		Queued:        n.Queued,
 		EstimateHours: estimate, EstimateSource: fieldString(fields, "estimate_source"), EstimateBy: fieldString(fields, "estimate_by"), EstimateAt: fieldString(fields, "estimate_at"),
-		PillEN: fieldString(fields, "pill_en"), PillDE: fieldString(fields, "pill_de"), BenefitEN: fieldString(fields, "benefit_en"), BenefitDE: fieldString(fields, "benefit_de"), Hide: hidden, Warnings: n.Warnings,
+		PillEN: fieldString(fields, "pill_en"), PillDE: fieldString(fields, "pill_de"), BenefitEN: fieldString(fields, "benefit_en"), BenefitDE: fieldString(fields, "benefit_de"), Hide: hidden, NoReleaseNeeded: noRelease, Warnings: n.Warnings,
 		IssueKey:            n.Key,
 		Title:               n.Title,
 		Type:                kinds.slug(n.KindID),
@@ -135,6 +137,9 @@ func (rt *runtime) printIssue(v issueView) error {
 	fmt.Fprintf(rt.stdout, "  type:     %s\n", v.Type)
 	fmt.Fprintf(rt.stdout, "  status:   %s\n", v.Status)
 	fmt.Fprintf(rt.stdout, "  priority: %s\n", v.Priority)
+	if v.NoReleaseNeeded {
+		fmt.Fprintln(rt.stdout, "  release:  no release needed")
+	}
 	if v.EstimateHours != nil {
 		fmt.Fprintf(rt.stdout, "  estimate: %gh (%s)\n", *v.EstimateHours, v.EstimateSource)
 	}

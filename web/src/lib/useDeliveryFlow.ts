@@ -5,7 +5,7 @@
 // project, mode and run it was asked for: a stale answer is dropped, a failed read shows
 // an error rather than an old answer and stays there until Retry or a bounded refresh.
 // The run list is kept, so a failure cannot change the derived run and start another read.
-// Without any recorded run the labelled example shows.
+// Without any recorded run every mode shows one empty state; Flow never shows sample data (AEON-1135).
 import { computed, onBeforeUnmount, ref, shallowRef, watch, type Ref } from 'vue'
 import type { DeliveryLanguage } from './delivery'
 import { pick, type FlowData } from './deliveryFlow'
@@ -13,12 +13,12 @@ import {
   arionTarget, compareData, FLOW_HINTS, flowStreamURL, liveData, parseHint, readFlow, readFlowRun, recordedRuns, replayData, runTitle,
   type ApiFlow, type ApiItem, type Recorded,
 } from './deliveryFlowData'
-import { exampleCompare, exampleLive, exampleReplay, EXAMPLE_REPLAY, exampleRun } from './deliveryFlowExample'
 import type { FlowMode } from './deliveryFlowModes'
 import { flowText, put } from './deliveryFlowText'
 
 export interface FlowChoice { id: string; label: string }
-export type FlowEmpty = 'live' | 'runs' | 'release' | null
+/** Why nothing shows: no recorded run at all, nothing in flight, no replayable run, no release to race. */
+export type FlowEmpty = 'none' | 'live' | 'runs' | 'release' | null
 const LIVE_HOURS = 4, LIST_DAYS = 30, LIVE_POLL_MS = 60_000, HINT_DELAY_MS = 400
 const RETRY_MS = [2_000, 5_000, 15_000, 30_000] as const
 
@@ -36,12 +36,13 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
   const list = shallowRef<ApiFlow | null>(null)
   const live = shallowRef<Recorded | null>(null)
   const single = shallowRef<Recorded | null>(null)
-  /** project|mode|run|example that `phase === ready` belongs to. Empty after a failure. */
+  /** project|mode|run|none that `phase === ready` belongs to. Empty after a failure. */
   const loadedView = ref('')
   let generation = 0
   let reading: AbortController | null = null
 
-  const example = computed(() => !!list.value && list.value.items.length === 0)
+  /** The project has no recorded run in the list window. */
+  const none = computed(() => !!list.value && list.value.items.length === 0)
   const releases = computed(() => (list.value?.items ?? []).filter(item => item.kind === 'release' && list.value!.steps.some(s => s.item_id === item.id && s.step_key === 'a')))
   const replayable = computed(() => (list.value?.items ?? []).filter(item => list.value!.steps.some(s => s.item_id === item.id)))
   const byStart = (a: ApiItem, b: ApiItem) => Date.parse(b.started_at ?? '') - Date.parse(a.started_at ?? '') || 0
@@ -49,7 +50,7 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
   const runId = computed(() => {
     const mode = options.mode(), asked = options.run()
     if (mode === 'live') return null
-    if (example.value) return mode === 'compare' ? 'r126' : EXAMPLE_REPLAY.includes(asked as 'r126') ? asked : 'r126'
+    if (none.value) return null
     const pool = (mode === 'compare' ? releases.value : replayable.value).slice().sort(byStart)
     // By default the latest release, else the latest run.
     return pool.find(item => item.id === asked)?.id ?? pool.find(item => item.kind === 'release')?.id ?? pool[0]?.id ?? null
@@ -59,10 +60,6 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
   const choices = computed<FlowChoice[]>(() => {
     const mode = options.mode(), lang = options.lang(), text = flowText(lang)
     if (mode === 'live') return []
-    if (example.value) {
-      if (mode === 'compare') return [{ id: 'r126', label: put(text.vsTarget, { a: 'Release 126' }) }]
-      return EXAMPLE_REPLAY.map(id => { const run = exampleRun(id)!; return { id, label: `${pick(run.title, lang)} (${run.facts?.ended != null ? text.final : text.soFarRun})` } })
-    }
     const pool = (mode === 'compare' ? releases.value : replayable.value).slice().sort(byStart)
     return pool.map(item => mode === 'compare'
       ? { id: item.id, label: put(text.vsTarget, { a: pick(runTitle(item), lang) }) }
@@ -73,7 +70,7 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
   function viewToken() {
     const mode = options.mode()
     const run = mode === 'live' ? '' : (runId.value ?? '')
-    return `${options.projectId()}|${mode}|${run}|${example.value ? 'example' : 'recorded'}`
+    return `${options.projectId()}|${mode}|${run}|${none.value ? 'none' : 'recorded'}`
   }
   const status = computed<'loading' | 'ready' | 'error'>(() => {
     if (phase.value === 'error') return 'error'
@@ -84,7 +81,7 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
   const data = computed<FlowData | null>(() => {
     const mode = options.mode(), lang = options.lang()
     if (status.value !== 'ready') return null
-    if (example.value) return mode === 'live' ? exampleLive() : mode === 'replay' ? exampleReplay(runId.value ?? 'r126') : exampleCompare(lang)
+    if (none.value) return null
     if (mode === 'live') return live.value ? liveData(live.value) : null
     const rec = single.value, run = rec?.runs[0]
     if (!rec || !run || run.id !== runId.value) return null
@@ -93,12 +90,13 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
   })
   const empty = computed<FlowEmpty>(() => {
     if (status.value !== 'ready' || data.value) return null
+    if (none.value) return 'none'
     const mode = options.mode()
     return mode === 'live' ? 'live' : mode === 'compare' ? 'release' : 'runs'
   })
   /** Changes when the view should start over (another mode or run); new data alone keeps the view. */
-  const key = computed(() => `${options.projectId()}|${options.mode()}|${runId.value ?? ''}|${example.value ? 'example' : 'recorded'}`)
-  const truncated = computed(() => !example.value && !!((options.mode() === 'live' ? live.value?.truncated : single.value?.truncated) || list.value?.truncated))
+  const key = computed(() => `${options.projectId()}|${options.mode()}|${runId.value ?? ''}|${none.value ? 'none' : 'recorded'}`)
+  const truncated = computed(() => !none.value && !!((options.mode() === 'live' ? live.value?.truncated : single.value?.truncated) || list.value?.truncated))
 
   // ---------- Reading ----------
   async function load(scope: 'all' | 'view' = 'all') {
@@ -114,7 +112,7 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
         if (turn !== generation) return
         list.value = answer
       }
-      if (!example.value) {
+      if (!none.value) {
         if (mode === 'live') {
           const answer = await readFlow(projectId, { from: new Date(now - LIVE_HOURS * 3_600_000) }, signal)
           if (turn !== generation) return
@@ -154,7 +152,7 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
     retries = 0
     // A hint about another run changes the run list; a hint about the shown run changes the view.
     const shown = options.mode() === 'live' || hint.item_id === runId.value
-    pending = example.value || !shown || pending === 'all' ? 'all' : 'view'
+    pending = none.value || !shown || pending === 'all' ? 'all' : 'view'
     clearTimeout(hintTimer)
     hintTimer = setTimeout(() => { const scope = pending ?? 'view'; pending = null; void load(scope) }, HINT_DELAY_MS)
   }
@@ -180,7 +178,8 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
   }
   function startPoll() {
     clearInterval(pollTimer)
-    pollTimer = setInterval(() => { if (options.active() && options.mode() === 'live' && !example.value) void load('view') }, LIVE_POLL_MS)
+    // Without a recorded run the list is read again, so the first run shows without a reload.
+    pollTimer = setInterval(() => { if (options.active() && options.mode() === 'live') void load(none.value ? 'all' : 'view') }, LIVE_POLL_MS)
   }
 
   watch(() => [options.active(), options.projectId()] as const, ([active], before) => {
@@ -196,5 +195,5 @@ export function useDeliveryFlow(options: FlowLoadOptions) {
   })
   onBeforeUnmount(() => { disconnect(); clearInterval(pollTimer); clearTimeout(hintTimer); generation++; reading?.abort() })
 
-  return { status: status as Readonly<Ref<'loading' | 'ready' | 'error'>>, data, example, empty, choices, runId, key, truncated, retry }
+  return { status: status as Readonly<Ref<'loading' | 'ready' | 'error'>>, data, empty, choices, runId, key, truncated, retry }
 }

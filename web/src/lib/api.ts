@@ -23,7 +23,7 @@ import type { TicketEta } from './eta.ts'
 import type { TicketEstimate } from './estimates.ts'
 import type { TicketPlanning } from './planning.ts'
 import { rowStore } from './rowStore.ts'
-import type { HistoryFilter, Recurrence, RecurrenceHistoryEntry, RecurrenceInput, RecurrencePreview, RecurrenceRelease, RecurrenceResult } from './recurrences'
+import type { ExecutionPrincipal, HistoryFilter, Recurrence, RecurrenceHistoryEntry, RecurrenceInput, RecurrencePreview, RecurrenceRelease, RecurrenceResult, RoutineExecutionSettings, RoutineGuardPolicy, RoutineScopeKind } from './recurrences'
 
 export interface Version { version: string; scheme: string; brand?: import('./brand').Brand; codename?: string }
 
@@ -38,6 +38,17 @@ export const previewRecurrenceDraft = (input: RecurrenceInput, signal?: AbortSig
 export const previewRecurrence = (id: string, signal?: AbortSignal) => json<RecurrencePreview>(`/recurrences/${encodeURIComponent(id)}/preview?count=4`, 'GET', undefined, {}, signal)
 export const recurrenceHistory = (id: string, filter: HistoryFilter, before?: number, signal?: AbortSignal) => json<{ items: RecurrenceHistoryEntry[]; next_cursor: number | null }>(`/recurrences/${encodeURIComponent(id)}/history${query({ filter, before })}`, 'GET', undefined, {}, signal)
 export const recurrenceReleases = (id: string, signal?: AbortSignal) => json<{ items: RecurrenceRelease[]; truncated: boolean }>(`/recurrences/${encodeURIComponent(id)}/releases`, 'GET', undefined, {}, signal)
+// Routines (AEON-1182). Lists filter by definition scope before the bounded 100-row page.
+export const listRoutines = (filter: { projectId?: string; scope?: RoutineScopeKind; after?: string }, signal?: AbortSignal) => json<Page<Recurrence>>(`/recurrences${query({ project_id: filter.projectId, scope: filter.scope, after: filter.after })}`, 'GET', undefined, {}, signal)
+export const putRoutineConsent = (id: string, body: { expected_revision: number; execute_consent: boolean; execution_principal_id: string | null }, signal?: AbortSignal) => json<Recurrence>(`/recurrences/${encodeURIComponent(id)}/execution-consent`, 'PUT', body, {}, signal)
+export const getRoutineGuardrails = (id: string, signal?: AbortSignal) => json<RoutineGuardPolicy>(`/recurrences/${encodeURIComponent(id)}/guardrails`, 'GET', undefined, {}, signal)
+// AEON-1184: restricted agents the owner may pick, at most 100 a page; page on until next_cursor is null.
+export const listExecutionPrincipals = (id: string, after?: string, signal?: AbortSignal) => json<{ items: ExecutionPrincipal[]; next_cursor: string | null }>(`/recurrences/${encodeURIComponent(id)}/execution-principals${query({ after })}`, 'GET', undefined, {}, signal)
+export const getRoutineExecutionSettings = (projectId: string, signal?: AbortSignal) => json<RoutineExecutionSettings>(`/projects/${encodeURIComponent(projectId)}/routine-execution-settings`, 'GET', undefined, {}, signal)
+export const putRoutineExecutionSettings = (projectId: string, body: { expected_revision: number; automatic_launch_enabled: boolean; qualification_id: string | null }, signal?: AbortSignal) => json<RoutineExecutionSettings>(`/projects/${encodeURIComponent(projectId)}/routine-execution-settings`, 'PUT', body, {}, signal)
+// Kind of work for a routine's output project (one bounded page) and the route its effort resolves to today.
+export const listRoutineWorkKinds = (projectId: string, lang: string, signal?: AbortSignal) => json<Page<import('./workKinds').WorkKind>>(`/work-kinds${query({ project_id: projectId, limit: 100, lang })}`, 'GET', undefined, {}, signal)
+export const resolveRoutineRoute = (role: string, projectId: string, signal?: AbortSignal) => json<{ role: string; profile: import('./modelsSimple').RegistryProfile | null; owner_required: boolean }>(`/models/resolve${query({ role, project_id: projectId })}`, 'GET', undefined, {}, signal)
 
 export class StaleRequestError extends Error {}
 export class RequestFailure extends Error {

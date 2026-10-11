@@ -115,7 +115,8 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await page.screenshot({ path: info.outputPath(`computer-result-${width}-${theme}.png`), fullPage: true })
     await page.goto(`/settings/accounts?account=${ACCOUNTS.claude}`)
     const useRow = pane.locator(`.use-sec [data-account="${ACCOUNTS.claude}"]`)
-    const use = useRow.getByRole('switch', { name: /Agents may use it/ })
+    // AEON-1172: the switch sits in Limits on this account; the login row keeps its details.
+    const use = pane.locator(`[data-use="${ACCOUNTS.claude}"]`).getByRole('switch', { name: /Agents may use it/ })
     await use.scrollIntoViewIfNeeded()
     const useGuard = await controlStability(page, { use, details: useRow.getByRole('button', { name: /^Details for/ }), close: pane.getByRole('button', { name: 'Close details' }) })
     const initial = await use.getAttribute('aria-checked')
@@ -216,7 +217,7 @@ test('verification errors stay honest and changing computer discards pending fee
   })
   // The same approved account can be enrolled on multiple computers. The
   // clicked attention row must request only its own computer's verification.
-  await page.goto('/settings/accounts')
+  await page.goto('/settings/computers')
   const attention = page.locator(`[data-need="verify:${other.computer_id}:${ACCOUNTS.claude}"]`)
   const attentionVerify = attention.locator('.verify-button')
   const attentionGuard = await controlStability(page, { attentionVerify })

@@ -98,6 +98,7 @@ type heartbeatOptions struct {
 	Interval          int
 	StateDir          string
 	Project           string
+	ProjectID         string
 	Agent             string
 	Harness           string
 	Generator         string
@@ -159,6 +160,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.int(&o.Interval, "interval", "seconds between beats (default 50)")
 			fs.string(&o.StateDir, "state-dir", 0, "private directory for registration and resume")
 			fs.string(&o.Project, "project", 'p', "project key")
+			fs.string(&o.ProjectID, "project-id", 0, "known project UUID; skips project-list lookup for registration and beats")
 			fs.string(&o.Agent, "agent", 0, "authenticated agent name")
 			fs.string(&o.Harness, "harness", 0, "execution family: "+runkind.Accepted)
 			fs.string(&o.Generator, "generator", 0, "public media generator label")
@@ -284,8 +286,11 @@ func (o *heartbeatOptions) prepare() error {
 	if strings.TrimSpace(o.StateDir) == "" {
 		return usagef("--state-dir is required")
 	}
-	if strings.TrimSpace(o.Project) == "" {
-		return usagef("--project is required")
+	if strings.TrimSpace(o.Project) == "" && o.ProjectID == "" {
+		return usagef("--project or --project-id is required")
+	}
+	if o.ProjectID != "" && !validUUID(o.ProjectID) {
+		return usagef("--project-id must be a UUID")
 	}
 	if !agentNameRE.MatchString(o.Agent) {
 		return usagef("--agent must be a valid agent name")
@@ -430,6 +435,12 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 
 // heartbeatLoop serves both the PID observer and a one-shot child process.
 func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep heartbeatDeps, session *heartbeatSession) error {
+	defer func() {
+		if session.subagentScan != nil {
+			session.subagentScan.Close()
+			session.subagentScan = nil
+		}
+	}()
 	if dep.alive == nil {
 		pid, start := session.disk.OwnerPID, session.disk.OwnerStart
 		dep.alive = func(int) bool { return ownerAlive(pid, start) }
@@ -478,6 +489,7 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 		case err != nil:
 			fmt.Fprintf(rt.stderr, "heartbeat: beat failed: %s\n", err.Error())
 		default:
+			rt.heartbeatSubagents(ctx, session, false)
 			if serr := saveHeartbeatSession(session); serr != nil {
 				fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
 			}
@@ -559,6 +571,16 @@ func waitHeartbeat(ctx context.Context, pid int, alive func(int) bool, interval 
 }
 
 func (rt *runtime) finishHeartbeat(o heartbeatOptions, session *heartbeatSession) error {
+	if session.subagentScan != nil {
+		session.subagentScan.Close()
+		session.subagentScan = nil
+	}
+	session.subagentNames = nil
+	rt.heartbeatSubagents(context.Background(), session, true)
+	if session.subagentScan != nil {
+		session.subagentScan.Close()
+		session.subagentScan = nil
+	}
 	if !session.disk.Terminal {
 		usageCtx, cancel := context.WithTimeout(context.Background(), heartbeatUsageFlushTimeout)
 		rt.drainHeartbeatUsage(usageCtx, o, session)
@@ -846,6 +868,9 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		return heartbeatSession{}, false, err
 	}
 	if ok {
+		if o.ProjectID != "" && !strings.EqualFold(o.ProjectID, existing.disk.ProjectID) {
+			return heartbeatSession{}, false, usagef("--project-id differs from this generation's project")
+		}
 		if existing.disk.StartRev == "" {
 			existing.disk.StartRev, _ = gitHEAD(ctx, o.Worktree)
 		}
@@ -863,7 +888,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		fmt.Fprintf(rt.stderr, "heartbeat: owner %d failed the start check\n", o.OwnerPID)
 		return heartbeatSession{}, false, errOwnerGone
 	}
-	projectID, err := rt.harnessProjectCtx(ctx, o.Project)
+	projectID, err := rt.heartbeatProjectCtx(ctx, o.Project, o.ProjectID)
 	if err != nil {
 		return heartbeatSession{}, false, err
 	}
@@ -882,10 +907,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if err != nil {
 		return heartbeatSession{}, false, err
 	}
-	// A native coordinator session survives a helper process restart.
-	if o.Role == "coordinator" && o.SourceSession != "" {
-		ref = o.Harness + ":" + strings.ToLower(o.SourceSession)
-	}
+	ref = heartbeatRegistrationRef(o, ref)
 	label, haveLabel := resolveHeartbeatLabel(ctx, o, dep, true)
 	body := map[string]any{
 		"max_session_file_bytes": rules.SessionFileLimit(o.Harness), "rules_client_version": version.Version,
@@ -945,7 +967,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	}
 	// Capture the owner before registration: a long predecessor timeout must
 	// not attach the new generation to a process that reused the owner's PID.
-	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID, BoundTicket: boundTicket}
+	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID, BoundTicket: boundTicket, RegisteredRef: ref}
 	if proved.Start != "" {
 		disk.OwnerPID = proved.PID
 		disk.OwnerStart = proved.Start
@@ -1003,6 +1025,15 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		disk.SentLabel = label
 	}
 	return heartbeatSession{id: disk.SessionID, lease: lease, disk: disk, hold: session.hold}, true, nil
+}
+
+// A native coordinator session survives a helper process restart. Claim uses
+// the same rule for state written before the registered reference was saved.
+func heartbeatRegistrationRef(o heartbeatOptions, fallback string) string {
+	if o.Role == "coordinator" && o.SourceSession != "" {
+		return o.Harness + ":" + strings.ToLower(o.SourceSession)
+	}
+	return fallback
 }
 
 func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSession) error {
@@ -1162,11 +1193,14 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	// Resolve on the beat's context every time. A cached id would hide a
-	// cancelled lookup, and the shutdown path reads ProjectID instead.
-	projectID, err := rt.harnessProjectCtx(ctx, o.Project)
+	// The opt-in UUID avoids project-list reads, while context cancellation
+	// and the generation's existing project binding remain authoritative.
+	projectID, err := rt.heartbeatProjectCtx(ctx, o.Project, o.ProjectID)
 	if err != nil {
 		return err
+	}
+	if o.ProjectID != "" && session.disk.ProjectID != "" && !strings.EqualFold(projectID, session.disk.ProjectID) {
+		return usagef("--project-id differs from this generation's project")
 	}
 	var controls []heartbeatControl
 	if o.PrintControls {

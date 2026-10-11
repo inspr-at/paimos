@@ -38,6 +38,16 @@ paths:
       responses:
         '200': {description: Queued runs, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/AgentRun'}}}}}
         '403': {$ref: '#/components/responses/Error'}
+  /runs/queued/notifications:
+    get:
+      operationId: watchQueuedRunHints
+      description: "Content-free queue.wake SSE hints for an agent daemon using its existing run.read key. Initial wake after subscribing covers startup and reconnect gaps. Only changes to its own queued runs wake it; no run or event content is returned. The exact key is rechecked before each hint and every 15 seconds. Connections last at most 30 minutes, with at most two per principal and 32 per server. Hints grant no dispatch authority; lifecycle reconciliation, account freshness, routing and final claims remain required."
+      security: [{agentKey: []}]
+      responses:
+        '200': {description: "Queue hints and stream.ping keepalives", content: {text/event-stream: {schema: {type: string}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
   /runs/{runId}:
     get:
       operationId: getAgentRun
@@ -114,10 +124,24 @@ components:
         handoff:
           allOf: [{$ref: '#/components/schemas/WorkerPickup'}]
           description: Required for a lead-routed assignment. Accepts the exact frozen brief and revisions with a host-local opaque worktree identity. Claim commits launch_unknown only after every pickup and reservation check succeeds, before any local process launch. A replay must retain this pickup and daemon generation; response loss is recovered through the existing durable daemon journal, never a second launch.
+        routine:
+          allOf: [{$ref: '#/components/schemas/RoutinePickup'}]
+          description: 'Required for a routine launch intent. Binds qualified capability and exact daemon artifact to one opaque owner worktree; ordinary legacy claims omit it. Missing or stale evidence refuses routine launch before accepting a writer.'
         verification_unavailable:
           type: string
           enum: [adapter_unsupported, binding_incomplete, local_binding_missing]
           description: Fail an owned unclaimed pairing verification without launching it. Requires its owning computer principal and enrolled daemon; managed and already claimed runs are rejected. Idempotent for the same refusal. Records verification_error=verification_unavailable and verification_reason, and releases reserved allowance.
+    RoutinePickup:
+      type: object
+      additionalProperties: false
+      required: [launch_id, worktree_id, capability, daemon_digest, capability_digest, computer_id]
+      properties:
+        launch_id: {type: string, format: uuid}
+        worktree_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        capability: {type: string, const: routine_execution_v1}
+        daemon_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        capability_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        computer_id: {type: string, format: uuid}
     RunTelemetry:
       type: object
       description: "A status report requires status, effective_model or a recognized error_code. Model and error evidence preserve the current run state when status is omitted. Empty status reports remain invalid."

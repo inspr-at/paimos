@@ -3,14 +3,14 @@
 import { api } from './api.ts'
 import { sessionGone } from './authz.ts'
 
-export type SectionId = 'personal' | 'theme' | 'developer' | 'policies' | 'models' | 'workspace' | 'vocabulary' | 'kinds' | 'access' | 'agents' | 'agent-rules' | 'accounts' | 'autopilot' | 'business' | 'portal'
+export type SectionId = 'personal' | 'theme' | 'developer' | 'policies' | 'models' | 'routines' | 'workspace' | 'vocabulary' | 'kinds' | 'access' | 'agents' | 'agent-rules' | 'accounts' | 'computers' | 'capacity' | 'autopilot' | 'business' | 'portal'
 export const SETTINGS_GROUPS = ['You', 'Workspace', 'Agents and automation', 'Business'] as const
 export type SettingsGroup = typeof SETTINGS_GROUPS[number]
 // Explicit grants keep Access, rules and accounts independent of admin role.
 export interface SettingsSection { id: SectionId; group: SettingsGroup; label: string; summary: string; who: string; admin: boolean; permission?: string | string[]; deniedTitle?: string; denied?: string; fresh?: boolean }
 export const anyOf = (permission: string | string[], allowed: (permission: string) => boolean) => (Array.isArray(permission) ? permission : [permission]).some(allowed)
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
-  { id: 'personal', group: 'You', label: 'Personal', summary: 'Mode, greeting and keys', who: 'Everyone has this section. Changes apply only to you.', admin: false },
+  { id: 'personal', group: 'You', label: 'Personal', summary: 'Mode, greeting, keys, routines', who: 'Everyone has this section. Changes apply only to you.', admin: false },
   { id: 'theme', group: 'You', label: 'Theme', summary: 'Colours, agent looks', who: 'Everyone picks a theme and can make their own. Only admins change the workspace themes and the default.', admin: false },
   { id: 'developer', group: 'You', label: 'Developer', summary: 'For people working on Paimos itself', who: 'Everyone has this section. Changes apply only to you.', admin: false },
   { id: 'workspace', group: 'Workspace', label: 'Workspace', summary: 'Name, brand and in-app AI', who: 'Admins only see and change this section.', admin: true },
@@ -19,9 +19,14 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'access', group: 'Workspace', label: 'Access', summary: 'People, roles and agents', who: 'People with See members or Read access log permission see this section. Only people with the corresponding manage permission change roles and invites.', admin: true, permission: ['members.read', 'audit.read'] },
   { id: 'policies', group: 'Agents and automation', label: 'Policies', summary: 'Who may do what, when', who: 'Everyone can read policies. Changes need the corresponding policy permission.', admin: false },
   { id: 'models', group: 'Agents and automation', label: 'Models', summary: 'Which model does what', who: 'Everyone picks their own models here. Admins also set the default for everyone and can lock a choice.', admin: false, permission: 'models.read', deniedTitle: 'Models need permission to read them', denied: 'An admin can give permission to see models.', fresh: true },
+  // AEON-1182: workspace routines and the rules every routine follows (read-only here).
+  { id: 'routines', group: 'Agents and automation', label: 'Routines', summary: 'Workspace routines and rules', who: 'Everyone sees workspace routines and the rules every routine follows. Only admins change workspace routines.', admin: false, fresh: true },
   { id: 'agents', group: 'Agents and automation', label: 'Agents', summary: 'Activity, estimates, models', who: 'Admins only change this section. It applies to every project.', admin: true },
   { id: 'agent-rules', group: 'Agents and automation', label: 'Agent rules', summary: 'Rules for every agent', who: 'People who may read agent rules see this section. Changes need permission to manage rules.', admin: false, permission: 'rules.read', deniedTitle: 'Agent rules need permission to read them', denied: 'Reading agent rules needs the rules read permission. Project membership alone does not open this page.' },
-  { id: 'accounts', group: 'Agents and automation', label: 'Accounts and computers', summary: 'Accounts, computers, capacity', who: 'People who may read accounts see this section. Managing accounts and computers needs the corresponding manage permission; only admins change low-quota warnings.', admin: false, permission: 'account.read', deniedTitle: 'Accounts need permission to read them', denied: 'Agent accounts and their limits are visible to people who can read accounts.' },
+  // AEON-1171: one question each (AEON-1149); all three read the same accounts and computers.
+  { id: 'accounts', group: 'Agents and automation', label: 'Accounts', summary: 'Which logins agents use', who: 'People who may read accounts see this section. Managing accounts needs the manage permission; only admins change low-quota warnings.', admin: false, permission: 'account.read', deniedTitle: 'Accounts need permission to read them', denied: 'Agent accounts and their limits are visible to people who can read accounts.' },
+  { id: 'computers', group: 'Agents and automation', label: 'Computers', summary: 'Where agents run', who: 'People who may read accounts see this section. Managing computers and their sign-ins needs the manage permission.', admin: false, permission: 'account.read', deniedTitle: 'Computers need permission to read accounts', denied: 'Computers and their sign-ins are visible to people who can read accounts.' },
+  { id: 'capacity', group: 'Agents and automation', label: 'Capacity', summary: 'How much, and when', who: 'People who may read accounts see this section. Changing the plan needs permission to manage accounts.', admin: false, permission: 'account.read', deniedTitle: 'Capacity needs permission to read accounts', denied: 'When agents work and how much they may use is visible to people who can read accounts.' },
   { id: 'autopilot', group: 'Agents and automation', label: 'Autopilot', summary: 'Moves tickets on its own', who: 'Admins only change the rules and overrides. Everyone who can edit a ticket works the flagged ones.', admin: true },
   { id: 'business', group: 'Business', label: 'Business', summary: 'Parts and quote settings', who: 'Admins only see and change this section.', admin: true },
   { id: 'portal', group: 'Business', label: 'Product portal', summary: 'Public catalog', who: 'Admins only see and change this section.', admin: true },

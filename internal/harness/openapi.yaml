@@ -572,7 +572,7 @@ components:
         state: {type: string, enum: [none, starting, working, waiting_for_room, paused, cannot_start]}
         reason: {type: string, description: 'Redacted machine-readable reason; contains no account or credential details. awaiting_generation means no claim yet; automatic_launch_disabled explains an unclaimed intent while launch is off; runtime_pickup_timeout means no runtime claimed an enabled start within five minutes. Admission failures name dial, harness, account or host; admission_unavailable means the admission adapter failed or is absent.'}
         process_active: {type: boolean, description: True until the bound harness generation has confirmed stopped; heartbeat loss and archive do not prove exit}
-        automatic_launch_enabled: {type: boolean, const: false, description: 'Server launch policy, independent of admission availability. Always false pending AEON-603; no setting or launch path is introduced. Older servers may omit this field; clients must treat omission as unavailable.'}
+        automatic_launch_enabled: {type: boolean, default: false, description: 'Effective person-owned project execution policy, independent of admission availability. Requires accepted exact-artifact coordinator/OPS qualification and matching current owner policy and trusted runtime facts. Defaults off; admission injection never enables it. This projection launches no process. Older servers may omit this field; clients must treat omission as unavailable.'}
     HarnessRemoveRequest:
       type: object
       additionalProperties: false

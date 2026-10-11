@@ -286,6 +286,7 @@ async function startEdit(focus: 'title' | 'body' | 'benefit' = 'title') {
 }
 function changeBenefit(key: string, value: string | boolean) {
   if (key === 'hide_from_release_notes' && typeof value === 'boolean') draft.hide_from_release_notes = value
+  else if (key === 'no_release_needed' && typeof value === 'boolean') draft.no_release_needed = value
   else if (typeof value === 'string' && benefitTextKeys.includes(key as typeof benefitTextKeys[number])) draft[key as typeof benefitTextKeys[number]] = value
   refreshBenefitNotice()
 }
@@ -318,6 +319,7 @@ async function saveEdit() {
   if (['ticket', 'work'].includes(target.kind_slug)) {
     for (const key of benefitTextKeys) setField(key, draft[key], base[key])
     if (draft.hide_from_release_notes !== base.hide_from_release_notes) changed.hide_from_release_notes = draft.hide_from_release_notes
+    if (draft.no_release_needed !== base.no_release_needed) changed.no_release_needed = draft.no_release_needed
   }
   if (Object.keys(changed).length) patch.fields = changed
   // The fields as the save will leave them, for the benefit check.

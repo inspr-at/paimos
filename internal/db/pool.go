@@ -21,15 +21,17 @@ import (
 // Per-server connection budget (Postgres max_connections=50):
 //
 //	pooled:    16, including session-lock workers and 2 foreground/probe slots
-//	dedicated: 1 optional phone-push listener + 1 per active event stream,
+//	dedicated: 1 shared routine listener + 1 optional phone-push listener
+//	           + 1 per active event stream,
 //	           agent subscription, inbox stream/long poll, harness notification
 //	           stream, or delivery flow stream; chat live uses no DB listener
 //	total:     16 + dedicated (not a fixed 16; CLI/admin/replicas need headroom)
 //
-// With phone push enabled, at most 33 client listeners fit in the remaining
-// 34 server slots BEFORE Postgres reserves and other clients. Subscription and
-// flow admission caps are each 64, not a global DB cap; lowering the pool alone
-// cannot bound client listeners. AEON_DATABASE_URL pool_max_conns overrides 16.
+// With routine dispatch and phone push enabled, at most 32 client listeners fit
+// in the remaining 34 server slots BEFORE Postgres reserves and other clients.
+// Subscription and flow admission caps are each 64, not a global DB cap; lowering
+// the pool alone cannot bound client listeners. AEON_DATABASE_URL pool_max_conns
+// overrides 16.
 const DefaultMaxConns int32 = 16
 const ForegroundReserve int32 = 2
 const ProbeAcquireTimeout = 100 * time.Millisecond

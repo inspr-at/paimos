@@ -157,11 +157,7 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 			label = t.ID
 		}
 		if t.Unavailable != "" {
-			var flags struct {
-				Hidden bool `json:"hide_from_release_notes"`
-			}
-			_ = json.Unmarshal(t.Fields, &flags)
-			if flags.Hidden {
+			if ticketbenefits.OmitFromReleaseNotes(t.Fields) {
 				out.Hidden++
 			} else {
 				out.Gaps = append(out.Gaps, label+": "+t.Unavailable)
@@ -176,11 +172,14 @@ func NotesFromSnapshot(raw []byte, version, source string) (*Notes, error) {
 			out.Gaps = append(out.Gaps, label+": ticket fields unavailable")
 			continue
 		}
-		hidden, validFlag := fields["hide_from_release_notes"].(bool)
-		if flag, present := fields["hide_from_release_notes"]; present && (!validFlag || flag == nil) {
-			return nil, fmt.Errorf("invalid snapshot hide flag")
+		for _, key := range []string{"hide_from_release_notes", "no_release_needed"} {
+			if flag, present := fields[key]; present {
+				if _, valid := flag.(bool); !valid {
+					return nil, fmt.Errorf("invalid snapshot %s flag", key)
+				}
+			}
 		}
-		if hidden {
+		if ticketbenefits.OmitFromReleaseNotes(t.Fields) {
 			out.Hidden++
 			continue
 		}

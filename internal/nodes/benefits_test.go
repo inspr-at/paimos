@@ -352,3 +352,53 @@ func TestTicketBenefitsCausalUndoCompletion(t *testing.T) {
 		}
 	}
 }
+
+// Risk: the mark is lost on an API round trip or malformed input changes policy.
+func TestNoReleaseNeededAPIRoundTrip(t *testing.T) {
+	p := newPrincipal(t, "content-work")
+	k := kindBySlug(t, p, "work")
+	fields := strings.TrimSuffix(benefitFields, "}") + `,"no_release_needed":true,"hide_from_release_notes":false,"notes":"Keep this"}`
+	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Scene edit","fields":%s}`, k.ID, fields))
+	check := func(raw []byte, want bool) {
+		t.Helper()
+		var got map[string]any
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got["no_release_needed"] != want || got["hide_from_release_notes"] != false || got["notes"] != "Keep this" {
+			t.Fatalf("fields lost: %s", raw)
+		}
+	}
+	code, raw := call(t, &p, "GET", "/api/nodes/"+n.ID, "")
+	check(decode[nodeJSON](t, code, raw, 200).Fields, true)
+	for _, bad := range []string{`null`, `"true"`, `1`} {
+		code, raw := call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"fields":{"no_release_needed":`+bad+`}}`)
+		if code != 422 || !strings.Contains(string(raw), "no_release_needed must be a boolean") {
+			t.Fatalf("bad mark: %d %s", code, raw)
+		}
+	}
+	fields = strings.Replace(fields, `"no_release_needed":true`, `"no_release_needed":false`, 1)
+	code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"fields":`+fields+`}`)
+	check(decode[nodeJSON](t, code, raw, 200).Fields, false)
+	code, raw = call(t, &p, "GET", "/api/nodes/"+n.ID, "")
+	check(decode[nodeJSON](t, code, raw, 200).Fields, false)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET status_autopilot='{"missed_release":true}'::jsonb WHERE id=$1`, n.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	fields = strings.Replace(fields, `"no_release_needed":false`, `"no_release_needed":true`, 1)
+	code, raw = call(t, &p, "PATCH", "/api/nodes/"+n.ID, `{"fields":`+fields+`}`)
+	marked := decode[nodeJSON](t, code, raw, 200)
+	check(marked.Fields, true)
+	var response struct {
+		Marks map[string]bool `json:"status_autopilot"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Marks["missed_release"] {
+		t.Fatal("content kept an obsolete missed-release flag")
+	}
+}

@@ -87,10 +87,10 @@ hello`, messageID)
 		{"target set routine key files", []string{"message", "target", "set", "--project", "AEON", "--address", "grok_bot:receiver", "--adapter", "grok_bot_routine", "--kind", "https_webhook", "--target-ref-file", webhookRef, "--target-key-file", keyFile}, []string{"POST " + base + `/message-targets {"adapter":"grok_bot_routine","address":"grok_bot:receiver","maximum_level":"simple","role":"primary","target_kind":"https_webhook","target_ref":"https://routine.example/hook","target_secret":"synthetic-sender-key"}`}, targetJSON + "\n", nil},
 		{"target list", []string{"message", "target", "list", "--project", "AEON", "--address", "codex:receiver"}, []string{"GET " + base + "/message-targets?address=codex%3Areceiver"}, "[" + targetJSON + "]\n", nil},
 		{"deliveries", []string{"message", "deliveries", "--project", "AEON"}, []string{"GET " + base + "/message-deliveries"}, "[" + deliveryJSON + "]\n", nil},
-		{"listen", []string{"listen", "--project", "AEON", "--as", "codex:receiver", "--ack"}, []string{"GET " + base + "/messages/listen?limit=10&to=codex%3Areceiver", "POST " + base + "/messages/" + messageID + "/ack"}, classicJSON, nil},
-		{"listen session", []string{"listen", "--project", "AEON", "--as", "codex:receiver", "--session", leaseID}, []string{"GET " + base + "/messages/listen?limit=10&session=" + leaseID + "&to=codex%3Areceiver"}, classicJSON, nil},
+		{"listen", []string{"listen", "--project", "AEON", "--as", "codex:receiver", "--ack"}, []string{"GET /api/projects/lookup?ref=AEON", "GET " + base + "/messages/listen?limit=10&to=codex%3Areceiver", "POST " + base + "/messages/" + messageID + "/ack"}, classicJSON, nil},
+		{"listen session", []string{"listen", "--project", "AEON", "--as", "codex:receiver", "--session", leaseID}, []string{"GET /api/projects/lookup?ref=AEON", "GET " + base + "/messages/listen?limit=10&session=" + leaseID + "&to=codex%3Areceiver"}, classicJSON, nil},
 		{"tell session", []string{"tell", "codex:receiver", "--project", "AEON", "--recipient-session", leaseID, "--sender-session", targetID, "--idempotency-key", "retry", "-m", "hello"}, []string{"POST " + base + `/messages {"body":"hello","delivery_level":"simple","expects_reply":false,"idempotency_key":"retry","is_action_request":false,"recipient_session_id":"` + leaseID + `","sender_session_id":"` + targetID + `","to":"codex:receiver"}`, "GET /api/inbox/messages/" + messageID + "/receipt"}, tellJSON, nil},
-		{"listen deliver", []string{"listen", "--project", "AEON", "--as", "codex:receiver", "--deliver", "codex"}, []string{"POST " + base + `/messages/delivery-claim {"adapter":"codex","to":"codex:receiver"}`, "POST " + base + `/messages/delivery-complete {"delivery_id":"` + deliveryID + `","effective_level":"steer","fallback_reason":"","lease_token":"` + leaseID + `"}`}, "", func(_ context.Context, adapter string, work inbox.DeliveryWork) (localDeliveryResult, error) {
+		{"listen deliver", []string{"listen", "--project", "AEON", "--as", "codex:receiver", "--deliver", "codex"}, []string{"GET /api/projects/lookup?ref=AEON", "POST " + base + `/messages/delivery-claim {"adapter":"codex","to":"codex:receiver"}`, "POST " + base + `/messages/delivery-complete {"delivery_id":"` + deliveryID + `","effective_level":"steer","fallback_reason":"","lease_token":"` + leaseID + `"}`}, "", func(_ context.Context, adapter string, work inbox.DeliveryWork) (localDeliveryResult, error) {
 			if adapter != "codex" || work.TargetRef != "fixture-thread" || work.Message == nil || work.Message.Body != "hello" {
 				return localDeliveryResult{}, fmt.Errorf("wrong fake adapter work")
 			}
@@ -110,6 +110,9 @@ hello`, messageID)
 				switch path {
 				case "/api/kinds":
 					fmt.Fprint(w, `{"items":[{"id":"00000000-0000-4000-8000-000000000001","slug":"project"}]}`)
+				case "/api/projects/lookup?ref=AEON":
+					seen = append(seen, r.Method+" "+path)
+					fmt.Fprint(w, `{"id":"`+projectID+`","key":"AEON-1","title":"AEON","state":"active"}`)
 				case "/api/me":
 					fmt.Fprint(w, `{"principal":{"id":"`+recipientID+`","name":"receiver"}}`)
 				default:

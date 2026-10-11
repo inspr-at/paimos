@@ -7,14 +7,48 @@ agent assignments, typed action gates, budgets and run logbooks. The recurring
 ticket scheduler does not supply those capabilities or Flow 2.
 
 In the web app, **Repeat…** in a ticket or epic's More menu (Shift+R while
-its panel is focused) opens the recurrence editor. Project **Settings →
-Recurring work** lists definitions with Pause/Resume, revision-checked Undo,
+its panel is focused) opens the routine editor. The project **Settings →
+Routines** box (formerly Recurring work) lists definitions with Pause/Resume, revision-checked Undo,
 Run now, Edit, History, Copy CLI command and Delete. Read-only people can inspect
 definitions and history; changing them needs `recurrences.manage`. The editor
 previews unsaved schedules through `POST /api/recurrences/preview`, using the
 server's calendar engine. Created tickets show the recurrence name and occurrence
 number, linking back to project Settings. Array-based template criteria are
 readable and editable in the ordinary ticket panel.
+
+### Routines in context (AEON-1182)
+
+One editor serves every entry point: a ticket's Repeat…, a project's Routines
+box, **Your routines** in Settings → Personal and the new **Settings →
+Routines** section (workspace routines plus the read-only Routine rules). A
+ticket-only routine is the editor above plus a **Who does it** row and a
+read-only sentence. **An agent works on it** adds Kind of work, Effort (the
+registry role; the model comes from Settings → Models), Reads first, and three
+folds: What it may do (the closed action set, the hard floor and, after the
+first save, the rules from `GET /api/recurrences/{id}/guardrails`), Budget per
+run, and Where it runs (needs a browser). "Before it runs" shows the next run
+and the draft's `execution_policy` from the preview. The ticket description is
+the agent's instructions (`assignment.goal`), and agent routines always queue
+each ticket.
+
+Saving an agent routine starts nothing: it is created paused and
+unconsented, and the same sheet then asks **Let agents run it**. Only the
+interactive owner decides; others see who does. The step resumes the shown
+revision, then sends `PUT /execution-consent` for the revision the resume
+returned, with the restricted agent picked under **Runs as** (personal
+routines run as their owner). A failed consent is said in words and never
+retried; a resumed routine offers Pause again. Until
+`GET /api/recurrences/{id}/execution-principals` (AEON-1184) answers, project
+and workspace routines show "Runs as: unavailable" and cannot be let run. A
+stale write reloads the record: fields the server changed take its value with
+a tint, other unsaved fields stay. Losing the right to manage closes the sheet,
+and the box says nothing was saved. Your routines need **Manage recurring work**
+only in the project their tickets go to, as the server checks it: each row and
+the open sheet follow that project's right. Closing the consent step says
+"Kept paused" only for a paused routine; a resumed one says it is not paused. Project boxes also show whether agents may
+run routines there; an owner or admin can turn it off, and turning it on waits
+for OPS qualification. Rows show the derived state (Scheduled, Waiting for a
+person, Held, Stopped; Running and Failed once runs are reported).
 
 The additive UI contract stores the optional recurrence `name` in `template`.
 `GET /api/recurrences/{id}/history` pages 50 events with a `before` cursor and
@@ -69,6 +103,32 @@ cannot be previewed. Event triggers may set `event_start` to `now` (default),
 clock inside each claim before running delayed publications, including across
 DST changes. Deferred rows yield to other ready definitions without advancing
 their event cursor.
+
+An explicit release source list, for example
+`{"kind":"event","event":"release.published","filter":{"project_ids":["<source project UUID>"]}}`,
+subscribes the output project to each publication from up to 20 readable projects
+in the same tenant. The saving caller and current definition owner need source
+read permission. The scheduler rechecks source visibility and authority under
+its tenant/tree fence; revoked or unreadable sources refuse without consuming
+pending publications. Only bounded release identifiers, names and versions
+reach generated work, never source ticket content.
+
+Explicit subscriptions consume publications in event order. With overlap
+suppression, an open ticket or unfinished routine run retains the next
+publication without a skipped receipt or cursor advance. A manual release run
+uses the same source-project/publication key; an overlap returns 409 so a later
+retry can still create it. Release choices use the configured sources, return
+at most 100 entries and disclose truncation. Omitted or empty source lists keep
+legacy same-project latest-only catch-up and overlap receipts.
+
+Automatic source subscriptions default off. This slice supplies
+`WithReleaseSubscriptionGate`, a transaction-bound integration for S04's
+person-owned output-project execution setting. Without that binding the
+scheduler creates no subscription publication events or occurrences and keeps
+its cursor. S04 is absent from this slice's baseline; the coordinator must wire
+its live gate before automatic subscriptions are available. Saving a scoped
+definition remains paused, and pending intents grant no launch authority.
+Qualification and person enablement remain separate release controls.
 
 For example, a weekly tool sweep under the code-health epic can be created with
 this body (replace project/parent UUIDs with the intended existing nodes):

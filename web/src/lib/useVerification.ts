@@ -6,6 +6,11 @@ import type { SignInReference } from './accountsOverview'
 
 export const signinKey = (s: SignInReference) => `${s.computer.computer_id}/${s.enrollment.account_id}`
 export const verificationActive = (s: SignInReference) => ['queued', 'starting', 'running', 'waiting', 'ownership_lost'].includes(s.enrollment.verification_state ?? '')
+/**
+ * The longest words of a normal Verify again, from the request to the result. A slot that
+ * shows them above its button holds this height, so the button stays put (AEON-541, AEON-1172).
+ */
+export const VERIFICATION_PROGRESS_WIDEST = ['Verifying… Waiting for the computer to start the check.', 'Verifying… Waiting for this computer to come online.', 'Verification needs attention. Process exit has not been confirmed.']
 export function verificationWords(s: SignInReference): string {
   const e = s.enrollment
   if (e.verification_stalled) return 'Verification stalled. The helper must confirm process exit and settle its reports.'

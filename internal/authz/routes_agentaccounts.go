@@ -5,6 +5,7 @@ package authz
 // Route and scope declarations for agentaccounts.
 func init() {
 	registerRoutes("agentaccounts", map[string]string{
+		"POST /api/agent-accounts/probes":                                "account.probe",
 		"PUT /api/agent-accounts/{accountId}/reset-policy":               "account.manage",
 		"POST /api/agent-accounts/{accountId}/resets/use":                "account.manage",
 		"POST /api/agent-accounts/{accountId}/resets/{actionId}/undo":    "account.manage",

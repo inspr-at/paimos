@@ -112,6 +112,11 @@ func (s *Supervisor) EnableLedger(ctx context.Context, c LedgerConfig) error {
 	return s.enableLedgerLocked(ctx, c)
 }
 func (s *Supervisor) enableLedgerLocked(ctx context.Context, c LedgerConfig) error {
+	// Separate native lead receipts are not worker journal rows. Never rebuild
+	// this member's occupancy from workers alone while a lead exit is unknown.
+	if err := checkRetainedLeads(s.state); err != nil {
+		return err
+	}
 	api, ok := s.api.(ledgerAPI)
 	if !ok {
 		return agentsetup.ErrLedgerUnavailable
@@ -229,6 +234,33 @@ func (s *Supervisor) enableLedgerLocked(ctx context.Context, c LedgerConfig) err
 		}
 		entry.record = record
 		entry.mu.Unlock()
+	}
+	// Never-attempted lead receipts may survive an ordinary claim refusal or
+	// lost reply. Preserve their occupancy through import until exact server
+	// reconciliation confirms abandonment; they do not freeze worker startup.
+	names, err := s.state.Names(4096)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if !strings.HasPrefix(name, "lead-runtime-") {
+			continue
+		}
+		raw, e := s.state.Read(name, 32768)
+		if e != nil {
+			return e
+		}
+		var r leadRecord
+		if json.Unmarshal(raw, &r) != nil || r.Version != 1 || r.Pickup.DaemonID != s.daemonID || name != "lead-runtime-"+r.Pickup.Demand.ID+".json" {
+			return ErrProcessesUnconfirmed
+		}
+		if r.Abandoned || r.ExitReported {
+			continue
+		}
+		if r.Attempted {
+			return ErrProcessesUnconfirmed
+		}
+		groups = append(groups, agentsetup.LedgerGroup{ID: r.Group, Instance: binding.Member.ID, Generation: generation, State: "pending", Holds: []agentsetup.LedgerLogin{s.ledgerLogin(r.Pickup.AccountID, generation)}})
 	}
 	logins := []agentsetup.LedgerLogin{}
 	for _, a := range s.accounts {
@@ -379,7 +411,7 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 	// intent retains its own slot and logins; other records and admission continue.
 	replayCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	unconfirmed := false
+	unconfirmed, cleanupFailed := false, false
 	defer func() {
 		s.mu.Lock()
 		previous := s.ledgerRouteUnconfirmed
@@ -387,7 +419,10 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 		s.mu.Unlock()
 		// Emit the first hold immediately. Later polls retain their complete
 		// reason set, including queue failures, for unchanged-cause rate limiting.
-		if unconfirmed && !previous {
+		// A routine cleanup runs once, so its failure is reported when it happens.
+		if cleanupFailed {
+			s.reportPollDiagnostic("routine_cleanup_failed")
+		} else if unconfirmed && !previous {
 			s.reportPollDiagnostic("")
 		}
 	}()
@@ -414,6 +449,15 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 				entry.mu.Unlock()
 			}
 		}
+		if r.RoutineWorkspace != nil && r.LaunchState == launchRoutePending && (r.State == "cancelled" || r.State == "failed" || r.State == "completed") {
+			// A terminal route intent proves no native launch was attempted.
+			// Release remaining resource/checkout handles even after ledger
+			// coordinates clear. A failure holds only this record's owners.
+			if s.releaseObsoleteRoutineRoute(r) != nil {
+				unconfirmed, cleanupFailed = true, true
+				continue
+			}
+		}
 		if r.LedgerGroup == "" {
 			continue
 		}
@@ -430,7 +474,7 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 			}
 			s.ledgerReplayAfter = r.RunID
 			routeCtx, routeCancel := context.WithTimeout(replayCtx, 500*time.Millisecond)
-			route, e := s.api.Route(routeCtx, r.RunID, s.daemonID, candidateIDs(r.RouteCandidates), s.estimates)
+			route, e := s.routeWorkspace(routeCtx, r.RunID, candidateIDs(r.RouteCandidates), r.RoutineWorkspace)
 			routeCancel()
 			if e != nil {
 				// A generic 409 includes capacity/grant/generation refusals. Release only
@@ -443,6 +487,23 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 					if readErr == nil && ledgerAttemptObsolete(r, run) {
 						if err = s.releaseLedger(r); err != nil {
 							return err
+						}
+						if r.RoutineWorkspace != nil {
+							// Keep the allocation's durable journal anchor. Release
+							// only this never-launched attempt's ownership, not its files.
+							r.State = "failed"
+							if run.Status == "cancelled" {
+								r.State = "cancelled"
+							}
+							r.LedgerGroup, r.LedgerGeneration, r.RouteCandidates = "", "", nil
+							if err = s.journal.Put(r); err != nil {
+								return err
+							}
+							s.setLedgerRecord(r)
+							if s.releaseObsoleteRoutineRoute(r) != nil {
+								unconfirmed, cleanupFailed = true, true
+							}
+							continue
 						}
 						// Nothing was forked for an attempt. Remove its private marker
 						// only after owner release; a crash before Delete replays safely.
@@ -494,6 +555,11 @@ func ledgerAttemptObsolete(record Record, run Run) bool {
 	}
 	switch run.Status {
 	case "queued":
+		// A routine account binding may be our own committed route whose
+		// response was lost. Retain its pickup and allocation for replay.
+		if record.RoutineWorkspace != nil {
+			return false
+		}
 		// Route did not give this daemon a confirmed account binding. An
 		// independently observed binding makes this pending attempt obsolete.
 		return run.AccountID != ""

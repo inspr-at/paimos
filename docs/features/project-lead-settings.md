@@ -37,3 +37,8 @@ mandatory gates mean wait. No model route, saved setting or queued work grants
 merge, deploy, credential rotation, force-stop or attached-session consent.
 AEON-734 owns lifecycle/ownership succession, AEON-598–600 execution, AEON-731
 recovery and AEON-741 the approved UI.
+
+Qualified routine execution is a separate person-owned project setting,
+documented in [Routine execution consent](routine-execution-consent.md). The
+lead lifecycle projection now resolves that qualification; this policy editor
+continues to grant no execution authority.

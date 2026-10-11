@@ -306,7 +306,9 @@ func serve(args []string) (resultErr error) {
 	captureCtx, stopCapture := context.WithCancel(ctx)
 	captureDone := make(chan struct{})
 	go func() { defer close(captureDone); s.RunCapacityCaptures(captureCtx) }()
-	defer func() { stopCapture(); <-captureDone }()
+	hintDone := make(chan struct{})
+	go func() { defer close(hintDone); s.RunQueueHints(captureCtx) }()
+	defer func() { stopCapture(); <-captureDone; <-hintDone }()
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	stopping := false
@@ -327,7 +329,7 @@ func serve(args []string) (resultErr error) {
 			continue
 		}
 		pollCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		err := s.PollOnce(pollCtx)
+		err := s.PollScheduledOnce(pollCtx)
 		cancel()
 		if err != nil && ctx.Err() == nil {
 			fmt.Fprintln(os.Stderr, "agentd poll failed; inspect AEON availability and account bindings")
@@ -336,6 +338,7 @@ func serve(args []string) (resultErr error) {
 		case <-ctx.Done():
 			stopping = true
 		case <-ticker.C:
+		case <-s.QueueWake():
 		}
 	}
 }

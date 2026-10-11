@@ -115,7 +115,7 @@ func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []
 	mux := http.NewServeMux()
 	// Legacy invariants remain tested during the read-only transition. Real
 	// public retirement is covered separately with Module.Mount.
-	module := &Module{pool: appPool}
+	module := &Module{pool: appPool, discovery: fixtureCatalogClient(t, nil)}
 	if strings.HasPrefix(path, "/api/model-preferences/levels/") {
 		module.mount(mux, module.writePreferences)
 	} else {
@@ -161,6 +161,12 @@ func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []
 
 func decode[T any](t *testing.T, p *tenant.Principal, method, path, body string, want int) T {
 	t.Helper()
+	if p != nil && want >= 200 && want < 300 && (strings.HasPrefix(path, "/api/models") || strings.HasPrefix(path, "/api/model-preferences")) && !strings.HasPrefix(path, "/api/models/catalog") && !strings.HasPrefix(path, "/api/models/routes?") {
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error { return legacyCatalogFixture(t.Context(), tx, *p) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	status, raw := call(t, p, method, path, body)
 	if status != want {
 		t.Fatalf("%s %s status %d, want %d: %s", method, path, status, want, raw)
@@ -354,16 +360,16 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `
 			INSERT INTO agent_accounts
 				(tenant_id, account_key, harness, daemon_id, registered_by_principal_id, label, state,
-				 last_probe_at, last_probe_ok, last_daemon_generation)
+				 last_probe_at, last_probe_ok, last_daemon_generation, share_usage)
 			VALUES ($1::uuid, 'local-codex', 'codex', 'daemon-a', $2::uuid, 'Codex', 'available',
-			        now() - interval '10 minutes', true, 'gen-1')`, admin.TenantID, agent.ID)
+			        now() - interval '10 minutes', true, 'gen-1', true)`, admin.TenantID, agent.ID)
 		return err
 	})
 	if err != nil {
 		t.Fatalf("account: %v", err)
 	}
 	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != haiku.ID || scout.Ladder[0].SkipReasons[0] != "account availability" {
+	if scout.Profile == nil || scout.Profile.ID != haiku.ID || scout.Ladder[0].SkipReasons[0] != "Codex account has no recent successful sign-in check" {
 		t.Fatalf("stale probe %+v", scout)
 	}
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
@@ -383,7 +389,7 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 		t.Fatalf("window: %v", err)
 	}
 	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != haiku.ID || scout.Ladder[0].SkipReasons[0] != "allowance" {
+	if scout.Profile == nil || scout.Profile.ID != haiku.ID || !strings.HasPrefix(scout.Ladder[0].SkipReasons[0], "Codex account is at its allowance or floor until ") {
 		t.Fatalf("full allowance %+v", scout)
 	}
 	other := makePrincipal(t, "beta", "person", "Bea", []string{"admin"})

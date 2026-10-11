@@ -134,6 +134,7 @@ type HarnessHealth struct {
 	Accounts      int
 	Available     int
 	Dispatchable  int
+	Reasons       []string
 }
 
 type httpError struct {

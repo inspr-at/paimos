@@ -28,14 +28,27 @@ func Issues(raw json.RawMessage) []string {
 			issues = append(issues, key+" must contain 2–4 words")
 		}
 	}
-	if raw, ok := fields["hide_from_release_notes"]; ok {
-		var value any
-		_ = json.Unmarshal(raw, &value)
-		if _, ok := value.(bool); !ok {
-			issues = append(issues, "hide_from_release_notes must be a boolean")
+	for _, key := range []string{"hide_from_release_notes", "no_release_needed"} {
+		if raw, ok := fields[key]; ok {
+			var value any
+			_ = json.Unmarshal(raw, &value)
+			if _, ok := value.(bool); !ok {
+				issues = append(issues, key+" must be a boolean")
+			}
 		}
 	}
 	return issues
+}
+
+// OmitFromReleaseNotes applies to both public notes and unavailable members.
+// Content work is never a software release note, regardless of its hide toggle.
+func OmitFromReleaseNotes(raw json.RawMessage) bool {
+	var flags struct {
+		Hidden    bool `json:"hide_from_release_notes"`
+		NoRelease bool `json:"no_release_needed"`
+	}
+	_ = json.Unmarshal(raw, &flags)
+	return flags.Hidden || flags.NoRelease
 }
 
 // Completed matches resolved successful completion categories, excluding

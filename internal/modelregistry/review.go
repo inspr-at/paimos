@@ -4,6 +4,7 @@ package modelregistry
 import (
 	"context"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,6 +51,28 @@ func ResolveReviewWithPolicyFor(ctx context.Context, tx pgx.Tx, p tenant.Princip
 	return resolveReviewWithCatalog(ctx, tx, p, q, now, nil, policy)
 }
 
+// ResolveRoutineEvaluationFor preserves live project/person pins and account
+// qualification. The compiled routine checkpoint requires independence even
+// when ordinary project review has its cross-family setting switched off.
+func ResolveRoutineEvaluationFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, author VerifiedModel, now time.Time) (ReviewRoute, reviewgate.FamilyPolicy, error) {
+	family, err := author.Family()
+	if err != nil {
+		return ReviewRoute{}, reviewgate.FamilyPolicy{}, err
+	}
+	settings, err := reviewgate.LoadFamilyPolicyTx(ctx, tx, &q.ProjectID)
+	if err != nil {
+		return ReviewRoute{}, reviewgate.FamilyPolicy{}, err
+	}
+	policy := settings.Effective
+	if policy.Mode == "off" {
+		policy = reviewgate.DefaultFamilyPolicy()
+	}
+	q.Role, q.AuthorFamily = "review-gate", family
+	q.routineEval = true
+	route, err := ResolveReviewWithPolicyFor(ctx, tx, p, q, now, policy)
+	return route, settings.Effective, err
+}
+
 func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog, policies ...reviewgate.FamilyPolicy) (ReviewRoute, error) {
 	out := ReviewRoute{Ladder: []Candidate{}, Role: "review-gate"}
 	if strings.TrimSpace(q.Area) == "security" || q.Role == "review-gate-security" {
@@ -65,14 +88,31 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	if err := requireCatalog(ctx, tx); err != nil {
 		return out, err
 	}
+	q.ReviewPolicies = policies
 	q.Role = out.Role
 	q.AuthorFamily = author
-	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil); err != nil {
+	var boardPolicies []reviewgate.FamilyPolicy
+	if q.routineEval {
+		boardPolicies = policies
+	}
+	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil, boardPolicies...); err != nil {
 		return out, err
 	} else if board != nil {
 		out.Profile, out.Ladder, out.OwnerRequired, out.Trace, out.Residency = board.Profile, board.Ladder, board.OwnerRequired, board.Trace, board.Residency
 		if out.Profile != nil {
-			out.Account, err = agentaccounts.ReviewAccount(ctx, tx, out.Profile.ID, out.Profile.Harness, q.ProjectID, now, out.Residency)
+			var accounts []agentaccounts.Account
+			accounts, err = agentaccounts.ReviewAccounts(ctx, tx, out.Profile.ID, out.Profile.Harness, q.ProjectID, now, out.Residency)
+			for _, account := range accounts {
+				if slices.Contains(board.Trace.QualifyingAccountIDs, account.ID) {
+					out.Account = &account
+					break
+				}
+			}
+			if err == nil && out.Account == nil {
+				out.Profile = nil
+				out.OwnerRequired = true
+				out.Trace.Blocked = "no qualified review account"
+			}
 		}
 		return out, err
 	}

@@ -30,7 +30,7 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   await page.getByRole('menuitem', { name: 'Personal settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await expect(page).toHaveTitle(/^Settings · /)
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Kinds of work/, /^Access/, /^Policies/, /^Models/, /^Agents/, /^Autopilot/, /^Business/, /^Product portal/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Kinds of work/, /^Access/, /^Policies/, /^Models/, /^Routines/, /^Agents/, /^Autopilot/, /^Business/, /^Product portal/])
   await expect(sections(page).getByRole('link', { name: /^Personal/ })).toHaveAttribute('aria-current', 'page')
 
   await page.getByRole('radio', { name: 'Dark' }).click()
@@ -63,8 +63,8 @@ test('members see Personal, Developer and Policies; an admin section explains it
   await setup(page, { role: 'member' })
   await page.goto('/settings')
   await expect(page).toHaveURL('/settings/personal')
-  // Members get per-person settings, vocabulary and read-only Policies.
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Vocabulary/, /^Policies/])
+  // Members get per-person settings, vocabulary, read-only Policies and the workspace's Routines.
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Vocabulary/, /^Policies/, /^Routines/])
   await expect(page.getByRole('heading', { name: 'Greeting' })).toBeVisible()
   await page.goto('/settings/workspace')
   await expect(page.getByRole('heading', { name: 'Workspace settings are for workspace admins' })).toBeVisible()
@@ -81,13 +81,16 @@ test('grouped navigation stays put across section changes and places policy card
   await page.goto('/settings/workspace')
   const nav = sections(page)
   // Kinds of work sits with Workspace once models.read is granted, beside Models,
-  // Agent rules and Accounts. The count is the whole granted list, in section order.
-  await expect(nav.getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Kinds of work/, /^Access/, /^Policies/, /^Models/, /^Agents/, /^Agent rules/, /^Accounts/, /^Autopilot/, /^Business/, /^Product portal/])
-  await expect(nav.getByRole('link')).toHaveCount(15)
+  // Agent rules and the three account parts (AEON-1171: Accounts, Computers, Capacity).
+  // The count is the whole granted list, in section order.
+  await expect(nav.getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Kinds of work/, /^Access/, /^Policies/, /^Models/, /^Routines/, /^Agents/, /^Agent rules/, /^Accounts/, /^Computers/, /^Capacity/, /^Autopilot/, /^Business/, /^Product portal/])
+  await expect(nav.getByRole('link')).toHaveCount(18)
   await expect(nav.getByRole('link', { name: /^Kinds of work/ })).toBeVisible()
   await expect(nav.getByRole('link', { name: /^Models/ })).toBeVisible()
   await expect(nav.getByRole('link', { name: /^Agent rules/ })).toBeVisible()
   await expect(nav.getByRole('link', { name: /^Accounts/ })).toBeVisible()
+  await expect(nav.getByRole('link', { name: /^Computers/ })).toBeVisible()
+  await expect(nav.getByRole('link', { name: /^Capacity/ })).toBeVisible()
   await expect(nav.locator('.nav-group')).toHaveText(['You', 'Workspace', 'Agents and automation', 'Business'])
   await expect(page.locator('.body > .who')).toHaveText('Admins only see and change this section.')
   await expect(page.locator('#work-vocabulary, #model-refresh, #status-autopilot, #members, #estimates')).toHaveCount(0)
@@ -316,7 +319,7 @@ test('settings layout evidence in light and dark at phone, tablet and desktop si
     await page.setViewportSize({ width, height: 900 })
     for (const theme of ['light', 'dark']) {
       await page.addInitScript(value => localStorage.setItem('aeon-theme', value), theme)
-      for (const section of ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'kinds', 'access', 'agents', 'agent-rules', 'accounts', 'autopilot', 'business', 'portal']) {
+      for (const section of ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'kinds', 'access', 'agents', 'agent-rules', 'accounts', 'computers', 'capacity', 'autopilot', 'business', 'portal']) {
         await page.goto(`/settings/${section}`)
         const audience = section === 'kinds' ? page.locator('.kinds-section > .who') : page.locator('.body > .who')
         await expect(audience).toBeVisible()

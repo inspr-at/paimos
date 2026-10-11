@@ -19,9 +19,14 @@ as a confirmed stop. The saved action continues after closing the sheet or
 restarting the server, with the original person's current permissions checked
 inside every write. A changed split target requires abandoning the saved request
 and reviewing a fresh preview; abandoning keeps earlier completed writes and
-handover requests intact. Heartbeat loss, lost process ownership and administrative
-removal keep the stop fence; they require recovery or an explicit process-stop
-report. Bindings of an unconfirmed generation cannot detach or move away while
+handover requests intact. An unconfirmed closure with reason `heartbeat_lost`,
+`archived_process_unknown`, `removed_process_unknown` or
+`attach detached; process exit unconfirmed` retains its busy hold for two hours
+from the later of `stopped_at` and `heartbeat_at`. A NULL heartbeat still gets
+the full two hours. Confirmed stops release immediately; live sessions and unknown
+reasons keep their holds. Expiry changes no closure, lease or historical binding
+and never proves process exit. Bindings of an unconfirmed generation cannot
+detach or move away while
 its work action is pending. The same generation may revive and finish handover.
 Cooperative wrap-up delivery expires after ten minutes. **Check handover** and
 the background worker retry expired delivery under the original person's current
@@ -54,6 +59,43 @@ automatic review records `review.unavailable` and leaves the review gate closed,
 without starting new work or preventing the original generation from finishing.
 Work-order cancellation rechecks `work_orders.write` and queued reservation
 release rechecks `run.create`, alongside `nodes.write` and session control.
+
+A person's existing graceful work action also settles a stale active run when
+all bound session holds have released, or when no generation is bound and the
+last run activity is at least two hours old. Run creation, start and the latest
+telemetry count as activity; fresh telemetry after closure keeps the hold.
+A closure predating the run cannot release a new orphaned run immediately.
+The write rechecks `run.create` and `work_orders.write` under the access/tree
+fence, marks the run `ownership_lost`, and records `run.stale_hold_released`
+with the action ID. A `work_lifecycle_release.exit_unconfirmed` trace marker
+retains the writer fence even for runs without a durable assignment. Only a
+finished exit report from the same authorized daemon clears it. It preserves
+daemon ownership, launch uncertainty and all capacity/accounting holds so a
+later owned executor can reconcile. Account and shared-quota occupancy, queue
+capacity advice, host concurrency and pairing drain checks count these runs
+until that authenticated exit report clears the marker. It never
+reports process exit or makes an uncertain writer eligible for takeover.
+A standalone running order with no reporting generation or run retains a
+two-hour hold from its last update and then settles through the same action,
+with the existing `work_order.cancelled` audit. Only a released session closure
+at or after that update can shorten the hold; historical ticket closures cannot
+release a newer standalone order. Replays do not duplicate events.
+
+Busy cancellation errors name visible holders by session/run/work-order ID,
+label and age in seconds. Each type shows up to 20 holders and identifies
+truncation. Handover errors show at most two work targets. Titles, hostnames,
+principal names, private notes, telemetry and leases are excluded; hidden project
+holders retain a generic message.
+
+Caller audit: `aeon_work_busy`, lifecycle completion and handover delivery use
+`aeon_work_session_released` for expiring busy holds. The original immutable
+`aeon_work_session_stopped` deliberately remains confirmed-exit proof for SQL
+binding/rebinding guards, lead succession and worker-yield checkpoints, plan
+capacity, writer admission, escalation and the confirm-exit endpoint. Those
+safety gates must not accept age as evidence of process exit. Release pairing
+requires migration `1330_stale_work_holds.sql` with the new lifecycle and
+telemetry code; the pinned migration exception retains the coordinator's
+independent review and previous-binary compatibility gates.
 
 Integration seams: AEON-655's work surfaces can supply `is_leaf` to the shared
 queue helper; this package also accepts the existing estimate's `is_parent`

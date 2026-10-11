@@ -17,6 +17,7 @@ func TestCoordinatorPermissionsCoverCLIHeartbeatPath(t *testing.T) {
 	for _, pattern := range []string{
 		"GET /api/kinds",
 		"GET /api/projects",
+		"GET /api/projects/lookup",
 		"POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat",
 		"GET /api/model-preferences",
 		"GET /api/work-kinds",

@@ -101,6 +101,8 @@ describe('rows', () => {
     expect(buildRows({ doc, workspace: null, scope: 'me', canEdit: true, entries, labels: label }).find(row => row.key === 'concept')!.unavailable).toMatchObject({ runs_instead: 'anthropic:sonnet' })
     expect(reasonText('default: The Claude account; role: No room')).toBe('the Claude account; No room')
     expect(reasonText('')).toBe('no qualified account has room right now')
+    expect(reasonText('column: allowance; default: allowance; role: daily_limit; daily_limit')).toBe('the account is at its allowance or floor; the account is at its daily cap')
+    expect(reasonText('Claude account is at its daily cap until 04:00; role: Claude account is at its daily cap until 04:00')).toBe('claude account is at its daily cap until 04:00')
   })
 })
 
