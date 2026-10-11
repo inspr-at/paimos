@@ -423,47 +423,30 @@ test.describe('settings written from the detail', () => {
     expect(backend.puts).toEqual([])
   })
 
-  test('At the limit: follow the model ladder or wait, and nothing else', async ({ page }) => {
+  test('AEON-1166: at the limit the dial follows Settings › Models: one line and a link, no choice of its own', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
-    const { backend } = await setup(page, { example: 'limit', dial: { selected: 'claude' } })
+    // A Wait saved before the dial followed Models: the server ignores it and reads it as ladder.
+    const old: DailyPlanOptions['settings'] = { claude: { pace: { mode: 'pace', points_per_day: null }, boost_today: null, at_limit: 'wait' } }
+    const { backend } = await setup(page, { example: 'limit', settings: old, dial: { selected: 'claude', folds: { 'claude:pace': true } } })
     await page.goto('/agents')
-    const claude = detail(page, 'claude'), choice = claude.getByRole('radiogroup', { name: 'At the limit' })
-    await expect(choice.getByRole('radio')).toHaveCount(2)
-    await expect(choice.getByRole('radio', { name: 'Follow the model ladder' })).toHaveAttribute('aria-checked', 'true')
-    await expect(claude).toContainText('Codex next on the model ladder.')
-    await expect(claude.getByRole('link', { name: 'Models' })).toHaveAttribute('href', '/settings/models')
-    await choice.getByRole('radio', { name: 'Wait' }).click()
+    const claude = detail(page, 'claude'), line = claude.locator('.cd-line')
+    await expect(line).toHaveText('Follows Settings › Models')
+    await expect(line.getByRole('link', { name: 'Settings › Models' })).toHaveAttribute('href', '/settings/models')
+    await expect(claude.getByRole('radiogroup', { name: 'At the limit' })).toHaveCount(0)
+    await expect(claude.getByRole('radio', { name: 'Wait' })).toHaveCount(0)
+    await expect(claude.locator('.cap-st')).toHaveText('At today’s limit · Codex next in the Models order')
+    await expect(row(page, 'claude').locator('.cap-stl')).toHaveText('At today’s limit · Codex next')
+    // The line keeps the AEON-1030 place: after Boost today, before the account, one row as high as a folded setting.
+    expect((await claude.locator('.cd-dl > dt').allTextContents()).map(t => t.trim())).toEqual(['Pace', 'Boost today', 'At the limit', 'Account'])
+    const [boostRow, limitRow] = await Promise.all([claude.locator('.cd-dl > dd').nth(1).boundingBox(), claude.locator('.cd-dl > dd').nth(2).boundingBox()])
+    expect(Math.abs(limitRow!.height - boostRow!.height)).toBeLessThanOrEqual(0.5)
+    expect(backend.puts).toEqual([])
+    // A later edit still sends at_limit for the previous release: the ladder the server reported, never the old Wait.
+    await claude.getByRole('radio', { name: 'Use everything before the reset' }).click()
     await expect.poll(() => backend.puts.length).toBe(1)
-    expect(backend.puts[0]!.value.daily!.claude!.at_limit).toBe('wait')
-    await expect(claude).toContainText('New work waits until midnight. Running agents finish.')
-    await expect(row(page, 'claude').locator('.cap-stl')).toHaveText('At today’s limit · new work waits')
-    await choice.getByRole('radio', { name: 'Follow the model ladder' }).click()
-    await expect.poll(() => backend.puts.length).toBe(2)
-    expect(backend.puts[1]!.value.daily!.claude!.at_limit).toBe('ladder')
-  })
-
-  test('At the limit works from the keyboard: the arrow keys pick the other option and take focus with them', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 1000 })
-    const { backend } = await setup(page, { example: 'limit', dial: { selected: 'claude' } })
-    await page.goto('/agents')
-    const choice = detail(page, 'claude').getByRole('radiogroup', { name: 'At the limit' })
-    const ladder = choice.getByRole('radio', { name: 'Follow the model ladder' }), wait = choice.getByRole('radio', { name: 'Wait' })
-    // Only the chosen option is in the tab order, so the arrows are the way to the other one.
-    await expect(ladder).toHaveAttribute('tabindex', '0'); await expect(wait).toHaveAttribute('tabindex', '-1')
-    await ladder.focus()
-    const picks: { key: string; to: 'ladder' | 'wait' }[] = [{ key: 'ArrowRight', to: 'wait' }, { key: 'ArrowLeft', to: 'ladder' }, { key: 'ArrowDown', to: 'wait' }, { key: 'ArrowUp', to: 'ladder' }, { key: 'End', to: 'wait' }, { key: 'Home', to: 'ladder' }]
-    for (const [i, { key, to }] of picks.entries()) {
-      await page.keyboard.press(key)
-      await expect.poll(() => backend.puts.length, key).toBe(i + 1)
-      expect(backend.puts[i]!.value.daily!.claude!.at_limit, key).toBe(to)
-      const [now, other] = to === 'wait' ? [wait, ladder] : [ladder, wait]
-      await expect(now, key).toHaveAttribute('aria-checked', 'true'); await expect(now, key).toBeFocused(); await expect(now, key).toHaveAttribute('tabindex', '0')
-      await expect(other, key).toHaveAttribute('aria-checked', 'false'); await expect(other, key).toHaveAttribute('tabindex', '-1')
-    }
-    // The key on the option that is already chosen writes nothing.
-    await page.keyboard.press('Home')
-    await expect(ladder).toBeFocused()
-    expect(backend.puts).toHaveLength(picks.length)
+    const daily = backend.puts[0]!.value.daily as Record<string, { at_limit: string; pace: { mode: string } }>
+    expect(daily.claude!.at_limit).toBe('ladder')
+    expect(daily.claude!.pace.mode).toBe('everything')
   })
 
   test('a failed write keeps the confirmed settings on screen and says so', async ({ page }) => {
@@ -481,12 +464,12 @@ test.describe('settings written from the detail', () => {
 
   test('a changed plan revision is re-read and the edit is not forced over it', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
-    const { backend } = await setup(page, { example: 'pace', dial: { selected: 'claude' } })
+    const { backend } = await setup(page, { example: 'pace', dial: { selected: 'claude', folds: { 'claude:pace': true } } })
     backend.conflicts = 1
     await page.goto('/agents')
-    await detail(page, 'claude').getByRole('radio', { name: 'Wait' }).click()
+    await detail(page, 'claude').getByRole('radio', { name: 'Use everything before the reset' }).click()
     await expect(dial(page).locator('.f-live')).toContainText('changed elsewhere')
-    await expect(detail(page, 'claude').getByRole('radio', { name: 'Follow the model ladder' })).toHaveAttribute('aria-checked', 'true')
+    await expect(detail(page, 'claude').getByRole('radio', { name: 'Stay on pace' })).toBeChecked()
     expect(backend.puts).toHaveLength(1)
   })
 })
@@ -642,6 +625,43 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
     expect(writes(calls)).toEqual([])
     // Picking and folding wrote no daily setting; only the plan's own limits changed above.
     expect(backend.puts.filter(p => p.value.daily)).toEqual([])
+    expect(errors).toEqual([])
+  })
+}
+
+// AEON-1166: the detail at the limit, with the replaced line, at 1440 and 390 in both themes. Everything else is AEON-1030.
+const d1Shots = process.env.AEON_1166_SHOTS ?? 'test-results/aeon-1166-mv2dial'
+for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+  test(`AEON-1166 ${width} ${theme}: at the limit the detail follows Settings › Models and the line keeps every control put`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    const errors = watchErrors(page)
+    const { backend } = await setup(page, { example: 'limit', dial: { selected: 'claude' } })
+    await page.goto('/agents')
+    const card = dial(page), claude = detail(page, 'claude'), link = claude.locator('.cd-line').getByRole('link', { name: 'Settings › Models' })
+    await expect(link).toBeVisible()
+    mkdirSync(d1Shots, { recursive: true })
+    const bounds = (await card.boundingBox())!
+    await page.setViewportSize({ width, height: Math.ceil(Math.max(1000, bounds.y + bounds.height + 100)) })
+    await card.screenshot({ path: `${d1Shots}/${width}-${theme}-at-limit.png`, animations: 'disabled' })
+    await card.screenshot({ path: info.outputPath(`${width}-${theme}-at-limit.png`), animations: 'disabled' })
+    await page.setViewportSize({ width, height: 1000 })
+    const pace = claude.getByRole('button', { name: 'Pace' }), boost = claude.getByRole('button', { name: 'Boost today' })
+    await expectStableControls({
+      controls: { link, pace, boost, headline: claude.getByRole('heading'), frame: card.locator('#dial-detail') },
+      scrollAreas: { card },
+      interactions: [
+        { name: 'hover the link', run: async () => { await link.hover(); expect(await link.evaluate(el => el.matches(':hover'))).toBe(true) } },
+        { name: 'focus the link from the keyboard', run: async () => { await boost.focus(); await page.keyboard.press('Tab'); await expect(link).toBeFocused() } },
+        { name: 'leave it', run: async () => { await page.mouse.move(1, 1); await link.blur(); await expect(link).not.toBeFocused(); expect(await link.evaluate(el => el.matches(':hover'))).toBe(false) } },
+      ],
+    })
+    if (width < 600) {
+      const box = (await link.boundingBox())!
+      expect(box.height).toBeGreaterThanOrEqual(44); expect(box.width).toBeGreaterThanOrEqual(44)
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+    expect(backend.puts).toEqual([])
     expect(errors).toEqual([])
   })
 }

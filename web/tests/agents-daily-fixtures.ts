@@ -45,7 +45,8 @@ export function claudeState(example: DailyExample, settings: DailySettings): Dai
   const over = everything ? 0 : Math.max(0, used - start - points)
   // The server also says at_limit when the only reading is stale: starts wait, though nothing is measured at the limit.
   const state = used >= limit || example === 'stale' ? 'at_limit' : over > 0 ? 'over_pace' : 'on_pace'
-  return { state, limit_used_pct: limit, today_points_used: todayUsed, today_points_allowed: allowed, over_pace_points: over, active_account_id: a.account_id, next_on_ladder: state === 'at_limit' && settings.at_limit === 'ladder' ? 'codex' : null, accounts: [a] }
+  // The saved at_limit is ignored (AEON-1166): Models names what comes next.
+  return { state, limit_used_pct: limit, today_points_used: todayUsed, today_points_allowed: allowed, over_pace_points: over, active_account_id: a.account_id, next_on_ladder: state === 'at_limit' ? 'codex' : null, accounts: [a] }
 }
 function codexState(): DailyState {
   const rows = [['agentone', 58, 64, 10, 1, 2], ['markus', 20, 22, 20, 2, 3], ['admin', 80, 81, 10, 3, 4]] as const
@@ -54,17 +55,20 @@ function codexState(): DailyState {
 }
 const cursorState = (): DailyState => ({ state: 'no_limit', limit_used_pct: null, today_points_used: null, today_points_allowed: null, over_pace_points: null, active_account_id: acct(30), next_on_ladder: null, accounts: [account(30, 'markus@barta.com', 1, { no_daily_limit: true, freshness: 'unknown', read_at: null })] })
 
-/** What the server reads for a plan with these saved settings; a PUT replaces `settings` and the next read follows. */
+/**
+ * What the server reads for a plan with these saved settings; a PUT replaces `settings` and the next read follows.
+ * At a daily cap the plan follows Settings › Models: reads report daily_at_limit and an old saved Wait as ladder (AEON-1166).
+ */
 export function dailyPlan(options: DailyPlanOptions = {}, updatedAt: string | null = null) {
   const example = options.example ?? 'pace', settings = { ...defaults(example), ...options.settings }
   const running = options.running ?? { codex: 6, claude: 2, cursor: 3 }
   return {
     total: options.total ?? 12, limits: options.limits ?? { codex: 6, claude: 2, cursor: 'no_limit' }, principal_id: ME_ID,
     running, running_total: Object.values(running).reduce((n, x) => n + x, 0), source: 'plan', updated_at: updatedAt,
-    daily: settings, daily_state: Object.fromEntries(Object.entries({ claude: claudeState(example, settings.claude), codex: codexState(), cursor: cursorState() })
+    daily: Object.fromEntries(Object.entries(settings).map(([harness, d]) => [harness, { ...d, at_limit: 'ladder' }])), daily_state: Object.fromEntries(Object.entries({ claude: claudeState(example, settings.claude), codex: codexState(), cursor: cursorState() })
       .filter(([harness]) => !options.without?.includes(harness))
       .map(([harness, state]) => [harness, options.readOnly ? { ...state, accounts: state.accounts.map(a => ({ ...a, can_edit: false })) } : state])),
-    daily_default_points: 10, daily_timezone: 'Europe/Vienna', daily_until: UNTIL,
+    daily_default_points: 10, daily_timezone: 'Europe/Vienna', daily_until: UNTIL, daily_at_limit: 'follows_models',
   }
 }
 
