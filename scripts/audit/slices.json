@@ -343,7 +343,12 @@
         "web/src/components/agents/ChatCodeBlock.vue",
         "web/src/components/lead/LeadAdoption.vue",
         "web/src/components/agents/AgentChores.vue",
-        "web/src/components/agents/DecisionDeskPanel.vue"
+        "web/src/components/agents/DecisionDeskPanel.vue",
+        "web/src/components/agents/SessionAvatar.vue",
+        "web/src/components/agents/HarnessOpener.vue",
+        "web/src/components/agents/SessionsHeld.vue",
+        "web/src/components/agents/sessionHold.ts",
+        "web/src/components/agents/sessionTime.ts"
       ]
     },
     {

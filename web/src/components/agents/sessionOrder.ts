@@ -7,6 +7,7 @@ import { parseJson } from '../../lib/json.ts'
 import { GROUPS, HEARTBEAT_STALE_MS, byStart as sessionsByStart, type SessionBranch, type SessionGroup } from '../../lib/agentState'
 import type { SessionView } from '../../stores/agents'
 import { intendedResult, sessionExecution } from './sessionRow'
+import { timeValue } from './sessionTime'
 
 export type SortKey = 'state' | 'result' | 'ticket' | 'execution' | 'host' | 'heartbeat' | 'running'
 export type SortDir = 'asc' | 'desc'
@@ -27,8 +28,9 @@ const byEnded = (a: Branch, b: Branch) => ended(b) - ended(a) || byStart(a, b)
 const byState = (a: Branch, b: Branch) => rank(a.group) - rank(b.group) || (a.group === 'stopped' && b.group === 'stopped' ? byEnded(a, b) : byStart(a, b))
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
-// What each column orders by. Heartbeat and Running are durations, like the
-// columns show them: ascending is the most recent beat, the shortest run. Beats
+// What each column orders by. Heartbeat and Time are durations, like the
+// columns show them: ascending is the most recent beat, the shortest time (a run so
+// far, or the time since a session ended or paused, AEON-1211). Beats
 // within the normal cadence count as equal, so on-time sessions keep their start
 // order; a session moves only once it falls silent, when its state changes too.
 function valueOf(key: Exclude<SortKey, 'state'>, b: Branch, now: number): Value {
@@ -46,7 +48,7 @@ function valueOf(key: Exclude<SortKey, 'state'>, b: Branch, now: number): Value 
       const age = Math.max(0, now - Date.parse(s.heartbeat_at))
       return age < HEARTBEAT_STALE_MS ? 0 : age
     }
-    case 'running': return Date.parse(s.stopped_at ?? new Date(now).toISOString()) - Date.parse(s.created_at)
+    case 'running': return timeValue(b.view, now)
   }
 }
 
