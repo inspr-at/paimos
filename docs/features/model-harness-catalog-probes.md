@@ -29,7 +29,9 @@ as apparently fresh metadata. A complete list records route membership through
 `listed`; partial or failed lists do not establish disappearance. Failures retain
 last good evidence. Native efforts have their original names and no guessed
 numeric scale. Identifier-only Cursor output keeps exact launch IDs and does
-not derive efforts from suffixes. OpenCode variant keys are not native levels.
+not derive efforts from suffixes. Cursor output examples are parser regressions;
+they do not qualify a particular live binary's format or per-effort semantics.
+OpenCode variant keys are not native levels.
 
 Codex reads all bounded `model/list` pages with hidden entries, native levels,
 default effort, upgrade and retirement metadata. Unix retirement seconds are

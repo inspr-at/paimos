@@ -87,7 +87,8 @@ func TestHarnessProbesScheduleCheckNowAndFencePublication(t *testing.T) {
 		"hidden":        {Value: json.RawMessage("true"), Path: "hidden"},
 		"successor":     {Value: json.RawMessage(`"replacement-model"`), Path: "upgrade"},
 	}}
-	report := modelreport.CatalogReport{RequestID: request.RequestID, BindingRevision: request.BindingRevision, DaemonID: "fixture", Generation: "generation", State: "fresh", Models: []modelreport.CatalogModel{model}}
+	idOnly := modelreport.CatalogModel{Model: "catalog-id-only", Facts: map[string]modelreport.CatalogField{}}
+	report := modelreport.CatalogReport{RequestID: request.RequestID, BindingRevision: request.BindingRevision, DaemonID: "fixture", Generation: "generation", State: "fresh", Models: []modelreport.CatalogModel{model, idOnly}}
 	path := "/api/models/harness-probes/" + account
 	before := registryRoutes(t, owner)
 	inRegistry(t, owner, func(tx pgx.Tx) error {
@@ -108,6 +109,13 @@ func TestHarnessProbesScheduleCheckNowAndFencePublication(t *testing.T) {
 		}
 		if discovered != 3 || active != 0 {
 			t.Fatal("native discoveries were lost or activated", discovered, active)
+		}
+		var guessed int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_profiles WHERE model=$1`, idOnly.Model).Scan(&guessed); err != nil {
+			return err
+		}
+		if guessed != 0 {
+			t.Fatal("ID-only catalog entry acquired a guessed profile")
 		}
 		rows, err := tx.Query(t.Context(), `SELECT provider,model_id,route,fact,value,source,source_kind,field_path,fetched_at FROM model_catalog_facts WHERE model_id=$1`, model.Model)
 		if err != nil {
@@ -149,12 +157,12 @@ func TestHarnessProbesScheduleCheckNowAndFencePublication(t *testing.T) {
 	send(agent, path, report, 409) // Previous valid evidence may not complete a new request.
 	report.RequestID = jobs[0].RequestID
 	report.State = "limited"
-	report.Models = []modelreport.CatalogModel{}
+	report.Models = []modelreport.CatalogModel{{Model: model.Model, Facts: map[string]modelreport.CatalogField{}}}
 	send(agent, path, report, 200)
 	inRegistry(t, owner, func(tx pgx.Tx) error {
 		var listed bool
 		var count int
-		if err := tx.QueryRow(t.Context(), `SELECT value FROM model_catalog_facts WHERE source=$1 AND route=$2 AND fact='listed'`, "harness:codex:"+account, "codex/"+model.Model).Scan(&listed); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT value FROM model_catalog_facts WHERE source=$1 AND route=$2 AND fact='listed'`, "harness:codex:"+account, "codex/"+idOnly.Model).Scan(&listed); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_catalog_facts WHERE source=$1 AND fact='native_levels'`, "harness:codex:"+account).Scan(&count); err != nil {

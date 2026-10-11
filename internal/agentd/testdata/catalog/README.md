@@ -10,6 +10,9 @@ or vendor connection is used.
 - pi: documented `get_available_models` and `get_available_thinking_levels`
   response envelopes:
   https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/docs/rpc-commands.md
+  Session-only model selection checked against the v0.87.1 RPC handler and
+  `AgentSession.setModel` (global defaults require explicit persistence):
+  https://github.com/badlogic/pi-mono/blob/v0.87.1/packages/coding-agent/src/core/agent-session.ts
 - OpenCode: the public models command emits provider/id followed by pretty JSON:
   https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/cmd/models.ts
 - Claude: the existing recorded fake SDK response from
