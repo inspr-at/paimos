@@ -7258,6 +7258,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestFailuresMustBeSpacedAndReceiptsAreBounded","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestHarnessProbeRoutesMountWithoutRetirementConflict","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestHarnessProbesScheduleCheckNowAndFencePublication","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestInjectedResolverRefusesUnreadyWithoutCatalogWrites","tier":"GATED-FULL"}

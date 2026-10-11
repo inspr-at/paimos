@@ -15,6 +15,53 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Risk: probe publication overlaps retirement and panics when mounting the
+// production router, or a routing fallback admits unrelated model operations.
+func TestHarnessProbeRoutesMountWithoutRetirementConflict(t *testing.T) {
+	mux := http.NewServeMux()
+	(&Module{}).Mount(mux)
+	person := tenant.Principal{ID: "person", TenantID: "tenant", Kind: tenant.Person}
+	agent := tenant.Principal{ID: "agent", TenantID: "tenant", Kind: tenant.Agent}
+	const account = "11111111-1111-4111-8111-111111111111"
+	report := `{"request_id":"22222222-2222-4222-8222-222222222222","binding_revision":1,"daemon_id":"fixture","daemon_generation":"generation","state":"fresh","models":[]}`
+	for _, tc := range []struct {
+		name, path, pattern, body string
+		principal                 tenant.Principal
+		status                    int
+		error                     string
+	}{
+		{"claim", "/api/models/harness-probes/claim", "POST /api/models/harness-probes/claim", `{"daemon_id":"fixture","daemon_generation":"generation"}`, person, 403, "agent required"},
+		{"report", "/api/models/harness-probes/" + account, "POST /api/models/{collection}/{accountId}", report, person, 403, "agent required"},
+		{"retirement", "/api/models/" + account + "/retire", "POST /api/models/{id}/retire", `{}`, agent, 403, "person_required"},
+		{"overlap", "/api/models/harness-probes/retire", "POST /api/models/{id}/retire", `{}`, person, 400, "invalid_profile_id"},
+		{"invalid account", "/api/models/harness-probes/not-a-uuid", "POST /api/models/{collection}/{accountId}", report, person, 400, "invalid probe binding"},
+		{"unrelated collection", "/api/models/other/" + account, "POST /api/models/{collection}/{accountId}", report, person, 404, ""},
+		{"unlisted action", "/api/models/" + account + "/other", "POST /api/models/{collection}/{accountId}", report, person, 404, ""},
+		{"extra segment", "/api/models/harness-probes/" + account + "/extra", "", report, person, 404, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			r = r.WithContext(tenant.WithPrincipal(r.Context(), tc.principal))
+			if _, pattern := mux.Handler(r); pattern != tc.pattern {
+				t.Fatalf("matched %q, want %q", pattern, tc.pattern)
+			}
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, r)
+			if w.Code != tc.status {
+				t.Fatalf("HTTP %d, want %d: %s", w.Code, tc.status, w.Body.String())
+			}
+			if tc.error != "" {
+				var response struct {
+					Error string `json:"error"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil || response.Error != tc.error {
+					t.Fatalf("wrong rejection: %s, want %q: %v", w.Body.String(), tc.error, err)
+				}
+			}
+		})
+	}
+}
+
 // Risk: an ID-only Cursor probe splits a route from its recorded launch tuple,
 // or suffix guessing folds a route for which no effort has ever been recorded.
 func TestCursorHarnessProbeReusesRecordedLaunchIdentity(t *testing.T) {
