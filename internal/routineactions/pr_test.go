@@ -247,6 +247,17 @@ func TestRoutinePRResponseLossAndFinalAuthority(t *testing.T) {
 // pending, worker self-approval, or an unrelated/stale person approval.
 func TestRoutineNonCodeCompletionNeedsSettledActionsAndPerson(t *testing.T) {
 	f := externalSetup(t)
+	// A personal execution identity differs from the assigned daemon. Current
+	// person consent supplies the ceiling; the daemon still needs its live role.
+	f.exec(`UPDATE routine_runs SET execution_principal_id=$2 WHERE id=$1`, f.run, f.person.ID)
+	authorize := f.b.authorize
+	f.b.authorize = func(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Binding, c routineguard.Context) (tenant.Principal, routineguard.Decision, string, error) {
+		_, d, id, err := authorize(ctx, tx, p, b, c)
+		actor := f.person
+		actor.Scopes = []string{"work_orders.write", "nodes.write"}
+		return actor, d, id, err
+	}
+
 	in := f.request("pipeline", "pipeline.request")
 	in.PipelineRequest = &PipelineRequest{NonCode: true, ResultDigest: strings.Repeat("e", 64)}
 	out, err := f.b.Execute(t.Context(), f.agent, f.run, in)

@@ -286,11 +286,11 @@ func (b *Broker) observeMerge(ctx context.Context, tid, id string) (Receipt, boo
 		if err != nil {
 			return err
 		}
-		if actor.ID != binding.ExecutionPrincipalID || actor.ID != p.ID || actor.TenantID != tid {
+		if actor.ID != binding.ExecutionPrincipalID || actor.TenantID != tid {
 			return authz.ErrForbidden
 		}
-		p = actor
-		for _, who := range []tenant.Principal{actor, {ID: binding.OwnerID, TenantID: tid, Kind: tenant.Person}} {
+		p.Scopes = actor.Scopes
+		for _, who := range []tenant.Principal{p, actor, {ID: binding.OwnerID, TenantID: tid, Kind: tenant.Person}} {
 			if err := authz.RequireTx(ctx, tx, who, "work_orders.write", authz.Scope{ProjectID: binding.ProjectID}); err != nil {
 				return err
 			}

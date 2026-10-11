@@ -147,7 +147,8 @@ func (b *Broker) effectTx(ctx context.Context, tid, id string, fn func(pgx.Tx, t
 		if _, err := tx.Exec(ctx, `UPDATE routine_actions SET policy_digest=$2,evaluation_id=$3 WHERE id=$1`, id, decision.PolicyDigest, evaluation); err != nil {
 			return err
 		}
-		if err := fn(tx, actor, binding, v, state, &out); err != nil {
+		p.Scopes = actor.Scopes
+		if err := fn(tx, p, binding, v, state, &out); err != nil {
 			return err
 		}
 		return saveReceiptTx(ctx, tx, out)

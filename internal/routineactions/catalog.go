@@ -294,10 +294,10 @@ func (b *Broker) authorizedTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		// identity and scopes, never a persisted API-key ceiling. API calls still
 		// check the original authenticated caller and its live key authority.
 		if reconcile && p.KeyID == "" {
-			if p.ID != actor.ID {
-				return Binding{}, authz.ErrForbidden
-			}
-			p = actor
+			// The assigned daemon and execution identity may differ, including
+			// a personal routine executed under its owner's consent. Keep both
+			// identities and check the daemon's live role with this bounded ceiling.
+			p.Scopes = actor.Scopes
 		}
 		if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: in.ProjectID}); err != nil {
 			return Binding{}, err
