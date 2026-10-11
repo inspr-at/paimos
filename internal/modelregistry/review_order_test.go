@@ -13,7 +13,6 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -153,19 +152,27 @@ func reviewOrderProfiles(t *testing.T, tx pgx.Tx, p tenant.Principal) (Profile, 
 	return strong, frontier
 }
 
+// Risk: a saved Models Review order changes which qualified reviewer runs
+// first but qualifies a profile it lists: an unqualified, disabled, retired,
+// author-family, unsupported-adapter, filtered, accountless or non-resident
+// choice must stay refused with its cause.
 func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
 		strong, frontier := reviewOrderProfiles(t, tx, p)
+		// Only the fixture pins have an account; catalog lines stay unrunnable.
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$1::uuid,$2::uuid] WHERE account_key='order'`, strong.ID, frontier.ID); err != nil {
+			return err
+		}
 		now := time.Now()
 		q := WorkQuery{AuthorFamily: "openai"}
-		legacy, err := ResolveReviewFor(t.Context(), tx, p, q, now)
+		automatic, err := ResolveReviewFor(t.Context(), tx, p, q, now)
 		if err != nil {
 			return err
 		}
-		if legacy.Profile == nil || legacy.Profile.ID != frontier.ID || legacy.Trace.OrderMode != "legacy" {
-			t.Fatal("legacy frontier/tier fallback changed", legacy)
+		if automatic.Profile == nil || automatic.Profile.ID != frontier.ID || automatic.Trace.OrderMode != "legacy" {
+			t.Fatal("automatic frontier/tier order changed", automatic)
 		}
-		if err := saveReviewOrder(t.Context(), tx, p.TenantID, "saved"); err != nil {
+		if err := dbtest.SetModelOrder(t.Context(), tx, p.TenantID, "", "other", "review", strong.ID, frontier.ID); err != nil {
 			return err
 		}
 		saved, err := ResolveReviewFor(t.Context(), tx, p, q, now)
@@ -173,38 +180,31 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 			return err
 		}
 		if saved.Profile == nil || saved.Profile.ID != strong.ID || saved.Trace.OrderMode != "saved" || saved.Ladder[0].ProfileID != strong.ID {
-			t.Fatal("saved fallback not applied", saved)
+			t.Fatal("saved order not applied", saved)
 		}
-		scope, err := modelprefs.SaveScope(t.Context(), tx, p, modelprefs.Scope{Level: "default"})
-		if err != nil {
-			return err
-		}
-		var kind string
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM work_kinds WHERE slug='review'`).Scan(&kind); err != nil {
-			return err
-		}
-		if err := modelprefs.PutRow(t.Context(), tx, p, scope, kind, modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": {Mode: "pinned", ProfileID: frontier.ID}}}); err != nil {
+		if err := dbtest.SetModelOrder(t.Context(), tx, p.TenantID, "", "other", "review", frontier.ID, strong.ID); err != nil {
 			return err
 		}
 		preferred, err := ResolveReviewFor(t.Context(), tx, p, q, now)
 		if err != nil {
 			return err
 		}
-		if preferred.Profile == nil || preferred.Profile.ID != frontier.ID || !preferred.Ladder[1].Selected || preferred.Trace.OrderMode != "saved" {
-			t.Fatal("preference lost qualified precedence", preferred)
+		if preferred.Profile == nil || preferred.Profile.ID != frontier.ID || !preferred.Ladder[0].Selected || preferred.Trace.OrderMode != "saved" {
+			t.Fatal("saved order lost qualified precedence", preferred)
 		}
+		const notRoute = "no registered route for this line"
 		for _, tc := range []struct {
 			name, sql, reason string
 			query             WorkQuery
 		}{
-			{"effort", "", "review requires frontier or strong at xhigh", q},
-			{"tier", "", "review requires frontier or strong at xhigh", q},
-			{"disabled", "", "policy", q},
-			{"retired", `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($2,$1,'order-test',$3)`, "retired", q},
+			{"effort", "", "review requires strong or frontier at the highest native level", q},
+			{"tier", "", "review requires strong or frontier at the highest native level", q},
+			{"disabled", "", notRoute, q},
+			{"retired", `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($2,$1,'order-test',$3)`, notRoute, q},
 			{"author", "", "author family", WorkQuery{AuthorFamily: "anthropic"}},
 			{"adapter", "", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", WorkQuery{AuthorFamily: "xai"}},
 			{"harness", "", "harness filter", WorkQuery{AuthorFamily: "openai", Harness: "codex"}},
-			{"account", `UPDATE agent_accounts SET last_probe_ok=false`, "no approved account with available capacity", q},
+			{"account", `UPDATE agent_accounts SET last_probe_ok=false`, "Claude account has no recent successful sign-in check", q},
 			{"residency", "", "not allowed: eu", WorkQuery{AuthorFamily: "openai", TicketResidency: "eu"}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
@@ -213,7 +213,7 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer sub.Rollback(t.Context())
-				target := frontier.ID
+				target := frontier
 				if tc.name == "effort" || tc.name == "tier" || tc.name == "disabled" || tc.name == "adapter" {
 					effort, tier := frontier.Effort, frontier.Tier
 					if tc.name == "effort" {
@@ -226,24 +226,22 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 					if tc.name == "adapter" {
 						harness, family, model = "codex", "openai", "gpt-6-sol"
 					}
-					if err := sub.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled) VALUES($1,$2,'1',$6,$7,$8,$3,$4,$5) RETURNING id::text`, p.TenantID, "unqualified-"+tc.name, effort, tier, tc.name != "disabled", harness, family, model).Scan(&target); err != nil {
+					if err := sub.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled,registered_effort_level) VALUES($1,$2,'1',$6,$7,$8,$3,$4,$5,CASE $3 WHEN 'xhigh' THEN 4 ELSE 3 END) RETURNING id::text`, p.TenantID, "unqualified-"+tc.name, effort, tier, tc.name != "disabled", harness, family, model).Scan(&target.ID); err != nil {
 						t.Fatal(err)
 					}
-					if _, err := sub.Exec(t.Context(), `UPDATE model_role_routes SET profile_id=$2 WHERE profile_id=$1`, frontier.ID, target); err != nil {
-						t.Fatal(err)
-					}
-					if err := modelprefs.PutRow(t.Context(), sub, p, scope, kind, modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": {Mode: "pinned", ProfileID: target}}}); err != nil {
-						t.Fatal(err)
-					}
+					target.Harness, target.Family, target.Model = harness, family, model
+				}
+				// The saved order lists the target first.
+				order := []string{target.ID, strong.ID}
+				if err := dbtest.SetModelOrder(t.Context(), sub, p.TenantID, "", "other", "review", order...); err != nil {
+					t.Fatal(err)
 				}
 				if tc.sql != "" {
 					var err error
 					if tc.name == "retired" {
 						_, err = sub.Exec(t.Context(), tc.sql, frontier.ID, p.TenantID, p.ID)
-					} else if tc.name == "account" {
-						_, err = sub.Exec(t.Context(), tc.sql)
 					} else {
-						_, err = sub.Exec(t.Context(), tc.sql, frontier.ID)
+						_, err = sub.Exec(t.Context(), tc.sql)
 					}
 					if err != nil {
 						t.Fatal(err)
@@ -253,17 +251,31 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got.Profile != nil && got.Profile.ID == target {
-					t.Fatal("preferred unqualified profile escaped", tc.name)
+				if got.Profile != nil && got.Profile.ID == target.ID {
+					t.Fatal("saved unqualified profile escaped", tc.name)
 				}
-				var candidate Candidate
+				reasons := []string{}
+				found := false
 				for _, c := range got.Ladder {
-					if c.ProfileID == target {
-						candidate = c
+					if c.ProfileID == target.ID {
+						found = true
+						if c.Selected {
+							t.Fatal("saved unqualified profile selected", tc.name)
+						}
+						reasons = append(reasons, c.SkipReasons...)
 					}
 				}
-				if !strings.Contains(strings.Join(candidate.SkipReasons, ";"), tc.reason) || candidate.Selected {
-					t.Fatal("wrong qualifying refusal", tc.name, candidate)
+				if !found {
+					// A choice without a dispatchable route is held at its line.
+					line, _ := modelsLine(target)
+					for _, held := range got.Trace.Held {
+						if held.Line == line {
+							reasons = append(reasons, held.Reason)
+						}
+					}
+				}
+				if !strings.Contains(strings.Join(reasons, ";"), tc.reason) {
+					t.Fatal("wrong qualifying refusal", tc.name, reasons, got)
 				}
 			})
 		}
@@ -271,24 +283,8 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if !security.OwnerRequired || security.Profile != nil || security.Trace.OrderMode != "" || security.Role != "review-gate-security" || len(security.Trace.Hard) != 1 || security.Trace.Hard[0] != "security_review" {
+		if !security.OwnerRequired || security.Profile != nil || security.Role != "review-gate-security" || len(security.Trace.Hard) != 1 || security.Trace.Hard[0] != "security_review" || security.Trace.Blocked != "no qualified security review profile/account" {
 			t.Fatal("saved order escaped security path", security)
-		}
-		// Preview caching must retain the same rows+mode even across later writes.
-		catalog := &preferencePreviewCatalog{}
-		a, err := resolveReviewWithCatalog(t.Context(), tx, p, q, now, catalog)
-		if err != nil {
-			return err
-		}
-		if err := saveReviewOrder(t.Context(), tx, p.TenantID, "legacy"); err != nil {
-			return err
-		}
-		b, err := resolveReviewWithCatalog(t.Context(), tx, p, q, now, catalog)
-		if err != nil {
-			return err
-		}
-		if a.Trace.OrderMode != "saved" || b.Trace.OrderMode != "saved" || !reflect.DeepEqual(a.Ladder, b.Ladder) {
-			t.Fatal("preview paired cached ladder with new mode")
 		}
 		return nil
 	})
@@ -310,7 +306,9 @@ func TestReviewOrderReadAndResolverSnapshotBarrier(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = writer.Rollback(context.Background()) })
-			if _, err := writer.Exec(t.Context(), `LOCK TABLE model_pref_situation_orders IN ACCESS EXCLUSIVE MODE`); err != nil {
+			// Hold every Models preference table the readers load, so the first
+			// such read waits for the whole saved order.
+			if _, err := writer.Exec(t.Context(), `LOCK TABLE model_pref_profiles, model_pref_orders, model_pref_situation_orders IN ACCESS EXCLUSIVE MODE`); err != nil {
 				t.Fatal(err)
 			}
 			var pid int
@@ -426,14 +424,28 @@ func TestReviewOrderCatalogUpgradePreservesSavedV2Default(t *testing.T) {
 		}
 		return saveReviewOrder(t.Context(), tx, p.TenantID, reviewOrderSaved)
 	})
-	before := roleRoutes("review-gate", registryRoutes(t, p))
-	if len(before) != 6 {
+	// Retained ladder rows are history for the deprecation release; the
+	// upgrade neither rewrites them nor turns them into Models orders.
+	retained := func() string {
+		var state string
+		inRegistry(t, p, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
+ 'ladder',(SELECT jsonb_agg(jsonb_build_array(priority,profile_id,state) ORDER BY priority) FROM model_role_routes WHERE role='review-gate'),
+ 'orders',(SELECT count(*) FROM model_pref_orders)+(SELECT count(*) FROM model_pref_situation_orders))::text`).Scan(&state)
+		})
+		return state
+	}
+	before := retained()
+	var rows int
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM model_role_routes WHERE role='review-gate'`).Scan(&rows)
+	})
+	if rows != 6 {
 		t.Fatal("historical default fixture lost its rows")
 	}
 	decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
-	after := roleRoutes("review-gate", registryRoutes(t, p))
-	if !reflect.DeepEqual(before, after) {
-		t.Fatalf("catalog upgrade replaced saved review order: before=%+v after=%+v", before, after)
+	if after := retained(); after != before {
+		t.Fatalf("catalog upgrade replaced saved review history: before=%s after=%s", before, after)
 	}
 	inRegistry(t, p, func(tx pgx.Tx) error {
 		mode, err := storedReviewOrder(t.Context(), tx)

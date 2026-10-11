@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -200,6 +201,8 @@ func profileBySlug(profiles []Profile, slug string) Profile {
 	return Profile{}
 }
 
+func astra(profiles []Profile) Profile { return profileBySlug(profiles, "codex-astra-xhigh") }
+
 func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
@@ -257,12 +260,27 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatal("cursor scout should be unsupported")
 	}
+	// Models review dispatches only to verified no-tools harnesses; for an
+	// Anthropic author that is native Grok, never Codex.
+	grok := profileBySlug(profiles, "grok-4-7-xhigh")
+	minimalAccount(t, admin, grok)
 	gate := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=anthropic", "", http.StatusOK)
-	astra := profileBySlug(profiles, "codex-astra-xhigh")
-	if gate.Profile == nil || gate.Profile.ID != astra.ID || gate.OwnerRequired ||
-		gate.CommandTemplate != "codex exec -m gpt-6-astra -c model_reasoning_effort=xhigh --sandbox read-only '{prompt}'" ||
-		len(gate.Ladder) != 7 || gate.Ladder[1].SkipReasons[0] != "author family" {
+	wantCommand, err := commandTemplate(grok.Harness, grok.Model, grok.Effort, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gate.Profile == nil || gate.Profile.ID != grok.ID || gate.OwnerRequired || gate.CommandTemplate != wantCommand || len(gate.Ladder) == 0 {
 		t.Fatalf("gate %+v", gate)
+	}
+	for _, candidate := range gate.Ladder {
+		for _, profile := range profiles {
+			if profile.ID == candidate.ProfileID && profile.Family == "anthropic" {
+				t.Fatalf("author family candidate walked: %+v", gate.Ladder)
+			}
+		}
+		if candidate.ProfileID == astra(profiles).ID && (candidate.Selected || !slices.Contains(candidate.SkipReasons, "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.")) {
+			t.Fatalf("Codex review was not refused for its sandbox: %+v", candidate)
+		}
 	}
 	otherProfiles := decode[[]Profile](t, &other, http.MethodGet, "/api/models", "", http.StatusOK)
 	minimalAccount(t, other, profileBySlug(otherProfiles, "claude-fable-xhigh"))
@@ -300,7 +318,28 @@ func reviewAccount(t *testing.T, p tenant.Principal, harness string) string {
 		}
 		schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
 		raw, _ := json.Marshal(schedule)
-		_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, id, raw)
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, id, raw); err != nil {
+			return err
+		}
+		if harness != "grok" {
+			return nil
+		}
+		// Native Grok reviews only through a macOS arm64 pairing enrollment.
+		var key, request, computer, profile string
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE harness='grok' AND enabled ORDER BY slug LIMIT 1`).Scan(&profile); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,created_by_principal_id) VALUES($1,$2,'Review fixture',gen_random_uuid()::text,'fixture-not-a-credential',$3) RETURNING id::text`, p.TenantID, runner, p.ID).Scan(&key); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
+ VALUES($1,gen_random_uuid(),'887887887',repeat('a',64),repeat('b',64),repeat('c',64),'{"platform":"darwin","arch":"arm64"}','fixture','redeemed',$2) RETURNING id::text`, p.TenantID, p.ID).Scan(&request); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,gen_random_uuid(),$2,$3,$4,'review-runner',repeat('c',64)) RETURNING id::text`, p.TenantID, request, runner, key).Scan(&computer); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) VALUES($1,$2,$3,$4,$5,now()+interval '1 hour',now())`, p.TenantID, id, computer, request, profile)
 		return err
 	})
 	return id
@@ -370,7 +409,34 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	profiles := decode[[]Profile](t, &admin, http.MethodGet, "/api/models", "", http.StatusOK)
 	luna := profileBySlug(profiles, "codex-luna-medium")
 	haiku := profileBySlug(profiles, "claude-haiku-medium")
+	// The Models walk admits accounts, not catalog previews: both routes
+	// have one, and the Codex account's health drives the later causes.
+	minimalAccount(t, admin, haiku)
 	inRegistry(t, admin, func(tx pgx.Tx) error {
+		var account string
+		if err := tx.QueryRow(t.Context(), `
+			INSERT INTO agent_accounts
+				(tenant_id, account_key, harness, daemon_id, registered_by_principal_id, label, state,
+				 last_probe_at, last_probe_ok, last_daemon_generation, share_usage, capacity_owner)
+			VALUES ($1::uuid, 'local-codex', 'codex', 'daemon-a', $2::uuid, 'Codex', 'available',
+			        now(), true, 'gen-1', true, $3) RETURNING id::text`, admin.TenantID, agent.ID, admin.ID).Scan(&account); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `
+			INSERT INTO account_allowance_windows
+				(tenant_id, account_id, starts_at, ends_at, unit, allowance, used, pace_model, burst_ratio)
+			VALUES ($1::uuid, $2, now() - interval '1 hour', now() + interval '1 hour', 'requests', 10, 0, 'unrestricted', 0)`, admin.TenantID, account); err != nil {
+			return err
+		}
+		schedule := capacity.DefaultSchedule()
+		for i := range schedule.Week {
+			schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+		}
+		schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+		raw, _ := json.Marshal(schedule)
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, admin.TenantID, admin.ID, account, raw); err != nil {
+			return err
+		}
 		return dbtest.SetModelOrder(t.Context(), tx, admin.TenantID, "", "other", "first", luna.ID, haiku.ID)
 	})
 	until := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
@@ -379,50 +445,27 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	if build.Profile == nil || build.Profile.ID != haiku.ID || len(build.Ladder) == 0 || build.Ladder[0].ProfileID != luna.ID || !strings.HasPrefix(build.Ladder[0].SkipReasons[0], "paused until ") || !strings.HasSuffix(build.Ladder[0].SkipReasons[0], ": hold") {
 		t.Fatalf("paused %+v", build)
 	}
-	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_pauses SET until_at = now() - interval '1 minute' WHERE harness='codex'`)
-		return err
-	})
-	if err != nil {
-		t.Fatalf("expire: %v", err)
+	expire := func(sql string) {
+		t.Helper()
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), sql)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
+	expire(`UPDATE model_pauses SET until_at = now() - interval '1 minute' WHERE harness='codex'`)
 	build = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=build", "", http.StatusOK)
 	if build.Profile == nil || build.Profile.ID != luna.ID || len(build.Ladder[0].SkipReasons) != 0 {
 		t.Fatalf("expired pause still skipped: %+v", build)
 	}
-
-	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `
-			INSERT INTO agent_accounts
-				(tenant_id, account_key, harness, daemon_id, registered_by_principal_id, label, state,
-				 last_probe_at, last_probe_ok, last_daemon_generation, share_usage)
-			VALUES ($1::uuid, 'local-codex', 'codex', 'daemon-a', $2::uuid, 'Codex', 'available',
-			        now() - interval '10 minutes', true, 'gen-1', true)`, admin.TenantID, agent.ID)
-		return err
-	})
-	if err != nil {
-		t.Fatalf("account: %v", err)
-	}
+	expire(`UPDATE agent_accounts SET last_probe_at = now() - interval '10 minutes' WHERE account_key = 'local-codex'`)
 	build = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=build", "", http.StatusOK)
 	if build.Profile == nil || build.Profile.ID != haiku.ID || build.Ladder[0].SkipReasons[0] != "Codex account has no recent successful sign-in check" {
 		t.Fatalf("stale probe %+v", build)
 	}
-	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `
-			UPDATE agent_accounts SET last_probe_at = now() WHERE account_key = 'local-codex'`)
-		if err != nil {
-			return err
-		}
-		_, err = tx.Exec(t.Context(), `
-			INSERT INTO account_allowance_windows
-				(tenant_id, account_id, starts_at, ends_at, unit, allowance, used, pace_model, burst_ratio)
-			SELECT $1::uuid, id, now() - interval '1 hour', now() + interval '1 hour', 'requests', 10, 10, 'unrestricted', 0
-			FROM agent_accounts WHERE account_key = 'local-codex'`, admin.TenantID)
-		return err
-	})
-	if err != nil {
-		t.Fatalf("window: %v", err)
-	}
+	expire(`UPDATE agent_accounts SET last_probe_at = now() WHERE account_key = 'local-codex'`)
+	expire(`UPDATE account_allowance_windows SET used = allowance WHERE account_id = (SELECT id FROM agent_accounts WHERE account_key = 'local-codex')`)
 	build = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=build", "", http.StatusOK)
 	if build.Profile == nil || build.Profile.ID != haiku.ID || !strings.HasPrefix(build.Ladder[0].SkipReasons[0], "Codex account is at its allowance or floor until ") {
 		t.Fatalf("full allowance %+v", build)
