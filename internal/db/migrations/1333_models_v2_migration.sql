@@ -67,6 +67,19 @@ CREATE FUNCTION aeon_models_canonical_line(line text) RETURNS text LANGUAGE sql 
   WHERE aeon_model_board_line(p.family,p.harness,p.model)=line ORDER BY p.slug,p.version,p.id LIMIT 1),line);
 $$;
 
+-- The routes one Models pause covers, as modelPauseRoutes: Cursor's xAI ids name one route per native level
+-- (grok-4.7-high, grok-4.7-xhigh), so a pause covers that line and version at every level; -fast stays separate.
+CREATE FUNCTION aeon_models_pause_routes(p_harness text, p_model text) RETURNS SETOF text LANGUAGE sql STABLE AS $$
+ WITH known AS (
+  SELECT DISTINCT p.model,p.family,aeon_models_line(p.family,p.harness,p.model) AS line,
+   replace((regexp_match((regexp_match(p.model,'^(.+?)(-(low|medium|high|xhigh|max|ultra))?(-fast)?$'))[1],'^([a-z][a-z-]*?)-?([0-9]+(?:[.-][0-9]+)*)(.*)$'))[2],'-','.') AS version
+  FROM model_profiles p WHERE p.harness=p_harness)
+ SELECT p_model
+ UNION
+ SELECT k.model FROM known k JOIN known t ON t.model=p_model AND t.family='xai' AND k.family='xai' AND k.line=t.line AND k.version IS NOT DISTINCT FROM t.version
+ WHERE p_harness='cursor';
+$$;
+
 CREATE FUNCTION aeon_migrate_models_v2(p_tenant uuid) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE prior text := current_setting('aeon.tenant_id',true); visible text := current_setting('aeon.visible_projects',true);
  audit jsonb; actor uuid; workspace uuid; item record; target record; source_rows jsonb; moved jsonb := '[]';
@@ -133,15 +146,18 @@ BEGIN
    moved := moved||jsonb_build_array(jsonb_build_object('from','review-gate','to','other/review','rank',ranked,'efforts',native));
   END IF;
  END LOOP;
+ -- A hold pauses every route its Models pause covers; the latest hold on a route wins.
  INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by)
- SELECT DISTINCT ON (p.harness,p.model) p_tenant,p.harness,p.model,r.valid_until,r.reason,actor
+ SELECT DISTINCT ON (p.harness,covered.model) p_tenant,p.harness,covered.model,r.valid_until,r.reason,actor
  FROM (SELECT * FROM model_role_routes UNION ALL SELECT * FROM model_security_role_routes) r
  JOIN model_profiles p ON p.tenant_id=r.tenant_id AND p.id=r.profile_id
+ CROSS JOIN LATERAL aeon_models_pause_routes(p.harness,p.model) covered(model)
  WHERE r.state<>'available' AND r.valid_until>stamp
- ORDER BY p.harness,p.model,r.valid_until DESC,r.role,r.priority;
+ ORDER BY p.harness,covered.model,r.valid_until DESC,r.role,r.priority;
  FOR item IN SELECT r.*,p.harness,p.model FROM (SELECT * FROM model_role_routes UNION ALL SELECT * FROM model_security_role_routes) r
   JOIN model_profiles p ON p.tenant_id=r.tenant_id AND p.id=r.profile_id WHERE r.state<>'available' AND r.valid_until>stamp ORDER BY r.role,r.priority LOOP
-  moved := moved||jsonb_build_array(jsonb_build_object('from',to_jsonb(item),'to',jsonb_build_object('pause',item.harness||'/'||item.model)));
+  moved := moved||jsonb_build_array(jsonb_build_object('from',to_jsonb(item),'to',jsonb_build_object('pause',item.harness||'/'||item.model,
+   'covers',(SELECT jsonb_agg(c.model ORDER BY c.model) FROM aeon_models_pause_routes(item.harness,item.model) c(model)))));
  END LOOP;
  INSERT INTO model_row_constraints(tenant_id,scope,project_id,column_key,line,kind,position,why,set_by,set_at)
  SELECT DISTINCT ON (scope,project_id,column_key,aeon_models_canonical_line(line)) tenant_id,scope,project_id,column_key,aeon_models_canonical_line(line),

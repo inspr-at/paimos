@@ -57,6 +57,11 @@ func TestModelsV2MigrationGolden(t *testing.T) {
 		if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,set_by) VALUES($1,$2,'other','first',ARRAY['openai:sol'],$3)`, admin.TenantID, workspace, admin.ID); err != nil {
 			return err
 		}
+		// These ladders replace the compatibility fixture's shipped ones, so
+		// the golden reads exactly the saved ladders below.
+		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes`); err != nil {
+			return err
+		}
 		for role, slugs := range map[string][]string{
 			"build":       {"codex-6-1-sol-high", "claude-sonnet-high", "opencode-ollama-qwen3-coder-default"},
 			"build-hard":  {"claude-opus-xhigh", "codex-6-1-sol-xhigh"},
@@ -339,6 +344,64 @@ func TestModelsV2SuccessorMovesAllReferences(t *testing.T) {
 		}
 		if step.State != "unavailable" || step.ValidUntil != nil || step.Reason != "Indefinite pause" {
 			t.Fatalf("stranded pause: %+v", step)
+		}
+		return nil
+	})
+}
+
+// Risk: a migrated hold on one of Cursor's effort-specific xAI ids leaves the
+// same route's other native levels running, unlike a Models pause on it.
+func TestModelsV2MigrationCursorHoldCoversNativeLevels(t *testing.T) {
+	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+		ctx := t.Context()
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		held := ""
+		// One route at two native levels, its separate fast route, and an older version.
+		for _, model := range []string{"grok-4.9-high", "grok-4.9-xhigh", "grok-4.9-high-fast", "grok-4.8-high"} {
+			effort := "high"
+			if strings.HasSuffix(model, "-xhigh") {
+				effort = "xhigh"
+			}
+			pin, err := insertProfile(ctx, tx, p.TenantID, profileWrite{Slug: "hold-cursor-" + strings.ReplaceAll(model, ".", "-"), Version: "fixture", Harness: "cursor", Family: "xai", Model: model, Effort: effort, Tier: "standard"})
+			if err != nil {
+				return err
+			}
+			if model == "grok-4.9-high" {
+				held = pin.ID
+			}
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state,reason,valid_until) VALUES($1,'build',1,$2,'conserved','Cursor hold',$3)`, p.TenantID, held, now.Add(time.Hour)); err != nil {
+			return err
+		}
+		want, err := modelPauseRoutes(ctx, tx, "cursor", "grok-4.9-high")
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(want, []string{"grok-4.9-high", "grok-4.9-xhigh"}) {
+			t.Fatalf("Models pause oracle covers %v", want)
+		}
+		if _, err := tx.Exec(ctx, `SELECT aeon_migrate_models_v2($1)`, p.TenantID); err != nil {
+			return err
+		}
+		var got []string
+		if err := tx.QueryRow(ctx, `SELECT coalesce(array_agg(model ORDER BY model),'{}') FROM model_pauses WHERE harness='cursor' AND reason='Cursor hold'`).Scan(&got); err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("migrated Cursor hold paused %v; a Models pause covers %v", got, want)
+		}
+		var covers []string
+		if err := tx.QueryRow(ctx, `SELECT array(SELECT jsonb_array_elements_text(m->'to'->'covers')) FROM model_v2_migrations, jsonb_array_elements(audit->'moved') m WHERE m->'to'->>'pause'='cursor/grok-4.9-high'`).Scan(&covers); err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(covers, want) {
+			t.Fatalf("audit lists %v for the hold; it paused %v", covers, want)
 		}
 		return nil
 	})
