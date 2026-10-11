@@ -97,9 +97,10 @@ function stepKeys(event: KeyboardEvent, index: number, handle: boolean) {
 function endKeys(event: KeyboardEvent) {
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
   event.preventDefault()
-  const next: ChainEnd = props.row.end === 'default' ? 'wait' : 'default'
+  // Radio keys select the other choice; focus goes with it at once, the save follows.
+  const group = event.currentTarget as HTMLElement, next: ChainEnd = props.row.end === 'default' ? 'wait' : 'default'
   emit('end', next)
-  void nextTick(() => (event.currentTarget as HTMLElement | null)?.querySelector<HTMLElement>(`[data-end="${props.row.key}:${next}"]`)?.focus())
+  void nextTick(() => group.querySelector<HTMLElement>(`[data-end="${props.row.key}:${next}"]`)?.focus())
 }
 </script>
 <template>

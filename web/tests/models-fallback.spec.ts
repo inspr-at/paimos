@@ -67,7 +67,8 @@ async function overlay(page: Page, trigger: string, min: number) {
   expect((await audit(page, min)).small, `${trigger} menu targets ≥ ${min} px`).toEqual([])
   await page.keyboard.press('Escape'); await expect(page.locator('.mdl-pop')).toHaveCount(0); await expect(page.locator(trigger)).toBeFocused()
 }
-const shot = (page: Page, testInfo: TestInfo, name: string, fullPage = true) => page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage })
+// The harness scrolls inside its main element, so the whole Models card is captured as an element.
+const shot = (page: Page, testInfo: TestInfo, name: string, card = true) => card ? page.locator('[data-models-section] .m-card').screenshot({ path: testInfo.outputPath(`${name}.png`) }) : page.screenshot({ path: testInfo.outputPath(`${name}.png`) })
 
 for (const width of [1440, 390]) for (const theme of ['light', 'dark']) test.describe(`at ${width} ${theme}`, () => {
   const phone = width < 600, min = phone ? 44 : 24
