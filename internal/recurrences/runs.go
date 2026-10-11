@@ -119,6 +119,13 @@ func persistRun(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurr
 	if err != nil {
 		return err
 	}
+	// M5's nullable launch linkage is filled by the executor later. Mark routine
+	// demand now so old daemons/rollback cannot reinterpret it as manual work.
+	if run.AgentRunID != nil {
+		if _, err := tx.Exec(ctx, `UPDATE agent_runs SET trace=jsonb_set(coalesce(trace,'{}'::jsonb),'{routine_run_id}',to_jsonb($2::text)) WHERE id=$1`, *run.AgentRunID, run.ID); err != nil {
+			return err
+		}
+	}
 	// The work creation is already confirmed in this transaction. Future outward
 	// actions use their own run-scoped key and immutable request digest.
 	request, err := json.Marshal(r.Input)
