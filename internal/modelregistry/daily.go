@@ -29,7 +29,7 @@ func resolveDailyWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		return out, err
 	}
 	// Models already checked each account owner's daily plan route by route.
-	// The legacy wrapper remains only until saved ladders migrate in S2.
+	// Other resolutions skip a capped harness and continue (AEON-1166).
 	if out.Trace.PreferenceOf != nil {
 		return out, nil
 	}
@@ -290,7 +290,9 @@ func (d *modelsDailyAdmission) filter(ctx context.Context, tx pgx.Tx, profile Pr
 			kept = append(kept, a.id)
 			continue
 		}
-		// Migrated order ends decide Wait. An unreadable plan still refuses.
+		// The dial follows Models (AEON-1166): a reached cap only skips this
+		// route, and the walk continues the order until it ends in Wait. An
+		// unreadable plan always refuses.
 		if reason == "daily_limit_unknown" {
 			d.wait = true
 		}

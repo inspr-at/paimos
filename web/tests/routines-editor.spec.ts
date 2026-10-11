@@ -58,6 +58,7 @@ async function setup(page: Page, role: 'admin' | 'member', options: { items?: Re
     }
     if (path.endsWith('/guardrails')) return route.fulfill({ json: { hard_version: 'h1', preset_version: '2026.10', digest: 'd', sources: [], rules: [{ rule: { id: 'hard.harmful_intent_v1', checkpoint: 'both', method: 'template', template: 'harmful_intent_v1', result: 'block' }, level: 'hard', scope: { kind: 'installation', id: 'paimos' }, version: 'h1' }, { rule: { id: 'recommended.sensitive', checkpoint: 'both', method: 'words', values: ['password', 'credential', 'secret', 'passwort'], result: 'needs_person' }, level: 'recommended', scope: { kind: 'installation', id: 'paimos' }, version: '2026.10' }] } })
     if (path.endsWith('/history')) return route.fulfill({ json: { items: [{ id: 9, type: 'recurrence.updated', at: dates[0], actor_name: 'Markus Barta', before: null, after: null, node: null }], next_cursor: null } })
+    if (path.endsWith('/runs')) return route.fulfill({ json: { items: [], next_cursor: null } })
     if (path.endsWith('/preview')) return route.fulfill({ json: { times: dates, trigger_kind: 'time' } })
     if (path.endsWith('/resume') || path.endsWith('/pause')) { Object.assign(record, { paused: path.endsWith('/pause'), revision: record.revision + 1 }); return route.fulfill({ json: record }) }
     if (path.endsWith('/execution-consent') && options.consentFails) return route.fulfill({ status: 422, json: { error: options.consentFails } })
@@ -109,7 +110,7 @@ test('an agent routine is created paused, then let run as the picked agent, with
   await expectStableControls({
     controls: { scout: radio(page, 'Look around'), build: radio(page, 'Build'), hard: radio(page, 'Hard build'), kind: editor(page).getByRole('combobox', { name: 'Kind of work' }), rules: editor(page).getByRole('button', { name: /^What it may do/ }), sentence: editor(page).locator('.ed-sentence'), create },
     scrollAreas: body,
-    interactions: ['Hard build', 'Look around', 'Build'].map(name => ({ name: `Effort: ${name}`, run: async () => { await radio(page, name).click(); await expect(editor(page).locator('.route')).toContainText('Today Opus 5.5 via Claude') } })),
+    interactions: ['Hard build', 'Look around', 'Build'].map(name => ({ name: `Effort: ${name}`, run: async () => { await radio(page, name).click(); await expect(editor(page).locator('.route')).toContainText('Today Opus 5.5 via Claude Code') } })),
   })
   await expectStableControls({
     controls: { off: radio(page, 'No limit'), money: radio(page, 'Money'), both: radio(page, 'Both'), where: editor(page).getByRole('button', { name: /^Where it runs/ }), create },
@@ -131,7 +132,7 @@ test('an agent routine is created paused, then let run as the picked agent, with
     ],
   })
   // Route line and WHO say the registry name and harness label, never a model or profile id.
-  await expect(editor(page).locator('.pv-grid')).toContainText('Opus 5.5 via Claude builds it')
+  await expect(editor(page).locator('.pv-grid')).toContainText('Opus 5.5 via Claude Code builds it')
   for (const part of ['.route', '.pv-grid']) for (const raw of ['claude-opus-5-5', '57000000-']) await expect(editor(page).locator(part)).not.toContainText(raw)
   // Settings paths (Models, Capacity, Computers) draw an SVG chevron, never ›, and each reads on one line.
   await expect(editor(page).locator('.route a')).toHaveAccessibleName('Settings, Models')
@@ -300,8 +301,8 @@ for (const [width, theme] of [[1440, 'dark'], [390, 'light']] as const) {
     await page.goto('/p/PHAROS/settings')
     await expect(page.getByRole('row', { name: 'Weekly dependency update', exact: true })).toContainText('Waiting for a person')
     await expect(page.getByText('Agents may run routines in PHAROS')).toBeVisible()
-    // The history card agrees with the box: a routine.
-    await expect(page.locator('.history-head .eyebrow')).toHaveText('Routine')
+    // An agent routine's history is its logbook (AEON-1192), named a routine like the box.
+    await expect(page.locator('[data-logbook] .lb-head .eyebrow')).toHaveText('Routine · PHAROS')
     await shot(page, info, `box-${width}-${theme}`)
     await draftAgentRoutine(page)
     await radio(page, 'An agent works on it').click()

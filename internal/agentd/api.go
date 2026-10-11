@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/modelreport"
+	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/version"
@@ -598,4 +599,26 @@ func (r *Remote) SessionActivityMode(id string) string {
 		return mode
 	}
 	return agentactivity.Off
+}
+
+// LeadDemand is bounded to one owner-approved project mapping. Missing routes
+// on older servers are unavailable, never a fallback to ordinary queue pickup.
+func (r *Remote) LeadDemand(ctx context.Context, project string) (*agentsetup.LeadDemand, error) {
+	var out struct {
+		Demand *agentsetup.LeadDemand `json:"demand"`
+		State  string                 `json:"state"`
+		Reason string                 `json:"reason"`
+	}
+	err := r.Client.Do(ctx, "GET", "/api/projects/"+url.PathEscape(project)+"/lead-runtime", nil, &out)
+	return out.Demand, err
+}
+func (r *Remote) ClaimLead(ctx context.Context, in agentsetup.LeadPickup) (agentsetup.LeadLaunch, error) {
+	var out agentsetup.LeadLaunch
+	err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(in.Demand.ProjectID)+"/lead-runtime/claim", in, &out)
+	return out, err
+}
+func (r *Remote) ReportLead(ctx context.Context, in agentsetup.LeadPickup, kind string, ownership *ownedprocess.Identity) (agentsetup.LeadLaunch, error) {
+	var out agentsetup.LeadLaunch
+	err := r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(in.Demand.ProjectID)+"/lead-runtime/report", map[string]any{"pickup": in, "kind": kind, "ownership": ownership}, &out)
+	return out, err
 }

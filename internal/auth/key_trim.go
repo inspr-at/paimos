@@ -177,7 +177,7 @@ func (m *Module) trimClock() time.Time {
 	}
 	return time.Now().UTC()
 }
-func (m *Module) trimReply(w http.ResponseWriter, status int, value any, err error) {
+func (m *Module) trimReply(w http.ResponseWriter, r *http.Request, status int, value any, err error) {
 	switch {
 	case errors.Is(err, authz.ErrForbidden):
 		writeForbidden(w)
@@ -188,7 +188,7 @@ func (m *Module) trimReply(w http.ResponseWriter, status int, value any, err err
 	case errors.Is(err, errTrimFullAccess), errors.Is(err, errTrimChanged), errors.Is(err, errTrimRecent), errors.Is(err, errTrimExpired), errors.Is(err, errTrimReplay), errors.Is(err, errTrimRestore), errors.Is(err, errKeyInactive):
 		writeJSON(w, 409, errorJSON{Error: err.Error()})
 	case err != nil:
-		writeInternal(w)
+		internalFailure(w, r, "key_trim", err)
 	default:
 		writeJSON(w, status, value)
 	}
@@ -209,11 +209,11 @@ func (m *Module) handleProposeKeyTrim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateTrimInput(&in); err != nil {
-		m.trimReply(w, 0, nil, err)
+		m.trimReply(w, r, 0, nil, err)
 		return
 	}
 	out, err := m.proposeKeyTrim(r.Context(), p, id, in)
-	m.trimReply(w, 201, out, err)
+	m.trimReply(w, r, 201, out, err)
 }
 func trimPerson(w http.ResponseWriter, r *http.Request) (tenant.Principal, bool) {
 	p, ok := tenant.PrincipalFrom(r.Context())
@@ -247,7 +247,7 @@ func (m *Module) handleDecideKeyTrim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := m.decideKeyTrim(r.Context(), p, id, in, restore)
-	m.trimReply(w, 200, out, err)
+	m.trimReply(w, r, 200, out, err)
 }
 func (m *Module) handleListKeyTrims(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -317,14 +317,14 @@ func (m *Module) handleListKeyTrims(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 	if err != nil {
-		m.trimReply(w, 0, nil, err)
+		m.trimReply(w, r, 0, nil, err)
 		return
 	}
 	out := map[string]any{"items": items, "has_more": hasMore}
 	if hasMore {
 		out["next_cursor"] = items[len(items)-1].ID
 	}
-	m.trimReply(w, 200, out, err)
+	m.trimReply(w, r, 200, out, err)
 }
 
 // This metadata reader deliberately does not use keyRecord/keyJSON/keySnapshot,

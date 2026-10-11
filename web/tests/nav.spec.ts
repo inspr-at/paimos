@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// The header's three places (Projects · Agents · Business), the breadcrumb that
-// continues from the active one, the g-sequences, and the Business tabs.
+// The header's places (Projects · Agents · Business · Decision Desk, AEON-1214),
+// the breadcrumb that continues from the active one, the g-sequences, and the
+// Business tabs.
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
@@ -19,7 +20,7 @@ test('three places in order of use; the active one is highlighted and the breadc
   const errors = watchErrors(page)
   await setup(page)
   await page.goto('/')
-  await expect(places(page).getByRole('link')).toHaveText(['Projects', 'Agents', 'Business'])
+  await expect(places(page).getByRole('link')).toHaveText(['Projects', 'Agents', 'Business', /^Decision Desk/])
   await expect(places(page).getByRole('link', { name: 'Projects' })).toHaveAttribute('aria-current', 'page')
   await expect(crumbs(page)).toHaveCount(0)
 
@@ -47,7 +48,7 @@ test('Business shows only while one of its parts is open', async ({ page }) => {
   await setup(page, { enabled: [] })
   await page.goto('/')
   await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
-  await expect(places(page).getByRole('link')).toHaveText(['Projects', 'Agents'])
+  await expect(places(page).getByRole('link')).toHaveText(['Projects', 'Agents', /^Decision Desk/])
 })
 
 test('g then b crosses the release menu g opened; another menu blocks a new arm, and an expired arm or a field stays on the ticket', async ({ page }) => {
@@ -144,11 +145,13 @@ test('Business tabs: a closed Customers or Quotes says how to open it; earlier l
   await expect(page.getByRole('navigation', { name: 'Business' }).getByRole('link')).toHaveText(['Overview', 'Customers', 'Quotes', 'Hours', 'Rates'])
   await expect(page.getByRole('navigation', { name: 'Business' }).getByRole('link', { name: 'Customers' })).toHaveAttribute('aria-current', 'page')
   await expect(page.getByRole('heading', { name: 'Customers is not enabled for this workspace' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Open Business setup' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Set up in Settings › Business' })).toBeVisible()
   await page.getByRole('link', { name: 'Quotes', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Quotes is not enabled for this workspace' })).toBeVisible()
-  await page.getByRole('link', { name: 'Open Business setup' }).click()
-  await expect(page).toHaveURL('/business')
+  // AEON-1189: every setup path ends in Settings › Business.
+  await page.getByRole('link', { name: 'Set up in Settings › Business' }).click()
+  await expect(page).toHaveURL('/settings/business#parts')
+  await expect(page.locator('#parts').getByRole('checkbox', { name: 'Quotes enabled' })).toBeVisible()
   await page.goto('/crm')
   await expect(page).toHaveURL('/business/customers')
   expect(errors).toEqual([])

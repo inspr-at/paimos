@@ -42,6 +42,7 @@ func (m *Module) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := m.tenantBySlug(r.Context(), slug); err != nil {
 		if slug == m.cfg.BootstrapTenantSlug && errors.Is(err, pgx.ErrNoRows) {
+			httpapi.LogFailure(r, "login_tenant", err)
 			writeHTML(w, http.StatusInternalServerError, notReadyPage)
 		} else {
 			writeHTML(w, http.StatusBadRequest, signInFailedPage)
@@ -50,16 +51,19 @@ func (m *Module) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	_, oc, err := m.oidcProvider(r.Context())
 	if err != nil {
+		httpapi.LogFailure(r, "oidc_provider", err)
 		writeHTML(w, http.StatusInternalServerError, notReadyPage)
 		return
 	}
 	state, err := randomString(16)
 	if err != nil {
+		httpapi.LogFailure(r, "oidc_state", err)
 		writeHTML(w, http.StatusInternalServerError, notReadyPage)
 		return
 	}
 	nonce, err := randomString(16)
 	if err != nil {
+		httpapi.LogFailure(r, "oidc_nonce", err)
 		writeHTML(w, http.StatusInternalServerError, notReadyPage)
 		return
 	}
@@ -70,6 +74,7 @@ func (m *Module) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	payload := oidcPayload{State: state, Nonce: nonce, Verifier: verifier, Tenant: slug, Invite: invite, Exp: time.Now().Add(oidcTTL).Unix()}
 	if err := m.setOIDCCookie(w, payload); err != nil {
+		httpapi.LogFailure(r, "oidc_cookie", err)
 		writeHTML(w, http.StatusInternalServerError, notReadyPage)
 		return
 	}
@@ -203,7 +208,7 @@ func (m *Module) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookieName); err == nil {
 		if raw, err := decodeSessionToken(c.Value); err == nil {
 			if err := m.deleteSession(r.Context(), raw); err != nil {
-				writeInternal(w)
+				internalFailure(w, r, "delete_session", err)
 				return
 			}
 		}
@@ -227,7 +232,7 @@ func (m *Module) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeInternal(w)
+		internalFailure(w, r, "load_me", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, m.meJSONFrom(view))
@@ -259,11 +264,12 @@ func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	tenantID, err := m.tenantBySlug(r.Context(), slug)
 	if errors.Is(err, pgx.ErrNoRows) {
+		httpapi.LogFailure(r, "dev_login_tenant", err)
 		writeJSON(w, http.StatusInternalServerError, errorJSON{Error: "workspace is not ready"})
 		return
 	}
 	if err != nil {
-		writeInternal(w)
+		internalFailure(w, r, "dev_login_tenant", err)
 		return
 	}
 	principal, identityID, err := m.personByEmail(r.Context(), tenantID, email)
@@ -274,7 +280,7 @@ func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		identityID, err = m.upsertIdentity(r.Context(), tenantID, devIssuer, identity.FoldEmailASCII(email), email, email)
 		if err != nil {
-			writeInternal(w)
+			internalFailure(w, r, "dev_login_identity", err)
 			return
 		}
 		principal, err = m.ensurePerson(r.Context(), tenantID, identityID, email, email)
@@ -284,18 +290,18 @@ func (m *Module) handleDevLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeInternal(w)
+		internalFailure(w, r, "dev_login_person", err)
 		return
 	}
 	token, err := m.startSession(r.Context(), identityID, principal.TenantID, principal.ID)
 	if err != nil {
-		writeInternal(w)
+		internalFailure(w, r, "dev_login_session", err)
 		return
 	}
 	m.setSessionCookie(w, token)
 	view, err := m.loadMe(r.Context(), principal)
 	if err != nil {
-		writeInternal(w)
+		internalFailure(w, r, "dev_login_view", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, m.meJSONFrom(view))

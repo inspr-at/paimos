@@ -416,13 +416,15 @@ test('approved queue surfaces in light/dark and narrow layouts, with accessible 
     const fold = page.locator('.phone-header-fold')
     if (await fold.count()) {
       for (const density of ['Comfortable', 'Compact']) {
+        // AEON-1188: header density lives in the Display menu, linked from the Filters sheet.
         await page.getByRole('button', { name: 'Filters', exact: true }).click()
-        const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+        await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+        const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
         const group = sheet.getByRole('radiogroup', { name: 'Project header density', exact: true })
         const choice = group.getByRole('radio', { name: density, exact: true })
         await expectStableControls({
           controls: { sheet, group, choice, apply: sheet.locator('footer button') },
-          scrollAreas: { body: sheet.locator('.sheet-scroll') },
+          scrollAreas: { body: sheet.locator('.menu-body') },
           interactions: [{ name: `${density} header`, run: async () => { await choice.click(); await expect(choice).toHaveAttribute('aria-checked', 'true') } }],
         })
         await sheet.locator('footer button').click()

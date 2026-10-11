@@ -2,13 +2,17 @@
 package modelregistry
 
 import (
+	"context"
 	"encoding/json"
 	"reflect"
 	"slices"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -454,7 +458,7 @@ func TestModelsV2OrderNativeEffortCompatibility(t *testing.T) {
 	}
 }
 
-// Risk: same-line route fallback hides its pause cause, or Quick jobs reports
+// Risk: same-line route fallback hides its pause cause or the route that runs, or Quick jobs reports
 // the normal row's strong model instead of the resolver's fast-tier choice.
 func TestModelsV2SameLineFallbackAndQuickJobs(t *testing.T) {
 	admin, _ := boardFixture(t)
@@ -470,6 +474,10 @@ func TestModelsV2SameLineFallbackAndQuickJobs(t *testing.T) {
 	doc := boardDecode[simpleDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
 	if len(doc.Unavailable) != 1 || doc.Unavailable[0].Cause != "paused" || doc.Unavailable[0].Waits || doc.Unavailable[0].RunsInstead == nil || *doc.Unavailable[0].RunsInstead != "openai:sol" || doc.Unavailable[0].Route == nil || *doc.Unavailable[0].Route != "codex" {
 		t.Fatalf("same-line sibling route hid the pause: %+v", doc.Unavailable)
+	}
+	// The page says "runs through Cursor instead" only from the route that actually runs.
+	if via := doc.Unavailable[0].RunsVia; via == nil || *via != "cursor" {
+		t.Fatalf("same-line fallback did not name the route that runs: %+v", doc.Unavailable[0])
 	}
 	if doc.Quick.Line == nil || *doc.Quick.Line != "openai:luna" || doc.Quick.Effort == nil || *doc.Quick.Effort != "medium" || doc.Quick.Harness == nil || *doc.Quick.Harness != "codex" || !slices.ContainsFunc(doc.Quick.Trace, func(trace simpleTrace) bool { return trace.Selected && trace.Line == "openai:luna" }) {
 		t.Fatalf("Quick jobs differs from dispatch: %+v", doc.Quick)
@@ -491,7 +499,7 @@ func TestModelsV2ResidencyCauseMatchesEvidence(t *testing.T) {
 	read := func(cause string) {
 		t.Helper()
 		doc := boardDecode[simpleDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
-		if len(doc.Unavailable) != 1 || doc.Unavailable[0].Cause != cause || !doc.Unavailable[0].Waits || doc.Unavailable[0].Until != nil {
+		if len(doc.Unavailable) != 1 || doc.Unavailable[0].Cause != cause || !doc.Unavailable[0].Waits || doc.Unavailable[0].Until != nil || doc.Unavailable[0].RunsVia != nil {
 			t.Fatalf("cause differs from qualification: %+v", doc.Unavailable)
 		}
 	}
@@ -527,6 +535,87 @@ func TestModelsV2CrossHarnessNativeWrites(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// Risk: a never rule stored under a harness-derived alias survives removal of
+// the provider identity the page displays, so dispatch stays blocked after a
+// successful reset; or a pin on the alias coexists with a never rule.
+func TestModelsV2NeverRuleAliasRemovedByDisplayedIdentity(t *testing.T) {
+	admin, member := boardFixture(t)
+	decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"cursor-nova-alias","version":"1","harness":"cursor","family":"openai","model":"gpt-7-nova","effort":"xhigh","tier":"strong"}`, 201)
+	const alias, displayed = "openai:gpt-nova", "openai:nova"
+	never := func() []simpleNever {
+		t.Helper()
+		doc := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
+		for _, row := range doc.Exceptions {
+			if row.Column == "backend" {
+				return row.Never
+			}
+		}
+		return nil
+	}
+	stored := func() []string {
+		t.Helper()
+		lines := []string{}
+		inRegistry(t, admin, func(tx pgx.Tx) error {
+			rows, err := tx.Query(t.Context(), `SELECT line FROM model_row_constraints WHERE scope='workspace' AND column_key='backend' AND kind='never' ORDER BY line`)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var line string
+				if err := rows.Scan(&line); err != nil {
+					return err
+				}
+				lines = append(lines, line)
+			}
+			return rows.Err()
+		})
+		return lines
+	}
+	base := "/api/model-preferences/orders/backend/first/never/"
+	// The never writer still accepts the alias but stores the provider identity.
+	saved := boardDecode[rulesDocument](t, boardCall(t, admin, "PUT", base+alias, map[string]any{"why": "Alias from an earlier picker", "revision": 0}, ""), 200)
+	if got := stored(); !slices.Equal(got, []string{displayed}) {
+		t.Fatalf("alias write stored %v, want the provider identity", got)
+	}
+	if got := never(); len(got) != 1 || got[0].Line != displayed {
+		t.Fatalf("page does not display the provider identity: %+v", got)
+	}
+	boardDecode[rulesDocument](t, boardCall(t, admin, "DELETE", base+displayed+"?revision="+strconv.FormatInt(saved.Revision, 10), nil, ""), 200)
+	if got := stored(); len(got) != 0 || len(never()) != 0 {
+		t.Fatalf("removing the displayed identity kept the restriction: %v", got)
+	}
+	// The retained rule editor stores the alias literally; removal by the
+	// displayed identity must clear it too, and a page write replaces it.
+	editorAlias := func(revision int64) rulesDocument {
+		t.Helper()
+		out := boardDecode[rulesDocument](t, boardCall(t, admin, "PUT", "/api/model-rules/workspace/backend", map[string]any{"top": []rulePin{}, "bottom": []rulePin{}, "not": map[string]string{alias: "Retained editor"}, "revision": revision}, ""), 200)
+		if got := stored(); !slices.Equal(got, []string{alias}) {
+			t.Fatalf("fixture lost the editor's alias row: %v", got)
+		}
+		return out
+	}
+	editor := editorAlias(saved.Revision + 1)
+	if got := never(); len(got) != 1 || got[0].Line != displayed {
+		t.Fatalf("page does not display the editor's alias as the provider identity: %+v", got)
+	}
+	removed := boardDecode[rulesDocument](t, boardCall(t, admin, "DELETE", base+displayed+"?revision="+strconv.FormatInt(editor.Revision, 10), nil, ""), 200)
+	if got := stored(); len(got) != 0 || len(never()) != 0 {
+		t.Fatalf("removing the displayed identity kept the editor's alias: %v", got)
+	}
+	editor = editorAlias(removed.Revision)
+	replaced := boardDecode[rulesDocument](t, boardCall(t, admin, "PUT", base+displayed, map[string]any{"why": "Page write", "revision": editor.Revision}, ""), 200)
+	if got := stored(); !slices.Equal(got, []string{displayed}) {
+		t.Fatalf("page write kept the equivalent alias row: %v", got)
+	}
+	// A pin on the alias is the same model as the displayed identity.
+	pinned := boardDecode[rulesDocument](t, boardCall(t, admin, "PUT", "/api/model-rules/workspace/backend", map[string]any{"top": []rulePin{{alias, "Fixed choice"}}, "bottom": []rulePin{}, "not": map[string]string{}, "revision": replaced.Revision}, ""), 200)
+	boardError(t, boardCall(t, admin, "PUT", base+displayed, map[string]any{"why": "Conflicts with the pin", "revision": pinned.Revision}, ""), 409, "rule_conflict")
+	if got := stored(); len(got) != 0 {
+		t.Fatalf("conflicting never write persisted: %v", got)
+	}
 }
 
 // Risk: pausing one Cursor native id leaves sibling levels running, or expands
@@ -584,4 +673,75 @@ func TestModelsV2CursorPauseCoversNativeIDs(t *testing.T) {
 	check(true)
 	boardDecode[modelPauseResult](t, boardCall(t, admin, "DELETE", path, nil, ""), 200)
 	check(false)
+}
+
+// Risk: a pause, the successor of a ladder hold, commits for an admin whose
+// grant was revoked while it waited on the tenant fence (code health rule 1;
+// moved here from the retired ladder editor's revocation case).
+func TestModelsV2PauseRechecksGrantRevokedUnderFence(t *testing.T) {
+	admin, _ := boardFixture(t)
+	sol := profileBySlug(decode[[]Profile](t, &admin, "GET", "/api/models", "", 200), "codex-6-1-sol-xhigh")
+	before := eventCount(t, admin, "model.pause_changed")
+	var clocked atomic.Int32
+	h := newEditorHTTP(t, &Module{pool: appPool, validationClock: func(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+		clocked.Add(1)
+		return validationNow(ctx, tx)
+	}})
+	held, release, fenced := make(chan int, 1), make(chan struct{}), make(chan error, 1)
+	go func() {
+		fenced <- db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+			if err := preferenceFence(t.Context(), tx, admin); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='member') WHERE principal_id=$1 AND scope_type='workspace'`, admin.ID); err != nil {
+				return err
+			}
+			var pid int
+			if err := tx.QueryRow(t.Context(), `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+				return err
+			}
+			held <- pid
+			<-release
+			return nil
+		})
+	}()
+	var pid int
+	select {
+	case pid = <-held:
+	case err := <-fenced:
+		t.Fatal("fence holder failed", err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("fence holder did not take the tenant fence")
+	}
+	done := startEditorRequest(t, h, admin, "PUT", "/api/models/lines/codex/"+sol.Model+"/pause", `{"until":null,"reason":"Planned maintenance"}`, nil)
+	waitEditorBlocked(t, pid)
+	// The pause itself waits at the tenant fence, past every earlier check.
+	var waiting string
+	if err := adminPool.QueryRow(t.Context(), `SELECT query FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid)) LIMIT 1`, pid).Scan(&waiting); err != nil {
+		t.Fatal(err)
+	}
+	if waiting != db.TenantFenceSQL {
+		t.Fatalf("the pause did not wait at the tenant fence: %q", waiting)
+	}
+	close(release)
+	if err := <-fenced; err != nil {
+		t.Fatal(err)
+	}
+	w := finishEditorRequest(t, done)
+	if w.Code != 403 || clocked.Load() != 0 {
+		t.Fatalf("revoked pause answered %d after %d clock reads: %s", w.Code, clocked.Load(), w.Body.String())
+	}
+	if eventCount(t, admin, "model.pause_changed") != before {
+		t.Fatal("revoked pause emitted an event")
+	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		var stored int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_pauses`).Scan(&stored); err != nil {
+			return err
+		}
+		if stored != 0 {
+			t.Fatalf("revoked pause stored %d rows", stored)
+		}
+		return nil
+	})
 }

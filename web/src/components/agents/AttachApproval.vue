@@ -8,7 +8,7 @@ import { formatAttachCode, onAttachCode, takeAttachCode } from '../../lib/attach
 import { attachAction, attachOutcome, metadataOnlyAttach, type AttachReview } from '../../lib/attachWatch'
 import { HARNESS_NAME } from '../../lib/capacity'
 import { duration } from '../../lib/agentState'
-import { can, ensurePermissions, onAccessChange } from '../../lib/authz'
+import { can, ensurePermissions, onAccessRevalidate } from '../../lib/authz'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { useAgents } from '../../stores/agents'
 import { useSession } from '../../stores/session'
@@ -199,7 +199,7 @@ function decide(revoke = false) {
 }
 // The same person refreshing their session keeps the review; a different person, workspace or right closes it.
 watch(() => `${identity.identity?.tenant.id}/${identity.identity?.principal.id}/${allowed.value}`, close)
-const stopAccess = onAccessChange(() => close())
+const stopAccess = onAccessRevalidate({ reset: close })
 onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
 </script>
 

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -78,6 +79,11 @@ func (f *fixture) call(method, path string, in, out any) {
 }
 func setup(t *testing.T, mode string, paid bool) *fixture {
 	t.Helper()
+	return setupWithActions(t, mode, paid, []string{"work.create"}, "personal")
+}
+
+func setupWithActions(t *testing.T, mode string, paid bool, actions []string, scopeKind string) *fixture {
+	t.Helper()
 	f := &fixture{t: t, d: dbtest.Open(t), mux: http.NewServeMux(), owner: tenant.Principal{Kind: tenant.Person, BrowserSession: true}, agent: tenant.Principal{Kind: tenant.Agent, Scopes: []string{"run.claim", "run.telemetry"}}}
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('routine-budget','Budget') RETURNING id::text`).Scan(&f.owner.TenantID))
 	f.agent.TenantID = f.owner.TenantID
@@ -123,7 +129,11 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	if mode == "money" || mode == "both" {
 		budget.MoneyCeilingMicroUSD = &n
 	}
-	in := recurrences.Input{ProjectID: f.project, ParentID: f.parent, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one", Template: recurrences.Template{Title: "Budget work", Description: "Assigned workspace", Criteria: []string{"Validate"}, EstimateHours: 1, Priority: "high", Type: "ticket"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "UTC"}, Definition: &recurrences.Definition{Scope: recurrences.DefinitionScope{Kind: "personal"}, OwnerPrincipalID: f.owner.ID, Assignment: &recurrences.Assignment{Goal: "Bounded fixture", Sources: []recurrences.SourceReference{}, Role: "build", WorkKindID: kind, AllowedActions: []string{"work.create"}, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: budget}}}
+	scope := recurrences.DefinitionScope{Kind: scopeKind}
+	if scopeKind == "project" {
+		scope.ProjectID = f.project
+	}
+	in := recurrences.Input{ProjectID: f.project, ParentID: f.parent, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one", Template: recurrences.Template{Title: "Budget work", Description: "Assigned workspace", Criteria: []string{"Validate"}, EstimateHours: 1, Priority: "high", Type: "ticket"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "UTC"}, Definition: &recurrences.Definition{Scope: scope, OwnerPrincipalID: f.owner.ID, Assignment: &recurrences.Assignment{Goal: "Bounded fixture", Sources: []recurrences.SourceReference{}, Role: "build", WorkKindID: kind, AllowedActions: actions, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: budget}}}
 	f.call("POST", "/api/recurrences", in, &f.routine)
 	must(t, f.tx(func(tx pgx.Tx) error {
 		var err error
@@ -141,7 +151,25 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	path := "/api/recurrences/" + f.routine.ID
 	f.call("POST", path+"/resume", map[string]any{"expected_revision": f.routine.Revision}, nil)
 	f.call("GET", path, nil, &f.routine)
-	f.call("PUT", path+"/execution-consent", map[string]any{"expected_revision": f.routine.Revision, "execute_consent": true}, nil)
+	consent := map[string]any{"expected_revision": f.routine.Revision, "execute_consent": true}
+	if scopeKind == "project" {
+		var service, role string
+		must(t, f.tx(func(tx pgx.Tx) error {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,agent_access_configured) VALUES($1,'agent','Controlled routine service',true) RETURNING id::text`, f.owner.TenantID).Scan(&service); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'controlled_routine','Controlled routine') RETURNING id::text`, f.owner.TenantID).Scan(&role); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, f.owner.TenantID, role, []string{"nodes.read", "run.create", "work_orders.write", "nodes.write"}); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.owner.TenantID, service, role, f.project)
+			return err
+		}))
+		consent["execution_principal_id"] = service
+	}
+	f.call("PUT", path+"/execution-consent", consent, nil)
 	f.call("GET", path, nil, &f.routine)
 	var occurrence recurrences.Occurrence
 	f.call("POST", path+"/run-now", map[string]string{"idempotency_key": "budget"}, &occurrence)
@@ -220,11 +248,9 @@ func setupDispatchOn(t *testing.T, f *fixture) *dispatchFixture {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,generation,state,dispatch_key_id) VALUES($1,$2,$3,$4,1,'working',$5)`, f.owner.TenantID, f.project, f.owner.ID, session, key); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, f.owner.TenantID, f.profile); err != nil {
-			return err
-		}
-		// Keep the legacy route as history and seed the live Models choice.
-		if err := dbtest.SetModelOrder(t.Context(), tx, f.owner.TenantID, "", "other", "first", f.profile); err != nil {
+		// The Default's Models order runs the budget profile (a build ladder
+		// before Models v2 migration 1333).
+		if err := dbtest.ModelsOrder(t.Context(), tx, f.owner.TenantID, "other", "first", "wait", f.profile); err != nil {
 			return err
 		}
 		return tx.QueryRow(t.Context(), `SELECT agent_run_id::text FROM routine_runs WHERE id=$1`, f.run).Scan(&agentRun)
@@ -238,6 +264,9 @@ func setupDispatchOn(t *testing.T, f *fixture) *dispatchFixture {
 		if mode.Load() == 1 {
 			checks.Host.CheckedAt = at.Add(-time.Minute)
 		}
+		if mode.Load() == 7 {
+			checks.Dial.CheckedAt = at.Add(time.Minute)
+		}
 		return checks, err
 	}
 	options := Options{Runtime: f.broker.Runtime, Gates: f.broker.Gates, LeadAdmission: admission,
@@ -250,6 +279,9 @@ func setupDispatchOn(t *testing.T, f *fixture) *dispatchFixture {
 			err := tx.QueryRow(ctx, `SELECT clock_timestamp(),coalesce((SELECT (snapshot->>'revision')::bigint FROM delivery_work_settings WHERE project_id=$1),0)`, project).Scan(&out.ObservedAt, &out.PolicyRevision)
 			if mode.Load() == 4 {
 				out.ObservedAt = out.ObservedAt.Add(-time.Minute)
+			}
+			if mode.Load() == 6 {
+				out.ObservedAt = out.ObservedAt.Add(time.Minute)
 			}
 			if mode.Load() == 5 {
 				out.MainGreen = nil
@@ -349,6 +381,12 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	wait("ci_admission_unavailable", "", 0)
 	mode.Store(5)
 	wait("ci_admission_unavailable", "", 0)
+	// A future reading is not fresh evidence. These missing clock boundaries
+	// retain the same no-route/no-hold/no-turn assertions as stale readings.
+	mode.Store(6)
+	wait("ci_admission_unavailable", "", 0)
+	mode.Store(7)
+	wait("lead admission wait: dial_unavailable", "", 0)
 	mode.Store(0)
 	f.exec(`INSERT INTO delivery_work_settings(tenant_id,project_id,snapshot) VALUES($1,$2,'{"freeze":true,"revision":1}')`, f.owner.TenantID, f.project)
 	wait("release_freeze", "", 0)
@@ -693,5 +731,147 @@ func TestRoutineQueueWaitsDoNotBlockLaterWork(t *testing.T) {
 	}))
 	if !out.Routed || out.WaitReason != "" || out.RunID != *later.Run.AgentRunID {
 		t.Fatalf("earlier no-consent routine blocked later routine: %+v", out)
+	}
+}
+
+// Risk: a committed claim disappears from discovery after its reply is lost;
+// an unlaunched actor leaks its session/hold, or abandonment clears a started
+// actor, another daemon's claim, or partial settlement after a callback failure.
+func TestLeadRuntimeClaimReplayAndAbandon(t *testing.T) {
+	for _, mode := range []string{"expired_reply", "unlaunched", "started", "settlement_failure", "unsettled"} {
+		t.Run(mode, func(t *testing.T) {
+			f := setup(t, "off", false)
+			f.agent.Scopes = []string{"harness.worker", "run.claim", "run.telemetry"}
+			// A real scoped key is required by the handler's final-write auth boundary.
+			keySecret := "fixture-lead-runtime-proof"
+			keyHash := sha256.Sum256([]byte(keySecret))
+			must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'Lead replay','lead-replay',$3,$4,$5) RETURNING id::text`, f.owner.TenantID, f.agent.ID, fmt.Sprintf("%x", keyHash[:]), f.agent.Scopes, f.owner.ID).Scan(&f.agent.AuthKeyID))
+
+			// Use a project-scoped routine; every daemon read remains under real RLS.
+			f.exec(`UPDATE recurrence_definitions SET scope_type='project',scope_project_id=$2 WHERE recurrence_id=$1`, f.routine.ID, f.project)
+			f.exec(`UPDATE routine_runs SET scope_type='project',scope_project_id=$2 WHERE id=$1`, f.run, f.project)
+			var actor, order, session, attempt, budget string
+			must(t, f.d.Admin.QueryRow(t.Context(), `SELECT agent_run_id::text,work_order_id::text FROM routine_runs WHERE id=$1`, f.run).Scan(&actor, &order))
+			f.exec(`UPDATE agent_runs SET agent_principal_id=$2,status='starting',model_profile_id=$3,account_id=$4 WHERE id=$1`, actor, f.agent.ID, f.profile, f.account)
+			ref, lease := strings.Repeat("r", 32), strings.Repeat("l", 32)
+			refHash := sha256.Sum256(append([]byte("aeon.harness.ref"), append([]byte{0}, []byte(ref)...)...))
+			leaseHash := sha256.Sum256(append([]byte("aeon.harness.lease"), append([]byte{0}, []byte(lease)...)...))
+			must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,owner_principal_id,run_id,work_order_id,harness,host,management,role,phase,ref_digest,lease_digest) VALUES($1,$2,$3,$4,$5,$6,'codex','local','managed','coordinator','starting',$7,$8) RETURNING id::text`, f.owner.TenantID, f.project, f.agent.ID, f.owner.ID, actor, order, refHash[:], leaseHash[:]).Scan(&session))
+			f.exec(`INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,generation,state,revision) VALUES($1,$2,$3,$4,1,'starting',2)`, f.owner.TenantID, f.project, f.owner.ID, session)
+			f.exec(`INSERT INTO project_lead_generations(tenant_id,project_id,generation,session_id) VALUES($1,$2,1,$3)`, f.owner.TenantID, f.project, session)
+			must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO routine_attempts(tenant_id,run_id,attempt_key,role,agent_run_id,principal_id,assignment_digest) SELECT tenant_id,id,'lead-recovery','lead',$2,$3,assignment_digest FROM routine_runs WHERE id=$1 RETURNING id::text`, f.run, actor, f.agent.ID).Scan(&attempt))
+			f.exec(`INSERT INTO routine_budget_balances(tenant_id,run_id,owner_principal_id,mode,recovery_ceiling_ms,held_ms) VALUES($1,$2,$3,'off',120000,60000)`, f.owner.TenantID, f.run, f.owner.ID)
+			must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO routine_budget_grants(tenant_id,run_id,owner_principal_id,attempt_id,action_id,grant_key,agent_run_id,account_id,harness,billing_mode,maximum_tokens,maximum_microusd,maximum_ms) VALUES($1,$2,$3,$4,$5,'lead',$6,$7,'codex','subscription',0,0,60000) RETURNING id::text`, f.owner.TenantID, f.run, f.owner.ID, attempt, f.action, actor, f.account).Scan(&budget))
+			demand := agentsetup.LeadDemand{ID: "10000000-0000-4000-8000-000000000090", ProjectID: f.project, OwnerID: f.owner.ID, RoutineRunID: f.run, Revision: 1}
+			pickup := agentsetup.LeadPickup{Demand: demand, DaemonID: "budget-daemon", DaemonGeneration: "budget-generation", LedgerGeneration: "10000000-0000-4000-8000-000000000091", AccountID: f.account, ComputerID: f.computer, DaemonDigest: strings.Repeat("b", 64), CapabilityDigest: strings.Repeat("c", 64), Capability: agentsetup.LeadExecutionCapability, WorktreeID: strings.Repeat("d", 64), Ref: ref, Lease: lease}
+			launch := agentsetup.LeadLaunch{Demand: demand, SessionID: session, Generation: 1, ProfileID: f.profile, Harness: "codex", Model: "fixture-model", Effort: "high", Host: "local", MaxDurationSeconds: 60, Grant: agentsetup.RoutineGrant{LaunchID: demand.ID, TenantID: f.owner.TenantID, OwnerID: f.owner.ID, ProjectID: f.project, RoutineRunID: f.run, AgentRunID: actor, PrincipalID: f.agent.ID, ExecutionPrincipalID: f.owner.ID, AccountID: f.account, ComputerID: f.computer, DaemonID: pickup.DaemonID, DaemonGeneration: pickup.DaemonGeneration, LedgerGeneration: pickup.LedgerGeneration, DaemonDigest: pickup.DaemonDigest, CapabilityDigest: pickup.CapabilityDigest, BudgetGrantID: budget, ExpiresAt: time.Unix(100, 0).UTC()}}
+			launch.Grant.QualificationID = f.gate.QualificationID
+			launch.Grant.DefinitionRevision, launch.Grant.ConsentRevision, launch.Grant.ExecutionRevision = 1, 1, 1
+			launch.Grant.HostMappingDigest = strings.Repeat("d", 64)
+			launch.Grant.Capability = agentsetup.RoutineExecutionCapability
+			launch.Grant.RuntimeCapability = "routine_native_coding_v1"
+			launch.Grant.BudgetMode = "off"
+			must(t, f.d.Admin.QueryRow(t.Context(), `SELECT assignment_digest FROM routine_runs WHERE id=$1`, f.run).Scan(&launch.Grant.AssignmentDigest))
+			must(t, launch.Grant.Validate())
+			binding, err := json.Marshal(map[string]any{"launch": launch, "worktree_id": pickup.WorktreeID, "ref_digest": refHash[:], "lease_digest": leaseHash[:]})
+			must(t, err)
+			f.exec(`INSERT INTO routine_launch_intents(tenant_id,id,routine_run_id,agent_run_id,project_id,owner_principal_id,worker_principal_id,kind,lead_generation,binding,state,worktree_id) VALUES($1,$2,$3,$4,$5,$6,$7,'lead',0,$8,'claimed',$9)`, f.owner.TenantID, demand.ID, f.run, actor, f.project, f.owner.ID, f.agent.ID, binding, pickup.WorktreeID)
+			f.exec(`INSERT INTO routine_launch_evidence(tenant_id,launch_id,kind,receipt) VALUES($1,$2,'claimed',$3)`, f.owner.TenantID, demand.ID, binding)
+			fail := mode == "settlement_failure"
+			calls := 0
+			checks := harness.LeadRuntimeChecks{Abandon: func(ctx context.Context, tx pgx.Tx, p tenant.Principal, l agentsetup.LeadLaunch) error {
+				calls++
+				if p.ID != f.agent.ID || l.SessionID != session || l.Grant.BudgetGrantID != budget {
+					return errors.New("wrong actor settled")
+				}
+				if mode == "unsettled" {
+					return nil
+				}
+				_, err := f.broker.SettleTx(ctx, tx, p, f.run, budget, routinebudget.Settlement{EventKey: "lead-abandon", UsageComplete: true, TokensKnown: true, PaidCostKnown: true, ProvenUnused: true, EvidenceDigest: strings.Repeat("a", 64)})
+				if err != nil {
+					return err
+				}
+				if fail {
+					return workorders.Fail(409, "fixture_settlement_failed")
+				}
+				return nil
+			}}
+			mux := http.NewServeMux()
+			harness.New(f.d.App).(*harness.Module).WithLeadRuntime(checks).Mount(mux)
+			call := func(suffix string, body any, want int) []byte {
+				t.Helper()
+				raw, err := json.Marshal(body)
+				must(t, err)
+				method := "POST"
+				if suffix == "" {
+					method = "GET"
+				}
+				req := httptest.NewRequest(method, "/api/projects/"+f.project+"/lead-runtime"+suffix, strings.NewReader(string(raw))).WithContext(tenant.WithPrincipal(t.Context(), f.agent))
+				req.Header.Set("Authorization", "Bearer aeon_lead-replay_"+keySecret)
+				w := httptest.NewRecorder()
+				mux.ServeHTTP(w, req)
+				if w.Code != want {
+					t.Fatalf("%s: got %d want %d: %s", suffix, w.Code, want, w.Body.String())
+				}
+				return w.Body.Bytes()
+			}
+			// The real server hides the claimed demand. Private claim replay must still
+			// retrieve exactly the old recipe, including its expired (unrenewed) grant.
+			if out := string(call("", nil, 200)); !strings.Contains(out, `"state":"reused"`) || !strings.Contains(out, `"demand":null`) {
+				t.Fatal(out)
+			}
+			var replay agentsetup.LeadLaunch
+			must(t, json.Unmarshal(call("/claim", pickup, 200), &replay))
+			if !reflect.DeepEqual(replay, launch) {
+				t.Fatal("claim replay changed its recipe")
+			}
+			forged := pickup
+			forged.DaemonGeneration = "other-generation"
+			if out := string(call("/report", map[string]any{"pickup": forged, "kind": "abandon"}, 409)); !strings.Contains(out, "lead_writer_conflict") {
+				t.Fatal(out)
+			}
+			if mode == "started" {
+				f.exec(`INSERT INTO routine_launch_evidence(tenant_id,launch_id,kind,receipt) VALUES($1,$2,'started','{}')`, f.owner.TenantID, demand.ID)
+			}
+			report := map[string]any{"pickup": pickup, "kind": "abandon"}
+			want := 200
+			if mode == "started" || fail || mode == "unsettled" {
+				want = 409
+			}
+			out := string(call("/report", report, want))
+			if mode == "started" && !strings.Contains(out, "lead_start_already_observed") || fail && !strings.Contains(out, "fixture_settlement_failed") || mode == "unsettled" && !strings.Contains(out, "lead_abandon_hold_unsettled") {
+				t.Fatal(out)
+			}
+			assertState := func(abandoned bool) {
+				t.Helper()
+				var state, runState, leadState, grantState string
+				var stopped, terminal bool
+				var held int64
+				must(t, f.d.Admin.QueryRow(t.Context(), `SELECT i.state,i.exit_observed_at IS NOT NULL,r.status,l.state,aeon_work_session_stopped(s.stopped_at,s.stop_reason),g.state,b.held_ms FROM routine_launch_intents i JOIN agent_runs r ON r.id=i.agent_run_id JOIN project_leads l ON l.project_id=i.project_id JOIN harness_sessions s ON s.id=l.session_id JOIN routine_budget_grants g ON g.id=$2 JOIN routine_budget_balances b ON b.run_id=i.routine_run_id WHERE i.id=$1`, demand.ID, budget).Scan(&state, &terminal, &runState, &leadState, &stopped, &grantState, &held))
+				if abandoned {
+					if state != "abandoned" || !terminal || runState != "cancelled" || leadState != "waiting_for_room" || !stopped || grantState != "settled" || held != 0 {
+						t.Fatalf("abandon incomplete: %s %v %s %s %v %s %d", state, terminal, runState, leadState, stopped, grantState, held)
+					}
+				} else {
+					if state != "claimed" || terminal || runState != "starting" || leadState != "starting" || stopped || grantState != "held" || held != 60000 {
+						t.Fatal("refusal did not retain all owners")
+					}
+				}
+			}
+			assertState(want == 200)
+			if fail {
+				fail = false
+				call("/report", report, 200)
+				assertState(true)
+			}
+			if mode != "started" && mode != "unsettled" {
+				before := calls
+				call("/report", report, 200)
+				assertState(true)
+				if calls != before {
+					t.Fatal("replay settled twice")
+				}
+			}
+		})
 	}
 }

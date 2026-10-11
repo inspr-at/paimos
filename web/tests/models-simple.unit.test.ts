@@ -5,25 +5,32 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { APIError, api } from '../src/lib/api'
 import {
-  buildEntries, buildRows, movePin, nearestEffort, nextView, orderWithFirst, pinFirst, reasonText, rulesBody, unpin,
-  type RegistryProfile, type SimpleDocument, type TailBoard,
+  buildEntries, buildRows, cantSentence, groupByProvider, movePin, nearestEffort, nextView, orderWithFirst, pinFirst, reasonText, rulesBody, ticketWhy, unpin, untilText,
+  type RegistryProfile, type SimpleDocument, type SimpleUnavailable, type TailBoard,
 } from '../src/lib/modelsSimple'
 import { getMembers } from '../src/lib/access'
-import { dismissLine, getRegistry, getSimple, getTail, getWorkspaceRules, putDismissed, putEffort, putOrder, putSituationOrder, putWorkspaceRules, resetOrder, resetSituationOrder } from '../src/lib/modelsSimpleApi'
+import { dismissLine, getRegistry, getSimple, getTail, getTicketResolution, getWorkspaceRules, putDismissed, putEffort, putOrder, putSituationOrder, putWorkspaceRules, resetOrder, resetSituationOrder } from '../src/lib/modelsSimpleApi'
 import { useModelsSimple } from '../src/lib/useModelsSimple'
 import { resetToasts, toasts } from '../src/lib/toast'
-import { KINDS, NEW_LINE, registry, simplePerson } from './models-simple-fixtures'
+import { KINDS, MANY, NEW_LINE, OPUS_CURSOR, registry, simplePerson } from './models-simple-fixtures'
 
 const state = vi.hoisted(() => ({
   session: { identity: { tenant: { id: 'tenant' }, principal: { id: 'person', name: 'Markus', kind: 'person' } } as { tenant: { id: string }; principal: { id: string; name: string; kind: string } } | null, authenticationCurrent: () => true },
   cleanups: [] as (() => void)[], access: undefined as (() => void) | undefined, manage: true, members: true,
 }))
 vi.mock('../src/stores/session', () => ({ useSession: () => state.session }))
-vi.mock('../src/lib/authz', () => ({ can: (permission: string) => permission === 'model_prefs.manage' ? state.manage : permission === 'members.read' ? state.members : true, onAccessChange: (listener: () => void) => { state.access = listener; return () => {} } }))
+vi.mock('../src/lib/authz', () => ({ can: (permission: string) => permission === 'model_prefs.manage' ? state.manage : permission === 'members.read' ? state.members : true, onAccessRevalidate: (actions: { reset: () => void; refresh: () => void }) => {
+  const owner = state.session.identity && `${state.session.identity.tenant.id}/${state.session.identity.principal.id}`
+  state.access = () => {
+    const current = state.session.identity && `${state.session.identity.tenant.id}/${state.session.identity.principal.id}`
+    if (current !== owner) actions.reset(); else actions.refresh()
+  }
+  return () => {}
+} }))
 vi.mock('vue', async original => ({ ...await original<typeof import('vue')>(), onBeforeUnmount: (cleanup: () => void) => state.cleanups.push(cleanup) }))
 vi.mock('../src/lib/api', async original => ({ ...await original<typeof import('../src/lib/api')>(), api: vi.fn() }))
 vi.mock('../src/lib/access', async original => ({ ...await original<typeof import('../src/lib/access')>(), getMembers: vi.fn() }))
-vi.mock('../src/lib/modelsSimpleApi', async original => ({ ...await original<typeof import('../src/lib/modelsSimpleApi')>(), getSimple: vi.fn(), getTail: vi.fn(), getRegistry: vi.fn(), getWorkspaceRules: vi.fn(), putOrder: vi.fn(), resetOrder: vi.fn(), putEffort: vi.fn(), putWorkspaceRules: vi.fn(), dismissLine: vi.fn(), putDismissed: vi.fn(), putSituationOrder: vi.fn(), resetSituationOrder: vi.fn() }))
+vi.mock('../src/lib/modelsSimpleApi', async original => ({ ...await original<typeof import('../src/lib/modelsSimpleApi')>(), getSimple: vi.fn(), getTail: vi.fn(), getRegistry: vi.fn(), getTicketResolution: vi.fn(), getWorkspaceRules: vi.fn(), putOrder: vi.fn(), resetOrder: vi.fn(), putEffort: vi.fn(), putWorkspaceRules: vi.fn(), putSituationOrder: vi.fn(), resetSituationOrder: vi.fn(), dismissLine: vi.fn(), putDismissed: vi.fn() }))
 
 const settle = async () => { for (let index = 0; index < 20; index++) await Promise.resolve() }
 const deferred = <T>() => { let resolve!: (value: T) => void, reject!: (error: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
@@ -101,7 +108,7 @@ describe('rows', () => {
     expect(buildRows({ doc, workspace: null, scope: 'me', canEdit: true, entries, labels: label }).find(row => row.key === 'concept')!.unavailable).toMatchObject({ runs_instead: 'anthropic:sonnet' })
     expect(reasonText('default: The Claude account; role: No room')).toBe('the Claude account; No room')
     expect(reasonText('')).toBe('no qualified account has room right now')
-    expect(reasonText('column: allowance; default: allowance; role: daily_limit; daily_limit')).toBe('the account is at its allowance or floor; the account is at its daily cap')
+    expect(reasonText('column: allowance; default: allowance; role: daily_limit; daily_limit')).toBe('the account has no room left until its limit resets; the account is at its daily cap')
     expect(reasonText('Claude account is at its daily cap until 04:00; role: Claude account is at its daily cap until 04:00')).toBe('claude account is at its daily cap until 04:00')
   })
 })
@@ -152,6 +159,102 @@ describe('what runs next', () => {
     expect(blocked.parts.map(part => part.text).join('')).toBe('AEON-1011 is queued, but nothing available can run it.')
     expect(blocked.why!.title).toBe('Why is AEON-1011 waiting?')
     expect(blocked.why!.steps.map(step => step.map(part => part.text).join(''))).toEqual(['Skipped Opus 5.5: no qualified account.'])
+  })
+})
+
+// Models v2 W1 (AEON-1160). Risk: the picker hides a model's other routes or offers an older version as if a pick could
+// run it, or a row explains a pick it can't run with codes, repeats or "allowance" instead of one sentence.
+describe('the picker: provider → line, newest first, older versions folded', () => {
+  const many = buildEntries(registry([OPUS_CURSOR, ...MANY]))
+  it('groups lines under their provider, one entry per line with every route, and older versions under the provider', () => {
+    const groups = groupByProvider(many)
+    expect(groups.map(group => group.label)).toEqual(['OpenAI', 'Anthropic', 'xAI', 'Google', 'Cursor', 'Unknown provider'])
+    const of = (label: string) => groups.find(group => group.label === label)!
+    expect(of('OpenAI').entries.map(entry => entry.name)).toEqual(['GPT-6.1 Sol', 'GPT-6.1 Astra', 'GPT-6.1 Luna', 'GPT-6.1 Terra'])
+    expect(of('OpenAI').older.map(entry => [entry.name, entry.replacedBy])).toEqual([['GPT-6 Sol', 'GPT-6.1 Sol'], ['GPT-6 Astra', 'GPT-6.1 Astra'], ['GPT-6 Luna', 'GPT-6.1 Luna'], ['GPT-6 Terra', 'GPT-6.1 Terra']])
+    expect(of('Anthropic').entries.map(entry => entry.name)).toEqual(['Opus 5.5', 'Sonnet 5.5', 'Fable 5.1', 'Haiku 4.5'])
+    expect(of('Anthropic').older.map(entry => entry.name)).toEqual(['Opus 4.8', 'Sonnet 5', 'Fable 5'])
+    expect(of('xAI').older.map(entry => entry.name)).toEqual(['Grok 4.6', 'Grok 4.5'])
+    // About 35 routes stay calm: one entry per line, and a line's older versions never become entries of their own.
+    expect(many.length).toBeLessThanOrEqual(20); expect(new Set(many.map(entry => entry.line)).size).toBe(many.length)
+    // Opus through Claude Code and Cursor is one model with two routes, each with its own native levels; the first route leads.
+    const opus = many.find(entry => entry.line === 'anthropic:opus')!
+    expect(opus.routes.map(route => [route.harness, route.efforts.map(effort => effort.name)])).toEqual([['claude', ['high', 'xhigh', 'max']], ['cursor', ['high', 'max']]])
+    expect(opus.efforts.map(effort => effort.name)).toEqual(['high', 'xhigh', 'max'])
+    expect(many.find(entry => entry.line === 'xai:grok')!.routes.map(route => route.harness)).toEqual(['grok', 'cursor'])
+    expect(opus.older[0]).toMatchObject({ key: 'anthropic:opus@4.8', line: 'anthropic:opus', replacedBy: 'Opus 5.5' })
+  })
+  it('filters lines and older versions alike, keeping the provider of a match', () => {
+    const groups = groupByProvider(many, entry => entry.name.includes('Opus'))
+    expect(groups.map(group => [group.label, group.entries.map(entry => entry.name), group.older.map(entry => entry.name)])).toEqual([['Anthropic', ['Opus 5.5'], ['Opus 4.8']]])
+    expect(groupByProvider(many, entry => entry.name === 'Grok 4.5').map(group => [group.entries.length, group.older.map(entry => entry.name)])).toEqual([[0, ['Grok 4.5']]])
+  })
+})
+
+describe('the can’t-run sentence', () => {
+  const entries = buildEntries(registry([OPUS_CURSOR])), now = Date.parse('2026-10-11T22:00:00Z')
+  const at = '2026-10-12T04:00:00Z', time = new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+  const item = (extra: Partial<SimpleUnavailable>): SimpleUnavailable => ({ column: 'design', line: 'anthropic:opus', runs_instead: 'openai:sol', effort: 'high', reason: 'raw server words', ticket: null, cause: 'daily_cap', until: at, route: 'claude', waits: false, runs_via: 'codex', ...extra })
+  const said = (extra: Partial<SimpleUnavailable>) => { const sentence = cantSentence(item(extra), entries, now)!; return `${sentence.cause} → ${sentence.then}.` }
+  it('says one cause and what happens instead, in words', () => {
+    expect(said({ runs_instead: 'anthropic:opus', effort: 'max', runs_via: 'cursor' })).toBe(`Claude account is at its daily cap until ${time} → Opus 5.5 runs through Cursor instead.`)
+    expect(said({})).toBe(`Claude account is at its daily cap until ${time} → GPT-6.1 Sol · high runs instead.`)
+    expect(said({ line: 'anthropic:fable', runs_instead: null, effort: null, waits: true, runs_via: null })).toBe(`Claude account is at its daily cap until ${time} → work waits until then.`)
+    expect(said({ cause: 'paused', until: '2026-10-14T12:00:00Z' })).toBe('Opus 5.5 is paused until 14 Oct → GPT-6.1 Sol · high runs instead.')
+    expect(said({ cause: 'paused', until: null })).toBe('Opus 5.5 is paused → GPT-6.1 Sol · high runs instead.')
+    expect(said({ line: 'xai:grok', cause: 'no_tools', until: null, route: 'grok' })).toBe('Grok 4.7 has no tools in PAIMOS → GPT-6.1 Sol · high runs instead.')
+    expect(said({ cause: 'no_account', until: null })).toBe('No Claude account can run Opus 5.5 right now → GPT-6.1 Sol · high runs instead.')
+    expect(said({ cause: 'retired', until: null, route: null })).toBe('Opus 5.5 has been retired → GPT-6.1 Sol · high runs instead.')
+    expect(said({ cause: 'residency', until: null, runs_instead: null, waits: true, runs_via: null })).toBe('Data residency rules out Opus 5.5 → work waits.')
+    // A reset that has passed is not promised again; an older server without a cause still gets plain words.
+    expect(said({ until: '2026-10-11T21:00:00Z' })).toBe('Claude account is at its daily cap → GPT-6.1 Sol · high runs instead.')
+    expect(said({ cause: undefined, reason: 'column: allowance; default: allowance' })).toBe('The account has no room left until its limit resets → GPT-6.1 Sol · high runs instead.')
+    expect(cantSentence(null, entries, now)).toBeNull()
+  })
+  it('never says a code, "allowance", a list or the same word twice, and names a reset time once', () => {
+    const causes = ['daily_cap', 'paused', 'no_tools', 'no_account', 'retired', 'residency'] as const
+    for (const cause of causes) for (const extra of [{}, { waits: true, runs_instead: null }, { runs_instead: 'anthropic:opus', runs_via: 'cursor' }]) {
+      const text = said({ cause, reason: 'allowance; daily_limit', ...extra })
+      expect(text, cause).not.toMatch(/allowance|;|_|\b(\w+) \1\b/)
+      expect((text.match(new RegExp(time, 'g')) ?? []).length, cause).toBeLessThanOrEqual(1)
+    }
+  })
+  it('names a reset within a day by its time and a later one by its date', () => {
+    expect(untilText(at, now)).toBe(time)
+    expect(untilText('2026-10-14T12:00:00Z', now)).toBe('14 Oct')
+    expect(untilText('2027-01-14T12:00:00Z', now)).toBe('14 Jan 2027')
+    expect(untilText(null, now)).toBe(''); expect(untilText('not a date', now)).toBe('')
+  })
+  it('lets the next line and its Why say the route, never “Opus instead of Opus”', () => {
+    const doc = simpleDoc({ exceptions: [{ ...simpleDoc().exceptions[0]! }], unavailable: [item({ runs_instead: 'anthropic:opus', effort: 'max', runs_via: 'cursor' })] })
+    const rows = buildRows({ doc, workspace: null, scope: 'me', canEdit: true, entries, labels: label })
+    const next = nextView({ now, rows, entries, labels: label, next: { ticket: 'AEON-1011', column: 'design', line: 'anthropic:opus', effort: 'max', reviewer: { line: 'openai:sol', effort: 'xhigh' }, trace: [{ line: 'anthropic:opus', stage: 'column', role: 'build', reason: 'Claude account is at its daily cap', selected: false }, { line: 'anthropic:opus', stage: 'column', role: 'build', reason: '', selected: true }] } })
+    expect(next.parts.map(part => part.text).join('')).toBe('The next UI design runs on Opus 5.5 · max through Cursor, reviewed by GPT-6.1 Sol.')
+    expect(next.why!.steps.map(step => step.map(part => part.text).join(''))).toEqual([
+      'UI design has its own model: Opus 5.5 · xhigh.', `Skipped Opus 5.5 through Claude Code: Claude account is at its daily cap until ${time}.`, 'It takes its next route, Cursor: Opus 5.5 · max.', 'Reviews always use another family: GPT-6.1 Sol.',
+    ])
+  })
+})
+
+describe('Why? for the ticket a person clicked', () => {
+  const profiles = registry([OPUS_CURSOR]), entries = buildEntries(profiles)
+  const profile = (model: string, effort: string) => profiles.find(item => item.model === model && item.effort === effort)!
+  it('explains that ticket’s own walk: what it skipped, and where it runs', () => {
+    const why = ticketWhy({ ticket: 'AEON-7', profiles, entries, resolution: { owner_required: false, profile: profile('claude-opus-5.5', 'max'), ladder: [
+      { profile_id: profile('claude-sonnet-5-5', 'high').id, selected: false, skip_reasons: ['daily_limit'] }, { profile_id: profile('claude-opus-5-5', 'xhigh').id, selected: false, skip_reasons: ['column: allowance'] },
+      { profile_id: 'gone', selected: false, skip_reasons: ['retired'] }, { profile_id: profile('claude-opus-5.5', 'max').id, selected: true, skip_reasons: [] }] } })
+    expect(why.title).toBe('Why Opus 5.5 for AEON-7?')
+    expect(why.steps.map(step => step.map(part => part.text).join(''))).toEqual([
+      'Skipped Sonnet 5.5: the account is at its daily cap.', 'Skipped Opus 5.5 through Claude Code: the account has no room left until its limit resets.',
+      'Skipped A model no longer in the registry: the model has been retired.', 'AEON-7 runs on Opus 5.5 · max through Cursor.',
+    ])
+  })
+  it('says the ticket waits when nothing runs it, and cuts a long walk honestly', () => {
+    const skips = Array.from({ length: 11 }, () => ({ profile_id: profile('claude-sonnet-5-5', 'high').id, selected: false, skip_reasons: ['daily_limit'] }))
+    const why = ticketWhy({ ticket: 'AEON-7', profiles, entries, resolution: { owner_required: true, profile: null, ladder: skips } })
+    expect(why.title).toBe('Why is AEON-7 waiting?')
+    expect(why.steps).toHaveLength(10)
+    expect(why.steps.slice(-2).map(step => step.map(part => part.text).join(''))).toEqual(['3 more skipped for the same kinds of reasons.', 'Nothing in the order of AEON-7 can run it right now, so it waits.'])
   })
 })
 
@@ -307,6 +410,22 @@ describe('the card’s writes', () => {
     await model.pick(concept, sonnet, 'max'); expect(model.error.value).toMatch(/^Only part of the change was saved: /); expect(toasts).toHaveLength(0)
     vi.mocked(putEffort).mockResolvedValue({ revision: 4 }); vi.mocked(putOrder).mockResolvedValue({ revision: 3 })
     await model.pick(concept, sonnet, 'max'); expect(model.error.value).toBe('Could not confirm the save. Reload before making another change; Undo is unavailable.'); expect(toasts).toHaveLength(0)
+  })
+  it('explains the clicked ticket for the person on screen and drops the answer after they change', async () => {
+    const profiles = registry([]), runs = profiles.find(item => item.model === 'claude-opus-5-5' && item.effort === 'xhigh')!
+    vi.mocked(getRegistry).mockResolvedValue(profiles)
+    let model = await page()
+    vi.mocked(getTicketResolution).mockResolvedValueOnce({ owner_required: false, profile: runs, ladder: [] })
+    expect((await model.explain('AEON-7'))?.title).toBe('Why Opus 5.5 for AEON-7?'); expect(getTicketResolution).toHaveBeenCalledWith('AEON-7')
+    const held = deferred<Awaited<ReturnType<typeof getTicketResolution>>>(); vi.mocked(getTicketResolution).mockReturnValueOnce(held.promise)
+    const asking = model.explain('AEON-8'); await settle()
+    state.session.identity = { tenant: { id: 'tenant' }, principal: { id: 'other', name: 'Other', kind: 'person' } }; state.access?.(); await settle()
+    held.resolve({ owner_required: false, profile: runs, ladder: [] })
+    expect(await asking).toBeNull(); expect(model.error.value).not.toContain('AEON-8')
+    state.cleanups.forEach(cleanup => cleanup()); state.cleanups = []
+    state.session.identity = { tenant: { id: 'tenant' }, principal: { id: 'person', name: 'Markus', kind: 'person' } }
+    model = await page(); vi.mocked(getTicketResolution).mockRejectedValueOnce(new APIError(404, 'not_found'))
+    expect(await model.explain('AEON-9')).toBeNull(); expect(model.error.value).toBe('Couldn’t load why AEON-9 runs on its model. Open it again from the ticket.')
   })
   it('drops what a held write answers after the person or scope changed', async () => {
     const model = await page(), held = deferred<{ revision: number }>(), concept = model.rows.value.find(row => row.key === 'concept')!

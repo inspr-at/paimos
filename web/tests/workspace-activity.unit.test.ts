@@ -8,7 +8,7 @@ const calls = vi.hoisted(() => ({ read: vi.fn(), undo: vi.fn() }))
 const session = reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'ada' } }, authenticationCurrent: () => true })
 vi.mock('../src/stores/session', () => ({ useSession: () => session }))
 vi.mock('../src/lib/api', () => ({ api: vi.fn() }))
-vi.mock('../src/lib/authz', () => ({ onAccessChange: () => () => {} }))
+vi.mock('../src/lib/authz', () => ({ onAccessRevalidate: () => () => {} }))
 vi.mock('../src/lib/workspaceActivity', async importOriginal => ({ ...await importOriginal<object>(), getWorkspaceActivity: calls.read, undoActivity: calls.undo }))
 
 function deferred<T>() {

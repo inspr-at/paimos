@@ -71,6 +71,15 @@ func (c *preferencePreviewCatalog) profiles(ctx context.Context, tx pgx.Tx) ([]P
 	return c.profileRows, c.profilesError
 }
 
+// dispatchBoard shares a preview's bounded catalog with every walk; live
+// dispatch reads only enabled pins so archived history cannot exhaust it.
+func (c *preferencePreviewCatalog) dispatchBoard(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
+	if c == nil {
+		return loadBoardCatalog(ctx, tx, true)
+	}
+	return c.routingBoard(ctx, tx)
+}
+
 func (c *preferencePreviewCatalog) ladder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, error) {
 	steps, _, err := c.ladderSnapshot(ctx, tx, role)
 	return steps, err

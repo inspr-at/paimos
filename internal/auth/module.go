@@ -134,7 +134,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		}
 		p, kind, err := m.authenticate(r)
 		if err != nil && !publicRequest(r) {
-			writeInternal(w)
+			internalFailure(w, r, "authenticate", err)
 			return
 		}
 		if err != nil {
@@ -170,7 +170,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			if err := m.pairingBoundary(r, p); err != nil {
 				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
 					if err := m.auditWorkstation(r, p, false, "pairing_denied"); err != nil {
-						writeInternal(w)
+						internalFailure(w, r, "audit_pairing_denied", err)
 						return
 					}
 				}
@@ -208,7 +208,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			if !controlled || scope == "" {
 				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
 					if err := m.auditWorkstation(r, p, false, "route_denied"); err != nil {
-						writeInternal(w)
+						internalFailure(w, r, "audit_route_denied", err)
 						return
 					}
 				}
@@ -252,7 +252,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			if err := permissionErr; err != nil {
 				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
 					if err := m.auditWorkstation(r, p, false, "permission_denied"); err != nil {
-						writeInternal(w)
+						internalFailure(w, r, "audit_permission_denied", err)
 						return
 					}
 				}
@@ -263,7 +263,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 						authz.WriteForbidden(w, err)
 					}
 				} else {
-					writeInternal(w)
+					internalFailure(w, r, "permission", err)
 				}
 				return
 			}
@@ -452,6 +452,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		case "lead-settings":
 			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
 				return "nodes.read", true
+			}
+		case "lead-runtime":
+			if validRouteUUID(parts[1]) && (len(parts) == 3 && read || len(parts) == 4 && r.Method == http.MethodPost && (parts[3] == "claim" || parts[3] == "report")) {
+				return "harness.worker", true
 			}
 		case "lead":
 			if len(parts) == 4 && parts[3] == "usage" && read {

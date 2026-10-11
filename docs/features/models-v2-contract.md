@@ -12,19 +12,27 @@ when their pick matches the workspace or personal Default.
 Order writes accept `rank: [pick, ...chain]`, `efforts: {line: nativeEffort}`,
 `end`, and the current profile `revision`. Existing `not` input remains
 supported and can be omitted. Omitted efforts/end preserve saved values;
-an empty efforts object restores automatic levels. A member can save a
+an empty efforts object restores automatic levels, and an empty `end` stores
+no ending (a person's first own order otherwise copies the workspace's). A
+personal order that stores `wait` owns its tail, so it drops the workspace's
+pinned steps; one that stores none keeps them. A member can save a
 workspace column with `for=me` and `If-Prefs-Person`; resetting removes the
 personal order. Workspace top locks return 423 for personal writes. Review
 orders must meet the strong/frontier floor at the highest native level.
 Native efforts are validated across the registered harnesses of the line;
 legacy harness-derived line ids remain accepted. Stored effort maps are
-bounded to 32 KiB.
+bounded to 32 KiB. The ranked board's `stored` order also returns the
+column's own `end` and `efforts`, so the page's Undo can write a reset order
+back whole, including an ending it never stored.
 
 Workspace administrators can set or lift a row exclusion with
 `PUT`/`DELETE /api/model-preferences/orders/{column}/first/never/{line}`.
 PUT requires `why` and the current workspace `rules_revision`; DELETE uses
 the `revision` query parameter. These writes preserve other rules and record
-the current person, timestamp, and explanation.
+the current person, timestamp, and explanation. Whole-row rule writes
+(`PUT /api/model-rules/workspace/{column}`) keep the author and time of every
+rule they leave unchanged. The page lifts a migrated pin to the bottom this
+way, in the same change, when an administrator moves or removes that step.
 
 People with `models.manage` can pause registered native levels of a harness/model
 route with `PUT /api/models/lines/{harness}/{model}/pause`, using `until`
@@ -39,7 +47,10 @@ The page includes Quick jobs' resolved pick, harness and trace. Each
 `unavailable` entry represents one distinct cause for that row:
 `daily_cap`, `paused`, `no_tools`, `no_account`, `retired`, or `residency`,
 with the skipped route, visible reset/expiry time, replacement, and `waits`.
-The compatibility `reason` remains deprecated. Private account evidence
+`runs_via` (AEON-1160, additive) names the harness of the route that runs
+instead, or null when the row waits; with `runs_instead` equal to `line` the
+same model runs through another route. The compatibility `reason` remains
+deprecated. Private account evidence
 retains the resolver's generic explanation and exposes no reset metrics.
 
 The `outdated` summary groups non-retired older numeric versions across

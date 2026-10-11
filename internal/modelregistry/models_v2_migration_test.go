@@ -4,6 +4,9 @@ package modelregistry
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"net/http"
 	"os"
@@ -26,6 +29,113 @@ func modelsMigrationFixture(t *testing.T) (tenant.Principal, tenant.Principal) {
 	admin, member := boardFixture(t)
 	boardDecode[boardDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/board", nil, ""), 200)
 	return admin, member
+}
+
+// Risk: materializing a Wait person's inherited Default changes their kind
+// pick, Stuck order or saved Review ownership, or overrides a template/lock.
+func TestModelsV2MigrationWaitPreservesInheritedRows(t *testing.T) {
+	for _, mode := range []string{"absent", "thinking-only", "template", "locked"} {
+		t.Run(mode, func(t *testing.T) {
+			prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+				ctx := t.Context()
+				var workspace, own string
+				if err := tx.QueryRow(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,template) VALUES($1,'workspace','balanced') RETURNING id::text`, p.TenantID).Scan(&workspace); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,end_mode) VALUES
+ ($1,$2,'other','first',ARRAY['openai:sol','anthropic:sonnet'],'wait'),
+ ($1,$2,'frontend','first',ARRAY['anthropic:opus','openai:sol'],'default'),
+ ($1,$2,'other','stuck',ARRAY['anthropic:opus','openai:sol'],'row')`, p.TenantID, workspace); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO model_review_order(tenant_id,ordinary_review_order_mode) VALUES($1,'saved')`, p.TenantID); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id)
+ SELECT tenant_id,'review-gate',CASE slug WHEN 'claude-opus-xhigh' THEN 1 ELSE 2 END,id
+ FROM model_profiles WHERE slug IN ('claude-opus-xhigh','codex-6-1-sol-xhigh')`); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO user_preferences(tenant_id,principal_id,key,value) VALUES($1,$2,'agents.working','{"total":15,"daily":{"codex":{"pace":{"mode":"pace","points_per_day":null},"boost_today":null,"at_limit":"wait"}}}')`, p.TenantID, p.ID); err != nil {
+					return err
+				}
+				if mode != "absent" {
+					var template *string
+					if mode == "template" {
+						value := "save"
+						template = &value
+					}
+					if err := tx.QueryRow(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,person_id,template,thinking) VALUES($1,'person',$2,$3,'deep') RETURNING id::text`, p.TenantID, p.ID, template).Scan(&own); err != nil {
+						return err
+					}
+				}
+				if mode == "locked" {
+					if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,end_mode) VALUES($1,$2,'frontend','first',ARRAY['openai:sol','anthropic:sonnet'],'default')`, p.TenantID, own); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(ctx, `INSERT INTO model_rules(tenant_id,scope,column_key,line,lock,why,set_by) VALUES($1,'workspace','frontend','anthropic:opus','top','Workspace pick',$2)`, p.TenantID, p.ID); err != nil {
+						return err
+					}
+				}
+				before, err := modelprefs.LoadBoardRouting(ctx, tx, &p.ID, "")
+				if err != nil {
+					return err
+				}
+				// Before cutover, saved reviews read the legacy ladder. Project
+				// that retained source into the board oracle, including native effort.
+				var rank []string
+				var efforts map[string]string
+				if err := tx.QueryRow(ctx, `SELECT array_agg(aeon_models_line(m.family,m.harness,m.model) ORDER BY r.priority),jsonb_object_agg(aeon_models_line(m.family,m.harness,m.model),m.effort)
+ FROM model_role_routes r JOIN model_profiles m ON m.id=r.profile_id WHERE r.role='review-gate'`).Scan(&rank, &efforts); err != nil {
+					return err
+				}
+				if !reflect.DeepEqual(rank, []string{"anthropic:opus", "openai:sol"}) {
+					t.Fatalf("invalid saved review fixture: %v", rank)
+				}
+				before.Orders = append(before.Orders, modelprefs.BoardOrder{ProfileID: workspace, Column: "other", Situation: "review", Rank: rank, Efforts: efforts, End: "wait"})
+				queries := []modelprefs.BoardQuery{{Column: "frontend", Situation: "first"}, {Column: "other", Situation: "stuck"}, {Column: "other", Review: true}}
+				golden := make([]modelprefs.BoardDecision, len(queries))
+				for i, q := range queries {
+					golden[i] = modelprefs.ResolveModelsBoard(before, q)
+				}
+				if mode != "template" && (golden[0].Rank[0] != "anthropic:opus" || golden[1].Rank[0] != "anthropic:opus" || golden[2].Automatic) {
+					t.Fatalf("invalid inherited oracle: %+v", golden)
+				}
+				if _, err := tx.Exec(ctx, `SELECT aeon_migrate_models_v2($1)`, p.TenantID); err != nil {
+					return err
+				}
+				after, err := modelprefs.LoadBoardRouting(ctx, tx, &p.ID, "")
+				if err != nil {
+					return err
+				}
+				for i, q := range queries {
+					got, want := modelprefs.ResolveModelsBoard(after, q), golden[i]
+					if !reflect.DeepEqual(got.Steps, want.Steps) || got.Automatic != want.Automatic || got.PreferenceOf.Source != want.PreferenceOf.Source {
+						t.Errorf("%s changed routing: before=%+v after=%+v", q.Situation, want, got)
+					}
+				}
+				var personalRows int
+				if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_pref_orders o JOIN model_pref_profiles owner ON owner.id=o.profile_id WHERE owner.person_id=$1`, p.ID).Scan(&personalRows); err != nil {
+					return err
+				}
+				wantRows := 0
+				if mode == "locked" {
+					wantRows = 1
+					var end string
+					if err := tx.QueryRow(ctx, `SELECT rank,end_mode FROM model_pref_orders WHERE profile_id=$1 AND column_key='frontend' AND situation='first'`, own).Scan(&rank, &end); err != nil {
+						return err
+					}
+					if !reflect.DeepEqual(rank, []string{"openai:sol", "anthropic:sonnet"}) || end != "default" {
+						t.Errorf("workspace lock rewrote the person's dormant row: %v/%s", rank, end)
+					}
+				}
+				if personalRows != wantRows || mode == "absent" && after.Person != nil && after.Person.ID != "" {
+					t.Errorf("migration materialized inherited ownership: rows=%d person=%+v", personalRows, after.Person)
+				}
+				return nil
+			})
+		})
+	}
 }
 
 // Risk: migration changes a saved fallback/Wait, drops a hold or a rule's
@@ -245,6 +355,35 @@ func TestModelsV2NoRuntimeLadderReaders(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		// Main's retirement/Undo keeps historical references. Permit only its
+		// named declarations, so new readers in those files are still rejected.
+		historical := map[string]map[string]bool{
+			"../modelregistry/catalog_retire_snapshot.go": {"retireTables": true, "retirementUses": true, "transferRetiredLadderReferences": true},
+			"../modelregistry/catalog_retire_http.go":     {"profileReferenced": true, "undoOutdated": true},
+		}
+		if allowed := historical[path]; allowed != nil {
+			positions := token.NewFileSet()
+			file, err := parser.ParseFile(positions, path, raw, 0)
+			if err != nil {
+				return err
+			}
+			for _, declaration := range file.Decls {
+				name := ""
+				switch decl := declaration.(type) {
+				case *ast.FuncDecl:
+					name = decl.Name.Name
+				case *ast.GenDecl:
+					if decl.Tok == token.VAR && len(decl.Specs) == 1 {
+						if value, ok := decl.Specs[0].(*ast.ValueSpec); ok && len(value.Names) == 1 {
+							name = value.Names[0].Name
+						}
+					}
+				}
+				if allowed[name] {
+					clear(raw[positions.Position(declaration.Pos()).Offset:positions.Position(declaration.End()).Offset])
+				}
+			}
+		}
 		for _, table := range []string{"model_role_routes", "model_security_role_routes"} {
 			if strings.Contains(string(raw), table) {
 				t.Errorf("runtime ladder reference in %s", path)
@@ -347,6 +486,64 @@ func TestModelsV2SuccessorMovesAllReferences(t *testing.T) {
 		}
 		if step.State != "unavailable" || step.ValidUntil != nil || step.Reason != "Indefinite pause" {
 			t.Fatalf("stranded pause: %+v", step)
+		}
+		return nil
+	})
+}
+
+// Risk: a migrated hold on one of Cursor's effort-specific xAI ids leaves the
+// same route's other native levels running, unlike a Models pause on it.
+func TestModelsV2MigrationCursorHoldCoversNativeLevels(t *testing.T) {
+	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+		ctx := t.Context()
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		held := ""
+		// One route at two native levels, its separate fast route, and an older version.
+		for _, model := range []string{"grok-4.9-high", "grok-4.9-xhigh", "grok-4.9-high-fast", "grok-4.8-high"} {
+			effort := "high"
+			if strings.HasSuffix(model, "-xhigh") {
+				effort = "xhigh"
+			}
+			pin, err := insertProfile(ctx, tx, p.TenantID, profileWrite{Slug: "hold-cursor-" + strings.ReplaceAll(model, ".", "-"), Version: "fixture", Harness: "cursor", Family: "xai", Model: model, Effort: effort, Tier: "standard"})
+			if err != nil {
+				return err
+			}
+			if model == "grok-4.9-high" {
+				held = pin.ID
+			}
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state,reason,valid_until) VALUES($1,'build',1,$2,'conserved','Cursor hold',$3)`, p.TenantID, held, now.Add(time.Hour)); err != nil {
+			return err
+		}
+		want, err := modelPauseRoutes(ctx, tx, "cursor", "grok-4.9-high")
+		if err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(want, []string{"grok-4.9-high", "grok-4.9-xhigh"}) {
+			t.Fatalf("Models pause oracle covers %v", want)
+		}
+		if _, err := tx.Exec(ctx, `SELECT aeon_migrate_models_v2($1)`, p.TenantID); err != nil {
+			return err
+		}
+		var got []string
+		if err := tx.QueryRow(ctx, `SELECT coalesce(array_agg(model ORDER BY model),'{}') FROM model_pauses WHERE harness='cursor' AND reason='Cursor hold'`).Scan(&got); err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("migrated Cursor hold paused %v; a Models pause covers %v", got, want)
+		}
+		var covers []string
+		if err := tx.QueryRow(ctx, `SELECT array(SELECT jsonb_array_elements_text(m->'to'->'covers')) FROM model_v2_migrations, jsonb_array_elements(audit->'moved') m WHERE m->'to'->>'pause'='cursor/grok-4.9-high'`).Scan(&covers); err != nil {
+			return err
+		}
+		if !reflect.DeepEqual(covers, want) {
+			t.Fatalf("audit lists %v for the hold; it paused %v", covers, want)
 		}
 		return nil
 	})

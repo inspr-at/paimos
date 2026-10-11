@@ -174,6 +174,17 @@ func editorError(t *testing.T, w *httptest.ResponseRecorder, status int, code st
 }
 func editorJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 
+// retiredLadderRefusal reports the retired writer's 410 by its decoded
+// message: the JSON encoder escapes ">" as >, so the raw body never
+// contains "Settings > Models".
+func retiredLadderRefusal(status int, body []byte) bool {
+	var refusal struct {
+		Error string `json:"error"`
+	}
+	return status == http.StatusGone && json.Unmarshal(body, &refusal) == nil &&
+		refusal.Error == "Role ladders moved to Settings > Models; use model preference orders and model pauses."
+}
+
 func editorFixture(t *testing.T) (tenant.Principal, *editorHTTP) {
 	t.Helper()
 	var p tenant.Principal
@@ -246,7 +257,7 @@ func TestEditorExpiryTokensAndCompensation(t *testing.T) {
 	sampled := false
 	h := newEditorHTTP(t, &Module{pool: appPool, validationClock: func(context.Context, pgx.Tx) (time.Time, error) { sampled = true; return clock, nil }})
 	initial := h.ladder(t, p, "build")
-	if initial.EditToken != nil || initial.CanEdit {
+	if initial.EditToken != nil || initial.CanEdit || len(initial.Routes) == 0 {
 		t.Fatal("compatibility read still grants editing")
 	}
 	expiry := clock.Add(time.Second)
@@ -258,6 +269,22 @@ func TestEditorExpiryTokensAndCompensation(t *testing.T) {
 	}
 	if sampled || catalogSetupState(t, p) != before || eventCount(t, p, evRoutes) != events {
 		t.Fatal("retired writer sampled its clock or changed stored holds")
+	}
+	// The Models successor preserves the exact reason and native expiry.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by) SELECT tenant_id,harness,model,$2,'quota',$3 FROM model_profiles WHERE id=$1`, initial.Routes[0].ProfileID, expiry, p.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range h.ladder(t, p, "build").Routes {
+		if row.ProfileID == initial.Routes[0].ProfileID {
+			found = row.State == "unavailable" && row.Reason == "quota" && row.ValidUntil != nil && row.ValidUntil.Equal(expiry)
+		}
+	}
+	if !found {
+		t.Fatal("deprecated read lost the Models pause")
 	}
 	// Full-precision and reason-only changes must bind different content.
 	a := held
@@ -474,4 +501,42 @@ type legacyPreferenceTestModule struct{ *Module }
 
 func (m legacyPreferenceTestModule) Mount(mux *http.ServeMux) {
 	m.Module.mount(mux, m.Module.writePreferences)
+}
+
+func errorText(raw []byte) string {
+	var out struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.Error == "" {
+		return string(raw)
+	}
+	return out.Error
+}
+
+func modelsState(t *testing.T, p tenant.Principal) string {
+	t.Helper()
+	var state string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
+ 'profiles',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_profiles p),
+ 'prefs',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_pref_profiles p),
+ 'orders',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_orders o),
+ 'situations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_situation_orders o),
+ 'pauses',(SELECT jsonb_agg(to_jsonb(o) ORDER BY harness,model) FROM model_pauses o),
+ 'constraints',(SELECT jsonb_agg(to_jsonb(o) ORDER BY scope,column_key,line) FROM model_row_constraints o),
+ 'ladders',(SELECT jsonb_agg(to_jsonb(r) ORDER BY role,priority) FROM model_role_routes r),
+ 'events',(SELECT count(*) FROM events WHERE type=$1),
+ 'counter',(SELECT to_jsonb(c) FROM event_counters c))::text`, evRoutes).Scan(&state)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func retiredLadderWrite(t *testing.T, h *editorHTTP, p tenant.Principal, path, body string, headers map[string]string) {
+	t.Helper()
+	w := h.call(t, p, "PUT", path, body, headers)
+	if !retiredLadderRefusal(w.Code, w.Body.Bytes()) || w.Header().Get("Deprecation") != "true" || w.Header().Get("Link") != `</api/model-preferences/orders>; rel="successor-version"` {
+		t.Fatalf("retired ladder writer answered %d: %s", w.Code, w.Body.String())
+	}
 }

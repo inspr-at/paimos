@@ -573,7 +573,7 @@ func TestModelInitializerAdaptersReauthorizeBeforeColdOrAdditiveSetup(t *testing
 			{"model list", "GET", "/api/models", nil, "models.read"},
 			{"legacy resolver", "GET", "/api/models/resolve?role=build", nil, "models.read"},
 			{"profile management", "POST", "/api/models", map[string]any{"slug": "boundary-extra", "version": "99", "harness": "codex", "family": "openai", "model": "gpt-test", "effort": "high", "tier": "strong"}, "models.manage"},
-			{"Models order", "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{}, "revision": 0, "end": "wait"}, "model_prefs.manage"},
+			{"legacy replacement", "PUT", "/api/models/routes", []any{}, "models.manage"},
 		} {
 			t.Run(route.name+map[bool]string{true: " cold", false: " additive"}[cold], func(t *testing.T) {
 				f := newCatalogFixture(t, false, cold)
@@ -582,6 +582,29 @@ func TestModelInitializerAdaptersReauthorizeBeforeColdOrAdditiveSetup(t *testing
 				cookie := f.boundaryCookie(t)
 				request := boundaryRequest(ctx, route.path, route.body, "", cookie)
 				request.Method = route.method
+				if route.name == "legacy replacement" {
+					// Retired by Models v2: 410 before any catalog preparation.
+					out := serveBoundary(h, request)
+					select {
+					case <-barrier.ready:
+						t.Fatal("retired ladder writer prepared the catalog")
+					default:
+					}
+					if out.Code != http.StatusGone {
+						t.Fatalf("retired ladder writer answered %d %s", out.Code, out.Body.String())
+					}
+					f.tx(t, func(tx pgx.Tx) error {
+						var profiles, seed int
+						if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM model_profiles),(SELECT count(*) FROM events WHERE type='model.registry_seeded')`).Scan(&profiles, &seed); err != nil {
+							return err
+						}
+						if want := map[bool]int{true: 0, false: 3}[cold]; profiles != want || seed != 0 {
+							t.Fatal("retired ladder writer persisted catalog setup")
+						}
+						return nil
+					})
+					return
+				}
 				done := make(chan *httptest.ResponseRecorder, 1)
 				go func() { done <- serveBoundary(h, request) }()
 				dbtest.Await(t, ctx, barrier.ready)
@@ -868,7 +891,7 @@ func TestCompletionDrainResourcesAndCancellationJoinAtomicBatch(t *testing.T) {
 }
 
 func TestCompletionFinalFenceSerializesConnectedWriters(t *testing.T) {
-	for _, operation := range []string{"manual_review", "models_order", "access", "account_lifecycle", "duplicate_completion"} {
+	for _, operation := range []string{"manual_review", "legacy_ladder", "access", "account_lifecycle", "duplicate_completion"} {
 		t.Run(operation, func(t *testing.T) {
 			f := newCatalogFixture(t, false)
 			run, report := f.completion(t)
@@ -887,13 +910,19 @@ func TestCompletionFinalFenceSerializesConnectedWriters(t *testing.T) {
 			case "manual_review":
 				r = boundaryRequest(ctx, "/api/nodes/"+f.ticket+"/reviews", f.input(), "", cookie)
 				want = 201
-			case "models_order":
-				var revision int64
-				f.tx(t, func(tx pgx.Tx) error {
-					return tx.QueryRow(t.Context(), `SELECT revision FROM model_pref_profiles WHERE scope='workspace'`).Scan(&revision)
-				})
-				r = boundaryRequest(ctx, "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{}, "revision": revision, "end": "wait"}, "", cookie)
+			case "legacy_ladder":
+				// Retired by Models v2: no longer a connected writer. It answers
+				// 410 at once while the completion holds its fence.
+				r = boundaryRequest(ctx, "/api/models/routes", []any{}, "", cookie)
 				r.Method = "PUT"
+				if out := serveBoundary(plain, r); out.Code != http.StatusGone {
+					t.Fatalf("retired ladder writer answered %d %s", out.Code, out.Body.String())
+				}
+				barrier.Release()
+				if a := dbtest.Await(t, ctx, first); a.Code != 200 {
+					t.Fatalf("completion %d %s", a.Code, a.Body.String())
+				}
+				return
 			case "access":
 				var role string
 				f.tx(t, func(tx pgx.Tx) error {

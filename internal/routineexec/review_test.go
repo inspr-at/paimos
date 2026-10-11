@@ -1,0 +1,299 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package routineexec
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/crossreview"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/routinebudget"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+)
+
+// Risks: duplicate reviews/charges after replay or restart, unverified or stale
+// review advancement, budget escape through child orders, and infinite failed
+// fix pickup. A fix re-review must retain the original build range and reject
+// a completed artifact from a different checkout. Reuse the real consent,
+// dispatch, telemetry, parser, budget and Decision Desk services; fixture
+// process/usage receipts represent qualified
+// adapter observations, never elapsed-time or sleep-based proof.
+func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
+	d := setupDispatchOn(t, setup(t, "both", false))
+	f := d.fixture
+	reviewer := prepareRoutineReviewer(t, f)
+	reviews := crossreview.New(f.d.App, nil)
+	d.options.Reviews = reviews
+	d.e = New(f.d.App, d.options)
+	runs := agentruns.NewWithReviews(f.d.App, nil, reviews.RequestForRun, reviews.PrepareForRun)
+	must(t, d.e.Bind(runs))
+	runs.Mount(f.mux)
+	var routed agentruns.RoutineQueueResult
+	must(t, f.tx(func(tx pgx.Tx) error {
+		var err error
+		routed, err = d.e.DispatchTx(t.Context(), tx, f.owner.TenantID, f.run, d.session, 1)
+		return err
+	}))
+	if !routed.Routed {
+		t.Fatalf("build dispatch: %+v", routed)
+	}
+
+	report := func(run, status, verdict string, cr *reviewgate.CommitRange) string {
+		t.Helper()
+		f.exec(`UPDATE agent_runs ar SET status='running',daemon_id='budget-daemon',daemon_generation='budget-generation',started_at=clock_timestamp(),effective_model=p.model,model_evidence='vendor_reported' FROM model_profiles p WHERE ar.id=$1 AND p.id=ar.model_profile_id`, run)
+		if verdict != "" {
+			must(t, f.tx(func(tx pgx.Tx) error {
+				var order, evidence string
+				if err := tx.QueryRow(t.Context(), `SELECT work_order_id::text FROM agent_runs WHERE id=$1`, run).Scan(&order); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(t.Context(), `INSERT INTO work_evidence(tenant_id,work_order_id,submitted_by_principal_id,kind,reference,run_id) VALUES($1,$2,$3,'text',$4,$5) RETURNING id::text`, f.owner.TenantID, order, f.agent.ID, verdict, run).Scan(&evidence); err != nil {
+					return err
+				}
+				return reviewgate.RecordEvidence(t.Context(), tx, order, evidence, f.agent.ID, run, "text", verdict, "budget-daemon", "budget-generation")
+			}))
+		}
+		payload := agentruns.Telemetry{Sequence: 1, Kind: "finished", Status: status, ProcessState: "exited", ReviewRange: cr}
+		raw, _ := json.Marshal(payload)
+		call := func() {
+			req := httptest.NewRequest(http.MethodPost, "/api/runs/"+run+"/telemetry", strings.NewReader(string(raw))).WithContext(tenant.WithPrincipal(t.Context(), f.agent))
+			req.Header.Set("Authorization", "Bearer "+f.token)
+			req.Header.Set(agentruns.DaemonHeader, "budget-daemon")
+			req.Header.Set(agentruns.GenerationHeader, "budget-generation")
+			w := httptest.NewRecorder()
+			f.mux.ServeHTTP(w, req)
+			if w.Code != 200 {
+				t.Fatalf("terminal telemetry: %d %s", w.Code, w.Body.String())
+			}
+		}
+		call()
+		call() // exact finish replay uses the existing telemetry dedupe
+		var receipt string
+		must(t, f.d.Admin.QueryRow(t.Context(), `SELECT id::text FROM routine_effect_outbox WHERE run_id=$1 AND effect_key=$2`, f.run, "finish:"+run).Scan(&receipt))
+		return receipt
+	}
+	settle := func(run string) {
+		t.Helper()
+		must(t, f.tx(func(tx pgx.Tx) error {
+			var grant string
+			if err := tx.QueryRow(t.Context(), `SELECT id::text FROM routine_budget_grants WHERE agent_run_id=$1 AND parent_id IS NULL`, run).Scan(&grant); err != nil {
+				return err
+			}
+			in := routinebudget.Settlement{EventKey: run, Usage: routinebudget.Amount{RecoveryMS: 1000}, UsageComplete: true, TokensKnown: true, PaidCostKnown: true, ExitConfirmed: true, EvidenceDigest: strings.Repeat("f", 64)}
+			_, err := f.broker.SettleTx(t.Context(), tx, f.owner, f.run, grant, in)
+			return err
+		}))
+	}
+	advance := func(receipt string, want bool) map[string]any {
+		t.Helper()
+		var advanced bool
+		must(t, f.tx(func(tx pgx.Tx) error {
+			var err error
+			advanced, err = d.e.ContinueTx(t.Context(), tx, f.owner.TenantID, receipt)
+			return err
+		}))
+		var raw []byte
+		must(t, f.d.Admin.QueryRow(t.Context(), `SELECT coalesce(result,'{}') FROM routine_effect_outbox WHERE id=$1`, receipt).Scan(&raw))
+		out := map[string]any{}
+		must(t, json.Unmarshal(raw, &out))
+		if advanced != want {
+			t.Fatalf("advance=%v want %v; result=%+v", advanced, want, out)
+		}
+		return out
+	}
+	wait := func(receipt, reason string) {
+		t.Helper()
+		out := advance(receipt, false)
+		if out["wait_reason"] != reason {
+			t.Fatalf("wait=%+v want %s", out, reason)
+		}
+		if (reason == "routine_review_proof_unavailable" || reason == "review_policy_changed" || reason == "review_head_changed" || reason == "fix_review_changed") && out["reevaluation_required"] != true {
+			t.Fatalf("stale review was not retained for reevaluation: %+v", out)
+		}
+	}
+	cr := reviewgate.CommitRange{Repository: "example/routine", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40)}
+	finished := report(d.agentRun, "completed", "", &cr)
+	wait(finished, "previous_actor_exit_or_usage_unconfirmed")
+	settle(d.agentRun)
+	f.exec(`UPDATE agent_runs SET model_evidence='unverified' WHERE id=$1`, d.agentRun)
+	wait(finished, "author_model_proof_unavailable")
+	f.exec(`UPDATE agent_runs SET model_evidence='vendor_reported' WHERE id=$1`, d.agentRun)
+	d.mode.Store(2)
+	wait(finished, "main_red")
+	d.mode.Store(0)
+	f.exec(`UPDATE project_routine_execution_settings SET automatic_launch_enabled=false WHERE project_id=$1`, f.project)
+	wait(finished, "main_red") // disabled execution retains the existing receipt
+	var provisional int
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM routine_budget_grants WHERE run_id=$1`, f.run).Scan(&provisional))
+	if provisional != 1 {
+		t.Fatalf("disabled continuation created grants: %d", provisional)
+	}
+	f.exec(`UPDATE project_routine_execution_settings SET automatic_launch_enabled=true WHERE project_id=$1`, f.project)
+	// Unknown external outcomes close final continuation even before the next
+	// recovery scan. Reconcile that original receipt before creating an actor.
+	f.exec(`INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,state,payload) VALUES($1,$2,'fixture:unknown','fixture.external','unknown','{}')`, f.owner.TenantID, f.run)
+	wait(finished, "routine_recovery_unconfirmed")
+	f.exec(`UPDATE routine_effect_outbox SET state='succeeded',result='{"original_outcome":"confirmed"}' WHERE run_id=$1 AND effect_key='fixture:unknown'`, f.run)
+	first := advance(finished, true)
+	reviewRun := first["agent_run_id"].(string)
+	reviewOrder := first["review_order_id"].(string)
+	advance(finished, false)
+	var count int
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM work_order_reviews WHERE ticket_node_id=$1`, f.work).Scan(&count))
+	if count != 1 {
+		t.Fatalf("duplicate review: %d", count)
+	}
+	var routedProfile, orderMode string
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT ar.model_profile_id::text,coalesce(v.trace->>'order_mode','') FROM work_order_reviews v JOIN agent_runs ar ON ar.id=$2 WHERE v.work_order_id=$1`, reviewOrder, reviewRun).Scan(&routedProfile, &orderMode))
+	if routedProfile != reviewer || orderMode != "saved" {
+		t.Fatalf("routine review bypassed the saved Models Review order: profile=%s order_mode=%q want %s saved", routedProfile, orderMode, reviewer)
+	}
+	var g agentsetup.RoutineGrant
+	must(t, f.tx(func(tx pgx.Tx) error { return loadActorGrant(t.Context(), tx, reviewRun, &g) }))
+	if g.Lineage == nil || g.Lineage.PreviousRunID != d.agentRun || g.RoutineRunID != f.run || g.Lineage.HeadSHA != cr.HeadSHA || g.BudgetMode != "both" || g.RemainingTokens == nil || g.RemainingCostMicros == nil {
+		t.Fatalf("lost lineage: %+v", g)
+	}
+	reviewFinished := report(reviewRun, "completed", "FINDING: high internal/example.go:1 Broken.\nVERDICT: changes", nil)
+	settle(reviewRun)
+	f.exec(`UPDATE work_order_reviews SET github_status='stale' WHERE work_order_id=$1`, reviewOrder)
+	wait(reviewFinished, "routine_review_proof_unavailable")
+	f.exec(`UPDATE work_order_reviews SET github_status='unconfigured' WHERE work_order_id=$1`, reviewOrder)
+	f.exec(`UPDATE agent_runs SET effective_model='different-model' WHERE id=$1`, reviewRun)
+	wait(reviewFinished, "routine_review_proof_unavailable")
+	f.exec(`UPDATE agent_runs SET effective_model='review-model' WHERE id=$1`, reviewRun)
+	var changedProfile string
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'changed-reviewer','fixture','codex','openai','review-model','xhigh','frontier') RETURNING id::text`, f.owner.TenantID).Scan(&changedProfile))
+	f.exec(`UPDATE agent_runs SET model_profile_id=$2 WHERE id=$1`, reviewRun, changedProfile)
+	wait(reviewFinished, "routine_review_proof_unavailable")
+	f.exec(`UPDATE agent_runs SET model_profile_id=$2 WHERE id=$1`, reviewRun, reviewer)
+	f.exec(`UPDATE agent_runs SET trace=jsonb_set(trace,'{routine_launch,lineage,head_sha}',to_jsonb($2::text)) WHERE id=$1`, reviewRun, strings.Repeat("c", 40))
+	wait(reviewFinished, "review_head_changed")
+	f.exec(`UPDATE agent_runs SET trace=jsonb_set(trace,'{routine_launch,lineage,head_sha}',to_jsonb($2::text)) WHERE id=$1`, reviewRun, cr.HeadSHA)
+	f.exec(`INSERT INTO cross_family_policies(tenant_id,project_id,mode,allowed_families,updated_by) VALUES($1,$2,'allowlist',ARRAY['anthropic'],$3)`, f.owner.TenantID, f.project, f.owner.ID)
+	wait(reviewFinished, "review_policy_changed")
+	f.exec(`DELETE FROM cross_family_policies WHERE project_id=$1`, f.project)
+	// Reconstruct the executor: the persisted completion, budget and review are
+	// sufficient; no in-memory counter grants another attempt.
+	d.e = New(f.d.App, d.options)
+	fix := advance(reviewFinished, true)
+	fixRun := fix["agent_run_id"].(string)
+	f.exec(`INSERT INTO model_situation_limits(tenant_id,fix_rounds) VALUES($1,1) ON CONFLICT(tenant_id) DO UPDATE SET fix_rounds=1`, f.owner.TenantID)
+	advance(reviewFinished, false)
+	must(t, f.tx(func(tx pgx.Tx) error {
+		var lineage string
+		var roots int
+		if err := tx.QueryRow(t.Context(), `SELECT retry_of_run_id::text FROM agent_runs WHERE id=$1`, fixRun).Scan(&lineage); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM routine_budget_grants WHERE run_id=$1 AND parent_id IS NULL`, f.run).Scan(&roots); err != nil {
+			return err
+		}
+		if lineage != d.agentRun || roots != 3 {
+			t.Fatalf("fix lineage/charges: %s %d", lineage, roots)
+		}
+		return nil
+	}))
+	fixedRange := reviewgate.CommitRange{Repository: cr.Repository, BaseSHA: cr.HeadSHA, HeadSHA: strings.Repeat("c", 40)}
+	fixFinished := report(fixRun, "completed", "", &fixedRange)
+	settle(fixRun)
+	var fixGrant []byte
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT trace->'routine_launch' FROM agent_runs WHERE id=$1`, fixRun).Scan(&fixGrant))
+	f.exec(`UPDATE agent_runs SET trace=trace #- '{routine_launch,lineage}' WHERE id=$1`, fixRun)
+	wait(fixFinished, "routine_lineage_unavailable")
+	f.exec(`UPDATE agent_runs SET trace=jsonb_set(trace,'{routine_launch}',$2::jsonb) WHERE id=$1`, fixRun, fixGrant)
+	f.exec(`UPDATE agent_runs SET trace=jsonb_set(trace,'{routine_launch,lineage,head_sha}',to_jsonb($2::text)) WHERE id=$1`, fixRun, strings.Repeat("d", 40))
+	wait(fixFinished, "fix_review_changed")
+	f.exec(`UPDATE agent_runs SET trace=jsonb_set(trace,'{routine_launch}',$2::jsonb) WHERE id=$1`, fixRun, fixGrant)
+	f.exec(`INSERT INTO cross_family_policies(tenant_id,project_id,mode,allowed_families,updated_by) VALUES($1,$2,'allowlist',ARRAY['anthropic'],$3)`, f.owner.TenantID, f.project, f.owner.ID)
+	wait(fixFinished, "review_policy_changed")
+	f.exec(`DELETE FROM cross_family_policies WHERE project_id=$1`, f.project)
+	f.exec(`UPDATE routine_effect_outbox SET payload=jsonb_set(payload,'{range,base_sha}',to_jsonb($2::text)) WHERE id=$1`, fixFinished, strings.Repeat("d", 40))
+	wait(fixFinished, "fix_artifact_lineage_changed")
+	f.exec(`UPDATE routine_effect_outbox SET payload=jsonb_set(payload,'{range,base_sha}',to_jsonb($2::text)) WHERE id=$1`, fixFinished, fixedRange.BaseSHA)
+	f.exec(`UPDATE routine_effect_outbox SET payload=jsonb_set(payload,'{range,repository}',to_jsonb($2::text)) WHERE id=$1`, fixFinished, "example/other")
+	wait(fixFinished, "fix_artifact_lineage_changed")
+	f.exec(`UPDATE routine_effect_outbox SET payload=jsonb_set(payload,'{range,repository}',to_jsonb($2::text)) WHERE id=$1`, fixFinished, fixedRange.Repository)
+	var roots int
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM routine_budget_grants WHERE run_id=$1 AND parent_id IS NULL`, f.run).Scan(&roots))
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM work_order_reviews WHERE ticket_node_id=$1`, f.work).Scan(&count))
+	if roots != 3 || count != 1 {
+		t.Fatalf("refused fix completion created reviews or charges: reviews=%d roots=%d", count, roots)
+	}
+	// The daemon reports only the fix's commits. The next reviewer must see
+	// the entire original build plus fix, including any unresolved finding.
+	rereview := advance(fixFinished, true)
+	rereviewRun := rereview["agent_run_id"].(string)
+	rereviewOrder := rereview["review_order_id"].(string)
+	var reviewedRange reviewgate.CommitRange
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT repository,base_sha,head_sha FROM work_order_reviews WHERE work_order_id=$1`, rereviewOrder).Scan(&reviewedRange.Repository, &reviewedRange.BaseSHA, &reviewedRange.HeadSHA))
+	if reviewedRange.Repository != cr.Repository || reviewedRange.BaseSHA != cr.BaseSHA || reviewedRange.HeadSHA != fixedRange.HeadSHA {
+		t.Fatalf("fix re-review lost original build range: %+v; original=%+v fix=%+v", reviewedRange, cr, fixedRange)
+	}
+	must(t, f.tx(func(tx pgx.Tx) error { return loadActorGrant(t.Context(), tx, rereviewRun, &g) }))
+	if g.Lineage == nil || g.Lineage.PreviousRunID != fixRun || g.Lineage.BaseSHA != cr.BaseSHA || g.Lineage.HeadSHA != fixedRange.HeadSHA {
+		t.Fatalf("fix re-review lost cumulative lineage: %+v", g)
+	}
+	advance(fixFinished, false)
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM routine_budget_grants WHERE run_id=$1 AND parent_id IS NULL`, f.run).Scan(&roots))
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM work_order_reviews WHERE ticket_node_id=$1`, f.work).Scan(&count))
+	if roots != 4 || count != 2 {
+		t.Fatalf("fix completion replay duplicated reviews or charges: reviews=%d roots=%d", count, roots)
+	}
+	rereviewFinished := report(rereviewRun, "completed", "FINDING: high internal/example.go:1 Still broken.\nVERDICT: changes", nil)
+	settle(rereviewRun)
+	// Permit a second fix for the retained finding, then keep the original
+	// failed-writer escalation assertions at that configured finite cap.
+	f.exec(`UPDATE model_situation_limits SET fix_rounds=2 WHERE tenant_id=$1`, f.owner.TenantID)
+	secondFix := advance(rereviewFinished, true)
+	secondFixRun := secondFix["agent_run_id"].(string)
+	must(t, f.tx(func(tx pgx.Tx) error { return loadActorGrant(t.Context(), tx, secondFixRun, &g) }))
+	if g.Lineage == nil || g.Lineage.PreviousRunID != fixRun || g.Lineage.BaseSHA != cr.BaseSHA || g.Lineage.HeadSHA != fixedRange.HeadSHA {
+		t.Fatalf("second fix lost original build lineage: %+v", g)
+	}
+	fixFinished = report(secondFixRun, "failed", "", nil)
+	settle(secondFixRun)
+	escalated := advance(fixFinished, true)
+	if escalated["state"] != "awaiting_decision" || escalated["question_id"] == nil {
+		t.Fatalf("missing desk escalation: %+v", escalated)
+	}
+	advance(fixFinished, false)
+	pass, err := d.e.RunTenant(t.Context(), f.owner.TenantID)
+	must(t, err)
+	if pass.Scanned != 0 {
+		t.Fatalf("parked work immediately picked up: %+v", pass)
+	}
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM desk_askers WHERE request_id=$1`, f.run).Scan(&count))
+	if count != 1 {
+		t.Fatalf("duplicate escalation: %d", count)
+	}
+}
+
+// prepareRoutineReviewer uses the same saved Models order and owned enrollment
+// in both the focused review guard and the cross-package qualification.
+func prepareRoutineReviewer(t *testing.T, f *fixture) string {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/models", nil)
+	must(t, modelregistry.PrepareCatalog(t.Context(), f.d.App, f.owner, modelregistry.CatalogPreparation{Operation: modelregistry.CatalogRead, Request: request}))
+	var reviewer, account string
+	// A review-grade (xhigh, level 4) profile in the workspace's saved Models
+	// Review order, as migration 1333 converts a saved review ladder. Routine
+	// reviews resolve through the same Models walk as every other review.
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,'routine-reviewer','fixture','claude','anthropic','review-model','xhigh','frontier',4) RETURNING id::text`, f.owner.TenantID).Scan(&reviewer))
+	must(t, f.tx(func(tx pgx.Tx) error {
+		return dbtest.ModelsOrder(t.Context(), tx, f.owner.TenantID, "other", "review", "wait", reviewer)
+	}))
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,label,registered_by_principal_id,owner_person_id,capacity_owner,linked_at,last_probe_at,last_probe_ok,last_daemon_generation,billing_mode,max_parallel_runs) SELECT tenant_id,'review','claude',daemon_id,'Review',registered_by_principal_id,owner_person_id,capacity_owner,linked_at,clock_timestamp(),true,last_daemon_generation,billing_mode,1 FROM agent_accounts WHERE id=$1 RETURNING id::text`, f.account).Scan(&account))
+	f.exec(`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) SELECT tenant_id,$2,computer_id,request_id,$3,verification_expires_at,ongoing_approved_at FROM agent_pairing_enrollments WHERE account_id=$1`, f.account, account, reviewer)
+	f.exec(`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source) SELECT tenant_id,$2,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,'claude',capacity_source FROM account_allowance_windows WHERE account_id=$1`, f.account, account)
+	f.exec(`INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) SELECT tenant_id,$2,window_kind,'claude',window_minutes,used_percent,resets_at,read_at,source FROM account_capacity_readings WHERE account_id=$1`, f.account, account)
+	f.exec(`INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,principal_id,scope,$2::uuid::text,$2,schedule FROM account_capacity_schedules WHERE account_id=$1`, f.account, account)
+	return reviewer
+}

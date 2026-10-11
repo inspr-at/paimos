@@ -2,13 +2,13 @@
 <script setup lang="ts">
 // AEON-1036: the selected harness's usage on the right of the open dial. Reading
 // first (week used and left, today's points, the bar, the pace state), settings
-// second (Pace and Boost today as folds, the choice at the limit), accounts
-// read-only. Folds open downward only, so nothing above them moves.
+// second (Pace and Boost today as folds; at the limit it follows Settings › Models,
+// AEON-1166), accounts read-only. Folds open downward only, so nothing above them moves.
 import { computed, ref, watch } from 'vue'
 import { HARNESS_NAME } from '../../lib/capacity'
 import {
-  atLimitWords, boostNumber, boostSummary, dailyBar, detailHeadline, makeBoost, paceSummary, pct, resetsLine, stateWords, todayLine, typedPercent, typedPoints, weekParts,
-  type AtLimit, type DailySettings, type DailyView, type EnteredAs,
+  boostNumber, boostSummary, dailyBar, detailHeadline, makeBoost, paceSummary, pct, resetsLine, stateWords, storedPace, todayLine, typedPercent, typedPoints, weekParts,
+  type DailySettings, type DailyView, type EnteredAs,
 } from '../../lib/dailyLimits'
 import type { DialFold } from '../../lib/dialPrefs'
 import AppIcon from '../AppIcon.vue'
@@ -53,8 +53,8 @@ function paceCommit() {
   const value = typedPoints(paceDraft.value)
   paceEditing.value = false
   if (value === undefined) { paceNote.value = 'Whole numbers from 1 to 50.'; return }
-  // The default is followed, not copied: the person's own default may change.
-  const stored = value === props.defaultPoints ? null : value
+  // The default is followed, not copied: the person's own default may change. The same rule as Settings › Capacity.
+  const stored = storedPace(settings.value.pace, { mode: 'own', points: value }, props.defaultPoints).points_per_day
   if (stored !== settings.value.pace.points_per_day) change({ pace: { ...settings.value.pace, points_per_day: stored } })
 }
 function paceCancel() { paceEditing.value = false; paceNote.value = '' }
@@ -92,21 +92,6 @@ function boostAs(value: EnteredAs) {
 }
 function boostClear() { if (boost.value) change({ boost_today: null }) }
 
-// ---------- At the limit ----------
-const atLimit = (value: AtLimit) => { if (settings.value.at_limit !== value) change({ at_limit: value }) }
-const AT_LIMIT: AtLimit[] = ['ladder', 'wait']
-// Only the chosen option is in the tab order, so the arrow keys move between the two like native radios:
-// they pick the neighbour and move focus with it. Browser and OS shortcuts (⌘←, Alt+←) stay untouched.
-function atLimitKey(event: KeyboardEvent, index: number) {
-  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
-  const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
-  const to = event.key === 'Home' ? 0 : event.key === 'End' ? AT_LIMIT.length - 1 : step ? (index + step + AT_LIMIT.length) % AT_LIMIT.length : -1
-  if (to < 0) return
-  event.preventDefault()
-  atLimit(AT_LIMIT[to]!)
-  const options = (event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLElement>('[role="radio"]')
-  options?.[to]?.focus()
-}
 // A new harness starts from its own drafts.
 watch(harness, () => { paceEditing.value = false; paceNote.value = ''; boostEditing.value = false; boostNote.value = ''; asLocal.value = 'used' })
 const SETTINGS = '/settings/accounts'
@@ -169,11 +154,9 @@ const active = computed(() => props.view.account?.account_id)
             <p :id="id('boost-note')" class="cap-note" :class="{ failed: boostNote }" aria-live="polite">{{ boostHelp }}</p>
           </div>
         </dd>
-        <dt><span :id="id('at-label')" class="eyebrow">At the limit</span></dt>
-        <dd>
-          <span class="seg" role="radiogroup" :aria-labelledby="id('at-label')"><button type="button" role="radio" :aria-checked="settings.at_limit === 'ladder'" :tabindex="tabbable(settings.at_limit === 'ladder' ? 0 : -1)" @click="atLimit('ladder')" @keydown="atLimitKey($event, 0)">Follow the model ladder</button><button type="button" role="radio" :aria-checked="settings.at_limit === 'wait'" :tabindex="tabbable(settings.at_limit === 'wait' ? 0 : -1)" @click="atLimit('wait')" @keydown="atLimitKey($event, 1)">Wait</button></span>
-          <p class="cap-note">{{ settings.at_limit === 'ladder' ? `${view.next ? `${atLimitWords(view)}.` : 'New work moves on to the next model for the work at hand.'} ` : 'New work waits until midnight. Running agents finish. ' }}<RouterLink v-if="settings.at_limit === 'ladder'" class="link-btn" to="/settings/models" :tabindex="tabbable()">Models</RouterLink></p>
-        </dd>
+        <!-- AEON-1166: Models decides at the limit; its order continues, or waits where it ends in Wait. -->
+        <dt><span class="eyebrow">At the limit</span></dt>
+        <dd><p class="cd-line">Follows <RouterLink class="link-btn" to="/settings/models" :tabindex="tabbable()">Settings › Models</RouterLink></p></dd>
         <dt><span class="eyebrow">{{ view.accounts.length > 1 ? 'Accounts' : 'Account' }}</span></dt>
         <dd>
           <ol v-if="view.accounts.length > 1" class="cd-acc">
@@ -235,6 +218,7 @@ p { margin: 0; }
 .cd-fh[aria-expanded="true"] .cap-chev { transform: rotate(90deg); }
 .cd-sum { display: flex; align-items: center; min-height: 30px; color: var(--ink-2); font-size: 13.5px; text-align: left; cursor: pointer; font-variant-numeric: tabular-nums; }
 .cd-dl dd.open .cd-sum { color: var(--ink); font-weight: 600; }
+.cd-line { display: flex; align-items: center; flex-wrap: wrap; gap: 0 5px; min-height: 30px; color: var(--ink-2); font-size: 13.5px; }
 .cd-fb { padding: 6px 0 4px; }
 .cap-opt { display: flex; align-items: center; gap: 8px; min-height: 30px; color: var(--ink); font-size: 13px; cursor: pointer; }
 .cap-opt input { accent-color: var(--teal); margin: 0; }
@@ -277,7 +261,7 @@ p { margin: 0; }
   .cap-opt { min-height: 44px; }
   .cap-opt input { width: 20px; height: 20px; }
   .cap-pp .field.n, .cap-today .field.n { min-height: 44px; width: 7ch; min-width: 7ch; }
-  .cd-add, .cd-links .link-btn, .cap-note .link-btn, .cap-today .link-btn, .cap-def .link-btn { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; }
+  .cd-add, .cd-links .link-btn, .cap-note .link-btn, .cap-today .link-btn, .cap-def .link-btn, .cd-line .link-btn { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; }
   .cd-acc li { grid-template-columns: 16px minmax(0, 1fr) auto; }
   .cd-acc .af { grid-column: 2 / -1; }
 }

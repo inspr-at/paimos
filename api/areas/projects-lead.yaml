@@ -1,15 +1,79 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # aeon:owner internal/usagedashboard
 paths:
-  /projects/{projectId}/lead:
+  /projects/{projectId}/lead-runtime:
     get:
-      summary: Read the project's explicitly owned lead
-      description: Requires harness.read. Returns none until a person explicitly requests a lead; existing coordinator registrations are never automatically adopted. Project members see only generation, state and redacted reason codes.
+      summary: Poll the project's authorized lead demand
+      description: 'Agent-only harness.worker. Returns one bounded demand after explicit person lead consent and project qualification. Existing or adoption-selected leads are reused without launching a replacement. Missing consent, qualified executor or runtime facts returns a visible wait. No queue presence grants start authority.'
       parameters:
         - $ref: '#/components/parameters/projectId'
       responses:
         '200':
-          description: Lead lifecycle snapshot
+          description: 'One pending demand, existing lead, or named wait'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [demand, state, reason]
+                properties:
+                  demand: {oneOf: [{$ref: '#/components/schemas/LeadRuntimeDemand'}, {type: 'null'}]}
+                  state: {type: string, enum: [pending, reused, waiting]}
+                  reason: {type: string}
+  /projects/{projectId}/lead-runtime/claim:
+    post:
+      summary: Claim one qualified root lead generation
+      description: 'Agent-only harness.worker and run.claim. Rechecks consent, owner, role-resolved account/model/host, shared budget and live deterministic admission under tenant/tree/pairing fences. Persists the exact daemon, checkout and private proof before any native launch. Identical lost replies replay one generation; changed or old daemons cannot claim. Unsupported collaborators refuse before a process starts.'
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LeadRuntimePickup'}
+      responses:
+        '200':
+          description: 'Immutable reserved native lead recipe'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LeadRuntimeLaunch'}
+        '403': {description: 'Current owner or daemon authority rejected'}
+        '409': {description: 'Changed intent, unknown exit, unqualified runtime or admission wait'}
+  /projects/{projectId}/lead-runtime/report:
+    post:
+      summary: Recheck native start or report an observed lead process
+      description: 'Exact claimed daemon and private proof required. Preflight repeats consent and deterministic live gates before a native start; a closed window denies a fresh start. Started records only the reserved process. Abandon confirms that this daemon never attempted native launch, refuses started evidence, stops the reserved session and settles its hold through the executor. Exit requires the identical process identity and preserves unknown usage or fixture holds; turn completion, cancellation and lost reporting are not exit. Replays are idempotent and never authorize replacement or ownership transfer.'
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [pickup, kind]
+              additionalProperties: false
+              properties:
+                pickup: {$ref: '#/components/schemas/LeadRuntimePickup'}
+                kind: {type: string, enum: [preflight, started, exit_observed, abandon]}
+                ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+      responses:
+        '200':
+          description: 'The same reserved lead recipe'
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LeadRuntimeLaunch'}
+        '409': {description: 'Binding changed, start unavailable or process evidence unconfirmed'}
+  /projects/{projectId}/lead:
+    get:
+      summary: Read the project's explicitly owned lead
+      description: 'Requires harness.read. Returns none until a person explicitly requests a lead; existing coordinator registrations are never automatically adopted. Includes read-only action availability for the current caller, bound to this project, revision, generation and session snapshot. Agent callers receive person_required for every person action, irrespective of a worker lease. Availability grants no mutation or dispatch authority; final writes still recheck current grants, ownership, revision, generation and confirmed exit. No private owner, dispatch state or credentials are returned.'
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: 'Lead lifecycle snapshot and current caller action availability'
+          headers:
+            Aeon-Contract: {$ref: '#/components/headers/ProjectLeadContract'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ProjectLead'}
@@ -227,7 +291,84 @@ paths:
         '403': {description: 'Current worker lease, live harness.worker permission, or live owner authority rejected'}
         '409': {description: 'Stale identity, useful current turn, unavailable scheduling evidence or unavailable handover delivery'}
 components:
+  headers:
+    ProjectLeadContract: {description: 'Project lead read response contract; version 1.1 describes the existing automatic launch policy and adds read-only current-caller action availability to the lead lifecycle snapshot.', schema: {type: string, enum: ['project-lead/1.1']}}
   schemas:
+    LeadRuntimeDemand:
+      type: object
+      required: [id, project_id, routine_run_id, owner_id, generation, revision]
+      additionalProperties: false
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        routine_run_id: {type: string, format: uuid}
+        owner_id: {type: string, format: uuid}
+        generation: {type: integer, minimum: 0}
+        revision: {type: integer, minimum: 1}
+    LeadRuntimePickup:
+      type: object
+      required: [demand, daemon_id, daemon_generation, ledger_generation, account_id, computer_id, daemon_digest, capability_digest, capability, worktree_id, harness_session_ref, worker_lease]
+      additionalProperties: false
+      properties:
+        demand: {$ref: '#/components/schemas/LeadRuntimeDemand'}
+        daemon_id: {type: string, minLength: 1, maxLength: 128}
+        daemon_generation: {type: string, minLength: 1, maxLength: 128}
+        ledger_generation: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        computer_id: {type: string, format: uuid}
+        daemon_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        capability_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        capability: {type: string, const: routine_lead_v1}
+        worktree_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        harness_session_ref: {type: string, minLength: 32, maxLength: 128, writeOnly: true}
+        worker_lease: {type: string, minLength: 32, maxLength: 128, writeOnly: true}
+    LeadRuntimeLaunch:
+      type: object
+      required: [demand, grant, session_id, generation, profile_id, harness, model, effort, host, max_duration_seconds]
+      properties:
+        demand: {$ref: '#/components/schemas/LeadRuntimeDemand'}
+        grant: {$ref: '#/components/schemas/LeadRuntimeGrant'}
+        session_id: {type: string, format: uuid}
+        generation: {type: integer, minimum: 1}
+        profile_id: {type: string, format: uuid}
+        harness: {type: string}
+        model: {type: string, maxLength: 256}
+        effort: {type: string, maxLength: 32}
+        host: {type: string, maxLength: 128}
+        max_duration_seconds: {type: integer, minimum: 1, maximum: 86400}
+    LeadRuntimeGrant:
+      type: object
+      description: 'Immutable S09/S11 actor grant. Its lead attempt and held shared-budget envelope are independently rechecked at claim and preflight. No credential or local path is included.'
+      required: [ledger_generation, launch_id, tenant_id, owner_id, project_id, routine_run_id, agent_run_id, execution_principal_id, principal_id, account_id, computer_id, daemon_id, daemon_generation, assignment_digest, definition_revision, consent_revision, execution_revision, qualification_id, daemon_digest, capability_digest, host_mapping_digest, capability, runtime_capability, budget_mode, budget_grant_id, expires_at]
+      properties:
+        ledger_generation: {type: string, format: uuid}
+        launch_id: {type: string, format: uuid}
+        tenant_id: {type: string, format: uuid}
+        owner_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        routine_run_id: {type: string, format: uuid}
+        agent_run_id: {type: string, format: uuid}
+        execution_principal_id: {type: string, format: uuid}
+        principal_id: {type: string, format: uuid}
+        account_id: {type: string, format: uuid}
+        computer_id: {type: string, format: uuid}
+        qualification_id: {type: string, format: uuid}
+        budget_grant_id: {type: string, format: uuid}
+        assignment_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        daemon_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        capability_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        host_mapping_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        definition_revision: {type: integer, minimum: 1}
+        consent_revision: {type: integer, minimum: 1}
+        execution_revision: {type: integer, minimum: 1}
+        daemon_id: {type: string, maxLength: 128}
+        daemon_generation: {type: string, maxLength: 128}
+        capability: {type: string, const: routine_execution_v1}
+        runtime_capability: {type: string, enum: [routine_native_coding_v1, routine_native_browser_v1]}
+        budget_mode: {type: string, enum: [off, tokens, money, both]}
+        remaining_tokens: {type: integer, minimum: 1, maximum: 1000000000000}
+        remaining_cost_micros: {type: integer, minimum: 1, maximum: 1000000000000}
+        expires_at: {type: string, format: date-time}
     LeadCandidate:
       type: object
       required: [id, display_label, harness, host, management_mode, reported_at]
@@ -298,5 +439,27 @@ components:
         generation: {type: integer, minimum: 0}
         session_id: {type: [string, 'null'], format: uuid}
         state: {type: string, enum: [none, starting, working, waiting_for_room, paused, cannot_start]}
-        reason: {type: string, description: Redacted machine-readable reason; contains no account or credential details}
-        process_active: {type: boolean, description: True until the bound harness generation has confirmed stopped; heartbeat loss and archive do not prove exit}
+        reason: {type: string, description: 'Redacted machine-readable reason; contains no account or credential details'}
+        process_active: {type: boolean, description: 'True until the bound harness generation has confirmed stopped; heartbeat loss and archive do not prove exit'}
+        automatic_launch_enabled: {type: boolean, default: false, description: 'Effective person-owned project execution policy, independent of admission availability. Requires accepted exact-artifact coordinator/OPS qualification and matching current owner policy and trusted runtime facts. Defaults off; admission injection never enables it. This projection launches no process. Older servers may omit this field; clients must treat omission as unavailable.'}
+        actions:
+          $ref: '#/components/schemas/ProjectLeadActions'
+    ProjectLeadAction:
+      type: object
+      readOnly: true
+      required: [available, blocked_reason]
+      properties:
+        available: {type: boolean, description: 'True when the current caller satisfies this action prerequisite in the displayed snapshot. Start and resume also require effective automatic launch policy; live admission remains checked at execution.'}
+        blocked_reason: {type: string, maxLength: 64, description: 'Short redacted machine-readable reason when unavailable; empty when available. Contains no private identity, credential or dispatch details.'}
+    ProjectLeadActions:
+      type: object
+      readOnly: true
+      description: 'Returned on GET lead only, for the current caller and the surrounding revision, generation and session. Discard on caller changes and refresh after lead changes; omission on older servers or mutation responses means unavailable until a fresh GET. This view neither transfers ownership nor authorizes the agent lease path or separate managed session Interrupt/Stop controls.'
+      required: [start, resume, pause, adopt, cancel_adoption, remove]
+      properties:
+        start: {$ref: '#/components/schemas/ProjectLeadAction'}
+        resume: {$ref: '#/components/schemas/ProjectLeadAction'}
+        pause: {$ref: '#/components/schemas/ProjectLeadAction', description: 'Cooperative pause/checkpoint handover, including cancellation of an unbound start intent.'}
+        adopt: {$ref: '#/components/schemas/ProjectLeadAction', description: 'Explicit selection of an eligible already running same-person root coordinator. A bound lead requires ordinary succession.'}
+        cancel_adoption: {$ref: '#/components/schemas/ProjectLeadAction'}
+        remove: {$ref: '#/components/schemas/ProjectLeadAction', description: 'A person with harness.control may remove a never-started intent, following the existing removal rule even when another person owns it.'}

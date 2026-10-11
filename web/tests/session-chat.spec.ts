@@ -909,6 +909,8 @@ test('AEON-976 Stop: Esc leaves the field then interrupts with captured process 
   await page.keyboard.press('Escape')
   await expect.poll(() => payloads.length).toBe(1)
   expect(payloads[0]).toMatchObject({ kind: 'interrupt', expected_ownership: ownership })
+  // AEON-1219: chat capture owns Esc before the page's close-details action.
+  await expect(page).toHaveURL(`/agents/${worker.id}?tab=messages`)
   await expect(page.locator('.toast.error').filter({ hasText: 'ownership changed' })).toBeVisible()
   await expect(field).toHaveValue('Keep this draft')
   await expect(panel).toBeVisible()

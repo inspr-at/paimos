@@ -93,7 +93,7 @@ func (m *Module) readRoutes(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if db.IsStatementTimeout(err) {
 			w.Header().Set("Retry-After", "1")
-			httpapi.WriteError(w, http.StatusServiceUnavailable, "Models compatibility read timed out; retry shortly.")
+			httpapi.WriteError(w, http.StatusServiceUnavailable, "Review ladder read timed out; retry shortly.")
 		} else if errors.Is(err, authz.ErrForbidden) {
 			writeErr(w, fail(http.StatusForbidden, "permission denied"))
 		} else {

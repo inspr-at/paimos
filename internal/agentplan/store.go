@@ -34,8 +34,9 @@ func (s Snapshot) MarshalJSON() ([]byte, error) {
 	}
 	return json.Marshal(struct {
 		plain
-		Daily map[string]DailySettings `json:"daily"`
-	}{plain: plain(s), Daily: daily})
+		Daily        map[string]DailySettings `json:"daily"`
+		DailyAtLimit string                   `json:"daily_at_limit"`
+	}{plain: plain(s), Daily: daily, DailyAtLimit: DailyAtLimitFollowsModels})
 }
 
 // ReadTx checks live read authority and canonical ownership. Only the running

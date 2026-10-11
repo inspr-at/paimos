@@ -67,6 +67,19 @@ CREATE FUNCTION aeon_models_canonical_line(line text) RETURNS text LANGUAGE sql 
   WHERE aeon_model_board_line(p.family,p.harness,p.model)=line ORDER BY p.slug,p.version,p.id LIMIT 1),line);
 $$;
 
+-- The routes one Models pause covers, as modelPauseRoutes: Cursor's xAI ids name one route per native level
+-- (grok-4.7-high, grok-4.7-xhigh), so a pause covers that line and version at every level; -fast stays separate.
+CREATE FUNCTION aeon_models_pause_routes(p_harness text, p_model text) RETURNS SETOF text LANGUAGE sql STABLE AS $$
+ WITH known AS (
+  SELECT DISTINCT p.model,p.family,aeon_models_line(p.family,p.harness,p.model) AS line,
+   replace((regexp_match((regexp_match(p.model,'^(.+?)(-(low|medium|high|xhigh|max|ultra))?(-fast)?$'))[1],'^([a-z][a-z-]*?)-?([0-9]+(?:[.-][0-9]+)*)(.*)$'))[2],'-','.') AS version
+  FROM model_profiles p WHERE p.harness=p_harness)
+ SELECT p_model
+ UNION
+ SELECT k.model FROM known k JOIN known t ON t.model=p_model AND t.family='xai' AND k.family='xai' AND k.line=t.line AND k.version IS NOT DISTINCT FROM t.version
+ WHERE p_harness='cursor';
+$$;
+
 CREATE FUNCTION aeon_migrate_models_v2(p_tenant uuid) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE prior text := current_setting('aeon.tenant_id',true); visible text := current_setting('aeon.visible_projects',true);
  audit jsonb; actor uuid; workspace uuid; item record; target record; source_rows jsonb; moved jsonb := '[]';
@@ -133,15 +146,18 @@ BEGIN
    moved := moved||jsonb_build_array(jsonb_build_object('from','review-gate','to','other/review','rank',ranked,'efforts',native));
   END IF;
  END LOOP;
+ -- A hold pauses every route its Models pause covers; the latest hold on a route wins.
  INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by)
- SELECT DISTINCT ON (p.harness,p.model) p_tenant,p.harness,p.model,r.valid_until,r.reason,actor
+ SELECT DISTINCT ON (p.harness,covered.model) p_tenant,p.harness,covered.model,r.valid_until,r.reason,actor
  FROM (SELECT * FROM model_role_routes UNION ALL SELECT * FROM model_security_role_routes) r
  JOIN model_profiles p ON p.tenant_id=r.tenant_id AND p.id=r.profile_id
+ CROSS JOIN LATERAL aeon_models_pause_routes(p.harness,p.model) covered(model)
  WHERE r.state<>'available' AND r.valid_until>stamp
- ORDER BY p.harness,p.model,r.valid_until DESC,r.role,r.priority;
+ ORDER BY p.harness,covered.model,r.valid_until DESC,r.role,r.priority;
  FOR item IN SELECT r.*,p.harness,p.model FROM (SELECT * FROM model_role_routes UNION ALL SELECT * FROM model_security_role_routes) r
   JOIN model_profiles p ON p.tenant_id=r.tenant_id AND p.id=r.profile_id WHERE r.state<>'available' AND r.valid_until>stamp ORDER BY r.role,r.priority LOOP
-  moved := moved||jsonb_build_array(jsonb_build_object('from',to_jsonb(item),'to',jsonb_build_object('pause',item.harness||'/'||item.model)));
+  moved := moved||jsonb_build_array(jsonb_build_object('from',to_jsonb(item),'to',jsonb_build_object('pause',item.harness||'/'||item.model,
+   'covers',(SELECT jsonb_agg(c.model ORDER BY c.model) FROM aeon_models_pause_routes(item.harness,item.model) c(model)))));
  END LOOP;
  INSERT INTO model_row_constraints(tenant_id,scope,project_id,column_key,line,kind,position,why,set_by,set_at)
  SELECT DISTINCT ON (scope,project_id,column_key,aeon_models_canonical_line(line)) tenant_id,scope,project_id,column_key,aeon_models_canonical_line(line),
@@ -153,26 +169,22 @@ BEGIN
   moved := moved||jsonb_build_array(jsonb_build_object('from',to_jsonb(item),'to',CASE item.lock WHEN 'bottom' THEN 'chain' ELSE 'never' END));
  END LOOP;
  UPDATE model_rules SET moved_to_models=true WHERE lock IN ('bottom','not');
- -- Saved Wait belongs to the person's rows. Canonical linked ownership is
- -- retained; do not impose one person's dial on the whole workspace.
+ -- Convert only ranks the person already owns. Materializing an inherited
+ -- Default would shadow workspace kinds, Stuck and saved Review orders and
+ -- bypass a personal template. The retained dial bridge covers inheritance.
+ -- Canonical linked ownership is retained; workspace pick locks still win.
  FOR item IN SELECT coalesce(p.linked_to,p.id) AS person,pref.value,entry.key AS harness
   FROM user_preferences pref JOIN principals p ON p.tenant_id=pref.tenant_id AND p.id=pref.principal_id
   CROSS JOIN LATERAL jsonb_each(coalesce(pref.value->'daily','{}')) entry
   WHERE pref.key='agents.working' AND p.kind='person' AND p.status='active' AND entry.value->>'at_limit'='wait'
   ORDER BY person,entry.key LOOP
-  IF NOT EXISTS(SELECT 1 FROM model_pref_profiles WHERE scope='person' AND person_id=item.person) THEN
-   INSERT INTO model_pref_profiles(tenant_id,scope,person_id,set_by) VALUES(p_tenant,'person',item.person,actor); END IF;
-  FOR target IN SELECT own.id AS profile_id,col.column_key,picked.line,picked.effort,picked.effort_level,picked.efforts
-  FROM model_pref_profiles own CROSS JOIN (SELECT DISTINCT column_key FROM model_pref_orders WHERE situation='first' UNION SELECT slug FROM work_kinds WHERE archived_at IS NULL UNION SELECT 'other') col
-  CROSS JOIN LATERAL (
-   SELECT o.rank[1] AS line,o.effort,o.effort_level,o.efforts FROM model_pref_orders o JOIN model_pref_profiles owner ON owner.id=o.profile_id
-   WHERE (owner.id=own.id OR owner.id=workspace) AND o.column_key IN (col.column_key,'other') AND o.situation='first' AND o.rank IS NOT NULL
-   ORDER BY (owner.id=own.id) DESC,(o.column_key=col.column_key) DESC LIMIT 1) picked
-  WHERE own.scope='person' AND own.person_id=item.person AND EXISTS(SELECT 1 FROM model_profiles m WHERE aeon_models_line(m.family,m.harness,m.model)=aeon_models_canonical_line(picked.line) AND m.harness=item.harness) LOOP
-   IF EXISTS(SELECT 1 FROM model_pref_orders WHERE profile_id=target.profile_id AND column_key=target.column_key AND situation='first') THEN
-    UPDATE model_pref_orders SET rank=ARRAY[target.line],end_mode='wait' WHERE profile_id=target.profile_id AND column_key=target.column_key AND situation='first';
-   ELSE INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,end_mode,effort,effort_level,efforts,set_by)
-    VALUES(p_tenant,target.profile_id,target.column_key,'first',ARRAY[target.line],'wait',target.effort,target.effort_level,target.efforts,actor); END IF;
+  FOR target IN SELECT o.profile_id,o.column_key,o.rank[1] AS line
+  FROM model_pref_orders o JOIN model_pref_profiles own ON own.id=o.profile_id
+  WHERE own.scope='person' AND own.person_id=item.person AND o.situation='first' AND cardinality(o.rank)>0
+   AND NOT EXISTS(SELECT 1 FROM model_rules rule WHERE rule.scope='workspace' AND rule.column_key=o.column_key AND rule.lock='top')
+   AND EXISTS(SELECT 1 FROM model_profiles m WHERE aeon_models_line(m.family,m.harness,m.model)=aeon_models_canonical_line(o.rank[1]) AND m.harness=item.harness)
+  ORDER BY o.column_key LOOP
+   UPDATE model_pref_orders SET rank=ARRAY[target.line],end_mode='wait' WHERE profile_id=target.profile_id AND column_key=target.column_key AND situation='first';
   END LOOP;
   moved := moved||jsonb_build_array(jsonb_build_object('from','dial/wait','person',item.person,'harness',item.harness,'to',
    coalesce((SELECT jsonb_agg(jsonb_build_object('profile',o.profile_id,'column',o.column_key,'rank',o.rank,'end',o.end_mode) ORDER BY o.column_key)

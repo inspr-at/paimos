@@ -19,8 +19,10 @@ import { DEFAULT_QUOTA_THRESHOLDS, isProblemSignin, quotaWindowWarns, signinStat
 import { accountsPartNeeds, matrixNeedFacts, NO_MATRIX_FACTS, partCounts, workContextLink, type AccountsPart, type MatrixNeedFacts } from './accountsNeeds'
 import { PERMISSION as USE_PERMISSION, readMatrix } from './accountUse'
 import { hostCapacityReason } from './hostCapacity'
+import { HARNESS_LABEL } from './agentState'
 import { daysSummary, HARNESS_NAME, ownOverride, poolOfRow, reserveLevel, timeLabel, when, type CapacityWindow } from './capacity'
-import { DEFAULT_DAILY_POINTS, type DailyPlanFields } from './dailyLimits'
+import { dailyOf, DEFAULT_DAILY_POINTS, paceChoice, PlanChanged, storedPace, withDaily, writePace, type DailyPace, type PaceChoice, type PlanRead } from './dailyLimits'
+import { fieldMessage, getProfile, ProfileError, profileChanged } from './profile'
 import { nextStale, pct, periodWords, quotaBar, quotaCaption, quotaInput, quotaLabel, type PlanClock } from './quotaBar'
 import { validQuotaThresholds, type QuotaWarningSettings } from './quotaWarnings'
 import { toast } from './toast'
@@ -29,6 +31,7 @@ import { signinKey, useVerification } from './useVerification'
 import { accountsNeeds, settingsNeeds } from './footerProviders'
 import { useAgents } from '../stores/agents'
 import { useCapacity } from '../stores/capacity'
+import { useProfile } from '../stores/profile'
 import { useSession } from '../stores/session'
 import type { NeedsYouItem } from '../components/settings/NeedsYouList.vue'
 import type { SettingsMenuItem } from '../components/settings/SettingsPopover.vue'
@@ -63,7 +66,7 @@ export function useAccountsSettings(part: AccountsPart) {
   let root: HTMLElement | null = null
   const bindRoot = (element: unknown) => { root = element instanceof HTMLElement ? element : null }
   let generation = 0
-  function reset() { generation++; selected.value = null; open.value = false; add.value = false; menuOpen.value = false; renameOpen.value = false; busy.value = false; focusSignIn.value = ''; thresholds.value = { ...DEFAULT_QUOTA_THRESHOLDS }; facts.value = NO_MATRIX_FACTS; plan.value = null; planClock.value = null; planFailed.value = false; void readThresholds(); void readFacts(); void readPlan() }
+  function reset() { generation++; selected.value = null; open.value = false; add.value = false; menuOpen.value = false; renameOpen.value = false; busy.value = false; focusSignIn.value = ''; thresholds.value = { ...DEFAULT_QUOTA_THRESHOLDS }; facts.value = NO_MATRIX_FACTS; plan.value = null; planClock.value = null; planFailed.value = false; paceBusy.value = ''; void readThresholds(); void readFacts(); void readPlan() }
   watch(owner, reset)
   watch(manage, allowed => { if (!allowed) { menuOpen.value = false; add.value = false } })
   watch(selectedKey, () => { menuOpen.value = false; renameOpen.value = false; busy.value = false })
@@ -105,7 +108,7 @@ export function useAccountsSettings(part: AccountsPart) {
   // daily_state); accounts outside it show their reading only, never a guessed limit.
   // A failed read keeps the last plan but says so, and its doors go stale on time
   // (freshUntil, from each reading's own age): the bars never promise room the server would refuse.
-  const plan = ref<DailyPlanFields | null>(null), planClock = ref<PlanClock | null>(null), planFailed = ref(false)
+  const plan = ref<PlanRead | null>(null), planClock = ref<PlanClock | null>(null), planFailed = ref(false)
   let planRead: AbortController | null = null
   async function readPlan() {
     planRead?.abort()
@@ -116,7 +119,7 @@ export function useAccountsSettings(part: AccountsPart) {
       const asked = Date.now()
       const response = await api('/agents/plan', { signal: controller.signal })
       if (!response.ok) throw new Error('plan')
-      const body = await response.json() as DailyPlanFields
+      const body = await response.json() as PlanRead
       if (planRead === controller && identity === owner.value) { plan.value = body; planClock.value = { asked, server: Date.parse(response.headers.get('Date') ?? '') }; planFailed.value = false }
     } catch { if (planRead === controller && !controller.signal.aborted && identity === owner.value) planFailed.value = true }
     finally { if (planRead === controller) planRead = null }
@@ -143,7 +146,7 @@ export function useAccountsSettings(part: AccountsPart) {
     const problem = problemSignins.value.find(p => p.account.id === a.id && isProblemSignin(p.signin))
     let caption = quotaCaption(bar, { period, resetsAt: daily?.resets_at ?? window?.reading.resets_at, now: agents.now, timezone: capacity.timezone, low })
     if (problem) caption = { text: `${caption.text.split(' · ')[0]} · needs verifying on ${problem.signin.computer.computer_name}`, tone: 'warn', icon: 'alert' }
-    return { bar, caption, label: quotaLabel(bar, `${a.vendor} · ${a.identity}`, period), atLimit: settings?.at_limit, window, daily }
+    return { bar, caption, label: quotaLabel(bar, `${a.vendor} · ${a.identity}`, period), atLimit: settings?.at_limit, window, daily, low, period }
   }
   const quotas = computed(() => new Map(accounts.value.map(a => [a.id, quotaOf(a)])))
   const quota = (a: OverviewAccount) => quotas.value.get(a.id) ?? quotaOf(a)
@@ -155,6 +158,90 @@ export function useAccountsSettings(part: AccountsPart) {
     const base = d.pace.mode === 'everything' ? 'Use everything before the reset' : `+${d.pace.points_per_day ?? def} percentage points a day${d.pace.points_per_day == null ? ', the default' : ''}`
     const boost = d.boost_today && Date.parse(d.boost_today.until) > agents.now ? `. Boost today: up to ${pct(d.boost_today.limit_used_pct)} % used, until midnight` : ''
     return `${base}${boost}. The same for every ${a.vendor} account; set in Capacity.`
+  }
+  // ---------- Pace (AEON-1175): one stored value, two editors ----------
+  // Capacity is pace's home; the Agents dial keeps its inline edit. Both write through the
+  // shared helper in dailyLimits, guarded by the updated_at of the plan the person saw: a
+  // change made elsewhere meanwhile is read again and said, never overwritten. Undo writes
+  // the whole pace before against the plan this write left, so it too never overwrites.
+  const profile = useProfile()
+  const paceBusy = ref('')
+  const paceDone = (choice: PaceChoice, def: number) => choice.mode === 'everything' ? 'uses everything before the reset' : choice.mode === 'default' ? `follows the default pace, +${def} percentage points a day` : `+${choice.points} percentage points a day${choice.points === def ? ', the default' : ''}`
+  function savePace(harness: string, choice: PaceChoice, basis: PlanRead | null = plan.value) {
+    if (!basis) return Promise.resolve()
+    const def = basis.daily_default_points ?? DEFAULT_DAILY_POINTS
+    return writeHarnessPace(harness, storedPace(dailyOf(basis.daily, harness).pace, choice, def), paceDone(choice, def), basis, true)
+  }
+  async function writeHarnessPace(harness: string, pace: DailyPace, said: string, basis: PlanRead, undoable: boolean) {
+    const identity = owner.value, turn = generation
+    if (!manage.value || paceBusy.value) return
+    const settings = dailyOf(basis.daily, harness), def = basis.daily_default_points ?? DEFAULT_DAILY_POINTS, before = { ...settings.pace }
+    paceBusy.value = harness
+    try {
+      const updatedAt = await writePace(basis, harness, pace)
+      if (identity !== owner.value || turn !== generation) return
+      const written: PlanRead = { ...(plan.value ?? basis), total: basis.total, limits: basis.limits, daily: withDaily(basis.daily, harness, { ...settings, pace }), updated_at: updatedAt }
+      plan.value = written
+      void readPlan()
+      toast(`${HARNESS_LABEL[harness] ?? harness}: ${said}`, undoable ? { action: { label: 'Undo', run: () => { if (identity === owner.value && turn === generation) void writeHarnessPace(harness, before, paceDone(paceChoice(before), def), written, false) } } } : {})
+    } catch (error) {
+      if (identity !== owner.value || turn !== generation) return
+      toast(error instanceof Error ? error.message : 'Couldn’t save the daily limit. Please try again.', { tone: 'error' })
+      if (error instanceof PlanChanged) void readPlan()
+    } finally { if (identity === owner.value && turn === generation) paceBusy.value = '' }
+  }
+  /**
+   * The default pace (PATCH /me/profile); harnesses that follow it follow along. Null is the
+   * built-in 10. The edit reads the stored value and its revision fresh (the cached profile can
+   * lag behind the plan on screen) and is guarded by that revision; Undo puts that value back,
+   * guarded by the revision the edit left, so a change made since is said, never overwritten.
+   */
+  async function saveDefaultPace(points: number | null): Promise<boolean> {
+    const identity = owner.value, turn = generation, basis = plan.value
+    if (!manage.value || paceBusy.value || !basis) return false
+    const before = basis.daily_default_points ?? DEFAULT_DAILY_POINTS, shown = points ?? DEFAULT_DAILY_POINTS
+    if (shown === before) return true
+    const stale = () => identity !== owner.value || turn !== generation
+    paceBusy.value = 'default'
+    try {
+      const current = await getProfile()
+      if (stale()) return false
+      profile.adopt(current)
+      // The default on screen is no longer the one stored: say so and show it, never overwrite.
+      if ((current.daily_points_per_day ?? DEFAULT_DAILY_POINTS) !== before) { defaultChanged(); return false }
+      const stored = current.daily_points_per_day ?? null
+      const saved = await profile.save({ daily_points_per_day: points, expected_revision: current.revision })
+      if (stale()) return false
+      plan.value = { ...(plan.value ?? basis), daily_default_points: shown }
+      void readPlan()
+      toast(`Default pace: +${shown} percentage points a day`, { action: { label: 'Undo', run: () => { if (!stale()) void undoDefaultPace(stored, saved.revision) } } })
+      return true
+    } catch (error) {
+      if (!stale()) defaultFailed(error)
+      return false
+    } finally { if (!stale()) paceBusy.value = '' }
+  }
+  async function undoDefaultPace(stored: number | null, revision: number) {
+    const identity = owner.value, turn = generation, stale = () => identity !== owner.value || turn !== generation
+    if (!manage.value || paceBusy.value) return
+    paceBusy.value = 'default'
+    try {
+      await profile.save({ daily_points_per_day: stored, expected_revision: revision })
+      if (stale()) return
+      if (plan.value) plan.value = { ...plan.value, daily_default_points: stored ?? DEFAULT_DAILY_POINTS }
+      void readPlan()
+      toast(`Default pace: +${stored ?? DEFAULT_DAILY_POINTS} percentage points a day`)
+    } catch (error) {
+      if (!stale()) defaultFailed(error)
+    } finally { if (!stale()) paceBusy.value = '' }
+  }
+  function defaultChanged() {
+    toast(new PlanChanged().message, { tone: 'error' })
+    void readPlan(); void profile.load(true)
+  }
+  function defaultFailed(error: unknown) {
+    if (profileChanged(error)) { defaultChanged(); return }
+    toast(error instanceof ProfileError && error.errors.daily_points_per_day ? fieldMessage('daily_points_per_day', error.errors.daily_points_per_day) : 'The default pace did not save. Please try again.', { tone: 'error' })
   }
   function computerSummary(c: PairingView) {
     if (c.computer_state === 'revoked') return computerState(c)
@@ -179,6 +266,8 @@ export function useAccountsSettings(part: AccountsPart) {
     if (id.startsWith('new:')) {
       // Owners and admins tick where it may work; others read the account.
       if (!choosesWhere.value) { if (accountOf(id.slice(4))) await show('account', id.slice(4)); return }
+      // The matrix opens For new things and brings the account's row to the person (AEON-1173).
+      if (revealWhere) { revealWhere(id.slice(4)); return }
       document.getElementById('account-use')?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
       return
     }
@@ -263,6 +352,9 @@ export function useAccountsSettings(part: AccountsPart) {
   // Capacity registers how its pacing editors take focus; elsewhere the editors are one part away.
   let revealPacing: (() => void) | null = null
   const bindPacing = (reveal: (() => void) | null) => { revealPacing = reveal }
+  // Accounts registers how "Choose where" reaches an account's row in Where accounts may work.
+  let revealWhere: ((accountId: string) => void) | null = null
+  const bindWhere = (reveal: ((accountId: string) => void) | null) => { revealWhere = reveal }
   /** "I'm away…" from a learned suggestion: the panel closes and the pacing editors take focus. */
   async function goPacing() {
     open.value = false
@@ -475,7 +567,8 @@ export function useAccountsSettings(part: AccountsPart) {
     part, agents, capacity, owner, manage, computers, accounts, machines, add, open, opener, computer, account, selectedKey, title, thresholds, busy, focusSignIn,
     bindRoot, computerState, status, references, mayVerify, verificationBusy, verificationMessage, retained, vendorName, expired,
     needs, counts, allReady, quota, paceWords, planFailed, heldOf, endHeld, computerSummary, windowLabel: (w: CapacityWindow) => windowLabel(w),
-    show, actAttention, refresh, verify, goPacing, bindPacing, planCard, planBusy, confirmPlan, cardSecondary,
+    agentsPlan: plan, paceBusy, savePace, saveDefaultPace,
+    show, actAttention, refresh, verify, goPacing, bindPacing, bindWhere, planCard, planBusy, confirmPlan, cardSecondary,
     cleanupRemoval, renameOpen, renameName, menuOpen, menuAnchor, menuItems, menuContext, menuError, openMenu, renameComputer, menuAction,
     setAccount, primarySignin,
   })

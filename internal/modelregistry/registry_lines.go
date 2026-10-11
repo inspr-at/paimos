@@ -60,28 +60,17 @@ func lineProfiles(c boardCatalog, h, model string) []Profile {
 
 // Editor tokens include all registry pins and preference/rule revisions.
 // Routing digests include only enabled pins, so archived history cannot exhaust
-// the live catalog's bounded input budget. Orders and row constraints enter
-// through the profile and rule revisions their writers bump: writes bound them
-// per board and project, so a tenant-wide count of their bodies could reject
-// configurations every writer accepted.
+// the live catalog's bounded input budget. Orders and row constraints are
+// bounded per board and project, so a tenant-wide count of their bodies must
+// not reject configurations every writer accepted.
 func registryRevision(ctx context.Context, tx pgx.Tx, routingOnly ...bool) (string, error) {
 	profilesWhere, retirementsWhere := "", ""
 	if len(routingOnly) > 0 && routingOnly[0] {
 		profilesWhere = " WHERE p.enabled"
 		retirementsWhere = " WHERE EXISTS(SELECT 1 FROM model_profiles p WHERE p.id=r.profile_id AND p.tenant_id=r.tenant_id AND p.enabled)"
 	}
-	// Limit every contributing set before building the digest.
-	var large bool
-	if err := tx.QueryRow(ctx, `SELECT
- (SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles p`+profilesWhere+` LIMIT 513) p) OR
- (SELECT count(*)>512 FROM (SELECT 1 FROM model_profile_retirements r`+retirementsWhere+` LIMIT 513) r) OR
- (SELECT count(*)>4096 FROM (SELECT 1 FROM model_pref_profiles LIMIT 4097) p) OR
- (SELECT count(*)>1536 FROM (SELECT 1 FROM model_rule_revisions LIMIT 1537) r) OR
- (SELECT count(*)>512 FROM (SELECT 1 FROM model_pauses LIMIT 513) p)`).Scan(&large); err != nil {
+	if err := registryBounds(ctx, tx, len(routingOnly) > 0 && routingOnly[0]); err != nil {
 		return "", err
-	}
-	if large {
-		return "", modelprefs.ErrBoardBounds
 	}
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT jsonb_build_array(
@@ -89,12 +78,41 @@ func registryRevision(ctx context.Context, tx pgx.Tx, routingOnly ...bool) (stri
  coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.profile_id) FROM model_profile_retirements r`+retirementsWhere+`),'[]'::jsonb),
  coalesce((SELECT jsonb_agg(jsonb_build_array(p.id,p.revision) ORDER BY p.id) FROM model_pref_profiles p),'[]'::jsonb),
  coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.scope,r.scope_key) FROM model_rule_revisions r),'[]'::jsonb),
+ coalesce((SELECT jsonb_agg(to_jsonb(o) ORDER BY o.profile_id,o.column_key,o.situation) FROM (`+modelprefs.OrdersSQL+`) o),'[]'::jsonb),
+ coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.scope,r.project_id,r.column_key,r.line) FROM model_row_constraints r),'[]'::jsonb),
  coalesce((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.harness,p.model) FROM model_pauses p),'[]'::jsonb))`).Scan(&raw)
 	if err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// registryBounds limits every set a registry digest reads before building it.
+// Orders and constraints are bounded per owner, as their writers accept them;
+// the bounded profile and rule-owner sets cap the contributing boards.
+func registryBounds(ctx context.Context, tx pgx.Tx, routingOnly ...bool) error {
+	profilesWhere, retirementsWhere := "", ""
+	if len(routingOnly) > 0 && routingOnly[0] {
+		profilesWhere = " WHERE p.enabled"
+		retirementsWhere = " WHERE EXISTS(SELECT 1 FROM model_profiles p WHERE p.id=r.profile_id AND p.tenant_id=r.tenant_id AND p.enabled)"
+	}
+	var large bool
+	if err := tx.QueryRow(ctx, `SELECT
+ (SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles p`+profilesWhere+` LIMIT 513) p) OR
+ (SELECT count(*)>512 FROM (SELECT 1 FROM model_profile_retirements r`+retirementsWhere+` LIMIT 513) r) OR
+ (SELECT count(*)>4096 FROM (SELECT 1 FROM model_pref_profiles LIMIT 4097) p) OR
+ (SELECT count(*)>1536 FROM (SELECT 1 FROM model_rule_revisions LIMIT 1537) r) OR
+ EXISTS(SELECT 1 FROM (`+modelprefs.OrdersSQL+`) o GROUP BY profile_id HAVING count(*)>1536) OR
+ EXISTS(SELECT 1 FROM model_row_constraints GROUP BY scope,project_id HAVING count(*)>4096) OR
+ (SELECT count(*)>512 FROM (SELECT 1 FROM model_pauses LIMIT 513) p) OR
+ EXISTS(SELECT 1 FROM model_rules GROUP BY scope,project_id HAVING count(*)>4096)`).Scan(&large); err != nil {
+		return err
+	}
+	if large {
+		return modelprefs.ErrBoardBounds
+	}
+	return nil
 }
 
 func validateLineWrite(in lineWrite, h, oldModel string) error {
@@ -259,9 +277,21 @@ func boardLineID(p Profile) string { f, l, _ := ProfileLine(p); return f + ":" +
 // Caller holds the tenant and registry fences. All transfers precede events.
 func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile, moveLines ...bool) error {
 	moveLine := len(moveLines) == 0 || moveLines[0]
+	if err := transferRetiredLadderReferences(ctx, tx, before, after); err != nil {
+		return err
+	}
+	// A pause belongs to its harness route and never switches harness or family.
+	// A paused route without a matching successor rejects instead of dropping it.
 	for _, old := range before {
 		candidates := sameRouteProfiles(after, old)
 		if len(candidates) == 0 {
+			var paused bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_pauses WHERE harness=$1 AND model=$2)`, old.Harness, old.Model).Scan(&paused); err != nil {
+				return err
+			}
+			if paused {
+				return fail(409, "successor has no matching harness route")
+			}
 			continue
 		}
 		if err := copyModelPause(ctx, tx, old, nearestProfile(candidates, old.Effort, old.EffortLevel)); err != nil {

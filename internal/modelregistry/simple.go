@@ -94,6 +94,7 @@ type simpleUnavailable struct {
 	Cause       string     `json:"cause"`
 	Until       *time.Time `json:"until"`
 	Route       *string    `json:"route"`
+	RunsVia     *string    `json:"runs_via"`
 	Waits       bool       `json:"waits"`
 }
 type simpleNew struct {
