@@ -2,7 +2,8 @@
 import type { ListItem } from './api.ts'
 import type { IconName } from '../components/AppIcon.vue'
 import { kindLabel } from './work.ts'
-export const WORK_ICONS = ['ticket', 'epic', 'task', 'layers', 'tree', 'folder', 'check', 'box'] as const
+import { isWorkIcon } from './workIcons.ts'
+export { WORK_ICONS } from './workIcons.ts'
 export interface WorkLevel { name: string; icon: string }
 export interface LeadNames { singular: string; plural: string }
 /** `lead` is absent while the workspace uses Lead/Leads (AEON-791). */
@@ -16,9 +17,8 @@ export function workLevel(v: WorkVocabulary, leaf: boolean, depth: number): Work
 }
 /** The icon to draw for a stored choice: unknown or blank values draw the default. */
 export function workIconChoice(icon: string, fallback: IconName): IconName {
-  return WORK_ICONS.includes(icon as typeof WORK_ICONS[number]) ? icon as IconName : fallback
+  return isWorkIcon(icon) ? icon : fallback
 }
-export const workIconName = (icon: string): string => icon.charAt(0).toUpperCase() + icon.slice(1)
 /** Settings label of a level: levels[0] is the top level, the leaf comes last. */
 export function vocabularyLabel(index: number, leaf = false): string {
   return leaf ? 'Leaf (work item)' : index === 0 ? 'Top level' : `Level ${index + 1}`
@@ -51,7 +51,7 @@ export function workLabel(row: Pick<ListItem, 'kind_slug'> & { level_name?: stri
     : kindLabel(row.kind_slug))
 }
 export function workIcon(row: Pick<ListItem, 'kind_slug'> & { level_icon?: string; is_leaf?: boolean }): IconName {
-  if (WORK_ICONS.includes(row.level_icon as typeof WORK_ICONS[number])) return row.level_icon as IconName
+  if (row.level_icon && isWorkIcon(row.level_icon)) return row.level_icon
   return row.is_leaf === false || row.kind_slug === 'epic' ? 'epic' : row.kind_slug === 'task' ? 'task' : 'ticket'
 }
 export function isWorkParent(row: { is_leaf?: boolean; kind_slug: string }): boolean { return row.is_leaf === false || (row.is_leaf === undefined && row.kind_slug === 'epic') }
