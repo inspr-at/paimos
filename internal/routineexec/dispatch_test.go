@@ -79,6 +79,11 @@ func (f *fixture) call(method, path string, in, out any) {
 }
 func setup(t *testing.T, mode string, paid bool) *fixture {
 	t.Helper()
+	return setupWithActions(t, mode, paid, []string{"work.create"}, "personal")
+}
+
+func setupWithActions(t *testing.T, mode string, paid bool, actions []string, scopeKind string) *fixture {
+	t.Helper()
 	f := &fixture{t: t, d: dbtest.Open(t), mux: http.NewServeMux(), owner: tenant.Principal{Kind: tenant.Person, BrowserSession: true}, agent: tenant.Principal{Kind: tenant.Agent, Scopes: []string{"run.claim", "run.telemetry"}}}
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('routine-budget','Budget') RETURNING id::text`).Scan(&f.owner.TenantID))
 	f.agent.TenantID = f.owner.TenantID
@@ -124,7 +129,11 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	if mode == "money" || mode == "both" {
 		budget.MoneyCeilingMicroUSD = &n
 	}
-	in := recurrences.Input{ProjectID: f.project, ParentID: f.parent, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one", Template: recurrences.Template{Title: "Budget work", Description: "Assigned workspace", Criteria: []string{"Validate"}, EstimateHours: 1, Priority: "high", Type: "ticket"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "UTC"}, Definition: &recurrences.Definition{Scope: recurrences.DefinitionScope{Kind: "personal"}, OwnerPrincipalID: f.owner.ID, Assignment: &recurrences.Assignment{Goal: "Bounded fixture", Sources: []recurrences.SourceReference{}, Role: "build", WorkKindID: kind, AllowedActions: []string{"work.create"}, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: budget}}}
+	scope := recurrences.DefinitionScope{Kind: scopeKind}
+	if scopeKind == "project" {
+		scope.ProjectID = f.project
+	}
+	in := recurrences.Input{ProjectID: f.project, ParentID: f.parent, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one", Template: recurrences.Template{Title: "Budget work", Description: "Assigned workspace", Criteria: []string{"Validate"}, EstimateHours: 1, Priority: "high", Type: "ticket"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "UTC"}, Definition: &recurrences.Definition{Scope: scope, OwnerPrincipalID: f.owner.ID, Assignment: &recurrences.Assignment{Goal: "Bounded fixture", Sources: []recurrences.SourceReference{}, Role: "build", WorkKindID: kind, AllowedActions: actions, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: budget}}}
 	f.call("POST", "/api/recurrences", in, &f.routine)
 	must(t, f.tx(func(tx pgx.Tx) error {
 		var err error
@@ -142,7 +151,25 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	path := "/api/recurrences/" + f.routine.ID
 	f.call("POST", path+"/resume", map[string]any{"expected_revision": f.routine.Revision}, nil)
 	f.call("GET", path, nil, &f.routine)
-	f.call("PUT", path+"/execution-consent", map[string]any{"expected_revision": f.routine.Revision, "execute_consent": true}, nil)
+	consent := map[string]any{"expected_revision": f.routine.Revision, "execute_consent": true}
+	if scopeKind == "project" {
+		var service, role string
+		must(t, f.tx(func(tx pgx.Tx) error {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,agent_access_configured) VALUES($1,'agent','Controlled routine service',true) RETURNING id::text`, f.owner.TenantID).Scan(&service); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'controlled_routine','Controlled routine') RETURNING id::text`, f.owner.TenantID).Scan(&role); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, f.owner.TenantID, role, []string{"nodes.read", "run.create", "work_orders.write", "nodes.write"}); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.owner.TenantID, service, role, f.project)
+			return err
+		}))
+		consent["execution_principal_id"] = service
+	}
+	f.call("PUT", path+"/execution-consent", consent, nil)
 	f.call("GET", path, nil, &f.routine)
 	var occurrence recurrences.Occurrence
 	f.call("POST", path+"/run-now", map[string]string{"idempotency_key": "budget"}, &occurrence)
@@ -237,6 +264,9 @@ func setupDispatchOn(t *testing.T, f *fixture) *dispatchFixture {
 		if mode.Load() == 1 {
 			checks.Host.CheckedAt = at.Add(-time.Minute)
 		}
+		if mode.Load() == 7 {
+			checks.Dial.CheckedAt = at.Add(time.Minute)
+		}
 		return checks, err
 	}
 	options := Options{Runtime: f.broker.Runtime, Gates: f.broker.Gates, LeadAdmission: admission,
@@ -249,6 +279,9 @@ func setupDispatchOn(t *testing.T, f *fixture) *dispatchFixture {
 			err := tx.QueryRow(ctx, `SELECT clock_timestamp(),coalesce((SELECT (snapshot->>'revision')::bigint FROM delivery_work_settings WHERE project_id=$1),0)`, project).Scan(&out.ObservedAt, &out.PolicyRevision)
 			if mode.Load() == 4 {
 				out.ObservedAt = out.ObservedAt.Add(-time.Minute)
+			}
+			if mode.Load() == 6 {
+				out.ObservedAt = out.ObservedAt.Add(time.Minute)
 			}
 			if mode.Load() == 5 {
 				out.MainGreen = nil
@@ -348,6 +381,12 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	wait("ci_admission_unavailable", "", 0)
 	mode.Store(5)
 	wait("ci_admission_unavailable", "", 0)
+	// A future reading is not fresh evidence. These missing clock boundaries
+	// retain the same no-route/no-hold/no-turn assertions as stale readings.
+	mode.Store(6)
+	wait("ci_admission_unavailable", "", 0)
+	mode.Store(7)
+	wait("lead admission wait: dial_unavailable", "", 0)
 	mode.Store(0)
 	f.exec(`INSERT INTO delivery_work_settings(tenant_id,project_id,snapshot) VALUES($1,$2,'{"freeze":true,"revision":1}')`, f.owner.TenantID, f.project)
 	wait("release_freeze", "", 0)
