@@ -93,7 +93,7 @@ BEGIN
  INSERT INTO model_pref_profiles(tenant_id,scope,template,thinking,usage,set_by)
  VALUES(p_tenant,'workspace','balanced','standard','balanced',actor); END IF;
  SELECT id INTO workspace FROM model_pref_profiles WHERE scope='workspace';
- FOR item IN SELECT role FROM (VALUES('build'),('build-hard'),('review-gate')) roles(role) LOOP
+ FOR item IN SELECT role FROM (VALUES('build'),('build-hard'),('review-gate')) roles(role) WHERE EXISTS(SELECT 1 FROM model_profiles) LOOP
   IF item.role='review-gate' AND coalesce((SELECT ordinary_review_order_mode FROM model_review_order),'legacy')<>'saved' THEN CONTINUE; END IF;
   SELECT array_agg(line ORDER BY priority),jsonb_object_agg(line,effort ORDER BY priority DESC) INTO ranked,native
   FROM (SELECT DISTINCT ON (aeon_models_line(p.family,p.harness,p.model))
@@ -106,9 +106,9 @@ BEGIN
    -- A saved multi-step Default already has its own chain.
    IF cardinality(existing)>1 THEN CONTINUE; END IF;
    pick := existing[1];
-   IF pick IS NOT NULL THEN ranked := ARRAY[pick]||array_remove(ranked,pick); END IF;
+   IF pick IS NOT NULL THEN ranked := ARRAY[pick]||array_remove(ranked,pick); native:=native-pick; END IF;
    IF EXISTS(SELECT 1 FROM model_pref_orders WHERE profile_id=workspace AND column_key='other' AND situation='first') THEN
-    UPDATE model_pref_orders SET rank=ranked,efforts=coalesce(efforts,'{}')||native,end_mode=coalesce(end_mode,'wait') WHERE profile_id=workspace AND column_key='other' AND situation='first';
+    UPDATE model_pref_orders SET rank=ranked,efforts=native||coalesce(efforts,'{}'),end_mode=coalesce(end_mode,'wait') WHERE profile_id=workspace AND column_key='other' AND situation='first';
    ELSE INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,efforts,end_mode,set_by)
     VALUES(p_tenant,workspace,'other','first',ranked,native,'wait',actor); END IF;
    moved := moved||jsonb_build_array(jsonb_build_object('from','build','to','other/first','rank',ranked,'efforts',native));
@@ -154,7 +154,7 @@ BEGIN
   IF NOT EXISTS(SELECT 1 FROM model_pref_profiles WHERE scope='person' AND person_id=item.person) THEN
    INSERT INTO model_pref_profiles(tenant_id,scope,person_id,set_by) VALUES(p_tenant,'person',item.person,actor); END IF;
   FOR target IN SELECT own.id AS profile_id,col.column_key,picked.line,picked.effort,picked.effort_level,picked.efforts
-  FROM model_pref_profiles own CROSS JOIN (SELECT DISTINCT column_key FROM model_pref_orders WHERE situation='first' UNION SELECT 'other') col
+  FROM model_pref_profiles own CROSS JOIN (SELECT DISTINCT column_key FROM model_pref_orders WHERE situation='first' UNION SELECT slug FROM work_kinds WHERE archived_at IS NULL UNION SELECT 'other') col
   CROSS JOIN LATERAL (
    SELECT o.rank[1] AS line,o.effort,o.effort_level,o.efforts FROM model_pref_orders o JOIN model_pref_profiles owner ON owner.id=o.profile_id
    WHERE (owner.id=own.id OR owner.id=workspace) AND o.column_key IN (col.column_key,'other') AND o.situation='first' AND o.rank IS NOT NULL
