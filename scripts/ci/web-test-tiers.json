@@ -5632,6 +5632,10 @@
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix3: 400 light G3 results and G6 admission evidence stay honest and the owned worker row stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix4: dark wide worker metadata stays in its row, full values are readable and every Beat label fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix4: light wide worker metadata stays in its row, full values are readable and every Beat label fits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 1024 dark long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 1024 light long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

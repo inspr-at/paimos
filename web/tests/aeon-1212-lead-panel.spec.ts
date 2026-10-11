@@ -30,9 +30,9 @@ const makeQuestion = (): Question => ({
   suggested_outcome: 'once', suggestion_reason: 'agent_suggestion', askers: [{ id: 'asker', principal_id: 'lead-agent', session_id: LEAD_SESSION, reply_root_id: '', comment_node_id: '', input: { request_id: 'ask-one', question: 'Merge?', options: [], meanwhile: 'parked' } }],
   pending: [], created_at: '2026-10-06T09:39:00Z', updated_at: '2026-10-06T09:39:00Z',
 })
-async function setup(page: Page, options: { denied?: boolean; question?: boolean; german?: boolean; pinned?: string; last?: string; actions?: boolean } = {}) {
+async function setup(page: Page, options: { denied?: boolean; question?: boolean; german?: boolean; pinned?: string; last?: string; actions?: boolean; workerMetadata?: { model: string; account: string; computer: string } } = {}) {
   await page.clock.setSystemTime(NOW)
-  const world = await mockLeadFlow(page, { lead: 'working', longText: options.german, accountLabels: { claude: 'Claude Max', codex: 'ChatGPT Pro' } })
+  const world = await mockLeadFlow(page, { lead: 'working', longText: options.german, accountLabels: { claude: 'Claude Max', codex: options.workerMetadata?.account ?? 'ChatGPT Pro' }, hostLabel: options.workerMetadata?.computer })
   const lead = world.state.leads['p-pharos']!
   lead.actions = Object.fromEntries(['start', 'resume', 'pause', 'adopt', 'cancel_adoption', 'remove'].map(action => [action, { available: action === 'pause', blocked_reason: action === 'pause' ? '' : 'ordinary_succession_required' }]))
   if (options.actions === false) delete lead.actions
@@ -76,7 +76,7 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
   await page.route('**/api/**', route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname
     if (path === '/api/models') return route.fulfill({ json: [
-      { id: 'sol', slug: 'sol-medium', model: 'gpt-6-sol', display_name: 'Sol', model_version: '6', harness: 'codex', family: 'openai', effort: 'medium', tier: 'standard', enabled: true },
+      { id: 'sol', slug: 'sol-medium', model: 'gpt-6-sol', display_name: options.workerMetadata?.model ?? 'Sol', model_version: '6', harness: 'codex', family: 'openai', effort: 'medium', tier: 'standard', enabled: true },
       { id: 'opus', slug: 'opus-high', model: 'Claude Opus 5.5', display_name: 'Opus', model_version: '5.5', harness: 'claude', family: 'anthropic', effort: 'high', tier: 'standard', enabled: true },
     ] })
     // Full-viewport evidence also renders the predecessor's background reads.
@@ -105,6 +105,69 @@ const panel = (page: Page) => page.getByRole('complementary', { name: 'Session d
 const question = (page: Page) => panel(page).locator('.session-question')
 const tab = (page: Page, name: string) => panel(page).getByRole('tab', { name: new RegExp(`^${name}`) })
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r }); return { promise, resolve } }
+
+// Risk: wide fixed-height worker rows let long metadata cover a neighbour,
+// or truncate a missing/old Beat label without a way to read it.
+for (const look of ['light', 'dark'] as const) {
+  test(`AEON-1212 fix4: ${look} wide worker metadata stays in its row, full values are readable and every Beat label fits`, async ({ page }, info) => {
+    await page.setViewportSize({ width: 1800, height: 1000 })
+    await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
+    const metadata = {
+      model: 'Sol mit einer besonders ausführlichen Modellbezeichnung für umfangreiche Implementierungsaufgaben',
+      account: 'Entwicklungskonto mit einer besonders ausführlichen Bezeichnung für gemeinsame Implementierungsaufgaben',
+      computer: 'ArbeitsrechnerMitEinerBesondersAusführlichenBezeichnungFürGemeinsameImplementierungsaufgaben',
+    }
+    const errors = watchErrors(page), world = await setup(page, { question: false, workerMetadata: metadata })
+    const worker = world.data.live.find(row => row.role === 'worker')!
+    worker.heartbeat_at = null
+    world.data.live.push({ ...worker, session_id: 'aaaaaaaa-0000-4000-8000-000000000003', principal_id: 'aaaaaaaa-0000-4000-8000-0000000000a3', name: 'Second worker', heartbeat_at: '2025-12-31T09:59:40Z' })
+    await page.goto(`/agents/${LEAD_SESSION}?tab=lead`)
+    const rows = panel(page).locator('.worker'), row = rows.first(), neighbour = rows.nth(1)
+    await expect(rows).toHaveCount(2)
+    await expect(row.locator('.worker-execution')).toBeVisible()
+    await expect(row.locator('.worker-beat')).toHaveText('Not reported')
+    await expect(neighbour.locator('.worker-beat')).toHaveText('31 Dec 2025')
+    const contained = async () => {
+      const failures = await rows.evaluateAll(elements => elements.flatMap(element => {
+        const bounds = element.getBoundingClientRect(), bad: string[] = []
+        for (const child of element.querySelectorAll('.worker-execution, .worker-execution > *, .worker-computer, .worker-beat')) {
+          const box = child.getBoundingClientRect()
+          if (box.top < bounds.top - .5 || box.bottom > bounds.bottom + .5 || box.left < bounds.left - .5 || box.right > bounds.right + .5) bad.push(`metadata outside row: ${child.className || child.tagName}`)
+          if (child.classList.contains('worker-beat') && child.scrollWidth > child.clientWidth + 1) bad.push(`Beat does not fit: ${child.textContent}`)
+        }
+        if (element.scrollWidth > element.clientWidth + 1) bad.push('row horizontal overflow')
+        return bad
+      }))
+      expect(failures).toEqual([])
+    }
+    for (const width of [1800, 2560]) {
+      await page.setViewportSize({ width, height: 1000 })
+      await row.scrollIntoViewIfNeeded()
+      await contained()
+      const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist'), row, neighbour }
+      await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content'), workers: panel(page).locator('.worker-list') }, interactions: [
+        { name: 'read each clipped metadata value on hover', run: async () => {
+          for (const [selector, value] of [['.worker-execution > span', `${metadata.model} 6 · medium`], ['.worker-execution > small', `Codex · ${metadata.account}`], ['.worker-computer', metadata.computer]]) {
+            await row.locator(selector!).hover()
+            await expect(page.getByRole('tooltip')).toHaveText(value!)
+            await contained()
+          }
+        } },
+        { name: 'read full metadata from the row on keyboard focus', run: async () => {
+          await page.keyboard.press('Tab')
+          await row.focus()
+          await expect(row).toBeFocused()
+          for (const value of Object.values(metadata)) await expect(page.getByRole('tooltip')).toContainText(value)
+          await contained()
+        } },
+      ] })
+      await row.evaluate(element => (element as HTMLElement).blur())
+      await panel(page).locator('#lp-workers').hover()
+      await page.screenshot({ path: info.outputPath(`AEON-1212/worker-metadata-${width}-${look}.png`) })
+    }
+    expect(errors).toEqual([])
+  })
+}
 
 test('AEON-1212 fix2: an overlapping refresh cannot finish the opening on discarded question evidence', async ({ page }) => {
   const world = await setup(page, { question: false, pinned: 'session' })
