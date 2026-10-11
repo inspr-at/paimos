@@ -10,7 +10,7 @@ import { preferenceFailure } from './modelsSettings'
 import { useSession } from '../stores/session'
 import { deleteNever, dismissLine, getRegistry, getSimple, getTail, getWorkspaceRules, putChain, putDismissed, putEffort, putNever, putOrder, putWorkspaceRules, resetOrder, type ChainBody } from './modelsSimpleApi'
 import {
-  ALL_COLUMN, buildEntries, buildRows, chainEfforts, effortLevel, entryFor, lineName, lineRoutes, lockReason, moveItem, movePin, nearestEffort, nextView, orderBody, orderLines, orderWithFirst, pinFirst, rulesBody, sameOrder, unpin,
+  ALL_COLUMN, buildEntries, buildRows, chainEfforts, effortLevel, entryFor, lineName, lineRoutes, lockReason, moveItem, movePin, nearestEffort, nextView, orderBody, orderLines, orderWithFirst, pinFirst, pinnedLast, pinnedSteps, rulesBody, sameOrder, unpin,
   type ChainEnd, type ModelEntry, type RegistryProfile, type RowView, type RulesBody, type Scope, type SimpleDocument, type SimpleNever, type SimpleStep, type TailBoard, type TailColumn,
 } from './modelsSimple'
 
@@ -98,7 +98,7 @@ export function useModelsSimple() {
     if (!Number.isSafeInteger(result.revision) || result.revision <= before) throw new Unconfirmed()
     return result.revision
   }
-  const order = (target: Scope, person: string | null, column: string, body: { rank: string[]; not: string[] }): Step => async revs => ({ ...revs, prefs: advanced(await putOrder(target, column, body, revs.prefs, person), revs.prefs) })
+  const order = (target: Scope, person: string | null, column: string, body: Parameters<typeof putOrder>[2]): Step => async revs => ({ ...revs, prefs: advanced(await putOrder(target, column, body, revs.prefs, person), revs.prefs) })
   const reset = (target: Scope, person: string | null, column: string): Step => async revs => ({ ...revs, prefs: advanced(await resetOrder(target, column, revs.prefs, person), revs.prefs) })
   const effortStep = (target: Scope, person: string | null, column: string, effort: string | null): Step => async revs => ({ ...revs, prefs: advanced(await putEffort(target, column, effort, revs.prefs, person), revs.prefs) })
   const rulesStep = (column: string, body: RulesBody): Step => async revs => ({ ...revs, rules: advanced(await putWorkspaceRules(column, body, revs.rules), revs.rules) })
@@ -166,6 +166,16 @@ export function useModelsSimple() {
   const carriesStoredEffort = (column: TailColumn, wanted: string | null) => !!wanted && column.stored_effort === wanted
   /** The native effort the column's own order stored; null (or absent) means the order inherits one. Undo restores this, never the effort on screen: that one may only be inherited from Default. */
   const storedEffort = (column: TailColumn) => column.stored_effort ?? null
+  /**
+   * A column's own order as stored: rank, exclusions, ending and every native level, then the order's own level. A
+   * reset deletes all of them, so its Undo writes this back (AEON-1161). An ending the order never stored is the row's.
+   */
+  const restore = (target: Scope, person: string | null, column: TailColumn, row: RowView): Step[] => {
+    const body = orderBody(column), stored = column.stored, level = storedEffort(column)
+    const end: ChainEnd = stored?.end === 'wait' || stored?.end === 'default' ? stored.end : row.end
+    const efforts = Object.fromEntries(Object.entries(stored?.efforts ?? {}).filter(([line]) => body.rank.includes(line)))
+    return [order(target, person, column.column, { ...body, efforts, end }), ...(level ? [effortStep(target, person, column.column, level)] : [])]
+  }
 
   /** Pick a model (and optionally its level) for a row; a draft row or a row without an order of its own gets one. */
   async function pick(row: RowView, entry: ModelEntry, effort: string | null = null): Promise<boolean> {
@@ -208,10 +218,10 @@ export function useModelsSimple() {
     if (!state || !editable.value || row.isDefault && scope.value === 'default' || !column) return false
     const seen = seenNow()
     const target = scope.value, who = person()
-    const before = orderBody(column), forward: Step[] = [reset(target, who, row.column)]
-    // A reset deletes the order and its effort with it; a stored effort comes back, an inherited one stays inherited.
-    const stored = storedEffort(column)
-    const backward: Step[] = [order(target, who, row.column, before), ...(stored ? [effortStep(target, who, row.column, stored)] : [])]
+    const forward: Step[] = [reset(target, who, row.column)]
+    // A reset deletes the whole order; Undo writes it back as stored, an inherited level stays inherited. A row without
+    // an order of its own has none to bring back.
+    const backward: Step[] = storedOrder(column) ? restore(target, who, column, row) : []
     let rules = false
     if (target === 'default' && row.lock && row.line) {
       try {
@@ -255,17 +265,27 @@ export function useModelsSimple() {
   /** The workspace's own row for a column, as a member's personal order is compared against it. */
   const sharedRow = (column: string) => workspace.value ? [workspace.value.all, ...workspace.value.exceptions].find(row => row.column === column) ?? null : null
 
+  /** Steps at the end of a row's order that a workspace pin keeps there: only an admin on For everyone moves or removes them. */
+  const fixedSteps = (row: RowView) => scope.value === 'default' && admin.value ? 0 : pinnedSteps(row, pinnedLast(columnOf(row.column)))
+
   /**
    * Edit a row's fallback: move, add or change a step at its own level, take one out, or choose how it ends. Every
    * edit saves at once with Undo. On Just me a workspace row becomes the person's own order ("yours · reset"); an
    * order that ends up as the workspace's again goes back to following it. Levels the row inherits stay inherited.
+   * Steps a workspace pin keeps last (migrated pins to the bottom) stay last; when an admin on For everyone moves or
+   * removes one, its pin is lifted in the same change, so the order alone decides its place.
    */
   async function editChain(row: RowView, change: ChainChange): Promise<boolean> {
     const state = doc.value, column = columnOf(row.column), base = rows.value[0]
     if (!state || !editable.value || busy.value || !row.editable || row.draft || !row.line || !column || !base) return false
-    let chain: SimpleStep[] = row.chain, end = row.end, levels = false, announce: string | undefined
+    const seen = seenNow()
+    // The pinned steps are the last ones; from `start` on, a step is kept there by a workspace rule.
+    const start = row.chain.length - pinnedSteps(row, pinnedLast(column))
+    let chain: SimpleStep[] = row.chain, end = row.end, levels = false, announce: string | undefined, lift: string[] = []
     if (change.kind === 'move') {
       if (change.from === change.to || !chain[change.from] || !chain[change.to]) return false
+      // A move into or out of the pinned steps lifts their pins: the order then keeps the place it shows.
+      if (change.from >= start || change.to >= start) lift = chain.slice(start).map(step => step.line)
       chain = moveItem(chain, change.from, change.to)
       announce = `${lineName(entries.value, chain[change.to]!.line)} moved to step ${change.to + 2} of ${chain.length + 1}.`
     } else if (change.kind === 'add' || change.kind === 'step') {
@@ -273,16 +293,36 @@ export function useModelsSimple() {
       // A line runs at most once per order.
       if (orderLines(row).some((line, index) => line === change.line && !(change.kind === 'step' && index === change.index + 1))) return false
       const step = { line: change.line, effort: change.effort }
-      chain = change.kind === 'add' ? [...chain, step] : chain.map((item, index) => index === change.index ? step : item)
+      // A new step joins before the pinned steps, where it will run.
+      chain = change.kind === 'add' ? [...chain.slice(0, start), step, ...chain.slice(start)] : chain.map((item, index) => index === change.index ? step : item)
       levels = true
     } else if (change.kind === 'remove') {
       if (!chain[change.index]) return false
+      if (change.index >= start) lift = [chain[change.index]!.line]
       chain = chain.filter((_, index) => index !== change.index)
     } else {
       if (row.isDefault || change.end === end) return false
       end = change.end
     }
     const target = scope.value, who = person(), had = storedOrder(column), level = storedEffort(column)
+    // Pins are workspace rules: only an admin on For everyone lifts one.
+    if (lift.length && !(target === 'default' && admin.value)) return false
+    const pins: { forward: Step[]; backward: Step[] } = { forward: [], backward: [] }
+    if (lift.length) {
+      try {
+        const document = await getWorkspaceRules()
+        if (!seen.same() || scope.value !== 'default') return false
+        if (document.revision !== state.rules_revision) { await refreshWith(conflict); return false }
+        const previous = rulesBody(document, row.column)
+        pins.forward.push(rulesStep(row.column, { ...previous, bottom: previous.bottom.filter(pin => !lift.includes(pin.line)) }))
+        pins.backward.push(rulesStep(row.column, previous))
+      } catch (failure) {
+        if (!seen.current()) return false
+        await refreshWith(failure instanceof APIError ? conflict : 'Could not read the workspace rules.')
+        return false
+      }
+    }
+    if (!seen.same()) return false
     const known = (line: string) => !!entryFor(entries.value, line)
     // The pick's level is written only when the row holds its own; otherwise it keeps following the default.
     const ownPick = row.isDefault || column.stored_effort != null || !!row.entry && row.effort !== nearestEffort(row.entry, base.effort, effortLevel(base.entry, base.effort))
@@ -297,7 +337,7 @@ export function useModelsSimple() {
     // Undo writes back what the row showed: a level a removal or a reset dropped, and the ending it had.
     const previous: ChainBody = { rank: rank(row.chain), ...(levels || change.kind === 'remove' || followsAgain ? { efforts: efforts(row.chain) } : {}), ...(change.kind === 'end' || followsAgain ? { end: row.end } : {}) }
     const backward: Step[] = had ? write(previous) : [reset(target, who, row.column)]
-    return commit({ forward, backward, announce })
+    return commit({ forward: [...pins.forward, ...forward], backward: [...pins.backward, ...backward], rules: lift.length > 0, announce })
   }
 
   /** Where "Allow again" may be offered: a workspace rule for admins on For everyone, a saved exclusion on its own order. */
@@ -353,5 +393,5 @@ export function useModelsSimple() {
   watch(() => can('models.read'), allowed => { if (allowed && !doc.value && !loading.value && owner.value) void load() })
   onBeforeUnmount(() => { alive = false; generation++; epoch.value++; abort?.abort(); unsubscribe() })
 
-  return { scope, doc, rows, names, entries, routes, labels, kinds, freeKinds, next, news, tail, loading, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey, cantReason, load, pick, use, clear, lock, dismiss, editChain, canAllow, allowAgain, startException, discardException, setScope, dropError }
+  return { scope, doc, rows, names, entries, routes, labels, kinds, freeKinds, next, news, tail, loading, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey, cantReason, load, pick, use, clear, lock, dismiss, editChain, fixedSteps, canAllow, allowAgain, startException, discardException, setScope, dropError }
 }

@@ -9302,11 +9302,15 @@
     ,
     {"kind":"browser","file":"tests/model-refresh.spec.ts","name":"the Models page carries the registry card: the old freshness links land on it and Check now shows its cooldown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"a member keeps a step a workspace pin holds last where it is, and the fold says why","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"a step comes out and Undo puts it back with its level; a level changes in the step’s own menu","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"a step drags by its handle to a new place; the order keeps its height while it moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"admins allow a Never line again for everyone; Undo sets it again with its reason","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"an admin takes a step a workspace pin holds last out with its pin; Undo sets both again, and moving it lifts the pin too","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 dark › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -16826,15 +16830,23 @@
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > stops the next request when the captured person or workspace is gone","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > Remove of a row without an order of its own lifts its lock; Undo sets the lock again and invents no order","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > Reset Undo writes the own order back whole: rank, exclusions, its Wait ending and each fallback’s level, then its own level","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > a member’s edit of a workspace row writes their own order with their person; Undo resets it","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > adds a step with every step’s level; the pick’s level is written only when the row holds its own","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > allows a Never line again only for admins on For everyone, against the rules revision; Undo sets it with its reason","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > an admin on For everyone takes a pinned step out, or moves it, with its pin lifted in the same change; Undo sets the pin again","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > an own order edited back to the workspace’s follows it again; Undo brings the own order back as it was","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > moves a step with one rank-only write, says where it went, and Undo writes the order back","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > on Just me a step a workspace pin keeps last stays there, and a new step joins before it","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > refuses a locked row, a draft, a line already in the order and an ending on the default, without a write","tier":"ESSENTIAL"}
     ,

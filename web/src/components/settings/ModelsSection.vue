@@ -180,7 +180,7 @@ watch(() => [route.hash, shown.value], async () => {
         <div class="m-list">
           <ModelRow v-if="defaultRow" :row="defaultRow" :expanded="picker?.key === defaultRow.key" :lock-tip="tip(defaultRow)" :instead="instead(defaultRow)" :reason="defaultRow.unavailable ? reasonText(defaultRow.unavailable.reason) : ''" @open="openPicker(defaultRow, $event)" @reset="resetRow(defaultRow)" @remove="removeRow(defaultRow)">
             <ModelChain
-              v-if="defaultRow.line" :row="defaultRow" :base="defaultRow" :entries="entries" :routes="routes" :states="states.get(defaultRow.key) ?? new Map()" :open="folds.has(defaultRow.key)" :everyone="scope === 'default'" :picking="picking(defaultRow)" :allow="canAllow(defaultRow)" :who="neverBy"
+              v-if="defaultRow.line" :row="defaultRow" :base="defaultRow" :entries="entries" :routes="routes" :states="states.get(defaultRow.key) ?? new Map()" :open="folds.has(defaultRow.key)" :everyone="scope === 'default'" :admin="admin" :fixed="model.fixedSteps(defaultRow)" :picking="picking(defaultRow)" :allow="canAllow(defaultRow)" :who="neverBy"
               @toggle="toggleFold(defaultRow.key)" @move="(from, to, keyboard) => moveStep(defaultRow!, from, to, keyboard)" @remove="index => removeStep(defaultRow!, index)" @pick="(index, anchor) => openStep(defaultRow!, index, anchor)" @end="end => setEnd(defaultRow!, end)" @allow="never => allowLine(defaultRow!, never)"
             />
           </ModelRow>
@@ -189,7 +189,7 @@ watch(() => [route.hash, shown.value], async () => {
             <TransitionGroup name="rw">
               <div v-for="row in exceptions" :key="row.key" class="rw" :data-key="row.key"><div class="rw-in"><ModelRow :row="row" :expanded="picker?.key === row.key" :lock-tip="tip(row)" :instead="instead(row)" :reason="row.unavailable ? reasonText(row.unavailable.reason) : ''" @open="openPicker(row, $event)" @reset="resetRow(row)" @remove="removeRow(row)">
                 <ModelChain
-                  v-if="row.line && !row.draft" :row="row" :base="defaultRow" :entries="entries" :routes="routes" :states="states.get(row.key) ?? new Map()" :open="folds.has(row.key)" :everyone="scope === 'default'" :picking="picking(row)" :allow="canAllow(row)" :who="neverBy"
+                  v-if="row.line && !row.draft" :row="row" :base="defaultRow" :entries="entries" :routes="routes" :states="states.get(row.key) ?? new Map()" :open="folds.has(row.key)" :everyone="scope === 'default'" :admin="admin" :fixed="model.fixedSteps(row)" :picking="picking(row)" :allow="canAllow(row)" :who="neverBy"
                   @toggle="toggleFold(row.key)" @move="(from, to, keyboard) => moveStep(row, from, to, keyboard)" @remove="index => removeStep(row, index)" @pick="(index, anchor) => openStep(row, index, anchor)" @end="end => setEnd(row, end)" @allow="never => allowLine(row, never)"
                 />
               </ModelRow></div></div>

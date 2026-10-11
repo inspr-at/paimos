@@ -23,7 +23,7 @@ export const getRegistry = async (signal?: AbortSignal) => {
   return profiles
 }
 export const getWorkspaceRules = (signal?: AbortSignal) => request<RulesDocument>('/model-rules', 'GET', undefined, undefined, signal)
-export const putOrder = (scope: Scope, column: string, body: OrderBody, revision: number, person: string | null) => request<WriteResult>(`${first(column)}?for=${scope}`, 'PUT', { ...body, revision }, who(scope, person))
+export const putOrder = (scope: Scope, column: string, body: OrderBody & Pick<ChainBody, 'efforts' | 'end'>, revision: number, person: string | null) => request<WriteResult>(`${first(column)}?for=${scope}`, 'PUT', { ...body, revision }, who(scope, person))
 export const resetOrder = (scope: Scope, column: string, revision: number, person: string | null) => request<WriteResult>(`${first(column)}?for=${scope}&revision=${revision}`, 'DELETE', undefined, who(scope, person))
 export const putEffort = (scope: Scope, column: string, effort: string | null, revision: number, person: string | null) => request<WriteResult>(`${first(column, '/thinking')}?for=${scope}`, 'PUT', { effort, revision }, who(scope, person))
 export const putWorkspaceRules = (column: string, body: RulesBody, revision: number) => request<RulesDocument>(`/model-rules/workspace/${encodeURIComponent(column)}`, 'PUT', { ...body, revision })

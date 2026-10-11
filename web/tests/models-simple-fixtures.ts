@@ -55,6 +55,8 @@ export interface MockOptions {
   fallback?: boolean
   /** Models v2 orders (AEON-1161): short fallbacks with their own levels and endings, and a Never rule on UI design. */
   v2?: boolean
+  /** A pin to the bottom migrated from the old board: Fable stays the last step of the Default for everyone. */
+  pinned?: boolean
 }
 interface Order { rank: string[] | null; not: string[]; effort: string | null; efforts?: Record<string, string>; end?: 'wait' | 'default' }
 const TEMPLATE = ['openai:sol', 'anthropic:opus', 'anthropic:sonnet', 'anthropic:fable', 'openai:astra', 'xai:grok', 'openai:luna', 'cursor:composer', 'unknown:openrouter/qwen/qwen3-coder']
@@ -90,6 +92,7 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     layers.default.set('design', { rank: ['anthropic:opus', 'anthropic:sonnet'], not: [], effort: 'xhigh', efforts: { 'anthropic:opus': 'xhigh', 'anthropic:sonnet': 'xhigh' }, end: 'default' })
     layers.default.set('concept', { rank: ['anthropic:fable'], not: [], effort: 'max', efforts: { 'anthropic:fable': 'max' }, end: 'wait' })
     rules.push({ scope: 'workspace', project_id: null, column: 'design', line: 'xai:grok', lock: 'not', position: 0, why: 'Moved here from the earlier model board', set_by: simplePerson, set_at: '2026-10-02T09:00:00Z' })
+    if (options.pinned) rules.push({ scope: 'workspace', project_id: null, column: 'other', line: 'anthropic:fable', lock: 'bottom', position: 0, why: 'Last resort on the earlier model board', set_by: simplePerson, set_at: '2026-09-01T08:00:00Z' })
     layers.mine.clear()
     if (options.member) {
       layers.mine.set('other', { rank: ['openai:sol', 'anthropic:sonnet'], not: [], effort: 'high', efforts: { 'openai:sol': 'high', 'anthropic:sonnet': 'high' }, end: 'wait' })
@@ -97,6 +100,9 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     }
   }
   const lockOf = (column: string) => rules.find(rule => rule.column === column && rule.lock === 'top')
+  // A pin to the bottom keeps its line last in every order of the column, as the server's resolver does.
+  const bottomOf = (column: string) => rules.filter(rule => rule.column === column && rule.lock === 'bottom').sort((a, b) => a.position - b.position).map(rule => rule.line)
+  const pinnedLast = (column: string, rank: string[]) => [...rank.filter(id => !bottomOf(column).includes(id)), ...bottomOf(column)]
   const own = (layer: 'mine' | 'default', column: string) => layer === 'mine' ? layers.mine.get(column) : layers.default.get(column)
   const inherited = (layer: 'mine' | 'default', column: string): Order => {
     const direct = own(layer, column)
@@ -119,7 +125,7 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
   }
   const pick = (layer: 'mine' | 'default', column: string): SimpleRow => {
     const { id, item, effort, lock, order, base } = first(layer, column)
-    const chain = (order.rank ?? []).filter(step => step !== id).map(step => ({ line: step, effort: line(step) ? nearest(line(step)!, order.efforts?.[step] ?? base) : null }))
+    const chain = pinnedLast(column, order.rank ?? []).filter(step => step !== id).map(step => ({ line: step, effort: line(step) ? nearest(line(step)!, order.efforts?.[step] ?? base) : null }))
     const never = [
       ...rules.filter(rule => rule.column === column && rule.lock === 'not').map(rule => ({ line: rule.line, by: rule.set_by, at: rule.set_at, why: rule.why })),
       ...order.not.map(not => ({ line: not, by: null, at: null, why: 'Saved exclusion' })),
@@ -158,10 +164,10 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
   function tail(layer: 'mine' | 'default'): TailBoard {
     const columns: TailColumn[] = [['other', 'Everything else'], ...KINDS.map(([column, label]) => [column, options.longLabels && column === 'design' ? 'UI design for the customer-facing marketing site and every campaign landing page' : label] as [string, string]), ...REVIEWS.map(column => [column, `Review of ${column.split(':')[1]}`] as [string, string])].map(([column, label]) => {
       const order = inherited(layer, column!), lock = lockOf(column!), direct = own(layer, column!)
-      const rank = lock ? [lock.line, ...order.rank!.filter(id => id !== lock.line)] : order.rank!
+      const rank = pinnedLast(column!, lock ? [lock.line, ...order.rank!.filter(id => id !== lock.line)] : order.rank!)
       return { column: column!, label: label!, fixed: column === 'other' || column!.startsWith('review:'), hidden: false, source: direct?.rank ? 'own' : 'template',
-        list: rank.map(id => ({ line: id, ...(lock && id === lock.line ? { lock: { kind: 'rule' } } : {}) })), not: order.not.map(id => ({ line: id })),
-        stored: { rank: [...(order.rank ?? [])], not: [...order.not] }, ...(direct ? { stored_effort: direct.effort } : {}),
+        list: rank.map(id => ({ line: id, ...(lock && id === lock.line ? { lock: { kind: 'rule' } } : bottomOf(column!).includes(id) ? { lock: { kind: 'rule', value: 'bottom', scope: 'workspace' } } : {}) })), not: order.not.map(id => ({ line: id })),
+        stored: { rank: [...(order.rank ?? [])], not: [...order.not], ...(direct?.rank ? { end: direct.end, efforts: direct.efforts } : {}) }, ...(direct ? { stored_effort: direct.effort } : {}),
         cant: column === 'concept' || column === 'other' || column!.startsWith('review:') ? [] : [{ line: 'xai:grok', reason: 'No tools in PAIMOS' }, ...(options.fresh ? [{ line: NEW_LINE.id, reason: 'No tools in PAIMOS' }] : [])] } as TailColumn
     })
     return { person_id: simplePerson, revision: revision[layer], profile: { dismissed_lines: dismissed[layer] }, columns }
@@ -191,6 +197,7 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
       if (input.revision !== rulesRevision) return route.fulfill({ status: 409, json: { error: 'stale_revision' } })
       const kept = rules.filter(rule => rule.column === column && rule.lock === 'not')
       rules = rules.filter(rule => rule.column !== column).concat(input.top.map((pin, position) => ({ scope: 'workspace' as const, project_id: null, column, line: pin.line, lock: 'top' as const, position, why: pin.why, set_by: simplePerson, set_at: '2026-10-09T09:00:00Z' })))
+        .concat(input.bottom.map((pin, position) => ({ scope: 'workspace' as const, project_id: null, column, line: pin.line, lock: 'bottom' as const, position, why: pin.why, set_by: simplePerson, set_at: '2026-10-09T09:00:00Z' })))
         .concat(Object.entries(input.not ?? {}).map(([id, why], position) => ({ ...(kept.find(rule => rule.line === id) ?? { scope: 'workspace' as const, project_id: null, column, line: id, lock: 'not' as const, set_by: simplePerson, set_at: '2026-10-09T09:00:00Z' }), position, why })))
       return route.fulfill({ json: { revision: ++rulesRevision, rules } })
     }

@@ -32,9 +32,12 @@ export interface SimpleDocument {
   unavailable: SimpleUnavailable[]; new_lines: SimpleNewLine[]; revision: number; rules_revision: number; person_id: string | null
 }
 /** The part of the ranked board this page needs: the stored order behind each first pick, and what a column cannot do. */
-export interface TailCard { line: string; lock?: unknown }
-/** The order a first-pick rewrite must keep, including lines the resolved list omits. */
-export interface StoredOrder { rank: string[]; not: string[] }
+export interface TailCard { line: string; lock?: { kind?: string; value?: string; scope?: string } | null }
+/**
+ * The order a first-pick rewrite must keep, including lines the resolved list omits. End and efforts are the column's
+ * own order's ending and native levels (AEON-1161); absent when it has no order of its own or stores none.
+ */
+export interface StoredOrder { rank: string[]; not: string[]; end?: string; efforts?: Record<string, string> }
 export interface TailColumn {
   column: string; label: string; fixed: boolean; hidden: boolean; source: 'own' | 'default' | 'template' | 'follows'
   list: TailCard[]; not: TailCard[]; cant: { line: string; reason: string }[]
@@ -189,6 +192,14 @@ export function buildRows(input: { doc: SimpleDocument; workspace: SimpleDocumen
 export function orderBody(column: TailColumn): OrderBody {
   if (column.stored && Array.isArray(column.stored.rank) && Array.isArray(column.stored.not)) return { rank: [...column.stored.rank], not: [...column.stored.not] }
   return { rank: column.list.map(card => card.line), not: column.not.map(card => card.line) }
+}
+/** Lines a workspace rule keeps last in a column's order: pins to the bottom, migrated from the old board (AEON-1158). */
+export const pinnedLast = (column: TailColumn | undefined) => new Set((column?.list ?? []).filter(card => card.lock?.value === 'bottom').map(card => card.line))
+/** How many steps at the end of a row's order are kept there by such pins. */
+export function pinnedSteps(row: RowView, pinned: Set<string>): number {
+  let count = 0
+  while (count < row.chain.length && pinned.has(row.chain[row.chain.length - 1 - count]!.line)) count++
+  return count
 }
 export function orderWithFirst(column: TailColumn, line: string): OrderBody {
   const body = orderBody(column)

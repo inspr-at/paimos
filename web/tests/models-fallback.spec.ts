@@ -195,6 +195,64 @@ test('admins allow a Never line again for everyone; Undo sets it again with its 
   await expect(page.locator('[data-never="design:xai:grok"]')).toBeVisible(); await expect(page.locator('[data-unnever]')).toHaveCount(0)
 })
 
+test('a member keeps a step a workspace pin holds last where it is, and the fold says why', async ({ page }) => {
+  const state = await open(page, { member: true, pinned: true })
+  await openFold(page, 'all')
+  await expect(steps(page, 'all')).toHaveText(['GPT-6.1 Sol · high', 'Sonnet 5.5 · high', 'Fable 5.1 · high'])
+  await expect(page.locator('[data-move="all:0"]')).toBeVisible(); await expect(page.locator('[data-chrm="all:0"]')).toBeVisible()
+  await expect(page.locator('[data-move="all:1"]')).toHaveCount(0); await expect(page.locator('[data-chrm="all:1"]')).toHaveCount(0)
+  await expect(page.locator('[data-fixed="all"]')).toHaveText('Fable 5.1 stays the last step: it is set for everyone.')
+  // The step above it moves neither below it from the keyboard nor by dragging.
+  await page.locator('[data-move="all:0"]').focus(); await page.keyboard.press('ArrowDown'); await expect(page.locator('[data-move="all:0"]')).toBeFocused()
+  const grip = (await page.locator('[data-move="all:0"]').boundingBox())!, last = (await page.locator('[data-chain="all"] .ch-it[data-i="1"]').boundingBox())!
+  await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2); await page.mouse.down()
+  await page.mouse.move(last.x + 60, last.y + last.height / 2, { steps: 6 }); await page.mouse.up()
+  await expect(steps(page, 'all')).toHaveText(['GPT-6.1 Sol · high', 'Sonnet 5.5 · high', 'Fable 5.1 · high'])
+  expect(state.writes).toEqual([])
+  // Its level is still the person's own to choose.
+  await page.locator('[data-chpick="all:1"]').click(); await page.locator(`.mdl-pop [data-line="${FABLE}"] .lvc[data-eff="max"]`).click()
+  await expect(steps(page, 'all')).toHaveText(['GPT-6.1 Sol · high', 'Sonnet 5.5 · high', 'Fable 5.1 · max'])
+  expect(state.writes.map(write => [write.path, write.person, write.body])).toEqual([
+    ['/model-preferences/orders/other/first', simplePerson, { rank: [SOL, SONNET, FABLE], efforts: { [SOL]: 'high', [SONNET]: 'high', [FABLE]: 'max' }, revision: 3 }],
+    ['/model-preferences/orders/other/first/thinking', simplePerson, { effort: 'high', revision: 4 }],
+  ])
+  expect(state.problems).toEqual([])
+})
+
+test('an admin takes a step a workspace pin holds last out with its pin; Undo sets both again, and moving it lifts the pin too', async ({ page }) => {
+  const state = await open(page, { pinned: true })
+  const pins = () => state.rules.filter(rule => rule.lock === 'bottom').map(rule => [rule.column, rule.line, rule.why])
+  const writes = (from: number) => state.writes.slice(from).map(write => [write.method, write.path, write.body])
+  await page.getByRole('button', { name: 'For everyone' }).click(); await openFold(page, 'all')
+  await expect(steps(page, 'all')).toHaveText(['GPT-6.1 Sol · xhigh', 'Opus 5.5 · max', 'Fable 5.1 · xhigh'])
+  await expect(page.locator('[data-fixed="all"]')).toHaveCount(0); await expect(page.locator('[data-move="all:1"]')).toBeVisible()
+  await page.locator('[data-chrm="all:1"]').click()
+  await expect(steps(page, 'all')).toHaveText(['GPT-6.1 Sol · xhigh', 'Opus 5.5 · max']); await expect(fold(page, 'all')).not.toContainText('Fable')
+  expect(writes(0)).toEqual([
+    ['PUT', '/model-rules/workspace/other', { top: [], bottom: [], not: {}, revision: 2 }],
+    ['PUT', '/model-preferences/orders/other/first', { rank: [SOL, OPUS], revision: 5 }],
+  ])
+  expect(pins()).toEqual([])
+  await undo(page).click()
+  await expect(steps(page, 'all')).toHaveText(['GPT-6.1 Sol · xhigh', 'Opus 5.5 · max', 'Fable 5.1 · xhigh'])
+  expect(pins()).toEqual([['other', FABLE, 'Last resort on the earlier model board']])
+  expect(writes(2)).toEqual([
+    ['PUT', '/model-rules/workspace/other', { top: [], bottom: [{ line: FABLE, why: 'Last resort on the earlier model board' }], not: {}, revision: 3 }],
+    ['PUT', '/model-preferences/orders/other/first', { rank: [SOL, OPUS, FABLE], efforts: { [SOL]: 'xhigh', [OPUS]: 'max', [FABLE]: 'xhigh' }, revision: 6 }],
+    ['PUT', '/model-preferences/orders/other/first/thinking', { effort: 'xhigh', revision: 7 }],
+  ])
+  // ↑ on its handle: the pin is lifted in the same change, and the order keeps the place it shows.
+  await page.locator('[data-move="all:1"]').focus(); await page.keyboard.press('ArrowUp')
+  await expect(steps(page, 'all')).toHaveText(['GPT-6.1 Sol · xhigh', 'Fable 5.1 · xhigh', 'Opus 5.5 · max'])
+  await expect(live(page)).toHaveText('Fable 5.1 moved to step 2 of 3.'); await expect(page.locator('[data-move="all:0"]')).toBeFocused()
+  expect(writes(5)).toEqual([
+    ['PUT', '/model-rules/workspace/other', { top: [], bottom: [], not: {}, revision: 4 }],
+    ['PUT', '/model-preferences/orders/other/first', { rank: [SOL, FABLE, OPUS], revision: 8 }],
+  ])
+  expect(pins()).toEqual([])
+  expect(state.problems).toEqual([])
+})
+
 test('folds grow in place: the controls above a fold, and the fold’s own controls, never move (AEON-541)', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'For everyone' }).click()

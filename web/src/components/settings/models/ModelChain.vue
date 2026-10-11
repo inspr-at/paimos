@@ -11,9 +11,10 @@ import {
 // A row's fallback (AEON-1161): one quiet sentence under the pick that opens the order in place. The fold grows
 // downward only, so nothing above it moves (AEON-541). Steps reorder by dragging the handle, or with ↑ ↓ on a focused
 // handle; each step keeps its own level; the order ends in Wait or the default's fallback. A lock makes it read-only.
+// The last `fixed` steps are kept last for everyone by a workspace pin: they keep their place here, with a line saying so.
 const props = defineProps<{
   row: RowView; base: RowView | undefined; entries: ModelEntry[]; routes: Map<string, string[]>; states: Map<string, StepState>
-  open: boolean; everyone: boolean; picking: number | 'add' | null
+  open: boolean; everyone: boolean; admin: boolean; fixed: number; picking: number | 'add' | null
   allow: (never: SimpleNever) => boolean; who: (never: SimpleNever) => string
 }>()
 const emit = defineEmits<{ toggle: []; move: [from: number, to: number, keyboard: boolean]; remove: [index: number]; pick: [index: number | null, anchor: HTMLElement]; end: [end: ChainEnd]; allow: [never: SimpleNever] }>()
@@ -28,6 +29,9 @@ const tail = computed(() => defaultTail(props.base, props.entries))
 const first = computed<SimpleStep>(() => ({ line: props.row.line ?? '', effort: props.row.effort }))
 const count = computed(() => props.row.chain.length + 1)
 const several = computed(() => [props.row.line, ...props.row.chain.map(step => step.line)].some(line => (props.routes.get(line ?? '')?.length ?? 0) > 1))
+// Steps before `movable` move and come out; the rest stay last.
+const movable = computed(() => Math.max(0, props.row.chain.length - props.fixed))
+const moves = (index: number) => editable.value && index < movable.value
 
 const entry = (step: SimpleStep) => entryFor(props.entries, step.line)
 const effortOf = (step: SimpleStep) => showsEffort(entry(step)) ? step.effort : null
@@ -36,6 +40,11 @@ const markOf = (step: SimpleStep) => entry(step)?.harness ?? ''
 const familyOf = (step: SimpleStep) => entry(step) ? '' : lineFamily(step.line)
 const noteOf = (step: SimpleStep, lead?: string | null) => routeNote(props.routes.get(step.line), lead)
 const because = (never: SimpleNever) => { const why = never.why.trim().replace(/[.\s]+$/, ''); return why ? `${why}. ` : '' }
+const fixedText = computed(() => {
+  const kept = props.row.chain.slice(movable.value), one = kept.length === 1
+  const what = one ? `${nameOf(kept[0]!)} stays the last step: it is set for everyone.` : `The last ${kept.length} steps stay last: they are set for everyone.`
+  return props.admin && !props.everyone ? `${what} Change ${one ? 'it' : 'them'} under For everyone.` : what
+})
 
 // ----- the fold: mounted while open or closing; it opens by height only -----------------------------------------
 const calm = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -59,7 +68,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 const drag = ref<{ from: number; over: number; pointer: number } | null>(null)
 const list = ref<HTMLElement>()
 function grab(event: PointerEvent, index: number) {
-  if (!editable.value || event.button !== 0) return
+  if (!moves(index) || event.button !== 0) return
   drag.value = { from: index, over: index, pointer: event.pointerId }
   ;(event.currentTarget as HTMLElement).setPointerCapture?.(event.pointerId)
 }
@@ -77,6 +86,8 @@ function drift(event: PointerEvent) {
     if (event.clientY < items[0]!.getBoundingClientRect().top) over = 0
     if (event.clientY > items.at(-1)!.getBoundingClientRect().bottom) over = items.length - 1
   }
+  // Steps kept last stay below every step that moves.
+  over = Math.min(over, movable.value - 1)
   if (over !== state.over) drag.value = { ...state, over }
 }
 function drop(event: PointerEvent) {
@@ -87,12 +98,12 @@ function drop(event: PointerEvent) {
 }
 function cancel() { drag.value = null }
 function stepKeys(event: KeyboardEvent, index: number, handle: boolean) {
-  if (!editable.value || event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+  if (!moves(index) || event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
   // Arrows move a step from its handle; anywhere else in the step, Alt with an arrow does.
   if (!handle && !event.altKey) return
   event.preventDefault()
   const to = index + (event.key === 'ArrowUp' ? -1 : 1)
-  if (to >= 0 && to < props.row.chain.length) emit('move', index, to, true)
+  if (to >= 0 && to < movable.value) emit('move', index, to, true)
 }
 function endKeys(event: KeyboardEvent) {
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
@@ -126,7 +137,7 @@ function endKeys(event: KeyboardEvent) {
               @keydown="stepKeys($event, index, false)"
             >
               <button
-                v-if="editable" type="button" class="grip" :data-move="`${row.key}:${index}`"
+                v-if="moves(index)" type="button" class="grip" :data-move="`${row.key}:${index}`"
                 :aria-label="`Move ${nameOf(step)}, step ${index + 2} of ${count}. Use the arrow keys`" data-tip="Drag, or press ↑ ↓"
                 @pointerdown="grab($event, index)" @keydown.stop="stepKeys($event, index, true)"
               ><AppIcon name="grip" :size="14" /></button>
@@ -140,7 +151,7 @@ function endKeys(event: KeyboardEvent) {
               <span v-else class="ch-pick ro"><span class="hg" aria-hidden="true"><HarnessMark :harness="markOf(step)" :provider="familyOf(step)" :size="12" /></span><span class="pn">{{ nameOf(step) }}<span v-if="effortOf(step)" class="pe"> · {{ effortOf(step) }}</span></span></span>
               <span class="ch-d">{{ noteOf(step) }}</span>
               <span v-if="states.get(step.line)" class="ch-st" :class="{ ok: states.get(step.line)!.runs }"><AppIcon :name="states.get(step.line)!.runs ? 'play' : 'alert'" :size="12" />{{ states.get(step.line)!.text }}</span>
-              <button v-if="editable" type="button" class="icon-btn flat x sm" :data-chrm="`${row.key}:${index}`" :aria-label="`Take ${nameOf(step)} out of the fallback`" data-tip="Take it out" @click="emit('remove', index)"><AppIcon name="close" :size="13" /></button>
+              <button v-if="moves(index)" type="button" class="icon-btn flat x sm" :data-chrm="`${row.key}:${index}`" :aria-label="`Take ${nameOf(step)} out of the fallback`" data-tip="Take it out" @click="emit('remove', index)"><AppIcon name="close" :size="13" /></button>
             </li>
           </ol>
           <div v-if="editable" class="ch-add"><button :id="`chadd-${row.key}`" type="button" class="add sm" :data-chadd="row.key" aria-haspopup="listbox" :aria-expanded="picking === 'add'" @click="emit('pick', null, $event.currentTarget as HTMLElement)"><AppIcon name="plus" :size="14" /><span>Add a fallback</span></button></div>
@@ -163,7 +174,8 @@ function endKeys(event: KeyboardEvent) {
             <button v-if="allow(never)" type="button" class="link-btn quiet" :data-unnever="`${row.key}:${never.line}`" @click="emit('allow', never)">Allow again</button>
           </p>
           <p v-if="row.lock && !everyone" class="ch-hint"><AppIcon name="lock" :size="12" />Locked for everyone, with its order.</p>
-          <p v-else-if="editable && row.chain.length > 1" class="ch-hint">Drag to reorder, or focus a handle and use ↑ ↓.</p>
+          <p v-else-if="editable && movable > 1" class="ch-hint">Drag to reorder, or focus a handle and use ↑ ↓.</p>
+          <p v-if="editable && fixed" class="ch-hint" :data-fixed="row.key"><AppIcon name="lock" :size="12" />{{ fixedText }}</p>
           <p v-if="several" class="ch-hint"><AppIcon name="route" :size="12" />A model with several routes tries each one before the next step.</p>
           <p v-if="row.isDefault" class="ch-hint"><AppIcon name="gauge" :size="12" />At a daily cap, the Agents dial follows this order too.</p>
         </div>

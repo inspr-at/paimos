@@ -7,7 +7,7 @@ import {
   buildEntries, buildRows, causeShort, chainEfforts, defaultTail, fallbackSentence, lineRoutes, moveItem, neverWho, routeNote, sameOrder, stepStates,
   type RegistryProfile, type SimpleDocument, type SimpleRow, type TailBoard,
 } from '../src/lib/modelsSimple'
-import { deleteNever, getRegistry, getSimple, getTail, getWorkspaceRules, putChain, putEffort, putNever, resetOrder } from '../src/lib/modelsSimpleApi'
+import { deleteNever, getRegistry, getSimple, getTail, getWorkspaceRules, putChain, putEffort, putNever, putOrder, putWorkspaceRules, resetOrder } from '../src/lib/modelsSimpleApi'
 import { useModelsSimple } from '../src/lib/useModelsSimple'
 import { resetToasts, toasts } from '../src/lib/toast'
 import { KINDS, registry, simplePerson } from './models-simple-fixtures'
@@ -19,7 +19,7 @@ const state = vi.hoisted(() => ({
 vi.mock('../src/stores/session', () => ({ useSession: () => state.session }))
 vi.mock('../src/lib/authz', () => ({ can: (permission: string) => permission === 'model_prefs.manage' ? state.manage : permission !== 'members.read', onAccessChange: () => () => {} }))
 vi.mock('vue', async original => ({ ...await original<typeof import('vue')>(), onBeforeUnmount: (cleanup: () => void) => state.cleanups.push(cleanup) }))
-vi.mock('../src/lib/modelsSimpleApi', async original => ({ ...await original<typeof import('../src/lib/modelsSimpleApi')>(), getSimple: vi.fn(), getTail: vi.fn(), getRegistry: vi.fn(), getWorkspaceRules: vi.fn(), putChain: vi.fn(), putEffort: vi.fn(), resetOrder: vi.fn(), putNever: vi.fn(), deleteNever: vi.fn() }))
+vi.mock('../src/lib/modelsSimpleApi', async original => ({ ...await original<typeof import('../src/lib/modelsSimpleApi')>(), getSimple: vi.fn(), getTail: vi.fn(), getRegistry: vi.fn(), getWorkspaceRules: vi.fn(), putChain: vi.fn(), putOrder: vi.fn(), putEffort: vi.fn(), resetOrder: vi.fn(), putNever: vi.fn(), deleteNever: vi.fn(), putWorkspaceRules: vi.fn() }))
 
 const SOL = 'openai:sol', OPUS = 'anthropic:opus', SONNET = 'anthropic:sonnet', FABLE = 'anthropic:fable', GROK = 'xai:grok'
 const settle = async () => { for (let index = 0; index < 20; index++) await Promise.resolve() }
@@ -41,6 +41,10 @@ function tail(own: string[] = [], effort: Record<string, string | null> = {}): T
   return { person_id: simplePerson, revision: 3, profile: { dismissed_lines: [] }, columns: [column('other', [SOL, OPUS]), column('design', [OPUS, SONNET]), column('concept', [FABLE]), column('backend', [SOL])] }
 }
 const views = (input: SimpleDocument, scope: 'me' | 'default' = 'me') => buildRows({ doc: input, workspace: null, scope, canEdit: true, entries, labels })
+/** The Default with Fable kept last for everyone by a pin to the bottom, migrated from the old board (AEON-1158). */
+const PIN = { kind: 'rule', value: 'bottom', scope: 'workspace' }
+const pinned = (): TailBoard => { const base = tail(['other']); return { ...base, columns: base.columns.map(column => column.column === 'other' ? { ...column, list: [{ line: SOL }, { line: OPUS }, { line: FABLE, lock: PIN }] } : column) } }
+const pinnedDoc = (overrides: Partial<SimpleDocument> = {}) => doc({ all: row('other', SOL, 'xhigh', { chain: [{ line: OPUS, effort: 'max' }, { line: FABLE, effort: 'high' }] }), ...overrides })
 
 describe('the fallback in words', () => {
   it('reads the pick, every step and the ending; the default always ends in Wait', () => {
@@ -94,6 +98,8 @@ describe('chain writes', () => {
     vi.mocked(getSimple).mockResolvedValue(doc()); vi.mocked(getTail).mockResolvedValue(tail()); vi.mocked(getRegistry).mockResolvedValue(registry())
     vi.mocked(getWorkspaceRules).mockResolvedValue({ revision: 2, rules: [] })
     vi.mocked(putChain).mockImplementation(async (_scope, _column, _body, revision) => ({ revision: revision + 1, person_id: simplePerson }))
+    vi.mocked(putOrder).mockImplementation(async (_scope, _column, _body, revision) => ({ revision: revision + 1, person_id: simplePerson }))
+    vi.mocked(putWorkspaceRules).mockImplementation(async (_column, _body, revision) => ({ revision: revision + 1, rules: [] }))
     vi.mocked(resetOrder).mockImplementation(async (_scope, _column, revision) => ({ revision: revision + 1, person_id: simplePerson }))
     vi.mocked(putEffort).mockImplementation(async (_scope, _column, _effort, revision) => ({ revision: revision + 1, person_id: simplePerson }))
     vi.mocked(deleteNever).mockImplementation(async (_column, _line, revision) => ({ revision: revision + 1, rules: [] }))
@@ -188,5 +194,63 @@ describe('chain writes', () => {
     expect(deleteNever).toHaveBeenCalledWith('design', GROK, 2); expect(model.announcement.value).toBe('Grok 4.7 is allowed again for UI design.')
     toasts.at(-1)!.actions[0]!.run(); await settle()
     expect(putNever).toHaveBeenCalledWith('design', GROK, 'From the earlier model board.', 3)
+  })
+  it('Reset Undo writes the own order back whole: rank, exclusions, its Wait ending and each fallback’s level, then its own level', async () => {
+    const stored = { rank: [FABLE, SONNET, OPUS], not: [GROK], end: 'wait', efforts: { [FABLE]: 'max', [SONNET]: 'high', [OPUS]: 'xhigh' } }
+    const board = (): TailBoard => { const base = tail(['concept'], { concept: 'max' }); return { ...base, columns: base.columns.map(column => column.column === 'concept' ? { ...column, stored } : column) } }
+    vi.mocked(getTail).mockResolvedValue(board())
+    vi.mocked(getSimple).mockResolvedValue(doc({ exceptions: [doc().exceptions[0]!, row('concept', FABLE, 'max', { mine: true, end: 'wait', chain: [{ line: SONNET, effort: 'high' }, { line: OPUS, effort: 'xhigh' }] })] }))
+    const model = await page()
+    after(4, board())
+    expect(await model.clear(find(model, 'concept'))).toBe(true)
+    expect(resetOrder).toHaveBeenCalledWith('me', 'concept', 3, simplePerson)
+    toasts.at(-1)!.actions[0]!.run(); await settle()
+    expect(putOrder).toHaveBeenCalledWith('me', 'concept', { rank: [FABLE, SONNET, OPUS], not: [GROK], efforts: { [FABLE]: 'max', [SONNET]: 'high', [OPUS]: 'xhigh' }, end: 'wait' }, 4, simplePerson)
+    expect(putEffort).toHaveBeenLastCalledWith('me', 'concept', 'max', 5, simplePerson)
+  })
+  it('Remove of a row without an order of its own lifts its lock; Undo sets the lock again and invents no order', async () => {
+    vi.mocked(getWorkspaceRules).mockResolvedValue({ revision: 2, rules: [{ scope: 'workspace', project_id: null, column: 'design', line: OPUS, lock: 'top', position: 0, why: 'Design stays on Opus.', set_by: simplePerson, set_at: '2026-10-02T09:00:00Z' }] })
+    const model = await page('default')
+    vi.mocked(getSimple).mockResolvedValue(doc({ revision: 4, rules_revision: 3 })); vi.mocked(getTail).mockResolvedValue({ ...tail(), revision: 4 })
+    expect(await model.clear(find(model, 'design'))).toBe(true)
+    expect(resetOrder).toHaveBeenCalledWith('default', 'design', 3, simplePerson); expect(putWorkspaceRules).toHaveBeenCalledWith('design', { top: [], bottom: [], not: {} }, 2)
+    toasts.at(-1)!.actions[0]!.run(); await settle()
+    expect(putWorkspaceRules).toHaveBeenLastCalledWith('design', { top: [{ line: OPUS, why: 'Design stays on Opus.' }], bottom: [], not: {} }, 3)
+    expect(putOrder).not.toHaveBeenCalled(); expect(putChain).not.toHaveBeenCalled()
+  })
+  it('on Just me a step a workspace pin keeps last stays there, and a new step joins before it', async () => {
+    vi.mocked(getTail).mockResolvedValue(pinned()); vi.mocked(getSimple).mockResolvedValue(pinnedDoc())
+    const model = await page()
+    expect(model.fixedSteps(find(model, 'all'))).toBe(1)
+    expect(await model.editChain(find(model, 'all'), { kind: 'remove', index: 1 })).toBe(false)
+    expect(await model.editChain(find(model, 'all'), { kind: 'move', from: 1, to: 0 })).toBe(false)
+    expect(await model.editChain(find(model, 'all'), { kind: 'move', from: 0, to: 1 })).toBe(false)
+    expect(getWorkspaceRules).not.toHaveBeenCalled(); expect(putChain).not.toHaveBeenCalled()
+    after(4, pinned())
+    expect(await model.editChain(find(model, 'all'), { kind: 'add', line: SONNET, effort: 'high' })).toBe(true)
+    expect(putChain).toHaveBeenCalledWith('me', 'other', { rank: [SOL, OPUS, SONNET, FABLE], efforts: { [SOL]: 'xhigh', [OPUS]: 'max', [SONNET]: 'high', [FABLE]: 'high' } }, 3, simplePerson)
+    expect(putWorkspaceRules).not.toHaveBeenCalled()
+  })
+  it('an admin on For everyone takes a pinned step out, or moves it, with its pin lifted in the same change; Undo sets the pin again', async () => {
+    const pin = { scope: 'workspace' as const, project_id: null, column: 'other', line: FABLE, lock: 'bottom' as const, position: 0, why: 'Last resort', set_by: simplePerson, set_at: '2026-09-01T08:00:00Z' }
+    vi.mocked(getTail).mockResolvedValue(pinned()); vi.mocked(getSimple).mockResolvedValue(pinnedDoc()); vi.mocked(getWorkspaceRules).mockResolvedValue({ revision: 2, rules: [pin] })
+    const model = await page('default')
+    expect(model.fixedSteps(find(model, 'all'))).toBe(0)
+    // The server after the change: the next revisions, so Undo may run against them.
+    vi.mocked(getSimple).mockResolvedValue(pinnedDoc({ revision: 4, rules_revision: 3 })); vi.mocked(getTail).mockResolvedValue({ ...pinned(), revision: 4 })
+    expect(await model.editChain(find(model, 'all'), { kind: 'remove', index: 1 })).toBe(true)
+    expect(putWorkspaceRules).toHaveBeenCalledWith('other', { top: [], bottom: [], not: {} }, 2)
+    expect(putChain).toHaveBeenCalledWith('default', 'other', { rank: [SOL, OPUS] }, 3, simplePerson)
+    expect(vi.mocked(putWorkspaceRules).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(putChain).mock.invocationCallOrder[0]!)
+    toasts.at(-1)!.actions[0]!.run(); await settle()
+    expect(putWorkspaceRules).toHaveBeenLastCalledWith('other', { top: [], bottom: [{ line: FABLE, why: 'Last resort' }], not: {} }, 3)
+    expect(putChain).toHaveBeenLastCalledWith('default', 'other', { rank: [SOL, OPUS, FABLE], efforts: { [SOL]: 'xhigh', [OPUS]: 'max', [FABLE]: 'high' } }, 4, simplePerson)
+    // Moving it up lifts its pin as well; the order then keeps the place it shows.
+    vi.mocked(putChain).mockClear(); vi.mocked(putWorkspaceRules).mockClear(); vi.mocked(getWorkspaceRules).mockResolvedValue({ revision: 4, rules: [pin] })
+    vi.mocked(getSimple).mockResolvedValue(pinnedDoc({ revision: 5, rules_revision: 4 })); vi.mocked(getTail).mockResolvedValue({ ...pinned(), revision: 5 }); await model.load()
+    expect(await model.editChain(find(model, 'all'), { kind: 'move', from: 1, to: 0 })).toBe(true)
+    expect(putWorkspaceRules).toHaveBeenCalledWith('other', { top: [], bottom: [], not: {} }, 4)
+    expect(putChain).toHaveBeenCalledWith('default', 'other', { rank: [SOL, FABLE, OPUS] }, 5, simplePerson)
+    expect(model.announcement.value).toBe('Fable 5.1 moved to step 2 of 3.')
   })
 })
