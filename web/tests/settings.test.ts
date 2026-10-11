@@ -26,8 +26,12 @@ test('Personal, Developer and Policies are for everyone; workspace sections foll
 })
 
 test('Business opens to people who may manage plugins, for its parts card (AEON-1189)', () => {
+  // Measured against what everyone sees, so a new everyone-section (Routines, AEON-1182)
+  // keeps this true: the grant adds Business, and only Business, and takes nothing away.
+  const everyone = visibleSections(false).map(section => section.id)
   const plugins = visibleSections(false, permission => permission === 'plugins.manage').map(section => section.id)
-  assert.deepEqual(plugins, ['personal', 'theme', 'developer', 'vocabulary', 'policies', 'business'])
+  assert.deepEqual(plugins.filter(id => !everyone.includes(id)), ['business'])
+  assert.deepEqual(plugins.filter(id => id !== 'business'), everyone)
   assert.equal(visibleSections(false, permission => permission === 'plugins.read').some(section => section.id === 'business'), false)
   const business = SETTINGS_SECTIONS.find(section => section.id === 'business')!
   assert.equal(sectionGranted(business, false, permission => permission === 'plugins.manage'), true)
