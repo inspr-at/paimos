@@ -814,6 +814,10 @@ func TestCatalogOutdatedUseLevels(t *testing.T) {
 		if err := RecordCatalogFacts(t.Context(), tx, admin.TenantID, []CatalogFact{{Provider: "anthropic", ModelID: old.Model, Fact: "successor", Value: raw, Source: "harness:recorded-lifecycle-vector", SourceKind: "harness", FieldPath: "upgrade", FetchedAt: time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)}}); err != nil {
 			return err
 		}
+		// The fixture seeds a build role route; a pause is another use without a level.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by,set_at) VALUES($1,'claude',$2,'Fixture pause',$3,'2026-10-11T00:00:00Z')`, admin.TenantID, old.Model, admin.ID); err != nil {
+			return err
+		}
 		var err error
 		if pinned, err = insertActivatedProfile(t.Context(), tx, admin, profileWrite{Slug: "old-opus-xhigh", Version: "1", Harness: "claude", Family: "anthropic", Model: old.Model, Effort: "xhigh", Tier: "strong"}, true, modelactivation.Person); err != nil {
 			return err
@@ -862,6 +866,7 @@ func TestCatalogOutdatedUseLevels(t *testing.T) {
 	want := map[string]string{
 		"Default · other · first": "xhigh > max",
 		"fallback · docs · fix":   "high > high",
+		"fallback · build":        "none > none",
 		"never · backend":         "none > none",
 		"pause · claude":          "none > none",
 		"pinned · normal":         "xhigh > max",
