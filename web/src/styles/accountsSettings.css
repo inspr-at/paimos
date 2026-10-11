@@ -51,7 +51,9 @@
 /* A Set by you or Held row keeps its size through ask, confirm and done (AEON-541): its words and its
    action slot each stack every state in one cell, the ones not shown hidden. A settled row loses the wait tint. */
 .lim-sec .lbl.stack { gap: 0; }
-.lim-sec .lbl.stack > .say { grid-area: 1/1; display: grid; gap: 2px; min-width: 0; }
+/* The words keep to the top of the reserved cell: a shorter state never slides its text down,
+   which also kept the browser's scroll anchoring from moving the whole panel. */
+.lim-sec .lbl.stack > .say { grid-area: 1/1; display: grid; align-content: start; gap: 2px; min-width: 0; }
 .lim-sec .act { display: grid; align-items: center; justify-items: end; }
 .lim-sec .act > * { grid-area: 1/1; }
 .lim-sec .sizer { visibility: hidden; }

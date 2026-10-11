@@ -184,22 +184,30 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
       const limits = pane(page).locator('[data-limits]'), rule = limits.locator(`[data-rule="${ACCOUNTS.main}"]`), held = limits.locator('[data-held]')
       await expect(held.locator('[data-say] b')).toHaveText('Held until 16:02')
       await expect(pane(page).locator('[data-quota-say]')).toHaveText('Agents leave it alone until the hold ends.')
-      const guard = await controlStability(page, { use: limits.locator(`[data-use="${ACCOUNTS.main}"]`).getByRole('switch'), signedIn: pane(page).getByRole('heading', { name: 'Signed in on' }), close: pane(page).getByRole('button', { name: 'Close details' }) })
+      const use = limits.locator(`[data-use="${ACCOUNTS.main}"]`).getByRole('switch')
+      // Scrolled so the rows sit at the top of the panel, where the browser's scroll
+      // anchoring acts: the guard measures in scroll coordinates, the screen check where the person sees it.
+      await rule.evaluate(el => el.scrollIntoView({ block: 'start' }))
+      const onScreen = () => use.evaluate(el => el.getBoundingClientRect().top), seen = await onScreen()
+      const guard = await controlStability(page, { use, signedIn: pane(page).getByRole('heading', { name: 'Signed in on' }), close: pane(page).getByRole('button', { name: 'Close details' }) })
       await guard.check(async () => {
         await rule.getByRole('button', { name: 'Remove' }).click()
         await expect(rule.locator('[data-say] small')).toHaveText(/^Remove it for good\?/)
       })
+      expect(Math.abs(await onScreen() - seen), 'switch on screen after Remove asks').toBeLessThanOrEqual(.5)
       await guard.check(async () => {
         await rule.getByRole('button', { name: 'Remove' }).click()
         await expect(rule.locator('[data-say] small')).toHaveText('Removed for good. The daily limit paces this account now.')
         await expect(rule.getByRole('button')).toHaveCount(0)
       })
+      expect(Math.abs(await onScreen() - seen), 'switch on screen after Remove').toBeLessThanOrEqual(.5)
       await guard.check(async () => {
         await held.getByRole('button', { name: 'End now' }).click()
         await expect(held.locator('[data-say] b')).toHaveText('Hold ended')
         await expect(held.getByRole('button')).toHaveCount(0)
         await expect(pane(page).locator('[data-quota-say]')).toHaveText('Agents may use 4 more percentage points today. They stop at today’s limit (62 %) first.')
       })
+      expect(Math.abs(await onScreen() - seen), 'switch on screen after End now').toBeLessThanOrEqual(.5)
       guard.done()
       await limits.scrollIntoViewIfNeeded()
       await page.screenshot({ path: info.outputPath(`accounts-limits-settled-${width}-${theme}.png`), fullPage: false })
