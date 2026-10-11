@@ -299,7 +299,8 @@ func TestPreferenceTicketResolutionUsesStoredPlacement(t *testing.T) {
 		WorkResolution
 		Preference PreferenceDecision `json:"preference"`
 	}](t, &admin, "GET", "/api/models/resolve?role=review-gate&author_family=openai&ticket="+ticket, "", 200)
-	if review.Profile != nil && review.Profile.Family == "openai" || review.Preference.Kind.Slug != "review" || len(review.Preference.HardRules) < 3 {
+	// Models reviews a ticket through its kind's Review situation.
+	if review.Profile != nil && review.Profile.Family == "openai" || review.Preference.Kind.Slug != "backend" || review.Trace.Situation != "review" || len(review.Preference.HardRules) < 3 {
 		t.Fatal("preference route bypassed the qualified review gate", review)
 	}
 }

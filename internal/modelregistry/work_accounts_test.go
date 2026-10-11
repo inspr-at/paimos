@@ -10,6 +10,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -74,8 +75,11 @@ func TestWorkLatestPinAndAutomaticResidencyReselection(t *testing.T) {
 		if err := modelprefs.PutRow(t.Context(), tx, p, scope, kind.ID, row); err != nil {
 			return err
 		}
-		// Row cells are historical evidence; the Models line resolves to its
-		// newest qualified version.
+		// Row cells are historical evidence; the kind's Models order carries
+		// the line and its native effort, resolving to the newest version.
+		if err := dbtest.SetModelOrder(t.Context(), tx, p.TenantID, "", "backend", "first", b.ID); err != nil {
+			return err
+		}
 		q := WorkQuery{Role: "build", Area: "backend"}
 		now := time.Now()
 		got, err := ResolveWork(t.Context(), tx, p, q, now)
@@ -121,6 +125,10 @@ func TestWorkLatestPinAndAutomaticResidencyReselection(t *testing.T) {
 		}
 		if got.Profile == nil || got.Profile.ID != a.ID || got.Trace.Fallback != "" {
 			t.Fatal("retired latest selected", got)
+		}
+		// The residency checks below use the template's automatic order.
+		if _, err := tx.Exec(t.Context(), `DELETE FROM model_pref_orders WHERE column_key='backend'`); err != nil {
+			return err
 		}
 		if _, err := tx.Exec(t.Context(), `DELETE FROM model_pref_rows WHERE scope_id=$1`, scope.ID); err != nil {
 			return err

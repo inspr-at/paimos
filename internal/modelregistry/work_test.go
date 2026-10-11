@@ -173,8 +173,8 @@ func TestResolveWorkEmptyMatrixEquivalence(t *testing.T) {
 func TestPreferenceFallbackAndResidencyBlocksEveryRole(t *testing.T) {
 	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
 		// A dedicated line: Models lines resolve to their newest version.
-		pin, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: "residency-pin", Version: "1", Harness: "codex", Family: "openai", Model: "gpt-6-residencypin", Effort: "xhigh", Tier: "strong"})
-		if err != nil {
+		pin := Profile{Harness: "codex", Model: "gpt-6-residencypin"}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled,registered_effort_level) VALUES($1,'residency-pin','1','codex','openai',$2,'xhigh','strong',true,4) RETURNING id::text`, p.TenantID, pin.Model).Scan(&pin.ID); err != nil {
 			return err
 		}
 		scope, err := modelprefs.SaveScope(t.Context(), tx, p, modelprefs.Scope{Level: "default"})

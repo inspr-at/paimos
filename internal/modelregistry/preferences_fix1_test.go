@@ -110,7 +110,12 @@ func TestResolveWorkPropagatesLateReviewLookupErrors(t *testing.T) {
 				} else if partial.Profile == nil || !errors.Is(err, injected) {
 					t.Fatalf("fault must follow a chosen profile: profile=%v error=%v", partial.Profile, err)
 				}
-				failing.accounts = 0
+				// Dispatch adds its daily account check after the choice.
+				countingWork := &reviewLookupFailure{Tx: tx}
+				if _, err := ResolveWork(t.Context(), countingWork, p, q, now); err != nil {
+					return err
+				}
+				failing.accounts, failing.failAt = 0, countingWork.accounts
 				out, err := ResolveWork(t.Context(), failing, p, q, now)
 				if !errors.Is(err, injected) || out.CommandTemplate != "" {
 					t.Fatalf("review error became a command: %+v, %v", out, err)
