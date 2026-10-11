@@ -153,7 +153,19 @@ func TestWebhookFailureAudit(t *testing.T) {
 				r.Header.Set("X-Hub-Signature-256", signed([]byte(tc.raw), m.secret))
 			}
 			w := httptest.NewRecorder()
-			m.mergeWebhook(w, r)
+			if tc.step == "metrics" || tc.step == "flow" {
+				// Keep these content-free logging cases as unit tests. The
+				// production HTTP chain now requires a durable database receipt;
+				// its step failures are also covered end-to-end by InternalRetry.
+				receipt := &webhookReceipt{event: "workflow_run", raw: []byte(tc.raw)}
+				_, err := m.webhookStep(r.Context(), tc.step, receipt, envelope{})
+				if err == nil {
+					t.Fatal("fixture did not fail its downstream step")
+				}
+				m.rejectWebhookStep(w, r, tc.action, &webhookStepError{step: tc.step, err: err})
+			} else {
+				m.mergeWebhook(w, r)
+			}
 			if w.Code != tc.status {
 				t.Fatalf("audit status: %d, want %d", w.Code, tc.status)
 			}

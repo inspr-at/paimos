@@ -77,6 +77,15 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		m.rejectWebhook(w, r, e.Action, "audit", 404, webhookClass("repository_mismatch"))
 		return
 	}
+	// Preserve the existing typed-envelope refusal before accepting a receipt.
+	// This is input validation, not an audit read or effect.
+	if _, enabled := m.github.(AuditGitHub); enabled {
+		var audit auditEnvelope
+		if json.Unmarshal(raw, &audit) != nil {
+			m.rejectWebhook(w, r, e.Action, "audit", 400, webhookClass("invalid_json"))
+			return
+		}
+	}
 	if err := webhookSubject(name, e); err != nil {
 		m.rejectWebhook(w, r, e.Action, "projection", 400, err)
 		return
@@ -93,19 +102,23 @@ func (m *Module) receiveWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err = m.processWebhook(ctx, id, true); err != nil {
-		step, status := "receipt", http.StatusBadGateway
-		var failed *webhookStepError
-		if errors.As(err, &failed) {
-			step = failed.step
-		}
-		var refusal *apiError
-		if errors.As(err, &refusal) {
-			status = refusal.status
-		}
-		m.rejectWebhook(w, r, e.Action, step, status, err)
+		m.rejectWebhookStep(w, r, e.Action, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (m *Module) rejectWebhookStep(w http.ResponseWriter, r *http.Request, action string, err error) {
+	step, status := "receipt", http.StatusBadGateway
+	var failed *webhookStepError
+	if errors.As(err, &failed) {
+		step = failed.step
+	}
+	var refusal *apiError
+	if errors.As(err, &refusal) {
+		status = refusal.status
+	}
+	m.rejectWebhook(w, r, action, step, status, err)
 }
 
 func webhookSubject(name string, e envelope) error {
