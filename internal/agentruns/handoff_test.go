@@ -490,6 +490,9 @@ func TestWorkerHandoffObsoleteClaimDoesNotAcceptWriter(t *testing.T) {
 func TestStaleWorkHoldKeepsWriterFenceAndOwnedExitReconciles(t *testing.T) {
 	f := setup(t)
 	nodes.New(f.d.App, nil).Mount(f.mux)
+	// Targeted queue admission requires an existing eligible account before
+	// the claim helper creates the reservation used by the owned daemon.
+	f.queueAccount(t, 1000000)
 	id := f.ticket(t, "open", "high", nil)
 	e := f.addQueue(t, id, map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile})
 	v := f.claim(t, e.Run)

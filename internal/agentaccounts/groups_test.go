@@ -113,7 +113,16 @@ func TestStaleWorkReleaseRetainsAdmissionUntilExit(t *testing.T) {
 				})
 			}
 			held := insertRun(t, admin, runner, profile)
-			mustRoute(t, mod, runner, token, held, "daemon-a", []Account{first}, map[string]int64{"requests": 1})
+			heldRoute := mustRoute(t, mod, runner, token, held, "daemon-a", []Account{first}, map[string]int64{"requests": 1})
+			// Every sibling's manual window binds the shared pool, so routing
+			// retains one reservation per window, not just the selected account.
+			reservationCount := 1
+			if shared {
+				reservationCount = 2
+			}
+			if len(heldRoute.Reservations) != reservationCount {
+				t.Fatalf("fixture did not reserve every binding window: %+v", heldRoute)
+			}
 			seed(t, admin, func(tx pgx.Tx) error {
 				_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='ownership_lost',started_at=created_at,ended_at=clock_timestamp(),trace='{"work_lifecycle_release":{"exit_unconfirmed":true}}' WHERE id=$1`, held)
 				return err
@@ -142,8 +151,15 @@ func TestStaleWorkReleaseRetainsAdmissionUntilExit(t *testing.T) {
 			if status != 409 || !strings.Contains(string(raw), "account_busy") {
 				t.Fatalf("unconfirmed writer lost account removal protection: %d %s", status, raw)
 			}
-			if scalar(t, admin, `SELECT count(*) FROM agent_runs WHERE id=$1 AND account_id IS NOT NULL`, blocked) != 0 || scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, held) != 1 {
+			if scalar(t, admin, `SELECT count(*) FROM agent_runs WHERE id=$1 AND account_id IS NOT NULL`, blocked) != 0 || scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE run_id=$1`, blocked) != 0 || scalar(t, admin, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, held) != int64(reservationCount) {
 				t.Fatal("blocked admission changed assignment or retained reservation")
+			}
+			for _, reservation := range heldRoute.Reservations {
+				if scalar(t, admin, `SELECT count(*) FROM account_reservations r JOIN account_allowance_windows w ON w.id=r.window_id
+ WHERE r.id=$1 AND r.run_id=$2 AND r.window_id=$3 AND r.state='active' AND r.reserved_units=1
+ AND r.actual_units IS NULL AND r.settled_at IS NULL AND w.reserved=1 AND w.used=0`, reservation.ReservationID, held, reservation.WindowID) != 1 {
+					t.Fatalf("blocked admission changed original reservation or window: %+v", reservation)
+				}
 			}
 			// The pairing regression exercises authenticated exit telemetry. Here
 			// isolate admission's response to the resulting confirmed marker.
