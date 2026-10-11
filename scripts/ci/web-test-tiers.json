@@ -68,6 +68,10 @@
   "policy": "ESSENTIAL runs on PRs and merge groups plus changed-area cases. GATED-FULL preserves the prior Go/unit/browser gate. NIGHTLY includes never-gated browser cases. Runtime reconciliation warns, defaults new cases to NIGHTLY and drops stale entries. Known-flaky cases and deletion candidates cannot be ESSENTIAL; AEON-679 rule B removes reviewed low-value categories; protected candidates stay available."
   ,
   "postGateCases": [
+    "browser:tests/a11y.spec.ts:axe: business parts status in dark"
+    ,
+    "browser:tests/a11y.spec.ts:axe: business parts status in light"
+    ,
     "browser:tests/account-use-matrix.spec.ts:screenshots of the matrix, light and dark"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: Remove and End now leave “Agents may use it” and everything below in place"
@@ -4649,6 +4653,10 @@
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business overview in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business overview in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business parts status in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business parts status in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business setup in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,

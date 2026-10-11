@@ -119,6 +119,8 @@ test('a partly set up overview shows status only, and its one link to Settings â
   await expect(parts.getByRole('link')).toHaveCount(0)
   const link = overview.getByRole('link', { name: 'Set up in Settings â€º Business' })
   await expect(link).toHaveCount(1)
+  // The rates are held, so the summary has not landed when the link is measured.
+  await expect(page.getByText('3 rates in force', { exact: true })).toHaveCount(0)
   const guard = await controlStability(page, { link, parts })
   await guard.check(async () => {
     release()
