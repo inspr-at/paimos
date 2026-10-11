@@ -36,6 +36,7 @@ import (
 
 type Config struct {
 	RoutineWorkspaces *RoutineWorkspaceConfig
+	LeadRuntime       *LeadRuntimeConfig
 	Power             Power
 	UsageProbes       usageprobe.Probe
 	StepUps           *StepUpManager
@@ -163,6 +164,7 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	leads                  *leadRuntime
 	routineConfig          *RoutineWorkspaceConfig
 	routineCheckouts       map[string]*agentsetup.Store
 	routineResources       map[string]RoutineResourceLease
@@ -392,6 +394,9 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			_ = lock.Close()
 		}
 	}()
+	if err := checkRetainedLeads(state); err != nil {
+		return nil, err
+	}
 	for _, suffix := range []string{".journal", ".checkpoint.json"} {
 		if _, e := state.Read("aeon-agentd-"+c.DaemonID+suffix, 4<<20); e != nil && !errors.Is(e, os.ErrNotExist) {
 			return nil, e
@@ -425,7 +430,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if c.Power == nil {
 		c.Power = systemPower{}
 	}
-	s := &Supervisor{queueWake: make(chan struct{}, 1), usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{leads: &leadRuntime{config: c.LeadRuntime, leads: map[string]*localLead{}}, queueWake: make(chan struct{}, 1), usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		power:             c.Power,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic, verificationDiagnostic: c.VerificationDiagnostic}
@@ -433,6 +438,14 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		s.ledgerRequired = true
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
+	}
+	if c.LeadRuntime != nil {
+		if len(c.LeadRuntime.Repositories) > 32 {
+			return nil, ErrRoutineUnavailable
+		}
+		copy := *c.LeadRuntime
+		copy.Repositories = append([]RoutineRepository(nil), c.LeadRuntime.Repositories...)
+		s.leads.config = &copy
 	}
 	s.capacityNow = c.Now
 	if c.RoutineWorkspaces != nil {
@@ -1178,7 +1191,11 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			}
 			prompt += "\n\nContinue the stopped attempt " + run.RetryOfRunID + ". Inspect its existing work and local changes before continuing; do not redo completed work."
 		}
-		prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
+		if grant != nil {
+			prompt += "\n\nRoutine builder contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Only local workspace tools are available. Outward effects require the coordinator's typed action broker. Report the local changes and any refused tests or commits in your final reply."
+		} else {
+			prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
+		}
 	}
 	if verification {
 		prompt = VerificationTask
@@ -1511,7 +1528,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				return mode, true
 			}
 			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
-				toolBinding{resourceEnvironment: resourceEnvironment, api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
+				toolBinding{routine: grant, resourceEnvironment: resourceEnvironment, api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
 			if err != nil {
 				closeHarness("process_failed")
 				return err
@@ -2669,12 +2686,30 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 func (s *Supervisor) Close(ctx context.Context) error {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
+	if s.leads != nil {
+		s.leads.mu.Lock()
+		defer s.leads.mu.Unlock()
+	}
 	s.mu.Lock()
 	s.closing = true
 	capturing := s.capacityCapturing
 	s.mu.Unlock()
 	if capturing {
 		return ErrDraining
+	}
+	if s.leads != nil {
+		if s.leads.config != nil {
+			api, ok := s.api.(leadRuntimeAPI)
+			if !ok || s.ledger == nil {
+				return ErrProcessesUnconfirmed
+			}
+			if err := s.reconcileLeadReceiptsLocked(ctx, api, false, false); err != nil {
+				return err
+			}
+		}
+		if err := checkRetainedLeads(s.state); err != nil {
+			return err
+		}
 	}
 	status := s.Lifecycle("")
 	if len(status.ActiveRunIDs) > 0 {

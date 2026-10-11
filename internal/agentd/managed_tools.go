@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -41,6 +42,7 @@ func (s *managedToolServer) Close() error {
 }
 
 type toolBinding struct {
+	routine                               *agentsetup.RoutineGrant
 	resourceEnvironment                   []string
 	reportActivity                        func(string) (string, bool)
 	api                                   RunToolAPI
@@ -54,6 +56,13 @@ func startManagedTools(credential string, b toolBinding) (*managedToolServer, er
 	if credential == "" || b.api == nil || b.workOrderID == "" || b.runID == "" || b.workspace == "" || b.active == nil {
 		return nil, errors.New("managed tools are not bound")
 	}
+	if b.routine != nil {
+		grant := *b.routine
+		if grant.Validate() != nil || grant.AgentRunID != b.runID || grant.RuntimeCapability != "routine_native_coding_v1" || b.branch != "routine/"+grant.LaunchID {
+			return nil, ErrRoutineToolsUnavailable
+		}
+		b.routine = &grant
+	}
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
@@ -64,6 +73,7 @@ func startManagedTools(credential string, b toolBinding) (*managedToolServer, er
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// A loopback bind alone does not prevent browser requests or DNS rebinding.
 		if r.Host != listener.Addr().String() || r.Header.Get("Origin") != "" ||
+			b.routine != nil && r.URL.Path != "/" ||
 			subtle.ConstantTimeCompare([]byte(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")), []byte(credential)) != 1 ||
 			!b.active() {
 			http.Error(w, "run capability unavailable", http.StatusForbidden)
@@ -74,7 +84,7 @@ func startManagedTools(credential string, b toolBinding) (*managedToolServer, er
 	})
 	httpServer := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
 	out := &managedToolServer{listener: listener, server: httpServer,
-		tools: RunTools{URL: "http://" + listener.Addr().String(), Token: credential}}
+		tools: RunTools{URL: "http://" + listener.Addr().String(), Token: credential, Routine: b.routine != nil}}
 	go func() { _ = httpServer.Serve(listener) }()
 	return out, nil
 }
@@ -120,6 +130,13 @@ type activityResult struct {
 }
 
 func addManagedTools(s *mcp.Server, b toolBinding) {
+	if b.routine != nil {
+		// Outward catalogue/evaluation/spend tools belong to the broker, never
+		// the builder's legacy daemon API credential or prompt instructions.
+		addManagedFileTools(s, b)
+		addManagedTerminalTool(s, b)
+		return
+	}
 	if b.reportActivity != nil {
 		mcp.AddTool(s, &mcp.Tool{Name: "aeon_activity", Description: "Read the workspace activity mode. In agent_summary mode, optionally report what you are doing at a phase change. Off and tool_activity require no summary."}, func(_ context.Context, _ *mcp.CallToolRequest, in activityArgs) (*mcp.CallToolResult, activityResult, error) {
 			if !b.active() {
@@ -136,8 +153,6 @@ func addManagedTools(s *mcp.Server, b toolBinding) {
 	}
 
 	addManagedFileTools(s, b)
-	// Cache qualified library closures only for this managed run.
-	var libraries terminalLibraryCache
 	mcp.AddTool(s, &mcp.Tool{Name: "aeon_comment", Description: "Comment on the bound work order."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in commentArgs) (*mcp.CallToolResult, string, error) {
 			if !b.active() || len(in.Body) > 65536 || strings.TrimSpace(in.Body) == "" {
@@ -212,10 +227,19 @@ func addManagedTools(s *mcp.Server, b toolBinding) {
 			}
 			return nil, "reply recorded", b.api.ReplyInbox(ctx, in.MessageID, sender, in.Body, in.IdempotencyKey)
 		})
-	mcp.AddTool(s, &mcp.Tool{Name: "aeon_terminal", Description: "Run an allowlisted test, build, or git operation in this run's workspace. No shell and no push."},
+	addManagedTerminalTool(s, b)
+}
+
+func addManagedTerminalTool(s *mcp.Server, b toolBinding) {
+	// Cache qualified library closures only for this managed run.
+	var libraries terminalLibraryCache
+	mcp.AddTool(s, &mcp.Tool{Name: "aeon_terminal", Description: "Run an allowlisted test, build, or git operation in this run's workspace. No shell and no push. Unqualified routine terminal isolation refuses before execution."},
 		func(ctx context.Context, _ *mcp.CallToolRequest, in terminalArgs) (*mcp.CallToolResult, string, error) {
 			if !b.active() {
 				return nil, "", ErrNotOwned
+			}
+			if b.routine != nil {
+				return nil, "", routineTerminalAllowed(in)
 			}
 			out, err := libraries.runTerminalWithResources(ctx, b.workspace, b.branch, in, b.resourceEnvironment)
 			return nil, out, err

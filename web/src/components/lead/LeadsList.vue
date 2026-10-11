@@ -36,6 +36,7 @@ watch(() => [session.identity?.principal.id, active.value.length], () => { void 
 onMounted(() => poller.start())
 onBeforeUnmount(() => poller.stop())
 
+const statePriority: Record<ProjectLead['state'], number> = { working: 0, starting: 1, waiting_for_room: 2, cannot_start: 3, paused: 4, none: 5 }
 interface Row { id: string; key: string; lead: ProjectLead | null; queued: number | null; name: string; sub: string; status: string; tone: string; busy: boolean }
 const leadSession = (lead: ProjectLead | null) => lead?.session_id ? agents.views.find(v => v.session.id === lead.session_id) ?? null : null
 const workersOf = (lead: ProjectLead | null) => lead?.session_id ? agents.views.filter(v => v.session.parent_harness_session_id === lead.session_id && !v.session.stopped_at).length : 0
@@ -49,7 +50,7 @@ const rows = computed<Row[]>(() => active.value.flatMap((p): Row[] => {
   const sub = [activity, lead.state === 'working' ? `${n} ${n === 1 ? 'worker' : 'workers'}` : '', q === null ? '' : `${q} queued`].filter(Boolean).join(' · ')
   const word = { starting: 'Starting', working: 'Working', waiting_for_room: 'Waiting', paused: 'Paused', cannot_start: 'Can’t start' }[lead.state] ?? ''
   return [{ id: p.id, key: p.routeKey, lead, queued: q, name: band.title, sub, status: word, tone: band.tone, busy: band.busy }]
-}).sort((a, b) => Number(a.lead?.state === 'none') - Number(b.lead?.state === 'none')))
+}).sort((a, b) => statePriority[a.lead!.state] - statePriority[b.lead!.state] || a.name.localeCompare(b.name) || a.key.localeCompare(b.key) || a.id.localeCompare(b.id)))
 const count = computed(() => rows.value.filter(r => r.lead && r.lead.state !== 'none').length)
 const mayStart = computed(() => session.identity?.principal.kind === 'person' && can('harness.control') && can('run.create'))
 /** Projects a person could start a lead for: the + menu offers Start lead only while one exists. */

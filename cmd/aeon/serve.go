@@ -404,6 +404,8 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	if err := routineExecutor.Bind(runMod); err != nil {
 		return err
 	}
+	harnessMod := harness.NewWithSessionRecovery(pool, agentruns.PrepareSessionRecovery, nodes.CapturePlanningStart).(*harness.Module)
+	routineExecutor.BindHarness(harnessMod)
 	startWorker(func() { routineExecutor.Run(workerCtx) })
 	startWorker(func() { deliveryMod.Run(workerCtx) })
 	startWorker(func() { deliveryMod.RunAlerts(workerCtx) })
@@ -447,7 +449,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			// R2: agents
 			inbox.New(pool, attachedMessages),
 			chat.New(pool, chat.Options{Enabled: cfg.ChatEnabled}),
-			harness.NewWithSessionRecovery(pool, agentruns.PrepareSessionRecovery, nodes.CapturePlanningStart),
+			harnessMod,
 			rules.New(pool),
 			doctrineMod,
 			ticketwork.New(pool),

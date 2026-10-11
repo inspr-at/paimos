@@ -1,10 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { DATE_FIELDS, DATE_PRESETS, heldOptions, offeredDimensions, type DateField, type DateFilter, type Dimension, type FacetOption, type GroupBy, type ListFilters } from '../../lib/ticketList'
-import type { ColumnId } from '../../lib/columns'
+import { DATE_FIELDS, DATE_PRESETS, heldOptions, offeredDimensions, type DateField, type DateFilter, type Dimension, type FacetOption, type ListFilters } from '../../lib/ticketList'
 import { TICKET_GRAPH_FILTERS } from '../../lib/ticketGraphRenderer'
-import { plural, type SortKey } from '../../lib/work'
+import { plural } from '../../lib/work'
 import type { ProjectSummary } from '../../lib/api'
 import { hiddenStates, hideLabel, type HideState } from '../../lib/hideStates'
 import { statusMeta } from '../../lib/work'
@@ -12,20 +11,16 @@ import HideLabel from './HideLabel.vue'
 import HideOptions from './HideOptions.vue'
 import AppIcon from '../AppIcon.vue'
 import FacetOptions from './FacetOptions.vue'
-import DisplayPanel from './DisplayPanel.vue'
-import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
 
-// Phones and small tablets share every filter and display preference with the toolbar.
+// Phones and small tablets share every filter with the toolbar. Display settings
+// have one home, the Display menu (AEON-1188): the sheet only links to it.
 const props = withDefaults(defineProps<{
   summary?: ProjectSummary | null; filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; loading?: boolean; total: number | null
-  view?: 'list' | 'outline' | 'graph'; canSave?: boolean; density: 'comfortable' | 'compact'; projectHeader?: boolean
-  columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
+  view?: 'list' | 'outline' | 'graph'; canSave?: boolean; projectHeader?: boolean
 }>(), { view: 'list' })
 const emit = defineEmits<{
-  hideStates: [states: HideState[]]; toggle: [dimension: Dimension, value: string]; exclude: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]; group: [value: GroupBy]
-  date: [value: DateFilter | null]; opened: []; expandAll: []; collapseAll: []; saveView: [anchor: HTMLElement]
-  sort: [keys: SortKey[]]; density: [value: 'comfortable' | 'compact']; columns: [order: ColumnId[], visible: ColumnId[]]
-  columnsReset: []; expandGroups: []; collapseGroups: []
+  hideStates: [states: HideState[]]; toggle: [dimension: Dimension, value: string]; exclude: [dimension: Dimension, value: string]; clearAll: []; showClosed: [value: boolean]
+  date: [value: DateFilter | null]; opened: []; saveView: [anchor: HTMLElement]; display: []
 }>()
 const hideName = computed(() => hideLabel(props.filters.hideStates))
 const hideNames = computed(() => hiddenStates(props.filters.hideStates).map(state => statusMeta(state).label).join(', '))
@@ -70,6 +65,11 @@ function saveView() {
   close()
   emit('saveView', anchor)
 }
+// The sheet steps aside for the Display menu; focus is back on Filters before it opens.
+function openDisplay() {
+  close()
+  emit('display')
+}
 defineExpose({ open, close })
 </script>
 
@@ -92,21 +92,10 @@ defineExpose({ open, close })
           </label>
         </div>
         <HideOptions :states="filters.hideStates" :summary="summary" :show-closed="filters.showClosed" @change="states => emit('hideStates', states)" />
-        <section v-if="view !== 'graph'" class="sheet-section" aria-labelledby="sheet-display-title">
-          <h3 id="sheet-display-title" class="eyebrow">Display</h3>
-          <DisplayPanel
-            sheet :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns"
-            :grouped="view === 'list' && filters.group !== 'none'" :project-header="projectHeader"
-            @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
-            @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
-            @expand-all="emit('expandAll'); close()" @collapse-all="emit('collapseAll'); close()"
-            @expand-groups="emit('expandGroups')" @collapse-groups="emit('collapseGroups')"
-          />
-        </section>
-        <section v-else-if="projectHeader" class="sheet-section" aria-labelledby="graph-sheet-display-title">
-          <h3 id="graph-sheet-display-title" class="eyebrow">Display</h3>
-          <HeaderRoomyChoice class="graph-header-choice" />
-        </section>
+        <!-- The Graph view has no list display options; its Display menu still holds the header's density. -->
+        <button v-if="view !== 'graph' || projectHeader" type="button" class="display-link" aria-haspopup="dialog" @click="openDisplay">
+          <AppIcon name="layers" :size="15" /><span class="display-link-label">Display settings…</span><AppIcon name="chevron-right" :size="14" class="display-link-chevron" />
+        </button>
         <p v-if="!held" class="sheet-loading" role="status">Loading filters…</p>
         <template v-else>
         <section v-for="dimension in dimensions" :key="dimension.key" class="sheet-section">
@@ -151,7 +140,12 @@ header .btn { height: 44px; }
 .sheet-row .switch { min-height: 44px; font-size: 14.5px; color: var(--ink); }
 .sheet-section { padding: 14px 0 8px; border-bottom: 1px solid var(--line); }
 .sheet-section .eyebrow { padding: 0 8px 8px; }
-.graph-header-choice { padding: 6px 8px 8px; }
+/* The whole row opens the Display menu: one hairline above and below, a tint on hover. */
+.display-link { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 52px; padding: 0 8px; border: 0; border-block: 1px solid var(--line); background: transparent; color: var(--ink); font-size: 14.5px; font-weight: 600; text-align: left; }
+.display-link:hover { background: var(--row-hover); }
+.display-link:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.display-link-label { flex: 1; min-width: 0; }
+.display-link-chevron { color: var(--ink-3); }
 .sheet-loading { padding: 14px 8px; font-size: 14px; color: var(--ink-3); }
 .sheet-section :deep(.facet-options) { grid-template-columns: minmax(0, 1fr); }
 .sheet-section :deep(.facet-option) { min-height: 44px; }

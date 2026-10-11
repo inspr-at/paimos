@@ -3,7 +3,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getNode } from '../../lib/api'
 import { attachOutcome, listPendingAttach, metadataOnlyAttach, type AttachOutcome, type AttachQueueRow, type AttachReview } from '../../lib/attachWatch'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { duration } from '../../lib/agentState'
 import { HARNESS_NAME } from '../../lib/capacity'
 import { useIdentityScope } from '../../lib/useIdentityScope'
@@ -55,7 +55,7 @@ function refresh() {
   }, { failed: () => { /* a missed read keeps what is shown; the next tick asks again */ } })
 }
 const poller = usePoller(refresh, 5_000, { enabled: () => allowed.value })
-const stopAccess = onAccessChange(change => { if (change === 'reset') reset(); void refresh() })
+const stopAccess = onAccessRevalidate({ reset, refresh: () => { void refresh() } })
 onMounted(() => poller.start(true))
 onBeforeUnmount(() => { poller.stop(); stopAccess(); reset() })
 watch(owner, () => { reset(); void refresh() })

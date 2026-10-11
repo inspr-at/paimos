@@ -333,6 +333,11 @@ func (a *CodexAdapter) Start(ctx context.Context, r StartRequest, observe func(A
 	return cp, nil
 }
 
+// thread/start's workspace sandbox does not bind an immutable inherited
+// MCP/hooks ceiling. Keep routine starts blocked before account probes and
+// app-server startup; manual operation and harmless verification are separate.
+func (*CodexAdapter) RoutineToolsSupported(agentsetup.RoutineGrant) bool { return false }
+
 // PiAdapter speaks Pi's JSONL RPC and verifies the effective state before
 // sending the first prompt or any steer.
 type PiAdapter struct {
