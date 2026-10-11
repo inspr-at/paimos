@@ -134,6 +134,11 @@ test('a used-up older limit stops agents in any unit, runs, tokens or money as m
   const stale = quotaBar(quotaInput({ daily: door({ freshness: 'stale' }), window: window(53), rule: base }))
   assert.deepEqual([stale.room, stale.by], [0, 'rule'])
   assert.equal(quotaCaption(stale, { now: NOW }).text, 'Agents stopped at the limit set by you')
+  // A percent rule that still leaves room binds first, yet an old reading claims none and says so.
+  const percent: LimitUse = { ...base, unit: 'percent', amount: 20, used: 18 }
+  const old = quotaBar(quotaInput({ daily: door({ freshness: 'stale' }), window: window(53), rule: percent }))
+  assert.deepEqual([old.room, old.by], [null, 'rule'])
+  assert.equal(quotaCaption(old, { now: NOW }).text, '53 % left · reading out of date')
   const blind = quotaBar(quotaInput({ rule: base }))
   assert.deepEqual([blind.known, blind.room, blind.by], [false, 0, 'rule'])
   assert.deepEqual(quotaCaption(blind, { now: NOW }), { text: 'Agents stopped at the limit set by you', tone: 'warn', icon: 'pause' })

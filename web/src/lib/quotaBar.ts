@@ -170,7 +170,7 @@ export function quotaCaption(bar: QuotaBar, o: { period?: string; resetsAt?: str
   const left = `${pct(bar.left)} % left`, resets = o.resetsAt ? ` · resets ${when(o.resetsAt, o.now, o.timezone)}` : ''
   if (o.low) return { text: `Low · ${left}${stopped ? ` · ${stopped.charAt(0).toLowerCase()}${stopped.slice(1)}` : resets}`, tone: 'warn', icon: 'gauge' }
   // A used-up rule stops agents whatever the reading says; an old reading alone only claims no room.
-  if (bar.stale && bar.by !== 'rule') return { text: `${left} · reading out of date`, tone: '', icon: '' }
+  if (bar.stale && !(bar.by === 'rule' && bar.room === 0)) return { text: `${left} · reading out of date`, tone: '', icon: '' }
   if (stopped) return { text: stopped, tone: 'warn', icon: 'pause' }
   return { text: `${left}${o.period ? ` ${o.period}` : ''}${resets}`, tone: '', icon: '' }
 }
