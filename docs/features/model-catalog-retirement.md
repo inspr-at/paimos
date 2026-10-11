@@ -4,9 +4,18 @@ The registry and the provider catalog expose a lifecycle object with state,
 date, successor, reason and source. Missing lifecycle evidence stays null.
 Native provider or harness successor facts take precedence over aggregators;
 otherwise `aeon_model_line` and `aeon_model_version_newer` identify a newer
-sourced version of the same provider line. Offline bootstrap aliases do not
-establish a successor. Deprecated, retiring and vanished states retain their
+sourced numeric version of the same provider line. Floating aliases and other
+non-numeric versions never establish an inferred successor, even with harness
+evidence. Deprecated, retiring and vanished states retain their
 source even when a successor is known.
+
+`GET /api/models` keeps its complete profile list, including retired profiles.
+Lifecycle enrichment uses only those identities and their source model lines,
+after the authorized profile-read transaction releases the tenant fence.
+Numeric successor comparisons run in one query. If enrichment exceeds its
+two-second deadline, evidence budget or another read fails, profiles remain
+available with `lifecycle: null`; optional display evidence never rejects an
+otherwise successful profile read.
 
 Only a complete successful provider refresh records presence or disappearance.
 An unavailable, revoked or incomplete source keeps the previous evidence.

@@ -151,19 +151,53 @@ func loadLifecycleCatalog(ctx context.Context, tx pgx.Tx, now time.Time, page ..
 	if err != nil {
 		return nil, err
 	}
+	profiles := []Profile{}
+	for _, ps := range c.profiles {
+		profiles = append(profiles, ps...)
+	}
+	return loadLifecycleProfiles(ctx, tx, now, profiles, page...)
+}
+
+// Registry reads pass their already-listed profiles, without the board's cap
+// or a second profile read. Candidate evidence is restricted to their lines.
+func loadLifecycleProfiles(ctx context.Context, tx pgx.Tx, now time.Time, profiles []Profile, page ...[2]string) ([]lifecycleModel, error) {
 	focused := map[string]bool{}
-	focusLines := map[string]bool{}
 	for _, id := range page {
 		focused[id[0]+":"+id[1]] = true
 	}
-	for _, ps := range c.profiles {
-		for _, p := range ps {
-			provider, id := CatalogIdentity(p.Family, p.Harness, p.Model, p.Effort)
-			focused[provider+":"+id] = true
+	for _, p := range profiles {
+		provider, id := CatalogIdentity(p.Family, p.Harness, p.Model, p.Effort)
+		focused[provider+":"+id] = true
+		if len(focused) > 20000 {
+			return nil, fail(413, "catalog identity limit")
 		}
 	}
-
-	rows, err := tx.Query(ctx, `SELECT provider,model_id,(aeon_model_line(CASE provider WHEN 'openai' THEN 'codex' WHEN 'anthropic' THEN 'claude' WHEN 'google' THEN 'gemini' WHEN 'xai' THEN 'grok' ELSE '' END,model_id))[1],(aeon_model_line(CASE provider WHEN 'openai' THEN 'codex' WHEN 'anthropic' THEN 'claude' WHEN 'google' THEN 'gemini' WHEN 'xai' THEN 'grok' ELSE '' END,model_id))[2],bool_or(source_kind IN ('native','harness','aggregator')) FROM model_catalog_facts GROUP BY provider,model_id ORDER BY provider,model_id LIMIT 20001`)
+	if len(focused) == 0 {
+		return []lifecycleModel{}, nil
+	}
+	keys := []map[string]string{}
+	for identity := range focused {
+		provider, id, _ := strings.Cut(identity, ":")
+		keys = append(keys, map[string]string{"provider": provider, "model_id": id})
+	}
+	keyJSON, err := json.Marshal(keys)
+	if err != nil {
+		return nil, err
+	}
+	// Derive the SQL line once per identity and apply the identity budget only
+	// to relevant lines. Unrelated vendor models cannot exhaust this projection.
+	rows, err := tx.Query(ctx, `WITH focus AS MATERIALIZED (
+		SELECT provider,model_id FROM jsonb_to_recordset($1::jsonb) AS k(provider text,model_id text)
+	), focus_lines AS MATERIALIZED (
+		SELECT provider,model_id,(aeon_model_line(CASE provider WHEN 'openai' THEN 'codex' WHEN 'anthropic' THEN 'claude' WHEN 'google' THEN 'gemini' WHEN 'xai' THEN 'grok' ELSE '' END,model_id))[1] AS line FROM focus
+	), identities AS MATERIALIZED (
+		SELECT provider,model_id,bool_or(source_kind IN ('native','harness','aggregator')) AS sourced
+		FROM model_catalog_facts WHERE provider IN (SELECT provider FROM focus) GROUP BY provider,model_id
+	), model_lines AS MATERIALIZED (
+		SELECT i.*,aeon_model_line(CASE provider WHEN 'openai' THEN 'codex' WHEN 'anthropic' THEN 'claude' WHEN 'google' THEN 'gemini' WHEN 'xai' THEN 'grok' ELSE '' END,model_id) AS parts FROM identities i
+	) SELECT provider,model_id,parts[1],parts[2],sourced FROM model_lines m
+	WHERE EXISTS(SELECT 1 FROM focus_lines f WHERE f.provider=m.provider AND (f.model_id=m.model_id OR f.line=m.parts[1]))
+	ORDER BY provider,model_id LIMIT 20001`, string(keyJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -187,35 +221,14 @@ func loadLifecycleCatalog(ctx context.Context, tx pgx.Tx, now time.Time, page ..
 	if len(models) > 20000 {
 		return nil, fail(413, "catalog identity limit")
 	}
-	// Source catalogs can contain thousands of unrelated models. Load full
-	// lifecycle evidence only for requested/registered models and their lines.
+	keys = []map[string]string{}
 	for _, model := range models {
-		if focused[model.Identity] {
-			focusLines[model.Provider+":"+model.Line] = true
-		}
-	}
-	for _, ps := range c.profiles {
-		for _, p := range ps {
-			provider, id := CatalogIdentity(p.Family, p.Harness, p.Model, p.Effort)
-			if _, ok := indexes[provider+":"+id]; !ok {
-				_, line, _ := ProfileLine(p)
-				focusLines[provider+":"+line] = true
-			}
-		}
-	}
-	modelsInScope := []lifecycleModel{}
-	keys := []map[string]string{}
-	indexes = map[string]int{}
-	for _, model := range models {
-		if !focused[model.Identity] && !focusLines[model.Provider+":"+model.Line] {
-			continue
-		}
-		indexes[model.Identity] = len(modelsInScope)
-		modelsInScope = append(modelsInScope, model)
 		keys = append(keys, map[string]string{"provider": model.Provider, "model_id": model.Model})
 	}
-	models = modelsInScope
-	keyJSON, _ := json.Marshal(keys)
+	keyJSON, err = json.Marshal(keys)
+	if err != nil {
+		return nil, err
+	}
 	rows, err = tx.Query(ctx, `SELECT f.provider,f.model_id,route,fact,value,source,source_kind,field_path,fetched_at FROM model_catalog_facts f JOIN jsonb_to_recordset($1::jsonb) AS k(provider text,model_id text) USING(provider,model_id) WHERE fact IN ('lifecycle','deprecated_at','retirement_at','successor','present') AND value<>'null'::jsonb ORDER BY f.provider,f.model_id,route,fact,source LIMIT 32001`, string(keyJSON))
 	if err != nil {
 		return nil, err
@@ -242,29 +255,27 @@ func loadLifecycleCatalog(ctx context.Context, tx pgx.Tx, now time.Time, page ..
 	if err != nil {
 		return nil, err
 	}
-	for _, ps := range c.profiles {
-		for _, p := range ps {
-			provider, id := CatalogIdentity(p.Family, p.Harness, p.Model, p.Effort)
-			key := provider + ":" + id
-			i, ok := indexes[key]
-			if !ok {
-				_, line, version := ProfileLine(p)
-				i = len(models)
-				indexes[key] = i
-				models = append(models, lifecycleModel{Identity: key, Provider: provider, Model: id, Line: line, Version: version})
-			}
-			models[i].Profiles = append(models[i].Profiles, p)
+	for _, p := range profiles {
+		provider, id := CatalogIdentity(p.Family, p.Harness, p.Model, p.Effort)
+		key := provider + ":" + id
+		i, ok := indexes[key]
+		if !ok {
+			_, line, version := ProfileLine(p)
+			i = len(models)
+			indexes[key] = i
+			models = append(models, lifecycleModel{Identity: key, Provider: provider, Model: id, Line: line, Version: version})
 		}
+		models[i].Profiles = append(models[i].Profiles, p)
 	}
 	for i := range models {
 		sort.Slice(models[i].Profiles, func(a, b int) bool { return models[i].Profiles[a].ID < models[i].Profiles[b].ID })
 		models[i].Lifecycle = resolveLifecycle(models[i].Facts, models[i].Identity, now)
 	}
-	// The SQL rule remains the authority for numeric comparisons, including
-	// aliases and variants. No marketing release or catalog revision is a version.
+	// The SQL rule remains the authority for concrete numeric comparisons.
+	// Floating aliases never prove which numbered version succeeds a pin.
 	candidateLines := map[string][]int{}
 	for i, model := range models {
-		if model.Version == "" || !model.Sourced {
+		if !numericCatalogVersion(model.Version) || !model.Sourced {
 			continue
 		}
 		if model.Lifecycle.State != nil && (*model.Lifecycle.State == "vanished" || *model.Lifecycle.State == "deprecated" || *model.Lifecycle.State == "retiring") {
@@ -283,24 +294,36 @@ func loadLifecycleCatalog(ctx context.Context, tx pgx.Tx, now time.Time, page ..
 		})
 		candidateLines[key] = indices
 	}
-	for i := range models {
-		model := &models[i]
-		if !focused[model.Identity] || model.Lifecycle.Successor != nil || model.Version == "" {
+	comparisons := []map[string]string{}
+	for _, model := range models {
+		if !focused[model.Identity] || model.Lifecycle.Successor != nil || !numericCatalogVersion(model.Version) {
 			continue
 		}
-		for _, j := range candidateLines[model.Provider+":"+model.Line] {
-			next := models[j]
-			if next.Identity == model.Identity {
-				continue
-			}
-			var newer bool
-			if err := tx.QueryRow(ctx, `SELECT aeon_model_version_newer($1,$2)`, next.Version, model.Version).Scan(&newer); err != nil {
+		candidates := candidateLines[model.Provider+":"+model.Line]
+		if len(candidates) == 0 || models[candidates[0]].Identity == model.Identity {
+			continue
+		}
+		next := models[candidates[0]]
+		comparisons = append(comparisons, map[string]string{"identity": model.Identity, "successor": next.Identity, "version": model.Version, "next_version": next.Version})
+	}
+	if len(comparisons) > 0 {
+		comparisonJSON, err := json.Marshal(comparisons)
+		if err != nil {
+			return nil, err
+		}
+		rows, err := tx.Query(ctx, `SELECT identity,successor FROM jsonb_to_recordset($1::jsonb)
+			AS c(identity text,successor text,version text,next_version text)
+			WHERE aeon_model_version_newer(next_version,version)`, string(comparisonJSON))
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var identity, successor string
+			if err := rows.Scan(&identity, &successor); err != nil {
 				return nil, err
 			}
-			if !newer {
-				continue
-			}
-			successor := next.Identity
+			model := &models[indexes[identity]]
 			model.Lifecycle.Successor = &successor
 			if model.Lifecycle.State == nil || *model.Lifecycle.State == "active" || *model.Lifecycle.State == "preview" {
 				state := "superseded"
@@ -308,11 +331,27 @@ func loadLifecycleCatalog(ctx context.Context, tx pgx.Tx, now time.Time, page ..
 				model.Lifecycle.Reason = "Same model line has a newer sourced version"
 				model.Lifecycle.Source = "aeon_model_line/aeon_model_version_newer"
 			}
-			break
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
 		}
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].Identity < models[j].Identity })
 	return models, nil
+}
+
+func numericCatalogVersion(version string) bool {
+	for _, part := range strings.Split(version, ".") {
+		if part == "" {
+			return false
+		}
+		for _, digit := range part {
+			if digit < '0' || digit > '9' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // Source identifiers are bounded to 128 bytes. Arbitrary precision preserves

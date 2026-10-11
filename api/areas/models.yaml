@@ -37,7 +37,7 @@ paths:
       description: Catalog preparation commits separately under current read authority before the model snapshot is loaded. Denied preparation creates no profiles, routes or seed events.
       security: *auth
       responses:
-        '200': {description: Tenant model registry, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelProfile'}}}}}
+        '200': {description: "Tenant model registry; optional lifecycle enrichment is null when unavailable or over budget", headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelCatalogProfile'}}}}}
     post:
       operationId: createModelProfile
       description: Admin creates an immutable model profile version. Routing policy is a separate ordered ladder.
@@ -322,6 +322,15 @@ components:
         fallback: {type: [object, 'null'], properties: {reason: {type: string}}}
         blocked: {type: [object, 'null'], properties: {reason: {type: string}}}
         hard_rules: {type: array, items: {type: string, enum: [cross_family, security_review, review_qualification, residency]}}
+    ModelCatalogProfile:
+      allOf:
+        - {$ref: '#/components/schemas/ModelProfile'}
+        - type: object
+          properties:
+            identity: {type: string, description: "Canonical provider:model identity"}
+            lifecycle:
+              description: "Best-effort evidence for this profile; null when calculation fails or exceeds its bounds"
+              oneOf: [{$ref: '#/components/schemas/ModelCatalogLifecycle'}, {type: 'null'}]
     ModelCatalogLifecycle:
       type: object
       required: [state, date, successor, reason, source]

@@ -105,8 +105,8 @@ func (m *Module) in(ctx context.Context, tenantID string, fn func(pgx.Tx) error)
 
 type catalogProfileView struct {
 	Profile
-	Identity  string           `json:"identity"`
-	Lifecycle CatalogLifecycle `json:"lifecycle"`
+	Identity  string            `json:"identity"`
+	Lifecycle *CatalogLifecycle `json:"lifecycle"`
 }
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
@@ -119,6 +119,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(ctx)
 
 	var items []catalogProfileView
+	var profiles []Profile
 	if err := PrepareCatalog(ctx, m.pool, p, CatalogPreparation{Operation: CatalogRead, Request: r}); err != nil {
 		writeErr(w, err)
 		return
@@ -135,33 +136,44 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		profiles, err := listProfiles(r.Context(), tx)
-		if err != nil {
-			return err
-		}
-		now, err := dbNow(r.Context(), tx)
-		if err != nil {
-			return err
-		}
-		models, err := loadLifecycleCatalog(r.Context(), tx, now)
-		if err != nil {
-			return err
-		}
-		byIdentity := map[string]CatalogLifecycle{}
-		for _, model := range models {
-			byIdentity[model.Identity] = model.Lifecycle
-		}
-		items = make([]catalogProfileView, 0, len(profiles))
-		for _, profile := range profiles {
-			provider, id := CatalogIdentity(profile.Family, profile.Harness, profile.Model, profile.Effort)
-			identity := provider + ":" + id
-			items = append(items, catalogProfileView{Profile: profile, Identity: identity, Lifecycle: byIdentity[identity]})
-		}
-		return nil
+		profiles, err = listProfiles(r.Context(), tx)
+		return err
 	})
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	items = make([]catalogProfileView, 0, len(profiles))
+	for _, profile := range profiles {
+		provider, id := CatalogIdentity(profile.Family, profile.Harness, profile.Model, profile.Effort)
+		items = append(items, catalogProfileView{Profile: profile, Identity: provider + ":" + id})
+	}
+
+	// Lifecycle is optional display evidence. Release the authorized read's
+	// tenant fence before enrichment; failures must never block dispatch reads.
+	if len(profiles) > 0 {
+		lifecycleCtx, stop := context.WithTimeout(r.Context(), 2*time.Second)
+		defer stop()
+		var models []lifecycleModel
+		err := m.in(lifecycleCtx, p.TenantID, func(tx pgx.Tx) error {
+			now, err := dbNow(lifecycleCtx, tx)
+			if err != nil {
+				return err
+			}
+			models, err = loadLifecycleProfiles(lifecycleCtx, tx, now, profiles)
+			return err
+		})
+		if err == nil {
+			byIdentity := map[string]CatalogLifecycle{}
+			for _, model := range models {
+				byIdentity[model.Identity] = model.Lifecycle
+			}
+			for i := range items {
+				if lifecycle, ok := byIdentity[items[i].Identity]; ok {
+					items[i].Lifecycle = &lifecycle
+				}
+			}
+		}
 	}
 	httpapi.WriteJSON(w, http.StatusOK, items)
 }
