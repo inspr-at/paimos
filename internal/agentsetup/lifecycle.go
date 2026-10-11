@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
@@ -546,23 +548,33 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		}
 	}
 	if s.Request.ExistingComputerID != "" && (s.Phase == "awaiting_approval" || s.Phase == "requesting" || s.Phase == "provisioning") {
-		if len(candidates) != len(s.Request.Accounts) {
-			return e.progress(s), errors.New("another login enrollment is pending; finish its approval first")
+		if matchesPendingLogin(s, candidates) {
+			return e.Step(ctx)
 		}
-		for _, c := range candidates {
-			matches := false
-			for _, local := range s.Candidates {
-				for _, requested := range s.Request.Accounts {
-					if local.Candidate.Key == requested.Key && c.Harness == requested.Harness && c.Path == local.Path && c.Home == local.Home && c.Identity == local.Identity {
-						matches = true
-					}
-				}
-			}
-			if !matches {
-				return e.progress(s), errors.New("another login enrollment is pending; finish its approval first")
-			}
+		// A different login or an updated physical executable must not be
+		// trapped behind an ended request. Poll its existing proof first;
+		// uncertain outcomes retain the request and its approval boundary.
+		p, err := e.Step(ctx)
+		if err != nil {
+			return p, err
 		}
-		return e.Step(ctx)
+		s, err = e.load()
+		if err != nil {
+			return Progress{}, err
+		}
+		if s.Phase == "awaiting_approval" || s.Phase == "requesting" || s.Phase == "provisioning" {
+			logins := make([]string, 0, len(s.Request.Accounts))
+			for _, c := range s.Request.Accounts {
+				logins = append(logins, c.Harness+" "+c.Label)
+			}
+			message := "another login enrollment is pending for " + strings.Join(logins, ", ") + "; finish its approval first"
+			if s.Response.UserCode != "" && s.Response.VerificationURI != "" {
+				message += fmt.Sprintf("; enter code %s at %s", s.Response.UserCode, s.Response.VerificationURI)
+			}
+			p = e.progress(s)
+			p.Action = message
+			return p, errors.New(message)
+		}
 	}
 	if s.DisconnectAll || s.View.ComputerState != "connected" {
 		return e.progress(s), errors.New("Add harness requires a connected computer")
@@ -629,6 +641,26 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		return Progress{}, err
 	}
 	return e.Step(ctx)
+}
+
+func matchesPendingLogin(s *snapshot, candidates []Candidate) bool {
+	if len(candidates) != len(s.Request.Accounts) {
+		return false
+	}
+	for _, c := range candidates {
+		matches := false
+		for _, local := range s.Candidates {
+			for _, requested := range s.Request.Accounts {
+				if local.Candidate.Key == requested.Key && c.Harness == requested.Harness && c.Path == local.Path && c.Home == local.Home && c.Identity == local.Identity {
+					matches = true
+				}
+			}
+		}
+		if !matches {
+			return false
+		}
+	}
+	return true
 }
 
 // renewsExistingPin is the single-account repair of a connected non-Claude
