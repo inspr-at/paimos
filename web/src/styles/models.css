@@ -239,7 +239,7 @@
 /* The cell popover: its order, Add, and Same as the row / Back to automatic. */
 .mdl-pop .sxp { display: flex; flex-direction: column; min-height: 0; overflow: auto; padding: 14px 14px 10px; }
 .mdl-pop .sxp h3 { margin: 0 4px 10px; font-size: 13.5px; }
-.mdl-pop .sxp-l { display: grid; padding: 4px; border-radius: 12px; background: var(--surface-sunken); list-style: none; }
+.mdl-pop .sxp-l { display: grid; margin: 0; padding: 4px; border-radius: 12px; background: var(--surface-sunken); list-style: none; }
 .mdl-pop .sxp-it { display: grid; grid-template-columns: 16px minmax(0, max-content) minmax(0, 1fr) 28px; align-items: center; column-gap: 8px; min-height: 44px; padding: 2px 4px; border-radius: 9px; }
 .mdl-pop .sxp-it + .sxp-it { box-shadow: 0 -1px 0 var(--line); }
 .mdl-pop .sxp-n { font: 500 11px/1 var(--mono); color: var(--ink-3); text-align: center; }

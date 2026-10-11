@@ -133,7 +133,7 @@ async function choose(entry: ModelEntry, effort: string | null) {
       <div class="sx-fold-in">
         <div v-if="rendered" class="sx-in">
           <template v-if="rows">
-            <p class="sx-lead">A row can use another order when work is small, in fix rounds, or stuck, and prefer a reviewer. An empty cell uses the row.<template v-if="!editable"> <b>Change these under For everyone.</b></template></p>
+            <p class="sx-lead">A row can use another order when work is small, in fix rounds, or stuck, and prefer a reviewer. An empty cell uses the row.{{ editable ? '' : ' ' }}<b v-if="!editable">Change these under For everyone.</b></p>
             <div class="sx-t" role="group" aria-label="Kind of work by situation">
               <div class="sx-r sx-h" aria-hidden="true"><span /><span v-for="item in SITUATIONS" :key="item.key" class="sx-c"><b>{{ item.label }}</b><small data-sx-hint>{{ situationHint(item.key, limits) }}</small></span></div>
               <div v-for="row in rows" :key="row.column" class="sx-r" :data-sx-row="row.column">

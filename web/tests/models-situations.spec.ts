@@ -21,8 +21,14 @@ const inView = (locator: Locator) => locator.evaluate(element => {
   const rect = element.getBoundingClientRect()
   return rect.left >= -0.5 && rect.top >= -0.5 && rect.right <= innerWidth + 0.5 && rect.bottom <= innerHeight + 0.5
 })
-/** Page positions of the rows and lines an overlay must not move (design check: "moves nothing"). */
-const tops = (page: Page) => page.locator('.m-list .row, .sx-sum, .sx-cell, .next').evaluateAll(elements => elements.map(element => Math.round(element.getBoundingClientRect().top + scrollY)))
+/** Positions of the rows and lines an overlay must not move (design check: "moves nothing"), in scroll-container coordinates. */
+const tops = (page: Page) => page.locator('.m-list .row, .sx-sum, .sx-cell, .next').evaluateAll(elements => elements.map(element => {
+  let top = element.getBoundingClientRect().top + scrollY
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) top += parent.scrollTop
+  return Math.round(top)
+}))
+/** What a cell shows; its situation label is only drawn on phones. */
+const shown = (page: Page, key: string) => cell(page, key).locator('.sx-cv')
 /** Visible controls smaller than the target size (24 px with a mouse, 44 px on touch). */
 const small = (scope: Locator, min: number) => scope.locator('button, [role="option"], input, .sx-cell').evaluateAll((elements, size) => elements
   .filter(element => { const rect = element.getBoundingClientRect(), style = getComputedStyle(element); return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' })
@@ -65,8 +71,8 @@ test('an admin on Just me reads the workspace situations; empty cells read Same 
   await expect(page.locator('.sx-lead')).toContainText('An empty cell uses the row. Change these under For everyone.')
   expect(await page.locator('.sx-h small').allTextContents()).toEqual(['2 h or less', 'after findings', 'after 3 rounds', 'another family'])
   await expect(page.locator('.sx-t button')).toHaveCount(0)
-  await expect(cell(page, 'other:small')).toHaveText('Same'); await expect(cell(page, 'other:review')).toHaveText('Automatic')
-  await expect(cell(page, 'design:fix')).toHaveText('Same'); await expect(cell(page, 'concept:review')).toHaveText('Automatic')
+  await expect(shown(page, 'other:small')).toHaveText('Same'); await expect(shown(page, 'other:review')).toHaveText('Automatic')
+  await expect(shown(page, 'design:fix')).toHaveText('Same'); await expect(shown(page, 'concept:review')).toHaveText('Automatic')
   await expect(cell(page, 'other:fix')).toContainText('Grok 4.7'); await expect(cell(page, 'other:stuck')).toContainText('GPT-6 Astra'); await expect(cell(page, 'other:stuck').locator('.cell-more')).toHaveText('+1')
   await expect(cell(page, 'design:stuck')).toContainText('Fable 5.1')
   await expect(cell(page, 'other:stuck').locator('.sr-only')).toHaveText('Default, Stuck: GPT-6 Astra · xhigh, then 1 more')
@@ -79,7 +85,7 @@ test('For everyone edits a cell in a popover that stays on screen and moves noth
   const state = await open(page, { situations: true })
   await page.getByRole('button', { name: 'For everyone' }).click()
   const fold = page.locator('#sx-fold'); await fold.click()
-  const fix = cell(page, 'design:fix'); await expect(fix).toHaveText('Same')
+  const fix = cell(page, 'design:fix'); await expect(shown(page, 'design:fix')).toHaveText('Same')
   const guard = await controlStability(page, { scope: page.getByRole('button', { name: 'For everyone' }), quick: page.locator('[data-quick-why]'), pick: page.locator('[data-pick="all"]'), fold, fix, stuck: cell(page, 'other:stuck'), next: page.locator('[data-why]') })
   const before = await tops(page)
   await guard.check(async () => { await fix.click(); await expect(page.getByRole('dialog', { name: 'Fix rounds · UI design' })).toBeVisible() })
@@ -98,7 +104,7 @@ test('For everyone edits a cell in a popover that stays on screen and moves noth
   expect(state.writes.at(-1)).toMatchObject({ method: 'PUT', path: '/model-preferences/orders/design/fix', search: '?for=default', body: { rank: ['anthropic:sonnet'], efforts: { 'anthropic:sonnet': 'xhigh' }, end: 'row', revision: 5 } })
   await expect(toast(page, 'Saved for everyone')).toBeVisible()
   await page.getByRole('button', { name: 'Undo', exact: true }).last().click()
-  await expect(fix).toHaveText('Same')
+  await expect(shown(page, 'design:fix')).toHaveText('Same')
   expect(state.writes.at(-1)).toMatchObject({ method: 'DELETE', path: '/model-preferences/orders/design/fix', search: '?for=default&revision=6' })
   // Taking a step out keeps the rest of the order, its levels and its ending.
   await cell(page, 'other:stuck').click()
@@ -110,7 +116,7 @@ test('For everyone edits a cell in a popover that stays on screen and moves noth
   expect(state.writes.at(-1)!.body).not.toHaveProperty('end'); expect(state.situations.get('other:stuck')?.end).toBe('wait')
   // "Same as the row" removes the cell's order; Review goes back to automatic and adds with an automatic ending.
   await cell(page, 'other:fix').click(); await page.getByRole('dialog', { name: 'Fix rounds · Default' }).getByRole('button', { name: 'Same as the row' }).click()
-  await expect(cell(page, 'other:fix')).toHaveText('Same')
+  await expect(shown(page, 'other:fix')).toHaveText('Same')
   expect(state.writes.at(-1)).toMatchObject({ method: 'DELETE', path: '/model-preferences/orders/other/fix', search: '?for=default&revision=8' })
   await cell(page, 'design:review').click()
   const review = page.getByRole('dialog', { name: 'Review · UI design' })
