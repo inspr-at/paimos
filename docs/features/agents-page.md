@@ -71,6 +71,7 @@ changes the badge, line 2 and the time, never the row's height.
 has them. Execution names the model the way Settings › Models does, with its
 level ("Opus 5.5 · xhigh"), and the account under it ("Claude Max · markus");
 a model the registry does not list still reads as words, never as its raw id.
+Search sessions finds a row by that name, and still by the raw id.
 The ticket has no column (its key opens the name; Display › Sort still orders
 by it). The tier, the estimate and whether the session listens or has an inbox
 live in the details, in words; the tier there keeps its one-step Left/Right
