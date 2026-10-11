@@ -5,7 +5,9 @@
 // phones. Up and down walk the items, Home and End jump, Escape closes and gives
 // focus back to the button; Tab or a click elsewhere closes it quietly.
 // The Decision Desk preview (AEON-1214) reuses it from the header's places:
-// its own trigger, a dialog, opening from the trigger's start edge.
+// its own trigger, a dialog, opening from the trigger's start edge. When that
+// trigger has stepped aside on a phone, the avatar sheet opens it instead, and
+// Escape gives focus back to whatever opened it.
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 const props = withDefaults(defineProps<{
@@ -57,8 +59,10 @@ function place() {
   const left = Math.max(12, Math.min(box.left, document.documentElement.clientWidth - 12 - width))
   offset.value = { left: `${left - box.left}px`, top: `${edge - 1 - box.top}px` }
 }
+let opener: HTMLElement | null = null
 async function show(at: 'first' | 'last' = 'first') {
   if (open.value) return
+  opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
   open.value = true
   emit('open')
   await nextTick()
@@ -71,7 +75,9 @@ function close(restoreFocus = false) {
   open.value = false
   offset.value = {}
   emit('close')
-  if (restoreFocus) trigger.value?.focus()
+  // The button, unless it is hidden; then the control that opened the menu.
+  if (restoreFocus) (trigger.value?.getClientRects().length ? trigger.value : opener)?.focus()
+  opener = null
 }
 function toggle() { if (open.value) close(); else void show() }
 
@@ -106,7 +112,7 @@ function focusOut(event: FocusEvent) {
 }
 onMounted(() => { document.addEventListener('pointerdown', outside); narrow.addEventListener('change', onNarrow); window.addEventListener('resize', place) })
 onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); narrow.removeEventListener('change', onNarrow); window.removeEventListener('resize', place) })
-defineExpose({ close, focusFirst, open })
+defineExpose({ close, focusFirst, open, show })
 </script>
 
 <template>

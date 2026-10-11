@@ -15,6 +15,8 @@ import { plural, relativeTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import AgentStateMark from '../indicators/AgentStateMark.vue'
 
+// On phones the preview is a full-height sheet with its link pinned at the foot.
+defineProps<{ phone?: boolean }>()
 const emit = defineEmits<{ navigate: [] }>()
 const desk = useDecisionDesk(), projects = useProjects(), session = useSession()
 const { appearance } = useAgentAppearance()
@@ -27,7 +29,7 @@ const KIND: Record<DeskProjectionItem['kind'], string> = {
 const owner = computed(() => `${session.identity?.tenant.id ?? ''}:${session.identity?.principal.id ?? ''}`)
 const root = ref<HTMLElement>()
 // A dialog: keyboard focus moves to its first row (or the Desk link) as it opens.
-onMounted(() => { void projects.load(); root.value?.querySelector<HTMLElement>('.dp-row, .dp-go')?.focus() })
+onMounted(() => { void projects.load(); (root.value?.querySelector<HTMLElement>('.dp-row') ?? root.value?.querySelector<HTMLElement>('.dp-go'))?.focus() })
 const doctrineProjects = ref(new Map<string, string>()), projectError = ref('')
 let projectGeneration = 0
 watch([() => desk.projection, owner], async ([projection, identity], [, previousOwner]) => {
@@ -83,11 +85,17 @@ const status = computed(() => desk.error ? 'Count unavailable' : desk.count === 
 const partial = computed(() => desk.count !== null && shown.value.length < desk.count ? `${shown.value.length} of ${desk.count} shown here.` : '')
 </script>
 
+<!-- Controls never move (AEON-541): reads, failures and refreshes change only the
+     rows, which grow downward or scroll. On wide screens the link to the Desk sits
+     in the head above them; on phones it is pinned at the foot of a full-height sheet. -->
 <template>
   <div ref="root" class="dp">
     <div class="dp-head">
-      <h3>Decision Desk</h3>
-      <span class="dp-count" role="status">{{ status }}</span>
+      <div class="dp-title">
+        <h3>Decision Desk</h3>
+        <span class="dp-count" role="status">{{ status }}</span>
+      </div>
+      <RouterLink v-if="!phone" class="dp-go" to="/decision-desk" @click="emit('navigate')">Open the Decision Desk<AppIcon name="chevron-right" :size="13" /></RouterLink>
     </div>
     <div class="dp-body">
       <p v-if="desk.error" class="dp-note" role="alert">{{ desk.error }} <button type="button" class="btn sm ghost dp-retry" :disabled="desk.loading" @click="desk.refresh()">Retry</button></p>
@@ -106,8 +114,9 @@ const partial = computed(() => desk.count !== null && shown.value.length < desk.
         </ul>
       </section>
       <p v-if="projectError" class="dp-note">{{ projectError }}</p>
+      <p v-if="partial && !phone" class="dp-partial">{{ partial }}</p>
     </div>
-    <div class="dp-foot">
+    <div v-if="phone" class="dp-foot">
       <span v-if="partial" class="dp-partial">{{ partial }}</span>
       <RouterLink class="dp-go" to="/decision-desk" @click="emit('navigate')">Open the Decision Desk<AppIcon name="chevron-right" :size="13" /></RouterLink>
     </div>
@@ -115,11 +124,12 @@ const partial = computed(() => desk.count !== null && shown.value.length < desk.
 </template>
 
 <style scoped>
-.dp { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
-.dp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 2px 6px; }
+.dp { display: flex; flex: 1 1 auto; flex-direction: column; gap: 8px; min-height: 0; }
+.dp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; padding: 0 6px; }
+.dp-title { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
 h3 { margin: 0; font-size: 14px; font-weight: 600; }
 .dp-count { color: var(--ink-3); font-size: 12px; white-space: nowrap; }
-.dp-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.dp-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .dp-note { margin: 0; padding: 10px 6px; color: var(--ink-2); font-size: 12.5px; }
 .dp-group + .dp-group { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
 .dp-group-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; padding: 4px 6px; color: var(--ink-2); font-size: 12px; font-weight: 600; }
@@ -137,8 +147,9 @@ li + li .dp-row { box-shadow: 0 -1px 0 var(--line); }
 .dp-t small { color: var(--ink-3); font-size: 11.5px; line-height: 1.35; }
 .dp-open { display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 999px; background: var(--btn-bg); box-shadow: var(--shadow-btn), inset 0 0 0 1px var(--glass-edge); color: var(--ink); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 .dp-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 0 6px; border-top: 1px solid var(--line); }
-.dp-partial { color: var(--ink-3); font-size: 12px; }
-.dp-go { display: inline-flex; align-items: center; gap: 2px; min-height: 36px; margin-left: auto; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.dp-partial { margin: 0; color: var(--ink-3); font-size: 12px; }
+.dp-body > .dp-partial { padding: 8px 6px 2px; }
+.dp-go { display: inline-flex; flex-shrink: 0; align-items: center; gap: 2px; min-height: 36px; margin-left: auto; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .dp-go:hover { text-decoration: underline; text-underline-offset: 2px; }
 .dp-go:focus-visible { outline: none; border-radius: 6px; box-shadow: var(--focus-ring); }
 /* Phones and touch: the footer link and Retry are full 44 px targets. */
@@ -148,8 +159,10 @@ li + li .dp-row { box-shadow: 0 -1px 0 var(--line); }
 }
 </style>
 
-<!-- The panel around the preview belongs to HeaderMenu; on phones it is teleported, so its size lives here. -->
+<!-- The panel around the preview belongs to HeaderMenu; on phones it is teleported, so its size lives here.
+     On wide screens it sits inside the Desk place: it starts from the body's text, never the place's one-line label. -->
 <style>
-.hm-panel.desk-panel.pop { display: flex; flex-direction: column; width: min(460px, calc(100vw - 24px)); max-height: calc(100dvh - var(--header-h) - 12px); padding: 10px 8px 6px; overflow: hidden; }
-.hm-panel.desk-panel.pop.sheet { width: auto; max-height: min(86dvh, 680px); padding: 18px 10px calc(8px + env(safe-area-inset-bottom)); }
+.hm-panel.desk-panel.pop { display: flex; flex-direction: column; width: min(460px, calc(100vw - 24px)); max-height: calc(100dvh - var(--header-h) - 12px); padding: 8px 8px 6px; overflow: hidden; font: 400 14px/1.5 var(--font); white-space: normal; text-align: start; }
+/* Phones: a full-height sheet; its head and foot stay put while the rows scroll between them. */
+.hm-panel.desk-panel.pop.sheet { top: max(8px, env(safe-area-inset-top)); width: auto; max-height: none; padding: 18px 10px calc(8px + env(safe-area-inset-bottom)); overflow: hidden; }
 </style>

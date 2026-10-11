@@ -104,6 +104,10 @@ const deskTip = computed(() => `${desk.error || (desk.count === null ? 'Reading 
 const deskBadge = computed(() => desk.count === null ? '?' : desk.count > 99 ? '99+' : String(desk.count))
 
 watch(command, value => { if (value?.command.name === 'palette') { consume(); palette.value?.open() } })
+// The avatar sheet opens the preview while the chevron has stepped aside (AEON-1214).
+const deskMenu = ref<InstanceType<typeof HeaderMenu> | null>(null)
+const bindDeskMenu = (menu: unknown) => { deskMenu.value = menu as InstanceType<typeof HeaderMenu> | null }
+watch(command, value => { if (value?.command.name === 'desk-preview') { consume(); void deskMenu.value?.show() } })
 function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
@@ -281,11 +285,11 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
             <span class="needs-badge" :class="{ empty: desk.count === 0 }" aria-hidden="true">{{ deskBadge }}</span>
           </RouterLink>
           <HeaderMenu
-            id="desk-preview" class="desk-more" role="dialog" popup="dialog" align="start" trigger-class="place-more" panel-class="desk-panel"
+            id="desk-preview" :ref="bindDeskMenu" class="desk-more" role="dialog" popup="dialog" align="start" trigger-class="place-more" panel-class="desk-panel"
             label="Decision Desk preview" trigger-label="Preview the Decision Desk" tip="Preview"
           >
             <template #trigger><AppIcon name="chevron" :size="14" /></template>
-            <template #default="{ close }"><DeskPreview @navigate="close()" /></template>
+            <template #default="{ close, phone }"><DeskPreview :phone="phone" @navigate="close()" /></template>
           </HeaderMenu>
         </span>
         <RouterLink
