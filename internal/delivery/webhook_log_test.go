@@ -144,7 +144,12 @@ func TestWebhookFailureAudit(t *testing.T) {
 		{"flow error", `{"action":"completed",` + base + `,"workflow_run":{"id":0}}`, "completed", "observation_unavailable", "flow", 502, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m, g, logs := webhookLogFixture()
+			f := newFixture(t)
+			m := f.m
+			g := &webhookLogGitHub{fakeGitHub: f.gh}
+			m.github = g
+			var logs bytes.Buffer
+			m.webhookFailures.logger = slog.New(slog.NewJSONHandler(&logs, nil))
 			if tc.fallback {
 				m.github = g.fakeGitHub
 			}
@@ -153,23 +158,11 @@ func TestWebhookFailureAudit(t *testing.T) {
 				r.Header.Set("X-Hub-Signature-256", signed([]byte(tc.raw), m.secret))
 			}
 			w := httptest.NewRecorder()
-			if tc.step == "metrics" || tc.step == "flow" {
-				// Keep these content-free logging cases as unit tests. The
-				// production HTTP chain now requires a durable database receipt;
-				// its step failures are also covered end-to-end by InternalRetry.
-				receipt := &webhookReceipt{event: "workflow_run", raw: []byte(tc.raw)}
-				_, err := m.webhookStep(r.Context(), tc.step, receipt, envelope{})
-				if err == nil {
-					t.Fatal("fixture did not fail its downstream step")
-				}
-				m.rejectWebhookStep(w, r, tc.action, &webhookStepError{step: tc.step, err: err})
-			} else {
-				m.mergeWebhook(w, r)
-			}
+			f.mux.ServeHTTP(w, r)
 			if w.Code != tc.status {
 				t.Fatalf("audit status: %d, want %d", w.Code, tc.status)
 			}
-			assertWebhookFailureLine(t, logs, "workflow_run", tc.action, tc.step, tc.class, tc.status, nil)
+			assertWebhookFailureLine(t, &logs, "workflow_run", tc.action, tc.step, tc.class, tc.status, nil)
 		})
 	}
 }
