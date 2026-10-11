@@ -167,6 +167,8 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	setup                  func(context.Context, agentsetup.SetupRequest) (agentsetup.Progress, error)
+	accountLogins          map[string]agentsetup.AccountLogin // Local status only; never in probe reports.
 	leads                  *leadRuntime
 	routineConfig          *RoutineWorkspaceConfig
 	browserCaptures        func(agentsetup.RoutineGrant) BrowserCaptureRequester
@@ -829,6 +831,13 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 			s.probeReasonDetails = map[string]string{}
 		}
 		delete(s.probeReasonDetails, account.ID)
+		if s.accountLogins == nil {
+			s.accountLogins = map[string]agentsetup.AccountLogin{}
+		}
+		delete(s.accountLogins, account.ID)
+		if status.ActiveIdentity != "" && hold == "" && dependencyErr == nil && probeErr == nil {
+			s.accountLogins[account.ID] = agentsetup.AccountLogin{ActiveIdentity: status.ActiveIdentity, Approved: strings.EqualFold(status.ActiveIdentity, account.VerifiedIdentity)}
+		}
 		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
 			reason := "probe_failed"
 			if status.Failure == ProbeAuthFailed {
