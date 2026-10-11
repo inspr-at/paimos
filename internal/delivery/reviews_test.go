@@ -59,6 +59,11 @@ func reviewSource(t *testing.T, f *fixture, slug, kind string, n int, head strin
 	f.tx(t, func(tx pgx.Tx) error { return saveRoundTx(t.Context(), tx, f.person.TenantID, source) })
 	return ReviewInput{SourceRound: source.ID, AuthorRun: run, Repository: f.m.config.Repository, Base: strings.Repeat("a", 40), Head: head}, source
 }
+
+// shadowReviewModel is the model of seedReviewRoute's reviewer pin; a saved
+// gate's route must name it, or shipping holds with gate_route_changed.
+const shadowReviewModel = "claude-shadow-review-1"
+
 func seedReviewRoute(t *testing.T, f *fixture) string {
 	t.Helper()
 	request := httptest.NewRequest("GET", "/api/models", nil)
@@ -69,7 +74,9 @@ func seedReviewRoute(t *testing.T, f *fixture) string {
 	f.tx(t, func(tx pgx.Tx) error {
 		// Its own line: Models walks a line's routes in registry order, so a
 		// catalog Opus route would otherwise run before this fixture's pin.
-		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'shadow-reviewer','test','claude','anthropic','claude-shadow-review-1','xhigh','frontier') RETURNING id::text`, f.person.TenantID).Scan(&profile); err != nil {
+		// The native level is registered explicitly: inserted pins get no
+		// guessed display level (1331), and reviews need level 4 or above.
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,'shadow-reviewer','test','claude','anthropic',$2,'xhigh','frontier',4) RETURNING id::text`, f.person.TenantID, shadowReviewModel).Scan(&profile); err != nil {
 			return err
 		}
 		// A saved Review order (a saved review ladder before Models v2).

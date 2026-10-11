@@ -324,6 +324,11 @@ func TestAuthorFamilyAliasesResolveAndReview(t *testing.T) {
 	}
 }
 
+// Risk: a model pause (the Models successor of a route hold) is ignored,
+// outlives its expiry or reaches another tenant; account health stops skipping
+// a step; or the retired ladder writer still stores or audits a hold. Build
+// follows the workspace Default order, so the order fixes which step is first
+// (Scout puts catalog-priced Quick-job steps ahead of it).
 func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
@@ -331,29 +336,76 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	profiles := decode[[]Profile](t, &admin, http.MethodGet, "/api/models", "", http.StatusOK)
 	luna := profileBySlug(profiles, "codex-luna-medium")
 	haiku := profileBySlug(profiles, "claude-haiku-medium")
-	until := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
-	body := fmt.Sprintf(`[{"role":"scout","priority":1,"profile_id":%q,"state":"conserved","reason":"hold","valid_until":%q},{"role":"scout","priority":2,"profile_id":%q,"state":"available","reason":"","valid_until":null}]`, luna.ID, until, haiku.ID)
-	routes := decode[[]Route](t, &admin, http.MethodPut, "/api/models/routes", body, http.StatusOK)
-	if len(routes) != 2 || routes[0].State != "conserved" {
-		t.Fatalf("routes %+v", routes)
+	if luna.ID == "" || haiku.ID == "" {
+		t.Fatal("missing catalog fixture")
 	}
-	if eventCount(t, admin, evRoutes) != 1 {
-		t.Fatal("missing route event")
+	until := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	before := modelsState(t, admin)
+	body := fmt.Sprintf(`[{"role":"build","priority":1,"profile_id":%q,"state":"conserved","reason":"hold","valid_until":%q},{"role":"build","priority":2,"profile_id":%q,"state":"available","reason":"","valid_until":null}]`, luna.ID, until.Format(time.RFC3339), haiku.ID)
+	if status, raw := call(t, &admin, http.MethodPut, "/api/models/routes", body); !retiredLadderRefusal(status, raw) {
+		t.Fatalf("retired writer took the hold: %d %s", status, raw)
 	}
-	scout := decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != haiku.ID || !strings.Contains(scout.Ladder[0].SkipReasons[0], "conserved until") {
-		t.Fatalf("suppressed %+v", scout)
+	if modelsState(t, admin) != before || eventCount(t, admin, evRoutes) != 0 {
+		t.Fatal("retired writer changed Models storage or audited a route change")
 	}
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET valid_until = now() - interval '1 minute' WHERE state = 'conserved'`)
+		if err := dbtest.ModelsOrder(t.Context(), tx, admin.TenantID, "other", "first", "wait", luna.ID, haiku.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by) VALUES($1,$2,$3,$4,'hold',$5)`, admin.TenantID, luna.Harness, luna.Model, until, admin.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("order and pause: %v", err)
+	}
+	firstReason := func(r Resolution) string {
+		if len(r.Ladder) == 0 || r.Ladder[0].ProfileID != luna.ID || len(r.Ladder[0].SkipReasons) == 0 {
+			return ""
+		}
+		return r.Ladder[0].SkipReasons[0]
+	}
+	build := decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=build", "", http.StatusOK)
+	if build.Profile == nil || build.Profile.ID != haiku.ID || firstReason(build) != "paused until "+until.Format(time.RFC3339)+": hold" {
+		t.Fatalf("paused %+v", build)
+	}
+	// While alpha's pause is active, another tenant's retired write is refused
+	// and alpha's order and pause stay invisible to it: its Luna is not paused.
+	other := makePrincipal(t, "beta", "person", "Bea", []string{"admin"})
+	alpha := modelsState(t, admin)
+	status, raw := call(t, &other, http.MethodPut, "/api/models/routes", fmt.Sprintf(`[{"role":"build","priority":1,"profile_id":%q,"state":"available"}]`, luna.ID))
+	if !retiredLadderRefusal(status, raw) || modelsState(t, admin) != alpha {
+		t.Fatalf("cross-tenant route %d %s", status, raw)
+	}
+	otherLuna := profileBySlug(decode[[]Profile](t, &other, http.MethodGet, "/api/models", "", http.StatusOK), "codex-luna-medium")
+	if otherLuna.ID == "" || otherLuna.ID == luna.ID {
+		t.Fatalf("tenant catalogs are not separate: %+v", otherLuna)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, other.TenantID, func(tx pgx.Tx) error {
+		var pauses int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_pauses`).Scan(&pauses); err != nil {
+			return err
+		}
+		step, err := preferenceStep(t.Context(), tx, otherLuna, "build")
+		if err != nil {
+			return err
+		}
+		if pauses != 0 || step.State != "available" || step.Reason != "" || step.ValidUntil != nil {
+			t.Fatalf("alpha's pause reached beta: %d pauses, %+v", pauses, step.Route)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE model_pauses SET until_at = now() - interval '1 minute' WHERE harness=$1 AND model=$2`, luna.Harness, luna.Model)
 		return err
 	})
 	if err != nil {
 		t.Fatalf("expire: %v", err)
 	}
-	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != luna.ID || len(scout.Ladder[0].SkipReasons) != 0 {
-		t.Fatalf("expired suppression still skipped: %+v", scout)
+	build = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=build", "", http.StatusOK)
+	if build.Profile == nil || build.Profile.ID != luna.ID || len(build.Ladder) == 0 || len(build.Ladder[0].SkipReasons) != 0 {
+		t.Fatalf("expired pause still skipped: %+v", build)
 	}
 
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
@@ -368,9 +420,9 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("account: %v", err)
 	}
-	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != haiku.ID || scout.Ladder[0].SkipReasons[0] != "Codex account has no recent successful sign-in check" {
-		t.Fatalf("stale probe %+v", scout)
+	build = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=build", "", http.StatusOK)
+	if build.Profile == nil || build.Profile.ID != haiku.ID || firstReason(build) != "Codex account has no recent successful sign-in check" {
+		t.Fatalf("stale probe %+v", build)
 	}
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `
@@ -388,13 +440,8 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("window: %v", err)
 	}
-	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != haiku.ID || !strings.HasPrefix(scout.Ladder[0].SkipReasons[0], "Codex account is at its allowance or floor until ") {
-		t.Fatalf("full allowance %+v", scout)
-	}
-	other := makePrincipal(t, "beta", "person", "Bea", []string{"admin"})
-	status, raw := call(t, &other, http.MethodPut, "/api/models/routes", fmt.Sprintf(`[{"role":"scout","priority":1,"profile_id":%q,"state":"available"}]`, luna.ID))
-	if status != http.StatusBadRequest {
-		t.Fatalf("cross-tenant route %d %s", status, raw)
+	build = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=build", "", http.StatusOK)
+	if build.Profile == nil || build.Profile.ID != haiku.ID || !strings.HasPrefix(firstReason(build), "Codex account is at its allowance or floor until ") {
+		t.Fatalf("full allowance %+v", build)
 	}
 }
