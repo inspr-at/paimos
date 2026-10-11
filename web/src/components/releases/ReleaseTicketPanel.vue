@@ -68,9 +68,10 @@ async function resolve() {
 watch(current, resolve, { immediate: true })
 // Another person, workspace or an ended session: whatever is shown or on its way
 // goes, and the ticket is resolved again as the new caller. The same person's
-// refresh keeps the current resolution and ticket until revalidated keys say
-// otherwise (below).
-const stopAccess = onAccessRevalidate({ reset: () => { void resolve() } })
+// refresh keeps the visible ticket until revalidated keys say otherwise (below).
+// A lookup still in flight was fenced by ticketLinks' earlier refresh listener,
+// so restart that resolution under the new access epoch.
+const stopAccess = onAccessRevalidate({ reset: () => { void resolve() }, refresh: () => { if (resolving.value) void resolve() } })
 onBeforeUnmount(stopAccess)
 // The key asked again answers differently (a lost project, a moved ticket).
 // Its own first answer (unknown to known) and a reset (handled above) do not count.

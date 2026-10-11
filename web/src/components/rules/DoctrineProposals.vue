@@ -8,11 +8,14 @@ import { onAccessRevalidate } from '../../lib/authz'
 import BizIcon from '../business/BizIcon.vue'
 const props = defineProps<{ latest?: DoctrineProposal }>()
 const stored = ref<DoctrineProposal[]>([])
+// Newly proposed or updated results can precede their appearance in the list.
+// Once listed, the server owns their next snapshot, including their removal.
+const localUpserts = new Set<string>()
 const findings = ref<DoctrineFinding[]>([])
 const loaded = ref(false)
 let generation = 0
 const individual = computed(() => stored.value.filter(p => !findings.value.some(f => f.proposal_id === p.id)))
-function upsert(p: DoctrineProposal) { stored.value = [p, ...stored.value.filter(item => item.id !== p.id)] }
+function upsert(p: DoctrineProposal) { localUpserts.add(p.id); stored.value = [p, ...stored.value.filter(item => item.id !== p.id)] }
 watch(() => props.latest, p => { if (p) upsert(p) }, { immediate: true })
 const busy = ref('')
 const error = ref('')
@@ -38,12 +41,13 @@ async function load() {
     const proposals = await getDoctrineProposals()
     const analysis = can('outcome.read') && can('knowledge.read') ? await getDoctrineFindings() : []
     if (current !== generation) return
-    stored.value = [...stored.value, ...proposals.filter(p => !stored.value.some(existing => existing.id === p.id))]
+    for (const p of proposals) localUpserts.delete(p.id)
+    stored.value = [...proposals, ...stored.value.filter(p => localUpserts.has(p.id))]
     findings.value = analysis
     loaded.value = true
   } catch (cause) { if (current === generation) error.value = doctrineMessage(cause) }
 }
-const stopAccess = onAccessRevalidate({ reset: () => { generation++; stored.value = []; findings.value = []; loaded.value = false; error.value = ''; busy.value = '' }, refresh: () => { if (!busy.value) void load() } })
+const stopAccess = onAccessRevalidate({ reset: () => { generation++; localUpserts.clear(); stored.value = []; findings.value = []; loaded.value = false; error.value = ''; busy.value = '' }, refresh: () => { if (!busy.value) void load() } })
 onBeforeUnmount(() => { generation++; stopAccess() })
 onMounted(load)
 </script>

@@ -5576,6 +5576,8 @@
     ,
     {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"pending budget saves preserve button positions and submit only once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"AEON-1195: focus replaces the proposal state and approval commit in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"a manager retries a source that could not be read","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"a workspace manager links a repository at a pinned release","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11118,6 +11120,8 @@
     ,
     {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"ppm 390 version: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/release-ticket-links.spec.ts","name":"AEON-1195: focus during ticket lookup keeps the panel controls and resolves the ticket","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/release-ticket-links.spec.ts","name":"a lost project access takes the link and the open ticket away at the next access check","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-ticket-links.spec.ts","name":"a modified click keeps the link: the ticket opens in a new tab, not the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -15137,6 +15141,10 @@
     {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"drops a stale key read and keeps the last keys when the newest read fails","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"refreshes the shared key cache when access settles after a key change","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/access-refresh-panels.unit.test.ts","name":"AEON-1195: focus during a held ticket-key lookup retries it and never reports a false missing ticket","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/access-refresh-panels.unit.test.ts","name":"AEON-1195: proposal refresh replaces state and approval head, removes server entries and retains only unlisted local upserts","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/access-revalidate.unit.test.ts","name":"AEON-1195: access listeners use the shared boundary and cannot clear state in their refresh callback","tier":"ESSENTIAL"}
     ,
