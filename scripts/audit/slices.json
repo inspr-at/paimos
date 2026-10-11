@@ -160,7 +160,9 @@
         "internal/agentd/queue_cadence_test.go",
         "internal/agentruns/queue_notifications.go",
         "internal/agentruns/queue_notifications_test.go",
-        "internal/runisolation/**"
+        "internal/runisolation/**",
+        "internal/agentd/routine_tools.go",
+        "internal/agentd/routine_tools_test.go"
       ]
     },
     {
