@@ -31,11 +31,11 @@ for (const width of [390, 1440]) {
       return route.fulfill({ json: permissions })
     })
     await page.goto('/settings/accounts')
-    // AEON-686/AEON-690: the thresholds are one line under the accounts list;
-    // Change opens a popover form, and Save keeps its place through feedback.
+    // AEON-686/AEON-690: the thresholds are one line under the accounts list (one
+    // sentence since AEON-1172); Change opens a popover form, and Save keeps its place through feedback.
     const line = page.locator('#quota-warnings')
-    await expect(line).toHaveText('Low-quota warnings: early 10 %, urgent 3 % · Change')
-    await line.getByRole('button', { name: 'Change', exact: true }).click()
+    await expect(line).toHaveText('Warn me when an account is low: at 10 % left, urgently at 3 %. Warnings never stop agents.Change')
+    await line.getByRole('button', { name: 'Change the low-quota warnings', exact: true }).click()
     const form = page.getByRole('dialog', { name: 'Low-quota warnings', exact: true })
     const early = form.getByLabel('Early notice (%)'), urgent = form.getByLabel('Urgent notice (%)')
     const save = form.getByRole('button', { name: /^Save/ }), cancel = form.getByRole('button', { name: 'Cancel', exact: true })
@@ -48,7 +48,7 @@ for (const width of [390, 1440]) {
         { name: 'valid custom thresholds', run: async () => { await early.fill('20'); await urgent.fill('5'); await expect(save).toBeEnabled(); await expect(form.getByRole('alert')).toHaveCount(0) } },
         { name: 'Enter stays in the field', run: async () => { await urgent.press('Enter'); await expect(urgent).toBeFocused(); expect(writes).toEqual([]) } },
         { name: 'Escape leaves the field', run: async () => { await urgent.press('Escape'); await expect(urgent).not.toBeFocused(); await expect(form).toBeVisible() } },
-        { name: 'failed save stays honest', run: async () => { await save.click(); await expect(form.getByRole('alert')).toHaveText('Could not save thresholds. Try again.'); await expect(save).toBeEnabled(); await expect(line).toContainText('early 10 %, urgent 3 %') } },
+        { name: 'failed save stays honest', run: async () => { await save.click(); await expect(form.getByRole('alert')).toHaveText('Could not save thresholds. Try again.'); await expect(save).toBeEnabled(); await expect(line).toContainText('at 10 % left, urgently at 3 %') } },
       ],
     })
     expect((await new AxeBuilder({ page }).include('.popover').analyze()).violations).toEqual([])
@@ -56,12 +56,12 @@ for (const width of [390, 1440]) {
     const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
     await urgent.press(mac ? 'Meta+Enter' : 'Control+Enter')
     await expect(form).toHaveCount(0)
-    await expect(line).toContainText('early 20 %, urgent 5 %')
+    await expect(line).toContainText('at 20 % left, urgently at 5 %')
     await expect(page.getByText('Low-quota warnings saved.')).toBeVisible()
     const write = { early_percent: 20, urgent_percent: 5, expected_early_percent: 10, expected_urgent_percent: 3 }
     expect(writes).toEqual([write, write])
     expect((await new AxeBuilder({ page }).include('#quota-warnings').analyze()).violations).toEqual([])
     await page.reload()
-    await expect(line).toContainText('early 20 %, urgent 5 %')
+    await expect(line).toContainText('at 20 % left, urgently at 5 %')
   })
 }
