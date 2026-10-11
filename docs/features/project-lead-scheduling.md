@@ -40,7 +40,7 @@ launch, then reports `runtime_pickup_timeout`. This only changes visible state:
 it does not launch, retry, cancel, free slots or change Engine W2 dispatch.
 
 GET `/api/projects/{projectId}/lead` also returns read-only `actions` for the
-current caller (AEON-1220, `Aeon-Contract: harness-session/3.1`). Each of `start`,
+current caller (AEON-1220, `Aeon-Contract: project-lead/1.1`). Each of `start`,
 `resume`, `pause`, `adopt`, `cancel_adoption` and `remove` has `available` and a
 short `blocked_reason`; the reason is empty when available. The existing
 `automatic_launch_enabled` policy is now described in the authored contract.

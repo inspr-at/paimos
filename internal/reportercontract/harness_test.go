@@ -23,7 +23,7 @@ func TestProjectLeadReadContractAdditionIsMinor(t *testing.T) {
 		t.Fatal(err)
 	}
 	now, ok := current["project-lead"]
-	if !ok || now.Version != HarnessSession {
+	if !ok || now.Version != ProjectLead {
 		t.Fatal("lead read is missing its declared contract pin")
 	}
 	var shape map[string]any
@@ -42,7 +42,7 @@ func TestProjectLeadReadContractAdditionIsMinor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bump, err := RequiredBump(Pin{Version: "harness-session/3.0", SHA256: "before-lead-actions", Shape: before}, now)
+	bump, err := RequiredBump(Pin{Version: "project-lead/1.0", SHA256: "before-lead-actions", Shape: before}, now)
 	if err != nil || bump != "minor" {
 		t.Fatalf("lead actions: got %q, %v; want minor", bump, err)
 	}

@@ -699,7 +699,7 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/3.1",
+    "version": "harness-session/3.0",
     "sha256": "35eb883983ff67171444690719cfb330db512124048a58954a06c8d02ddd835b",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
@@ -3947,7 +3947,7 @@
     }
   },
   "project-lead": {
-    "version": "harness-session/3.1",
+    "version": "project-lead/1.1",
     "sha256": "73842c01da31e5090adebb11a3045ab60bf2feab7c12cdd89833edb6a73f7646",
     "shape": {
       "GET /projects/{projectId}/lead 200": {

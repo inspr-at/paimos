@@ -37,7 +37,7 @@ func TestReporterRoutesDeclareHeaderBeforeAuthentication(t *testing.T) {
 		{"me", "GET", "/api/me", reportercontract.Me, (&auth.Module{}).Mount},
 		{"harness status", "GET", "/api/projects/00000000-0000-4000-8000-000000000001/harness-sessions/00000000-0000-4000-8000-000000000002", reportercontract.HarnessSession, harness.New(nil).Mount},
 		{"harness heartbeat", "POST", "/api/projects/00000000-0000-4000-8000-000000000001/harness-sessions/00000000-0000-4000-8000-000000000002/heartbeat", reportercontract.HarnessSession, harness.New(nil).Mount},
-		{"project lead", "GET", "/api/projects/00000000-0000-4000-8000-000000000001/lead", reportercontract.HarnessSession, harness.New(nil).Mount},
+		{"project lead", "GET", "/api/projects/00000000-0000-4000-8000-000000000001/lead", reportercontract.ProjectLead, harness.New(nil).Mount},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mux := http.NewServeMux()

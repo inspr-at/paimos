@@ -73,7 +73,7 @@ paths:
         '200':
           description: 'Lead lifecycle snapshot and current caller action availability'
           headers:
-            Aeon-Contract: {$ref: '#/components/headers/HarnessSessionContract'}
+            Aeon-Contract: {$ref: '#/components/headers/ProjectLeadContract'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ProjectLead'}
@@ -291,6 +291,8 @@ paths:
         '403': {description: 'Current worker lease, live harness.worker permission, or live owner authority rejected'}
         '409': {description: 'Stale identity, useful current turn, unavailable scheduling evidence or unavailable handover delivery'}
 components:
+  headers:
+    ProjectLeadContract: {description: 'Project lead read response contract; version 1.1 describes the existing automatic launch policy and adds read-only current-caller action availability to the lead lifecycle snapshot.', schema: {type: string, enum: ['project-lead/1.1']}}
   schemas:
     LeadRuntimeDemand:
       type: object
