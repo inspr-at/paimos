@@ -2,14 +2,18 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -20,6 +24,14 @@ type metricsFake struct {
 	*auditFake
 	respond func(path string) (any, error)
 	calls   []string
+}
+
+// A green queue suite has no failed checks to quarantine. Keep that ingress
+// reader available while independently injecting the Actions runs for Flow.
+type metricsQueueFake struct{ *metricsFake }
+
+func (g *metricsQueueFake) QueueChecks(context.Context, queueSuite, *queueRun) (string, []queueRun, error) {
+	return "CI", nil, nil
 }
 
 func (g *metricsFake) MetricsRead(_ context.Context, tenantID string, read func(func(string, any) error) error) error {
@@ -81,6 +93,208 @@ func metricCounts(t *testing.T, f *fixture) (runs, pulls, marks int) {
 		return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM delivery_metric_runs),(SELECT count(*) FROM delivery_metric_pulls),(SELECT count(*) FROM delivery_metric_marks)`).Scan(&runs, &pulls, &marks)
 	})
 	return
+}
+
+func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
+	// Risk: an unconfigured metric consumer rejects an authenticated delivery
+	// on an unnecessary Actions read, or suppresses linked checks/queue facts.
+	for _, tc := range []struct {
+		name                                                                                                         string
+		linked, queue, projectedQueue, suiteRefs, suitePR, unrelated, delayed, unlinked, fail, reconciled, saturated bool
+	}{
+		{name: "read_available"},
+		{name: "read_unavailable", fail: true},
+		{name: "unrelated_linked_pull", linked: true, unrelated: true, fail: true},
+		{name: "linked_checks_empty_suite_pulls", linked: true},
+		{name: "linked_checks_explicit_suite_pull", linked: true, suitePR: true},
+		{name: "delayed_empty_suite_after_synchronization", linked: true, delayed: true},
+		{name: "reconciled_then_synchronized_delayed_empty_suite", linked: true, delayed: true, reconciled: true},
+		{name: "delayed_suite_current_link_removed", linked: true, delayed: true, unlinked: true, fail: true},
+		{name: "saturated_history_all_links_removed", linked: true, delayed: true, unlinked: true, saturated: true, fail: true},
+		{name: "linked_queue_empty_suite_pulls", linked: true, queue: true},
+		{name: "linked_queue_refs_prefix", linked: true, queue: true, suiteRefs: true},
+		{name: "linked_queue_projected_head", linked: true, queue: true, projectedQueue: true},
+		{name: "linked_read_failure_then_redelivery", linked: true, fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			g := &metricsFake{auditFake: &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}}
+			f.m.github = g
+			if tc.queue {
+				f.m.github = &metricsQueueFake{metricsFake: g}
+			}
+			p := f.pull()
+			if tc.linked {
+				f.gh.pulls[7] = p
+				if tc.reconciled {
+					if err := f.m.Reconcile(t.Context(), f.person.TenantID); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					auditSend(t, f, "pull_request", "unconfigured-pr-open", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": f.at.Add(-2 * time.Hour), "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+				}
+				if item := f.item(t, 7); item.Ticket == nil || *item.Ticket != f.ticket {
+					t.Fatal("fixture pull is not linked to its ticket")
+				}
+			}
+			head, branch, event, stepKey := strings.Repeat("d", 40), "work/aeon-1241", "pull_request", "ci"
+			if tc.linked && !tc.unrelated {
+				head, branch = p.Head, p.Branch
+			}
+			if tc.queue {
+				head, branch, event, stepKey = strings.Repeat("c", 40), "gh-readonly-queue/main/pr-7-"+p.Head, "merge_group", "queue"
+			}
+			if tc.projectedQueue {
+				auditSend(t, f, "merge_group", "unconfigured-queue", map[string]any{"action": "checks_requested", "merge_group": map[string]any{"head_sha": head, "base_sha": p.Base, "head_ref": "refs/heads/" + branch}}, 204)
+			}
+			if tc.delayed {
+				current := p
+				current.Head = strings.Repeat("e", 40)
+				f.gh.pulls[7] = current
+				auditSend(t, f, "pull_request", "unconfigured-pr-sync", map[string]any{"action": "synchronize", "pull_request": map[string]any{"number": 7, "created_at": f.at.Add(-2 * time.Hour), "head": map[string]any{"sha": current.Head, "ref": current.Branch}, "base": map[string]any{"sha": current.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+				if item := f.item(t, 7); item.Head != current.Head || item.Head == head {
+					t.Fatal("synchronization did not replace the projected head")
+				}
+				if tc.unlinked {
+					f.tx(t, func(tx pgx.Tx) error {
+						if tc.saturated {
+							_, err := tx.Exec(t.Context(), `INSERT INTO delivery_github_events(tenant_id,delivery_id,event,repository,head_sha,received_at,payload_sha256,observations,fanout_done,processed_at)
+								SELECT tenant_id,'saturated-'||n,event,repository,head_sha,received_at,payload_sha256,observations,true,processed_at
+								FROM delivery_github_events CROSS JOIN generate_series(1,101) n WHERE delivery_id='unconfigured-pr-open'`)
+							if err != nil {
+								return err
+							}
+						}
+						_, err := tx.Exec(t.Context(), `UPDATE delivery_items SET project_id=NULL,ticket_node_id=NULL WHERE repository=$1 AND pull_request=7`, f.m.config.Repository)
+						return err
+					})
+				}
+			}
+			needsFlow := tc.linked && !tc.unrelated && !tc.unlinked
+			unavailable := tc.fail
+			g.respond = func(path string) (any, error) {
+				if path != "/actions/runs?check_suite_id=900&head_sha="+head+"&per_page=2" {
+					t.Fatalf("unexpected GitHub read: %s", path)
+				}
+				if unavailable {
+					return nil, crossreview.ErrUnavailable
+				}
+				run := githubRunBody(501, 1, defaultCIWorkflow, event, branch, head, f.at.Add(-time.Hour), 10*time.Minute, "success", 900)
+				if needsFlow && !tc.queue {
+					run["pull_requests"] = []any{map[string]any{"number": 7}}
+				}
+				return map[string]any{"total_count": 1, "workflow_runs": []any{run}}, nil
+			}
+			var logs bytes.Buffer
+			f.m.webhookFailures.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			f.tx(t, func(tx pgx.Tx) error {
+				var sources int
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_metric_sources`).Scan(&sources); err != nil {
+					return err
+				}
+				if sources != 0 {
+					t.Fatalf("fixture unexpectedly linked %d metric sources", sources)
+				}
+				return nil
+			})
+			suiteBranch := branch
+			if tc.suiteRefs {
+				suiteBranch = "refs/heads/" + branch
+			}
+			if tc.projectedQueue {
+				suiteBranch = ""
+			}
+			pulls := []any{}
+			if tc.suitePR {
+				pulls = append(pulls, map[string]any{"number": 7})
+			}
+			body := map[string]any{
+				"action":       "completed",
+				"installation": map[string]any{"id": 456},
+				"repository":   map[string]any{"full_name": f.m.config.Repository, "default_branch": "main"},
+				"check_suite":  map[string]any{"id": 900, "head_sha": head, "head_branch": suiteBranch, "status": "completed", "app": map[string]any{"slug": "github-actions"}, "pull_requests": pulls},
+			}
+			raw, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			send := func() *httptest.ResponseRecorder {
+				r := webhookLogRequest("check_suite", string(raw))
+				r.Header.Set("X-Hub-Signature-256", signed(raw, f.m.secret))
+				w := httptest.NewRecorder()
+				f.mux.ServeHTTP(w, r)
+				return w
+			}
+			w := send()
+			var ledger int
+			f.tx(t, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_github_events WHERE delivery_id='delivery-log-test' AND event='check_suite'`).Scan(&ledger)
+			})
+			if ledger != 1 {
+				t.Fatalf("authenticated projection ledger: %d, want 1", ledger)
+			}
+			if needsFlow && unavailable {
+				if w.Code != 502 || len(g.calls) != 1 || flowEventCount(t, f) != 0 {
+					t.Fatalf("required flow read failure: status=%d reads=%d flow events=%d", w.Code, len(g.calls), flowEventCount(t, f))
+				}
+				assertWebhookFailureLine(t, &logs, "check_suite", "completed", "flow", "github_unavailable", 502, nil)
+				// Explicit redelivery compatibility remains covered here;
+				// internal recovery has separate per-step receipt regressions.
+				unavailable = false
+				logs.Reset()
+				g.calls = nil
+				w = send()
+			}
+			if w.Code != 204 {
+				t.Fatalf("unlinked metric source: status %d, want 204", w.Code)
+			}
+			runs, metricPulls, marks := metricCounts(t, f)
+			if runs+metricPulls+marks != 0 || logs.Len() != 0 {
+				t.Fatalf("unlinked metrics must be a no-op: facts=%d logs=%d", runs+metricPulls+marks, logs.Len())
+			}
+			if !needsFlow {
+				if len(g.calls) != 0 || flowEventCount(t, f) != 0 {
+					t.Fatalf("no consumer: reads=%d flow events=%d", len(g.calls), flowEventCount(t, f))
+				}
+				return
+			}
+			if len(g.calls) != 1 {
+				t.Fatalf("linked flow Actions reads: %d, want 1", len(g.calls))
+			}
+			if key, ended, outcome := flowStepRow(t, f, "github_app", "run/501/1"); key != stepKey || ended == nil || outcome == nil || *outcome != "green" {
+				t.Fatalf("linked flow step: %s %v %v", key, ended, outcome)
+			}
+			if tc.queue {
+				if key, ended, _ := flowStepRow(t, f, "github_app", "run/501/1/queued"); key != "queue" || ended == nil {
+					t.Fatalf("queue wait: %s %v", key, ended)
+				}
+			}
+			before := flowEventCount(t, f)
+			if before == 0 {
+				t.Fatal("linked flow wrote no events")
+			}
+			if w = send(); w.Code != 204 || flowEventCount(t, f) != before {
+				t.Fatalf("redelivery changed flow: status=%d events=%d -> %d", w.Code, before, flowEventCount(t, f))
+			}
+			if runs, pulls, marks := metricCounts(t, f); runs+pulls+marks != 0 {
+				t.Fatal("redelivery wrote unconfigured metrics")
+			}
+		})
+	}
+
+	t.Run("unconfigured_pull_and_review", func(t *testing.T) {
+		f := newFixture(t)
+		g := &metricsFake{auditFake: &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}}
+		g.respond = func(path string) (any, error) { t.Fatalf("unexpected metric read: %s", path); return nil, errRead }
+		f.m.github = g
+		p := f.pull()
+		f.gh.pulls[7] = p
+		auditSend(t, f, "pull_request", "no-source-pull", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": f.at.Add(-time.Hour), "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+		auditSend(t, f, "status", "no-source-review", map[string]any{"sha": p.Head, "state": "success", "context": "aeon/review", "created_at": f.at}, 204)
+		if runs, pulls, marks := metricCounts(t, f); runs+pulls+marks != 0 || len(g.calls) != 0 {
+			t.Fatalf("unconfigured pull/review metrics: runs=%d pulls=%d marks=%d reads=%d", runs, pulls, marks, len(g.calls))
+		}
+	})
 }
 
 func TestDeliveryMetricsWebhookRecordsEachEventKind(t *testing.T) {
