@@ -35,7 +35,7 @@ func TestHarnessProbesScheduleCheckNowAndFencePublication(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['models.read','models.report'] WHERE principal_id=$1`, agent.ID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_daemon_generation='generation',capacity_owner=$2 WHERE id=$1`, account, agent.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_daemon_generation='generation',capacity_owner=$2 WHERE id=$1`, account, owner.ID)
 		return err
 	})
 	m := &Module{pool: appPool, discovery: fixtureCatalogClient(t, nil), validationClock: func(context.Context, pgx.Tx) (time.Time, error) { return now, nil }}

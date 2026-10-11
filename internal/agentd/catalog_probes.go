@@ -265,7 +265,7 @@ func (s *Supervisor) activeCatalogProcess(account string) Process {
 func (s *Supervisor) captureCatalog(ctx context.Context, local EnrolledAccount, adapter Adapter) (out catalogCapture) {
 	active := s.activeCatalogProcess(local.ID)
 	if p, ok := active.(*codexProcess); ok {
-		if p.verify(ctx) != nil {
+		if p.lifetime == nil || p.lifetime.Verify() != nil {
 			return failedCatalog(ctx)
 		}
 		return collectCodexCatalog(ctx, func(ctx context.Context, method string, args any) (json.RawMessage, error) {
@@ -369,7 +369,7 @@ func (s *Supervisor) captureCatalog(ctx context.Context, local EnrolledAccount, 
 	}
 }
 func captureClaudeCatalog(ctx context.Context, p *claudeProcess) catalogCapture {
-	if p.verify(ctx) != nil {
+	if p.lifetime == nil || p.lifetime.Verify() != nil {
 		return failedCatalog(ctx)
 	}
 	raw, err := p.request(ctx, "jsonrpc", "aeon/catalog", map[string]any{})
@@ -393,7 +393,9 @@ func (s *Supervisor) captureModelCatalogs(ctx context.Context) {
 	defer s.capacityCheckMu.Unlock()
 	op, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	cursor := ""
+	s.mu.Lock()
+	cursor := s.catalogCursor
+	s.mu.Unlock()
 	for page := 0; page < 4; page++ {
 		requests, next, err := api.ClaimCatalogProbes(op, s.daemonID, s.generation, cursor)
 		if err != nil {
@@ -417,6 +419,7 @@ func (s *Supervisor) captureModelCatalogs(ctx context.Context) {
 			}
 			adapter := s.adapters[local.Harness]
 			available := s.probedAccounts[local.ID] && !s.blockedAccounts[local.ID] || local.Harness == OpenCode && s.harnessHolds[local.Harness] == ""
+			probeLifecycle := s.probePendingSince[local.ID]
 			s.mu.Unlock()
 			if local.ID == "" || local.Key != request.AccountKey || local.Harness != request.Harness || local.DependencyBlocked || adapter == nil || !available || !s.dispatchAllowed(local.ID) || !s.dispatchMu.TryLock() {
 				continue
@@ -427,6 +430,20 @@ func (s *Supervisor) captureModelCatalogs(ctx context.Context) {
 				s.capacityCapturing = true
 				s.capacityAccountID = local.ID
 				s.capacityStartedAt = s.capacityNow()
+				// A crash during a new process launch must preserve the capture
+				// fence. Confirmed cleanup clears this durable intent below.
+				state := s.capacityChecks[local.ID]
+				state.CleanupUnconfirmed = true
+				s.capacityChecks[local.ID] = state
+				if err = s.saveCapacityChecksLocked(); err != nil {
+					busy = true
+					state.CleanupUnconfirmed = false
+					s.capacityChecks[local.ID] = state
+					s.capacityCapturing = false
+					s.capacityAccountID = ""
+					s.capacityStartedAt = time.Time{}
+					logCapacityError("catalog capture fence persistence failed", local.ID, err)
+				}
 			}
 			s.mu.Unlock()
 			s.dispatchMu.Unlock()
@@ -437,24 +454,39 @@ func (s *Supervisor) captureModelCatalogs(ctx context.Context) {
 			capture := s.captureCatalog(captureCtx, local, adapter)
 			stop()
 			s.mu.Lock()
-			if capture.CleanupUnconfirmed {
-				state := s.capacityChecks[local.ID]
+			state := s.capacityChecks[local.ID]
+			state.CleanupUnconfirmed = capture.CleanupUnconfirmed
+			s.capacityChecks[local.ID] = state
+			if err = s.saveCapacityChecksLocked(); err != nil {
+				// The persisted launch intent remains unresolved. Keep the
+				// same conservative runtime fence until it can be reconciled.
+				capture.CleanupUnconfirmed = true
+				capture.State = "stale"
+				capture.Models = []modelreport.CatalogModel{}
 				state.CleanupUnconfirmed = true
 				s.capacityChecks[local.ID] = state
-				if err = s.saveCapacityChecksLocked(); err != nil {
-					logCapacityError("catalog cleanup fence persistence failed", local.ID, err)
-				}
-			} else {
+				logCapacityError("catalog cleanup fence persistence failed", local.ID, err)
+			}
+			if !capture.CleanupUnconfirmed {
 				s.capacityCapturing = false
 				s.capacityAccountID = ""
 				s.capacityStartedAt = time.Time{}
 			}
+			current := s.probePendingSince[local.ID].Equal(probeLifecycle)
+			found := false
+			for _, a := range s.accounts {
+				if a.ID == local.ID {
+					found = true
+					current = current && a.Key == local.Key && a.Harness == local.Harness
+				}
+			}
+			current = current && found
 			s.mu.Unlock()
 			if op.Err() != nil {
 				return
 			}
 			fenced, err := s.readFence(local.ID)
-			if fenced || err != nil || !s.dispatchAllowed(local.ID) {
+			if !current || fenced || err != nil || !s.dispatchAllowed(local.ID) {
 				continue
 			}
 			report := modelreport.CatalogReport{RequestID: request.RequestID, BindingRevision: request.BindingRevision, DaemonID: s.daemonID, Generation: s.generation, State: capture.State, Models: capture.Models}
@@ -462,6 +494,9 @@ func (s *Supervisor) captureModelCatalogs(ctx context.Context) {
 				logCapacityError("model catalog report failed", local.ID, err)
 			}
 		}
+		s.mu.Lock()
+		s.catalogCursor = next
+		s.mu.Unlock()
 		if next == "" || next == cursor {
 			return
 		}

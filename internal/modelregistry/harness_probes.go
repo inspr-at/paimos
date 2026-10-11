@@ -146,7 +146,7 @@ func (m *Module) claimHarnessProbes(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		rows, err := tx.Query(ctx, `SELECT a.id::text,a.account_key,a.harness,a.link_revision FROM agent_accounts a WHERE `+harnessProbeEligible+`
- AND a.registered_by_principal_id=$1 AND (a.capacity_owner IS NULL OR a.capacity_owner=$1)
+ AND a.registered_by_principal_id=$1
  AND a.daemon_id=$2 AND a.last_daemon_generation=$3 AND ($4='' OR a.id>NULLIF($4,'')::uuid)
  ORDER BY a.id LIMIT 17`, current.ID, in.Daemon, in.Generation, in.After)
 		if err != nil {
@@ -237,7 +237,7 @@ func (m *Module) reportHarnessProbe(w http.ResponseWriter, r *http.Request) {
 		var harness string
 		var valid bool
 		if err = tx.QueryRow(ctx, `SELECT a.harness,`+harnessProbeEligible+` AND a.link_revision=$2 AND a.daemon_id=$3 AND a.last_daemon_generation=$4
- AND a.registered_by_principal_id=$5 AND (a.capacity_owner IS NULL OR a.capacity_owner=$5)
+ AND a.registered_by_principal_id=$5
  FROM agent_accounts a WHERE a.id=$1 FOR NO KEY UPDATE`, account, in.BindingRevision, in.DaemonID, in.Generation, current.ID).Scan(&harness, &valid); err == pgx.ErrNoRows {
 			return fail(404, "account not found")
 		}
@@ -293,8 +293,10 @@ func (m *Module) reportHarnessProbe(w http.ResponseWriter, r *http.Request) {
 			}
 			base := CatalogFact{Provider: provider, ModelID: id, Route: harness + "/" + model.Model, Source: source, SourceKind: "harness", FetchedAt: now}
 			// Missing current fields must not remain old, apparently fresh facts.
-			if _, err = tx.Exec(ctx, `DELETE FROM model_catalog_facts WHERE source=$1 AND route=$2 AND fact NOT IN ('model_id','listed')`, source, base.Route); err != nil {
-				return err
+			if in.State == "fresh" {
+				if _, err = tx.Exec(ctx, `DELETE FROM model_catalog_facts WHERE source=$1 AND route=$2 AND fact NOT IN ('model_id','listed')`, source, base.Route); err != nil {
+					return err
+				}
 			}
 			base.Fact, base.FieldPath = "model_id", "model"
 			base.Value, _ = json.Marshal(model.Model)

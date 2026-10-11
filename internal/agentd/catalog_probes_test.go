@@ -57,13 +57,14 @@ func TestHarnessCatalogRecordedFactsAndUnknown(t *testing.T) {
 	if string(claude[0].Facts["native_levels"].Value) != `["low","high"]` || len(claude[1].Facts) != 0 {
 		t.Fatal("SDK native levels lost or unknown default invented")
 	}
-	for _, parse := range []func([]byte) error{
-		func(raw []byte) error { _, _, err := parseCodexCatalog(raw); return err },
-		func(raw []byte) error { _, err := parseClaudeCatalog(raw); return err },
-	} {
-		if parse([]byte(`{"data":[],"data":[]}`)) == nil {
-			t.Fatal("ambiguous duplicate keys accepted")
-		}
+	if _, _, err := parseCodexCatalog([]byte(`{"data":[],"data":[]}`)); err == nil {
+		t.Fatal("ambiguous Codex duplicate keys accepted")
+	}
+	if _, err := parseClaudeCatalog([]byte(`[{"value":"id"}]`)); err != nil {
+		t.Fatal("valid ID-only SDK response rejected", err)
+	}
+	if _, err := parseClaudeCatalog([]byte(`[{"value":"id","value":"other"}]`)); err == nil {
+		t.Fatal("ambiguous SDK duplicate keys accepted")
 	}
 	if modelreport.ValidateCatalog("fresh", []modelreport.CatalogModel{{Model: "id", Facts: map[string]modelreport.CatalogField{"credential": {Value: json.RawMessage("null"), Path: "credential"}}}}) == nil {
 		t.Fatal("unallowlisted null field accepted")
