@@ -318,11 +318,6 @@
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)"
   ,
   "tests": [
-    {"kind":"go","package":"internal/delivery","name":"TestWebhookBodyTimeoutDoesNotPoisonKeepAliveConnection","tier":"ESSENTIAL"},
-    {"kind":"go","package":"internal/httpapi","name":"TestCancelledConnectionContextClosesConnection","tier":"ESSENTIAL"},
-    {"kind":"go","package":"internal/httpapi","name":"TestRequestOnCancelledConnectionClosesIt","tier":"ESSENTIAL"},
-    {"kind":"go","package":"internal/httpapi","name":"TestHandlerFailureLoggingIsContentFree","tier":"ESSENTIAL"},
-
     {"kind":"go","package":"cmd/aeon","name":"TestAgentProjectRoleFlags","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon","name":"TestDefaultServerHasNoOutboundNetwork","tier":"ESSENTIAL"}
@@ -3581,7 +3576,7 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestImportedSignInHintRequiresVerifiedTenantEmail","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/auth","name":"TestIncident1228MiddlewareRecordsFailureClass","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/auth","name":"TestIncident1228MiddlewareRecordsFailureClass","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestInstructionProvenanceQueryScopeAtMiddleware","tier":"GATED-FULL"}
     ,
@@ -5927,6 +5922,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryOmitsProjectsWithoutDeliveryRead","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestWebhookBodyTimeoutDoesNotPoisonKeepAliveConnection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureAudit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestWebhookFailureCompleteMerges","tier":"ESSENTIAL"}
@@ -6759,9 +6756,13 @@
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestAttachmentFramePolicyComposesWithAithema","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/httpapi","name":"TestCancelledConnectionContextClosesConnection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/httpapi","name":"TestCapabilityAndPanicDetailsNeverEnterRequestLogs","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestClassicAPIPathsAreGone","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestHandlerFailureLoggingIsContentFree","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestHandlersAndMiddleware","tier":"ESSENTIAL"}
     ,
@@ -6776,6 +6777,8 @@
     {"kind":"go","package":"internal/httpapi","name":"TestReadyProbeDeadlineAndDrain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestRequestLogRoutes","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestRequestOnCancelledConnectionClosesIt","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/identity","name":"TestFromEnvDefaultAndCredentialFile","tier":"GATED-FULL"}
     ,

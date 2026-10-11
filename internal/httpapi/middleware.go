@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -171,7 +172,7 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		r = r.WithContext(context.WithValue(r.Context(), failureKey{}, &sw.failureLogged))
 		start := time.Now()
 		defer func() {
-			if sw.status >= 500 && !sw.failureLogged {
+			if sw.status >= 500 && !sw.failureLogged.Load() {
 				LogFailure(r, "handler", conn.Err())
 			}
 			attrs := []any{
@@ -193,7 +194,6 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("Retry-After", "1")
 			LogFailure(r, "connection_context", conn.Err())
-			sw.failureLogged = true
 			WriteError(sw, http.StatusServiceUnavailable, "service unavailable")
 			return
 		}
@@ -297,7 +297,7 @@ type statusWriter struct {
 	conn          context.Context
 	closed        bool
 	closeHeader   bool
-	failureLogged bool
+	failureLogged atomic.Bool
 }
 
 func (w *statusWriter) WriteHeader(status int) {

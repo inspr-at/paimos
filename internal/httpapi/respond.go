@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sync/atomic"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -88,8 +89,8 @@ func ErrorClass(err error) string {
 // Call at the failure site so a live request still retains a database SQLSTATE;
 // the outer status writer also provides a fallback for otherwise silent 5xx.
 func LogFailure(r *http.Request, step string, err error) {
-	if marker, ok := r.Context().Value(failureKey{}).(*bool); ok {
-		*marker = true
+	if marker, ok := r.Context().Value(failureKey{}).(*atomic.Bool); ok {
+		marker.Store(true)
 	}
 	class := ErrorClass(err)
 	if err == nil {
