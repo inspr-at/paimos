@@ -20,8 +20,8 @@ for (const width of [1440, 1024, 390]) {
         await more.click()
         const menu = page.getByRole('menu')
         // AEON-780/783: Pause all, Resume all and Wind down live in the Wind down popover, History in the Sessions head.
-        // AEON-1209: "…" keeps four items; the Decision Desk is the app header's place.
-        await expect(menu.getByRole('menuitem')).toHaveText([/^Model preferences/, /^Usage/, /^Agent keys/, /^Agent settings/])
+        // AEON-1209: "…" keeps five items; the Decision Desk is the app header's place.
+        await expect(menu.getByRole('menuitem')).toHaveText([/^Model preferences/, /^Usage/, /^Routines/, /^Agent keys/, /^Agent settings/])
         await expect(header.getByRole('button', { name: 'Wind down', exact: true })).toBeVisible()
         await expect(page.locator('.sessions .head-tools').getByRole('button', { name: /^Show history/ })).toBeVisible()
         await expect(page.locator('.places').getByRole('link', { name: /^Decision Desk/ })).toHaveAttribute('href', '/decision-desk')
