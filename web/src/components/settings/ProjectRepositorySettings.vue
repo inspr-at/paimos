@@ -33,7 +33,7 @@ const repoName = computed(() => source.value?.repository.split('/')[1] ?? '')
 const appURL = computed(() => `https://github.com/organizations/${encodeURIComponent(repoOwner.value)}/settings/installations`)
 const checked = computed(() => source.value?.last_read_error?.at ? `Checked ${date(source.value.last_read_error.at, true)}` : '')
 const staleDays = computed(() => source.value?.last_event_at ? Math.floor((observedAt.value - Date.parse(source.value.last_event_at)) / 86_400_000) : 0)
-const historyDays = computed(() => source.value?.backfill_since ? Math.max(1, Math.round((observedAt.value - Date.parse(source.value.backfill_since)) / 86_400_000)) : days.value)
+const historyDays = computed(() => source.value?.backfill_since ? Math.max(1, Math.floor((observedAt.value - Date.parse(source.value.backfill_since)) / 86_400_000)) : days.value)
 const progressDay = computed(() => position.value?.day ? Math.max(0, Math.min(historyDays.value, Math.floor((Date.parse(position.value.day) - Date.parse(position.value.since)) / 86_400_000))) : null)
 const phases = [['runs', 'CI runs'], ['pulls', 'Pull requests'], ['jobs', 'Job results']] as const
 function date(value: string, clock = false) { return new Date(value).toLocaleString('en-GB', { day: 'numeric', month: 'short', ...(clock ? { hour: '2-digit', minute: '2-digit' } : {}) }) }
@@ -42,7 +42,9 @@ function load(initial = false) {
   if (initial) loading.value = true
   const id = props.project.id
   return reader.run(({ after, signal }) => after(readDeliveryMetrics(id, signal), value => {
+    const firstLinkedRead = !source.value && !!value.source
     source.value = value.source; observedAt.value = Date.parse(value.generated_at) || Date.now(); error.value = ''
+    if (firstLinkedRead && !formOpen.value) days.value = HISTORY_DAYS.reduce<number>((nearest, option) => Math.abs(option - historyDays.value) < Math.abs(nearest - historyDays.value) ? option : nearest, 30)
     if (value.source?.backfill === 'done') position.value = null
     if (route.query.link === '1' && !value.source && manage.value && !formOpen.value) openForm()
   }), { failed: () => { error.value = 'The repository link couldn’t load.' }, settled: () => { loading.value = false } })

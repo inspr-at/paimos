@@ -39,7 +39,7 @@ async function setup(page: Page) {
   await page.route('**/api/projects/*/delivery/metrics/source', route => {
     const body = route.request().postDataJSON(); world.links.push(body)
     if (world.readOnly || world.fail) return route.fulfill({ status: world.readOnly ? 403 : 503, json: { error: 'The repository was not saved.' } })
-    world.state = 'noactions'; world.source = { ...source('noactions')!, ...body }
+    world.state = 'noactions'; world.source = { ...source('noactions')!, repository: body.repository, ci_workflow: body.ci_workflow, nightly_workflow: body.nightly_workflow, backfill_since: new Date(Date.parse('2026-10-12T00:00:00Z') - body.days * 86_400_000).toISOString() }
     return route.fulfill({ json: world.source })
   })
   await page.route('**/api/projects/*/delivery/metrics/backfill', route => {
@@ -165,6 +165,7 @@ test('AEON-1226: approved repository reference states and check.mjs audit agains
   }
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   writeFileSync(testInfo.outputPath('check-result.txt'), JSON.stringify({ head, approvedCheckSHA, results, failures, limitations: ['The approved check.mjs audits a file mock. Its unchanged audit function is adapted to the P1/P3 build selectors; P4–P6 flows remain outside P3.', 'P2 GET metrics/source contains no cursor phase or running total. Progress details are rendered only from an actual backfill response.', 'The GitHub API does not identify individual organisation owners. The fix line names the repository owner, without guessing a person.'] }, null, 2))
+  writeFileSync(testInfo.outputPath('check-result.md'), `AEON-1226 · HEAD ${head}\n\nApproved check.mjs SHA-256: ${approvedCheckSHA}\n\n${results.length} audit checks; ${results.filter(result => !(result as { passed: boolean }).passed).length} failures. Browser errors: ${failures.length}.\n\nProgress details use real backfill responses; the source API has no cursor or running total. The owner line names the GitHub repository owner and does not invent a person.\n\n${JSON.stringify(results, null, 2)}\n`)
   expect(results.filter(result => !(result as { passed: boolean }).passed)).toEqual([])
   expect(failures).toEqual([])
 })

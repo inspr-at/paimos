@@ -423,5 +423,4 @@ watch(state, (next, prev) => {
 .dl-tip p { margin: 0; color: inherit; opacity: .92; }
 .dl-tip p + p { margin-top: 6px; }
 .dl-tip .meta { font: 500 11px/1.5 var(--mono); opacity: .75; }
-.go-src { text-decoration:none; color:inherit; } .go-src:hover { box-shadow:inset 0 0 0 1px var(--teal); }
 </style>
