@@ -43,10 +43,12 @@ func (m *Module) mountShipping(mux *http.ServeMux) {
 		mux.HandleFunc(route.pattern, func(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 			defer cancel()
+			r = r.WithContext(ctx)
 			if r.Method != http.MethodGet {
-				c := http.NewResponseController(w)
-				_ = c.SetReadDeadline(time.Now().Add(5 * time.Second))
-				defer c.SetReadDeadline(time.Time{})
+				if err := httpapi.BufferRequestBodyTimeout(w, r, 1<<20, 5*time.Second); err != nil {
+					respondError(w, fail(http.StatusBadRequest, "invalid request body"))
+					return
+				}
 			}
 			route.handler(w, r.WithContext(ctx))
 		})

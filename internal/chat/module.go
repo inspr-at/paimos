@@ -127,12 +127,6 @@ func handle[Input any](m *Module, op func(*http.Request, pgx.Tx, tenant.Principa
 }
 
 func readBody(ctx context.Context, w http.ResponseWriter, r *http.Request) ([]byte, error) {
-	controller := http.NewResponseController(w)
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := controller.SetReadDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
-			return nil, workorders.Fail(http.StatusRequestTimeout, "request body deadline unavailable")
-		}
-	}
 	limit := int64(8192)
 	if strings.HasSuffix(r.URL.Path, "/outbox") || strings.HasSuffix(r.URL.Path, "/final") {
 		limit = 512 << 10
@@ -143,37 +137,15 @@ func readBody(ctx context.Context, w http.ResponseWriter, r *http.Request) ([]by
 	if r.Method == http.MethodPut {
 		limit = 16384
 	}
-	body := http.MaxBytesReader(w, r.Body, limit)
-	type result struct {
-		raw []byte
-		err error
+	raw, err := httpapi.ReadRequestBody(w, r.WithContext(ctx), limit, 3*time.Second)
+	if err == nil {
+		return raw, nil
 	}
-	done := make(chan result, 1)
-	go func() {
-		raw, err := io.ReadAll(body)
-		done <- result{raw, err}
-	}()
-	select {
-	case got := <-done:
-		// Clear the connection deadline only after a complete body. An
-		// incomplete/timed-out request must not resume keep-alive reads.
-		if got.err == nil && ctx.Err() == nil {
-			_ = controller.SetReadDeadline(time.Time{})
-			return got.raw, nil
-		}
-		var tooLarge *http.MaxBytesError
-		if errors.As(got.err, &tooLarge) {
-			return nil, workorders.Fail(http.StatusBadRequest, "request body too large")
-		}
-		return nil, workorders.Fail(http.StatusRequestTimeout, "request body did not arrive in time")
-	case <-ctx.Done():
-		// An explicit socket deadline also interrupts a read when the
-		// caller cancels before the three-second deadline. Closing releases
-		// cancellable bodies used by middleware and isolated transports.
-		_ = controller.SetReadDeadline(time.Now())
-		_ = body.Close()
-		return nil, workorders.Fail(http.StatusRequestTimeout, "request body did not arrive in time")
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return nil, workorders.Fail(http.StatusBadRequest, "request body too large")
 	}
+	return nil, workorders.Fail(http.StatusRequestTimeout, "request body did not arrive in time")
 }
 
 // Chat identity writes do not move the tree. Take only the tenant access

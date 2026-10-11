@@ -62,7 +62,16 @@ test('workers nest by session ID, display their label, harness and ticket, and e
   await expect(row(page, child)).toHaveCount(0)
   await page.keyboard.press('Space')
   await expect(row(page, child)).toBeVisible()
-  await expect(page.locator('.last-updated time')).toHaveAttribute('datetime', /T/)
+  // From the row itself, ← folds the open lead and → unfolds it again.
+  await row(page, lead).focus()
+  await page.keyboard.press('ArrowLeft')
+  await expect(row(page, child)).toHaveCount(0)
+  await expect(row(page, lead)).toHaveAttribute('aria-expanded', 'false')
+  await page.keyboard.press('ArrowRight')
+  await expect(row(page, child)).toBeVisible()
+  await expect(row(page, lead)).toHaveAttribute('aria-expanded', 'true')
+  // A fresh list says nothing about its age; only a delay shows in the head (AEON-780 replaced the last-updated stamp).
+  await expect(page.locator('.page-head .freshness')).toHaveCount(0)
 })
 
 test('new workers update through the live channel and stopped workers fold immediately into recoverable history', async ({ page }) => {
@@ -86,23 +95,38 @@ test('new workers update through the live channel and stopped workers fold immed
 
 test('returning to a visible tab refreshes immediately and failed reads keep the last success visible', async ({ page }) => {
   const { data } = await setup(page)
+  // The last good read lands in the first minute (a whole minute just after the fixtures' clock);
+  // the next read fails ten minutes later.
+  const lastGood = Math.ceil(Date.now() / 60_000) * 60_000, failedAt = lastGood + 10 * 60_000
+  await page.clock.install({ time: lastGood })
   await page.goto('/agents')
-  await expect(row(page, child)).toBeVisible()
-  const stamp = await page.locator('.last-updated time').getAttribute('datetime')
+  await expect(row(page, child)).toContainText('AC4 hierarchy')
   await page.route('**/api/harness-sessions?*', route => route.fulfill({ status: 503, json: { error: 'temporarily unavailable' } }))
-  await signal(page, 'harness.registered')
-  await expect(page.locator('.freshness')).toContainText('Update delayed')
-  const retained = await page.locator('.last-updated time').getAttribute('datetime')
-  expect(Date.parse(retained!)).toBeGreaterThanOrEqual(Date.parse(stamp!))
+  await page.clock.pauseAt(failedAt)
+  const delayed = page.locator('.page-head .freshness')
+  await expect(delayed).toContainText('Update delayed')
+  // The failed read keeps the last good list and dates it: the head's tip and the footer (AEON-785)
+  // name the last success, never the failed read.
+  await expect(row(page, child)).toContainText('AC4 hierarchy')
+  const [good, failed] = await page.evaluate(times => times.map(at => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })), [lastGood, failedAt])
+  expect(good).not.toBe(failed)
+  const footer = page.locator('.app-footer .sum')
+  await expect(footer).toHaveAttribute('data-conn', 'off')
+  await expect(footer).toHaveAttribute('aria-label', `Live updates paused, retrying. The page shows the state of ${good}.`)
+  await expect(delayed).toHaveAttribute('data-tip', /last update /)
+  expect(await delayed.getAttribute('data-tip')).not.toContain(await page.evaluate(at => new Date(at).toLocaleString(), failedAt))
+  // Back on the tab, the list is read at once, well before the 20-second poll.
   await page.unroute('**/api/harness-sessions?*')
   Object.assign(data.sessions[1]!, { display_label: 'Returned worker' })
+  await page.clock.resume()
   await page.evaluate(() => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
     document.dispatchEvent(new Event('visibilitychange'))
   })
   await expect(row(page, child)).toContainText('Returned worker', { timeout: 3000 })
   // Only a delay is said in the head; once updates land again it goes (AEON-780: no "Live").
-  await expect(page.locator('.page-head .freshness')).toHaveCount(0)
+  await expect(delayed).toHaveCount(0)
+  await expect(footer).toHaveAttribute('data-conn', 'on')
 })
 
 test('a stopped lead with a live grandchild stays visible and direct worker links open their ancestors', async ({ page }) => {
