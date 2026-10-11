@@ -6,4 +6,6 @@ Future ladder holds become pauses on the matching harness and model, across nati
 
 One `model.settings_migrated` event per existing tenant records the retained source snapshot, each moved item and its resulting settings. Source ladders remain intact for the deprecation release. Registry discovery and catalog upgrades no longer seed or append ladder entries. Successor edits carry order and situation references, native efforts, never rules and pauses.
 
+Replaying the migration keeps its original receipt and emits no duplicate event. Oversized audit snapshots abort the migration transaction. Successor transfers retain constraint ownership and preserve a stricter pause already set on the successor.
+
 `GET /api/models/routes` remains a bounded compatibility response derived from Models, with editing disabled. `PUT /api/models/routes` returns 410 Gone. Choices are edited through model preferences; pause editing is supplied by the Models v2 contract package.
