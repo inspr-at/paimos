@@ -219,7 +219,25 @@ func (m *Module) validateLeadLaunch(ctx context.Context, tx pgx.Tx, p tenant.Pri
 	}
 	// The actor must already have a real, distinct lead attempt and shared hold.
 	// An injected preparer cannot convert a worker's envelope into lead authority.
-	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_budget_grants b JOIN routine_attempts a ON a.tenant_id=b.tenant_id AND a.id=b.attempt_id JOIN agent_runs r ON r.tenant_id=b.tenant_id AND r.id=b.agent_run_id JOIN model_profiles m ON m.tenant_id=r.tenant_id AND m.id=r.model_profile_id WHERE b.id=$1 AND b.run_id=$2 AND b.agent_run_id=$3 AND b.account_id=$4 AND b.parent_id IS NULL AND b.state='held' AND a.role='lead' AND a.assignment_digest=$5 AND r.agent_principal_id=$6 AND r.account_id=$4 AND r.purpose='managed' AND r.status IN ('queued','starting') AND m.id=$7 AND m.enabled AND m.harness=$8 AND m.model=$9 AND m.effort=$10 AND ($11::bigint IS NULL OR b.maximum_tokens=$11) AND ($12::bigint IS NULL OR b.maximum_microusd=$12))`, g.BudgetGrantID, g.RoutineRunID, g.AgentRunID, g.AccountID, g.AssignmentDigest, p.ID, launch.ProfileID, launch.Harness, launch.Model, launch.Effort, g.RemainingTokens, g.RemainingCostMicros).Scan(&valid)
+	err = tx.QueryRow(ctx, `SELECT EXISTS(
+ SELECT 1 FROM routine_budget_grants b
+ JOIN routine_budget_balances balance ON balance.tenant_id=b.tenant_id AND balance.run_id=b.run_id
+ JOIN routine_attempts a ON a.tenant_id=b.tenant_id AND a.id=b.attempt_id AND a.run_id=b.run_id
+ JOIN agent_runs r ON r.tenant_id=b.tenant_id AND r.id=b.agent_run_id AND r.id=a.agent_run_id
+ JOIN model_profiles m ON m.tenant_id=r.tenant_id AND m.id=r.model_profile_id
+ WHERE b.id=$1 AND b.run_id=$2 AND b.agent_run_id=$3 AND b.account_id=$4
+ AND b.parent_id IS NULL AND b.state='held' AND a.role='lead' AND a.assignment_digest=$5
+ AND a.principal_id=$6 AND r.agent_principal_id=$6 AND r.account_id=$4
+ AND r.purpose='managed' AND r.status IN ('queued','starting')
+ AND m.id=$7 AND m.enabled AND m.harness=$8 AND m.model=$9 AND m.effort=$10 AND b.harness=$8
+ AND ($11::bigint IS NULL OR b.maximum_tokens=$11) AND ($12::bigint IS NULL OR b.maximum_microusd=$12)
+ AND balance.mode=$13 AND b.owner_principal_id=$14 AND balance.owner_principal_id=$14
+ AND b.maximum_ms >= $15
+ AND NOT EXISTS(SELECT 1 FROM harness_sessions hs WHERE hs.run_id=r.id AND hs.id::text<>$16
+  AND NOT aeon_work_session_stopped(hs.stopped_at,hs.stop_reason)))`,
+		g.BudgetGrantID, g.RoutineRunID, g.AgentRunID, g.AccountID, g.AssignmentDigest, p.ID,
+		launch.ProfileID, launch.Harness, launch.Model, launch.Effort, g.RemainingTokens,
+		g.RemainingCostMicros, g.BudgetMode, g.OwnerID, launch.MaxDurationSeconds*1000, launch.SessionID).Scan(&valid)
 	if err != nil {
 		return err
 	}
@@ -230,7 +248,7 @@ func (m *Module) validateLeadLaunch(ctx context.Context, tx pgx.Tx, p tenant.Pri
 	if err != nil {
 		return err
 	}
-	if policy.OwnerPersonID == nil || *policy.OwnerPersonID != g.OwnerID || policy.Effective.AllowedAccountIDs != nil && !slices.Contains(*policy.Effective.AllowedAccountIDs, g.AccountID) {
+	if policy.OwnerPersonID == nil || *policy.OwnerPersonID != g.OwnerID || policy.Effective.AllowedAccountIDs != nil && !slices.Contains(*policy.Effective.AllowedAccountIDs, g.AccountID) || policy.Effective.AllowedHostIDs != nil && !slices.Contains(*policy.Effective.AllowedHostIDs, g.ComputerID) {
 		return workorders.Fail(409, "lead_owner_policy_changed")
 	}
 	// Explicit owner selectors are binding even when the injected reserver
@@ -274,11 +292,11 @@ func (m *Module) claimLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principal
 	}
 	var raw []byte
 	var state string
-	err = tx.QueryRow(ctx, `SELECT binding,state FROM routine_launch_intents WHERE id=$1 AND project_id=$2 AND owner_principal_id=$3 AND routine_run_id=$4 AND kind='lead' AND lead_generation=$5 FOR NO KEY UPDATE`, in.Demand.ID, in.Demand.ProjectID, in.Demand.OwnerID, in.Demand.RoutineRunID, in.Demand.Generation).Scan(&raw, &state)
+	err = tx.QueryRow(ctx, `SELECT CASE WHEN octet_length(binding::text)<=65536 THEN binding END,state FROM routine_launch_intents WHERE id=$1 AND project_id=$2 AND owner_principal_id=$3 AND routine_run_id=$4 AND kind='lead' AND lead_generation=$5 FOR NO KEY UPDATE`, in.Demand.ID, in.Demand.ProjectID, in.Demand.OwnerID, in.Demand.RoutineRunID, in.Demand.Generation).Scan(&raw, &state)
 	if err != nil {
 		return nil, err
 	}
-	if len(raw) > 65536 {
+	if raw == nil || len(raw) > 65536 {
 		return nil, workorders.Fail(409, "lead_binding_unavailable")
 	}
 	if state == "claimed" {
@@ -420,7 +438,7 @@ func (m *Module) reportLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principa
 	}
 	var raw []byte
 	var state, worktree string
-	if err = tx.QueryRow(ctx, `SELECT binding,state,worktree_id FROM routine_launch_intents WHERE id=$1 AND kind='lead' FOR NO KEY UPDATE`, pickup.Demand.ID).Scan(&raw, &state, &worktree); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT CASE WHEN octet_length(binding::text)<=65536 THEN binding END,state,worktree_id FROM routine_launch_intents WHERE id=$1 AND kind='lead' FOR NO KEY UPDATE`, pickup.Demand.ID).Scan(&raw, &state, &worktree); err != nil {
 		return nil, err
 	}
 	var saved leadRuntimeBinding

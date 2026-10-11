@@ -115,6 +115,9 @@ func (s *Supervisor) pollLeadRuntime(ctx context.Context, discover bool) error {
 	if s.leads == nil || s.leads.config == nil {
 		return nil
 	}
+	if s.ledgerBarrier != nil {
+		s.ledgerBarrier("lead_pickup_requested")
+	}
 	if err := s.dispatchMu.LockContext(ctx); err != nil {
 		return err
 	}
@@ -169,10 +172,6 @@ func (s *Supervisor) reconcileLeadReceiptsLocked(ctx context.Context, api leadRu
 		if len(name) < len("lead-runtime-.json") || name[:13] != "lead-runtime-" {
 			continue
 		}
-		count++
-		if count > 128 {
-			return ErrProcessesUnconfirmed
-		}
 		raw, e := s.state.Read(name, 32768)
 		if e != nil {
 			return e
@@ -183,6 +182,10 @@ func (s *Supervisor) reconcileLeadReceiptsLocked(ctx context.Context, api leadRu
 		}
 		if r.ExitReported {
 			continue
+		}
+		count++
+		if count > 128 {
+			return ErrProcessesUnconfirmed
 		}
 		if r.Pickup.DaemonGeneration != s.generation || r.Pickup.LedgerGeneration != s.ledgerBinding.Generation {
 			return ErrProcessesUnconfirmed
@@ -420,6 +423,11 @@ func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand a
 	}
 	if err = s.ledger.Launching(s.ledgerBinding.Member.ID, record.Pickup.LedgerGeneration, record.Group); err != nil {
 		return err
+	}
+	// Disk/ledger contention must not carry an expiring grant past a window.
+	// Its durable attempted boundary remains conservative if this refuses.
+	if !s.capacityNow().Before(launch.Grant.ExpiresAt) || ctx.Err() != nil || !s.dispatchAllowed(account.ID) {
+		return ErrProcessesUnconfirmed
 	}
 	lifetime, cancel := context.WithTimeout(s.lifetime, time.Duration(launch.MaxDurationSeconds)*time.Second)
 	local := s.leads.leads[demand.ID]

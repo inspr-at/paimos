@@ -144,7 +144,19 @@ func TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit(t *testing.T
 				first, second := make(chan error, 1), make(chan error, 1)
 				go func() { first <- s.PollLeadRuntime(t.Context()) }()
 				<-api.started
+				if s.dispatchMu.TryLock() {
+					s.dispatchMu.Unlock()
+					t.Fatal("lost claim did not retain the dispatch fence")
+				}
+				requested := make(chan struct{})
+				var requestedOnce sync.Once
+				s.ledgerBarrier = func(stage string) {
+					if stage == "lead_pickup_requested" {
+						requestedOnce.Do(func() { close(requested) })
+					}
+				}
 				go func() { second <- s.PollLeadRuntime(t.Context()) }()
+				<-requested
 				close(api.release)
 				if err := <-first; !errors.Is(err, errLeadReplyLost) {
 					t.Fatal(err)
