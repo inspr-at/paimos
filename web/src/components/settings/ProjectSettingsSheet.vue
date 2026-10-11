@@ -1,16 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { inject, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onAction, shortcutTyping } from '../../lib/shortcuts'
 import { settingsSubmitKey } from '../../lib/settingsOverlays'
+import { PROJECT_SETTINGS_OVERLAY } from '../../lib/projectSettings'
 import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ title: string; description?: string }>()
 const emit = defineEmits<{ close: []; submit: [] }>()
 const dialog = ref<HTMLDialogElement>()
+const registerOverlay = inject(PROJECT_SETTINGS_OVERLAY, null)
+let unregister: (() => void) | undefined
 const opener = document.activeElement as HTMLElement | null
 const owns = (event: KeyboardEvent) => !!dialog.value?.contains(event.target as Node) && !!dialog.value?.matches(':modal')
-const keys = [
+const keys = registerOverlay ? [] : [
   onAction('project.settings.dismiss', event => {
     if (shortcutTyping(event.target)) { (event.target as HTMLElement).blur(); dialog.value?.focus({ preventScroll: true }) }
     else emit('close')
@@ -22,8 +25,11 @@ function backdrop(event: MouseEvent) {
   const box = dialog.value.getBoundingClientRect()
   if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) emit('close')
 }
-onMounted(() => { dialog.value?.showModal(); dialog.value?.querySelector<HTMLElement>('[autofocus]')?.focus({ preventScroll: true }) })
-onBeforeUnmount(() => { keys.forEach(dispose => dispose()); dialog.value?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }) })
+onMounted(() => {
+  unregister = registerOverlay?.({ element: () => dialog.value, close: () => emit('close'), submit: () => emit('submit') })
+  dialog.value?.showModal(); dialog.value?.querySelector<HTMLElement>('[autofocus]')?.focus({ preventScroll: true })
+})
+onBeforeUnmount(() => { unregister?.(); keys.forEach(dispose => dispose()); dialog.value?.close(); if (opener?.isConnected) opener.focus({ preventScroll: true }) })
 </script>
 
 <template>
