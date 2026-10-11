@@ -704,6 +704,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCatalogCascadeMetadataAndRouting","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestCatalogDefaultFollowsDispatchLatestVersion","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCatalogDefaultUsesOfferedProfileAndDeterministicAccount","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCatalogPreselectsOnlyRunnableUnreadAccount","tier":"GATED-FULL"}
@@ -7687,6 +7689,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestPlanningLearningSeededActiveTimeSortAndSnapshot","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlanningLearningSnapshotSpeedReproducesFrozenTokens","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestPlanningLearningTruncationKeepsRouteEstimates","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlanningLinkedViewerAndCanonicalAssignee","tier":"GATED-FULL"}
     ,
