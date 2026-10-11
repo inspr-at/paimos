@@ -87,7 +87,7 @@ func (m *Module) handleAgentKeyScopes(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, errKeyExpiry):
 		writeBadRequest(w, errKeyExpiry.Error())
 	case err != nil:
-		writeInternal(w)
+		internalFailure(w, r, "handleAgentKeyScopes", err)
 	case delta != nil:
 		writeJSON(w, http.StatusOK, view.Key)
 	default:
