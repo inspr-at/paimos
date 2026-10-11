@@ -49,8 +49,14 @@ func TestCursorHarnessProbeReusesRecordedLaunchIdentity(t *testing.T) {
 				return nil
 			})
 			seedEvidenceSession(t, owner, agent, "cursor", model, effort)
-			if got := reportEvidence(t, agent, []Observation{{ReportID: EvidenceID("cursor-run-start"), Harness: "cursor", Model: model, Effort: effort, Status: "working"}}, 200); got.Recorded != 1 {
-				t.Fatal("run-start report was not recorded", got)
+			reportRunStart := func() {
+				t.Helper()
+				if got := reportEvidence(t, agent, []Observation{{ReportID: EvidenceID("cursor-run-start"), Harness: "cursor", Model: model, Effort: effort, Status: "working"}}, 200); got.Recorded != 1 {
+					t.Fatal("run-start report was not recorded", got)
+				}
+			}
+			if !withPin {
+				reportRunStart()
 			}
 			inRegistry(t, owner, func(tx pgx.Tx) error {
 				var pins int
@@ -78,6 +84,9 @@ func TestCursorHarnessProbeReusesRecordedLaunchIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			decode[map[string]any](t, &agent, "POST", "/api/models/harness-probes/"+account, string(raw), 200)
+			if withPin {
+				reportRunStart()
+			}
 			page := decode[catalogPage](t, &owner, "GET", "/api/models/catalog?limit=50", "", 200)
 			if page.NextCursor != "" || page.Truncated {
 				t.Fatal("fixture catalog read was incomplete")

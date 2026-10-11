@@ -1,6 +1,8 @@
 # Harness-sourced model catalog probes
 
-The daemon health poll services model discovery even when no run is queued.
+The daemon background capture loop services model discovery even when no run is
+queued. Catalog claims and captures run outside dispatch and health polling,
+sharing the existing capacity capture serialization and owned-process fences.
 `POST /api/models/harness-probes/claim` schedules due enrolled accounts using the
 existing catalog `interval_minutes`. `POST /api/models/refresh` (Check now)
 queues approved accounts immediately, sharing the existing five-minute manual
@@ -29,7 +31,9 @@ as apparently fresh metadata. A complete list records route membership through
 `listed`; partial or failed lists do not establish disappearance. Failures retain
 last good evidence. Native efforts have their original names and no guessed
 numeric scale. Identifier-only Cursor output keeps exact launch IDs and does
-not derive efforts from suffixes. Cursor output examples are parser regressions;
+not derive efforts from suffixes. Identity folding reuses the recorded effort
+from an immutable pin or observation for that exact Cursor launch ID; without
+such a tuple, the ID stays unfolded. Cursor output examples are parser regressions;
 they do not qualify a particular live binary's format or per-effort semantics.
 OpenCode variant keys are not native levels.
 

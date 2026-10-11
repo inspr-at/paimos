@@ -288,7 +288,19 @@ func (m *Module) reportHarnessProbe(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		for _, model := range in.Models {
-			provider, id := CatalogIdentity(model.Provider, harness, model.Model, model.Effort)
+			effort := model.Effort
+			if harness == "cursor" && effort == "" {
+				// An ID-only list does not establish effort. Reuse a recorded
+				// tuple for this exact route, preferring immutable launch pins.
+				err = tx.QueryRow(ctx, `SELECT effort FROM (
+ SELECT effort,0 AS priority FROM model_profiles WHERE harness=$1 AND model=$2
+ UNION ALL SELECT effort,1 AS priority FROM model_observations WHERE harness=$1 AND model=$2
+ ) tuples ORDER BY priority,effort LIMIT 1`, harness, model.Model).Scan(&effort)
+				if err != nil && err != pgx.ErrNoRows {
+					return err
+				}
+			}
+			provider, id := CatalogIdentity(model.Provider, harness, model.Model, effort)
 			if (harness == "codex" && provider != "openai") || (harness == "claude" && provider != "anthropic") {
 				return fail(400, "harness provider mismatch")
 			}

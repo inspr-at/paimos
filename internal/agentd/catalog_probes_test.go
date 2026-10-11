@@ -256,6 +256,7 @@ func TestCatalogPollServicesIdleAccountsAndKeepsQualification(t *testing.T) {
 	if err := s.ProbeOnce(t.Context()); err != nil {
 		t.Fatal(err)
 	}
+	s.runCapacityCaptureTick(t.Context())
 	if got := s.captureCatalog(t.Context(), s.accounts[0], &CodexAdapter{}); got.State != "unsupported" {
 		t.Fatal("unqualified idle Codex launch was enabled")
 	}
