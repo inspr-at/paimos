@@ -221,13 +221,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
         await short.tap()
         await expect(selectedKeys).toHaveCount(0)
         await expect(page).toHaveURL(/\/p\/PHAROS\/tickets$/)
-        await pauseForGesture(page)
-        const again = (await short.boundingBox())!
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: again.x + again.width / 2, y: again.y + again.height / 2 }] })
-        await page.clock.runFor(480)
-        await expect(selectedKeys).toHaveText(['PHAROS-12'])
-        await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-        await page.clock.resume()
+        // Selection mode remains armed with no rows selected; another tap
+        // selects the row again before the original clipped-row scenario.
+        await short.tap()
         await expect(selectedKeys).toHaveText(['PHAROS-12'])
         // Ordinary taps continue to toggle when selection is already active.
         await name.tap()
