@@ -4,11 +4,15 @@ package agentd
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 )
 
 type diagnosticProbeAdapter struct {
@@ -110,5 +114,136 @@ func TestBlockedClaudeAccountsKeepDistinctDiagnostics(t *testing.T) {
 	}
 	if status.AccountStatuses["signed-out"].ReasonDetail != agentsetup.ProbeSignedOut {
 		t.Fatal("sign-out lost its daemon-view diagnostic")
+	}
+}
+
+type isolationProbeAdapter struct {
+	*fakeAdapter
+	statuses    map[string]ProbeStatus
+	probeErr    error
+	timeoutPath string
+	starts      []string
+}
+
+func (a *isolationProbeAdapter) ProbeHarness(ctx context.Context, key string) (ProbeStatus, error) {
+	if key == "bad" && a.timeoutPath != "" {
+		_, _, err := probeRunWith(ctx, a.timeoutPath, nil, nil, func(context.Context, *exec.Cmd) error { return context.DeadlineExceeded })
+		return probeUnavailable, err
+	}
+	if key == "bad" && a.probeErr != nil {
+		return probeUnavailable, a.probeErr
+	}
+	return a.statuses[key], nil
+}
+
+func (a *isolationProbeAdapter) Start(ctx context.Context, r StartRequest, emit func(AdapterEvent)) (Process, error) {
+	a.starts = append(a.starts, r.AccountKey)
+	return a.fakeAdapter.Start(ctx, r, emit)
+}
+
+type isolationProbeAPI struct {
+	*fakeAPI
+	runs      []Run
+	profiles  []Profile
+	reportErr error
+	observed  map[string]bool
+}
+
+func (a *isolationProbeAPI) Queued(context.Context) ([]Run, error)       { return a.runs, nil }
+func (a *isolationProbeAPI) Profiles(context.Context) ([]Profile, error) { return a.profiles, nil }
+func (a *isolationProbeAPI) Probe(_ context.Context, id, _, _ string, available bool) error {
+	a.observed[id] = available
+	if id == "blocked" {
+		return a.reportErr
+	}
+	return nil
+}
+func (a *isolationProbeAPI) Route(ctx context.Context, id, daemon string, accounts []string, units map[string]int64) (Route, error) {
+	route, err := a.fakeAPI.Route(ctx, id, daemon, accounts, units)
+	route.AccountID = accounts[0]
+	if route.AccountID == "blocked" {
+		route.AccountKey = "bad"
+	}
+	return route, err
+}
+
+// Risk: a failed/login-required account at the front of the queue must neither
+// acquire a writer/resource hold nor prevent a sibling's fenced claim/launch.
+func TestProbeFailureMatrixKeepsSiblingDispatchAndRecovers(t *testing.T) {
+	for _, failedHarness := range []string{Claude, Codex, Cursor} {
+		for _, readyHarness := range []string{Claude, Codex, Cursor} {
+			for _, failure := range []string{"probe_failed", "login_required", "harness_failed", "vendor_timeout", "report_refused", "all_failed"} {
+				t.Run(failedHarness+"/"+readyHarness+"/"+failure, func(t *testing.T) {
+					s, base, process := testSupervisor(t)
+					base.run.RequestedAccountID = "account"
+					base.profile.Harness = readyHarness
+					blockedRun := base.run
+					blockedRun.ID, blockedRun.RequestedAccountID, blockedRun.ModelProfileID = "blocked-run", "blocked", "blocked-profile"
+					api := &isolationProbeAPI{fakeAPI: base, runs: []Run{blockedRun, base.run}, profiles: []Profile{{ID: "blocked-profile", Harness: failedHarness, Model: "model"}, base.profile}, observed: map[string]bool{}}
+					s.api = api
+					s.accounts = []EnrolledAccount{{ID: "blocked", Key: "bad", Harness: failedHarness}, {ID: "account", Key: "local", Harness: readyHarness}}
+					adapter := &isolationProbeAdapter{fakeAdapter: &fakeAdapter{proc: process}, statuses: map[string]ProbeStatus{"bad": probeUnavailable, "local": probeOK}}
+					s.adapters = map[string]Adapter{failedHarness: adapter, readyHarness: adapter}
+					wantReason := failure
+					switch failure {
+					case "login_required":
+						adapter.statuses["bad"] = probeAuthFailed
+					case "harness_failed":
+						adapter.probeErr = harnesslaunch.ErrStart
+					case "vendor_timeout":
+						adapter.timeoutPath = fakeVendorPath(t, "codex")
+						wantReason = "harness_failed"
+					case "report_refused":
+						api.reportErr = errors.New("stale account binding rejected")
+						adapter.statuses["bad"] = probeOK
+						wantReason = "probe_failed"
+					case "all_failed":
+						adapter.statuses["local"] = probeAuthFailed
+						wantReason = "probe_failed"
+					}
+					var diagnostics []string
+					s.pollDiagnostic = func(reason string) { diagnostics = append(diagnostics, reason) }
+					if err := s.PollScheduledOnce(t.Context()); (err != nil) != (failure == "report_refused") {
+						t.Fatalf("per-account outcome became global poll failure: %v", err)
+					}
+					status := s.Lifecycle("")
+					if status.AccountStatuses["blocked"].Reason != wantReason || s.accountAvailable("blocked") || api.observed["blocked"] != adapter.statuses["bad"].OK {
+						t.Fatalf("failed account lost its reason/fence: %+v, observations=%v", status, api.observed)
+					}
+					if failure == "all_failed" {
+						if status.Ready || status.AccountStatuses["account"].Reason != "login_required" || base.claims != 0 || len(adapter.starts) != 0 || len(s.runs) != 0 || s.checkout != nil || !slices.Contains(diagnostics, "probe_failed") {
+							t.Fatalf("all failed accounts acquired dispatch authority: %+v", status)
+						}
+						// Model an approved re-link: fresh observation and server ack
+						// clear only this account, then normal dispatch retries it.
+						adapter.statuses["bad"] = probeOK
+						api.runs = []Run{blockedRun}
+						s.wakeQueue()
+						if err := s.PollScheduledOnce(t.Context()); err != nil || !s.accountAvailable("blocked") || s.accountAvailable("account") || base.claims != 1 || !slices.Equal(adapter.starts, []string{"bad"}) {
+							t.Fatalf("account recovery did not retry through dispatch: %v", err)
+						}
+					} else if !status.Ready || status.AccountStatuses["account"].State != "ready" || base.claims != 1 || !slices.Equal(adapter.starts, []string{"local"}) || !slices.Equal(base.routeAccounts, []string{"account"}) || len(diagnostics) != 0 {
+						t.Fatalf("failed %s blocked ready %s: %+v, starts=%v diagnostics=%v", failedHarness, readyHarness, status, adapter.starts, diagnostics)
+					}
+				})
+			}
+		}
+	}
+}
+
+// Inject a command timeout instead of waiting for a real vendor process. A
+// caller cancellation still propagates; the private deadline stays local.
+func TestVendorProbeDeadlineCannotCancelSiblingPolling(t *testing.T) {
+	path := fakeVendorPath(t, "codex")
+	for _, cancelled := range []bool{false, true} {
+		ctx, cancel := context.WithCancel(t.Context())
+		if cancelled {
+			cancel()
+		}
+		_, _, err := probeRunWith(ctx, path, nil, nil, func(context.Context, *exec.Cmd) error { return context.DeadlineExceeded })
+		cancel()
+		if !errors.Is(err, harnesslaunch.ErrStart) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) != cancelled {
+			t.Fatalf("vendor deadline escaped its account or caller cancellation was lost: %v", err)
+		}
 	}
 }

@@ -93,6 +93,55 @@ func (v recoveryAgentFixture) request(t *testing.T) map[string]any {
 	return map[string]any{"request_id": uid(), "expected_revision": d["observed_revision"], "action": "restart"}
 }
 
+func TestQueuedAgentDiagnosisUsesOnlyItsRunAccountAndFreshPairedHost(t *testing.T) {
+	v := recoveryAgent(t)
+	f := v.f
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET process_ownership=NULL,heartbeat_at=NULL WHERE id=$1`, v.session); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='queued',account_id=NULL,requested_account_id=$2,started_at=NULL WHERE id=$1`, v.run, v.account); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_pairing_computers SET display_name='mbp2607' WHERE principal_id=$1`, f.agent.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=clock_timestamp(),last_probe_ok=false,last_probe_failure='auth_failed',allowed_model_profile_ids=ARRAY[$2::uuid] WHERE id=$1`, v.account, v.profile); err != nil {
+			return err
+		}
+		// Other harness/account failures must not be attributed to this run.
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_probe_failure) VALUES($1,$2,'other-codex','codex','fixture',$3,'Other account',clock_timestamp(),false,'unavailable')`, f.person.TenantID, uid(), f.agent.ID)
+		return err
+	})
+	for _, tc := range []struct {
+		probeOK                bool
+		failure, cause, detail string
+	}{
+		{false, "auth_failed", "login_required", "Claude needs signing in on mbp2607."},
+		{false, "unavailable", "probe_failed", "Claude availability could not be confirmed on mbp2607."},
+	} {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_ok=$2,last_probe_failure=$3 WHERE id=$1`, v.account, tc.probeOK, tc.failure)
+			return err
+		})
+		w := f.call(f.person, "GET", v.path+"/recover-agent", nil, "")
+		expect(t, w, 200)
+		got := decode(t, w)
+		if got["cause"] != tc.cause || got["detail"] != tc.detail || got["action"] != "" {
+			t.Fatalf("queued registration lost actual account blocker: %v", got)
+		}
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_pairing_computers SET last_seen_at=clock_timestamp()-interval '3 minutes' WHERE principal_id=$1`, f.agent.ID)
+		return err
+	})
+	w := f.call(f.person, "GET", v.path+"/recover-agent", nil, "")
+	expect(t, w, 200)
+	if got := decode(t, w); got["cause"] != "host_not_reporting" || got["action"] != "" {
+		t.Fatalf("stale host advice guessed live sign-in: %v", got)
+	}
+}
+
 // Exercise the real bearer authentication, paired-resource ceiling and route
 // declarations as well as the handler; injecting a principal would miss them.
 func (v recoveryAgentFixture) runtimeCall(t *testing.T, path string, body any, lease ...string) *httptest.ResponseRecorder {

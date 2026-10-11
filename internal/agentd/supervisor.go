@@ -857,9 +857,6 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 		s.profilePermissions[account.ID] = errors.Is(probeErr, piprobe.ErrPrivateProfile) || errors.Is(dependencyErr, piprobe.ErrPrivateProfile)
 		s.mu.Unlock()
 		s.capacityProbeConnection(account.ID, err == nil && available)
-		if probeErr != nil {
-			failures = append(failures, errors.New("harness failed to start"))
-		}
 		// A harness that fails to start is a per-harness hold reported through
 		// Lifecycle, not a poll failure: siblings keep polling and dispatching.
 		if err != nil {
@@ -874,7 +871,7 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 			failures = append(failures, ErrScope)
 			continue
 		}
-		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) && !errors.Is(err, ErrHostCapacity) {
+		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) && !errors.Is(err, ErrHostCapacity) && !errors.Is(err, errAccountUnavailable) {
 			failures = append(failures, err)
 		}
 	}
@@ -901,9 +898,10 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 	}
 	// Multiple accounts produce at most one line per readiness cause per poll.
 	failed, timedOut, unsettled := false, false, false
-	for _, detail := range s.lifecycleAt("", now).AccountStatuses {
-		failed = failed || detail.Reason == "probe_failed"
-		timedOut = timedOut || detail.Reason == "probe_timeout"
+	lifecycle := s.lifecycleAt("", now)
+	for _, detail := range lifecycle.AccountStatuses {
+		failed = failed || !lifecycle.Ready && detail.Reason == "probe_failed"
+		timedOut = timedOut || !lifecycle.Ready && detail.Reason == "probe_timeout"
 		unsettled = unsettled || detail.Reason == agentsetup.UnsettledPreviousRun
 	}
 	if failed {
@@ -939,6 +937,8 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 		s.pollDiagnostic(reason)
 	}
 }
+
+var errAccountUnavailable = errors.New("no local account enrollment for harness")
 
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if run.RoutineBudget != nil {
@@ -1067,6 +1067,17 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	if err := validQueuedExecutionMode(run, adapter); err != nil {
 		return err
+	}
+	// Defer only this run before allocating routine resources or acquiring a
+	// checkout. The route and final claim still recheck their current authority.
+	accountIDs := make([]string, 0, len(s.accounts))
+	for _, account := range s.accounts {
+		if account.Harness == profile.Harness && s.accountAvailable(account.ID) && (run.AccountID == "" || run.AccountID == account.ID) && (run.RequestedAccountID == "" || run.RequestedAccountID == account.ID) {
+			accountIDs = append(accountIDs, account.ID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		return errAccountUnavailable
 	}
 	budgetBroker, _ := s.api.(RoutineBudgetBroker)
 	routineBudget, err := newRoutineCallBudget(StartRequest{Run: run, Profile: profile,
@@ -1210,15 +1221,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	if len(s.estimates) == 0 {
 		return errors.New("allowance estimates required")
-	}
-	accountIDs := make([]string, 0, len(s.accounts))
-	for _, account := range s.accounts {
-		if account.Harness == profile.Harness && s.accountAvailable(account.ID) && (run.AccountID == "" || run.AccountID == account.ID) && (run.RequestedAccountID == "" || run.RequestedAccountID == account.ID) {
-			accountIDs = append(accountIDs, account.ID)
-		}
-	}
-	if len(accountIDs) == 0 {
-		return errors.New("no local account enrollment for harness")
 	}
 	var route Route
 	if entry != nil {

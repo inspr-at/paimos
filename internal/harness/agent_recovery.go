@@ -6,9 +6,11 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
@@ -88,8 +90,58 @@ func (m *Module) agentDiagnosis(ctx context.Context, tx pgx.Tx, s Session) (Agen
 	out := diagnoseAgent(s, now, paired, keyLive, hostFresh, runStatus)
 	if continued {
 		out.Cause, out.Detail, out.Action = "continuation_queued", "A continuation already exists for this session; it follows normal dispatch.", ""
+	} else if runStatus == "queued" && s.ProcessOwnership == nil && s.ArchivedAt == nil && s.HandedOverToID == nil {
+		// A queued registration has no process/daemon generation yet. Its
+		// principal's paired computer is evidence for dispatch advice only;
+		// it must never confer recovery authority on an unowned process.
+		var host, harness string
+		err := tx.QueryRow(ctx, `SELECT coalesce(nullif(c.display_name,''),q.details->>'computer_name','computer'),
+ EXISTS(SELECT 1 FROM agent_keys k WHERE k.tenant_id=c.tenant_id AND k.id=c.key_id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>$3)),
+ coalesce(c.last_seen_at BETWEEN $3-interval '2 minutes' AND $3,false),mp.harness
+ FROM agent_pairing_computers c
+ JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+ JOIN agent_runs ar ON ar.tenant_id=c.tenant_id AND ar.id=$2 AND ar.agent_principal_id=c.principal_id
+ JOIN model_profiles mp ON mp.tenant_id=ar.tenant_id AND mp.id=ar.model_profile_id
+ WHERE c.principal_id=$1 AND c.state='connected'`, s.AgentPrincipalID, s.RunID, now).Scan(&host, &keyLive, &hostFresh, &harness)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return out, nil
+		}
+		if err != nil {
+			return AgentDiagnosis{}, err
+		}
+		var wait *agentaccounts.CapacityWait
+		if keyLive && hostFresh {
+			wait, err = agentaccounts.WaitForRun(ctx, tx, *s.RunID)
+			if err != nil {
+				return AgentDiagnosis{}, err
+			}
+		}
+		out = diagnoseQueuedAgent(s, now, keyLive, hostFresh, harness, host, wait)
 	}
 	return out, nil
+}
+
+func diagnoseQueuedAgent(s Session, now time.Time, keyLive, hostFresh bool, harness, host string, wait *agentaccounts.CapacityWait) AgentDiagnosis {
+	out := diagnoseAgent(s, now, true, keyLive, hostFresh, "queued")
+	if !keyLive || !hostFresh {
+		return out
+	}
+	name := map[string]string{"claude": "Claude", "codex": "Codex", "cursor": "Cursor", "grok": "Grok", "pi": "pi", "gemini": "Gemini CLI", "opencode": "OpenCode"}[harness]
+	if name == "" {
+		name = "The harness"
+	}
+	out.Cause, out.Detail, out.Action = "dispatch_pending", fmt.Sprintf("%s is waiting for dispatch on %s.", name, host), ""
+	if wait != nil {
+		switch wait.Code {
+		case "sign_in":
+			out.Cause, out.Detail = "login_required", fmt.Sprintf("%s needs signing in on %s.", name, host)
+		case "offline":
+			out.Cause, out.Detail = "probe_failed", fmt.Sprintf("%s availability could not be confirmed on %s.", name, host)
+		default:
+			out.Cause, out.Detail = "dispatch_wait", fmt.Sprintf("%s is waiting for an available account on %s.", name, host)
+		}
+	}
+	return out
 }
 
 func recoveryPerson(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, action string) error {
