@@ -762,6 +762,26 @@
       "table": "model_catalog_facts"
     },
     {
+      "classification": "metadata",
+      "columns": {
+        "account_id": "metadata",
+        "binding_revision": "metadata",
+        "completed_at": "metadata",
+        "daemon_generation": "metadata",
+        "lease_until": "metadata",
+        "model_count": "metadata",
+        "report_digest": "metadata",
+        "request_id": "metadata",
+        "requested_at": "metadata",
+        "state": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "model_harness_probes"
+    },
+    {
       "classification": "personal",
       "columns": {
         "harness": "metadata",

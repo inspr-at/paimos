@@ -169,6 +169,7 @@ type Supervisor struct {
 	power                  Power
 	queuePollMu            sync.Mutex
 	queueNext              time.Time
+	catalogCursor          string // Protected by mu; rotate bounded account pages fairly.
 	queueDirty             atomic.Bool
 	queueWake              chan struct{}
 	chatGate               chatRelayGate

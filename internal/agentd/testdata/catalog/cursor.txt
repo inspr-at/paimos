@@ -1,0 +1,4 @@
+Available models:
+grok-4.7-high - Grok 4.7 High
+grok-4.7-low - Grok 4.7 Low
+gemini-2.5-pro - Gemini 2.5 Pro
