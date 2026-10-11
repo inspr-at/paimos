@@ -865,8 +865,15 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 				return err
 			}
 		}
+		permissionFailure := readFailure != nil && metricError(readFailure, at).Reason == "actions_read_missing"
 		for _, id := range failedRuns {
-			if _, err = tx.Exec(ctx, `UPDATE delivery_metric_runs SET jobs_failed_at=$3 WHERE repository=$1 AND run_id=$2 AND attempt=1`, source.Repository, id, at); err != nil {
+			// A missing App permission is repository-wide. The source's 30-minute
+			// retry owns this delay, rather than each run's ordinary retry hour.
+			var failedAt *time.Time
+			if !permissionFailure {
+				failedAt = &at
+			}
+			if _, err = tx.Exec(ctx, `UPDATE delivery_metric_runs SET jobs_failed_at=$3 WHERE repository=$1 AND run_id=$2 AND attempt=1`, source.Repository, id, failedAt); err != nil {
 				return err
 			}
 		}
@@ -898,7 +905,14 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 		}
 		var readError []byte
 		if readFailure != nil {
-			readError, _ = json.Marshal(metricError(readFailure, at))
+			readError, err = json.Marshal(metricError(readFailure, at))
+			if err != nil {
+				return err
+			}
+			if permissionFailure {
+				retry := at.Add(30 * time.Minute)
+				result.RetryAt = &retry
+			}
 		}
 		if _, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1,last_read_error=$3,backfill_retry_at=$4,backfill_pending=$5 WHERE project_id=$1`, project, raw, readError, result.RetryAt, result.State != "done"); err != nil {
 			return err

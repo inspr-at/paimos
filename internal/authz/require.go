@@ -510,6 +510,12 @@ func ProjectStartReasonTx(ctx context.Context, tx pgx.Tx, project string) (strin
 // RequireProjectAdminTx supplements nodes.write for project deletion. Grants
 // are live; a project Admin or workspace Owner/Admin supplies the admin role.
 func RequireProjectAdminTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {
+	if p.Kind == tenant.Agent && p.KeyCreatorID != "" {
+		creator := tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person}
+		if err := RequireProjectAdminTx(ctx, tx, creator, project); err != nil {
+			return err
+		}
+	}
 	if err := RequireTx(ctx, tx, p, "nodes.write", Scope{ProjectID: project}); err != nil {
 		return err
 	}

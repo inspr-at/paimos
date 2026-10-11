@@ -101,9 +101,30 @@ func TestDeliveryHistoryPermissionRetryCheckAgainAndTenantIsolation(t *testing.T
 	// Valid signed events update the repository timestamp even without metrics;
 	// an unauthenticated request cannot stamp it.
 	f.at = f.at.Add(time.Minute)
+	f.gh.pulls[7] = f.pull()
 	f.webhook(t, "pull_request", "opened", "history-receipt", 204)
 	if at := historySource(t, f).LastEventAt; at == nil || !at.Equal(f.at) {
 		t.Fatal("accepted webhook timestamp missing")
+	}
+	// A permission failure among successful job reads still owns the same
+	// 30-minute source retry, rather than waiting the ordinary job retry hour.
+	seedBareRuns(t, f, 2)
+	g.respond = func(path string) (any, error) {
+		if strings.Contains(path, "/1002/") {
+			return nil, &crossreview.GitHubHTTPError{StatusCode: 403, ActionsReadRequired: true}
+		}
+		return githubJobsBody(f.at.Add(-time.Hour), 30, nil), nil
+	}
+	var jobs BackfillResult
+	f.call(t, f.person, "POST", path+"/backfill", map[string]any{}, 200, &jobs)
+	if jobs.Jobs != 1 || jobs.RetryAt == nil || !jobs.RetryAt.Equal(f.at.Add(30*time.Minute)) || historySource(t, f).LastReadError.Reason != "actions_read_missing" {
+		t.Fatalf("partial permission retry: %+v", jobs)
+	}
+	f.at = f.at.Add(30 * time.Minute)
+	g.respond = func(string) (any, error) { return githubJobsBody(f.at.Add(-time.Hour), 30, nil), nil }
+	f.call(t, f.person, "POST", path+"/backfill", map[string]any{}, 200, &jobs)
+	if jobs.State != "done" || jobs.Jobs != 1 {
+		t.Fatalf("job permission retry did not run at deadline: %+v", jobs)
 	}
 }
 
