@@ -396,7 +396,9 @@
         "web/src/components/agents/AgentChores.vue",
         "web/src/components/agents/DecisionDeskPanel.vue",
         "web/src/components/header/DeskPreview.vue",
-        "web/src/components/settings/models/ModelOutdatedSheet.vue"
+        "web/src/components/settings/models/ModelOutdatedSheet.vue",
+        "web/src/components/settings/models/ModelLineRow.vue",
+        "web/src/components/settings/models/ModelDiscovery.vue"
       ]
     },
     {

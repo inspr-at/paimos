@@ -544,20 +544,24 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const themeApply = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/theme-apply.spec.ts')
   assert.ok(themeApply && themeApply.listedTests === 10, 'Theme application regressions must remain in the gate')
   assert.ok(gated.some(spec => spec.file === themeApply.file), 'Theme application must remain gated')
+  // AEON-1163 runs the approved design's check against the built Model registry in its own spec (with the
+  // screenshots moved out of models-registry.spec.ts); charge its weight like the specs above.
+  const registryShots = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/models-registry-shots.spec.ts')
+  assert.ok(registryShots && gated.some(spec => spec.file === registryShots.file), 'The registry design check must remain in the gate')
   const priorGate = {
     ...real,
     groups: real.groups.filter(group => group !== attention).map(group => ({
       ...group,
-      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply).map(spec =>
+      specs: group.specs.filter(spec => !deskFiles.has(spec.file) && spec !== themeApply && spec !== registryShots).map(spec =>
         spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } :
           spec === noShift ? { ...spec, weightSeconds: noShiftOnMain } : spec),
     })),
   }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth + deskGrowth + themeApply.weightSeconds + registryShots.weightSeconds
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover and theme application specs')
+    'expanded gate exceeds the prior estimate plus the attention, autopilot, cutover, theme application and registry design-check specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {
