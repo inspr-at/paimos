@@ -728,14 +728,14 @@ paths:
                       body: {type: string, maxLength: 16000}
       responses:
         '200':
-          description: Waiting or completed action; waiting never means success. Replays preserve the original action.
+          description: "Waiting or completed action; waiting never means success. Unconfirmed stopped sessions retain a two-hour busy hold from the later of stopped_at and heartbeat_at. Stale orphaned runs can be released with an audit event under current person authority, retaining ownership and accounting evidence. Replays preserve the original action."
           content:
             application/json:
               schema: {$ref: '#/components/schemas/WorkLifecycleAction'}
         '400': {description: Invalid request or bounded scope exceeded}
         '403': {description: Person with current nodes.write and any required harness.control/run.create/work_orders.write permissions}
         '408': {description: Request body read timed out}
-        '409': {description: 'Stale preview, another pending intent, or a run without cooperative handover delivery'}
+        '409': {description: 'Stale preview, another pending intent, or young work without cooperative delivery. Work holds name visible session, run and work-order IDs, labels and ages; holder details are bounded.'}
   /nodes/{nodeId}/work-lifecycle/{actionId}:
     parameters:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -757,11 +757,11 @@ paths:
       - {name: actionId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: continueWorkLifecycle
-      summary: Recheck permissions and confirmed stops, then apply the saved intent atomically
+      summary: Recheck permissions and work holds, then apply the saved intent atomically
       security: [{session: []}]
       responses:
         '200':
-          description: Waiting or completed; expired cooperative handovers are retried without force or releasing the stop fence. Repeat requests cannot create children or cancel a leaf twice
+          description: "Waiting or completed; expired cooperative deliveries are retried without force. Live work and young uncertain closures retain their holds; a two-hour expired stop is not process-exit evidence. Repeat requests cannot create children or cancel a leaf twice."
           content:
             application/json:
               schema: {$ref: '#/components/schemas/WorkLifecycleAction'}

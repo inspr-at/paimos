@@ -65,11 +65,12 @@ func (s *waitSnapshot) load(ctx context.Context, tx pgx.Tx) error {
 	if err != nil {
 		return err
 	}
-	// Count every active door, including retired siblings still holding a
-	// confirmed pool's slots. The two existing occupancy views share one scan.
+	// Count every active door and unconfirmed lifecycle release, including
+	// retired siblings still holding a confirmed pool's slots. Match admission.
 	rows, err := tx.Query(ctx, `SELECT r.account_id::text,a.harness,a.quota_pool_fingerprint,count(*)
  FROM agent_runs r JOIN agent_accounts a ON a.tenant_id=r.tenant_id AND a.id=r.account_id
- WHERE r.account_id IS NOT NULL AND r.status IN ('queued','starting','running','waiting')
+ WHERE r.account_id IS NOT NULL AND (r.status IN ('queued','starting','running','waiting')
+  OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')
  GROUP BY r.account_id,a.harness,a.quota_pool_fingerprint LIMIT $1`, maxWaitAccounts+1)
 	if err != nil {
 		return err
