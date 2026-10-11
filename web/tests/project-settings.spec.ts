@@ -193,6 +193,10 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       await expect(page.getByLabel('Name', { exact: true })).toBeEnabled()
       await expect(page.getByLabel('Group', { exact: true })).toBeEnabled()
       async function capture(state: string) {
+        // Dismiss completed action messages through their real controls before
+        // recording the next reference state; no timers or hidden DOM edits.
+        for (let count = 0; count < 10 && await page.locator('.toast-close').count(); count++) await page.locator('.toast-close').first().click()
+        await expect(page.locator('.toast')).toHaveCount(0)
         const checks = await checkProjectSettings(page, `${state}/${width}/${theme}`, width < 600)
         for (const check of checks) expect(check.passed, check.message).toBe(true)
         lines.push(`${state}-${width}-${theme}: ${checks.length} approved audit checks PASS`)

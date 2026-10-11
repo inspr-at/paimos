@@ -231,7 +231,9 @@ form { min-width: 0; } form:focus { outline: none; }
 .foot-lines { display: grid; gap: 8px; padding-top: 14px; }
 .foot { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
 .foot > svg { flex: none; margin-top: 2px; }
-.link-btn { display: inline-flex; align-items: center; justify-content: center; gap: 2px; color: var(--ink-2); }
+.link-btn { display: inline-flex; align-items: center; justify-content: center; gap: 2px; border: 0; padding: 0; background: none; color: var(--teal-ink); font-family: inherit; font-size: 12.5px; font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.link-btn.quiet { color: var(--ink-2); font-weight: 500; text-decoration-color: var(--line-2); }
+.link-btn.quiet:hover { color: var(--teal-ink); text-decoration-color: currentColor; }
 .ro-note { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; padding: 8px 12px; border-radius: 10px; background: var(--surface-sunken); font-size: 12.5px; color: var(--ink-2); }
 .ro-note > svg { flex: none; }
 .life-r { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; column-gap: 12px; min-height: 70px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
