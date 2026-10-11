@@ -7,7 +7,7 @@
 import { computed, ref, watch } from 'vue'
 import { HARNESS_NAME } from '../../lib/capacity'
 import {
-  boostNumber, boostSummary, dailyBar, detailHeadline, makeBoost, paceSummary, pct, resetsLine, stateWords, todayLine, typedPercent, typedPoints, weekParts,
+  boostNumber, boostSummary, dailyBar, detailHeadline, makeBoost, paceSummary, pct, resetsLine, stateWords, storedPace, todayLine, typedPercent, typedPoints, weekParts,
   type DailySettings, type DailyView, type EnteredAs,
 } from '../../lib/dailyLimits'
 import type { DialFold } from '../../lib/dialPrefs'
@@ -53,8 +53,8 @@ function paceCommit() {
   const value = typedPoints(paceDraft.value)
   paceEditing.value = false
   if (value === undefined) { paceNote.value = 'Whole numbers from 1 to 50.'; return }
-  // The default is followed, not copied: the person's own default may change.
-  const stored = value === props.defaultPoints ? null : value
+  // The default is followed, not copied: the person's own default may change. The same rule as Settings › Capacity.
+  const stored = storedPace(settings.value.pace, { mode: 'own', points: value }, props.defaultPoints).points_per_day
   if (stored !== settings.value.pace.points_per_day) change({ pace: { ...settings.value.pace, points_per_day: stored } })
 }
 function paceCancel() { paceEditing.value = false; paceNote.value = '' }

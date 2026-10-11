@@ -4,7 +4,7 @@ paths:
   /model-preferences/simple:
     get:
       operationId: getSimpleModelPreferences
-      description: 'Requires models.read. A bounded repeatable-read snapshot of first-build picks, overrides, locks, pending lines and qualified fallback evidence. Uses the canonical caller only. revision is the selected preference profile revision; rules_revision is the workspace rule write token. Stored expert orders and settings remain active.'
+      description: 'Requires models.read. A bounded repeatable-read snapshot of first-build picks, overrides, locks, pending lines and qualified fallback evidence. Uses the canonical caller only. revision is the selected preference profile revision; rules_revision is the workspace rule write token. Rows include their fallback chain, ending and attributed workspace never rules. Workspace reads include explicit situation orders; Quick jobs uses the dispatch resolver. Unavailable entries identify one cause each, with privacy-filtered reset times. Stored expert orders and settings remain active.'
       security: *auth
       parameters:
         - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
@@ -161,18 +161,58 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
         '428': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
+  /model-preferences/orders/{column}/first/never/{line}:
+    parameters:
+      - {name: column, in: path, required: true, schema: {type: string, maxLength: 64}}
+      - {name: line, in: path, required: true, schema: {type: string, maxLength: 128}}
+    put:
+      operationId: putModelNeverRule
+      security: *auth
+      description: 'Person-only workspace model_prefs.manage, checked under the tenant fence. Sets a workspace Not-allowed rule for every order on this row, including personal orders. Preserves other rules and records who, when and why. revision is rules_revision from /simple.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [why, revision]
+              properties:
+                why: {type: string, minLength: 1, maxLength: 1000}
+                revision: {type: integer, format: int64, minimum: 0}
+      responses:
+        '200': {description: 'Updated rules and revision.', content: {application/json: {schema: {$ref: '#/components/schemas/ModelRules'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteModelNeverRule
+      security: *auth
+      description: 'Person-only workspace model_prefs.manage under the tenant fence. Lifts this Not-allowed rule and preserves other rules. revision is the current workspace rules_revision.'
+      parameters:
+        - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        '200': {description: 'Updated rules and revision.', content: {application/json: {schema: {$ref: '#/components/schemas/ModelRules'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
   /model-preferences/orders/{column}/{situation}:
     put:
       operationId: putModelBoardOrder
       security: *auth
-      description: "One revision-checked write and event. Personal Not allowed is additive to rules. Agents cannot write."
+      description: "Rank is the pick followed by its chain. Per-line efforts and end are optional; omitted values preserve existing settings. Personal writes on a workspace row create only the canonical caller's own order; locked columns return 423. Agents cannot write."
       parameters:
         - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
         - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
         - {name: column, in: path, required: true, schema: {type: string, maxLength: 64}}
-        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, fix, stuck]}}
+        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, small, fix, stuck, review]}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardOrderWrite'}}}}
       responses:
+        '423': {description: 'The workspace locks this column and its order.'}
         '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardWriteResult'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -184,14 +224,15 @@ paths:
     delete:
       operationId: resetModelBoardOrder
       security: *auth
-      description: "Reset to the inherited order with the profile revision, preserving the separate column thinking override."
+      description: "Reset the row to inheritance, or a situation to same as the row (review to automatic), using the selected profile revision. Column thinking is preserved. Personal changes on a workspace row create or reset only the canonical caller's own order; workspace locks return 423."
       parameters:
         - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
         - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
         - {name: column, in: path, required: true, schema: {type: string, maxLength: 64}}
-        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, fix, stuck]}}
+        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, small, fix, stuck, review]}}
         - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
       responses:
+        '423': {description: 'The workspace locks this column and its order.'}
         '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardWriteResult'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -209,9 +250,10 @@ paths:
         - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
         - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
         - {name: column, in: path, required: true, schema: {type: string, maxLength: 64}}
-        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, fix, stuck]}}
+        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, small, fix, stuck, review]}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelColumnThinkingWrite'}}}}
       responses:
+        '423': {description: 'The workspace locks this column and its order.'}
         '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardWriteResult'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -362,8 +404,10 @@ components:
     ModelBoardOrderWrite:
       type: object
       additionalProperties: false
-      required: [rank, not, revision]
+      required: [rank, revision]
       properties:
+        efforts: {type: object, maxProperties: 512, additionalProperties: {type: string, maxLength: 32}, description: 'Native effort for ranked lines only, from their registered routes. The encoded stored map is bounded to 32 KiB. Omitted preserves matching stored entries; an empty object restores automatic levels.'}
+        end: {type: string, enum: [wait, default, row, auto], description: 'Rows use wait or default (the Default itself uses wait); small/fix/stuck use row or wait and review uses auto or wait. Omitted preserves the current ending.'}
         rank: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
         not: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
         revision: {type: integer, format: int64, minimum: 0}
@@ -432,15 +476,68 @@ components:
       allOf:
         - {$ref: '#/components/schemas/ModelSimplePick'}
         - type: object
-          required: [column, mine, lock]
+          required: [column, mine, lock, chain, end, never]
           properties:
+            chain: {type: array, maxItems: 512, items: {$ref: '#/components/schemas/ModelSimpleStep'}}
+            end: {type: string, enum: [wait, default]}
+            never: {type: array, maxItems: 512, items: {$ref: '#/components/schemas/ModelSimpleNever'}}
             column: {type: string}
             mine: {type: boolean}
             lock: {type: [object, 'null'], required: [by, at, reason], properties: {by: {type: [string, 'null'], format: uuid}, at: {type: [string, 'null'], format: date-time}, reason: {type: string}}}
+    ModelSimpleStep:
+      type: object
+      required: [line, effort]
+      properties:
+        line: {type: string, maxLength: 128}
+        effort: {type: [string, 'null'], maxLength: 32}
+    ModelSimpleNever:
+      type: object
+      required: [line, by, at, why]
+      properties:
+        line: {type: string, maxLength: 128}
+        by: {type: [string, 'null'], format: uuid}
+        at: {type: [string, 'null'], format: date-time}
+        why: {type: string, maxLength: 1000}
+    ModelSimpleSituation:
+      allOf:
+        - {$ref: '#/components/schemas/ModelSimplePick'}
+        - type: object
+          required: [chain, end]
+          properties:
+            chain: {type: array, maxItems: 512, items: {$ref: '#/components/schemas/ModelSimpleStep'}}
+            end: {type: string, enum: [wait, row, auto]}
     ModelSimplePreferences:
       type: object
-      required: [all, exceptions, reviews, next, unavailable, new_lines, revision, rules_revision, person_id]
+      required: [all, exceptions, reviews, next, unavailable, new_lines, quick, outdated, revision, rules_revision, person_id]
       properties:
+        situations:
+          type: object
+          maxProperties: 256
+          description: 'Explicit workspace situation orders, included only for for=default. Missing cells follow the row or automatic review.'
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            properties:
+              small: {$ref: '#/components/schemas/ModelSimpleSituation'}
+              fix: {$ref: '#/components/schemas/ModelSimpleSituation'}
+              stuck: {$ref: '#/components/schemas/ModelSimpleSituation'}
+              review: {$ref: '#/components/schemas/ModelSimpleSituation'}
+        outdated:
+          type: object
+          required: [count, named, uses]
+          description: 'Non-retired registered older versions with a newer active successor, grouped across routes and levels. Named entries use representative immutable profile ids. Uses counts explicit pinned settings in the workspace and canonical caller scopes; latest-line orders already follow the successor. Detailed lifecycle facts remain on the catalog API.'
+          properties:
+            count: {type: integer, minimum: 0, maximum: 512}
+            named: {type: array, maxItems: 512, items: {type: object, required: [line, successor], properties: {line: {type: string, format: uuid}, successor: {type: string, format: uuid}}}}
+            uses: {type: integer, minimum: 0, maximum: 10000}
+        quick:
+          allOf:
+            - {$ref: '#/components/schemas/ModelSimplePick'}
+            - type: object
+              required: [harness, trace]
+              properties:
+                harness: {type: [string, 'null']}
+                trace: {type: array, maxItems: 512, items: {$ref: '#/components/schemas/ModelSimpleTrace'}}
         all: {$ref: '#/components/schemas/ModelSimpleRow'}
         exceptions: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/ModelSimpleRow'}}
         reviews: {type: object, required: [mode], properties: {mode: {type: string, const: cross_family}}}
@@ -455,16 +552,20 @@ components:
             trace: {type: array, items: {$ref: '#/components/schemas/ModelSimpleTrace'}}
         unavailable:
           type: array
-          maxItems: 257
+          maxItems: 1542
           items:
             type: object
-            required: [column, line, runs_instead, effort, reason, ticket]
+            required: [column, line, runs_instead, effort, reason, ticket, cause, until, route, waits]
             properties:
               column: {type: string}
               line: {type: string}
               runs_instead: {type: [string, 'null']}
               effort: {type: [string, 'null']}
-              reason: {type: string}
+              cause: {type: string, enum: [daily_cap, paused, no_tools, no_account, retired, residency]}
+              until: {type: [string, 'null'], format: date-time}
+              route: {type: [string, 'null'], description: 'Harness of the skipped route, absent when no registered route exists.'}
+              waits: {type: boolean, description: 'No model in this row order can run now.'}
+              reason: {type: string, deprecated: true, description: 'Compatibility explanation for this cause. New clients use cause, until and route.'}
               ticket: {type: [string, 'null']}
         new_lines: {type: array, maxItems: 512, items: {type: object, required: [line, can_do], properties: {line: {type: string}, can_do: {type: array, items: {type: string}}}}}
         revision: {type: integer, format: int64}

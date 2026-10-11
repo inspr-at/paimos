@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // ModelsForRun projects the same catalog as /agent-accounts/catalog, scoped to
@@ -102,6 +103,7 @@ type CatalogEffort struct {
 type catalogProfile struct {
 	ID, Harness, Model, Family, Effort, Version string
 	Priority                                    *int
+	NativeLevel                                 *int
 }
 
 func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
@@ -207,12 +209,20 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, now time.Time) ([]catalogProfile, error) {
 	// Use current model pauses and the review qualification rule. Catalog reads
 	// never initialize profiles or grant models dispatch authority.
+	var large bool
+	if err := tx.QueryRow(ctx, `SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles WHERE enabled LIMIT 513) p`).Scan(&large); err != nil {
+		return nil, err
+	}
+	if large {
+		return nil, fail(http.StatusRequestEntityTooLarge, "model catalog input limit exceeded")
+	}
 	rows, err := tx.Query(ctx, `
-		SELECT p.id::text,p.harness,p.model,p.family,p.effort,p.version
+		SELECT p.id::text,p.harness,p.model,p.family,p.effort,p.version,coalesce(p.registered_effort_level,d.effort_level)
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id LEFT JOIN (`+ModelPausesSQL+`) r
 		  ON r.tenant_id=p.tenant_id AND r.profile_id=p.id
 		LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
-		WHERE p.enabled
+        WHERE p.enabled
+          AND NOT EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at <= $3))
 		  AND p.model NOT IN ('gpt-6-terra','gpt-6.1-astra','gpt-6.1-luna','gpt-6.1-terra')
 		  AND (o.suppressed_until IS NULL OR o.suppressed_until <= $3)
 		  AND ($1 <> 'review-gate-security' OR p.family <> $4)
@@ -226,7 +236,7 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 	profiles := []catalogProfile{}
 	for rows.Next() {
 		var p catalogProfile
-		if err := rows.Scan(&p.ID, &p.Harness, &p.Model, &p.Family, &p.Effort, &p.Version); err != nil {
+		if err := rows.Scan(&p.ID, &p.Harness, &p.Model, &p.Family, &p.Effort, &p.Version, &p.NativeLevel); err != nil {
 			return nil, err
 		}
 		family := harnesslaunch.ModelFamily(p.Harness, p.Model)
@@ -235,18 +245,24 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 		}
 		profiles = append(profiles, p)
 	}
-	return profiles, rows.Err()
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	return profiles, nil
 }
 
 // catalogPriorities ranks profiles by the workspace Models walk for the role:
 // its row and situation order, then on each step the profiles dispatch would
 // run, chosen by the same rule (modelprefs.RouteCandidates) over the line's
-// whole registry: the latest active model version only, at the step's effort
+// enabled registry: the latest active model version only, at the step's effort
 // or the nearest level, ties up; reviews take the highest. A candidate the
 // catalog does not offer (paused, suppressed or unqualified) preselects
 // nothing on that step, since dispatch skips it rather than run an older
-// version. Quick jobs and an Automatic review keep no saved order, so nothing
-// is preselected. A board or registry beyond its bounds preselects nothing
+// version. Quick jobs have no preselection; Automatic reviews retain their
+// family-order hint at each route's highest native effort. A board or registry
+// beyond its bounds preselects nothing
 // rather than failing the catalog.
 func catalogPriorities(ctx context.Context, tx pgx.Tx, role, authorFamily, project string, now time.Time, profiles []catalogProfile) error {
 	q := modelprefs.BoardQuery{Column: "other", Situation: "first"}
@@ -258,7 +274,8 @@ func catalogPriorities(ctx context.Context, tx pgx.Tx, role, authorFamily, proje
 	case "review-gate", "review-gate-security":
 		q.Review, q.AuthorFamily = true, authorFamily
 	}
-	s, err := modelprefs.LoadBoardRouting(ctx, tx, nil, project)
+	principal, _ := tenant.PrincipalFrom(ctx)
+	s, err := modelprefs.LoadBoardRouting(ctx, tx, modelprefs.PrefsPerson(ctx, tx, principal), project)
 	if errors.Is(err, modelprefs.ErrBoardBounds) {
 		return nil
 	}
@@ -277,6 +294,24 @@ func catalogPriorities(ctx context.Context, tx pgx.Tx, role, authorFamily, proje
 		offered[p.ID] = i
 	}
 	d := modelprefs.ResolveModelsBoard(s, q)
+	if q.Review && d.Automatic {
+		ranks := reviewgate.ReviewFamilyRanks()
+		ordered := slices.Clone(profiles)
+		sort.SliceStable(ordered, func(i, j int) bool {
+			if ranks[ordered[i].Family] != ranks[ordered[j].Family] {
+				return ranks[ordered[i].Family] < ranks[ordered[j].Family]
+			}
+			return ordered[i].Model < ordered[j].Model
+		})
+		seen := map[string]bool{}
+		for _, profile := range ordered {
+			line, _ := modelprefs.ModelsLine(profile.Family, profile.Harness, profile.Model)
+			if !seen[line] {
+				d.Steps = append(d.Steps, modelprefs.BoardStep{Line: line, Level: reviewgate.ReviewMinEffortLevel})
+				seen[line] = true
+			}
+		}
+	}
 	for n, step := range d.Steps {
 		line := lines[step.Line]
 		if line == nil || slices.Contains(d.Not, step.Line) {
@@ -299,7 +334,7 @@ type catalogLine struct {
 	routes []modelprefs.RouteProfile
 }
 
-// catalogRouteLines reads the registry dispatch walks: every profile by its
+// catalogRouteLines reads the registry dispatch walks: enabled profiles by their
 // Models line in registry order, active when enabled and not retired, within
 // the same 512-profile bound.
 func catalogRouteLines(ctx context.Context, tx pgx.Tx, now time.Time) (map[string]*catalogLine, error) {
@@ -307,6 +342,7 @@ func catalogRouteLines(ctx context.Context, tx pgx.Tx, now time.Time) (map[strin
 		SELECT p.id::text,p.harness,p.model,p.family,p.effort,coalesce(p.registered_effort_level,d.effort_level)::integer,
 		  p.enabled AND NOT EXISTS (SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=$1))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+		WHERE p.enabled
 		ORDER BY p.slug,p.version,p.id LIMIT 513`, now)
 	if err != nil {
 		return nil, err

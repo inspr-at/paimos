@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"sort"
 	"testing"
@@ -139,6 +140,27 @@ func planningFixtureProjection(t *testing.T, body []byte) map[string]any {
 	projection := map[string]any{}
 	for _, item := range page.Items {
 		planning := item["planning"].(map[string]any)
+		// Models revisions include tenant-owned identities and stamps. Validate
+		// the opaque token before comparing the complete planning content. Live
+		// change/equality assertions remain in TestListPlanningColumns.
+		normalizeRoute := func(raw any) {
+			if raw == nil {
+				return
+			}
+			route, ok := raw.(map[string]any)
+			if !ok {
+				t.Fatalf("invalid planning route: %T", raw)
+			}
+			revision, ok := route["revision"].(string)
+			if !ok || !regexp.MustCompile(`^[0-9a-f]{8}$`).MatchString(revision) {
+				t.Fatalf("invalid routing revision: %v", route["revision"])
+			}
+			route["revision"] = "revision"
+		}
+		normalizeRoute(planning["route"])
+		if snapshot, ok := planning["snapshot"].(map[string]any); ok {
+			normalizeRoute(snapshot["route"])
+		}
 		models, _ := planning["models"].([]any) // Absent on a ticket with no sessions; absence stays in the raw comparison.
 		for _, model := range models {
 			sessions := model.(map[string]any)["sessions"].([]any)

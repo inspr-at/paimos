@@ -457,3 +457,139 @@ func expectedPreferencePerson(r *http.Request, level string) (string, error) {
 	}
 	return strings.ToLower(values[0]), nil
 }
+
+// A row-level never rule belongs to the workspace, even when a person has
+// their own order. Keep other pins and never rules untouched by these writes.
+func (m *Module) writeNeverRule(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	if p.Kind != tenant.Person {
+		writePreferenceError(w, prefFail(403, "person_required"))
+		return
+	}
+	column, line := r.PathValue("column"), r.PathValue("line")
+	if len(column) > 64 || len(line) > 128 || r.URL.Query().Get("project_id") != "" {
+		writePreferenceError(w, prefFail(400, "invalid_rule_scope"))
+		return
+	}
+	var in struct {
+		Why      string `json:"why"`
+		Revision *int64 `json:"revision"`
+	}
+	if r.Method == http.MethodDelete {
+		revision, err := requestedRevision(r)
+		if err != nil {
+			writePreferenceError(w, err)
+			return
+		}
+		in.Revision = &revision
+	} else {
+		if err := workBody(w, r); err != nil {
+			writePreferenceError(w, err)
+			return
+		}
+		if err := decodeJSON(w, r, &in); err != nil {
+			writePreferenceError(w, err)
+			return
+		}
+		in.Why = strings.TrimSpace(in.Why)
+		if in.Why == "" || !boundedText(in.Why, 1000) || strings.ContainsRune(in.Why, '\x00') {
+			writePreferenceError(w, prefFail(422, "invalid_rule"))
+			return
+		}
+	}
+	if in.Revision == nil || *in.Revision < 0 {
+		writePreferenceError(w, prefFail(400, "revision_required"))
+		return
+	}
+	var out rulesDocument
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		ctx := r.Context()
+		if _, err := boardWriteAuthority(ctx, tx, r, p, "default", ""); err != nil {
+			return err
+		}
+		s, err := modelprefs.LoadBoard(ctx, tx, nil, "")
+		if err != nil {
+			return err
+		}
+		if !validBoardColumn(s, column) {
+			return prefFail(422, "unknown_column")
+		}
+		revision, err := ruleRevision(ctx, tx, "workspace", "")
+		if err != nil {
+			return err
+		}
+		if revision != *in.Revision {
+			return prefFail(409, "stale_revision")
+		}
+		var before *modelprefs.Rule
+		count := 0
+		for _, rule := range s.Rules {
+			if rule.Column != column {
+				continue
+			}
+			count++
+			if rule.Line == line {
+				if rule.Lock != "not" {
+					return prefFail(409, "rule_conflict")
+				}
+				copy := rule
+				before = &copy
+			}
+		}
+		if r.Method == http.MethodDelete {
+			if _, err := tx.Exec(ctx, `DELETE FROM model_rules WHERE scope='workspace' AND column_key=$1 AND line=$2 AND lock='not' AND moved_to_models IS NOT TRUE`, column, line); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM model_row_constraints WHERE scope='workspace' AND column_key=$1 AND line=$2 AND kind='never'`, column, line); err != nil {
+				return err
+			}
+		} else {
+			c, err := loadBoardCatalog(ctx, tx)
+			if err != nil {
+				return err
+			}
+			c = modelsWriteCatalog(c)
+			if _, ok := c.profiles[line]; !ok {
+				return prefFail(422, "unknown_line")
+			}
+			if before == nil && (count >= 512 || len(s.Rules) >= 4096) {
+				return modelprefs.ErrBoardBounds
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM model_rules WHERE scope='workspace' AND column_key=$1 AND line=$2 AND lock='not' AND moved_to_models IS NOT TRUE`, column, line); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM model_row_constraints WHERE scope='workspace' AND column_key=$1 AND line=$2 AND kind='never'`, column, line); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO model_row_constraints(tenant_id,scope,column_key,line,kind,why,set_by) VALUES($1,'workspace',$2,$3,'never',$4,$5)`, p.TenantID, column, line, in.Why, p.ID); err != nil {
+				return err
+			}
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO model_rule_revisions(tenant_id,scope,scope_key,revision) VALUES($1,'workspace','',1) ON CONFLICT(tenant_id,scope,scope_key) DO UPDATE SET revision=model_rule_revisions.revision+1 RETURNING revision`, p.TenantID).Scan(&out.Revision); err != nil {
+			return err
+		}
+		after, err := modelprefs.LoadBoard(ctx, tx, nil, "")
+		if err != nil {
+			return err
+		}
+		out.Rules = after.Rules
+		// Audit the affected row, like the retained rule editor. The read
+		// response can contain all workspace rows; an event stays bounded.
+		audit := rulesDocument{Revision: out.Revision, Rules: []modelprefs.Rule{}}
+		for _, rule := range after.Rules {
+			if rule.Column == column {
+				audit.Rules = append(audit.Rules, rule)
+			}
+		}
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "model.rules_changed", Before: map[string]any{"column": column, "line": line, "rule": before}, After: audit})
+		return err
+	})
+	if err != nil {
+		writeBoardError(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, 200, out)
+}

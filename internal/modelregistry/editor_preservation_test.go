@@ -210,13 +210,12 @@ func TestEditorRetiredKindUndoAndEventFailureRollback(t *testing.T) {
 			t.Fatal("failure did not reach injected event insert", err)
 		}
 	}
-	// The retired ladder writer never reaches the event insert: 410, no change.
-	ladder := h.ladder(t, p, "build")
-	routesBefore := modelsState(t, p)
-	retiredLadderWrite(t, h, p, "/api/models/routes?role=build", "[]", map[string]string{"If-Match": routeEditToken("build", ladder.Routes)})
-	var calls int
-	if err := adminPool.QueryRow(t.Context(), `SELECT last_value FROM editor_event_probe`).Scan(&calls); err != nil || calls != 2 || modelsState(t, p) != routesBefore {
-		t.Fatal("retired ladder writer reached the event insert or changed state", err, calls)
+	// The retired ladder writer answers before any resource or event write.
+	routesBefore := catalogSetupState(t, p)
+	editorRetired(t, h.call(t, p, "PUT", "/api/models/routes?role=build", "[]", map[string]string{"If-Match": `"` + strings.Repeat("d", 64) + `"`}))
+	var probes int
+	if err := adminPool.QueryRow(t.Context(), `SELECT last_value FROM editor_event_probe`).Scan(&probes); err != nil || probes != 2 || catalogSetupState(t, p) != routesBefore {
+		t.Fatal("retired ladder writer reached the event insert or mutated storage", probes, err)
 	}
 }
 
@@ -250,14 +249,8 @@ func TestEditorMutationFinalPermissionRevocation(t *testing.T) {
 			path, body := "/api/model-preferences/levels/default", `{"revision":0,"residency":"eu"}`
 			headers := prefHeaders(p.ID)
 			if ladder {
-				// The retired writer refuses before reading its body (410).
-				beforeModels := modelsState(t, p)
-				r := h.ladder(t, p, "build")
-				retiredLadderWrite(t, h, p, "/api/models/routes?role=build", "[]", map[string]string{"If-Match": routeEditToken("build", r.Routes)})
-				if modelsState(t, p) != beforeModels {
-					t.Fatal("retired writer changed state")
-				}
-				return
+				path, body = "/api/models/routes?role=build", "[]"
+				headers = map[string]string{"If-Match": `"` + strings.Repeat("e", 64) + `"`}
 			}
 			beforePref, beforeRoutes := preferenceStorage(t, p), catalogSetupState(t, p)
 			barrier := &stalledEndpointBody{entered: make(chan struct{}), release: make(chan struct{}), reader: strings.NewReader(body)}
@@ -269,6 +262,23 @@ func TestEditorMutationFinalPermissionRevocation(t *testing.T) {
 			w := httptest.NewRecorder()
 			done := make(chan struct{})
 			go func() { h.handler.ServeHTTP(w, r); close(done) }()
+			if ladder {
+				// The retired writer answers without reading its stalled body,
+				// so no authority window opens for a revocation to race.
+				select {
+				case <-done:
+				case <-barrier.entered:
+					t.Fatal("retired ladder writer read its body")
+				case <-time.After(10 * time.Second):
+					t.Fatal("retired ladder writer waited for its body")
+				}
+				barrier.Close()
+				editorRetired(t, w)
+				if preferenceStorage(t, p) != beforePref || catalogSetupState(t, p) != beforeRoutes {
+					t.Fatal("retired ladder writer changed state")
+				}
+				return
+			}
 			<-barrier.entered
 			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 				if err := db.LockTenant(t.Context(), tx, p.TenantID); err != nil {

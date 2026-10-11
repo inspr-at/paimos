@@ -429,7 +429,7 @@ func (m *Module) undoOutdated(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		for _, raw := range append(append([]json.RawMessage{}, before["model_rules"]...), append(append([]json.RawMessage{}, before["model_row_constraints"]...), before["model_pref_scopes"]...)...) {
+		for _, raw := range append(append(append(append([]json.RawMessage{}, before["model_rules"]...), before["model_row_constraints"]...), before["model_pref_profiles"]...), before["model_pref_scopes"]...) {
 			project := rowString(rowFields(raw), "project_id")
 			if project != "" {
 				if err := authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{ProjectID: project}); err != nil {

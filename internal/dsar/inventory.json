@@ -744,7 +744,6 @@
       "table": "inbox_messages"
     },
     {
-      "table": "model_catalog_credentials",
       "classification": "secret",
       "columns": {
         "account_id": "metadata",
@@ -754,10 +753,10 @@
       },
       "locator": {
         "tenant_column": "tenant_id"
-      }
+      },
+      "table": "model_catalog_credentials"
     },
     {
-      "table": "model_catalog_facts",
       "classification": "metadata",
       "columns": {
         "fact": "metadata",
@@ -773,7 +772,8 @@
       },
       "locator": {
         "tenant_column": "tenant_id"
-      }
+      },
+      "table": "model_catalog_facts"
     },
     {
       "classification": "metadata",

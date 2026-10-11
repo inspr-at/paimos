@@ -78,7 +78,12 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if !boardDispatchAdopted(s) && !(q.ExplicitBoard && boardInitialized(s)) {
 		return nil, nil
 	}
-	c, err := q.preview.board(ctx, tx)
+	var c boardCatalog
+	preview := q.preview
+	if inherited, ok := ctx.Value(previewBoardKey{}).(*preferencePreviewCatalog); preview == nil && ok {
+		preview = inherited
+	}
+	c, err = preview.dispatchBoard(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +172,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			continue
 		}
 		seen[key] = true
-		profiles := modelsRouteCandidates(c.profiles[order.Line], order.Effort, order.Level, review)
+		profiles := modelsWalkCandidates(c.profiles[order.Line], order.Effort, order.Level, review)
 		if len(profiles) == 0 {
 			d.Held = append(d.Held, modelprefs.HeldLine{Line: order.Line, Reason: "no registered route for this line"})
 			continue
@@ -328,7 +333,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			}
 			// An escalation outcome is the whole walk's, not its first line's:
 			// the Decision Desk stores it as the route block.
-			if q.Escalation {
+			if q.Escalation && waitCode == "" {
 				out.Trace.Blocked = "no allowed stronger route"
 				if lockedEscalation {
 					out.Trace.Blocked = "locked model preference"
@@ -430,7 +435,7 @@ func modelsBoardDecision(s modelprefs.BoardState, q modelprefs.BoardQuery) model
 // ModelsReviewHighestNative is the reversible 2026-10-10 review-floor decision.
 // The minimum equivalent stays xhigh even when the native catalog has no name.
 const ModelsReviewHighestNative = modelprefs.ReviewHighestNative
-const modelsReviewMinLevel = 4
+const modelsReviewMinLevel = reviewgate.ReviewMinEffortLevel
 
 func qualifiedReviewProfile(p Profile) bool {
 	return (p.Tier == "strong" || p.Tier == "frontier") && p.EffortLevel != nil && *p.EffortLevel >= modelsReviewMinLevel
@@ -526,6 +531,83 @@ func modelsRouteCandidates(ps []Profile, effort string, level int, review bool) 
 	out := []Profile{}
 	for _, i := range modelprefs.RouteCandidates(routes, effort, level, review) {
 		out = append(out, ps[i])
+	}
+	return out
+}
+
+// modelsWalkCandidates keeps a line whose every version is retired in the
+// walk at its newest version, so its cause reads "retired" rather than a
+// missing route; skipReasons never selects a retired step.
+func modelsWalkCandidates(ps []Profile, effort string, level int, review bool) []Profile {
+	if out := modelsRouteCandidates(ps, effort, level, review); len(out) > 0 {
+		return out
+	}
+	return routeCandidates(ps, effort, level, review, func(p Profile) bool { return p.Enabled })
+}
+
+func routeCandidates(ps []Profile, effort string, level int, review bool, live func(Profile) bool) []Profile {
+	for _, p := range ps {
+		if effort != "" && p.Effort == effort && p.EffortLevel != nil {
+			level = *p.EffortLevel
+			break
+		}
+	}
+	latest := ""
+	for _, p := range ps {
+		_, version := modelsLine(p)
+		if live(p) && version != "alias" && CompareModelVersions(version, latest) > 0 {
+			latest = version
+		}
+	}
+	type route struct{ profiles []Profile }
+	routes := []route{}
+	keys := map[string]int{}
+	for _, p := range ps {
+		_, version := modelsLine(p)
+		if version != "alias" && version != latest {
+			continue
+		}
+		key := p.Harness + ":" + p.Model
+		// Cursor effort suffixes represent one native route.
+		if p.Harness == "cursor" && p.Family == "xai" {
+			line, _ := modelsLine(p)
+			key = p.Harness + ":" + line
+		}
+		i, ok := keys[key]
+		if !ok {
+			i = len(routes)
+			keys[key] = i
+			routes = append(routes, route{})
+		}
+		routes[i].profiles = append(routes[i].profiles, p)
+	}
+	out := []Profile{}
+	for _, route := range routes {
+		levels := []int{}
+		exact := false
+		for _, p := range route.profiles {
+			if !live(p) {
+				continue
+			}
+			if p.EffortLevel != nil {
+				levels = append(levels, *p.EffortLevel)
+			}
+			exact = exact || effort != "" && p.Effort == effort
+		}
+		nearest := modelprefs.NearestEffort(level, levels)
+		if review && ModelsReviewHighestNative {
+			nearest = -1
+			for _, v := range levels {
+				nearest = max(nearest, v)
+			}
+			exact = false
+		}
+		for _, p := range route.profiles {
+			if exact && p.Effort != effort || !exact && nearest >= 0 && (p.EffortLevel == nil || *p.EffortLevel != nearest) {
+				continue
+			}
+			out = append(out, p)
+		}
 	}
 	return out
 }

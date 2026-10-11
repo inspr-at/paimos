@@ -162,10 +162,12 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 
 func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog) (WorkResolution, error) {
 	if catalog != nil {
-		// Editor previews retain their smaller, honest truncation boundary.
+		// Editor previews retain their smaller, honest truncation boundary,
+		// and every cell's Models walk reuses that one bounded read.
 		if _, err := catalog.profiles(ctx, tx); err != nil {
 			return WorkResolution{}, err
 		}
+		ctx = context.WithValue(ctx, previewBoardKey{}, catalog)
 		if q.PersonID == nil {
 			q.WorkspaceOnly = true
 		}

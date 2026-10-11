@@ -1888,6 +1888,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineContinuationRetainsOriginalCheckout","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineCooperativeStopExactIdentityAndUncertainReplay","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineDispatchIsolatesFailedHarnessProbe","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineProviderBudgetBeforeCallsAndSettlement","tier":"ESSENTIAL"}
@@ -3567,6 +3569,8 @@
     {"kind":"go","package":"internal/auth","name":"TestFromEnv","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestFullAccessLiveCatalogAndBoundaries","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestFullAccessModelsV2SimpleRead","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestHarnessProbeRoutesThroughPairedRuntimeMiddleware","tier":"ESSENTIAL"}
     ,
@@ -7432,7 +7436,13 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelWaitReasonsRespectCurrentAccountSharing","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2CrossHarnessNativeWrites","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2CursorPauseCoversNativeIDs","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2EscalationAdmissionWait","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2InheritedDefaultExclusionsAreNotExceptions","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigrationGolden","tier":"ESSENTIAL"}
     ,
@@ -7442,15 +7452,29 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NoRuntimeLadderReaders","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2OrderNativeEffortCompatibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2OutdatedCountsVisiblePins","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2PageContractWritesAndReads","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2PauseLifecycleAndAuthority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2ResidencyCauseMatchesEvidence","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RolesRoutesAndWait","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RoundRoutingCompatibility","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RoutesRetiredAndDerived","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2SameLineFallbackAndQuickJobs","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2SuccessorMovesAllReferences","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2UnadoptedSavedLadder","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2UnavailableDistinctCauses","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestNewHarnessProfileValidation","tier":"GATED-FULL"}
     ,
@@ -7523,6 +7547,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestReportsAreScopedIdempotentAndPreserveOverrides","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestResolveAPIReturnsLoosenedResidencyTrace","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestResolveHarnessFilterIgnoresDisabledHistoryBound","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestResolvePlacementAuthorizationPrecedesPersonAndTicketMismatch","tier":"ESSENTIAL"}
     ,
@@ -8270,6 +8296,8 @@
     ,
     {"kind":"go","package":"internal/profile","name":"TestCompressedImageBombs","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/profile","name":"TestDefaultPaceIsBoundedAndUndoable","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/profile","name":"TestImageAdmissionRejectsCanceledAndInvalid","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/profile","name":"TestImageAdmissionReleasedOnErrors","tier":"GATED-FULL"}
@@ -8281,6 +8309,8 @@
     {"kind":"go","package":"internal/profile","name":"TestJPEGEXIFOrientation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/profile","name":"TestManifest","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/profile","name":"TestProfilePatchGuardedByExpectedRevision","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/profile","name":"TestProfileTenantUniquenessAvatarAndUndo","tier":"ESSENTIAL"}
     ,
@@ -8848,6 +8878,8 @@
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestLeadSettingsStartGatesSchema","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestModelsV2PageOpenAPIContract","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/reportercontract","name":"TestNoRequestStatusAndHeartbeatAreByteIdenticalToV1","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestOpenAPIPropertyNamesHaveNoSpace","tier":"ESSENTIAL"}
@@ -8913,6 +8945,8 @@
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchReservedAccountAdmission","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineQueueWaitsDoNotBlockLaterWork","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineRecoveryRevocationReceiptsAndPendingNotice","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineReviewFixLineageAndFiniteEscalation","tier":"ESSENTIAL"}
     ,
