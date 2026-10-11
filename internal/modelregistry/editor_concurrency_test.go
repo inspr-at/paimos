@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -42,149 +43,100 @@ func finishEditorRequest(t *testing.T, done <-chan *httptest.ResponseRecorder) *
 	}
 }
 
+// retiredWriteWhileFenced sends a retired ladder write while another
+// transaction holds the tenant fence. The request must be answered before
+// that fence is released, without sampling the mutation clock or writing.
+func retiredWriteWhileFenced(t *testing.T, p tenant.Principal, path string, body string, headers map[string]string, check func(*testing.T, *httptest.ResponseRecorder)) {
+	t.Helper()
+	clock := make(chan struct{}, 1)
+	m := &Module{pool: appPool, validationClock: func(ctx context.Context, tx pgx.Tx) (time.Time, error) {
+		select {
+		case clock <- struct{}{}:
+		default:
+		}
+		return validationNow(ctx, tx)
+	}}
+	h := newEditorHTTP(t, m)
+	before := catalogSetupState(t, p)
+	events := eventCount(t, p, evRoutes)
+	blocker, err := appPool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer blocker.Rollback(context.Background())
+	if err := db.LockTenant(t.Context(), blocker, p.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	// The fence stays held until the response arrives; a writer that waits
+	// for it hangs and fails the bounded finish instead of passing late.
+	check(t, finishEditorRequest(t, startEditorRequest(t, h, p, "PUT", path, body, headers)))
+	select {
+	case <-clock:
+		t.Fatal("retired writer sampled the mutation clock")
+	default:
+	}
+	if err := blocker.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if catalogSetupState(t, p) != before || eventCount(t, p, evRoutes) != events {
+		t.Fatal("retired writer mutated storage or wrote an event")
+	}
+}
+
+// Risk: a conditional, whole-tenant or demoted request to the retired ladder
+// writer still enters the mutation fence or commits, rather than being
+// answered at once: 410 for a manager, the route permission's 403 after
+// demotion. The compatibility read never hands out an edit token.
 func TestEditorConcurrentConditionalLegacyAndRevocationFence(t *testing.T) {
 	for _, mode := range []string{"conditional", "legacy", "revoke"} {
 		t.Run(mode, func(t *testing.T) {
-			p, _ := editorFixture(t)
-			held, release := make(chan int, 1), make(chan struct{})
-			defer close(release)
-			calls := 0
-			m := &Module{pool: appPool, validationClock: func(ctx context.Context, tx pgx.Tx) (time.Time, error) {
-				calls++
-				if calls == 1 {
-					var pid int
-					if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
-						return time.Time{}, err
-					}
-					held <- pid
-					select {
-					case <-release:
-					case <-ctx.Done():
-						return time.Time{}, ctx.Err()
-					}
-				}
-				return validationNow(ctx, tx)
-			}}
-			h := newEditorHTTP(t, m)
+			p, h := editorFixture(t)
 			initial := h.ladder(t, p, "build")
-			// Preserve the editor's required precondition as a test failure.
-			// Models retirement removes this token; dereferencing it would
-			// panic and hide the remaining package's regression results.
-			if initial.EditToken == nil || !initial.CanEdit || len(initial.Routes) == 0 {
-				t.Fatal("legacy editor requires a complete editable ladder; Models retirement makes this endpoint read-only")
+			if initial.EditToken != nil || initial.CanEdit {
+				t.Fatal("compatibility read still grants editing")
 			}
-			wanted := append([]Route{}, initial.Routes...)
-			wanted[0].Priority = 500
-			first := startEditorRequest(t, h, p, "PUT", "/api/models/routes?role=build", editorJSON(wanted), map[string]string{"If-Match": *initial.EditToken})
-			var pid int
-			select {
-			case pid = <-held:
-			case <-time.After(10 * time.Second):
-				t.Fatal("writer did not reach post-fence clock")
-			}
-			var second <-chan *httptest.ResponseRecorder
-			revoked := make(chan error, 1)
-			if mode == "revoke" {
-				go func() {
-					revoked <- db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-						if err := db.LockTenant(t.Context(), tx, p.TenantID); err != nil {
-							return err
-						}
-						_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='member') WHERE principal_id=$1 AND scope_type='workspace'`, p.ID)
-						return err
-					})
-				}()
-			} else {
-				path := "/api/models/routes?role=build"
-				headers := map[string]string{"If-Match": *initial.EditToken}
-				if mode == "legacy" {
-					path = "/api/models/routes"
-					headers = nil
+			path, headers := "/api/models/routes?role=build", map[string]string{"If-Match": `"` + strings.Repeat("a", 64) + `"`}
+			check := editorRetired
+			switch mode {
+			case "legacy":
+				path, headers = "/api/models/routes", nil
+			case "revoke":
+				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='member') WHERE principal_id=$1 AND scope_type='workspace'`, p.ID)
+					return err
+				}); err != nil {
+					t.Fatal(err)
 				}
-				second = startEditorRequest(t, h, p, "PUT", path, "[]", headers)
-			}
-			waitEditorBlocked(t, pid)
-			// Exactly one release without risking a cleanup double-close.
-			release <- struct{}{}
-			editorDecode[[]Route](t, finishEditorRequest(t, first))
-			if mode == "revoke" {
-				select {
-				case err := <-revoked:
-					if err != nil {
-						t.Fatal(err)
+				check = func(t *testing.T, w *httptest.ResponseRecorder) {
+					t.Helper()
+					if w.Code != http.StatusForbidden {
+						t.Fatalf("demoted person reached the retired writer: %d %s", w.Code, w.Body.String())
 					}
-				case <-time.After(10 * time.Second):
-					t.Fatal("revoker remained blocked")
-				}
-				if len(h.ladder(t, p, "build").Routes) != len(wanted) {
-					t.Fatal("authorized fenced mutation did not commit")
-				}
-				return
-			}
-			w := finishEditorRequest(t, second)
-			if mode == "conditional" {
-				editorError(t, w, 409, "stale_revision")
-				if *h.ladder(t, p, "build").EditToken != routeEditToken("build", wanted) {
-					t.Fatal("stale competing writer overwrote first")
-				}
-			} else {
-				if len(editorDecode[[]Route](t, w)) != 0 || len(h.ladder(t, p, "build").Routes) != 0 {
-					t.Fatal("legacy write did not retain whole-tenant semantics")
 				}
 			}
+			retiredWriteWhileFenced(t, p, path, editorJSON(initial.Routes), headers, check)
 		})
 	}
 }
 
+// Risk: an expiry-policy write to the retired ladder writer still waits for
+// the tenant fence and applies or clears a retained hold.
 func TestEditorPostFenceExpiryClearAfterWaiting(t *testing.T) {
-	p, h := editorFixture(t)
-	initial := h.ladder(t, p, "build")
+	p, _ := editorFixture(t)
 	expiry := time.Date(2030, 1, 1, 0, 0, 0, 654321000, time.UTC)
-	desired := append([]Route{}, initial.Routes...)
-	desired[0].State, desired[0].Reason, desired[0].ValidUntil = "unavailable", "previous hold", &expiry
+	held := []Route{{Role: "build", Priority: 1, State: "unavailable", Reason: "previous hold", ValidUntil: &expiry}}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles ORDER BY slug,version,id LIMIT 1`).Scan(&held[0].ProfileID)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	for _, clear := range []bool{false, true} {
 		t.Run(fmt.Sprint(clear), func(t *testing.T) {
-			blocker, err := appPool.Begin(t.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer blocker.Rollback(context.Background())
-			if err := db.LockTenant(t.Context(), blocker, p.TenantID); err != nil {
-				t.Fatal(err)
-			}
-			var pid int
-			blocker.QueryRow(t.Context(), `SELECT pg_backend_pid()`).Scan(&pid)
-			clockCalls := make(chan struct{}, 1)
-			m := &Module{pool: appPool, validationClock: func(ctx context.Context, tx pgx.Tx) (time.Time, error) { clockCalls <- struct{}{}; return expiry, nil }}
-			h = newEditorHTTP(t, m)
 			path := "/api/models/routes?role=build"
 			if clear {
 				path += "&expiry_policy=clear"
 			}
-			done := startEditorRequest(t, h, p, "PUT", path, editorJSON(desired), map[string]string{"If-Match": *initial.EditToken})
-			waitEditorBlocked(t, pid)
-			select {
-			case <-clockCalls:
-				t.Fatal("clock sampled before tenant fence acquired")
-			default:
-			}
-			if err := blocker.Commit(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			w := finishEditorRequest(t, done)
-			select {
-			case <-clockCalls:
-			default:
-				t.Fatal("post-fence clock not sampled")
-			}
-			if clear {
-				actual := editorDecode[[]Route](t, w)
-				if actual[0].State != "available" || actual[0].ValidUntil != nil || actual[0].Reason != "" {
-					t.Fatal("equal expiry compensation revived hold")
-				}
-			} else {
-				editorError(t, w, 422, "suppression_expired")
-			}
+			retiredWriteWhileFenced(t, p, path, editorJSON(held), map[string]string{"If-Match": `"` + strings.Repeat("b", 64) + `"`}, editorRetired)
 		})
 	}
 }
