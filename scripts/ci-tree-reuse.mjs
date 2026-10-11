@@ -14,6 +14,7 @@ export const executionSteps = {
   'ci-plan': 'Classify local PR diff',
   'go-static': 'Check prepared rules bootstrap drift',
   'go-timing': 'Timing budgets, alone',
+  'web-catalogue': 'Require every web case to be classified',
   'web-setup': 'Build web',
   'release-check-run': 'Enforce test runner trust boundary',
   'e2e-run': 'Start server and run smoke',
