@@ -230,6 +230,69 @@ func TestMinimalRemovePreviewQualificationAndPrivacy(t *testing.T) {
 	})
 }
 
+// Risk (AEON-1163): the remove question of a version with two usable routes
+// offers the sibling route that is removed in the same step as the fallback,
+// and a version used only in the small or review situation reads as unused.
+func TestRemovePreviewCoversTheWholeVersionAndEverySituation(t *testing.T) {
+	admin, _ := boardFixture(t)
+	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	sol, opus := profileBySlug(ps, "codex-6-1-sol-high"), profileBySlug(ps, "claude-opus-high")
+	sibling := decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"pi-opus-sibling","version":"1","harness":"pi","family":"anthropic","model":"anthropic/`+opus.Model+`","effort":"high","tier":"`+opus.Tier+`"}`, 201)
+	minimalAccount(t, admin, sol)
+	minimalAccount(t, admin, sibling)
+	order := map[string]any{"rank": []string{"anthropic:opus", "openai:sol"}, "not": []string{}, "revision": 0}
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first?for=default", order, ""), 200)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pref_situation_orders(tenant_id,profile_id,column_key,situation,rank,end_mode)
+ SELECT tenant_id,id,'other',situation,ARRAY['anthropic:opus','openai:sol'],'wait' FROM model_pref_profiles,unnest(ARRAY['small','review']) situation WHERE scope='workspace'`)
+		return err
+	})
+	base := "/api/models/lines/claude/" + opus.Model + "/usage"
+	ids := url.Values{}
+	for _, p := range ps {
+		if p.Harness == "claude" && p.Model == opus.Model && !p.Retired {
+			ids.Add("profile", p.ID)
+		}
+	}
+	ids.Add("profile", sibling.ID)
+	bySituation := func(doc lineUsageDocument) map[string]lineUse {
+		out := map[string]lineUse{}
+		for _, use := range doc.UsedBy {
+			out[use.Column+"/"+use.Situation] = use
+		}
+		return out
+	}
+	// The sibling route can run: asked about one route only, it is what takes over.
+	one := bySituation(boardDecode[lineUsageDocument](t, boardCall(t, admin, "GET", base, nil, ""), 200))
+	if one["backend/first"].Replacement.Harness != "pi" || one["backend/first"].Replacement.Model != sibling.Model {
+		t.Fatalf("fixture lacks a usable sibling route: %+v", one["backend/first"])
+	}
+	whole := boardDecode[lineUsageDocument](t, boardCall(t, admin, "GET", base+"?"+ids.Encode(), nil, ""), 200)
+	uses := bySituation(whole)
+	if len(whole.UsedBy) != 3 || whole.Incomplete {
+		t.Fatalf("want backend first, other small and other review: %+v", whole.UsedBy)
+	}
+	for _, key := range []string{"backend/first", "other/small"} {
+		if pick := uses[key].Replacement; pick.Harness != "codex" || pick.Model != sol.Model {
+			t.Fatalf("%s falls back to %+v, want %s", key, pick, sol.Model)
+		}
+	}
+	review, ok := uses["other/review"]
+	if !ok {
+		t.Fatalf("review situation use missing: %+v", whole.UsedBy)
+	}
+	for _, use := range whole.UsedBy {
+		if use.Replacement.Model == opus.Model || use.Replacement.Model == sibling.Model {
+			t.Fatalf("%s/%s falls back to a route removed in the same step: %+v", use.Column, use.Situation, use.Replacement)
+		}
+	}
+	if review.Layer != "default" {
+		t.Fatalf("review use lost its layer: %+v", review)
+	}
+	// A route that is gone means the page asks about a version that changed.
+	boardError(t, boardCall(t, admin, "GET", base+"?profile=00000000-0000-4000-8000-000000000000", nil, ""), 409, "stale_removal_set")
+}
+
 // Risk: the simple view disagrees with rank[0], canonical person/revision,
 // native effort, locks or its visible inability to run the selected model.
 func TestMinimalSimpleReadPreservesFirstAndFallback(t *testing.T) {

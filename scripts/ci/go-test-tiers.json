@@ -7496,6 +7496,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRegistrySeedsResolvesAndIsolates","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestRemovePreviewCoversTheWholeVersionAndEverySituation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestReportsAreScopedIdempotentAndPreserveOverrides","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestResolveAPIReturnsLoosenedResidencyTrace","tier":"GATED-FULL"}
