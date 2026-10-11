@@ -538,6 +538,8 @@
         ,
         {"file":"tests/models-simple.spec.ts","listedTests":21,"tierTiming":{"caseSeconds":{"max":2.142,"median":0.68,"min":0.466},"seconds":17.886,"selectedTests":22},"weightSeconds":12,"weightSource":"AEON-1011 local-single-worker-7.1s-plus-margin"}
         ,
+        {"file":"tests/models-situations.spec.ts","listedTests":4,"weightSeconds":3,"weightSource":"AEON-1162 mbp2606 single-worker 1.9s plus margin"}
+        ,
         {"file":"tests/policies-ladders-moved.spec.ts","listedTests":2,"weightSeconds":4,"weightSource":"AEON-1204 local-single-worker-2.1s-plus-margin"}
         ,
         {"file":"tests/policies-rules.spec.ts","listedTests":9,"weightSeconds":20,"weightSource":"AEON-1165 estimate, 9 cases replacing the ladder editor spec"}
@@ -925,6 +927,8 @@
         {"file":"tests/models-fallback.spec.ts","listedTests":13,"weightSeconds":14,"weightSource":"AEON-1161 mbp2606 single worker: with models-simple and its shots (20s weight) the three specs ran in 30.1s; plus margin"}
         ,
         {"file":"tests/models-outdated.spec.ts","listedTests":10,"weightSeconds":11,"weightSource":"AEON-1164 local-single-worker-7.5s-plus-margin; AEON-1163 adds the phone tray case"}
+        ,
+        {"file":"tests/models-situations-shots.spec.ts","listedTests":12,"weightSeconds":8,"weightSource":"AEON-1162 evidence screenshots, mbp2606 single-worker 6.5s plus margin"}
         ,
         {"file":"tests/multiple-account-pairing.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":1.722,"median":1.5945,"min":1.491},"seconds":9.596,"selectedTests":6},"weightSeconds":13.317072,"weightSource":"unmeasured-test-rate"}
         ,

@@ -7548,6 +7548,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2SameLineFallbackAndQuickJobs","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2SituationCellsCarryTheirExclusions","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2SuccessorMovesAllReferences","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2UnadoptedSavedLadder","tier":"ESSENTIAL"}
@@ -7620,6 +7622,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRegistryEffortScale","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestRegistryRevisionAcceptsOrdersAndConstraintsAcrossOwners","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRegistrySeedsResolvesAndIsolates","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRemovePreviewCoversTheWholeVersionAndEverySituation","tier":"ESSENTIAL"}
@@ -7631,6 +7635,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestResolveAPIReturnsLoosenedResidencyTrace","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestResolveHarnessFilterIgnoresDisabledHistoryBound","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestResolveHarnessFilterIncludesProjectRules","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestResolvePlacementAuthorizationPrecedesPersonAndTicketMismatch","tier":"ESSENTIAL"}
     ,

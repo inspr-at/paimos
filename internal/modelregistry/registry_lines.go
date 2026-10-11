@@ -60,7 +60,9 @@ func lineProfiles(c boardCatalog, h, model string) []Profile {
 
 // Editor tokens include all registry pins and preference/rule revisions.
 // Routing digests include only enabled pins, so archived history cannot exhaust
-// the live catalog's bounded input budget.
+// the live catalog's bounded input budget. Orders and row constraints are
+// bounded per board and project, so a tenant-wide count of their bodies must
+// not reject configurations every writer accepted.
 func registryRevision(ctx context.Context, tx pgx.Tx, routingOnly ...bool) (string, error) {
 	profilesWhere, retirementsWhere := "", ""
 	if len(routingOnly) > 0 && routingOnly[0] {
@@ -87,6 +89,8 @@ func registryRevision(ctx context.Context, tx pgx.Tx, routingOnly ...bool) (stri
 }
 
 // registryBounds limits every set a registry digest reads before building it.
+// Orders and constraints are bounded per owner, as their writers accept them;
+// the bounded profile and rule-owner sets cap the contributing boards.
 func registryBounds(ctx context.Context, tx pgx.Tx, routingOnly ...bool) error {
 	profilesWhere, retirementsWhere := "", ""
 	if len(routingOnly) > 0 && routingOnly[0] {
@@ -99,11 +103,10 @@ func registryBounds(ctx context.Context, tx pgx.Tx, routingOnly ...bool) error {
  (SELECT count(*)>512 FROM (SELECT 1 FROM model_profile_retirements r`+retirementsWhere+` LIMIT 513) r) OR
  (SELECT count(*)>4096 FROM (SELECT 1 FROM model_pref_profiles LIMIT 4097) p) OR
  (SELECT count(*)>1536 FROM (SELECT 1 FROM model_rule_revisions LIMIT 1537) r) OR
- (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_orders LIMIT 1537) o) OR
- (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_situation_orders LIMIT 1537) o) OR
- (SELECT count(*)>4096 FROM (SELECT 1 FROM model_row_constraints LIMIT 4097) r) OR
+ EXISTS(SELECT 1 FROM (`+modelprefs.OrdersSQL+`) o GROUP BY profile_id HAVING count(*)>1536) OR
+ EXISTS(SELECT 1 FROM model_row_constraints GROUP BY scope,project_id HAVING count(*)>4096) OR
  (SELECT count(*)>512 FROM (SELECT 1 FROM model_pauses LIMIT 513) p) OR
- (SELECT count(*)>4096 FROM (SELECT 1 FROM model_rules LIMIT 4097) r)`).Scan(&large); err != nil {
+ EXISTS(SELECT 1 FROM model_rules GROUP BY scope,project_id HAVING count(*)>4096)`).Scan(&large); err != nil {
 		return err
 	}
 	if large {
