@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/routineactions/evidence"
 	"github.com/inspr-at/paimos/internal/routineguard"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -284,9 +285,34 @@ func TestRoutineNonCodeCompletionNeedsSettledActionsAndPerson(t *testing.T) {
 	}
 }
 
+// qualifiedPipeline models the read-only adapter's recorded review/CI facts.
+// Delivery's behaviour test separately exercises its real required-check and
+// artifact policies; these observations exercise binding and person decisions.
+type qualifiedPipeline struct {
+	facts  evidence.PipelineFacts
+	review evidence.Review
+	ready  bool
+}
+
+func (p *qualifiedPipeline) RoutineSnapshot(context.Context, string, string, string, string) (evidence.PipelineFacts, error) {
+	f := p.facts
+	f.ObservedAt = time.Now().UTC()
+	return f, nil
+}
+func (p *qualifiedPipeline) RoutineReadyTx(context.Context, pgx.Tx, string, string, string, evidence.PipelineFacts) (string, bool, error) {
+	return strings.Repeat("e", 64), p.ready, nil
+}
+func (p *qualifiedPipeline) RoutineReviewTx(context.Context, pgx.Tx, string, string) (evidence.Review, error) {
+	return p.review, nil
+}
+func (p *qualifiedPipeline) RoutineMergeResultTx(context.Context, pgx.Tx, string, string, string, string, int64) (bool, string, error) {
+	return false, "merge_done_receipt_pending_or_refused", nil
+}
+
 // Risk R15/R17: AEON-1008 necessarily changes updated_at when it marks Done.
 // Observation must recognize that exact receipt without granting a stale write
-// to the node, and an expired/revoked approval must still hold the routine.
+// to the node. Stale review/CI and a changed queue SHA require a fresh person
+// decision, and a revoked approval must still hold the routine.
 func TestRoutineMergeObservationKeepsDoneRevisionAndApproval(t *testing.T) {
 	f := externalSetup(t)
 	f.b.WithObservation(func(_ context.Context, _ pgx.Tx, _ tenant.Principal, _ Binding) (tenant.Principal, error) {
@@ -312,38 +338,72 @@ func TestRoutineMergeObservationKeepsDoneRevisionAndApproval(t *testing.T) {
 	}
 	f.exec(`UPDATE routine_attempts SET state='completed',process_receipt='{"process_state":"exited"}' WHERE run_id=$1`, f.run)
 	f.exec(`UPDATE routine_runs SET state='awaiting_pipeline' WHERE id=$1`, f.run)
-	digest := strings.Repeat("d", 64)
-	var hold approvals.Approval
-	f.tx(func(tx pgx.Tx) error {
-		var pending []events.Change
-		var err error
-		now := time.Now().UTC()
-		hold, err = approvals.RequestRoutineHoldTx(t.Context(), tx, f.agent, f.target, "work_orders.write", digest, now.Add(time.Hour), now, &pending)
-		return err
-	})
+	prNumber := int64(7)
+	pipeline := &qualifiedPipeline{facts: evidence.PipelineFacts{Facts: evidence.Facts{PR: &prNumber, Base: prIn.PROpen.BaseSHA, PullHead: strings.Repeat("f", 40)}, ArtifactSHA: prIn.PROpen.HeadSHA}, ready: true,
+		review: evidence.Review{OrderID: f.run, Repository: prIn.PROpen.Repository, BaseSHA: prIn.PROpen.BaseSHA, HeadSHA: prIn.PROpen.HeadSHA, Verdict: "ok", PolicyDigest: strings.Repeat("e", 64)}}
+	f.b.WithPipeline(pipeline)
+	out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
+	if err != nil || out.State != "pending" || out.WaitReason != "pipeline_head_changed" || out.ApprovalID != "" {
+		t.Fatalf("stale head: %+v %v", out, err)
+	}
+	pipeline.facts.Facts.PullHead = prIn.PROpen.HeadSHA
+	out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
+	if err != nil || out.State != "pending" || out.WaitReason != "pipeline_review_stale" || out.ApprovalID != "" {
+		t.Fatalf("stale review: %+v %v", out, err)
+	}
+	pipeline.review.GateOpen = true
+	out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
+	if err != nil || out.State != "awaiting_decision" || out.ApprovalID == "" {
+		t.Fatalf("code person handoff: %+v %v", out, err)
+	}
 	mux := http.NewServeMux()
 	approvals.New(f.d.App).Mount(mux)
-	req := httptest.NewRequest("POST", "/api/approvals/"+hold.ID+"/decision", strings.NewReader(`{"decision":"approved"}`)).WithContext(tenant.WithPrincipal(t.Context(), f.person))
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, req)
-	if w.Code != 200 {
-		t.Fatalf("approval: %d %s", w.Code, w.Body.String())
+	decide := func(person tenant.Principal, id string, want int) {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/api/approvals/"+id+"/decision", strings.NewReader(`{"decision":"approved"}`)).WithContext(tenant.WithPrincipal(t.Context(), person))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != want {
+			t.Fatalf("decision: %d %s", w.Code, w.Body.String())
+		}
 	}
-	out.State, out.ApprovalID = "awaiting_merge", hold.ID
-	raw, _ := json.Marshal(out)
-	f.exec(`UPDATE routine_actions SET state='awaiting_merge',result=$2,approval_id=$3 WHERE id=$1`, out.ID, raw, hold.ID)
-	f.exec(`UPDATE routine_effect_outbox SET result=jsonb_build_object('approval_digest',$2::text) WHERE action_id=$1`, out.ID, digest)
+	decide(f.agent, out.ApprovalID, 403)
+	decide(f.person, out.ApprovalID, 200)
+	out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
+	if err != nil || out.State != "awaiting_merge" {
+		t.Fatalf("approved pipeline: %+v %v", out, err)
+	}
+	previousApproval := out.ApprovalID
+	pipeline.facts.Facts.Queued = true
+	pipeline.facts.Facts.QueueHead = strings.Repeat("c", 40)
+	pipeline.ready = false // The new merge SHA's checks/artifact remain unavailable.
+	out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
+	if err != nil || out.State != "pending" || out.WaitReason != "pipeline_ci_or_artifact_pending" {
+		t.Fatalf("stale queue proof: %+v %v", out, err)
+	}
+	pipeline.facts.ArtifactSHA = pipeline.facts.Facts.QueueHead
+	pipeline.ready = true
+	out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
+	if err != nil || out.State != "awaiting_decision" || out.ApprovalID == previousApproval {
+		t.Fatalf("queue reused approval: %+v %v", out, err)
+	}
+	decide(f.person, out.ApprovalID, 200)
+	out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
+	if err != nil || out.State != "awaiting_merge" {
+		t.Fatalf("refreshed pipeline: %+v %v", out, err)
+	}
+	holdID := out.ApprovalID
 	if _, done, err := f.b.observeMerge(t.Context(), f.agent.TenantID, out.ID); err != nil || done {
 		t.Fatalf("missing merge falsely completed: done=%v %v", done, err)
 	}
 	// Represent the exact receipt and revision produced by the existing writer.
 	f.exec(`UPDATE nodes SET state='done',updated_at=updated_at+interval '1 second' WHERE id=$1`, f.target)
 	f.exec(`INSERT INTO events(tenant_id,node_id,actor_principal_id,type,metadata) VALUES($1,$2,$3,'delivery.merge_done',jsonb_build_object('repository',$4::text,'head_sha',$5::text,'merge_sha',$6::text,'pull_request',7))`, f.agent.TenantID, f.target, f.person.ID, prIn.PROpen.Repository, prIn.PROpen.HeadSHA, strings.Repeat("e", 40))
-	f.exec(`UPDATE agent_permission_grants SET revoked_at=clock_timestamp() WHERE approval_request_id=$1`, hold.ID)
+	f.exec(`UPDATE agent_permission_grants SET revoked_at=clock_timestamp() WHERE approval_request_id=$1`, holdID)
 	if _, done, err := f.b.observeMerge(t.Context(), f.agent.TenantID, out.ID); err != nil || done {
 		t.Fatalf("revoked approval falsely completed: done=%v %v", done, err)
 	}
-	f.exec(`UPDATE agent_permission_grants SET revoked_at=NULL WHERE approval_request_id=$1`, hold.ID)
+	f.exec(`UPDATE agent_permission_grants SET revoked_at=NULL WHERE approval_request_id=$1`, holdID)
 	var before, after time.Time
 	f.tx(func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT updated_at FROM nodes WHERE id=$1`, f.target).Scan(&before)
