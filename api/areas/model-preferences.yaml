@@ -389,6 +389,8 @@ components:
           properties:
             rank: {type: array, maxItems: 512, items: {type: string, maxLength: 128}}
             not: {type: array, maxItems: 512, items: {type: string, maxLength: 128}}
+            end: {type: string, enum: [wait, default, row, auto], description: 'Ending stored on this column order. Omitted when the column has no order of its own or its order stores no ending.'}
+            efforts: {type: object, maxProperties: 512, additionalProperties: {type: string, maxLength: 32}, description: 'Native levels stored on this column order, by line. Omitted when the column has no order of its own or its order stores none.'}
         stored_effort: {type: [string, 'null'], description: 'Native effort stored on this column order. Null when that order has none. Omitted when this column has no order of its own.'}
     ModelBoardCoverage:
       type: object
@@ -407,7 +409,7 @@ components:
       required: [rank, revision]
       properties:
         efforts: {type: object, maxProperties: 512, additionalProperties: {type: string, maxLength: 32}, description: 'Native effort for ranked lines only, from their registered routes. The encoded stored map is bounded to 32 KiB. Omitted preserves matching stored entries; an empty object restores automatic levels.'}
-        end: {type: string, enum: [wait, default, row, auto], description: 'Rows use wait or default (the Default itself uses wait); small/fix/stuck use row or wait and review uses auto or wait. Omitted preserves the current ending.'}
+        end: {type: string, enum: ['', wait, default, row, auto], description: 'Rows use wait or default (the Default itself uses wait); small/fix/stuck use row or wait and review uses auto or wait. An empty string stores no ending, so the order ends as its column does without one (the Undo of a reset writes back an order that stored none). Omitted preserves the current ending.'}
         rank: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
         not: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
         revision: {type: integer, format: int64, minimum: 0}
