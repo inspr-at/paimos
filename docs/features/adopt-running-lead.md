@@ -6,23 +6,55 @@ person-owned root coordinators in that project, with fresh reporting (at most
 two minutes old), and no pending pause, stop or archive. It shows the computer,
 harness and latest reporting time. Pages use bounded keyset pagination.
 
+If the first page is empty but a reporting root coordinator has no person
+owner, the panel names its label (or harness) and computer and explains that it
+must be registered with a key created by the adopting person. An agent key
+without a person creator cannot establish that ownership. The
+explanation does not make that session eligible, and other people's owned
+sessions are not named in it. Ownership and adoption authority remain unchanged.
+
 **Confirm adoption** creates an owned lead intent if absent, or selects a
 session for the same owner's existing unbound intent. Confirmation preserves
 the current session and its context. The card shows **Adoption confirmed ·
 waiting for session proof** until the session supplies its existing lease:
 
 ```sh
-aeon harness lead claim --project AEON \
-  --harness-session-file /path/to/existing-session-reference \
-  --worker-lease-file /path/to/existing-worker-lease
+aeon harness lead claim --state-dir /path/to/existing-heartbeat-state
 ```
 
-Both files are private regular files. The session file holds the existing
-native harness reference used at registration, rather than the public Aeon
-session UUID. The command reads the current lead revision unless
-`--expected-revision` is specified, then proves the lease in a request header.
-Neither proof is printed. A person must confirm first; the command cannot
-create an intent or choose its owner.
+Use the directory passed to `harness run-heartbeat --state-dir`. Claim reads
+the existing lease, project and registered reference from its owned private
+files while the heartbeat continues running. `--project KEY` is optional with
+state and must match its project when supplied. State must belong to the current
+user, with directory mode `0700` and regular file mode `0600`; symlinks are
+refused. Claim leaves the heartbeat's lifetime lock and saved state intact.
+The command reads the current
+lead revision unless `--expected-revision` is specified, then proves the lease
+in a request header. Neither proof is printed. A person must confirm first;
+the command cannot create an intent or choose its owner.
+
+The registered reference has two shapes: a coordinator registered with
+`--source-session` uses `<harness>:<lowercase source UUID>`; a registration
+without that combination uses the random value in `session.ref`. New heartbeat
+state records the exact reference sent at registration. Older state uses its
+saved native-session binding (`index.source`) and the server's registered
+harness and role to derive the same value; it never guesses from a transcript.
+The public Aeon session UUID in `session.id` is not the reference proof.
+
+Raw proof files remain supported as an alternative:
+
+```sh
+aeon harness lead claim --project AEON \
+  --harness-session-file /path/to/private-registered-reference \
+  --worker-lease-file /path/to/existing-heartbeat-state/lease.key
+```
+
+Both files must be private regular files. The raw reference file must contain
+the actual value used at registration. In older native-coordinator state,
+`session.ref` contains the random fallback and is **not** that value. If such
+state lacks its saved native binding, use a private raw file containing the
+actual `<harness>:<lowercase source UUID>` reference. Raw proof flags cannot be
+combined with `--state-dir`.
 
 The fenced claim rechecks person authority, session ownership, root role,
 reporting freshness and pending controls. Only the confirmed session receives a

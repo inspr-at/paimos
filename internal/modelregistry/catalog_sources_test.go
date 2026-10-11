@@ -2,6 +2,7 @@
 package modelregistry
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -225,6 +226,91 @@ func TestCatalogKeylessRefreshPersistsFactsWithoutAccountAuthority(t *testing.T)
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &second) != nil || len(second.Models) != 1 || second.Models[0].Identity <= first.Models[0].Identity {
 		t.Fatal("keyset page repeated or lost model")
 	}
+}
+
+// Risk: startup makes unsolicited public requests, or disabling discovery
+// during a fetch still starts more requests or publishes the in-flight facts.
+func TestCatalogScheduledRefreshRequiresOptInAndRechecksIt(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "catalog-schedule", "person", "Owner", []string{"admin"})
+	ctx := tenant.WithPrincipal(t.Context(), p)
+	at := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
+	seen := []string{}
+	m := NewWithVault(appPool, nil)
+	m.discovery = fixtureCatalogClient(t, &seen)
+	m.validationClock = func(context.Context, pgx.Tx) (time.Time, error) { return at, nil }
+	refresh := func() RefreshResult {
+		t.Helper()
+		out, err := m.runRefresh(ctx, p, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	setEnabled := func(enabled bool) {
+		t.Helper()
+		inRegistry(t, p, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE model_refresh_settings SET api_enabled=$1`, enabled)
+			return err
+		})
+	}
+	if out := refresh(); len(seen) != 0 || len(out.Sources) != 0 {
+		t.Fatalf("default scheduled refresh attempted external discovery: %v %+v", seen, out)
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var bootstrap, external int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FILTER (WHERE source_kind='bootstrap'),count(*) FILTER (WHERE source_kind<>'bootstrap') FROM model_catalog_facts`).Scan(&bootstrap, &external); err != nil {
+			return err
+		}
+		if bootstrap == 0 || external != 0 {
+			t.Fatalf("offline scheduled preparation lost bootstrap or fetched facts: %d %d", bootstrap, external)
+		}
+		return nil
+	})
+
+	setEnabled(true)
+	at = at.Add(24 * time.Hour)
+	if out := refresh(); !reflect.DeepEqual(seen, publicCatalogSources) || len(out.Sources) != len(publicCatalogSources) {
+		t.Fatalf("opted-in keyless scheduled discovery did not run: %v %+v", seen, out)
+	} else {
+		for _, source := range out.Sources {
+			if source.State != "fresh" || source.Seen == 0 {
+				t.Fatalf("opted-in source failed: %+v", source)
+			}
+		}
+	}
+	acceptedAt := at
+	seen = []string{}
+	at = at.Add(24 * time.Hour)
+	fixtureTransport := m.discovery.Transport
+	m.discovery.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		resp, err := fixtureTransport.RoundTrip(r)
+		// The first response is held until the settings write commits. No
+		// database transaction spans this fetch or its competing write.
+		if len(seen) == 1 {
+			setEnabled(false)
+		}
+		return resp, err
+	})
+	out := refresh()
+	if !reflect.DeepEqual(seen, publicCatalogSources[:1]) || len(out.Sources) != len(publicCatalogSources) {
+		t.Fatalf("disabled scheduled discovery started another request: %v %+v", seen, out)
+	}
+	for _, source := range out.Sources {
+		if source.State != "stale" || source.Seen != 0 {
+			t.Fatalf("disabled discovery reported successful publication: %+v", source)
+		}
+	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var latest time.Time
+		if err := tx.QueryRow(ctx, `SELECT max(fetched_at) FROM model_catalog_facts WHERE source_kind='aggregator'`).Scan(&latest); err != nil {
+			return err
+		}
+		if !latest.Equal(acceptedAt) {
+			t.Fatalf("disabled discovery replaced accepted facts: %s, want %s", latest, acceptedAt)
+		}
+		return nil
+	})
 }
 
 // Risk: missing source fields still become guessed metadata on new pins,

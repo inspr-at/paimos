@@ -154,7 +154,7 @@ paths:
         '200': {description: 'Settings, last refresh result, pending models and observations; no credentials', content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshStatus'}}}}
     post:
       operationId: refreshModelCatalog
-      description: 'Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials and queues up to 64 approved harness accounts for asynchronous discovery on the next daemon poll. harness_probes_queued and harness_probes_truncated report queueing; completion and failures are visible in GET refresh harness_sources. Person-triggered checks bypass interval_minutes and share a five-minute per-tenant manual cooldown; 429 includes retry_after seconds and Retry-After. Agents and the scheduler retain interval_minutes. Vendor requests run after the reservation transaction commits, with a shared 30-second deadline, at most 5 pages and 500 identifiers per vendor, and 200 observations/profile additions per run. Accepts no profile, route, URL or credential writes. Optional API calls stay disabled until a person enables them. Every completed run writes one audit event; outages keep the last good catalog and mark that source stale.'
+      description: 'Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials and queues up to 64 approved harness accounts for asynchronous discovery on the daemon capture loop. harness_probes_queued and harness_probes_truncated report queueing; completion and failures are visible in GET refresh harness_sources. Person-triggered checks bypass interval_minutes and share a five-minute per-tenant manual cooldown; 429 includes retry_after seconds and Retry-After. Agents and the scheduler retain interval_minutes. Vendor requests run after the reservation transaction commits, with a shared 30-second deadline, at most 5 pages and 10000 identifiers per vendor, and 200 observations/profile additions per run. Accepts no profile, route, URL or credential writes. Explicit refreshes fetch public catalogs without keys; credentialed calls and scheduled public discovery require api_enabled. Every completed run writes one audit event; outages keep the last good catalog and mark that source stale.'
       security: *auth
       responses:
         '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true, properties: {new_lines: {type: array, maxItems: 200, items: {type: string}}, added: {type: integer, minimum: 0, description: 'Profiles inserted by this run, including disabled discoveries and one profile per effort.'}, accepted_models: {type: array, maxItems: 200, items: {type: string}, description: 'Distinct board line ids whose newer version was accepted because the line is already in use. Absent when acceptance was not established.'}}}}}}
@@ -389,7 +389,7 @@ components:
       properties:
         agent_reports_enabled: {type: boolean, default: true}
         auto_add_profiles: {type: boolean, default: true}
-        api_enabled: {type: boolean, default: false}
+        api_enabled: {type: boolean, default: false, description: "Enables credentialed native discovery and scheduled public catalog fetches. Explicit refreshes can fetch public catalogs without keys. Disabled by default; startup and interval workers remain offline."}
         interval_minutes: {type: integer, minimum: 60, maximum: 43200, default: 1440}
     ModelRefreshSettingsWrite:
       type: object
@@ -398,7 +398,7 @@ components:
       properties:
         agent_reports_enabled: {type: boolean, default: true}
         auto_add_profiles: {type: boolean, default: true}
-        api_enabled: {type: boolean, default: false}
+        api_enabled: {type: boolean, default: false, description: "Enables credentialed native discovery and scheduled public catalog fetches. Explicit refreshes can fetch public catalogs without keys. Disabled by default; startup and interval workers remain offline."}
         interval_minutes: {type: integer, minimum: 60, maximum: 43200, default: 1440}
         account_use_revision: {type: integer, minimum: 1, description: "Required when changing auto_add_profiles. Person account.use.manage is rechecked under tenant, catalog and matrix fences; stale revision returns 409."}
     ModelRefreshStatus:
@@ -423,7 +423,7 @@ components:
               state: {type: string, enum: [pending, probing, fresh, limited, unsupported, stale, timeout]}
               seen: {type: integer, minimum: 0}
         harness_sources_truncated: {type: boolean}
-        public_sources: {type: array, items: {type: string, enum: [openrouter, modelsdev, litellm]}, description: "Keyless sources refreshed on the existing bounded refresh schedule independently of credentialed API settings"}
+        public_sources: {type: array, items: {type: string, enum: [openrouter, modelsdev, litellm]}, description: "Keyless sources available to explicit refreshes; scheduled fetches require api_enabled and use the existing bounded refresh interval"}
         observations: {type: array, items: {type: object, additionalProperties: true}}
     ModelResolution:
       type: object
