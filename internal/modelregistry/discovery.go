@@ -47,6 +47,9 @@ func fetchProviderCatalog(ctx context.Context, client *http.Client, source, key 
 	seenPages := map[string]bool{}
 	seenModels := map[string]bool{}
 	for page := 0; page < maxDiscoveryPages; page++ {
+		if err := ctx.Err(); err != nil {
+			return out, err
+		}
 		address := endpoint
 		q := url.Values{}
 		switch source {
