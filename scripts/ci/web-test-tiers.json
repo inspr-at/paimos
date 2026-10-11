@@ -244,6 +244,8 @@
     ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:390: long German names stay readable and never widen the page"
     ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:a queue or questions that can’t be read say so below the list instead of dropping chips and lines in silence"
+    ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:dark 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip"
     ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1024 dark: the grouped list, its menus and its folds"
@@ -5455,6 +5457,8 @@
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Filter by project, harness and computer: pills under the head, the address keeps them, Clear all ends them","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"a fold is the person’s, survives a reload, sums up the workers and moves none of the row’s controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"a queue or questions that can’t be read say so below the list instead of dropping chips and lines in silence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"dark 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15654,7 +15658,11 @@
     ,
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > a failed read is said: queue counts become unknown, questions keep what was shown as incomplete","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > a lead’s workers from a session read cut short are a lower bound; a cut-short queue count never stands in for the project’s own","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > a read answered after a sign-in change is never shown to the next person","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > a reconnect or a poll rereads Next up with the counts: a missed queue event leaves neither behind","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > batches named events into one reread of what they changed; a reconnect rereads everything","tier":"ESSENTIAL"}
     ,
@@ -15665,6 +15673,8 @@
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > reads open questions within five pages and says when more exist; a failed later page keeps the rest","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > reads the queue, the open questions and every active project’s lead while the page shows them","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > the Agents list hears when the queue failed or was read in part, and when not every question was read","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"accepted recovery stays pending until verified result and never calls queued work restarted","tier":"ESSENTIAL"}
     ,
@@ -18026,13 +18036,19 @@
     ,
     {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"list tools in the address > read bounded values: each once, short, at most twenty","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > a count from a queue read in part says it is a lower bound; a queue that can’t be read says so","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > a folded lead sums up what it holds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > an ended lead generation never hides what the current lead does: starting, removed, paused or running anew","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > group by a value in a given order, unknown keys after by label","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > head each group with its lead, whatever order the sessions come in","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > keep the person’s own project order, then the rest by key","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > one queue chip per project: on the current lead, never on an ended generation; the first coordinator while the lead is unknown","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > show a pending lead or the no-lead line only where no lead row heads the group","tier":"ESSENTIAL"}
     ,

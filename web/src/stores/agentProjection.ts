@@ -116,7 +116,12 @@ export const useAgentProjection = defineStore('agentProjection', () => {
     if (!owner.value || !watchers.size) return Promise.resolve()
     const reads: Promise<unknown>[] = [readQueue(), readOpenQuestions()]
     if (everyProject()) reads.push(leads.loadMany(activeProjects()))
-    for (const id of watchedProjects()) if (!agents.loaded) reads.push(readTree(id))
+    for (const id of watchedProjects()) {
+      if (!agents.loaded) reads.push(readTree(id))
+      // Next up reads the project's own queue: a reconnect or a poll rereads it with the counts,
+      // so a missed queue event never leaves the panel behind the list (AEON-1210 G4).
+      reads.push(workQueue.load(id, true))
+    }
     return Promise.all(reads)
   }
   const poller = usePoller(refresh, PROJECTION_POLL_MS)

@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1210 G2/G4 (audit AEON-1218): the shared Agents projection. Risk: a question attaches to a
 // lead by principal or to the wrong generation, workers bind by project instead of their real
-// parent, a failed or cut-short read looks complete, a read answered after a sign-in change is
-// shown to the next person, or named events flood the server with one reread each.
+// parent, a failed or cut-short read looks complete (in the store or in the views that read it),
+// a read answered after a sign-in change is shown to the next person, named events flood the
+// server with one reread each, or a reconnect refreshes the counts but leaves Next up behind.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { effectScope, ref } from 'vue'
 import { addWake, asksBySession, emptyWake, eventNode, queueByProject, subtree } from '../src/lib/agentProjection'
 import type { Question } from '../src/lib/decisionDeskApi'
 
@@ -14,7 +16,8 @@ const mocks = vi.hoisted(() => ({
   calls: [] as string[], wake: null as null | ((event?: string, node?: string | null) => void),
   leads: { views: {} as Record<string, { caughtUp: boolean; decisions: unknown[] }>, loadMany: vi.fn(async () => {}), loadLead: vi.fn(async () => {}), load: vi.fn(async () => {}) },
   agents: { loaded: false, views: [] as unknown[], admitSessions: (rows: unknown[]) => rows, loadAll: vi.fn(async () => {}) },
-  work: { snapshots: {} as Record<string, unknown>, load: vi.fn(async () => {}) },
+  work: { snapshots: {} as Record<string, unknown>, load: vi.fn(async (_project: string, _force?: boolean) => {}) },
+  live: [] as unknown[],
   identity: null as unknown as { identity: { tenant: { id: string }; principal: { id: string } } | null },
   projects: null as unknown as { projects: { id: string; archived: boolean }[] },
 }))
@@ -27,7 +30,8 @@ vi.mock('../src/lib/decisionDeskApi', () => ({ MAX_QUESTION_PAGES: 10, readQuest
 vi.mock('../src/lib/agentRows', () => ({ listAllSessions: async (params: { project: string }) => { mocks.calls.push(`sessions:${params.project}`); return mocks.sessions() } }))
 vi.mock('../src/lib/agents', () => ({ onProjectionWake: (listener: (event?: string, node?: string | null) => void) => { mocks.wake = listener; return () => { mocks.wake = null } } }))
 vi.mock('../src/lib/usePolledData', () => ({ usePoller: () => ({ start() {}, stop() {} }) }))
-vi.mock('../src/lib/authz', () => ({ onAccessRevalidate: () => () => {} }))
+vi.mock('../src/lib/authz', () => ({ onAccessRevalidate: () => () => {}, can: () => true }))
+vi.mock('../src/stores/liveAgents', () => ({ useLiveAgents: () => ({ watch: () => () => {}, get items() { return mocks.live } }) }))
 vi.mock('../src/stores/projectLeads', () => ({ useProjectLeads: () => mocks.leads }))
 vi.mock('../src/stores/agents', () => ({ useAgents: () => mocks.agents }))
 vi.mock('../src/stores/workQueue', () => ({ useWorkQueue: () => mocks.work }))
@@ -41,7 +45,9 @@ vi.mock('../src/stores/session', async () => {
   mocks.identity = reactive({ identity: { tenant: { id: 't' }, principal: { id: 'markus' } } }) as typeof mocks.identity
   return { useSession: () => mocks.identity }
 })
-import { useAgentProjection, WAKE_BATCH_MS } from '../src/stores/agentProjection'
+import { useAgentProjection, QUEUE_ITEM_LIMIT, WAKE_BATCH_MS } from '../src/stores/agentProjection'
+import { useAgentProjects } from '../src/components/agents/useAgentProjects'
+import { useLeadSummary } from '../src/lib/useLeadSummary'
 
 const S1 = '11111111-1111-4111-8111-111111111111', S2 = '22222222-2222-4222-8222-222222222222', W1 = '33333333-3333-4333-8333-333333333333'
 const q = (id: string, fields: { session?: string; inputSession?: string; principal?: string; project?: string; state?: 'open' | 'answered' } = {}) => ({
@@ -84,7 +90,7 @@ describe('the store', () => {
     mocks.questions = () => ({ items: [q('q1', { session: S1 })], has_more: false })
     mocks.sessions = () => ({ items: [], next_cursor: null })
     mocks.leads.views = {}; mocks.leads.loadMany.mockClear(); mocks.leads.loadLead.mockClear(); mocks.leads.load.mockClear()
-    mocks.agents.loaded = false; mocks.agents.loadAll.mockClear(); mocks.work.load.mockClear()
+    mocks.agents.loaded = false; mocks.agents.loadAll.mockClear(); mocks.work.load.mockReset(); mocks.work.snapshots = {}; mocks.live = []
     mocks.identity.identity = { tenant: { id: 't' }, principal: { id: 'markus' } }
     mocks.projects.projects = [{ id: 'p1', archived: false }, { id: 'p2', archived: false }, { id: 'old', archived: true }]
   })
@@ -178,6 +184,69 @@ describe('the store', () => {
     await vi.advanceTimersByTimeAsync(WAKE_BATCH_MS)
     expect(mocks.calls.sort()).toEqual(['questions@0', 'queue'])
     expect(mocks.leads.loadMany).toHaveBeenCalledWith(['p1', 'p2'])
+  })
+
+  it('a reconnect or a poll rereads Next up with the counts: a missed queue event leaves neither behind', async () => {
+    vi.useFakeTimers()
+    // The server's queue; Next up (the project's own read) and the list's counts both come from it.
+    let server = [{ project_id: 'p1', key: 'P1-1' }, { project_id: 'p1', key: 'P1-2' }]
+    mocks.queue = () => ({ items: server })
+    mocks.work.load.mockImplementation(async (project: string) => { mocks.work.snapshots[project] = { items: server.filter(item => item.project_id === project) } })
+    const projection = useAgentProjection()
+    projection.watchProjects({ all: true })
+    projection.watchProjects({ project: 'p1' })
+    await vi.advanceTimersByTimeAsync(0)
+    const nextUp = () => (mocks.work.snapshots.p1 as { items: { key: string }[] }).items.map(item => item.key)
+    expect([projection.queuedOf('p1'), nextUp()]).toEqual([2, ['P1-1', 'P1-2']])
+    // The queue moves while the stream is down: no queue event arrives, only the reconnect.
+    server = [{ project_id: 'p1', key: 'P1-9' }]
+    mocks.wake!()
+    await vi.advanceTimersByTimeAsync(WAKE_BATCH_MS)
+    expect([projection.queuedOf('p1'), nextUp()]).toEqual([1, ['P1-9']])
+    // The periodic reread does the same.
+    server = []
+    await projection.refresh()
+    expect([projection.queuedOf('p1'), nextUp()]).toEqual([0, []])
+  })
+
+  it('the Agents list hears when the queue failed or was read in part, and when not every question was read', async () => {
+    const projection = useAgentProjection()
+    const scope = effectScope()
+    const { view } = scope.run(() => useAgentProjects())!
+    await flush()
+    expect(view.value).toMatchObject({ queueError: '', queuePartial: false, asksPartial: false })
+    expect(view.value.queued('p1')).toBe(2)
+    // More queued items than one read keeps, and more open questions than five pages.
+    mocks.queue = () => ({ items: Array.from({ length: QUEUE_ITEM_LIMIT + 1 }, () => ({ project_id: 'p1' })) })
+    mocks.questions = (query: { offset: number }) => ({ items: Array.from({ length: 100 }, (_, i) => q(`q-${query.offset + i}`, { session: S1 })), has_more: true })
+    await projection.refresh()
+    expect(view.value).toMatchObject({ queueError: '', queuePartial: true, asksPartial: true })
+    expect(view.value.queued('p1')).toBe(QUEUE_ITEM_LIMIT)
+    // The queue fails: its counts are unknown and the list is told why, never shown nothing silently.
+    mocks.queue = () => { throw new Error('queue down') }
+    await projection.refresh()
+    expect(view.value.queued('p1')).toBeNull()
+    expect(view.value).toMatchObject({ queueError: 'queue down', queuePartial: false })
+    scope.stop()
+  })
+
+  it('a lead’s workers from a session read cut short are a lower bound; a cut-short queue count never stands in for the project’s own', async () => {
+    mocks.leads.views = { p1: { lead: { project_id: 'p1', state: 'working', session_id: S1, reason: '', revision: 1, generation: 1, process_active: true }, caughtUp: false, decisions: [] } } as never
+    mocks.live = [{ session_id: W1, project_id: 'p1', stopped_at: null, role: 'worker' }]
+    mocks.sessions = () => ({ items: [{ id: S1, parent_harness_session_id: null }, { id: W1, parent_harness_session_id: S1 }], next_cursor: 'more' })
+    mocks.queue = () => ({ items: Array.from({ length: QUEUE_ITEM_LIMIT + 1 }, () => ({ project_id: 'p1' })) })
+    mocks.work.snapshots = { p1: { items: [{ key: 'P1-1' }, { key: 'P1-2' }, { key: 'P1-3' }] } }
+    const scope = effectScope()
+    const summary = scope.run(() => useLeadSummary(ref('p1'), ref('P1')))!
+    await flush()
+    expect(summary.workers.value.map(w => w.session_id)).toEqual([W1])
+    expect([summary.workersKnown.value, summary.workersPartial.value]).toEqual([true, true])
+    expect(summary.queuedCount.value).toBe(3)
+    // The whole tree read: the count is exact.
+    mocks.sessions = () => ({ items: [{ id: S1, parent_harness_session_id: null }, { id: W1, parent_harness_session_id: S1 }], next_cursor: null })
+    await useAgentProjection().refresh()
+    expect(summary.workersPartial.value).toBe(false)
+    scope.stop()
   })
 
   it('binds a lead band’s workers by parent from the project’s own session read when the Agents list is not loaded', async () => {

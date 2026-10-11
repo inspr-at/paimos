@@ -14,10 +14,16 @@ import { useSession } from '../../stores/session'
 export interface AgentProjects {
   /** The project's lead as last read; null or undefined until one could be read. */
   lead: (projectId: string) => ProjectLead | null | undefined
-  /** Queued work items per project; null while the queue cannot be read. */
+  /** Queued work items per project; null while the queue cannot be read; at least this many while `queuePartial`. */
   queued: (projectId: string) => number | null
+  /** The queue could not be read: queue chips and no-lead lines are missing, not absent. Empty once it is read. */
+  queueError: string
+  /** Only part of the queue was read: each queued count is at least what it shows. */
+  queuePartial: boolean
   /** Open questions asked by exactly this session (never by its principal or another generation). */
   asks: (sessionId: string) => number
+  /** Not every open question could be read: the questions counted below a lead may be fewer than it has. */
+  asksPartial: boolean
   /** The person may start a lead (each project still checks its own launch). */
   mayStart: boolean
   /** Only the first 50 projects' leads are read. */
@@ -36,7 +42,11 @@ export function useAgentProjects() {
   const view = computed<AgentProjects>(() => ({
     lead: id => leads.views[id]?.lead,
     queued: id => projection.queuedOf(id),
+    // A refusal shows nothing to this person; a failure or a cut-short read says so (AEON-1210 G2).
+    queueError: projection.queue.state === 'error' ? projection.queue.error || 'The queue can’t be read right now.' : '',
+    queuePartial: projection.queue.state === 'ready' && projection.queue.partial,
     asks: id => projection.asksOf(id).length,
+    asksPartial: projection.questions.partial,
     mayStart: mayStart.value,
     truncated: leads.truncated,
   }))

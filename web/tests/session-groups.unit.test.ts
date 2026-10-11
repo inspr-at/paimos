@@ -1,16 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1210 (design AEON-1196 §3.3–3.4): Sessions grouped by project. Risk: a group moves with
 // activity instead of keeping its fixed place, a lead does not head its group, a lead line shows
-// for a project that has its lead on the list (or hides one that waits), the address carries
+// for a project that has its lead on the list (or hides one that waits), an ended lead generation
+// hides what the current lead does, a count read in part looks complete, the address carries
 // unbounded filters, or the folded-groups preference grows past its bound.
 import { describe, expect, it } from 'vitest'
-import { facetChoices, foldSummary, keyedGroups, matchesFacets, NO_PROJECT, orderProjects, parseFacet, parseGroup, projectGroups, MAX_FACET_VALUES } from '../src/components/agents/sessionGroups'
+import { facetChoices, foldSummary, keyedGroups, matchesFacets, NO_PROJECT, orderProjects, parseFacet, parseGroup, projectGroups, queueHeads, queuedWord, queueNote, MAX_FACET_VALUES } from '../src/components/agents/sessionGroups'
 import { foldedProjects, MAX_FOLDED, nextFolded } from '../src/lib/agentsLayout'
 import type { ProjectLead } from '../src/lib/lead'
 
 const lead = (state: ProjectLead['state'], session_id: string | null = null): ProjectLead => ({ project_id: 'x', state, reason: '', revision: 1, generation: 1, session_id, process_active: false, automatic_launch_enabled: true })
-const root = (id: string, project: string | null, role: 'coordinator' | 'worker' = 'worker', key = project?.toUpperCase() ?? '') =>
-  ({ view: { session: { id, project_id: project, role }, projectKey: key, projectTitle: `${key} title` } })
+const root = (id: string, project: string | null, role: 'coordinator' | 'worker' = 'worker', key = project?.toUpperCase() ?? '', stopped_at: string | null = null) =>
+  ({ view: { session: { id, project_id: project, role, stopped_at }, projectKey: key, projectTitle: `${key} title` } })
+// A lead generation that ended a moment ago: it keeps its place on the list for ten minutes.
+const ended = (id: string, project: string) => root(id, project, 'coordinator', project.toUpperCase(), '2026-10-11T10:00:00Z')
 const projects = [{ id: 'aeon', key: 'AEON', title: 'Aeon' }, { id: 'ops', key: 'OPS', title: 'Ops' }, { id: 'web', key: 'WEB', title: 'Web' }]
 
 describe('project groups', () => {
@@ -40,6 +43,31 @@ describe('project groups', () => {
     expect(projectGroups({ ...input, onlyProjects: ['OPS'] }).groups.map(g => g.project.key)).toEqual(['AEON', 'OPS'])
   })
 
+  it('an ended lead generation never hides what the current lead does: starting, removed, paused or running anew', () => {
+    const leads: Record<string, ProjectLead> = { aeon: lead('starting') }
+    const queued: Record<string, number> = { aeon: 3 }
+    const input = { roots: [ended('old', 'aeon')], projects, lead: (id: string) => leads[id], queued: (id: string) => queued[id] ?? 0, lines: true }
+    const shape = () => projectGroups(input).groups.map(g => [g.project.key, g.roots.map(r => r.view.session.id), g.line?.kind ?? null])
+    // A new lead without a session yet heads the group; the ended generation stays under it.
+    expect(shape()).toEqual([['AEON', ['old'], 'pending']])
+    // Removed: the queued work says it waits for a lead.
+    leads.aeon = lead('none')
+    expect(shape()).toEqual([['AEON', ['old'], 'none']])
+    // Paused, its own session ended: the lead's state still speaks, not the ended row.
+    leads.aeon = lead('paused', 'old')
+    expect(shape()).toEqual([['AEON', ['old'], 'pending']])
+    // The new generation runs: it heads the group, the ended one follows; no line.
+    leads.aeon = lead('working', 'new')
+    input.roots = [ended('old', 'aeon'), root('new', 'aeon', 'coordinator')]
+    expect(shape()).toEqual([['AEON', ['new', 'old'], null]])
+  })
+
+  it('one queue chip per project: on the current lead, never on an ended generation; the first coordinator while the lead is unknown', () => {
+    const leads: Record<string, ProjectLead | undefined> = { aeon: lead('working', 'new'), ops: lead('starting') }
+    const roots = [ended('old', 'aeon'), root('new', 'aeon', 'coordinator'), ended('gone', 'ops'), root('c1', 'web', 'coordinator'), root('c2', 'web', 'coordinator')]
+    expect([...queueHeads(roots, id => leads[id])].sort()).toEqual(['c1', 'new'])
+  })
+
   it('still group sessions of a project the person no longer lists, after the listed ones', () => {
     const { groups } = projectGroups({ roots: [root('z', 'zzz', 'worker', 'ARCH'), root('a', 'aeon')], projects, lead: () => undefined, queued: () => null, lines: true })
     expect(groups.map(g => g.project.key)).toEqual(['AEON', 'ARCH'])
@@ -48,6 +76,13 @@ describe('project groups', () => {
   it('group by a value in a given order, unknown keys after by label', () => {
     const items = ['problem', 'working', 'idle', 'working', 'odd']
     expect(keyedGroups(items, x => x, x => x, ['problem', 'working', 'idle']).map(g => [g.key, g.items.length])).toEqual([['problem', 1], ['working', 2], ['idle', 1], ['odd', 1]])
+  })
+
+  it('a count from a queue read in part says it is a lower bound; a queue that can’t be read says so', () => {
+    expect([queuedWord(4, false), queuedWord(4, true)]).toEqual(['4', '4+'])
+    expect(queueNote({ queueError: '', queuePartial: false })).toBe('')
+    expect(queueNote({ queueError: 'queue down', queuePartial: false })).toContain('can’t be read')
+    expect(queueNote({ queueError: '', queuePartial: true })).toContain('at least')
   })
 
   it('a folded lead sums up what it holds', () => {

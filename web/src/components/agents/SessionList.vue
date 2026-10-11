@@ -56,7 +56,7 @@ import SessionFacetMenu from './SessionFacetMenu.vue'
 import type { AgentProjects } from './useAgentProjects'
 import {
   DEFAULT_GROUP, emptyFacets, FACET_KEYS, FACET_TITLE, facetChoices, facetsActive, foldSummary, GROUP_BY, groupWord, isLeadRoot, keyedGroups, matchesFacets,
-  NO_PROJECT, orderProjects, projectGroups, type FacetKey, type Facets, type GroupBy, type LeadLine, type ProjectRef,
+  NO_PROJECT, orderProjects, projectGroups, queueHeads, queuedWord, queueNote, type FacetKey, type Facets, type GroupBy, type LeadLine, type ProjectRef,
 } from './sessionGroups'
 const serviceTiers = useServiceTiers()
 
@@ -149,16 +149,21 @@ const customOrder = usePreference<{ ids?: string[] }>('projects:order')
 const orderedProjects = computed<ProjectRef[]>(() => orderProjects(projectStore.projects.filter(p => !p.archived).map(p => ({ id: p.id, key: p.routeKey, title: p.title })), customOrder.value.value?.ids ?? []))
 const leadOf = (projectId: string | null | undefined) => projectId ? props.projects?.lead(projectId) ?? null : null
 const queuedOf = (projectId: string | null | undefined) => projectId ? props.projects?.queued(projectId) ?? null : null
+// A count from a queue read cut short reads “4+”; a queue that can't be read says so below the list (AEON-1210 G2).
+const qWord = (count: number | null) => queuedWord(count ?? 0, !!props.projects?.queuePartial)
+const qTell = (count: number | null) => `${props.projects?.queuePartial ? 'At least ' : ''}${count ?? 0} queued`
+const sourceQueueNote = computed(() => props.projects ? queueNote(props.projects) : '')
 // Lead lines speak for projects, not sessions: they show while nothing but a project filter narrows the list.
 const lines = computed(() => !showRemoved.value && !!props.projects && !stateFilter.value && !terms.value.length && !facets.value.harness.length && !facets.value.computer.length)
 type Header = 'none' | 'static' | 'toggle' | 'fold'
 interface Section { id: string; header: Header; label: string; note?: string; count: number; roots: Branch[]; project?: ProjectRef; line?: LeadLine | null }
 const liveCount = (roots: Branch[]) => roots.reduce((sum, branch) => sum + branch.liveCount, 0)
 const flatten = (roots: Branch[]): Branch[] => roots.flatMap(branch => [branch, ...flatten(branch.children)])
-function lineSections(): Section[] {
+// Grouped by lead or not at all, a project's lead line shows where its current lead has no running session here.
+function lineSections(live: Branch[]): Section[] {
   if (!lines.value) return []
-  return projectGroups({ roots: [], projects: orderedProjects.value, lead: leadOf, queued: queuedOf, lines: true, onlyProjects: facets.value.project }).groups
-    .map(g => ({ id: `p:${g.project.id}`, header: 'none', label: g.project.key, count: 0, roots: [], project: g.project, line: g.line }))
+  return projectGroups({ roots: live, projects: orderedProjects.value, lead: leadOf, queued: queuedOf, lines: true, onlyProjects: facets.value.project }).groups
+    .flatMap(g => g.line ? [{ id: `p:${g.project.id}`, header: 'none' as const, label: g.project.key, count: 0, roots: [], project: g.project, line: g.line }] : [])
 }
 const HOSTLESS = 'No computer'
 const groupLabel = (key: string) => GROUPS.find(g => g.id === key)?.label ?? key
@@ -175,10 +180,10 @@ const sections = computed<Section[]>(() => {
     for (const branch of leads) out.push({ id: `l:${branch.view.session.id}`, header: 'fold', label: branch.view.name, note: branch.view.projectKey, count: liveCount([branch]), roots: [branch] })
     const rest = live.filter(branch => !leads.includes(branch))
     if (rest.length) out.push({ id: 'nolead', header: 'fold', label: 'No lead', count: liveCount(rest), roots: rest })
-    out.push(...lineSections())
+    out.push(...lineSections(live))
   } else if (group.value === 'none') {
     if (live.length) out.push({ id: 'all', header: 'none', label: '', count: liveCount(live), roots: live })
-    out.push(...lineSections())
+    out.push(...lineSections(live))
   } else {
     // By harness, state or computer each live session joins the group of its own value; a worker
     // whose lead sits in another group starts its own line there.
@@ -229,6 +234,8 @@ const prefRoots = computed(() => {
   }
   return ids
 })
+// One queue chip per project: on its current lead's row, or on its lead line when no running lead session is here.
+const chipRoots = computed(() => queueHeads(liveRoots.value, leadOf))
 // Parents are open by default; a deeper fold lasts for this visit (AEON-784).
 // A head-count filter forces kept parents open through treeRows' match.
 const isExpanded = (branch: Branch): boolean => {
@@ -291,7 +298,7 @@ function rowsOf(section: Section): Row[] {
       ...row, view, primary, context: sessionContext(view, primary), exec: sessionExecution(view),
       family: row.depth > 0 || row.open, familyEnd: !rows[index + 1]?.depth,
       lead: view.session.role === 'coordinator' || row.branch.children.length > 0,
-      leadRoot, queued: leadRoot ? queuedOf(view.session.project_id) : null, line, sub, under,
+      leadRoot, queued: leadRoot && !section.line && chipRoots.value.has(view.session.id) ? queuedOf(view.session.project_id) : null, line, sub, under,
     }
   })
 }
@@ -814,12 +821,12 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         <!-- A project with queued work and no lead: one slim line (AEON-1196 §3.3). -->
         <div v-if="section.line?.kind === 'none' && section.project" class="row nolead" role="row" :data-project="section.project.key">
           <span role="gridcell" class="nl-in">
-            <span class="nl-ic" aria-hidden="true"><AppIcon name="folder" :size="15" /></span><b class="mono nl-key">{{ section.project.key }}</b><span class="nl-t">{{ section.line.queued }} queued · no {{ LEAD_WORDS.l }}</span>
+            <span class="nl-ic" aria-hidden="true"><AppIcon name="folder" :size="15" /></span><b class="mono nl-key">{{ section.project.key }}</b><span class="nl-t">{{ qWord(section.line.queued) }} queued · no {{ LEAD_WORDS.l }}</span>
             <button v-if="projects?.mayStart && canLaunchLead(section.line.lead)" type="button" class="btn sm nl-btn" :aria-label="`Start a ${LEAD_WORDS.l} for ${section.project.key}`" @click="openStartLead([section.project.id], $event.currentTarget as HTMLElement, true)"><AppIcon name="play" :size="13" />Start a {{ LEAD_WORDS.l }}</button>
             <span v-else class="nl-note">{{ !canLaunchLead(section.line.lead) ? leadLaunchReason(section.line.lead) : `A project admin starts its ${LEAD_WORDS.l}` }}</span>
           </span>
         </div>
-        <!-- A lead without a session on this list (starting, waiting for room, paused, can't start) still heads its group. -->
+        <!-- A lead without a running session on this list (starting, waiting for room, paused, can't start) still heads its group. -->
         <div
           v-else-if="section.line?.kind === 'pending' && section.project" class="row lead-row pending" role="row" :data-project="section.project.key" :data-row="`l:${section.project.id}`"
           aria-level="1" :data-state="pendingState(section.line.lead)" :class="{ active: cursor === `l:${section.project.id}` }" tabindex="-1"
@@ -836,11 +843,11 @@ function sessionLinkClick(event: MouseEvent, id: string) {
                 <span class="current-activity">{{ pendingBand(section.line.lead, section.project).status }}</span>
               </span>
             </button>
-            <button v-if="queuedOf(section.project.id)" type="button" class="qchip q-l1" :aria-label="`${queuedOf(section.project.id)} queued in ${section.project.key}: open Next up`" :data-tip="`${queuedOf(section.project.id)} queued · open Next up`" @click.stop="openQueue(section.project.id, $event)"><AppIcon name="queue" :size="12" />{{ queuedOf(section.project.id) }}<span class="qw"> queued</span></button>
+            <button v-if="queuedOf(section.project.id)" type="button" class="qchip q-l1" :aria-label="`${qTell(queuedOf(section.project.id))} in ${section.project.key}: open Next up`" :data-tip="`${qWord(queuedOf(section.project.id))} queued · open Next up`" @click.stop="openQueue(section.project.id, $event)"><AppIcon name="queue" :size="12" />{{ qWord(queuedOf(section.project.id)) }}<span class="qw"> queued</span></button>
           </span>
           <span role="gridcell" class="c-ticket">
             <span class="faint">{{ section.project.key }}</span>
-            <button v-if="queuedOf(section.project.id)" type="button" class="qchip q-l2" :aria-label="`${queuedOf(section.project.id)} queued in ${section.project.key}: open Next up`" @click.stop="openQueue(section.project.id, $event)"><AppIcon name="queue" :size="12" />{{ queuedOf(section.project.id) }}<span class="qw"> queued</span></button>
+            <button v-if="queuedOf(section.project.id)" type="button" class="qchip q-l2" :aria-label="`${qTell(queuedOf(section.project.id))} in ${section.project.key}: open Next up`" @click.stop="openQueue(section.project.id, $event)"><AppIcon name="queue" :size="12" />{{ qWord(queuedOf(section.project.id)) }}<span class="qw"> queued</span></button>
           </span>
           <span class="execution-host" role="presentation"><span role="gridcell" class="c-exec" /><span role="gridcell" class="c-tier" /><span role="gridcell" class="c-host" /></span>
           <span role="gridcell" class="right c-beat" />
@@ -892,7 +899,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
             </a>
             </RouterLink>
             <!-- The queue chip opens the lead at Next up: on the title line in the wide table, on the state line in compact rows. -->
-            <button v-if="row.queued" type="button" class="qchip q-l1" :aria-label="`${row.queued} queued in ${row.view.projectKey}: open Next up`" :data-tip="`${row.queued} queued · open Next up`" @click="openQueue(row.view.session.project_id, $event)"><AppIcon name="queue" :size="12" />{{ row.queued }}<span class="qw"> queued</span></button>
+            <button v-if="row.queued" type="button" class="qchip q-l1" :aria-label="`${qTell(row.queued)} in ${row.view.projectKey}: open Next up`" :data-tip="`${qWord(row.queued)} queued · open Next up`" @click="openQueue(row.view.session.project_id, $event)"><AppIcon name="queue" :size="12" />{{ qWord(row.queued) }}<span class="qw"> queued</span></button>
             <span v-if="row.view.session.stopped_at && row.view.session.handed_over_to_id" class="lineage">
               <RouterLink :to="`/agents/${row.view.session.handed_over_to_id}`" :title="`Handed over to ${lineageName(row.view.session.handed_over_to_id)}`">Handed over to {{ lineageName(row.view.session.handed_over_to_id) }}</RouterLink>
               <button v-if="stoppedChildren(row.branch)" type="button" class="worker-toggle history-toggle" :aria-expanded="!!history[row.view.session.id]" :aria-label="`Show stopped workers of ${row.view.name}`" @click="toggleStopped(row.branch)">{{ stoppedChildren(row.branch) }} stopped</button>
@@ -909,7 +916,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
           <span role="gridcell" class="c-ticket">
             <TicketPeekLink v-if="row.view.ticket" class="ticket-chip" :ticket-key="row.view.ticket.key" :href="row.view.ticket.href" :tip="row.view.ticket.title">{{ row.view.ticket.key }}</TicketPeekLink>
             <span v-else class="faint">{{ row.view.projectKey || '—' }}</span>
-            <button v-if="row.queued" type="button" class="qchip q-l2" :aria-label="`${row.queued} queued in ${row.view.projectKey}: open Next up`" @click="openQueue(row.view.session.project_id, $event)"><AppIcon name="queue" :size="12" />{{ row.queued }}<span class="qw"> queued</span></button>
+            <button v-if="row.queued" type="button" class="qchip q-l2" :aria-label="`${qTell(row.queued)} in ${row.view.projectKey}: open Next up`" @click="openQueue(row.view.session.project_id, $event)"><AppIcon name="queue" :size="12" />{{ qWord(row.queued) }}<span class="qw"> queued</span></button>
             <SessionEstimate v-if="etaOf(row.view) || working(row.view)" class="row-eta" :eta="etaOf(row.view)" :now="now" :missing="working(row.view)" />
           </span>
           <span class="execution-host" role="presentation">
@@ -948,6 +955,9 @@ function sessionLinkClick(event: MouseEvent, id: string) {
     </div>
     </template>
     <p v-if="projects?.truncated && !showRemoved && loaded" class="truncated">The first 50 projects show their {{ LEAD_WORDS.pl }}. Open a project to see its {{ LEAD_WORDS.l }}.</p>
+    <!-- A read behind the lead rows that failed or stopped short says so below the list, never a silent gap (AEON-1210 G2). -->
+    <p v-if="sourceQueueNote && !showRemoved && loaded" class="truncated" data-source-note="queue" role="status">{{ sourceQueueNote }}</p>
+    <p v-if="projects?.asksPartial && !showRemoved && loaded" class="truncated" data-source-note="questions" role="status"><RouterLink to="/decision-desk">Not every open question could be read, so a lead may ask more than it shows here; see the Decision Desk</RouterLink></p>
     <div v-if="showRemoved && loaded && state === 'ready' && (historyMore || (historyState === 'loading' && removedCount))" class="older">
       <button type="button" class="btn sm ghost quiet-btn" :disabled="historyState === 'loading'" @click="emit('older')">{{ historyState === 'loading' ? 'Loading…' : 'Show older' }}</button>
     </div>
@@ -955,7 +965,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
       <div role="menu" :aria-label="`Actions for ${menu.view.name}`" @keydown="menuKeys">
         <template v-if="leadProject(menu.view)">
           <button type="button" role="menuitem" class="menu-item" data-autofocus @click="pickLead(null)"><AppIcon name="agent" :size="16" /><span class="mi-text"><span>Open the {{ LEAD_WORDS.l }} panel</span><small>Right now, workers, Next up and the checks</small></span></button>
-          <button v-if="queuedOf(leadProject(menu.view))" type="button" role="menuitem" class="menu-item" @click="pickLead('next-up')"><AppIcon name="queue" :size="16" /><span class="mi-text"><span>Next up · {{ queuedOf(leadProject(menu.view)) }}</span><small>The queue, in the {{ LEAD_WORDS.l }} panel</small></span></button>
+          <button v-if="queuedOf(leadProject(menu.view))" type="button" role="menuitem" class="menu-item" @click="pickLead('next-up')"><AppIcon name="queue" :size="16" /><span class="mi-text"><span>Next up · {{ qWord(queuedOf(leadProject(menu.view))) }}</span><small>The queue, in the {{ LEAD_WORDS.l }} panel</small></span></button>
           <hr class="menu-sep">
         </template>
         <button v-if="permittedWorker(menu.view) && leadsFor(menu.view).length" type="button" role="menuitem" class="menu-item" data-autofocus @click="pickMove">
@@ -1269,6 +1279,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .nl-note { color: var(--ink-3); font-size: 12px; }
 @media (pointer: coarse), (max-width: 720px) { .nl-btn { min-height: 44px; } }
 .truncated { margin: 0; padding: 0 18px 12px; font-size: 12px; color: var(--ink-3); }
+.truncated a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .role { flex: none; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--secondary-tint-3); color: var(--secondary-ink); font: 600 9px/16px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .c-exec { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 /* Marks differ in width (Claude narrow, xAI wide): a fixed slot keeps every row's text on one left edge. */

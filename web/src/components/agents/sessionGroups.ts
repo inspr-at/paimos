@@ -72,8 +72,8 @@ export function orderProjects<P extends ProjectRef>(projects: readonly P[], cust
 }
 
 // ---------- Group by Project (the default) ----------
-interface Rootish { view: { session: { id: string; project_id?: string | null; role?: string }; projectKey: string; projectTitle: string } }
-/** A project's lead that has no session on this list (starting, waiting for room, paused, can't start), or queued work and no lead. */
+interface Rootish { view: { session: { id: string; project_id?: string | null; role?: string; stopped_at?: string | null }; projectKey: string; projectTitle: string } }
+/** A project's lead that has no running session on this list (starting, waiting for room, paused, can't start), or queued work and no lead. */
 export type LeadLine = { kind: 'pending'; lead: ProjectLead } | { kind: 'none'; lead: ProjectLead; queued: number }
 export interface ProjectGroup<B> { project: ProjectRef; roots: B[]; leads: number; line: LeadLine | null }
 export interface ProjectGrouping<B> {
@@ -87,6 +87,9 @@ export interface ProjectGrouping<B> {
   lines: boolean
   onlyProjects?: readonly string[]
 }
+/** The project's current lead on this list: the running session the lead names. Its identity decides, never the coordinator role. */
+export const isCurrentLead = (root: Rootish, lead: ProjectLead | null | undefined) => !!lead?.session_id && lead.session_id === root.view.session.id && !root.view.session.stopped_at
+/** A root that heads its project's group: the lead's session or a coordinator of any generation (an ended one keeps its place for ten minutes). */
 export const isLeadRoot = (root: Rootish, lead: ProjectLead | null | undefined) => root.view.session.role === 'coordinator' || (!!lead?.session_id && lead.session_id === root.view.session.id)
 export function projectGroups<B extends Rootish>(input: ProjectGrouping<B>): { groups: ProjectGroup<B>[]; loose: B[] } {
   const byProject = new Map<string, B[]>(), loose: B[] = [], refs = new Map<string, ProjectRef>()
@@ -104,10 +107,12 @@ export function projectGroups<B extends Rootish>(input: ProjectGrouping<B>): { g
   for (const project of [...input.projects, ...extra]) {
     const lead = input.lead(project.id)
     const own = byProject.get(project.id) ?? []
-    // The lead heads its group; the project's other sessions follow in list order.
-    const leads = own.filter(root => isLeadRoot(root, lead)), rest = own.filter(root => !isLeadRoot(root, lead))
+    // The current lead heads its group, earlier generations after it; the project's other sessions follow in list order.
+    const current = own.filter(root => isCurrentLead(root, lead))
+    const leads = [...current, ...own.filter(root => isLeadRoot(root, lead) && !current.includes(root))], rest = own.filter(root => !leads.includes(root))
+    // Only the current lead's own row speaks for the lead: an ended generation never hides what the lead does now.
     let line: LeadLine | null = null
-    if (!leads.length && lead && input.lines && (!input.onlyProjects?.length || input.onlyProjects.includes(project.key))) {
+    if (!current.length && lead && input.lines && (!input.onlyProjects?.length || input.onlyProjects.includes(project.key))) {
       const queued = input.queued(project.id)
       if (lead.state !== 'none') line = { kind: 'pending', lead }
       else if (queued) line = { kind: 'none', lead, queued }
@@ -115,6 +120,18 @@ export function projectGroups<B extends Rootish>(input: ProjectGrouping<B>): { g
     if (own.length || line) groups.push({ project: known.has(project.id) ? project : refs.get(project.id) ?? project, roots: [...leads, ...rest], leads: leads.length, line })
   }
   return { groups, loose }
+}
+/** The rows that carry their project's queue chip: the current lead's, else, while the lead is unknown, its first coordinator. Never two per project. */
+export function queueHeads<B extends Rootish>(roots: readonly B[], lead: (projectId: string) => ProjectLead | null | undefined): Set<string> {
+  const heads = new Map<string, B>()
+  for (const root of roots) {
+    const id = root.view.session.project_id
+    if (!id) continue
+    const known = lead(id)
+    if (isCurrentLead(root, known)) heads.set(id, root)
+    else if (!known && !heads.has(id) && isLeadRoot(root, known)) heads.set(id, root)
+  }
+  return new Set([...heads.values()].map(root => root.view.session.id))
 }
 
 /** Groups keyed by a value of each item, in a given order of keys (unknown keys after, by label). */
@@ -125,6 +142,15 @@ export function keyedGroups<T>(items: readonly T[], keyOf: (item: T) => string, 
   const at = (key: string) => rank.get(key) ?? Number.MAX_SAFE_INTEGER
   return [...map].map(([key, list]) => ({ key, label: label(key), items: list }))
     .sort((a, b) => at(a.key) - at(b.key) || collator.compare(a.label, b.label) || a.key.localeCompare(b.key))
+}
+
+// ---------- Counts that could not be read in full say so (AEON-1210 G2) ----------
+/** A queued count, “4+” while only part of the queue was read. */
+export const queuedWord = (count: number, partial: boolean) => partial ? `${count}+` : `${count}`
+/** The list's line about its queue read: why chips and no-lead lines are missing, or that the counts are lower bounds. */
+export function queueNote({ queueError, queuePartial }: { queueError: string; queuePartial: boolean }): string {
+  if (queueError) return 'Queued work can’t be read right now, so queue counts and no-lead lines are missing here.'
+  return queuePartial ? 'Only part of the queue could be read: each queued count is at least what it shows, and a project may wait for a lead without its line.' : ''
 }
 
 // ---------- A folded lead says what it holds ----------

@@ -228,6 +228,9 @@ test('Display groups by harness, state or none; the address keeps it and Project
   await options.nth(5).click()
   await expect(page.locator('.sessions .group-row.keyed')).toHaveCount(0)
   await expect(page).toHaveURL(/group=none/)
+  // Without groups a lead line still speaks only where the current lead has no running session: AEON waits; PHAROS's lead row is on the list.
+  await expect(page.locator('.sessions [data-row="l:p-aeon"]')).toBeVisible()
+  await expect(page.locator('.sessions [data-row="l:p-pharos"]')).toHaveCount(0)
   await page.keyboard.press('Escape')
   await page.reload()
   await expect(display).toContainText('no groups')
@@ -235,6 +238,23 @@ test('Display groups by harness, state or none; the address keeps it and Project
   await page.getByRole('dialog', { name: 'Display' }).getByRole('radio', { name: 'Project' }).click()
   await expect(page).not.toHaveURL(/group=/)
   await expect(display).not.toContainText('·')
+})
+
+test('a queue or questions that can’t be read say so below the list instead of dropping chips and lines in silence', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await setup(page)
+  await page.route('**/api/queue', route => route.fulfill({ status: 500, json: { error: 'queue down' } }))
+  await page.route(/\/api\/decision-desk\?state=open/, route => route.fulfill({ status: 500, json: { error: 'desk down' } }))
+  await page.goto('/agents')
+  await expect(leadRow(page)).toBeVisible()
+  await expect(page.locator('.sessions [data-source-note="queue"]')).toHaveText('Queued work can’t be read right now, so queue counts and no-lead lines are missing here.')
+  await expect(page.locator('.sessions [data-source-note="questions"]').getByRole('link')).toHaveAttribute('href', '/decision-desk')
+  // The counts are unknown: no chip and no no-lead line claims a number.
+  await expect(page.locator('.sessions .qchip')).toHaveCount(0)
+  await expect(page.locator('.sessions .row.nolead')).toHaveCount(0)
+  // The lead that waits still heads its group: its state never needed the queue.
+  await expect(page.locator('.sessions [data-row="l:p-aeon"] .c-state')).toContainText('Waiting')
 })
 
 // The design's gate (AEON-1196 check.mjs) on the grouped list: no coloured edge accents, SVG icons

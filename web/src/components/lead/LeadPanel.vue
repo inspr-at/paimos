@@ -24,7 +24,7 @@ const props = defineProps<{ projectId: string; projectKey: string; routeKey: str
 const w = LEAD_WORDS
 const leads = useProjectLeads(), queue = useWorkQueue(), session = useSession(), router = useRouter()
 const summary = useLeadSummary(toRef(props, 'projectId'), toRef(props, 'projectKey'))
-const { view, lead, band, queued, leadSession, workers, workersKnown, decisions, complete, gateIds, mergedIds, questions, questionsPartial, keyOf } = summary
+const { view, lead, band, queued, leadSession, workers, workersKnown, workersPartial, decisions, complete, gateIds, mergedIds, questions, questionsPartial, keyOf } = summary
 const closeButton = ref<HTMLButtonElement>()
 const dial = ref<{ running: number; total: number } | null>(null)
 // Relative times move on while the panel is open.
@@ -69,10 +69,13 @@ const nowCopy = computed(() => {
   if (lead.value?.state === 'working') {
     const room = dial.value ? Math.max(0, dial.value.total - dial.value.running) : null
     const activity = leadSession.value?.current_activity?.text || leadSession.value?.activity_note
-    return [activity, `${workers.value.length} ${workers.value.length === 1 ? 'worker runs' : 'workers run'}.`, room === null ? '' : room ? `${room} more ${room === 1 ? 'fits' : 'fit'} within the dial.` : 'The dial is full.'].filter(Boolean).join(' ')
+    return [activity, workersRun.value, room === null ? '' : room ? `${room} more ${room === 1 ? 'fits' : 'fit'} within the dial.` : 'The dial is full.'].filter(Boolean).join(' ')
   }
   return band.value.now
 })
+// Workers by their real parent: unknown while the tree can't be read, a lower bound while only part of it was.
+const workerCount = computed(() => workersKnown.value ? `${workers.value.length}${workersPartial.value ? '+' : ''}` : '—')
+const workersRun = computed(() => !workersKnown.value ? '' : workersPartial.value ? `At least ${workers.value.length} ${workers.value.length === 1 ? 'worker runs' : 'workers run'}.` : `${workers.value.length} ${workers.value.length === 1 ? 'worker runs' : 'workers run'}.`)
 const reported = computed(() => {
   const s = leadSession.value
   if (!s?.heartbeat_at) return 'Not reported yet'
@@ -135,7 +138,7 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
         <p class="now-copy">{{ nowCopy }}</p>
         <p v-if="unmanaged" class="small" data-unmanaged>{{ unmanagedLeadCopy }}</p>
         <dl class="facts">
-          <div><dt>Workers</dt><dd>{{ workersKnown ? workers.length : '—' }}</dd><dd class="sub">{{ workersKnown ? `of this ${w.l}` : 'can’t be read' }}</dd></div>
+          <div><dt>Workers</dt><dd>{{ workerCount }}</dd><dd class="sub">{{ !workersKnown ? 'can’t be read' : workersPartial ? 'not all sessions read' : `of this ${w.l}` }}</dd></div>
           <div><dt>Queued</dt><dd>{{ queued ? queued.length : '—' }}</dd><dd class="sub">{{ next[0] ? `next ${next[0].key}` : queued ? 'nothing waits' : 'can’t be read' }}</dd></div>
           <div><dt>Gate</dt><dd>{{ gateIds ? gateIds.length : '—' }}</dd><dd class="sub">{{ gateIds?.[0] ? keyOf(gateIds[0]) ?? '…' : gateIds ? 'none' : 'not read yet' }}</dd></div>
           <div><dt>Merged</dt><dd>{{ mergedIds ? mergedIds.length : '—' }}</dd><dd class="sub">today</dd></div>
@@ -144,6 +147,7 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
       <section class="p-sec" aria-labelledby="lp-workers">
         <div class="p-head"><h3 id="lp-workers">Workers</h3><span class="small">Chosen by role</span></div>
         <p v-if="!workersKnown" class="small warn">Its workers can’t be read right now.</p>
+        <p v-else-if="workersPartial" class="small warn" data-partial>Not every session of this project could be read; more workers may run.</p>
         <p v-else-if="!workers.length" class="small faint">{{ lead?.state === 'paused' ? 'No worker runs while paused.' : 'No workers yet.' }}</p>
         <div v-for="s in workers" :key="s.session_id ?? `${s.harness}:${s.since}`" class="wk">
           <span class="vendor"><HarnessMark :harness="s.harness" :size="15" /></span>

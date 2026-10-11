@@ -19,8 +19,12 @@ export function useLeadSummary(projectId: Ref<string>, projectKey: Ref<string>) 
   const view = computed(() => leads.views[projectId.value] ?? null)
   const lead = computed(() => view.value?.lead ?? null)
   const queued = computed(() => queue.snapshots[projectId.value]?.items ?? null)
-  // The count the Agents tree shows, else this project's own queue read.
-  const queuedCount = computed(() => projection.queuedOf(projectId.value) ?? (queued.value ? queued.value.length : null))
+  // The count the Agents tree shows, else this project's own queue read. A tree count from a queue
+  // read cut short is only a lower bound: the project's own read stands in for it (AEON-1210 G2).
+  const queuedCount = computed(() => {
+    const own = queued.value ? queued.value.length : null
+    return projection.queue.partial ? own : projection.queuedOf(projectId.value) ?? own
+  })
   const band = computed(() => leadBand(lead.value, projectKey.value, queuedCount.value, LEAD_WORDS))
   const sessions = computed<LiveAgent[]>(() => live.items.filter(agent => agent.project_id === projectId.value && !agent.stopped_at))
   const leadSession = computed(() => lead.value?.session_id ? sessions.value.find(agent => agent.session_id === lead.value!.session_id) ?? null : null)
@@ -28,6 +32,8 @@ export function useLeadSummary(projectId: Ref<string>, projectKey: Ref<string>) 
   const workerIds = computed(() => projection.workersOf(projectId.value, lead.value?.session_id))
   const workers = computed(() => { const ids = workerIds.value; return ids ? sessions.value.filter(agent => !!agent.session_id && ids.has(agent.session_id)) : [] })
   const workersKnown = computed(() => workerIds.value !== null)
+  // Only part of the project's sessions could be read: the lead has at least these workers.
+  const workersPartial = computed(() => workersKnown.value && projection.treeSource(projectId.value).partial)
   const decisions = computed(() => view.value?.decisions ?? [])
   // Gate and merges come from the project's lead reports across generations;
   // until that history is read in full they are unknown.
@@ -48,5 +54,5 @@ export function useLeadSummary(projectId: Ref<string>, projectKey: Ref<string>) 
   const questions = computed(() => projection.asksOf(lead.value?.session_id).filter(q => q.project_id === projectId.value))
   // More open questions exist than were read, or they could not be read: some of the lead's may be among them.
   const questionsPartial = computed(() => projection.questions.partial || projection.questions.state === 'error' || projection.questions.state === 'forbidden')
-  return { view, lead, band, queued, queuedCount, sessions, leadSession, workers, workersKnown, decisions, complete, gateIds, mergedIds, stations, questions, questionsPartial, keyOf }
+  return { view, lead, band, queued, queuedCount, sessions, leadSession, workers, workersKnown, workersPartial, decisions, complete, gateIds, mergedIds, stations, questions, questionsPartial, keyOf }
 }
