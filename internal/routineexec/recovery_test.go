@@ -25,8 +25,8 @@ import (
 )
 
 // Risks: revoked authority winning a final mutation, duplicate notification or
-// charge, a guessed PID freeing resources, and failed notification losing its
-// intent. Reuse real consent/budget/inbox guards; a PostgreSQL barrier proves
+// charge, a guessed PID freeing resources, failed notification losing its
+// intent, and an undelivered stop never retrying. Reuse real guards; a barrier proves
 // revocation and the attempted final authorization actually overlap.
 func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 	d := setupDispatch(t)
@@ -172,20 +172,73 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 	must(t, f.d.Admin.QueryRow(t.Context(), `UPDATE agent_keys SET scopes=array_append(scopes,'harness.worker'),created_by_principal_id=$2
    WHERE principal_id=$1 RETURNING id::text`, worker.ID, admin).Scan(&worker.KeyID))
 	worker.AuthKeyID, worker.KeyCreatorID = worker.KeyID, admin
-	request := httptest.NewRequest("POST", fmt.Sprintf("/api/projects/%s/harness-sessions/%s/yield", f.project, session), strings.NewReader(`{}`)).WithContext(tenant.WithPrincipal(t.Context(), worker))
-	request.Header.Set("Authorization", "Bearer "+f.token)
-	request.Header.Set("X-Aeon-Worker-Lease", lease)
-	w := httptest.NewRecorder()
-	mux.ServeHTTP(w, request)
-	if w.Code != 200 {
-		t.Fatalf("scoped stop yield: %d %s", w.Code, w.Body.String())
+	yield := func() []harness.Control {
+		t.Helper()
+		request := httptest.NewRequest("POST", fmt.Sprintf("/api/projects/%s/harness-sessions/%s/yield", f.project, session), strings.NewReader(`{}`)).WithContext(tenant.WithPrincipal(t.Context(), worker))
+		request.Header.Set("Authorization", "Bearer "+f.token)
+		request.Header.Set("X-Aeon-Worker-Lease", lease)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, request)
+		if w.Code != 200 {
+			t.Fatalf("scoped stop yield: %d %s", w.Code, w.Body.String())
+		}
+		var offered struct {
+			Controls []harness.Control `json:"controls"`
+		}
+		must(t, json.Unmarshal(w.Body.Bytes(), &offered))
+		return offered.Controls
 	}
-	var offered struct {
-		Controls []harness.Control `json:"controls"`
+	// Expire an unclaimed control through the real yield path, without sleeping.
+	var original string
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT id::text FROM harness_controls WHERE session_id=$1`, session).Scan(&original))
+	f.exec(`UPDATE harness_controls SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, original)
+	if offered := yield(); len(offered) != 0 || count(`SELECT count(*) FROM harness_controls WHERE id=$1 AND state='completed' AND outcome='rejected' AND reason='authorization_expired'`, original) != 1 {
+		t.Fatalf("unclaimed stop did not expire safely: %+v", offered)
 	}
-	must(t, json.Unmarshal(w.Body.Bytes(), &offered))
-	if len(offered.Controls) != 1 || offered.Controls[0].Kind != "stop" || offered.Controls[0].ExpectedOwnership == nil {
-		t.Fatalf("scoped stop not offered: %s", w.Body.String())
+	// A fresh stop uses current ownership, never the old process identity.
+	identity.ProcessID = strings.Repeat("9", 32)
+	f.exec(`UPDATE harness_sessions SET process_ownership=$2,heartbeat_at=clock_timestamp() WHERE id=$1`, session, identity)
+	for range 2 {
+		must(t, d.e.recoverRun(ctx, f.owner.TenantID, f.run))
+	}
+	if count(`SELECT count(*) FROM harness_controls WHERE session_id=$1`, session) != 2 || count(`SELECT count(*) FROM harness_controls hc JOIN routine_effect_outbox o ON o.result->>'control_id'=hc.id::text WHERE hc.session_id=$1 AND hc.id<>$2::uuid AND hc.kind='stop' AND hc.state='pending' AND hc.expected_ownership=$3::jsonb AND o.state='pending' AND o.result->>'session_id'=$1::text`, session, original, identity) != 1 {
+		t.Fatal("expired unclaimed stop was not replaced exactly once with current ownership")
+	}
+	// Changed ownership also rejects before delivery. That rejection permits a
+	// fresh control only after the current process is checked again.
+	var revokedControl string
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT id::text FROM harness_controls WHERE session_id=$1 AND state='pending'`, session).Scan(&revokedControl))
+	identity.ProcessID = strings.Repeat("a", 32)
+	f.exec(`UPDATE harness_sessions SET process_ownership=$2,heartbeat_at=clock_timestamp() WHERE id=$1`, session, identity)
+	if offered := yield(); len(offered) != 0 || count(`SELECT count(*) FROM harness_controls WHERE id=$1 AND state='completed' AND outcome='rejected' AND reason='authorization_revoked'`, revokedControl) != 1 {
+		t.Fatalf("changed ownership stop was not rejected before delivery: %+v", offered)
+	}
+	for range 2 {
+		must(t, d.e.recoverRun(ctx, f.owner.TenantID, f.run))
+	}
+	if count(`SELECT count(*) FROM harness_controls WHERE session_id=$1`, session) != 3 || count(`SELECT count(*) FROM harness_controls WHERE session_id=$1 AND kind='stop' AND state='pending' AND expected_ownership=$2::jsonb`, session, identity) != 1 {
+		t.Fatal("authorization-revoked stop was not replaced exactly once with current ownership")
+	}
+	offered := yield()
+	if len(offered) != 1 || offered[0].Kind != "stop" || offered[0].ExpectedOwnership == nil || *offered[0].ExpectedOwnership != identity {
+		t.Fatalf("scoped replacement stop not offered: %+v", offered)
+	}
+	current := offered[0].ID
+	for range 2 {
+		must(t, d.e.recoverRun(ctx, f.owner.TenantID, f.run))
+	}
+	if count(`SELECT count(*) FROM harness_controls WHERE session_id=$1`, session) != 3 {
+		t.Fatal("claimed stop was reissued")
+	}
+	f.exec(`UPDATE harness_controls SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, current)
+	if offered := yield(); len(offered) != 0 || count(`SELECT count(*) FROM harness_controls WHERE id=$1 AND state='completed' AND outcome='rejected' AND reason='outcome_unconfirmed'`, current) != 1 {
+		t.Fatalf("claimed stop did not retain uncertainty: %+v", offered)
+	}
+	for range 2 {
+		must(t, d.e.recoverRun(ctx, f.owner.TenantID, f.run))
+	}
+	if count(`SELECT count(*) FROM harness_controls WHERE session_id=$1`, session) != 3 || count(`SELECT count(*) FROM routine_effect_outbox WHERE run_id=$1 AND kind='routine.stop' AND state='pending' AND result->>'control_id'=$2`, f.run, current) != 1 {
+		t.Fatal("uncertain stop was reissued or its pending intent was lost")
 	}
 	// Restoration cannot resume by itself, and bearer/person-less resume cannot
 	// turn this original paused run into a newly authorized assignment.
@@ -197,8 +250,8 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 	f.call("GET", "/api/recurrences/"+f.routine.ID, nil, &f.routine)
 	bearer := f.owner
 	bearer.BrowserSession = false
-	request = httptest.NewRequest("POST", "/api/recurrences/"+f.routine.ID+"/resume", strings.NewReader(fmt.Sprintf(`{"expected_revision":%d}`, f.routine.Revision))).WithContext(tenant.WithPrincipal(t.Context(), bearer))
-	w = httptest.NewRecorder()
+	request := httptest.NewRequest("POST", "/api/recurrences/"+f.routine.ID+"/resume", strings.NewReader(fmt.Sprintf(`{"expected_revision":%d}`, f.routine.Revision))).WithContext(tenant.WithPrincipal(t.Context(), bearer))
+	w := httptest.NewRecorder()
 	f.mux.ServeHTTP(w, request)
 	if w.Code != 403 || !strings.Contains(w.Body.String(), "interactive_person_required") {
 		t.Fatalf("person-less recovery resume: %d %s", w.Code, w.Body.String())

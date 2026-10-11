@@ -27,11 +27,16 @@ type routineStopProcess struct {
 	*fakeProcess
 	identity ownedprocess.Identity
 	stops    int
+	forces   int
 }
 
 func (p *routineStopProcess) Ownership() (ownedprocess.Identity, error) { return p.identity, nil }
-func (*routineStopProcess) ForceStop(context.Context, ownedprocess.Identity, time.Time) error {
-	return ErrUnsupported
+func (p *routineStopProcess) ForceStop(_ context.Context, expected ownedprocess.Identity, _ time.Time) error {
+	if expected != p.identity {
+		return ErrNotOwned
+	}
+	p.forces++
+	return nil
 }
 func (p *routineStopProcess) GracefulStop(context.Context) error {
 	p.stops++
@@ -39,7 +44,8 @@ func (p *routineStopProcess) GracefulStop(context.Context) error {
 }
 
 // Risk: a stale/replayed recovery control signals a different process or twice
-// after a lost native reply. No native CLI or PID signal is used in this test.
+// after a lost native reply, or blocks a later person-authorized force stop.
+// No native CLI or PID signal is used in this test.
 func TestRoutineCooperativeStopExactIdentityAndUncertainReplay(t *testing.T) {
 	g := routineTestGrant("20")
 	root, err := filepath.EvalSymlinks(t.TempDir())
@@ -82,8 +88,19 @@ func TestRoutineCooperativeStopExactIdentityAndUncertainReplay(t *testing.T) {
 		t.Fatalf("stale current identity stop: %v count=%d", err, proc.stops)
 	}
 	proc.identity = identity
-	if _, err := s.control(t.Context(), req, true); err == nil || proc.stops != 1 {
-		t.Fatalf("positive cooperative stop: %v count=%d", err, proc.stops)
+	entry.harness = HarnessSession{ID: "routine-session", Activity: "idle"}
+	api.harnessControls = []HarnessControl{
+		{ID: req.CorrelationID, Kind: "stop", ExpectedGeneration: entry.harness.ID, ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry},
+		{ID: "person-stop-now", Kind: "stop", RequestPayload: &struct {
+			StopNow bool `json:"stop_now"`
+		}{true}, ExpectedGeneration: entry.harness.ID, ExpectedOwnership: &identity, ExpiresAt: &expiry, deadline: expiry},
+	}
+	api.harnessCompletionFailures = 1
+	if err := s.serviceHarnessWake(t.Context(), entry, false, true); !errors.Is(err, ErrControlUnconfirmed) || proc.stops != 1 || proc.forces != 0 {
+		t.Fatalf("lost cooperative stop/completion reply: %v stops=%d forces=%d", err, proc.stops, proc.forces)
+	}
+	if api.harnessCompletionFailures != 0 || len(entry.pending) != 2 {
+		t.Fatal("cooperative stop did not attempt uncertain completion or lost its pending controls")
 	}
 	if _, err := s.control(t.Context(), req, true); !errors.Is(err, ErrControlUnconfirmed) || proc.stops != 1 {
 		t.Fatalf("uncertain replay repeated stop: %v count=%d", err, proc.stops)
@@ -109,5 +126,14 @@ func TestRoutineCooperativeStopExactIdentityAndUncertainReplay(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("lost stop reply was not journaled before touching the child")
+	}
+	if err := s.serviceHarnessWake(t.Context(), entry, false, true); err != nil {
+		t.Fatalf("uncertain cooperative stop blocked the next person control: %v", err)
+	}
+	if len(entry.pending) != 0 || proc.stops != 1 || proc.forces != 1 || len(api.harnessCompletions) != 2 || api.harnessCompletions[0] != "routine-stop:rejected:outcome_unconfirmed" || api.harnessCompletions[1] != "person-stop-now:applied:owned_group_signalled_root_exited" {
+		t.Fatalf("cooperative replay/force stop results: pending=%d stops=%d forces=%d completions=%v", len(entry.pending), proc.stops, proc.forces, api.harnessCompletions)
+	}
+	if err := s.serviceHarnessWake(t.Context(), entry, false, true); err != nil || proc.stops != 1 || proc.forces != 1 || len(api.harnessCompletions) != 2 {
+		t.Fatalf("settled controls were repeated: %v stops=%d forces=%d completions=%v", err, proc.stops, proc.forces, api.harnessCompletions)
 	}
 }
