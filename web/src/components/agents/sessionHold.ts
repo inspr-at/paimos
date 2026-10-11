@@ -4,10 +4,8 @@
 // change. Changes in structure (a session arriving or leaving, a row moving to another
 // group or parent, a new order) wait while the person points at the list, has keyboard
 // focus in one of its rows or has one of its menus open. They apply 1.5 s after that
-// ends, on Show now, or when the page loads. Whether a row matches the list's filter is part
-// of its place: a held row keeps the match it froze with, whatever changed the live one.
-// An ended session keeps its place and end state for 10 minutes, then moves to Ended at
-// the next allowed moment.
+// ends, on Show now, or when the page loads. An ended session keeps its place and end
+// state for 10 minutes, then moves to Ended at the next allowed moment.
 import { computed, onScopeDispose, shallowRef, watch, type ComputedRef } from 'vue'
 
 export const LINGER_MS = 10 * 60_000
@@ -23,31 +21,24 @@ export function lingers(session: Ended, now: number) {
 /** When a lingering session moves to Ended (at the next allowed moment from then). */
 export const movesAt = (session: Ended) => endedAt(session) + LINGER_MS
 
-/** What the list froze: every member in tree order, its structural key, its filter match and the copy it saw. */
-export interface Frame<T> { order: string[]; rank: Map<string, number>; keys: Map<string, string>; matches: Map<string, boolean>; views: Map<string, T> }
+/** What the list froze: every member in tree order, its structural key and the copy it saw. */
+export interface Frame<T> { order: string[]; rank: Map<string, number>; keys: Map<string, string>; views: Map<string, T> }
 export interface Structure<T> {
   id: (view: T) => string
   /** Where a view sits: its group and parent. A different key is a move. */
   key: (view: T) => string
   /** Every view's id in tree order (folds and filters aside). */
   order: (views: readonly T[]) => string[]
-  /** Whether a view matches the list's filter. A different match is a move too. */
-  match?: (view: T) => boolean
 }
 
 export function frameOf<T>(views: readonly T[], structure: Structure<T>): Frame<T> {
-  const order = structure.order(views), match = structure.match
+  const order = structure.order(views)
   return {
     order, rank: new Map(order.map((id, index) => [id, index])),
     keys: new Map(views.map(view => [structure.id(view), structure.key(view)])),
-    matches: new Map(match ? views.map(view => [structure.id(view), match(view)]) : []),
     views: new Map(views.map(view => [structure.id(view), view])),
   }
 }
-
-/** Whether a live view sits where the frame placed it: the same key and the same filter match. */
-const inPlace = <T>(frame: Frame<T>, structure: Structure<T>, id: string, view: T) =>
-  frame.keys.get(id) === structure.key(view) && (!structure.match || frame.matches.get(id) === structure.match(view))
 
 /** The ids outside one longest run that keeps the frame's order: the fewest rows that moved. */
 export function reordered(order: readonly string[], rank: ReadonlyMap<string, number>): Set<string> {
@@ -73,7 +64,8 @@ export function heldChanges<T>(frame: Frame<T>, live: readonly T[], structure: S
     const id = structure.id(view)
     liveIds.add(id)
     if (follows.has(id)) continue
-    if (!frame.keys.has(id) || !inPlace(frame, structure, id, view)) changed.add(id)
+    const key = frame.keys.get(id)
+    if (key === undefined || key !== structure.key(view)) changed.add(id)
   }
   for (const id of frame.keys.keys()) if (!liveIds.has(id) && !follows.has(id)) changed.add(id)
   for (const id of reordered(structure.order(live), frame.rank)) if (!follows.has(id)) changed.add(id)
@@ -88,7 +80,7 @@ export function settle<T>(frame: Frame<T>, live: readonly T[], structure: Struct
     if (follows.has(id)) continue
     const now = byId.get(id)
     // The live copy shows the newest state; a move waits, so the held copy places it.
-    out.push(now && inPlace(frame, structure, id, now) ? now : held)
+    out.push(now && structure.key(now) === frame.keys.get(id) ? now : held)
   }
   for (const id of follows) { const now = byId.get(id); if (now) out.push(now) }
   return out
@@ -107,8 +99,6 @@ export interface SessionHold<T> {
   rank: ComputedRef<ReadonlyMap<string, number> | null>
   /** How many rows wait to enter, leave or move. */
   pending: ComputedRef<number>
-  /** The filter match a held row froze with; undefined while nothing holds it or the person's own change follows it. */
-  matched: (id: string) => boolean | undefined
   showNow: () => void
   /** The person's own changes (a removal, a move) apply at once. */
   follow: (ids: Iterable<string>) => void
@@ -135,7 +125,6 @@ export function useSessionHold<T>(live: () => readonly T[], structure: Structure
     views: computed(() => frame.value ? settle(frame.value, live(), structure, follows.value) : [...live()]),
     rank: computed(() => frame.value?.rank ?? null),
     pending: computed(() => frame.value ? heldChanges(frame.value, live(), structure, follows.value).size : 0),
-    matched: id => frame.value && !follows.value.has(id) ? frame.value.matches.get(id) : undefined,
     showNow,
     follow(ids) { if (frame.value) follows.value = new Set([...follows.value, ...ids]) },
     reset,
