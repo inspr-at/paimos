@@ -81,13 +81,16 @@ test('grouped navigation stays put across section changes and places policy card
   await page.goto('/settings/workspace')
   const nav = sections(page)
   // Kinds of work sits with Workspace once models.read is granted, beside Models,
-  // Agent rules and Accounts. The count is the whole granted list, in section order.
-  await expect(nav.getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Kinds of work/, /^Access/, /^Policies/, /^Models/, /^Agents/, /^Agent rules/, /^Accounts/, /^Autopilot/, /^Business/, /^Product portal/])
-  await expect(nav.getByRole('link')).toHaveCount(15)
+  // Agent rules and the three account parts (AEON-1171: Accounts, Computers, Capacity).
+  // The count is the whole granted list, in section order.
+  await expect(nav.getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Kinds of work/, /^Access/, /^Policies/, /^Models/, /^Agents/, /^Agent rules/, /^Accounts/, /^Computers/, /^Capacity/, /^Autopilot/, /^Business/, /^Product portal/])
+  await expect(nav.getByRole('link')).toHaveCount(17)
   await expect(nav.getByRole('link', { name: /^Kinds of work/ })).toBeVisible()
   await expect(nav.getByRole('link', { name: /^Models/ })).toBeVisible()
   await expect(nav.getByRole('link', { name: /^Agent rules/ })).toBeVisible()
   await expect(nav.getByRole('link', { name: /^Accounts/ })).toBeVisible()
+  await expect(nav.getByRole('link', { name: /^Computers/ })).toBeVisible()
+  await expect(nav.getByRole('link', { name: /^Capacity/ })).toBeVisible()
   await expect(nav.locator('.nav-group')).toHaveText(['You', 'Workspace', 'Agents and automation', 'Business'])
   await expect(page.locator('.body > .who')).toHaveText('Admins only see and change this section.')
   await expect(page.locator('#work-vocabulary, #model-refresh, #status-autopilot, #members, #estimates')).toHaveCount(0)
