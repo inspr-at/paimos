@@ -6,7 +6,8 @@ import { ruleParts, type RecurrenceTrigger } from './recurrences'
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
 const daysDE = ['Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag', 'Sonntag']
 const codes = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
-export const recurringWord = (locale: string) => displayLanguage(locale) === 'de' ? 'Wiederkehrend' : 'Recurring'
+// AEON-1182: Routines replace Recurring work; the word is the same in German.
+export const recurringWord = (_locale: string) => 'Routine'
 
 export function recurrenceSchedule(trigger: RecurrenceTrigger, locale = 'en'): string {
   const de = displayLanguage(locale) === 'de'
