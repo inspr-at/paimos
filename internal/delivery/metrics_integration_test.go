@@ -45,7 +45,7 @@ func newMetricsFixture(t *testing.T) (*fixture, *metricsFake) {
 	f.m.github = g
 	var source MetricSource
 	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery/metrics/source", map[string]any{"repository": f.m.config.Repository}, 200, &source)
-	if !source.AppConnected || source.Backfill != "not_started" || source.CIWorkflow != defaultCIWorkflow {
+	if !source.AppConnected || source.Backfill != "running" || source.CIWorkflow != defaultCIWorkflow {
 		t.Fatalf("source: %+v", source)
 	}
 	return f, g
@@ -226,7 +226,8 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 		t.Fatalf("failed step wrote %d pulls", pullsBefore)
 	}
 	failOn = ""
-	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
+	// Explicit Check again bypasses the new server retry delay.
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/check-again", nil, 200, &step)
 	// The runs and pulls are in, but two first attempts still lack their jobs:
 	// the backfill is not done until the jobs pass has read them.
 	if step.State != "running" || step.Phase != "jobs" {

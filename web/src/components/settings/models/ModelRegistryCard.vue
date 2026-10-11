@@ -2,9 +2,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '../../AppIcon.vue'
-import HarnessMark from '../../agents/HarnessMark.vue'
-import ModelRegistryEditor, { type RemoveQuestion } from './ModelRegistryEditor.vue'
+import ModelLineRow from './ModelLineRow.vue'
+import ModelDiscovery, { type DiscoveryAccount } from './ModelDiscovery.vue'
+import ModelRegistryEditor from './ModelRegistryEditor.vue'
 import ModelOutdatedSheet from './ModelOutdatedSheet.vue'
+import ModelsPopover from './ModelsPopover.vue'
+import { api } from '../../../lib/api'
 import { can, onAccessRevalidate } from '../../../lib/authz'
 import { createScope, scopeOwner } from '../../../lib/identityScope'
 import { toast } from '../../../lib/toast'
@@ -12,15 +15,17 @@ import { listWorkKinds } from '../../../lib/workKinds'
 import { useSession } from '../../../stores/session'
 import { PERMISSION, readMatrix } from '../../../lib/accountUse'
 import {
-  RegistryError, REMOVED_REASON, UNDONE_REASON, addLine, buildLines, changeOf, checkNow, checkReport, cooldownLabel, draftOf, draftsMatch, editLine, emptyDraft, getRefreshStatus, hasErrors, intervalLabel, lastChecked, lineWriteOf,
-  listProfiles, metaParts, modelSlug, outdatedBatch, outdatedTray, previewRemoval, putRefreshSettings, readOutdated, readOutdatedBatch, refused, removalText, removeLine, restoreLine, retireOutdated, shortDate, snapshotFromUsage, splitLevels, undoOutdated, validateDraft,
-  type DraftErrors, type LineDraft, type LinePick, type LineSnapshot, type LineUsage, type OutdatedDocument, type RefreshStatus, type RegistryLine, type RegistryProfile, type WriteScope,
+  RegistryError, REMOVED_REASON, UNDONE_REASON, acceptProposal, addLine, buildLines, buildRegistry, changeOf, checkNow, checkReport, cooldownLabel, draftOf, draftsMatch, editLine, emptyDraft, getRefreshStatus, hasErrors,
+  intervalLabel, lastChecked, lineWriteOf, listProfiles, modelSlug, outdatedBatch, outdatedTray, pauseModel, pauseOptions, pauseUntil, previewRemoval, putDiscoveryKey, putRefreshSettings, readOutdated,
+  readOutdatedBatch, refused, registryCount, removalText, removeLine, restoreLine, retireOutdated, snapshotFromUsage, splitLevels, undoOutdated, undoPause, untilText, validateDraft,
+  type DraftErrors, type LineDraft, type LinePick, type LineSnapshot, type Observation, type OutdatedDocument, type PauseChoice, type RefreshSettings, type RefreshStatus, type RegistryLine, type RegistryProfile,
+  type RegistryModel, type RegistryRoute, type RegistryRow, type WriteScope,
 } from '../../../lib/modelRegistry'
 
-// Settings › Models › Model registry (AEON-1012). Admins edit, everyone else reads.
-// Editing happens inline under the entry, never in a dialog, and nothing above the
-// control that was used ever moves: the editor, the remove question and every
-// message open below it.
+// Settings › Models › Model registry (AEON-1012, grouped in AEON-1163). Admins manage, everyone else reads.
+// Providers group the lines; each line is one row, folded by default. Everything an admin does opens below the
+// control that was used, never in a dialog: a fold, the Pause… menu, the remove question, the editor of a route
+// added by hand. Nothing above that control moves (AEON-541).
 const COOLDOWN_MS = 5 * 60_000
 const session = useSession()
 const owner = computed(() => scopeOwner(session.identity))
@@ -28,28 +33,40 @@ const readable = computed(() => session.authenticationCurrent() && can('models.r
 const isPerson = computed(() => session.authenticationCurrent() && session.identity?.principal.kind === 'person')
 const manageable = computed(() => isPerson.value && can('models.manage'))
 const refreshable = computed(() => isPerson.value && can('models.refresh'))
-// Auto-update is the "New model versions" switch of the account matrix (AEON-1054).
+// Auto-update is the "New model versions" switch of the account matrix (AEON-1054), and its only writer (AEON-1148).
 const autoManageable = computed(() => manageable.value && can(PERMISSION))
 // The scope belongs to a person who may read models; it changes when the person, the workspace or that access does.
 const scopeKey = computed(() => readable.value ? owner.value : '')
 const scope = createScope(() => scopeKey.value)
-const loadLane = scope.lane(), previewLane = scope.lane()
+const loadLane = scope.lane(), previewLane = scope.lane(), accountLane = scope.lane()
 
 const profiles = ref<RegistryProfile[]>([]), status = ref<RefreshStatus | null>(null), outdated = ref<OutdatedDocument | null>(null)
 const phase = ref<'loading' | 'ready' | 'error'>('loading')
+const now = ref(Date.now()), cooldownUntil = ref(0), checking = ref(false)
+const clock = computed(() => new Date(now.value))
+// The registry lines (one harness and model id each) are what the editor edits; the grouped registry is what the page shows.
 const lines = computed(() => buildLines(profiles.value))
+const registry = computed(() => buildRegistry(profiles.value, clock.value))
+const rows = computed(() => registry.value.groups.flatMap(group => group.rows))
 const autoOn = computed(() => status.value?.settings.auto_add_profiles === true)
 const stripError = ref(''), autoBusy = ref(false)
-const now = ref(Date.now()), cooldownUntil = ref(0), checking = ref(false)
+const opened = ref(new Set<string>())
 const editing = ref<'new' | string | null>(null)   // 'new' or a line key
 const draft = ref<LineDraft>(emptyDraft()), errors = ref<DraftErrors>({}), saving = ref(false), formError = ref('')
-const question = ref<RemoveQuestion | null>(null)
+// The remove question of one row: the usage of every route it removes, read before anything is removed. The version
+// is the one on screen when Remove… was pressed: Remove retires exactly the levels that were asked about (AEON-574 rule 4).
+interface Question { key: string; model: RegistryModel; state: 'loading' | 'ready' | 'error'; text?: string; failed?: string; removing?: boolean }
+const question = ref<Question | null>(null)
+// The Pause… menu remembers the version it was opened on; a later read never changes what it pauses.
+const pauseMenu = ref<{ key: string; model: RegistryModel; anchor: HTMLElement; at: number } | null>(null), pausing = ref<string | null>(null)
 // What the editor was opened on: one usage read, whose revision and line fields stay together. editorTurn moves on with every open, close and switch of the editor, so a read or save of an earlier editor can never touch the current one.
 let revisionWait: Promise<LineSnapshot> | null = null
 let editorTurn = 0
 type EditorHandle = { focusName(): void; focusFor(found: DraftErrors): void }
 let editor: EditorHandle | null = null, opener: HTMLElement | null = null, ticker: ReturnType<typeof setInterval> | undefined, questionTurn = 0
+let questionOpener: HTMLElement | null = null
 const bindEditor = (el: unknown) => { editor = el as EditorHandle | null }
+const cardEl = ref<HTMLElement | null>(null)
 
 // ---------- loading ----------
 // The outdated read is a hint for admins: when it fails, every version still shows in the list with its tags, so the registry loads without it.
@@ -58,7 +75,8 @@ async function readAll(signal: AbortSignal): Promise<[RegistryProfile[], Refresh
   const [list, refresh, first] = await Promise.all([listProfiles(signal), getRefreshStatus(signal), manageable.value ? readOutdated(signal).catch(() => null) : null])
   return [list, refresh, first && await readOutdatedBatch(first, list, signal)]
 }
-function adopt([list, refresh, old]: [RegistryProfile[], RefreshStatus, OutdatedDocument | null]) { profiles.value = list; status.value = refresh; outdated.value = old; phase.value = 'ready' }
+// Dates on the rows ("Paused until …", "Retiring …") are read against the time of the read that brought them.
+function adopt([list, refresh, old]: [RegistryProfile[], RefreshStatus, OutdatedDocument | null]) { now.value = Date.now(); profiles.value = list; status.value = refresh; outdated.value = old; phase.value = 'ready' }
 function load() {
   phase.value = 'loading'
   void loadLane.run(({ after, signal }) => after(readAll(signal), adopt), { failed: () => { phase.value = 'error' } })
@@ -74,7 +92,7 @@ function startCooldown(ms: number) {
   stopTicker()
   ticker = setInterval(() => { now.value = Date.now(); if (now.value >= cooldownUntil.value) stopTicker() }, 1000)
 }
-const when = computed(() => lastChecked(status.value?.last_run_at ?? null, new Date(now.value)))
+const when = computed(() => lastChecked(status.value?.last_run_at ?? null, clock.value))
 const stripText = computed(() => {
   if (phase.value === 'loading') return 'Loading models…'
   const current = status.value
@@ -118,12 +136,58 @@ function check() {
   })
 }
 
-// ---------- the inline editor ----------
+// ---------- how new models are found (the former Model catalog form, merged here: AEON-1138) ----------
+// Agent reports, vendor lists, the interval, discovery keys and waiting models. Auto-update keeps its one writer
+// above: every write here sends the settings with auto_add_profiles unchanged, so it never needs the matrix revision.
+const discoveryOpen = ref(false), discoveryBusy = ref(false), discoveryError = ref(''), discoveryNote = ref('')
+const accounts = ref<DiscoveryAccount[] | null>(null)
+const VENDOR: Record<string, string> = { codex: 'openai', claude: 'anthropic', grok: 'xai', pi: 'openrouter' }
+function loadAccounts() {
+  if (accounts.value || !manageable.value || !can('account.read')) return
+  void accountLane.run(({ after, signal }) => after(api('/agent-accounts', { signal }).then(async response => response.ok ? await response.json() as unknown : []), list => {
+    accounts.value = Array.isArray(list) ? (list as { id?: unknown; label?: unknown; harness?: unknown }[])
+      .filter(account => typeof account?.id === 'string' && typeof account.harness === 'string' && !!VENDOR[account.harness])
+      .map(account => ({ id: String(account.id), label: typeof account.label === 'string' ? account.label : String(account.id), harness: String(account.harness), vendor: VENDOR[String(account.harness)]! })) : []
+  }), { failed: () => { accounts.value = [] } })
+}
+function toggleDiscovery() { discoveryOpen.value = !discoveryOpen.value; if (discoveryOpen.value) loadAccounts() }
+function discoveryWrite(work: (signal: AbortSignal) => Promise<unknown>, done: string, fail: string, before?: () => void) {
+  if (discoveryBusy.value || !manageable.value) return
+  discoveryBusy.value = true; discoveryError.value = ''; discoveryNote.value = ''
+  void scope.run(({ after, signal }) => after(work(signal), () => after(reload(), () => { discoveryNote.value = done })), {
+    failed: error => { before?.(); discoveryError.value = error instanceof RegistryError && error.status === 403 ? 'You can’t change how models are found. Ask a workspace admin.' : fail },
+    settled: () => { discoveryBusy.value = false },
+  })
+}
+function setDiscovery(change: Partial<Pick<RefreshSettings, 'agent_reports_enabled' | 'api_enabled' | 'interval_minutes'>>) {
+  const current = status.value
+  if (!current || discoveryBusy.value || !manageable.value) return
+  // The whole object goes back with auto_add_profiles as the server holds it; the control moves at once and a failed save puts it back.
+  const next = { ...current.settings, ...change }
+  status.value = { ...current, settings: next }
+  discoveryWrite(signal => putRefreshSettings(next).then(saved => { if (signal.aborted) return; if (status.value) status.value = { ...status.value, settings: saved } }), 'Saved.', 'It could not be saved. Try again.', () => { if (status.value) status.value = { ...status.value, settings: current.settings } })
+}
+const saveKey = (account: DiscoveryAccount, key: string) => discoveryWrite(signal => putDiscoveryKey(account.id, account.vendor, key, signal), key ? 'The discovery key was saved.' : 'The discovery key was removed.', key ? 'The key could not be saved. Try again.' : 'The key could not be removed. Try again.')
+function accept(observation: Observation) {
+  discoveryWrite(signal => acceptProposal(observation, signal), `${observation.model} at ${observation.effort} can run now.`, 'It could not be accepted. Try again.')
+}
+
+// ---------- the rows ----------
+function toggleRow(key: string) {
+  const next = new Set(opened.value)
+  if (next.has(key)) next.delete(key); else next.add(key)
+  opened.value = next
+}
+const rowOf = (key: string | null) => rows.value.find(row => row.key === key) ?? null
+const editingIn = (row: RegistryRow) => !!editing.value && editing.value !== 'new' && row.model.routes.some(route => route.lineKeys.includes(editing.value!))
+const busyRow = (row: RegistryRow) => pausing.value === row.key || (question.value?.key === row.key && !!question.value.removing)
+
+// ---------- the inline editor: Add model, and routes added by hand ----------
 const lineOf = (key: string | null) => lines.value.find(line => line.key === key) ?? null
 const editedLine = computed(() => editing.value && editing.value !== 'new' ? lineOf(editing.value) : null)
-const mode = computed<'new' | 'manual' | 'auto'>(() => !editedLine.value ? 'new' : editedLine.value.source === 'auto' ? 'auto' : 'manual')
+const mode = computed<'new' | 'manual'>(() => editedLine.value ? 'manual' : 'new')
 function openEditor(key: 'new' | string, trigger: HTMLElement | null) {
-  if (!manageable.value || saving.value || question.value?.removing) return
+  if (!manageable.value || saving.value) return
   if (editing.value === key) { closeEditor(true); return }
   const line = key === 'new' ? null : lineOf(key)
   if (key !== 'new' && !line) return
@@ -131,15 +195,16 @@ function openEditor(key: 'new' | string, trigger: HTMLElement | null) {
   if (line) captureRevision(line)
   void nextTick(() => editor?.focusName())
 }
+const editRoute = (route: RegistryRoute, trigger: HTMLElement) => { if (route.hand && route.lineKeys[0]) openEditor(route.lineKeys[0], trigger) }
 function closeEditor(restoreFocus: boolean) {
   const back = opener
-  editing.value = null; editorTurn++; errors.value = {}; formError.value = ''; closeQuestion(); opener = null; revisionWait = null
+  editing.value = null; editorTurn++; errors.value = {}; formError.value = ''; opener = null; revisionWait = null
   if (restoreFocus && back) void nextTick(() => { if (back.isConnected) back.focus() })
 }
 // Fields and revision come from the usage read, not from the list already on screen. The read answers only the editor that asked for it.
 function captureRevision(line: RegistryLine) {
   const key = line.key, turn = editorTurn
-  const opened = draftOf(line)
+  const openedDraft = draftOf(line)
   let settled = false
   const pending = new Promise<LineSnapshot>((resolve, reject) => {
     const finish = (error?: unknown, value?: LineSnapshot) => {
@@ -160,8 +225,8 @@ function captureRevision(line: RegistryLine) {
         if (!snapshot) { finish(new RegistryError(502, 'The registry revision is not available.')); return }
         const next = draftOf(snapshot.line)
         // Edits typed on the stale list must not be saved at the newer revision.
-        if (!draftsMatch(draft.value, opened) && !draftsMatch(opened, next)) { finish(new RegistryError(409, 'stale registry revision')); return }
-        if (draftsMatch(draft.value, opened)) draft.value = next
+        if (!draftsMatch(draft.value, openedDraft) && !draftsMatch(openedDraft, next)) { finish(new RegistryError(409, 'stale registry revision')); return }
+        if (draftsMatch(draft.value, openedDraft)) draft.value = next
         finish(undefined, snapshot)
       })
     }, { failed: error => finish(error) })
@@ -170,8 +235,8 @@ function captureRevision(line: RegistryLine) {
   revisionWait = pending
 }
 function writeScope(signal: AbortSignal): WriteScope {
-  const owner = scopeKey.value
-  return { signal, live: () => scopeKey.value === owner }
+  const captured = scopeKey.value
+  return { signal, live: () => scopeKey.value === captured }
 }
 // An answer belongs to the entry it was asked for: if the person has moved to another form since, that form is left alone.
 const stillOn = (key: string | null) => editing.value === key
@@ -194,10 +259,10 @@ function save() {
   const found = validateDraft(written, mode.value)
   errors.value = found
   if (hasErrors(found)) { void nextTick(() => editor?.focusFor(found)); return }
-  const opened = editedLine.value
+  const line0 = editedLine.value
   saving.value = true; formError.value = ''
-  if (opened) {
-    const key = opened.key, turn = editorTurn
+  if (line0) {
+    const key = line0.key, turn = editorTurn
     const pending = revisionWait
     void scope.run(({ after, signal }) => after(pending ?? Promise.reject(new RegistryError(502, 'The registry revision is not available.')), ({ line, revision }) => {
       // Cancelled, or the editor was reopened, while this save waited: nothing is written for a form that is gone.
@@ -245,20 +310,13 @@ function save() {
   })), { failed: error => { if (stillOn('new')) formError.value = failure(error) }, settled: () => { saving.value = false } })
 }
 
-// ---------- remove, with its preview first ----------
-function closeQuestion() { questionTurn++; previewLane.cancel(); question.value = null }
-function askRemove() {
-  const line = editedLine.value
-  if (!line || saving.value || !manageable.value) return
-  if (question.value) { closeQuestion(); return }
-  const turn = ++questionTurn
-  question.value = { state: 'loading' }
-  void previewLane.run(({ after, signal }) => after(Promise.all([previewRemoval(line.harness, line.model, signal), kindLabels(signal)]), ([usage, kinds]) => {
-    if (turn !== questionTurn || editing.value !== line.key) return
-    question.value = { state: 'ready', text: previewText(line, usage, kinds) }
-  }), { failed: () => { if (turn === questionTurn) question.value = { state: 'error' } } })
+// ---------- remove a version, with its preview first ----------
+function closeQuestion(restoreFocus = false) {
+  questionTurn++; previewLane.cancel(); question.value = null
+  const back = questionOpener
+  questionOpener = null
+  if (restoreFocus && back) void nextTick(() => { if (back.isConnected) back.focus() })
 }
-function retryRemove() { closeQuestion(); askRemove() }
 async function kindLabels(signal: AbortSignal): Promise<Record<string, string>> {
   try { return Object.fromEntries((await listWorkKinds(signal)).items.map(kind => [kind.slug, kind.label])) } catch { return {} }
 }
@@ -266,29 +324,94 @@ function replacementName(pick: LinePick): string {
   if (!pick.model) return pick.line ?? ''
   return lines.value.find(other => other.harness === pick.harness && other.model === pick.model)?.name ?? pick.model
 }
-function previewText(line: RegistryLine, usage: LineUsage, kinds: Record<string, string>): string {
-  return removalText(line.name, line.source, usage, kinds, session.identity?.principal.id ?? '', replacementName)
+/**
+ * Asks where the version shown in a row is used: one read of every level of every route Remove retires, so a route
+ * that goes in the same step is never named as what takes over (AEON-1163).
+ */
+function askRemove(row: RegistryRow, trigger: HTMLElement | null) {
+  if (!manageable.value || saving.value || question.value?.removing) return
+  if (question.value?.key === row.key) { closeQuestion(true); return }
+  if (editing.value) closeEditor(false)
+  closeQuestion()
+  questionOpener = trigger
+  const turn = ++questionTurn, model = row.model
+  question.value = { key: row.key, model, state: 'loading' }
+  const route = model.routes.find(candidate => candidate.models[0])
+  const read = (signal: AbortSignal) => route ? previewRemoval(route.harness, route.models[0]!, signal, model.profileIds) : Promise.reject(new RegistryError(404, 'model line not found'))
+  void previewLane.run(({ after, signal }) => after(Promise.all([read(signal), kindLabels(signal)]), ([usage, kinds]) => {
+    if (turn !== questionTurn || question.value?.key !== row.key) return
+    const source = model.routes.every(candidate => candidate.hand) ? 'manual' : 'auto'
+    question.value = { key: row.key, model, state: 'ready', text: removalText(model.name, source, usage, kinds, session.identity?.principal.id ?? '', replacementName) }
+  }), { failed: () => { if (turn === questionTurn) question.value = { key: row.key, model, state: 'error' } } })
 }
+function retryRemove() { const row = rowOf(question.value?.key ?? null), back = questionOpener; if (!row) return; closeQuestion(); askRemove(row, back) }
 function remove() {
-  const line = editedLine.value, current = question.value
-  if (!line || current?.state !== 'ready' || current.removing || !manageable.value) return
-  const turn = questionTurn, key = line.key
-  question.value = { ...current, removing: true }
-  void scope.run(({ after, signal }) => after(removeLine(line.profileIds, REMOVED_REASON, writeScope(signal)), result => after(reload(), () => {
+  const current = question.value
+  if (!current || current.state !== 'ready' || current.removing || !manageable.value) return
+  const turn = questionTurn, model = current.model
+  question.value = { ...current, removing: true, failed: undefined }
+  void scope.run(({ after, signal }) => after(removeLine(model.profileIds, REMOVED_REASON, writeScope(signal)), result => after(reload(), () => {
     if (result.error) {
-      if (turn === questionTurn) closeQuestion()
-      if (stillOn(key)) formError.value = `Only ${result.done.length} of ${line.profileIds.length} levels were removed: ${result.error}. Remove it again to finish.`
+      const partly = `Only ${result.done.length} of ${model.profileIds.length} levels of ${model.name} were removed: ${result.error}. Remove it again to finish.`
+      // The person may have moved on to another form meanwhile; the outcome is still said. Removing again finishes the levels that are left.
+      if (turn === questionTurn && question.value) question.value = { ...question.value, model: rowOf(current.key)?.model ?? model, removing: false, failed: partly }
+      else toast(partly, { tone: 'error' })
       return
     }
-    if (stillOn(key)) closeEditor(true)
-    toast(`Removed ${line.name}`, { action: { label: 'Undo', run: () => undo(async scope => { const failed = await restoreLine(result.done, scope); if (failed) throw new Error(failed) }) } })
-  })), { failed: error => { if (turn === questionTurn) closeQuestion(); if (stillOn(key)) formError.value = failure(error) } })
+    if (turn === questionTurn) closeQuestion()
+    // The row may be gone; focus lands on the card's first control instead of the page.
+    void nextTick(() => { if (!cardEl.value?.contains(document.activeElement)) cardEl.value?.querySelector<HTMLElement>('[data-reg-add], [data-reg-check]')?.focus({ preventScroll: true }) })
+    toast(`Removed ${model.name}`, { action: { label: 'Undo', run: () => undo(async scope => { const failed = await restoreLine(result.done, scope); if (failed) throw new Error(failed) }) } })
+  })), { failed: error => { if (turn === questionTurn && question.value) question.value = { ...question.value, removing: false, failed: failure(error) }; else toast(failure(error), { tone: 'error' }) } })
+}
+function questionKeys(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || event.isComposing) return
+  event.preventDefault(); event.stopPropagation()
+  if (!question.value?.removing) closeQuestion(true)
+}
+
+// ---------- pause a version ----------
+// The menu's dates are those of the moment it opened ("For a week · Until 18 Oct").
+const pauseChoices = computed(() => pauseMenu.value ? pauseOptions(pauseMenu.value.model.routes.some(route => route.pause || route.partlyPaused), new Date(pauseMenu.value.at)) : [])
+function openPause(row: RegistryRow, anchor: HTMLElement) {
+  if (!manageable.value || pausing.value) return
+  if (pauseMenu.value?.key === row.key) { pauseMenu.value = null; return }
+  pauseMenu.value = { key: row.key, model: row.model, anchor, at: Date.now() }
+}
+function pauseKeys(event: KeyboardEvent) {
+  const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="menuitem"]')]
+  const at = items.indexOf(document.activeElement as HTMLElement)
+  const go = (index: number) => { event.preventDefault(); items[(index + items.length) % items.length]?.focus() }
+  if (event.key === 'ArrowDown') go(at + 1)
+  else if (event.key === 'ArrowUp') go(at - 1)
+  else if (event.key === 'Home') go(0)
+  else if (event.key === 'End') go(items.length - 1)
+}
+function choosePause(choice: PauseChoice | 'resume') {
+  const open = pauseMenu.value
+  pauseMenu.value = null
+  if (!open || pausing.value || !manageable.value) return
+  const model = open.model, anchor = open.anchor, until = choice === 'resume' ? null : pauseUntil(choice, new Date())
+  pausing.value = open.key
+  void scope.run(({ after, signal }) => after(pauseModel(model, model.family, choice === 'resume' ? 'resume' : { until }, writeScope(signal)), result => after(reload(), () => {
+    const back = result.done
+    const undoAction = back.length ? { action: { label: 'Undo', run: () => undo(scope => undoPause(back, new Date(), scope).then(failed => { if (failed) throw new Error(failed) })) } } : {}
+    const steps = model.routes.length
+    if (result.error) {
+      toast(`${choice === 'resume' ? 'Resumed' : 'Paused'} only ${back.length} of its route${steps === 1 ? '' : 's'}: ${result.error}. Try again to finish.`, { tone: 'error', ...undoAction })
+      return
+    }
+    toast(choice === 'resume' ? `Resumed ${model.name}` : `Paused ${model.name} ${untilText(until, new Date())}`, undoAction)
+  })), {
+    failed: error => { toast(error instanceof RegistryError && error.status === 403 ? 'You can’t pause models. Ask a workspace admin.' : 'It could not be changed. Try again.', { tone: 'error' }) },
+    // The row's buttons are disabled while the pause runs; focus returns to Pause… once it can take it again.
+    settled: () => { pausing.value = null; void nextTick(() => { if (anchor.isConnected) anchor.focus({ preventScroll: true }) }) },
+  })
 }
 
 // ---------- old versions: the tray and the review sheet (AEON-1164) ----------
 const sheetOpen = ref(false), removingOld = ref(false)
-const cardEl = ref<HTMLElement | null>(null)
-const batch = computed(() => manageable.value && outdated.value ? outdatedBatch(outdated.value, profiles.value, new Date(now.value)) : null)
+const batch = computed(() => manageable.value && outdated.value ? outdatedBatch(outdated.value, profiles.value, clock.value) : null)
 const entries = computed(() => batch.value?.entries ?? [])
 const more = computed(() => batch.value?.more === true)
 const tray = computed(() => entries.value.length ? outdatedTray(entries.value, more.value, outdated.value?.incomplete === true) : null)
@@ -341,22 +464,26 @@ function retireOld(versions: string[]) {
   })
 }
 
-// ---------- row text ----------
-const clock = computed(() => new Date(now.value))
-const retiring = (line: RegistryLine) => line.retireAt ? `Retiring ${shortDate(line.retireAt, clock.value)}` : ''
-const meta = (line: RegistryLine) => metaParts(line, clock.value)
-
-// An entry that disappears under an open editor (another person removed it) closes it.
+// An entry that disappears under an open editor (another person removed it) closes it; so does a gone row's question or menu.
 watch(lines, () => { if (editing.value && editing.value !== 'new' && !lineOf(editing.value)) closeEditor(false) })
+// A question or menu asked about a version that has changed since (another admin added or removed a route) no longer
+// says what would happen, so it closes; the person asks again about what is on screen now.
+const sameVersion = (model: RegistryModel, key: string) => { const now = rowOf(key)?.model; return !!now && now.profileIds.length === model.profileIds.length && now.profileIds.every(id => model.profileIds.includes(id)) }
+watch(rows, () => {
+  const asked = question.value
+  if (asked && !asked.removing && !asked.failed && !sameVersion(asked.model, asked.key)) closeQuestion()
+  if (pauseMenu.value && !pausing.value && !sameVersion(pauseMenu.value.model, pauseMenu.value.key)) pauseMenu.value = null
+})
 function reset() {
-  scope.reset(); closeEditor(false); stopTicker(); profiles.value = []; status.value = null; stripError.value = ''; autoBusy.value = false; checking.value = false; cooldownUntil.value = 0; saving.value = false
-  outdated.value = null; sheetOpen.value = false; removingOld.value = false
+  scope.reset(); closeEditor(false); closeQuestion(); stopTicker(); profiles.value = []; status.value = null; stripError.value = ''; autoBusy.value = false; checking.value = false; cooldownUntil.value = 0; saving.value = false
+  outdated.value = null; sheetOpen.value = false; removingOld.value = false; opened.value = new Set(); pauseMenu.value = null; pausing.value = null
+  discoveryOpen.value = false; discoveryBusy.value = false; discoveryError.value = ''; discoveryNote.value = ''; accounts.value = null
   phase.value = 'loading'
   if (scopeKey.value) load()
 }
 // Everything above is declared before the first run: a change of person or access starts over.
 watch(scopeKey, reset, { immediate: true, flush: 'sync' })
-const stopAccess = onAccessRevalidate({ reset, refresh: () => { if (scopeKey.value && !saving.value && !autoBusy.value && !checking.value && !question.value?.removing && !removingOld.value) void reload() } })
+const stopAccess = onAccessRevalidate({ reset, refresh: () => { if (scopeKey.value && !saving.value && !autoBusy.value && !checking.value && !question.value?.removing && !removingOld.value && !pausing.value && !discoveryBusy.value) void reload() } })
 onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
 </script>
 
@@ -365,7 +492,7 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
     <header class="reg-head">
       <div class="reg-titles">
         <h2 id="reg-title">Model registry</h2>
-        <p class="reg-lead">Every model PAIMOS can run. With auto-update, newer versions of models in use are taken on by themselves; a new model waits until someone uses it.</p>
+        <p class="reg-lead">Every model PAIMOS can run, by provider. Facts come from the provider or the harness that runs it; models added by hand stay editable.</p>
       </div>
       <button v-if="manageable && phase === 'ready'" type="button" class="btn sm reg-add" data-reg-add :aria-expanded="editing === 'new'" @click="openEditor('new', $event.currentTarget as HTMLElement)"><AppIcon name="plus" :size="14" />Add model</button>
     </header>
@@ -384,10 +511,12 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
         </span>
       </button>
     </div>
+    <ModelDiscovery v-if="readable && status && phase === 'ready'" :status="status" :open="discoveryOpen" :manage="manageable" :busy="discoveryBusy" :error="discoveryError" :note="discoveryNote" :accounts="accounts"
+      @toggle="toggleDiscovery" @set="setDiscovery" @save-key="saveKey" @accept="accept" />
     <div v-if="tray && phase === 'ready'" class="reg-tray" data-reg-tray>
       <AppIcon name="history" :size="16" class="reg-tray-ic" />
       <span class="reg-tray-t" data-reg-tray-text><template v-for="(pair, index) in tray.named" :key="index"><template v-if="index">{{ ' · ' }}</template><b>{{ pair.to }}</b> replaces {{ pair.from }}</template>{{ ' · ' }}{{ tray.count }}{{ tray.unused }}</span>
-      <button type="button" class="btn sm" data-reg-review aria-haspopup="dialog" :aria-expanded="sheetOpen" @click="openSheet">Review…</button>
+      <button type="button" class="btn sm reg-review" data-reg-review aria-haspopup="dialog" :aria-expanded="sheetOpen" @click="openSheet">Review…</button>
     </div>
 
     <div class="reg-body">
@@ -397,37 +526,53 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
         <span>Models couldn’t load. Agents keep running on the last saved choices.</span>
         <button type="button" class="btn sm" data-reg-retry @click="load">Try again</button>
       </div>
-      <ul v-else class="reg-list" aria-label="Registered models">
-        <li v-if="editing === 'new'" class="reg-item">
-          <ModelRegistryEditor :ref="bindEditor" v-model:draft="draft" mode="new" :line="null" :errors="errors" :saving="saving" :form-error="formError" :question="null" @save="save" @cancel="closeEditor(true)" @clear="clearError" />
-        </li>
-        <li v-for="line in lines" :key="line.key" class="reg-item" :data-reg-row="line.model">
-          <div class="reg-row">
-            <span class="reg-mark" aria-hidden="true"><HarnessMark :harness="line.harness" :provider="line.route" :size="13" /></span>
-            <div class="reg-main">
-              <span class="rg-n">{{ line.name }}
-                <template v-if="line.isNew"><span class="tag-new">New</span><span class="tag-off">off until used</span></template>
-                <span v-else-if="line.retireAt" class="tag-ret"><AppIcon name="clock" :size="12" />{{ retiring(line) }}</span>
-              </span>
-              <span v-if="line.note" class="rg-note">{{ line.note }}</span>
-              <span class="rg-m"><template v-for="(part, index) in meta(line)" :key="index"><template v-if="index">{{ ' · ' }}</template><code v-if="part === line.model">{{ part }}</code><template v-else>{{ part }}</template></template></span>
-            </div>
-            <span class="lv" :aria-label="`Thinking levels: ${line.efforts.join(', ')}`"><span v-for="level in line.efforts" :key="level">{{ level }}</span></span>
-            <button v-if="manageable" type="button" class="reg-edit" data-reg-edit :aria-expanded="editing === line.key" :aria-label="`Edit ${line.name}`" @click="openEditor(line.key, $event.currentTarget as HTMLElement)">Edit</button>
+      <template v-else>
+        <p v-if="registry.rows" class="reg-count" data-reg-count>{{ registryCount(registry) }}</p>
+        <div class="reg-list" aria-label="Registered models" role="group">
+          <div v-if="editing === 'new'" class="reg-new">
+            <ModelRegistryEditor :ref="bindEditor" v-model:draft="draft" mode="new" :line="null" :errors="errors" :saving="saving" :form-error="formError" @save="save" @cancel="closeEditor(true)" @clear="clearError" />
           </div>
-          <ModelRegistryEditor v-if="editing === line.key" :ref="bindEditor" v-model:draft="draft" :mode="mode" :line="line" :errors="errors" :saving="saving" :form-error="formError" :question="question"
-            @save="save" @cancel="closeEditor(true)" @clear="clearError" @ask-remove="askRemove" @keep="closeQuestion" @remove="remove" @retry="retryRemove" />
-        </li>
-        <li v-if="!lines.length && editing !== 'new'" class="reg-note" role="status">No models are registered yet.</li>
-      </ul>
+          <div v-for="group in registry.groups" :key="group.provider" class="pg" role="group" :aria-labelledby="`reg-pg-${group.provider}`" :data-reg-provider="group.provider">
+            <p :id="`reg-pg-${group.provider}`" class="pg-h"><span>{{ group.label }}</span><span class="pg-n">{{ group.rows.length }} {{ group.rows.length === 1 ? 'line' : 'lines' }}</span></p>
+            <ul class="pg-list">
+              <li v-for="row in group.rows" :key="row.key" :data-reg-row="row.key">
+                <ModelLineRow :row="row" :open="opened.has(row.key)" :manage="manageable" :now="clock" :editing="editing" :pausing="pauseMenu?.key === row.key" :busy="busyRow(row)"
+                  @toggle="toggleRow(row.key)" @edit="editRoute" @pause="openPause(row, $event)" @remove="askRemove(row, $event)">
+                  <div v-if="question?.key === row.key" class="reg-confirm" data-reg-confirm :role="question.state === 'error' || question.failed ? 'alert' : 'status'" @keydown="questionKeys">
+                    <p v-if="question.state === 'loading'">Checking where {{ row.model.name }} is used…</p>
+                    <p v-else-if="question.state === 'error'">It could not be checked where {{ row.model.name }} is used, so it can’t be removed yet.</p>
+                    <p v-else>{{ question.text }}</p>
+                    <p v-if="question.failed" class="reg-confirm-err" data-reg-error><AppIcon name="alert" :size="14" />{{ question.failed }}</p>
+                    <div class="reg-confirm-acts">
+                      <button type="button" class="btn sm ghost" data-reg-keep :disabled="question.removing" @click="closeQuestion(true)">Keep it</button>
+                      <button v-if="question.state === 'error'" type="button" class="btn sm" data-reg-retry-remove @click="retryRemove">Try again</button>
+                      <button type="button" class="btn sm danger" data-reg-confirm-remove :aria-disabled="question.state !== 'ready' || question.removing" :aria-busy="question.removing" @click="remove">Remove</button>
+                    </div>
+                  </div>
+                </ModelLineRow>
+                <ModelRegistryEditor v-if="editingIn(row)" :ref="bindEditor" v-model:draft="draft" :mode="mode" :line="editedLine" :errors="errors" :saving="saving" :form-error="formError"
+                  @save="save" @cancel="closeEditor(true)" @clear="clearError" />
+              </li>
+            </ul>
+          </div>
+          <p v-if="!registry.rows && editing !== 'new'" class="reg-note" role="status">No models are registered yet.</p>
+        </div>
+      </template>
     </div>
     <ModelOutdatedSheet v-if="sheetOpen && entries.length" :entries="entries" :auto-on="autoOn" :incomplete="outdated?.incomplete === true" :more="more" :busy="removingOld"
       @close="sheetOpen = false" @remove="retireOld" />
+    <ModelsPopover v-if="pauseMenu" :open="true" :anchor="pauseMenu.anchor" :label="`Pause ${pauseMenu.model.name}`" role="presentation" :width="280" @update:open="value => { if (!value) pauseMenu = null }">
+      <div class="reg-menu" role="menu" :aria-label="`Pause ${pauseMenu.model.name}`" data-reg-pause-menu @keydown="pauseKeys">
+        <button v-for="(option, index) in pauseChoices" :key="option.choice" type="button" class="mi" role="menuitem" :data-autofocus="index === 0 ? '' : undefined" :data-reg-pause-choice="option.choice" @click="choosePause(option.choice)">
+          <AppIcon :name="option.choice === 'resume' ? 'play' : 'pause'" :size="14" /><span class="t">{{ option.label }}</span><span class="d">{{ option.detail }}</span>
+        </button>
+      </div>
+    </ModelsPopover>
   </section>
 </template>
 
 <style scoped>
-.reg-card { padding: 26px 28px 8px; scroll-margin-top: 20px; container-type: inline-size; }
+.reg-card { padding: 26px 28px 12px; scroll-margin-top: 20px; container-type: inline-size; }
 .reg-head { display: flex; align-items: flex-start; gap: 16px; padding-bottom: 20px; }
 .reg-titles { flex: 1; min-width: 0; }
 h2 { font: 600 18px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); }
@@ -450,45 +595,53 @@ h2 { font: 600 18px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); 
 @keyframes reg-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .reg-check .spin { animation: none; } }
 
-.reg-tray { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 8px 8px 8px 14px; border-radius: 12px; background: var(--row-selected); font-size: 13px; line-height: 1.5; color: var(--ink-2); }
-.reg-tray-ic { flex: none; color: var(--teal-ink); }
-.reg-tray-t { flex: 1; min-width: 0; }
+.reg-tray { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; column-gap: 10px; row-gap: 8px; margin-top: 10px; padding: 8px 8px 8px 14px; border-radius: 12px; background: var(--row-selected); font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.reg-tray-ic { color: var(--teal-ink); }
+.reg-tray-t { min-width: 0; }
 .reg-tray-t b { font-weight: 600; color: var(--ink); }
-.reg-tray .btn { flex: none; }
 
-.reg-body { margin-top: 10px; }
+.reg-body { margin-top: 4px; }
+.reg-count { padding: 14px 16px 0; font-size: 12px; color: var(--ink-3); }
 .reg-note { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 16px; font-size: 13px; color: var(--ink-2); }
-.reg-list { list-style: none; margin: 0; padding: 0; }
-.reg-item { border-bottom: 1px solid var(--line); }
-.reg-item:last-child { border-bottom: 0; }
-.reg-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 64px; align-items: center; column-gap: 14px; min-height: 64px; padding: 12px 16px; }
-.reg-mark { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 7px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); }
-.reg-main { display: grid; min-width: 0; }
-.rg-n { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: 14px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
-.rg-note { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); overflow-wrap: anywhere; }
-.rg-m { font-size: 12.5px; line-height: 1.5; color: var(--ink-3); overflow-wrap: anywhere; }
-.rg-m code { font: 500 11.5px/1.4 var(--mono); color: var(--ink-2); }
-.lv { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 220px; }
-.lv span { padding: 2px 7px; border-radius: 999px; background: var(--surface-sunken); font: 500 11.5px/1.5 var(--mono); color: var(--ink-2); }
-/* A quiet text link; base.css adds the 44 px hit area on touch screens. */
-.reg-edit { justify-self: end; min-height: 24px; min-width: 24px; padding: 0 3px; border: 0; background: none; font: 500 12.5px/1.4 var(--font); color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 2px; }
-.reg-edit:hover { color: var(--teal-ink); text-decoration-color: currentColor; }
-.tag-new { font: 600 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--teal-ink); background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); padding: 4px 5px; border-radius: 6px; }
-.tag-off { font-size: 12px; font-weight: 500; color: var(--ink-3); }
-.tag-ret { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; color: var(--warn-ink); }
+.reg-list { margin-top: 4px; }
+.reg-new { padding-top: 10px; }
+.pg { margin-top: 14px; }
+.pg-h { display: flex; justify-content: space-between; gap: 12px; padding: 0 16px 6px; border-bottom: 1px solid var(--line); font: 500 10.5px/1.5 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+.pg-n { letter-spacing: .06em; text-transform: none; }
+.pg-list { list-style: none; margin: 0; padding: 0; }
+.pg-list > li:last-child :deep(.ln) { border-bottom: 0; }
+
+/* The remove question grows under the row's actions; its buttons sit on its first line's right, then stack. */
+.reg-confirm { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: flex-end; gap: 8px 16px; margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.reg-confirm > p { flex: 1 1 320px; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.reg-confirm > .reg-confirm-err { display: flex; align-items: flex-start; gap: 8px; flex-basis: 100%; order: 3; color: var(--danger); }
+.reg-confirm-err :deep(svg) { flex: none; margin-top: 3px; }
+.reg-confirm-acts { display: flex; flex-wrap: wrap; gap: 8px; }
+.reg-confirm-acts [aria-disabled="true"] { opacity: .55; cursor: default; }
+
+/* The Pause… menu: teleported, so these rules reach it through the scope of this template. */
+.reg-menu { display: grid; padding: 6px; }
+.mi { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: center; gap: 2px 10px; width: 100%; min-height: 48px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.mi:hover, .mi:focus-visible { background: var(--row-hover); outline: none; }
+.mi:focus-visible { box-shadow: inset 0 0 0 1px var(--line-2); }
+.mi :deep(svg) { grid-row: span 2; align-self: start; margin-top: 3px; color: var(--ink-2); }
+.mi .t { font-size: 13.5px; font-weight: 600; }
+.mi .d { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
 
 @container (max-width: 600px) {
-  .reg-card { padding: 18px 14px 4px; }
+  .reg-card { padding: 18px 14px 6px; }
   .reg-head { flex-wrap: wrap; row-gap: 12px; }
   .reg-titles { flex-basis: 100%; }
   .reg-strip { flex-wrap: wrap; gap: 4px 10px; padding: 8px 12px; }
   .reg-check { margin-left: auto; }
   .reg-text { order: 3; flex: 1 1 100%; padding-bottom: 4px; }
-  .reg-tray { flex-wrap: wrap; }
-  .reg-row { grid-template-columns: 22px minmax(0, 1fr) auto; row-gap: 8px; padding: 12px; }
-  .reg-mark { align-self: start; margin-top: 2px; }
-  .lv { grid-column: 2 / -1; grid-row: 2; justify-content: flex-start; max-width: none; }
-  .reg-edit { grid-column: 3; grid-row: 1; align-self: start; }
+  /* On a phone, Review… gets its own line under the sentence instead of squeezing it (Tick, AEON-1164). */
+  .reg-tray { grid-template-columns: 16px minmax(0, 1fr); padding: 10px 12px; }
+  .reg-tray-ic { align-self: start; margin-top: 2px; }
+  .reg-review { grid-column: 2; justify-self: start; }
+  .reg-count, .pg-h { padding-left: 12px; padding-right: 12px; }
 }
+@media (pointer: coarse) { .mi { min-height: 52px; } .reg-switch { min-height: 44px; } }
 </style>
 <style scoped src="../../../styles/settingsButtons.css"></style>
+<style src="../../../styles/models.css"></style>

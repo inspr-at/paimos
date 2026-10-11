@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -150,25 +151,82 @@ func attachmentViewPolicy(origin string, next http.Handler) http.Handler {
 }
 
 func requestIDMiddleware(next http.Handler) http.Handler {
+	return requestIDMiddlewareWithMetrics(next, &TransportMetrics{})
+}
+
+func requestIDMiddlewareWithMetrics(next http.Handler, metrics *TransportMetrics) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Caller-supplied IDs can contain tokens. Generate our own trace value
 		// before it enters response headers, context or structured logs.
 		id := newRequestID()
-		ctx := context.WithValue(r.Context(), requestIDKey{}, id)
-		r = r.WithContext(ctx)
+		// net/http cancels a keep-alive connection's context on any failed read,
+		// including a handler's own read deadline, but can keep the connection
+		// open after draining the body. Every later request on it would start
+		// cancelled and fail its first database call in 0 ms (AEON-1228). Any
+		// response written after that cancellation closes the connection; a
+		// request that still arrives cancelled is logged and closes it too.
+		conn := r.Context()
+		deadOnArrival := conn.Err() != nil
+		if deadOnArrival {
+			w.Header().Set("Connection", "close")
+		}
+		r = r.WithContext(context.WithValue(conn, requestIDKey{}, id))
 		w.Header().Set(requestIDHeader, id)
-		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK, conn: conn}
+		r = r.WithContext(context.WithValue(r.Context(), bodyReadFailureKey{}, &sw.bodyFailed))
+		var authenticated atomic.Bool
+		r = r.WithContext(context.WithValue(r.Context(), authenticationKey{}, &authenticated))
+		r = r.WithContext(context.WithValue(r.Context(), failureKey{}, &sw.failureLogged))
 		start := time.Now()
 		defer func() {
-			slog.Info("request",
+			if sw.status >= 500 && !sw.failureLogged.Load() {
+				LogFailure(r, "handler", conn.Err())
+			}
+			total := metrics.record(r, sw.status, authenticated.Load(), deadOnArrival)
+			attrs := []any{
 				"method", r.Method,
 				"path", requestLogRoute(r),
 				"status", sw.status,
 				"request_id", id,
+				"conn_id", ConnectionID(conn),
+				"route", metricRoute(r),
+				"status_class", statusClass(sw.status),
+				"authenticated", authenticated.Load(),
+				"request_count", 1,
+				"requests_total", total,
+				"cancelled_on_arrival_total", metrics.cancelled.Load(),
 				"duration_ms", time.Since(start).Milliseconds(),
-			)
+			}
+			if deadOnArrival {
+				attrs = append(attrs, "connection_context", "cancelled_on_arrival")
+				slog.Warn("request arrived on a cancelled connection; connection closed", "path", requestLogRoute(r), "request_id", id, "conn_id", ConnectionID(conn))
+			} else if sw.closed {
+				attrs = append(attrs, "connection_context", "cancelled")
+			}
+			slog.Info("request", attrs...)
 		}()
+		if deadOnArrival {
+			w.Header().Set("Cache-Control", "no-store")
+			w.Header().Set("Retry-After", "1")
+			LogFailure(r, "connection_context", conn.Err())
+			WriteError(sw, http.StatusServiceUnavailable, "service unavailable")
+			return
+		}
 		next.ServeHTTP(sw, r)
+		// A handler that wrote nothing gets its status line from net/http after
+		// this returns; the connection header must be set before that.
+		if !sw.wrote && (conn.Err() != nil || sw.bodyFailed.Load()) {
+			sw.closed = true
+			w.Header().Set("Connection", "close")
+		}
+		if (conn.Err() != nil || sw.bodyFailed.Load()) && sw.wrote && !sw.closeHeader {
+			// Headers committed before cancellation cannot be changed. Flush
+			// any buffered response, then let net/http abort this connection
+			// (or only this stream on HTTP/2), rather than return it to reuse.
+			sw.closed = true
+			_ = http.NewResponseController(w).Flush()
+			panic(http.ErrAbortHandler)
+		}
 	})
 }
 
@@ -223,10 +281,13 @@ func recoverMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
+				if rec == http.ErrAbortHandler {
+					panic(rec)
+				}
 				// Both the URL path and the panic value can contain a public
 				// capability or an upstream credential. The request ID is enough
 				// to correlate this failure without disclosing either value.
-				slog.Error("panic", "request_id", RequestID(r.Context()))
+				LogFailure(r, "panic", nil)
 				WriteError(w, http.StatusInternalServerError, "internal error")
 			}
 		}()
@@ -246,14 +307,29 @@ type statusWriter struct {
 	http.ResponseWriter
 	status int
 	wrote  bool
+	// conn is the request context net/http derived from the connection. Once
+	// it is cancelled the connection must not carry another request.
+	conn          context.Context
+	closed        bool
+	closeHeader   bool
+	failureLogged atomic.Bool
+	bodyFailed    atomic.Bool
 }
 
 func (w *statusWriter) WriteHeader(status int) {
 	if w.wrote {
 		return
 	}
-	w.status = status
-	w.wrote = true
+	final := status >= 200 || status == http.StatusSwitchingProtocols
+	if final {
+		w.status = status
+		w.wrote = true
+	}
+	if w.bodyFailed.Load() || w.conn != nil && w.conn.Err() != nil {
+		w.closed = true
+		w.ResponseWriter.Header().Set("Connection", "close")
+		w.closeHeader = final
+	}
 	w.ResponseWriter.WriteHeader(status)
 }
 
@@ -267,7 +343,12 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *statusWriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+	_ = w.FlushError()
+}
+
+func (w *statusWriter) FlushError() error {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
 	}
+	return http.NewResponseController(w.ResponseWriter).Flush()
 }

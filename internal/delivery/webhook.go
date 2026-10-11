@@ -20,6 +20,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/jackc/pgx/v5"
 )
@@ -143,12 +144,14 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 		m.rejectWebhook(w, r, "unknown", "audit", 404, webhookClass("not_configured"))
 		return
 	}
-	raw, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
+	raw, err := httpapi.ReadRequestBody(w, r, 2<<20, 5*time.Second)
 	if err != nil || len(raw) > 2<<20 {
 		class := webhookClass("body_too_large")
-		if err != nil {
+		var tooLarge *http.MaxBytesError
+		if err != nil && !errors.As(err, &tooLarge) {
 			class = "body_read"
 		}
+		closeAfterFailedRead(w)
 		m.rejectWebhook(w, r, "unknown", "audit", 413, class)
 		return
 	}
@@ -173,6 +176,10 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if name == "pull_request" && e.Pull.Base.Repo.FullName != m.config.Repository {
 		m.rejectWebhook(w, r, e.Action, "audit", 404, webhookClass("repository_mismatch"))
+		return
+	}
+	if err := m.recordMetricEvent(r.Context()); err != nil {
+		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
 		return
 	}
 	// A workflow run is a flow fact, not a delivery observation. The audit
@@ -386,4 +393,15 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+
+func (m *Module) recordMetricEvent(ctx context.Context) error {
+	service := db.AllProjects(ctx, "authenticated repository webhook receipt")
+	return db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE delivery_metric_sources SET last_event_at=greatest(last_event_at,$2) WHERE repository=$1`, m.config.Repository, m.now())
+		return err
+	})
 }

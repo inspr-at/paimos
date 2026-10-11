@@ -29,21 +29,7 @@ import (
 func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	d := setupDispatchOn(t, setup(t, "both", false))
 	f := d.fixture
-	request := httptest.NewRequest(http.MethodGet, "/api/models", nil)
-	must(t, modelregistry.PrepareCatalog(t.Context(), f.d.App, f.owner, modelregistry.CatalogPreparation{Operation: modelregistry.CatalogRead, Request: request}))
-	var reviewer, account string
-	// A review-grade (xhigh, level 4) profile in the workspace's saved Models
-	// Review order, as migration 1333 converts a saved review ladder. Routine
-	// reviews resolve through the same Models walk as every other review.
-	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,'routine-reviewer','fixture','claude','anthropic','review-model','xhigh','frontier',4) RETURNING id::text`, f.owner.TenantID).Scan(&reviewer))
-	must(t, f.tx(func(tx pgx.Tx) error {
-		return dbtest.ModelsOrder(t.Context(), tx, f.owner.TenantID, "other", "review", "wait", reviewer)
-	}))
-	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,label,registered_by_principal_id,owner_person_id,capacity_owner,linked_at,last_probe_at,last_probe_ok,last_daemon_generation,billing_mode,max_parallel_runs) SELECT tenant_id,'review','claude',daemon_id,'Review',registered_by_principal_id,owner_person_id,capacity_owner,linked_at,clock_timestamp(),true,last_daemon_generation,billing_mode,1 FROM agent_accounts WHERE id=$1 RETURNING id::text`, f.account).Scan(&account))
-	f.exec(`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) SELECT tenant_id,$2,computer_id,request_id,$3,verification_expires_at,ongoing_approved_at FROM agent_pairing_enrollments WHERE account_id=$1`, f.account, account, reviewer)
-	f.exec(`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source) SELECT tenant_id,$2,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,'claude',capacity_source FROM account_allowance_windows WHERE account_id=$1`, f.account, account)
-	f.exec(`INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) SELECT tenant_id,$2,window_kind,'claude',window_minutes,used_percent,resets_at,read_at,source FROM account_capacity_readings WHERE account_id=$1`, f.account, account)
-	f.exec(`INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,principal_id,scope,$2::uuid::text,$2,schedule FROM account_capacity_schedules WHERE account_id=$1`, f.account, account)
+	reviewer := prepareRoutineReviewer(t, f)
 	reviews := crossreview.New(f.d.App, nil)
 	d.options.Reviews = reviews
 	d.e = New(f.d.App, d.options)
@@ -288,4 +274,26 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("duplicate escalation: %d", count)
 	}
+}
+
+// prepareRoutineReviewer uses the same saved Models order and owned enrollment
+// in both the focused review guard and the cross-package qualification.
+func prepareRoutineReviewer(t *testing.T, f *fixture) string {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/models", nil)
+	must(t, modelregistry.PrepareCatalog(t.Context(), f.d.App, f.owner, modelregistry.CatalogPreparation{Operation: modelregistry.CatalogRead, Request: request}))
+	var reviewer, account string
+	// A review-grade (xhigh, level 4) profile in the workspace's saved Models
+	// Review order, as migration 1333 converts a saved review ladder. Routine
+	// reviews resolve through the same Models walk as every other review.
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,'routine-reviewer','fixture','claude','anthropic','review-model','xhigh','frontier',4) RETURNING id::text`, f.owner.TenantID).Scan(&reviewer))
+	must(t, f.tx(func(tx pgx.Tx) error {
+		return dbtest.ModelsOrder(t.Context(), tx, f.owner.TenantID, "other", "review", "wait", reviewer)
+	}))
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,label,registered_by_principal_id,owner_person_id,capacity_owner,linked_at,last_probe_at,last_probe_ok,last_daemon_generation,billing_mode,max_parallel_runs) SELECT tenant_id,'review','claude',daemon_id,'Review',registered_by_principal_id,owner_person_id,capacity_owner,linked_at,clock_timestamp(),true,last_daemon_generation,billing_mode,1 FROM agent_accounts WHERE id=$1 RETURNING id::text`, f.account).Scan(&account))
+	f.exec(`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) SELECT tenant_id,$2,computer_id,request_id,$3,verification_expires_at,ongoing_approved_at FROM agent_pairing_enrollments WHERE account_id=$1`, f.account, account, reviewer)
+	f.exec(`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source) SELECT tenant_id,$2,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,'claude',capacity_source FROM account_allowance_windows WHERE account_id=$1`, f.account, account)
+	f.exec(`INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) SELECT tenant_id,$2,window_kind,'claude',window_minutes,used_percent,resets_at,read_at,source FROM account_capacity_readings WHERE account_id=$1`, f.account, account)
+	f.exec(`INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,principal_id,scope,$2::uuid::text,$2,schedule FROM account_capacity_schedules WHERE account_id=$1`, f.account, account)
+	return reviewer
 }

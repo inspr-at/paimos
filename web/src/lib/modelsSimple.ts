@@ -8,13 +8,24 @@ import { HARNESS_NAME as ACCOUNT_NAME } from './capacity'
 export type Scope = 'me' | 'default'
 export interface SimplePick { line: string | null; effort: string | null; harness?: string; model?: string }
 export interface SimpleLock { by: string | null; at: string | null; reason: string }
-export interface SimpleRow extends SimplePick { column: string; mine: boolean; lock: SimpleLock | null }
+/** One step of a row's fallback, at its own native level (AEON-1161). */
+export interface SimpleStep { line: string; effort: string | null }
+/** A line a row never uses, even in someone's own order: a workspace rule (who, when, why) or a saved exclusion. */
+export interface SimpleNever { line: string; by: string | null; at: string | null; why: string }
+/** What a row does when none of its order can run: wait, or continue with the default's order. */
+export type ChainEnd = 'wait' | 'default'
+export interface SimpleRow extends SimplePick {
+  column: string; mine: boolean; lock: SimpleLock | null
+  /** Models v2 (AEON-1159). Absent only on an older server; read as an empty order. */
+  chain?: SimpleStep[]; end?: ChainEnd; never?: SimpleNever[]
+}
 export interface SimpleTrace { line: string; stage: 'column' | 'default' | 'role'; role?: string; reason: string; selected: boolean }
 export interface SimpleNext { column?: string; line?: string | null; effort?: string | null; ticket?: string; reviewer?: SimplePick; trace?: SimpleTrace[] }
 /** Why a row's pick can't run right now, one cause per entry (AEON-1159). The page writes the words; reason is legacy. */
 export type UnavailableCause = 'daily_cap' | 'paused' | 'no_tools' | 'no_account' | 'retired' | 'residency'
 export interface SimpleUnavailable {
   column: string; line: string; runs_instead: string | null; effort: string | null; reason: string; ticket: string | null
+  /** route is the harness of the skipped route, waits says nothing in the order can run. */
   cause?: UnavailableCause; until?: string | null; route?: string | null; waits?: boolean
   /** Harness of the route that runs instead; tells "runs through Cursor instead" apart from another model. */
   runs_via?: string | null
@@ -23,11 +34,16 @@ export interface SimpleNewLine { line: string; can_do: string[] }
 export interface SimpleDocument {
   all: SimpleRow; exceptions: SimpleRow[]; reviews: { mode: 'cross_family' }; next: SimpleNext | null
   unavailable: SimpleUnavailable[]; new_lines: SimpleNewLine[]; revision: number; rules_revision: number; person_id: string | null
+  /** Workspace situation orders (for=default only); a missing cell follows its row, or automatic review. */
+  situations?: SimpleSituations; quick?: SimpleQuick
 }
 /** The part of the ranked board this page needs: the stored order behind each first pick, and what a column cannot do. */
-export interface TailCard { line: string; lock?: unknown }
-/** The order a first-pick rewrite must keep, including lines the resolved list omits. */
-export interface StoredOrder { rank: string[]; not: string[] }
+export interface TailCard { line: string; lock?: { kind?: string; value?: string; scope?: string } | null }
+/**
+ * The order a first-pick rewrite must keep, including lines the resolved list omits. End and efforts are the column's
+ * own order's ending and native levels (AEON-1161); absent when it has no order of its own or stores none.
+ */
+export interface StoredOrder { rank: string[]; not: string[]; end?: string; efforts?: Record<string, string> }
 export interface TailColumn {
   column: string; label: string; fixed: boolean; hidden: boolean; source: 'own' | 'default' | 'template' | 'follows'
   list: TailCard[]; not: TailCard[]; cant: { line: string; reason: string }[]
@@ -72,7 +88,7 @@ export interface ModelEntry {
   replacedBy?: string
 }
 const harnessRank = (harness: string) => { const index = HARNESS_ORDER.indexOf(harness); return index < 0 ? HARNESS_ORDER.length : index }
-const providerRank = (provider: string) => { const index = PROVIDER_ORDER.indexOf(provider); return index < 0 ? PROVIDER_ORDER.length - 1 : index }
+export const providerRank = (provider: string) => { const index = PROVIDER_ORDER.indexOf(provider); return index < 0 ? PROVIDER_ORDER.length - 1 : index }
 const levelValue = (effort: EffortName) => effort.level ?? NAMED_LEVEL[effort.name] ?? 2
 /** "GPT-6.1 Sol", "Opus 5.5": the model's own name and version, never a harness or a profile revision. */
 export function fullName(profile: RegistryProfile): string {
@@ -81,6 +97,14 @@ export function fullName(profile: RegistryProfile): string {
     if (gpt) return `GPT-${gpt[1]} ${gpt[2]!.charAt(0).toUpperCase()}${gpt[2]!.slice(1)}`
   }
   return `${profile.short_name || profile.display_name || profile.model} ${profile.model_version ?? ''}`.trim()
+}
+/** The line a model version belongs to, without its version ("GPT Sol", "Claude Opus"), from the same fields as fullName. */
+export function registryLineName(profile: RegistryProfile): string {
+  if (profile.harness === 'codex') {
+    const gpt = /^gpt-([0-9]+(?:\.[0-9]+)*)-(.+)$/.exec(profile.model)
+    if (gpt) return `GPT ${gpt[2]!.charAt(0).toUpperCase()}${gpt[2]!.slice(1)}`
+  }
+  return profile.display_name || profile.short_name || profile.model
 }
 
 /**
@@ -207,6 +231,8 @@ export interface RowView {
   key: string; column: string; label: string; isDefault: boolean
   line: string | null; effort: string | null; entry: ModelEntry | null
   mine: boolean; reset: boolean; remove: boolean; editable: boolean; lock: SimpleLock | null; unavailable: SimpleUnavailable | null
+  /** The fallback after the pick, how it ends, and the lines this row never uses (AEON-1161). */
+  chain: SimpleStep[]; end: ChainEnd; never: SimpleNever[]
   /** A draft row exists only on this page until a pick is made; nothing is stored for it. */
   draft?: boolean
 }
@@ -225,12 +251,13 @@ export function buildRows(input: { doc: SimpleDocument; workspace: SimpleDocumen
       reset: own && falls, remove: !isDefault && (scope === 'default' ? canEdit : own && !falls),
       editable: canEdit && (scope === 'default' || !row.lock), lock: row.lock,
       unavailable: doc.unavailable.find(item => item.column === row.column) ?? null,
+      chain: Array.isArray(row.chain) ? row.chain : [], end: row.end === 'wait' || row.end === 'default' ? row.end : isDefault ? 'wait' : 'default', never: Array.isArray(row.never) ? row.never : [],
     }
   })
   // "+ Different model for…" starts a row with the default's model and level; nothing is stored until a pick.
   if (draft && !rows.some(row => row.column === draft)) {
     const base = rows[0]!
-    rows.push({ ...base, key: draft, column: draft, label: labels.get(draft) ?? draft, isDefault: false, mine: false, reset: false, remove: false, editable: canEdit, lock: null, unavailable: null, draft: true })
+    rows.push({ ...base, key: draft, column: draft, label: labels.get(draft) ?? draft, isDefault: false, mine: false, reset: false, remove: false, editable: canEdit, lock: null, unavailable: null, chain: [], end: 'default', never: [], draft: true })
   }
   return rows
 }
@@ -239,6 +266,14 @@ export function buildRows(input: { doc: SimpleDocument; workspace: SimpleDocumen
 export function orderBody(column: TailColumn): OrderBody {
   if (column.stored && Array.isArray(column.stored.rank) && Array.isArray(column.stored.not)) return { rank: [...column.stored.rank], not: [...column.stored.not] }
   return { rank: column.list.map(card => card.line), not: column.not.map(card => card.line) }
+}
+/** Lines a workspace rule keeps last in a column's order: pins to the bottom, migrated from the old board (AEON-1158). */
+export const pinnedLast = (column: TailColumn | undefined) => new Set((column?.list ?? []).filter(card => card.lock?.value === 'bottom').map(card => card.line))
+/** How many steps at the end of a row's order are kept there by such pins. */
+export function pinnedSteps(row: RowView, pinned: Set<string>): number {
+  let count = 0
+  while (count < row.chain.length && pinned.has(row.chain[row.chain.length - 1 - count]!.line)) count++
+  return count
 }
 export function orderWithFirst(column: TailColumn, line: string): OrderBody {
   const body = orderBody(column)
@@ -378,6 +413,202 @@ export function nextView(input: { next: SimpleNext | null; rows: RowView[]; entr
   return { parts, why: { title: `Why ${entryFor(entries, next.line)?.name ?? lineFallback(next.line)}?`, steps } }
 }
 
+// ----- Quick jobs and the situation matrix (Models v2 W3, AEON-1162) -----------------------------------------------
+/** The matrix columns. "First build" is the small-work order; the row itself stays the first-build order. */
+export type SituationKey = 'small' | 'fix' | 'stuck' | 'review'
+export interface SituationStep { line: string; effort: string | null }
+export interface SimpleSituation extends SimplePick { chain: SituationStep[]; end: 'wait' | 'row' | 'auto'; /** The order's saved exclusions. */ not?: string[] }
+export type SimpleSituations = Record<string, Partial<Record<SituationKey, SimpleSituation>>>
+export interface SimpleQuick { line: string | null; effort: string | null; harness: string | null; model?: string; trace: SimpleTrace[] }
+/** A situation order as the order endpoint takes it: rank = [pick, …chain]; an omitted end or not keeps the stored one. */
+export interface SituationOrder { rank: string[]; efforts: Record<string, string>; end?: 'wait' | 'row' | 'auto'; not?: string[] }
+export interface SituationLimitsView { small_hours: number; fix_rounds: number }
+
+export const SITUATIONS: readonly { key: SituationKey; label: string }[] = [
+  { key: 'small', label: 'First build' }, { key: 'fix', label: 'Fix rounds' }, { key: 'stuck', label: 'Stuck' }, { key: 'review', label: 'Review' },
+]
+/** The limits come from Settings › Kinds of work; without them the hint names the situation in words only. */
+export function situationHint(key: SituationKey, limits: SituationLimitsView | null): string {
+  if (key === 'small') return limits ? `${limits.small_hours} h or less` : 'small work'
+  if (key === 'fix') return 'after findings'
+  if (key === 'stuck') return limits ? `after ${limits.fix_rounds} ${limits.fix_rounds === 1 ? 'round' : 'rounds'}` : 'after the fix rounds'
+  return 'another family'
+}
+export interface SituationRow { column: string; label: string; isDefault: boolean; line: string | null; effort: string | null; entry: ModelEntry | null; cells: Record<SituationKey, SimpleSituation | null> }
+/**
+ * The matrix rows: the Default, every row of the workspace, then any kind that has a situation order but no row of its
+ * own, so a count never names a cell the page does not show. Kinds keep the order of Settings › Kinds of work.
+ */
+export function situationRows(input: { doc: SimpleDocument; entries: ModelEntry[]; labels: Map<string, string>; order: string[] }): SituationRow[] {
+  const { doc, entries, labels, order } = input, cells = doc.situations ?? {}
+  const cellsOf = (column: string) => Object.fromEntries(SITUATIONS.map(({ key }) => [key, cells[column]?.[key]?.line ? cells[column]![key]! : null])) as Record<SituationKey, SimpleSituation | null>
+  const view = (row: SimpleRow): SituationRow => ({ column: row.column, label: row.column === ALL_COLUMN ? 'Default' : labels.get(row.column) ?? row.column, isDefault: row.column === ALL_COLUMN, line: row.line, effort: row.effort, entry: entryFor(entries, row.line), cells: cellsOf(row.column) })
+  const rows = [doc.all, ...doc.exceptions].map(view)
+  const extra = Object.keys(cells).filter(column => !rows.some(row => row.column === column) && SITUATIONS.some(({ key }) => cells[column]?.[key]?.line))
+    .sort((a, b) => (order.indexOf(a) + 1 || order.length + 1) - (order.indexOf(b) + 1 || order.length + 1) || a.localeCompare(b))
+  return [...rows, ...extra.map(column => view({ ...doc.all, column }))]
+}
+export const situationCount = (rows: SituationRow[]) => rows.reduce((count, row) => count + SITUATIONS.filter(({ key }) => row.cells[key]).length, 0)
+export const situationSteps = (cell: SimpleSituation | null | undefined): SituationStep[] => cell?.line ? [{ line: cell.line, effort: cell.effort }, ...cell.chain] : []
+/**
+ * An order body for these steps; no steps means the cell goes back to the row (or to automatic review). The exclusions
+ * are sent only when given, to write a whole stored order back; otherwise the server keeps the ones it has.
+ */
+export function situationOrder(steps: SituationStep[], end?: SituationOrder['end'], not?: string[]): SituationOrder | null {
+  if (!steps.length) return null
+  const efforts: Record<string, string> = {}
+  for (const step of steps) if (step.effort) efforts[step.line] = step.effort
+  return { rank: steps.map(step => step.line), efforts, ...(end ? { end } : {}), ...(not ? { not: [...not] } : {}) }
+}
+/**
+ * Reviews run at the model's highest native level, which the server picks and refuses any other (review_floor). So a
+ * review step sends no level, whatever level was clicked; the cell then shows the level the server chose.
+ */
+export const situationStep = (situation: SituationKey, entry: ModelEntry, effort: string | null): SituationStep =>
+  ({ line: entry.line, effort: situation === 'review' ? null : effort })
+export const situationEndText = (situation: SituationKey, cell: SimpleSituation) =>
+  cell.end === 'wait' ? 'Then wait.' : situation === 'review' ? 'Then automatic, always another family.' : 'Then the row’s fallback.'
+export const situationEmptyText = (situation: SituationKey) => situation === 'review' ? 'Automatic: the first qualified model of another family.' : 'Same as the row: its pick, then its fallback.'
+/** Refusals of a situation write, in plain words; the server sends codes. */
+export function situationFailure(code: string): string {
+  const words: Record<string, string> = {
+    review_floor: 'Reviews need a strong model at its highest level. That model can’t review here.',
+    invalid_effort: 'That level isn’t available for this model.', effort_not_registered: 'That level isn’t available for this model.',
+    unknown_column: 'That kind of work no longer exists. Reload to see the current kinds.', invalid_end: 'That ending isn’t allowed for this situation.',
+  }
+  return words[code] ?? ''
+}
+
+export interface QuickView { lead: string; steps: Part[][]; foot: string }
+/** The Quick jobs "Why?": the rule, what was skipped and why, what runs now, and what runs when nothing qualifies. */
+export function quickView(input: { quick: SimpleQuick | null | undefined; fallback: RowView | null | undefined; entries: ModelEntry[] }): QuickView {
+  const { quick, fallback, entries } = input
+  const name = (line: string | null | undefined, effort: string | null | undefined) => pickText(entryFor(entries, line), effort ?? null, lineFallback(line))
+  const said: Record<string, string> = { 'Quick jobs requires fast tier': 'it isn’t a fast model', 'No tools in PAIMOS': 'it has no tools in PAIMOS' }
+  const steps: Part[][] = [[{ text: 'PAIMOS takes the cheapest model that qualifies: a fast model with tools and an account with room.' }]]
+  const skipped = (quick?.trace ?? []).filter(step => step.role !== 'review-gate' && !step.selected && step.reason)
+  for (const step of skipped.slice(0, 3)) {
+    const reason = step.reason.split(';').map(part => said[part.trim()] ?? part).join(';')
+    steps.push([{ text: `Skipped ${entryFor(entries, step.line)?.name ?? lineFallback(step.line)}: ${reasonText(reason)}.` }])
+  }
+  if (skipped.length > 3) steps.push([{ text: `Skipped ${skipped.length - 3} more that can’t run right now.` }])
+  if (quick?.line) steps.push([{ text: 'Right now: ' }, { text: name(quick.line, quick.effort), strong: true }, { text: quick.harness ? ` through ${harnessLabel(quick.harness)}.` : '.' }])
+  else if (quick) steps.push([{ text: 'Right now nothing qualifies, so quick jobs wait.' }])
+  if (fallback?.line) steps.push([{ text: 'If none qualifies, the default runs: ' }, { text: name(fallback.line, fallback.effort), strong: true }, { text: '.' }])
+  return { lead: 'Scout and mechanical work: reading code, triage, small changes that are fully described.', steps, foot: 'Agents still ask by role name (scout, mechanical); the answer comes from this page.' }
+}
+
+// ----- Fallback orders (AEON-1161) ------------------------------------------------------------------------------
+// Each row is its pick, then its fallback in order, then Wait or the default's fallback. Nothing outside the order runs.
+
+/** A model by its own name, never a raw id. */
+export const lineName = (entries: ModelEntry[], line: string | null | undefined) => entryFor(entries, line)?.name ?? lineFallback(line)
+/** "Opus 5.5 · max"; a model with one level shows no level. */
+export const stepText = (entries: ModelEntry[], step: SimpleStep) => pickText(entryFor(entries, step.line), step.effort, lineFallback(step.line))
+/** How an order ends, in words. The default always ends in Wait. */
+export const endText = (end: ChainEnd, isDefault: boolean) => isDefault || end === 'wait' ? 'Wait' : 'the default’s fallback'
+/** The sentence under a row: "If GPT-6.1 Sol can’t run → Opus 5.5 → Wait". */
+export function fallbackSentence(row: RowView, entries: ModelEntry[]): { pick: string; steps: string[] } {
+  return { pick: row.entry?.name ?? lineFallback(row.line), steps: [...row.chain.map(step => lineName(entries, step.line)), endText(row.end, row.isDefault)] }
+}
+/** Where "the default’s fallback" goes: the default's pick, its order, then Wait. */
+export const defaultTail = (base: RowView | undefined, entries: ModelEntry[]) => base?.line ? [lineName(entries, base.line), ...base.chain.map(step => lineName(entries, step.line)), 'Wait'] : ['Wait']
+
+/** One item moved to another place; anything out of range leaves the list as it was. */
+export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
+  const next = list.slice()
+  if (from === to || from < 0 || to < 0 || from >= list.length || to >= list.length) return next
+  const [item] = next.splice(from, 1)
+  next.splice(to, 0, item!)
+  return next
+}
+/** The lines an order already holds; a fallback offers only the others. */
+export const orderLines = (row: RowView) => [row.line, ...row.chain.map(step => step.line)].filter((line): line is string => !!line)
+
+/** The server's model identity (modelregistry.modelsLine): one line across every harness that runs it. */
+export function modelsLineId(profile: RegistryProfile): { line: string; version: string } {
+  let harness = profile.harness, model = profile.model
+  if (profile.family === 'anthropic') { harness = 'claude'; model = model.replace(/^anthropic\//, '') }
+  if (profile.family === 'openai' && model.startsWith('gpt-')) harness = 'codex'
+  const { line, version } = profileLine({ ...profile, harness, model })
+  return { line: `${profile.family}:${line}`, version }
+}
+/** The routes (harnesses) each line runs through, in registry order: the enabled routes of its latest version. */
+export function lineRoutes(profiles: RegistryProfile[]): Map<string, string[]> {
+  const byLine = new Map<string, { profile: RegistryProfile; version: string }[]>()
+  for (const profile of profiles) {
+    const { line, version } = modelsLineId(profile)
+    byLine.set(line, [...(byLine.get(line) ?? []), { profile, version }])
+  }
+  const out = new Map<string, string[]>()
+  for (const [line, items] of byLine) {
+    const usable = items.filter(item => item.profile.enabled && !item.profile.retired)
+    const latest = usable.filter(item => item.version !== 'alias').reduce((version, item) => compareModelVersions(item.version, version) > 0 ? item.version : version, '')
+    const harnesses: string[] = []
+    for (const { profile, version } of usable) if ((version === 'alias' || version === latest) && !harnesses.includes(profile.harness)) harnesses.push(profile.harness)
+    out.set(line, harnesses)
+  }
+  return out
+}
+/** "Claude Code, then 2 more": the route a step tries first, and how many it tries after it. */
+export function routeNote(harnesses: string[] | undefined, first?: string | null): string {
+  if (!harnesses?.length) return ''
+  const lead = first && harnesses.includes(first) ? first : harnesses[0]!
+  return harnesses.length > 1 ? `${harnessLabel(lead)}, then ${harnesses.length - 1} more` : harnessLabel(lead)
+}
+
+const clock = (iso: string, now: number) => {
+  const at = Date.parse(iso)
+  if (!Number.isFinite(at)) return ''
+  const when = new Date(at)
+  return at >= now && at - now < 86_400_000 ? when.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : formatDate(iso)
+}
+/** A cause in a few words for a step in the order. Never a code. */
+export function causeShort(item: Pick<SimpleUnavailable, 'cause' | 'until'>, now = Date.now()): string {
+  const until = item.until ? clock(item.until, now) : ''
+  switch (item.cause) {
+    case 'daily_cap': return until ? `daily cap until ${until}` : 'at its daily cap'
+    case 'paused': return until ? `paused until ${until}` : 'paused'
+    case 'no_tools': return 'no tools in PAIMOS'
+    case 'no_account': return 'no account with room'
+    case 'retired': return 'retired'
+    case 'residency': return 'not allowed where this work must run'
+    default: return 'can’t run right now'
+  }
+}
+export interface StepState { text: string; runs: boolean }
+/**
+ * What the order says about each step right now, from the row's own evidence only: the pick's first cause, and the
+ * step that runs instead. Steps the server did not report on say nothing rather than guess.
+ */
+export function stepStates(row: RowView, unavailable: SimpleUnavailable[], now = Date.now()): Map<string, StepState> {
+  const out = new Map<string, StepState>()
+  const first = unavailable.find(item => item.column === row.column && item.line === row.line)
+  if (!first || !row.line) return out
+  if (first.runs_instead === row.line) {
+    out.set(row.line, { text: first.route ? `runs now, not through ${harnessLabel(first.route)}` : 'runs now through another route', runs: true })
+    return out
+  }
+  out.set(row.line, { text: causeShort(first, now), runs: false })
+  if (first.runs_instead) out.set(first.runs_instead, { text: 'runs now', runs: true })
+  return out
+}
+
+/**
+ * The native levels a chain write stores: each step's level, and the pick's only when the row holds its own
+ * (an inherited level stays inherited). Lines the registry does not know keep the server's automatic level.
+ */
+export function chainEfforts(input: { pick: string | null; pickEffort: string | null; ownPick: boolean; steps: SimpleStep[]; known: (line: string) => boolean }): Record<string, string> {
+  const out: Record<string, string> = {}
+  if (input.ownPick && input.pick && input.pickEffort && input.known(input.pick)) out[input.pick] = input.pickEffort
+  for (const step of input.steps) if (step.effort && input.known(step.line)) out[step.line] = step.effort
+  return out
+}
+/** Two orders that read the same: pick, level, every step with its level, and the ending. */
+export const sameOrder = (a: { line: string | null; effort: string | null; chain: SimpleStep[]; end: ChainEnd }, b: { line: string | null; effort: string | null; chain: SimpleStep[]; end: ChainEnd }) =>
+  a.line === b.line && a.effort === b.effort && a.end === b.end && a.chain.length === b.chain.length && a.chain.every((step, index) => step.line === b.chain[index]!.line && step.effort === b.chain[index]!.effort)
+/** "Markus, 2 Oct" for a workspace rule; a saved exclusion has no author. */
+export const neverWho = (never: SimpleNever, name: (id: string) => string) => never.at ? `${never.by ? name(never.by) : 'An admin'}, ${formatDate(never.at)}` : 'saved exclusion'
 /** What /models/resolve says about one ticket: the profile that runs it and every step its walk skipped. */
 export interface TicketResolution {
   profile: RegistryProfile | null; owner_required: boolean

@@ -369,3 +369,18 @@ func TestAdmissionWIPInventoryRejectsPartialReads(t *testing.T) {
 		t.Fatal("partial page became a complete count")
 	}
 }
+
+func TestAdmissionProjectLifecycleDeniesBeforeOtherInputs(t *testing.T) {
+	// Risk: freeze/archive become merely advisory or fail behind unrelated host,
+	// quota and CI errors instead of returning the current lifecycle reason.
+	f := newFixture(t)
+	for _, state := range []string{"frozen", "archived"} {
+		f.exec(t, `UPDATE nodes SET state=$2 WHERE id=$1`, f.project, state)
+		f.decide(t, f.request("lifecycle-"+state, "first_build"), "project_"+state)
+	}
+	f.exec(t, `UPDATE nodes SET state='open' WHERE id=$1`, f.project)
+	f.decide(t, f.request("lifecycle-restored", "first_build"), "shadow_disabled")
+	f.enable(t)
+	f.exec(t, `UPDATE nodes SET state='frozen' WHERE id=$1`, f.project)
+	f.decide(t, f.request("lifecycle-shadow", "first_build"), "project_frozen")
+}

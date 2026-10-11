@@ -145,12 +145,12 @@ func (m *Module) adoptLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err != nil {
 		return nil, err
 	}
-	active, err := leadProject(ctx, tx, id)
+	lifecycle, err := leadProject(ctx, tx, id)
 	if err != nil {
 		return nil, err
 	}
-	if !active {
-		return nil, workorders.Fail(409, "project archived")
+	if lifecycle != "" {
+		return nil, workorders.Fail(409, lifecycle)
 	}
 	l, err := loadLead(ctx, tx, id, true)
 	if err != nil {

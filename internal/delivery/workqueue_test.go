@@ -350,3 +350,50 @@ func TestDeliveryWorkQueueConcurrentClaimOwnsSlugOnce(t *testing.T) {
 		t.Fatal("shadow claim gained execution authority")
 	}
 }
+
+func TestDeliveryQueueProjectLifecycleClosesStarts(t *testing.T) {
+	// Risk: queue admission bypasses the project's lifecycle or a previously
+	// claimed round starts after Freeze, while existing work cannot finish.
+	f := newFixture(t)
+	path := queuePath(f)
+	f.m.SetQueueAdmission(func(context.Context, pgx.Tx, tenant.Principal, Round) (bool, string, error) {
+		return true, "allowed", nil
+	})
+	s := queueDefaults()
+	s.Mode = "shadow"
+	f.call(t, f.person, "PUT", path+"/settings", s, 200, &s)
+	var round Round
+	f.call(t, f.person, "POST", path, roundInput(f, "lifecycle", "first_build", 1), 201, &round)
+	for i, state := range []string{"frozen", "archived"} {
+		f.tx(t, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE nodes SET state=$2 WHERE id=$1`, f.project, state)
+			return err
+		})
+		var claim QueueClaim
+		f.call(t, f.person, "POST", path+"/claim", ClaimInput{Request: requestID(80 + i)}, 200, &claim)
+		if claim.Round != nil || claim.Reason != "project_"+state || claim.Execute {
+			t.Fatalf("lifecycle admission: %+v", claim)
+		}
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='open' WHERE id=$1`, f.project)
+		return err
+	})
+	var claim QueueClaim
+	f.call(t, f.person, "POST", path+"/claim", ClaimInput{Request: requestID(82)}, 200, &claim)
+	if claim.Round == nil {
+		t.Fatal("restored project could not claim")
+	}
+	round = *claim.Round
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='frozen' WHERE id=$1`, f.project)
+		return err
+	})
+	var refusal struct {
+		Error string `json:"error"`
+	}
+	f.call(t, f.person, "POST", path+"/"+round.ID+"/progress", map[string]any{"revision": round.Revision, "state": "running"}, 409, &refusal)
+	if refusal.Error != "project_frozen" {
+		t.Fatalf("round start refused for the wrong reason: %+v", refusal)
+	}
+}

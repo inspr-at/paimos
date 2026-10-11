@@ -3,10 +3,12 @@
 // python3 /Users/markus/Code/aeon-worktrees/bin/fleet-gate.py -- npm test -- session-attention.spec.ts --workers=2
 import { test, expect } from '@playwright/test'
 import { mockStateColours, stateNow } from './state-colours-fixtures'
+import { mockAgents } from './agents-fixtures'
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390]) {
   test(`${theme} ${width}: shared replies leave five siblings working and Needs you empty`, async ({ page }, testInfo) => {
     const { agents, data } = await mockStateColours(page, theme)
+    await mockAgents(page, agents, { now: () => stateNow })
     await page.setViewportSize({ width, height: width === 1440 ? 1000 : 844 })
     const template = agents.sessions[0]!
     const shared = { kind: 'reply', scope: 'shared', actor: 'agent', count: 1, blocking: false, location: 'messages' }
@@ -19,11 +21,12 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     data.projects.splice(1)
     await page.goto('/agents')
     const queue = page.getByRole('region', { name: 'Needs you' })
-    // Production removes Needs you when nothing is pending and there is no decided
-    // history. The sentence "Nothing waits on you" exists only inside that region.
+    const desk = page.getByRole('region', { name: 'Decision Desk', exact: true })
+    // Legacy inline requests are retired; the canonical desk keeps an empty state.
     await expect(page.locator('.page-head .count[data-filter="working"] b')).toHaveText('5')
     await expect(queue).toHaveCount(0)
-    await expect(page.getByText('Nothing waits on you')).toHaveCount(0)
+    await expect(desk).toContainText('Nothing waits on you.')
+    await expect(desk.getByLabel('Open decisions')).toHaveText('0')
     await expect(page.getByRole('list', { name: 'Requests waiting for you' })).toHaveCount(0)
     for (const session of agents.sessions) {
       const row = page.locator(`[data-row="s:${session.id}"]`)
@@ -56,10 +59,10 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
       attention_reasons: [{ kind: 'approval', scope: 'run', actor: 'person', count: 1, blocking: true, location: 'approvals' }, shared] })
     agents.approvals.push({ id: 'bk5-approval', agent_principal_id: template.agent_principal_id, agent_name: 'Shared fixture principal', resource_kind: 'run', resource_id: 'bk5-run', run_id: 'bk5-run', scope: 'nodes.read', rationale: '', risk: 'low', decision: null, decided_by_principal_id: null, expires_at: new Date(stateNow + 60_000).toISOString(), proposed_at: new Date(stateNow).toISOString() })
     await page.goto('/agents/bk5-worker-0')
-    await expect(queue).toBeVisible()
-    await expect(queue).not.toContainText('Nothing waits on you')
-    await expect(queue.getByRole('list', { name: 'Requests waiting for you' })).toBeVisible()
-    await expect(queue).toContainText('Read tickets')
+    await expect(queue).toHaveCount(0)
+    await expect(desk).not.toContainText('Nothing waits on you')
+    await expect(desk.getByLabel('Open decisions')).toHaveText('1')
+    await expect(page.getByTestId('agents-desk-item-a:bk5-approval')).toHaveAttribute('href', '/decision-desk?item=a:bk5-approval')
     await expect(panel.locator('.head-top .agent-state-label')).toHaveText('Awaiting approval')
     // The panel reopens on the remembered tab (Messages, above); evidence lives in Overview.
     await panel.getByRole('tab', { name: 'Overview' }).click()

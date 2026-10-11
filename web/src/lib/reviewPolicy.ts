@@ -6,6 +6,8 @@ export interface ReviewPolicy { mode: ReviewPolicyMode; allowed_families: Review
 export interface ReviewPolicySettings {
   project_id: string | null; policy: ReviewPolicy | null; effective: ReviewPolicy; workspace: ReviewPolicy
   valid_families: ReviewFamily[]; source: 'default' | 'tenant' | 'project'; updated_by: string | null; updated_at: string | null
+  // Read-only dispatch rules for "How reviewers are chosen" (AEON-1159 contract).
+  family_order: string[]; floor: { tiers: string[]; min_effort_level: number }; security_excludes: string[]
 }
 const pathFor = (id: string) => id ? `/projects/${encodeURIComponent(id)}/review-policy` : '/settings/review-policy'
 async function request(id: string, method: string, body?: ReviewPolicy, signal?: AbortSignal, revision?: string | null): Promise<ReviewPolicySettings> {

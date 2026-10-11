@@ -128,6 +128,9 @@ func TestWebhookFailureParse(t *testing.T) {
 func TestWebhookFailureAudit(t *testing.T) {
 	// Risk: nested ingress/audit handlers emit no line or several lines for a
 	// refusal, or an unauthenticated action injects payload text into logs.
+	// Authenticated envelopes persist their receipt before the audit parser;
+	// keep that real write available so each case reaches its claimed failure.
+	f := newFixture(t)
 	base := `"installation":{"id":456},"repository":{"full_name":"example/delivery"}`
 	for _, tc := range []struct {
 		name, raw, action, class string
@@ -144,6 +147,8 @@ func TestWebhookFailureAudit(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, g, logs := webhookLogFixture()
+			m.pool = f.d.App
+			m.config.TenantID = f.person.TenantID
 			if tc.fallback {
 				m.github = g.fakeGitHub
 			}

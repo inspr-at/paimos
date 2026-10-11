@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -62,6 +63,12 @@ type Server struct {
 	// readyProbe overrides the readiness database ping. Nil uses db.Probe.
 	// Tests inject it; production leaves it nil.
 	readyProbe func(context.Context) error
+	// AuthProbe exercises shared authentication reads without minting credentials
+	// or renewing activity. It shares readiness's 500ms total budget.
+	AuthProbe func(context.Context) error
+	authReady authReadiness
+	readyNow  func() time.Time
+	Metrics   TransportMetrics
 
 	once    sync.Once
 	handler http.Handler
@@ -112,7 +119,7 @@ func (s *Server) build() {
 	}
 	api = readStatementTimeoutMiddleware(api)
 	api = routePatternMiddleware(s.Mux, api)
-	api = commonMiddleware(api)
+	api = requestIDMiddlewareWithMetrics(recoverMiddleware(securityMiddleware(api)), &s.Metrics)
 
 	publicMux := http.NewServeMux()
 	publicMounted := false
