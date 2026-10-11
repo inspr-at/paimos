@@ -212,6 +212,10 @@
     ,
     "browser:tests/aeon-1188-displayhome.spec.ts:with the header folded on a phone, the link opens the Display menu beside New"
     ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:390: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:768: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable"
+    ,
     "browser:tests/aeon-1209-agents-head.spec.ts:dark 1440: head order, the capacity row and no Desk panel"
     ,
     "browser:tests/aeon-1209-agents-head.spec.ts:dark: hovering a unit shows its − / + in place, wide and tight"
@@ -227,6 +231,12 @@
     "browser:tests/aeon-1209-agents-head.spec.ts:design gate at 390 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state"
     ,
     "browser:tests/aeon-1209-agents-head.spec.ts:phone › dark 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:touch targets › 1280 with seven harnesses: the wide row shows −, the number and + as three distinct 44 px targets in every unit"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:touch targets › 390 with seven harnesses: an open plate holds −, the number and + as three distinct 44 px targets"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:touch targets › 768 with seven harnesses: an open plate holds −, the number and + as three distinct 44 px targets"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
@@ -5356,6 +5366,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1024: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1024: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1440: the Sessions card head sticks inside its card with the same box and insides","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1440: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -5364,7 +5376,13 @@
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"390: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"390: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"768: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"F and / search this list; typing in the search only types; Esc clears, then leaves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"a search that hides the session under the cursor moves the cursor to a match; Enter and p never act on a hidden session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"dark 1440: head order, the capacity row and no Desk panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5391,6 +5409,14 @@
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"phone › light 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"the accounts chip opens three tiles that lead into Settings; its tooltip stays away while open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"touch targets › 1280 with seven harnesses: the wide row shows −, the number and + as three distinct 44 px targets in every unit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"touch targets › 390 with seven harnesses: an open plate holds −, the number and + as three distinct 44 px targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"touch targets › 390: an open plate holds −, the number and + as three distinct 44 px targets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"touch targets › 768 with seven harnesses: an open plate holds −, the number and + as three distinct 44 px targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
