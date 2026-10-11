@@ -42,7 +42,7 @@ AEON-1191 uses the S21 vocabulary and reason sentences read from
 reads are additive and use existing tables; no migration or execution grant is
 introduced. The approved design is AEON-1182, Routines report section d (R0).
 
-## AEON-1191 verification handoff
+## AEON-1191 initial verification handoff
 
 The migration guard against `v261010123154.0.0` passed, as did all 33 ownership
 inventory tests and all 314 tier/shard metadata tests. OpenAPI was regenerated
@@ -54,3 +54,30 @@ slot was occupied. The remote static check also returned exit 3 under the night
 hold. Go/contract tests, the targeted web unit file and the full static check
 remain pending on the approved runner or PR CI; exit 3 is incomplete. No heavy
 local fallback, origin push or deployment was performed.
+
+## Fix round 3
+
+The CI regression on `3d5b4ba31` failed while seeding the consent coverage
+fixture: the restrictive `recurrences_definition_scope` policy rejects a marked
+recurrence whose definition does not exist yet. The fixture now follows the
+production create order, inserting definitions before marked recurrences in the
+same transaction with the deferred foreign key. No RLS policy or production
+authority was changed. The existing regression retains every assertion and now
+also checks that exactly 1001 seeded candidates are visible to the owner and that
+overflow returns the coverage-specific 422 before any runtime-policy work.
+
+Current main was merged, retaining both the draft guardrails route and main's
+routine-actions route. No tests or source files were added or renamed, so their
+existing tier and ownership registrations remain in place. The targeted
+`decision-desk-fix3.unit.test.ts` file passed all eight tests with one worker as
+the single permitted small local fallback after the remote CI pool was full.
+The PR's web unit execution also passed; its red job was an artifact-service
+upload timeout. The policy preview requires the coordinator's trusted review
+verdict; workers do not run that gate.
+
+Remote Go/package, browser and merge-main static verification remains incomplete:
+the Go runner refused the full CI pool under the night protocol, the browser
+launcher is unavailable pending OPS-247, and the static runner is paused at
+night. These refusals are exit 3, not green checks; the coordinator must rerun
+verification on the approved runner or PR CI before merging. No origin push or
+deployment was performed.
