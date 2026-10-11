@@ -7232,6 +7232,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedLifecycleEvidence","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedRetirePauseKeepsHarnessRoute","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedRetireRevocationFence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedRetireSafetyAndPrivacy","tier":"ESSENTIAL"}
