@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -168,6 +169,63 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if limitEstimates == nil {
 		limitEstimates = map[string]int64{}
 	}
+	result, err := persistReservation(ctx, tx, p, run, account, windows, limitEstimates, estimates, now)
+	if err != nil {
+		return RouteResult{}, err
+	}
+	if err := writeEvent(ctx, tx, p, evReserved, nil, result); err != nil {
+		return RouteResult{}, err
+	}
+	return result, nil
+}
+
+// ReserveRoutineAccountTx shares the router's exact account selection and
+// reservation write, without a network/daemon call or event append. The server
+// must hold tenant/tree/pairing and revalidate consent before entering. An
+// ordinary run cannot use this seam; current owned native enrollment is required.
+func ReserveRoutineAccountTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routine, runID, accountID string) (RouteResult, events.Change, error) {
+	var bound bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_runs r JOIN agent_runs ar ON ar.tenant_id=r.tenant_id AND ar.id=r.agent_run_id
+ WHERE r.id=$1 AND r.agent_run_id=$2 AND r.execute_consent AND r.consent_revision=r.definition_revision AND r.state='pending' AND ar.agent_principal_id=$3)`, routine, runID, p.ID).Scan(&bound); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	if !bound {
+		return RouteResult{}, events.Change{}, workorders.Fail(409, "routine_intent_required")
+	}
+	if err := accountuse.LockShared(ctx, tx); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	run, err := lockRun(ctx, tx, runID)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	if run.Status != "queued" || run.AccountID != nil || run.ProfileID == nil {
+		return RouteResult{}, events.Change{}, workorders.Fail(409, "routine_account_unbound")
+	}
+	if err := accountuse.RequireRun(ctx, tx, accountID, runID); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	var daemon, harness string
+	err = tx.QueryRow(ctx, `SELECT a.daemon_id,m.harness FROM agent_accounts a JOIN model_profiles m ON m.tenant_id=a.tenant_id AND m.id=$2 WHERE a.id=$1 AND a.registered_by_principal_id=$3 AND m.enabled`, accountID, *run.ProfileID, p.ID).Scan(&daemon, &harness)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	account, windows, limits, err := selectAccount(ctx, tx, run, p.ID, harness, *run.ProfileID, daemon, []string{accountID}, nil, now)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	if err = agentpairing.RunFence(ctx, tx, account.ID, run.ID, false); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	result, err := persistReservation(ctx, tx, p, run, account, windows, limits, nil, now)
+	return result, events.Change{Type: evReserved, After: result}, err
+}
+
+func persistReservation(ctx context.Context, tx pgx.Tx, p tenant.Principal, run runRow, account Account, windows []Window, limitEstimates, estimates map[string]int64, now time.Time) (RouteResult, error) {
 	rawEstimates, err := json.Marshal(limitEstimates)
 	if err != nil {
 		return RouteResult{}, err
@@ -211,9 +269,6 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 			return RouteResult{}, err
 		}
 		result.Reservations = append(result.Reservations, Reservation{ReservationID: id, WindowID: window.ID, Unit: window.Unit})
-	}
-	if err := writeEvent(ctx, tx, p, evReserved, nil, result); err != nil {
-		return RouteResult{}, err
 	}
 	return result, nil
 }

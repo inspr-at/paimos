@@ -92,6 +92,7 @@ type CompletionReviewer func(context.Context, pgx.Tx, tenant.Principal, string, 
 type CompletionPreparer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange) (bool, error)
 type module struct {
 	routines         RoutineLaunchChecks
+	routineQueue     RoutineQueueDispatcher
 	queueHintMu      sync.Mutex
 	queueHintReaders map[string]int
 	queueTimeout     func(context.Context, time.Duration) (context.Context, context.CancelFunc)
