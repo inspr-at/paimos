@@ -119,6 +119,9 @@ test('1440: compact Default tier control keeps its box through confirmation and 
   const { writes, confirm, getState } = await setup(page)
   await page.goto(`/agents/${id}`)
   await expect(page.locator('.session-panel')).toHaveClass(/docked/)
+  // Overview can open wider than the compact-table boundary. Use the live
+  // divider to exercise the narrow layout without changing its width checks.
+  await page.getByRole('separator', { name: 'Resize the session list' }).press('ArrowLeft')
   // The five-column list retains the menu; tier controls live in the panel (AEON-1213).
   const list = page.locator('.sessions'), time = row(page).locator('.c-time'), actions = row(page).locator('.more')
   expect((await list.boundingBox())!.width).toBeLessThanOrEqual(880)
@@ -150,6 +153,7 @@ for (const width of [1280, 1366, 1440]) test(`${width}: panel-open session table
   Object.assign(data.sessions[0]!, { eta_ready_at: new Date(Date.now() + 600_000).toISOString(), progress_pct: 50 })
   await page.goto(`/agents/${id}`)
   await expect(page.locator('.session-panel')).toHaveClass(/docked/)
+  await page.getByRole('separator', { name: 'Resize the session list' }).press('ArrowLeft')
   await expect(row(page)).toBeVisible()
   const list = page.locator('.sessions'), actions = row(page).locator('.more'), tier = glyph(page)
   const details = page.locator('.session-panel')
