@@ -5,7 +5,7 @@
 // Every read is bounded, belongs to one person (a sign-in change drops it) and reports its own
 // failure or partial result; named server events wake a batched reread of what they changed.
 import { defineStore } from 'pinia'
-import { computed, onScopeDispose, reactive, watch } from 'vue'
+import { computed, onScopeDispose, reactive, ref, watch } from 'vue'
 import { APIError } from '../lib/api'
 import { onAccessRevalidate } from '../lib/authz'
 import { listAllSessions } from '../lib/agentRows'
@@ -109,6 +109,7 @@ export const useAgentProjection = defineStore('agentProjection', () => {
 
   // ---------- Who reads: the Agents page reads every project, a lead band or panel its own ----------
   const watchers = new Map<symbol, { all: boolean; project?: string }>()
+  const allWatchers = ref(0)
   const watchedProjects = () => [...new Set([...watchers.values()].flatMap(w => w.project ? [w.project] : []))]
   const everyProject = () => [...watchers.values()].some(w => w.all)
   function refresh() {
@@ -123,11 +124,15 @@ export const useAgentProjection = defineStore('agentProjection', () => {
   function watchProjects(scope: { all: true } | { project: string }) {
     const key = Symbol('projection')
     const first = !watchers.size
-    watchers.set(key, 'all' in scope ? { all: true } : { all: false, project: scope.project })
+    const all = 'all' in scope
+    watchers.set(key, all ? { all: true } : { all: false, project: scope.project })
+    if (all) allWatchers.value++
     if (first) poller.start()
     void refresh()
-    return () => { watchers.delete(key); if (!watchers.size) poller.stop() }
+    return () => { if (!watchers.delete(key)) return; if (all) allWatchers.value--; if (!watchers.size) poller.stop() }
   }
+  // The projects list may arrive after the page: every active project's lead is read once it is known.
+  watch(() => allWatchers.value > 0 && owner.value ? activeProjects().join(',') : '', (ids, before) => { if (ids && ids !== before) void leads.loadMany(ids.split(',')) })
 
   // ---------- Live: batched wakes from the named events (lib/agents.ts registers them centrally) ----------
   function wake(event?: string, node?: string | null) {

@@ -258,7 +258,7 @@ test('a stopped lead links its successor instead of claiming live workers', asyn
     Object.assign(worker, { parent_harness_session_id: id(90), adopted_from_id: lead })
   }
   await page.goto('/agents')
-  await page.locator('.group-toggle').filter({ hasText: 'Ended' }).click()
+  // It stopped just now, so it keeps its place and end state for 10 minutes (AEON-1210, design §3.2).
   await expect(row(page, lead).getByRole('link', { name: 'Handed over to Resumed lead' })).toBeVisible()
   await expect(row(page, lead).locator('.worker-tools')).toHaveCount(0)
   await expect(row(page, id(2)).getByRole('link', { name: 'Adopted from Release lead' })).toBeVisible()

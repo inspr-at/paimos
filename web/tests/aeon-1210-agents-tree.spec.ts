@@ -112,6 +112,7 @@ test('a fold is the person’s, survives a reload, sums up the workers and moves
   const { calls } = await setup(page)
   await page.goto('/agents')
   await expect(row(page, sid(2))).toBeVisible()
+  await expect(page.locator('.sessions [data-row="l:p-aeon"]')).toBeVisible()
   const fold = leadRow(page).locator('.tree-fold')
   await expect(fold).toHaveAttribute('aria-label', /^Fold .+’s workers: 2 workers, \d+ working$/)
   const before = { fold: await box(page, `.sessions [data-row="s:${LEAD}"] .tree-fold`), row: await box(page, `.sessions [data-row="s:${LEAD}"]`), chip: await box(page, `.sessions [data-row="s:${LEAD}"] .qchip.q-l1`) }
@@ -141,6 +142,9 @@ test('Collapse all folds every lead, Expand all opens them; the icon swaps in it
   const { calls } = await setup(page)
   await page.goto('/agents')
   await expect(row(page, sid(2))).toBeVisible()
+  // Every lead has been read: AEON's waiting lead heads its group before anything is measured.
+  await expect(page.locator('.sessions [data-row="l:p-aeon"]')).toBeVisible()
+  await expect(page.locator('.sessions .row.nolead[data-project="WEB"]')).toBeVisible()
   const head = stick(page)
   await expectStableControls({
     controls: { title: head.locator('#sessions-title'), slot: head.locator('.fold-all-slot'), search: head.getByRole('searchbox', { name: 'Search sessions in this list' }), filter: head.getByRole('button', { name: 'Filter', exact: true }), lead: leadRow(page).locator('.tree-fold') },

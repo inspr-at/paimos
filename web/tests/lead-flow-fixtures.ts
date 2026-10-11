@@ -116,8 +116,19 @@ export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
       return json(state.settings)
     }
     if (/^\/api\/projects\/p-pharos\/lead-decisions$/.test(path)) return json({ items: decisions.filter(d => d.event_id > Number(url.searchParams.get('after') ?? 0)), next_after: null })
-    // The Agents page's Sessions card heads each project with its lead (AEON-1210); no session runs here.
-    if (path === '/api/harness-sessions' && method === 'GET') return json({ items: [], next_cursor: null })
+    // The session list carries the same live sessions as the live read, the worker under its lead
+    // (AEON-1210: workers bind to a lead by their real parent session).
+    if (path === '/api/harness-sessions' && method === 'GET') {
+      const project = url.searchParams.get('project')
+      const items = data.live.filter(a => a.session_id && (!project || a.project_id === project)).map(a => ({
+        id: a.session_id, project_id: a.project_id, agent_principal_id: a.principal_id, parent_harness_session_id: a.role === 'worker' ? LEAD_SESSION : null,
+        work_order_id: null, run_id: null, ticket_node_id: a.ticket?.id ?? null, ticket: a.ticket ? { id: a.ticket.id, key: a.ticket.key, title: a.ticket.title } : null,
+        project: { id: a.project_id, key: 'PHAROS', title: 'Pharos' }, harness: a.harness, host: 'imac0', management_mode: a.management_mode, role: a.role,
+        advertised_capabilities: ['inbox', 'status'], activity_sequence: 1, revision: 1, work_shape: 'ship', phase: a.phase, activity: a.activity,
+        heartbeat_at: a.heartbeat_at, created_at: a.since, stopped_at: null, stop_reason: null, finished: false, display_label: a.name,
+      }))
+      return json({ items, next_cursor: null })
+    }
     if (path === '/api/decision-desk') return json({ items: options.question ? [{ ...question, askers }] : [], has_more: false })
     if (path === '/api/projects/p-pharos/questions') return json({ items: options.question ? [{ ...question, askers }] : [], has_more: false })
     // The lead's agent, read once per session so its questions outlive the session.

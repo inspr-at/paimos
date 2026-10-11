@@ -372,11 +372,13 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   await openAgents(page)
   // A click anywhere on the row that is not a link or button opens the session.
   // AEON-1210: the PHAROS lead heads its group; its project's other sessions follow by urgency, then start
-  // time, so amy (heartbeat overdue) sits right below the lead and above nova.
+  // time: the failed run first, then amy (heartbeat overdue), then nova.
   await row(page, camy).locator('.c-state').click()
   await expect(page).toHaveURL(`/agents/${camy}`)
   await expect(panel(page).getByRole('heading', { name: /camy/ })).toBeVisible()
   await panel(page).focus()
+  await page.keyboard.press('j')
+  await expect(page).toHaveURL(`/agents/${session(8)}`)
   await page.keyboard.press('j')
   await expect(page).toHaveURL(`/agents/${session(5)}`)
   await expect(panel(page).getByRole('heading', { name: /amy/ })).toBeVisible()

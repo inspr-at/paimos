@@ -225,7 +225,8 @@ test('leaving the page that opened the docked lead panel closes it', async ({ pa
   await page.setViewportSize({ width: 1440, height: 1000 })
   await mockLeadFlow(page, { lead: 'working', aeon: 'none' })
   await page.goto('/agents')
-  await page.locator('.sessions .lead-row[data-project="PHAROS"]').click()
+  // The working lead's own session heads PHAROS; its queue chip opens the lead panel (AEON-1210).
+  await page.locator('.sessions .lead-row[data-project="PHAROS"] .qchip.q-l1').click()
   await expect(panel(page)).toBeVisible()
   await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects' }).click()
   await expect(page).toHaveURL(/\/$/)
@@ -306,7 +307,8 @@ for (const look of ['light', 'dark'] as const) test(`Agents page: one line per l
   await theme(page, look)
   // AEON-1210: Sessions heads PHAROS with its lead row and AEON, which has queued work and no lead, with one slim line.
   const leads = page.locator('.agents-page .sessions')
-  await expect(leads.locator('.lead-row[data-project="PHAROS"]')).toContainText('PHAROS lead')
+  await expect(leads.locator('.lead-row[data-project="PHAROS"]')).toContainText('Claude lead')
+  await expect(leads.locator('.lead-row[data-project="PHAROS"] .role')).toHaveText('Lead')
   await expect(leads.locator('.row.nolead[data-project="AEON"]')).toContainText('1 queued · no lead')
   await page.screenshot({ path: info.outputPath(`agents-leads-${look}.png`) })
   await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
@@ -316,7 +318,7 @@ for (const look of ['light', 'dark'] as const) test(`Agents page: one line per l
   const sheet = page.getByRole('dialog', { name: 'Start lead for AEON' })
   await expect(sheet.locator('[data-row="project"]')).toContainText('The only project without a lead.')
   await page.keyboard.press('Escape')
-  await leads.locator('.lead-row[data-project="PHAROS"]').click()
+  await leads.locator('.lead-row[data-project="PHAROS"] .qchip.q-l1').click()
   await expect(panel(page)).toBeVisible()
 })
 

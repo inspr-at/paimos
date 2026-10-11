@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   agents: { loaded: false, views: [] as unknown[], admitSessions: (rows: unknown[]) => rows, loadAll: vi.fn(async () => {}) },
   work: { snapshots: {} as Record<string, unknown>, load: vi.fn(async () => {}) },
   identity: null as unknown as { identity: { tenant: { id: string }; principal: { id: string } } | null },
+  projects: null as unknown as { projects: { id: string; archived: boolean }[] },
 }))
 vi.mock('../src/lib/api', () => {
   class APIError extends Error { constructor(readonly status: number, message: string) { super(message) } }
@@ -30,7 +31,11 @@ vi.mock('../src/lib/authz', () => ({ onAccessRevalidate: () => () => {} }))
 vi.mock('../src/stores/projectLeads', () => ({ useProjectLeads: () => mocks.leads }))
 vi.mock('../src/stores/agents', () => ({ useAgents: () => mocks.agents }))
 vi.mock('../src/stores/workQueue', () => ({ useWorkQueue: () => mocks.work }))
-vi.mock('../src/stores/projects', () => ({ useProjects: () => ({ projects: [{ id: 'p1', archived: false }, { id: 'p2', archived: false }, { id: 'old', archived: true }] }) }))
+vi.mock('../src/stores/projects', async () => {
+  const { reactive } = await import('vue')
+  mocks.projects = reactive({ projects: [] as { id: string; archived: boolean }[] })
+  return { useProjects: () => mocks.projects }
+})
 vi.mock('../src/stores/session', async () => {
   const { reactive } = await import('vue')
   mocks.identity = reactive({ identity: { tenant: { id: 't' }, principal: { id: 'markus' } } }) as typeof mocks.identity
@@ -81,6 +86,7 @@ describe('the store', () => {
     mocks.leads.views = {}; mocks.leads.loadMany.mockClear(); mocks.leads.loadLead.mockClear(); mocks.leads.load.mockClear()
     mocks.agents.loaded = false; mocks.agents.loadAll.mockClear(); mocks.work.load.mockClear()
     mocks.identity.identity = { tenant: { id: 't' }, principal: { id: 'markus' } }
+    mocks.projects.projects = [{ id: 'p1', archived: false }, { id: 'p2', archived: false }, { id: 'old', archived: true }]
   })
   afterEach(() => { vi.useRealTimers() })
 
@@ -92,6 +98,18 @@ describe('the store', () => {
     expect([projection.queuedOf('p1'), projection.queuedOf('p2'), projection.queuedOf('p3')]).toEqual([2, 1, 0])
     expect(projection.asksOf(S1).map(x => x.id)).toEqual(['q1'])
     expect(projection.asksOf(S2)).toEqual([])
+    stop()
+  })
+
+  it('reads every lead again once the projects list arrives after the page', async () => {
+    mocks.projects.projects = []
+    const projection = useAgentProjection()
+    const stop = projection.watchProjects({ all: true })
+    await flush()
+    mocks.leads.loadMany.mockClear()
+    mocks.projects.projects = [{ id: 'p1', archived: false }, { id: 'p3', archived: false }]
+    await flush()
+    expect(mocks.leads.loadMany).toHaveBeenCalledWith(['p1', 'p3'])
     stop()
   })
 

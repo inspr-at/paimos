@@ -82,7 +82,7 @@ test('Lost contact is an ended row with a bin; one click removes, Undo brings it
   const { lost, undone } = await setup(page)
   await page.goto('/agents')
   // Not a Problem in its project's group (AEON-1210): it sits with the ended sessions.
-  await expect(page.locator('.sessions .grp:not(.ended)')).not.toContainText('cursor-275')
+  await expect(page.locator('.sessions .grp:not(.ended)').filter({ hasText: 'cursor-275' })).toHaveCount(0)
   await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(row(page, lost.id)).toContainText('Lost contact')
   const bin = row(page, lost.id).getByRole('button', { name: 'Remove cursor-275' })

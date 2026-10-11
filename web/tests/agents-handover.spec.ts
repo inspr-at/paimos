@@ -49,7 +49,8 @@ async function setup(page: Page, theme = 'light', rights = true, extraLead = fal
   })
   await page.goto('/agents')
   await expect(row(page, 4)).toBeVisible()
-  await page.locator('.group-toggle').filter({ hasText: 'Ended' }).click()
+  // AEON-1210 (design AEON-1196 §3.2): the lead that handed over a minute ago keeps its place and end state.
+  await expect(row(page, 1)).toBeVisible()
   return { moves: () => moves, undos: () => undos }
 }
 
