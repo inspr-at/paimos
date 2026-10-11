@@ -30,6 +30,7 @@ func TestCancelledConnectionContextClosesConnection(t *testing.T) {
 	for _, mode := range []string{"header", "implicit write", "flush", "header before cancel", "flush before cancel", "informational header", "no write"} {
 		t.Run(mode, func(t *testing.T) {
 			var probes atomic.Int32
+			settled := make(chan http.ConnState, 4)
 			s := &Server{Modules: []Module{moduleFunc(func(mux *http.ServeMux) {
 				mux.HandleFunc("GET /api/trigger", func(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Content-Length", "0")
@@ -77,6 +78,11 @@ func TestCancelledConnectionContextClosesConnection(t *testing.T) {
 			server := httptest.NewUnstartedServer(s.Handler())
 			server.Config.ReadHeaderTimeout = 10 * time.Second
 			server.Config.IdleTimeout = time.Minute
+			server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+				if state == http.StateIdle || state == http.StateClosed {
+					settled <- state
+				}
+			}
 			server.Start()
 			defer server.Close()
 			conn, err := net.Dial("tcp", server.Listener.Addr().String())
@@ -113,6 +119,19 @@ func TestCancelledConnectionContextClosesConnection(t *testing.T) {
 			}
 			if mode != "header before cancel" && mode != "flush before cancel" && !first.Close {
 				t.Fatal("response committed after cancellation has no Connection: close")
+			}
+			// A flushed response can arrive before the handler observes
+			// cancellation. Wait for its terminal connection state before
+			// sending another request: unread probe bytes during Close can
+			// otherwise turn graceful EOF into a TCP reset. StateIdle fails
+			// immediately if the guard is missing; no timeout proves closure.
+			select {
+			case state := <-settled:
+				if state != http.StateClosed {
+					t.Fatalf("cancelled connection returned to %s instead of closing", state)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("cancelled connection never reached a terminal state; hang guard")
 			}
 			_, _ = io.WriteString(conn, "GET /api/probe HTTP/1.1\r\nHost: aeon.test\r\n\r\n")
 			_, err = http.ReadResponse(responses, nil)
