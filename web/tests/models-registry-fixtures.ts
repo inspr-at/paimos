@@ -41,7 +41,14 @@ export interface RegistryWorld {
   gateUsage: Promise<void> | null
   /** Registry revision returned with the usage snapshot. */
   usageRevision: string
-  usage: { used_by: { column: string; layer: string; person?: string; replacement: { line: string | null; effort: string | null; harness?: string; model?: string } }[]; incomplete: boolean }
+  /**
+   * Uses the usage read answers. route (AEON-1163): the one route, "harness:model", whose own id a stored reference names (a
+   * board id from before Models); like the server, the mock names that use only when the read asks about the route, through
+   * its path or a profile parameter of one of its levels.
+   */
+  usage: { used_by: { column: string; layer: string; person?: string; route?: string; replacement: { line: string | null; effort: string | null; harness?: string; model?: string } }[]; incomplete: boolean }
+  /** AEON-1163: every usage read, its path and the profile parameters it asked about. */
+  usageAsks: { path: string; profiles: string[] }[]
   /** Null answers GET /models/outdated with 404, as servers before AEON-1145 C do. */
   outdated: OutdatedWorld | null
   /** AEON-1163: pause writes refused for this model id (413), and accounts, saved keys and waiting models for How new models are found. */
@@ -88,7 +95,7 @@ export function registryWorld(over: Partial<RegistryWorld> = {}): RegistryWorld 
     profiles: registryProfiles(), permissions: ['models.read', 'models.manage', 'models.refresh', 'account.use.manage'], accountUseRevision: 7,
     settings: { agent_reports_enabled: true, auto_add_profiles: true, api_enabled: true, interval_minutes: 360 }, lastRun: '2026-10-09T04:12:00Z', writes: [], reads: [],
     check: { status: 200 }, failPut: false, conflictPut: false, failSettings: false, failUsage: false, failRetireAfter: null, failList: false, gateRetire: null, gateUsage: null, usageRevision: 'r1',
-    usage: { used_by: [], incomplete: false }, outdated: null, failPause: null, accounts: [], keys: [], observations: [], ...over,
+    usage: { used_by: [], incomplete: false }, usageAsks: [], outdated: null, failPause: null, accounts: [], keys: [], observations: [], ...over,
   }
 }
 
@@ -178,10 +185,14 @@ export async function mockRegistry(page: Page, world: RegistryWorld, options: { 
     if (line) {
       const harness = decode(line[1]!), model = decode(line[2]!)
       if (line[3]) {
+        const profiles = url.searchParams.getAll('profile')
+        world.usageAsks.push({ path: decode(path), profiles })
         if (world.gateUsage) await world.gateUsage
         if (world.failUsage) return route.fulfill({ status: 500, json: { error: 'usage failed' } })
         const lineProfiles = world.profiles.filter(profile => sameLine(profile, harness, model))
-        return route.fulfill({ json: { ...world.usage, replacement: world.usage.used_by[0]?.replacement ?? { line: null, effort: null }, revision: world.usageRevision, line_profiles: lineProfiles } })
+        const asked = new Set([...lineProfiles, ...world.profiles.filter(profile => profiles.includes(profile.id))].map(profile => `${profile.harness}:${profile.model}`))
+        const used = world.usage.used_by.filter(use => !use.route || asked.has(use.route)).map(use => { const answer = { ...use }; delete answer.route; return answer })
+        return route.fulfill({ json: { ...world.usage, used_by: used, replacement: used[0]?.replacement ?? { line: null, effort: null }, revision: world.usageRevision, line_profiles: lineProfiles } })
       }
       if (world.failPut) return route.fulfill({ status: 422, json: { error: 'provider route does not match model namespace' } })
       if (world.conflictPut) return route.fulfill({ status: 409, json: { error: 'stale registry revision' } })

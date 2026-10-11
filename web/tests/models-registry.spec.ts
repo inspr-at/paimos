@@ -314,16 +314,21 @@ test('Edit of a hand-added route can change its slug and route, and a server ref
   await expect(route(page, 'unknown:haiku', 'pi:anthropic/claude-haiku-5').locator('.srcb')).toHaveText('Added by hand')
 })
 
+// AEON-1163 risk: the question reads through the version's first route only, so a use only the pi route has goes unnamed and
+// Remove takes a route that is still in use. The mock names the Backend use only when the read asks about the pi route.
 test('Remove… asks where every route of the version is used before anything is removed, removes every level of every route, and Undo restores them', async ({ page }) => {
   const world = await setup(page, { usage: { incomplete: false, used_by: [
     { column: 'other', layer: 'default', replacement: { line: 'openai:astra', effort: 'xhigh', harness: 'codex', model: 'gpt-6-astra' } },
-    { column: 'backend', layer: 'workspace', replacement: { line: 'openai:astra', effort: 'xhigh', harness: 'codex', model: 'gpt-6-astra' } },
+    { column: 'backend', layer: 'workspace', route: 'pi:anthropic/claude-opus-5-5', replacement: { line: 'openai:astra', effort: 'xhigh', harness: 'codex', model: 'gpt-6-astra' } },
   ] } })
   await open(page, OPUS)
   await body(page, OPUS).getByRole('button', { name: 'Remove…' }).click()
   const ask = confirm(page, OPUS)
   await expect(ask).toContainText('Opus 5.5 is in use: Default · all work (for everyone) — GPT-6 Astra at xhigh takes over; Backend build (for everyone) — GPT-6 Astra at xhigh takes over. Auto-update won’t add it back.')
-  expect(world.reads).toEqual(expect.arrayContaining(['/models/lines/claude/claude-opus-5-5/usage', '/models/lines/pi/anthropic/claude-opus-5-5/usage']))
+  // One read asks about the whole version: the Claude Code route in its path, every level of both routes as a parameter.
+  const levels = world.profiles.filter(profile => profile.model.endsWith('claude-opus-5-5')).map(profile => profile.id).sort()
+  expect(levels).toHaveLength(5)
+  expect(world.usageAsks.map(read => ({ ...read, profiles: read.profiles.slice().sort() }))).toEqual([{ path: '/models/lines/claude/claude-opus-5-5/usage', profiles: levels }])
   expect(world.writes).toHaveLength(0)
   // Keep it closes the question, removes nothing and returns to Remove….
   await ask.getByRole('button', { name: 'Keep it' }).click()
