@@ -260,8 +260,8 @@ export function useModelsSimple() {
   }
   /**
    * A workspace situation order (Expert, For everyone): the new order, or null for "Same as the row" (review: automatic).
-   * `seen` is the revision on screen when the person opened the cell. Undo writes back the order the page showed, or
-   * removes it again.
+   * `seen` is the revision on screen when the person opened the cell. Undo writes back the whole order the page showed,
+   * its exclusions included, or removes it again.
    */
   async function situation(column: string, key: SituationKey, next: SituationOrder | null, seen: number): Promise<boolean> {
     const state = doc.value
@@ -270,7 +270,7 @@ export function useModelsSimple() {
     if (state.revision !== seen) { error.value = conflict; return false }
     const shown = state.situations?.[column]?.[key] ?? null
     if (!next && !shown) return false
-    const before = situationOrder(situationSteps(shown), shown?.end)
+    const before = situationOrder(situationSteps(shown), shown?.end, shown?.not)
     const write = (body: SituationOrder | null): Step => async revs => ({ ...revs, prefs: advanced(await (body ? putSituationOrder(column, key, body, revs.prefs) : resetSituationOrder(column, key, revs.prefs)), revs.prefs) })
     const current = capture(), done = await commit({ forward: [write(next)], backward: [write(before)] })
     // The server answers with codes; say what they mean.

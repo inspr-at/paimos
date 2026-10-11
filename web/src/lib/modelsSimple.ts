@@ -266,11 +266,11 @@ export function nextView(input: { next: SimpleNext | null; rows: RowView[]; entr
 /** The matrix columns. "First build" is the small-work order; the row itself stays the first-build order. */
 export type SituationKey = 'small' | 'fix' | 'stuck' | 'review'
 export interface SituationStep { line: string; effort: string | null }
-export interface SimpleSituation extends SimplePick { chain: SituationStep[]; end: 'wait' | 'row' | 'auto' }
+export interface SimpleSituation extends SimplePick { chain: SituationStep[]; end: 'wait' | 'row' | 'auto'; /** The order's saved exclusions. */ not?: string[] }
 export type SimpleSituations = Record<string, Partial<Record<SituationKey, SimpleSituation>>>
 export interface SimpleQuick { line: string | null; effort: string | null; harness: string | null; model?: string; trace: SimpleTrace[] }
-/** A situation order as the order endpoint takes it: rank = [pick, …chain]; an omitted end keeps the stored one. */
-export interface SituationOrder { rank: string[]; efforts: Record<string, string>; end?: 'wait' | 'row' | 'auto' }
+/** A situation order as the order endpoint takes it: rank = [pick, …chain]; an omitted end or not keeps the stored one. */
+export interface SituationOrder { rank: string[]; efforts: Record<string, string>; end?: 'wait' | 'row' | 'auto'; not?: string[] }
 export interface SituationLimitsView { small_hours: number; fix_rounds: number }
 
 export const SITUATIONS: readonly { key: SituationKey; label: string }[] = [
@@ -283,9 +283,6 @@ export function situationHint(key: SituationKey, limits: SituationLimitsView | n
   if (key === 'stuck') return limits ? `after ${limits.fix_rounds} ${limits.fix_rounds === 1 ? 'round' : 'rounds'}` : 'after the fix rounds'
   return 'another family'
 }
-/** Reviews never run below this native level (reviewgate.ReviewMinEffortLevel). */
-export const REVIEW_MIN_LEVEL = 4
-
 export interface SituationRow { column: string; label: string; isDefault: boolean; line: string | null; effort: string | null; entry: ModelEntry | null; cells: Record<SituationKey, SimpleSituation | null> }
 /**
  * The matrix rows: the Default, every row of the workspace, then any kind that has a situation order but no row of its
@@ -302,16 +299,22 @@ export function situationRows(input: { doc: SimpleDocument; entries: ModelEntry[
 }
 export const situationCount = (rows: SituationRow[]) => rows.reduce((count, row) => count + SITUATIONS.filter(({ key }) => row.cells[key]).length, 0)
 export const situationSteps = (cell: SimpleSituation | null | undefined): SituationStep[] => cell?.line ? [{ line: cell.line, effort: cell.effort }, ...cell.chain] : []
-/** An order body for these steps; no steps means the cell goes back to the row (or to automatic review). */
-export function situationOrder(steps: SituationStep[], end?: SituationOrder['end']): SituationOrder | null {
+/**
+ * An order body for these steps; no steps means the cell goes back to the row (or to automatic review). The exclusions
+ * are sent only when given, to write a whole stored order back; otherwise the server keeps the ones it has.
+ */
+export function situationOrder(steps: SituationStep[], end?: SituationOrder['end'], not?: string[]): SituationOrder | null {
   if (!steps.length) return null
   const efforts: Record<string, string> = {}
   for (const step of steps) if (step.effort) efforts[step.line] = step.effort
-  return { rank: steps.map(step => step.line), efforts, ...(end ? { end } : {}) }
+  return { rank: steps.map(step => step.line), efforts, ...(end ? { end } : {}), ...(not ? { not: [...not] } : {}) }
 }
-/** A review step keeps its level only at the review floor or above; below it the server picks the highest qualified level. */
+/**
+ * Reviews run at the model's highest native level, which the server picks and refuses any other (review_floor). So a
+ * review step sends no level, whatever level was clicked; the cell then shows the level the server chose.
+ */
 export const situationStep = (situation: SituationKey, entry: ModelEntry, effort: string | null): SituationStep =>
-  ({ line: entry.line, effort: situation === 'review' && (effortLevel(entry, effort) ?? 0) < REVIEW_MIN_LEVEL ? null : effort })
+  ({ line: entry.line, effort: situation === 'review' ? null : effort })
 export const situationEndText = (situation: SituationKey, cell: SimpleSituation) =>
   cell.end === 'wait' ? 'Then wait.' : situation === 'review' ? 'Then automatic, always another family.' : 'Then the row’s fallback.'
 export const situationEmptyText = (situation: SituationKey) => situation === 'review' ? 'Automatic: the first qualified model of another family.' : 'Same as the row: its pick, then its fallback.'

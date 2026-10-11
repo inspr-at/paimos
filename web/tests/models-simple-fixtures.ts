@@ -79,17 +79,20 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     rules = [{ scope: 'workspace', project_id: null, column: 'design', line: 'anthropic:opus', lock: 'top', position: 0, why: 'Design mocks stay on Opus while the design gate is tuned (AEON-912).', set_by: options.lockedByOther ? otherPerson : simplePerson, set_at: '2026-10-02T09:00:00Z' }]
   } else layers.default.set('other', { rank: TEMPLATE, not: [], effort: 'xhigh' })
   // Situation orders live on the workspace only: `${column}:${situation}`, as the order endpoint stores them.
-  const situations = new Map<string, { rank: string[]; efforts: Record<string, string>; end: 'wait' | 'row' | 'auto' }>()
+  const situations = new Map<string, { rank: string[]; efforts: Record<string, string>; end: 'wait' | 'row' | 'auto'; not: string[] }>()
   if (options.situations) {
-    situations.set('other:fix', { rank: ['xai:grok'], efforts: { 'xai:grok': 'high' }, end: 'row' })
-    situations.set('other:stuck', { rank: ['openai:astra', 'anthropic:opus'], efforts: { 'openai:astra': 'xhigh', 'anthropic:opus': 'max' }, end: 'wait' })
-    situations.set('design:stuck', { rank: ['anthropic:fable'], efforts: { 'anthropic:fable': 'max' }, end: 'row' })
+    situations.set('other:fix', { rank: ['xai:grok'], efforts: { 'xai:grok': 'high' }, end: 'row', not: ['anthropic:sonnet'] })
+    situations.set('other:stuck', { rank: ['openai:astra', 'anthropic:opus'], efforts: { 'openai:astra': 'xhigh', 'anthropic:opus': 'max' }, end: 'wait', not: [] })
+    situations.set('design:stuck', { rank: ['anthropic:fable'], efforts: { 'anthropic:fable': 'max' }, end: 'row', not: [] })
   }
+  // Reviews run at a model's highest native level: the server reads a review step back at it and refuses any other.
+  const highest = (id: string) => line(id)?.efforts.at(-1) ?? null
   const situationCells = (): SimpleSituations => {
     const cells: SimpleSituations = {}
     for (const [key, order] of situations) {
       const [column, situation] = key.split(':') as [string, SituationKey], first = line(order.rank[0])
-      cells[column] = { ...cells[column], [situation]: { line: order.rank[0]!, effort: order.efforts[order.rank[0]!] ?? null, harness: first?.harness, model: first?.model, chain: order.rank.slice(1).map(id => ({ line: id, effort: order.efforts[id] ?? null })), end: order.end } }
+      const effort = (id: string) => order.efforts[id] ?? (situation === 'review' ? highest(id) : null)
+      cells[column] = { ...cells[column], [situation]: { line: order.rank[0]!, effort: effort(order.rank[0]!), harness: first?.harness, model: first?.model, chain: order.rank.slice(1).map(id => ({ line: id, effort: effort(id) })), end: order.end, not: [...order.not] } }
     }
     return cells
   }
@@ -192,15 +195,16 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     const target = layer, orders = layers[target]
     const situation = path.startsWith('/model-preferences/orders/') ? path.split('/')[4] : undefined
     if (situation && situation !== 'first') {
-      // A situation order: workspace only, rank = [pick, …chain]; an omitted end keeps the stored one.
+      // A situation order: workspace only, rank = [pick, …chain]; an omitted end or not keeps the stored one.
       const column = decodeURIComponent(path.split('/')[3]!), key = `${column}:${situation}`, submitted = method === 'DELETE' ? Number(url.searchParams.get('revision')) : (body as { revision: number }).revision
       if (target !== 'default') return route.fulfill({ status: 403, json: { error: 'forbidden' } })
       if (submitted !== revision.default) return route.fulfill({ status: 409, json: { error: 'stale_revision' } })
       if (method === 'DELETE') situations.delete(key)
       else {
-        const input = body as { rank: string[]; efforts?: Record<string, string>; end?: 'wait' | 'row' | 'auto' }, before = situations.get(key)
+        const input = body as { rank: string[]; efforts?: Record<string, string>; end?: 'wait' | 'row' | 'auto'; not?: string[] }, before = situations.get(key)
         if (new Set(input.rank).size !== input.rank.length) return route.fulfill({ status: 400, json: { error: 'invalid_board_order' } })
-        situations.set(key, { rank: input.rank, efforts: input.efforts ?? before?.efforts ?? {}, end: input.end ?? before?.end ?? (situation === 'review' ? 'auto' : 'row') })
+        if (situation === 'review' && Object.entries(input.efforts ?? {}).some(([id, effort]) => effort !== highest(id))) return route.fulfill({ status: 422, json: { error: 'review_floor', code: 'review_floor' } })
+        situations.set(key, { rank: input.rank, efforts: input.efforts ?? before?.efforts ?? {}, end: input.end ?? before?.end ?? (situation === 'review' ? 'auto' : 'row'), not: input.not ?? before?.not ?? [] })
       }
       revision.default++
       return route.fulfill({ json: { person_id: simplePerson, revision: revision.default, profile: tail('default').profile, dry_run: false, moved: [] } })

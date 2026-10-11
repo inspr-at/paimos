@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Models v2 W3 (AEON-1162): Quick jobs and the situation matrix. Risk: a cell writes an order the server refuses or
-// that drops a level the page showed (a review below the floor, a lost chain), the matrix hides a cell it counts,
-// or the Quick jobs "Why?" claims a model the server did not choose.
+// that drops what the page showed (a review level other than the highest, a lost chain or exclusion), the matrix hides
+// a cell it counts, or the Quick jobs "Why?" claims a model the server did not choose.
 import { describe, expect, it } from 'vitest'
 import {
   buildEntries, buildRows, quickView, situationCount, situationHint, situationOrder, situationRows, situationStep, situationSteps,
@@ -29,16 +29,24 @@ describe('situation matrix', () => {
     // Taking a step out keeps the other steps' levels and leaves the ending as stored; a step without a level sends none.
     const left = situationSteps(rows[0]!.cells.stuck).filter(step => step.line !== 'anthropic:opus')
     expect(situationOrder(left)).toEqual({ rank: ['openai:astra', 'cursor:composer'], efforts: { 'openai:astra': 'xhigh' } })
-    // Undo writes back exactly the order the page showed, ending included; no steps means "same as the row".
-    expect(situationOrder(situationSteps(stuck), stuck.end)).toEqual({ rank: ['openai:astra', 'anthropic:opus', 'cursor:composer'], efforts: { 'openai:astra': 'xhigh', 'anthropic:opus': 'max' }, end: 'wait' })
+    // Undo writes back exactly the order the page showed, ending and saved exclusions included; no steps means "same as the row".
+    expect(situationOrder(situationSteps(stuck), stuck.end, ['xai:grok'])).toEqual({ rank: ['openai:astra', 'anthropic:opus', 'cursor:composer'], efforts: { 'openai:astra': 'xhigh', 'anthropic:opus': 'max' }, end: 'wait', not: ['xai:grok'] })
+    expect(situationOrder(situationSteps(stuck), stuck.end, [])).toHaveProperty('not', [])
     expect(situationOrder([])).toBeNull()
-    // A review step below the floor sends no level, so the server picks the highest qualified one instead of refusing.
-    expect(situationStep('review', entry('anthropic:opus'), 'high')).toEqual({ line: 'anthropic:opus', effort: null })
-    expect(situationStep('review', entry('anthropic:opus'), 'xhigh')).toEqual({ line: 'anthropic:opus', effort: 'xhigh' })
     expect(situationStep('fix', entry('anthropic:opus'), 'high')).toEqual({ line: 'anthropic:opus', effort: 'high' })
     // A document without situations (a person's own read) has no matrix to show.
     expect(situationRows({ doc: doc(undefined), entries, labels, order: [] }).every(item => Object.values(item.cells).every(cell => cell === null))).toBe(true)
     expect([situationHint('small', { small_hours: 2, fix_rounds: 3 }), situationHint('stuck', { small_hours: 2, fix_rounds: 1 }), situationHint('small', null)]).toEqual(['2 h or less', 'after 1 round', 'small work'])
+  })
+})
+
+describe('a review step', () => {
+  it('sends no level, so the server runs the highest native one instead of refusing a lower one', () => {
+    // Reviews run at the model's highest native level and the server refuses any other: Opus has max, so xhigh would
+    // be refused (review_floor). A review step sends no level at all, and its order carries none.
+    expect(entry('anthropic:opus').efforts.map(effort => effort.name)).toEqual(['high', 'xhigh', 'max'])
+    for (const level of ['high', 'xhigh', 'max']) expect(situationStep('review', entry('anthropic:opus'), level)).toEqual({ line: 'anthropic:opus', effort: null })
+    expect(situationOrder([situationStep('review', entry('anthropic:opus'), 'xhigh')], 'auto')).toEqual({ rank: ['anthropic:opus'], efforts: {}, end: 'auto' })
   })
 })
 

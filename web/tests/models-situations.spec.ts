@@ -114,16 +114,30 @@ test('For everyone edits a cell in a popover that stays on screen and moves noth
   await expect(cell(page, 'other:stuck')).toContainText('Opus 5.5'); await expect(cell(page, 'other:stuck').locator('.cell-more')).toHaveCount(0)
   expect(state.writes.at(-1)).toMatchObject({ method: 'PUT', path: '/model-preferences/orders/other/stuck', body: { rank: ['anthropic:opus'], efforts: { 'anthropic:opus': 'max' }, revision: 7 } })
   expect(state.writes.at(-1)!.body).not.toHaveProperty('end'); expect(state.situations.get('other:stuck')?.end).toBe('wait')
-  // "Same as the row" removes the cell's order; Review goes back to automatic and adds with an automatic ending.
+  // "Same as the row" removes the cell's order; Undo writes the whole order back, its saved exclusions included.
   await cell(page, 'other:fix').click(); await page.getByRole('dialog', { name: 'Fix rounds · Default' }).getByRole('button', { name: 'Same as the row' }).click()
   await expect(shown(page, 'other:fix')).toHaveText('Same')
   expect(state.writes.at(-1)).toMatchObject({ method: 'DELETE', path: '/model-preferences/orders/other/fix', search: '?for=default&revision=8' })
+  expect(state.situations.has('other:fix')).toBe(false)
+  await page.getByRole('button', { name: 'Undo', exact: true }).last().click()
+  await expect(cell(page, 'other:fix')).toContainText('Grok 4.7')
+  expect(state.writes.at(-1)).toMatchObject({ method: 'PUT', path: '/model-preferences/orders/other/fix', body: { rank: ['xai:grok'], efforts: { 'xai:grok': 'high' }, end: 'row', not: ['anthropic:sonnet'], revision: 9 } })
+  expect(state.situations.get('other:fix')).toEqual({ rank: ['xai:grok'], efforts: { 'xai:grok': 'high' }, end: 'row', not: ['anthropic:sonnet'] })
+  // Review goes back to automatic and adds with an automatic ending. It sends no level: reviews run at the model's
+  // highest native one, which the server picks and the cell then shows.
   await cell(page, 'design:review').click()
   const review = page.getByRole('dialog', { name: 'Review · UI design' })
   await expect(review).toContainText('Automatic: the first qualified model of another family.')
   await review.getByRole('button', { name: 'Use another order' }).click(); await page.getByRole('combobox').fill('sol'); await page.keyboard.press('Enter')
   await expect(cell(page, 'design:review')).toContainText('GPT-6.1 Sol')
-  expect(state.writes.at(-1)).toMatchObject({ method: 'PUT', path: '/model-preferences/orders/design/review', body: { rank: ['openai:sol'], efforts: { 'openai:sol': 'xhigh' }, end: 'auto' } })
+  expect(state.writes.at(-1)).toMatchObject({ method: 'PUT', path: '/model-preferences/orders/design/review', body: { rank: ['openai:sol'], efforts: {}, end: 'auto' } })
+  await expect(cell(page, 'design:review').locator('.sr-only')).toHaveText('UI design, Review: GPT-6.1 Sol · xhigh')
+  // A lower level clicked for a model whose highest is above it still writes no level, so the server cannot refuse it.
+  await cell(page, 'design:review').click(); await review.getByRole('button', { name: 'Add to this order' }).click()
+  await option(page, 'anthropic:opus').locator('.lvc[data-eff="xhigh"]').click()
+  await expect(cell(page, 'design:review').locator('.cell-more')).toHaveText('+1')
+  expect(state.writes.at(-1)).toMatchObject({ method: 'PUT', path: '/model-preferences/orders/design/review', body: { rank: ['openai:sol', 'anthropic:opus'], efforts: {} } })
+  await expect(page.locator('[data-models-error]')).toHaveCount(0)
   await cell(page, 'design:review').click()
   await expect(review).toContainText('Then automatic, always another family.'); await expect(review.getByRole('button', { name: 'Back to automatic' })).toBeVisible()
   guard.done(); expect(state.problems).toEqual([])

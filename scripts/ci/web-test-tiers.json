@@ -16896,6 +16896,8 @@
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > Undo of a reset does not turn an inherited effort into a stored one","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > Undo of “Same as the row” writes the whole situation order back, its saved exclusions included","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > a draft row writes nothing until it is picked, and picking the default for everyone stores nothing at all","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > asks again once when a write lands between the two reads, and gives up in words after that","tier":"ESSENTIAL"}
@@ -16953,6 +16955,8 @@
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"what runs next > leaves a reviewer skip out of the build trace, and says plainly when nothing is queued","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-situations.unit.test.ts","name":"Quick jobs > names what was skipped in plain words, what runs now, and the default it falls back to","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-situations.unit.test.ts","name":"a review step > sends no level, so the server runs the highest native one instead of refusing a lower one","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-situations.unit.test.ts","name":"situation matrix > shows every row with a cell, counts only what it shows, and writes orders the server accepts","tier":"ESSENTIAL"}
     ,

@@ -61,6 +61,9 @@ type simpleSituation struct {
 	simplePick
 	Chain []simpleStep `json:"chain"`
 	End   string       `json:"end"`
+	// Not is the order's saved exclusions, so the page can write the whole
+	// stored order back (Undo of "Same as the row").
+	Not []string `json:"not"`
 }
 type simpleQuick struct {
 	simplePick
@@ -290,7 +293,10 @@ func (m *Module) simple(w http.ResponseWriter, r *http.Request) {
 				if order.ProfileID != s.Workspace.ID || order.Situation == "first" || order.Rank == nil || strings.HasPrefix(order.Column, "review:") || !validBoardColumn(s, order.Column) {
 					continue
 				}
-				cell := simpleSituation{Chain: []simpleStep{}, End: order.End}
+				cell := simpleSituation{Chain: []simpleStep{}, End: order.End, Not: []string{}}
+				if order.Not != nil {
+					cell.Not = order.Not
+				}
 				if cell.End == "" {
 					cell.End = "row"
 					if order.Situation == "review" {
