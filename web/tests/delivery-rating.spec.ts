@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test, type Browser, type Page } from '@playwright/test'
-import { mkdirSync } from 'node:fs'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { usageDashboard } from './usage-data'
 
-const shots = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-218'
 const sessionId = '5e000000-0000-4000-8000-000000000001'
 
 const world: AgentWorld = {
@@ -153,32 +151,30 @@ test('a person marks rework with a reason and can undo it', async ({ page }) => 
   expect(errors).toEqual([])
 })
 
-test('ticket rework fits 390 and 1600 in light and dark', async ({ browser }) => {
-  mkdirSync(shots, { recursive: true })
+test('ticket rework fits 390 and 1600 in light and dark', async ({ browser }, testInfo) => {
   for (const width of [1600, 390]) {
     for (const theme of ['light', 'dark'] as const) {
       await shot(browser, width, theme, async page => {
         const { work } = await openTicket(page, theme)
         const box = work.locator('[data-delivery-rating]')
         await expect(box.getByRole('button', { name: 'Needs rework' })).toBeVisible()
-        await box.screenshot({ path: `${shots}/ticket-idle-${theme}-${width}.png` })
+        await box.screenshot({ path: testInfo.outputPath(`ticket-idle-${theme}-${width}.png`) })
         await box.getByRole('button', { name: 'Needs rework' }).click()
         await box.getByRole('textbox', { name: 'Reason' }).fill('Needs another pass')
         await box.locator('summary').click()
         await expect(box.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).resolves.toBe(true)
         await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).resolves.toBe(true)
-        await box.screenshot({ path: `${shots}/ticket-form-${theme}-${width}.png` })
+        await box.screenshot({ path: testInfo.outputPath(`ticket-form-${theme}-${width}.png`) })
         await box.getByRole('button', { name: 'Mark for rework' }).click()
         await expect(box).toContainText('Marked for rework')
         await expect(box.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).resolves.toBe(true)
-        await box.screenshot({ path: `${shots}/ticket-marked-${theme}-${width}.png` })
+        await box.screenshot({ path: testInfo.outputPath(`ticket-marked-${theme}-${width}.png`) })
       })
     }
   }
 })
 
-test('the session overview shows the same rework mark', async ({ browser }) => {
-  mkdirSync(shots, { recursive: true })
+test('the session overview shows the same rework mark', async ({ browser }, testInfo) => {
   for (const width of [1600, 390]) {
     for (const theme of ['light', 'dark'] as const) {
       await shot(browser, width, theme, async page => {
@@ -203,14 +199,13 @@ test('the session overview shows the same rework mark', async ({ browser }) => {
         await expect(box).toContainText('1 review round · 2 reverts')
         await expect(details.getByRole('heading', { name: 'Details' })).toBeVisible()
         await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).resolves.toBe(true)
-        await box.screenshot({ path: `${shots}/session-${theme}-${width}.png` })
+        await box.screenshot({ path: testInfo.outputPath(`session-${theme}-${width}.png`) })
       })
     }
   }
 })
 
-test('usage shows the rework rate by harness', async ({ browser }) => {
-  mkdirSync(shots, { recursive: true })
+test('usage shows the rework rate by harness', async ({ browser }, testInfo) => {
   const group = (label: string, exceptions: number, deliveries: number) => ({
     label, votes: exceptions, average: null, exceptions, deliveries, rework_rate: `${exceptions}/${deliveries}`,
   })
@@ -241,7 +236,7 @@ test('usage shows the rework rate by harness', async ({ browser }) => {
         if (width > 600) await expect(table.getByRole('row', { name: /Codex/ })).toContainText('50%')
         if (width > 600) await expect(table.getByRole('row', { name: /Claude/ }).locator('td').last()).toHaveText('')
         await expect(page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1)).resolves.toBe(true)
-        await page.locator('.breakdown').screenshot({ path: `${shots}/usage-${theme}-${width}.png` })
+        await page.locator('.breakdown').screenshot({ path: testInfo.outputPath(`usage-${theme}-${width}.png`) })
       })
     }
   }

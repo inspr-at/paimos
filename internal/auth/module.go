@@ -134,6 +134,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		}
 		p, kind, err := m.authenticate(r)
 		if err != nil && !publicRequest(r) {
+			httpapi.MarkAuthentication(r)
 			internalFailure(w, r, "authenticate", err)
 			return
 		}
@@ -148,6 +149,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
+			httpapi.MarkAuthentication(r)
 			p.BrowserSession = true
 			if !publicRequest(r) {
 				if c, cErr := r.Cookie(sessionCookieName); cErr == nil {
@@ -156,6 +158,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			}
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		case credAgent:
+			httpapi.MarkAuthentication(r)
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		}
 		if kind != credSession && kind != credAgent && protectedRequest(r) {

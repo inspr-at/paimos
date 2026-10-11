@@ -313,6 +313,8 @@ test('old workspace bookmarks redirect during section and hash changes inside Se
 })
 
 test('settings layout evidence in light and dark at phone, tablet and desktop sizes', async ({ page }) => {
+  // Ninety navigations and screenshots form this evidence matrix.
+  test.setTimeout(120_000)
   await setup(page)
   await mockAccess(page, accessWorld(), { also: ['account.read', 'rules.read', 'models.read'] })
   for (const width of [390, 1024, 1440]) {

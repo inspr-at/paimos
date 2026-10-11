@@ -31,6 +31,52 @@ func (w *bodyDeadlineRecorder) SetReadDeadline(deadline time.Time) error {
 	return nil
 }
 
+// Risk: endpoint buffering shortens the 30-second upload budget or extends an
+// earlier caller deadline. Clock samples bound the installed deadline; no
+// elapsed-time performance threshold or wait establishes the behavior.
+func TestBufferEndpointBodyDeadlineBudget(t *testing.T) {
+	for _, earlier := range []bool{false, true} {
+		name := "30-second endpoint budget"
+		if earlier {
+			name = "earlier caller deadline"
+		}
+		t.Run(name, func(t *testing.T) {
+			ctx := t.Context()
+			callerDeadline := time.Now().Add(15 * time.Second)
+			if earlier {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithDeadline(ctx, callerDeadline)
+				defer cancel()
+			}
+			r := httptest.NewRequest(http.MethodPost, "/api/work-orders", strings.NewReader(`{"reason":"process_exited"}`)).WithContext(ctx)
+			w := &bodyDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+			before := time.Now()
+			err := BufferEndpointBody(w, r)
+			after := time.Now()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(w.deadlines) != 2 || w.deadlines[0].IsZero() || !w.deadlines[1].IsZero() {
+				t.Fatalf("successful read must install then clear deadline: %v", w.deadlines)
+			}
+			got := w.deadlines[0]
+			if earlier {
+				if !got.Equal(callerDeadline) {
+					t.Fatalf("caller deadline changed: got %s, want %s", got, callerDeadline)
+				}
+			} else if got.Before(before.Add(30*time.Second)) || got.After(after.Add(30*time.Second)) {
+				t.Fatalf("body deadline %s is outside the 30-second budget [%s, %s]", got, before.Add(30*time.Second), after.Add(30*time.Second))
+			}
+			var body struct {
+				Reason string `json:"reason"`
+			}
+			if err := Decode(r, &body); err != nil || body.Reason != "process_exited" {
+				t.Fatalf("buffered body changed: %+v, %v", body, err)
+			}
+		})
+	}
+}
+
 func TestBufferBodyBoundsAndDecode(t *testing.T) {
 	for _, tc := range []struct {
 		name, body string
@@ -207,7 +253,15 @@ func TestBufferEndpointBodyCancellationKeepsInterruptDeadline(t *testing.T) {
 			}
 			r := httptest.NewRequest("POST", "/", nil).WithContext(ctx)
 			r.Body = body
-			w := &bodyDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+			recorder := httptest.NewRecorder()
+			var w http.ResponseWriter = recorder
+			var transportWriter *bodyDeadlineRecorder
+			if tc.transport {
+				transportWriter = &bodyDeadlineRecorder{ResponseRecorder: recorder}
+				w = transportWriter
+			} else if err := http.NewResponseController(w).SetReadDeadline(deadline); !errors.Is(err, http.ErrNotSupported) {
+				t.Fatalf("fixture unexpectedly supports transport deadlines: %v", err)
+			}
 			result := make(chan error, 1)
 			go func() { result <- BufferEndpointBody(w, r) }()
 			defer body.Close()
@@ -215,6 +269,8 @@ func TestBufferEndpointBodyCancellationKeepsInterruptDeadline(t *testing.T) {
 			case <-body.entered:
 			case err := <-result:
 				t.Fatalf("buffer returned before reading the body: %v", err)
+			case <-time.After(10 * time.Second):
+				t.Fatal("buffer never started reading the body")
 			}
 			cancel()
 			var err error
@@ -227,14 +283,19 @@ func TestBufferEndpointBodyCancellationKeepsInterruptDeadline(t *testing.T) {
 			if !errors.As(err, &failure) || failure.Status != http.StatusRequestTimeout || failure.Message != "request body read timed out" {
 				t.Fatalf("cancelled read result: %v", err)
 			}
+			if recorder.Header().Get("Connection") != "close" {
+				t.Fatal("cancelled body left the connection reusable")
+			}
+			select {
+			case <-body.release:
+			default:
+				t.Fatal("cancelled body reader was not closed")
+			}
 			if !tc.transport {
-				if len(w.deadlines) != 0 {
-					t.Fatalf("no transport deadline was requested, yet deadlines were set: %v", w.deadlines)
-				}
 				return
 			}
-			if len(w.deadlines) != 2 || !w.deadlines[0].Equal(deadline) || !w.deadlines[1].Equal(time.Unix(1, 0)) {
-				t.Fatalf("expected the installed deadline, one expired interrupt and no clear: %v", w.deadlines)
+			if len(transportWriter.deadlines) != 2 || !transportWriter.deadlines[0].Equal(deadline) || !transportWriter.deadlines[1].Equal(time.Unix(1, 0)) {
+				t.Fatalf("expected the installed deadline, one expired interrupt and no clear: %v", transportWriter.deadlines)
 			}
 		})
 	}

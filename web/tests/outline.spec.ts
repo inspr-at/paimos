@@ -11,6 +11,7 @@ const ticketViews = (page: Page) => page.getByRole('tablist', { name: 'Ticket vi
 const row = (page: Page, key: string) => outline(page).locator('tr.ticket-row').filter({ has: page.locator('.key', { hasText: new RegExp(`^${key}$`) }) })
 const keys = (page: Page) => outline(page).locator('tr.ticket-row:not(.ghost) .key')
 const ago = (h: number) => new Date(Date.parse('2026-09-23T12:00:00Z') - h * 3_600_000).toISOString()
+const submit = process.platform === 'darwin' ? 'Meta+Enter' : 'Control+Enter'
 
 // The shared fixtures plus a finished epic that still holds open work, and a ticket with tasks.
 function tree() {
@@ -71,7 +72,7 @@ test('a created child moved away remotely and back locally remains expandable af
     const children = panel.getByRole('region', { name: 'Tickets in this epic' })
     await children.getByRole('button', { name: 'Add ticket' }).click()
     await children.getByLabel('New ticket title').fill('Return this child')
-    await page.keyboard.press('Enter')
+    await page.keyboard.press(submit)
     await expect(children.locator('.child-row')).toHaveCount(1)
     const child = data.nodes.find(node => node.title === 'Return this child')!
     Object.assign(child, { parent_id: 'n-epic', updated_at: new Date(Date.parse(child.updated_at) + 60_000).toISOString() })
@@ -83,9 +84,9 @@ test('a created child moved away remotely and back locally remains expandable af
     await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
     await row(page, child.key).getByText(child.key, { exact: true }).click()
     await panel.getByRole('button', { name: 'More actions' }).click()
-    await page.getByRole('menuitem', { name: 'Move to another epic…' }).click()
-    await page.getByLabel('Find an epic').fill('Empty epic')
-    await expect(page.getByRole('listbox', { name: 'Epics' }).getByRole('option')).toHaveCount(1)
+    await page.getByRole('menuitem', { name: 'Move to another parent…' }).click()
+    await page.getByLabel('Find a parent').fill('Empty epic')
+    await expect(page.getByRole('listbox', { name: 'Parents' }).getByRole('option')).toHaveCount(1)
     await page.keyboard.press('Enter')
     await expect(page.getByText(/moved to PHAROS-30 Empty epic/)).toBeVisible()
     await expect(row(page, 'PHAROS-30').getByRole('button', { name: 'Expand PHAROS-30' })).toBeVisible()
@@ -103,9 +104,9 @@ test('the List | Outline switch keeps the view in the URL and the same toolbar',
   await ticketViews(page).getByRole('tab', { name: 'Outline' }).click()
   await expect(page).toHaveURL('/p/PHAROS/tickets?view=outline')
   await expect(outline(page)).toBeVisible()
-  // Epics first (open ones and closed ones that still hold open work), then "No epic".
-  await expect(keys(page)).toHaveText(['PHAROS-10', 'PHAROS-30', 'PHAROS-14'])
-  await expect(outline(page).locator('.outline-group')).toContainText('No epic')
+  // One work tree orders all roots by the current sort, regardless of level.
+  await expect(keys(page)).toHaveText(['PHAROS-14', 'PHAROS-10', 'PHAROS-30'])
+  await expect(outline(page).locator('.outline-group')).toHaveCount(0)
   await expect(row(page, 'PHAROS-30')).toHaveClass(/dimmed/)
   await expect(row(page, 'PHAROS-10')).not.toHaveClass(/dimmed/)
   // Filters keep the view; Group by does not apply.
@@ -131,9 +132,9 @@ test('epics show subtree progress; children indent under their parents with guid
   const calls = await mockWork(page, tree())
   await page.goto('/p/PHAROS?view=outline&closed=1')
   await expect(row(page, 'PHAROS-10')).toBeVisible()
-  // With closed work shown the outline loads lazily: epics and loose work, then children on demand.
+  // With closed work shown all root levels share one lazy page.
   const roots = lists(calls).filter(call => call.query.get('parent_id') === 'p-pharos')
-  expect(roots.map(call => call.query.get('kind')).sort()).toEqual(['epic', 'ticket,task'])
+  expect(roots.map(call => call.query.get('kind')).sort()).toEqual(['work,epic,ticket,task'])
   await expect(row(page, 'PHAROS-10').locator('.epic-progress')).toHaveText('0/3')
   await expect(row(page, 'PHAROS-30').locator('.epic-progress')).toHaveText('1/2')
   // Chevrons only where there are children.
@@ -181,20 +182,22 @@ test('keyboard: arrows open and close, step in and out; Space toggles; Enter ope
   await page.goto('/p/PHAROS?view=outline&closed=1')
   await expect(row(page, 'PHAROS-10')).toBeVisible()
   await page.keyboard.press('j')
-  await expect(row(page, 'PHAROS-10')).toHaveAttribute('aria-selected', 'true')
+  await expect(row(page, 'PHAROS-14')).toHaveClass(/cursor/)
+  await page.keyboard.press('j')
+  await expect(row(page, 'PHAROS-10')).toHaveClass(/cursor/)
   await page.keyboard.press('ArrowRight')
   await expect(row(page, 'PHAROS-10')).toHaveAttribute('aria-expanded', 'true')
   await expect(row(page, 'PHAROS-11')).toBeVisible()
   await page.keyboard.press('ArrowRight')
-  await expect(row(page, 'PHAROS-11')).toHaveAttribute('aria-selected', 'true')
+  await expect(row(page, 'PHAROS-11')).toHaveClass(/cursor/)
   await page.keyboard.press('j')
-  await expect(row(page, 'PHAROS-12')).toHaveAttribute('aria-selected', 'true')
+  await expect(row(page, 'PHAROS-12')).toHaveClass(/cursor/)
   await page.keyboard.press(' ')
   await expect(row(page, 'PHAROS-13')).toBeVisible()
   await page.keyboard.press(' ')
   await expect(row(page, 'PHAROS-13')).toHaveCount(0)
   await page.keyboard.press('ArrowLeft')
-  await expect(row(page, 'PHAROS-10')).toHaveAttribute('aria-selected', 'true')
+  await expect(row(page, 'PHAROS-10')).toHaveClass(/cursor/)
   await page.keyboard.press('ArrowLeft')
   await expect(row(page, 'PHAROS-10')).toHaveAttribute('aria-expanded', 'false')
   await page.keyboard.press('Enter')
@@ -211,18 +214,20 @@ test('n on an epic creates tickets inside it and stays open for the next', async
   await page.goto('/p/PHAROS?view=outline')
   await expect(row(page, 'PHAROS-10')).toBeVisible()
   await page.keyboard.press('j')
+  await page.keyboard.press('j')
   await page.keyboard.press('n')
   const input = page.getByLabel('New ticket title')
   await expect(input).toBeFocused()
   await expect(input).toHaveAttribute('placeholder', 'Ticket in PHAROS-10')
-  await expect(page.getByRole('button', { name: /^Epic: Guarded multi-cloud provisioning/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Parent: Guarded multi-cloud provisioning/ })).toBeVisible()
   await input.fill('Scaleway connector')
-  await page.keyboard.press('Enter')
+  await page.keyboard.press(submit)
   await expect(input).toHaveValue('')
   await expect(input).toBeFocused()
   const post = calls.find(call => call.method === 'POST' && call.path === '/api/nodes')!
   expect((post.body as { parent_id: string }).parent_id).toBe('n-epic')
   await expect(outline(page).locator('tr.ticket-row').filter({ hasText: 'Scaleway connector' })).toHaveAttribute('aria-level', '2')
+  await page.keyboard.press('Escape')
   await page.keyboard.press('Escape')
   await expect(input).toHaveCount(0)
 })
@@ -242,7 +247,7 @@ test('dragging a ticket onto an epic moves it there, guarded against newer copie
   // The ticket sits inside the epic now, which opened to show it.
   await expect(row(page, 'PHAROS-14')).toHaveAttribute('aria-level', '2')
   await page.getByRole('button', { name: 'Undo' }).click()
-  await expect(page.getByText('PHAROS-14 moved out of its epic')).toBeVisible()
+  await expect(page.getByText('PHAROS-14 moved to the project root')).toBeVisible()
   await expect(row(page, 'PHAROS-14')).toHaveAttribute('aria-level', '1')
 })
 
@@ -327,7 +332,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
     const child = row(page, 'PHAROS-11')
     const key = (await child.locator('.c-key').boundingBox())!, title = (await child.locator('.title-link').boundingBox())!
     expect(title.y).toBeGreaterThan(key.y + key.height - 1)
-    expect(await child.evaluate(el => getComputedStyle(el).paddingLeft)).toBe('24px')
+    // Selection space shares the card inset; depth still adds ten pixels.
+    const parentInset = await epic.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))
+    expect(await child.evaluate(el => parseFloat(getComputedStyle(el).paddingLeft))).toBe(parentInset + 10)
     await child.locator('.title-link').click()
     await expect(page.getByRole('complementary', { name: 'Ticket details' })).toBeVisible()
     expect(errors).toEqual([])
@@ -343,10 +350,14 @@ async function controlledStream(page: Page) {
       onerror: (() => void) | null = null
       listeners = new Map<string, ((event: unknown) => void)[]>()
       constructor() {
-        ;(window as unknown as { outlineStream: Source }).outlineStream = this
         queueMicrotask(() => this.emit('stream.ready', { after: 500, resumed: false }))
       }
-      addEventListener(type: string, listener: (event: unknown) => void) { this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener]) }
+      addEventListener(type: string, listener: (event: unknown) => void) {
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), listener])
+        // Other screen subscribers also open streams. Target the work store,
+        // rather than whichever subscriber happened to construct last.
+        if (type === 'node.updated') (window as unknown as { outlineStream: Source }).outlineStream = this
+      }
       emit(type: string, data: unknown) { for (const listener of this.listeners.get(type) ?? []) listener({ data: JSON.stringify(data), lastEventId: '501' }) }
       fail() { this.readyState = 0; this.onerror?.() }
       close() { this.readyState = 2 }
@@ -482,7 +493,7 @@ test('AEON-385: an old parent page cannot restore the count after moving its las
   let hold = false, computed = 0, release!: () => void
   const wait = new Promise<void>(resolve => { release = resolve })
   await mockWork(page, data, { hold: call => {
-    if (hold && call.method === 'GET' && call.path === '/api/nodes' && call.query.get('kind') === 'epic' && call.query.get('parent_id') === 'p-pharos') return { until: wait, computed: () => { computed++ } }
+    if (hold && call.method === 'GET' && call.path === '/api/nodes' && call.query.get('kind') === 'work,epic,ticket,task' && call.query.get('parent_id') === 'p-pharos') return { until: wait, computed: () => { computed++ } }
   } })
   try {
     await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
@@ -491,7 +502,7 @@ test('AEON-385: an old parent page cannot restore the count after moving its las
     hold = true
     await outlineGap(page)
     await expect.poll(() => computed).toBe(1)
-    await row(page, 'PHAROS-11').dragTo(outline(page).locator('.outline-group'))
+    await row(page, 'PHAROS-11').dragTo(outline(page).getByRole('row', { name: 'Project root drop destination' }))
     await expect(row(page, 'PHAROS-11')).toHaveAttribute('aria-level', '1')
     await expect(row(page, 'PHAROS-10').locator('.twisty')).toHaveCount(0)
     release()
@@ -511,7 +522,7 @@ test('AEON-385: bulk move relocates lazy Outline rows immediately and sends disp
   for (const key of ['PHAROS-11', 'PHAROS-12']) await row(page, key).getByRole('checkbox').check()
   await row(page, 'PHAROS-10').getByRole('button', { name: 'Collapse PHAROS-10' }).click()
   await page.getByRole('toolbar', { name: '2 selected tickets' }).getByRole('button', { name: 'Move' }).click()
-  await page.getByRole('dialog', { name: 'Epic for 2 tickets' }).getByRole('option', { name: 'No epic' }).click()
+  await page.getByRole('dialog', { name: 'Parent for 2 tickets' }).getByRole('option', { name: 'No parent' }).click()
   for (const key of ['PHAROS-11', 'PHAROS-12']) await expect(row(page, key)).toHaveAttribute('aria-level', '1')
   await expect(row(page, 'PHAROS-10').locator('.twisty')).toHaveCount(0)
   expect(calls.find(call => call.path === '/api/nodes/bulk')?.body).toMatchObject({ parent_id: 'p-pharos', if_unmodified_since: revisions })
