@@ -171,6 +171,7 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
         await stable.check(() => trigger.click())
         const explainer = page.locator('.explainer')
         await expect(explainer.locator('h3')).toBeFocused()
+        expect(await explainer.evaluate(el => el.classList.contains('as-sheet'))).toBe(width < 600)
         expect((await explainer.innerText()).split(/\s+/).filter(word => /[\p{L}\p{N}]/u.test(word)).length).toBeLessThanOrEqual(120)
         const box = (await explainer.boundingBox())!
         expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(width + .5)
@@ -179,12 +180,14 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
         await stable.check(() => page.keyboard.press('Escape'))
         await expect(trigger).toBeFocused()
       }
+      if (width >= 600) await stable.check(() => page.locator('[data-how="key"]').hover())
       stable.done()
       await page.locator('[data-life="freeze"]').click(); await capture('freeze-popover'); await page.keyboard.press('Escape')
       await page.locator('[data-life="archive"]').click(); await capture('archive-popover'); await page.keyboard.press('Escape')
       await page.locator('[data-life="delete"]').click(); await capture('delete-sheet'); await page.keyboard.press('Escape'); await page.keyboard.press('Escape')
       if (width <= 1000) { await nav.click(); await capture('nav-open'); await page.keyboard.press('Escape') }
-      await navigate(page, '/p/PRJ-26/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await capture('general-prj26')
+      await navigate(page, '/p/AEON/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await capture('general-aeon')
+      await navigate(page, '/p/PRJ-26/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await capture('general-prj26')
       await navigate(page, '/p/PHAROS/settings/agents'); await expect(page.locator('#project-work-context')).toBeVisible(); await capture('agents-pharos')
       await navigate(page, '/p/PHAROS/settings/access'); await capture('access-pharos')
       await navigate(page, '/p/PHAROS/settings/routines'); await expect(page.locator('#recurring-work')).toBeVisible(); await capture('routines-pharos')
@@ -196,6 +199,8 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       await expect(viewer.getByRole('heading', { name: 'Lifecycle', exact: true })).toBeVisible()
       await expect(viewer.locator('[data-life]')).toHaveCount(0); await expect(viewer.locator('#f-name, #f-desc')).toHaveCount(0)
       await expect(viewer.getByRole('link', { name: 'Edit name and description in Settings' })).toHaveCount(0)
+      await expect(viewer.getByText('Reading shared groups…', { exact: true })).toHaveCount(0)
+      for (const check of await checkProjectSettings(viewer, `readonly/${width}/${theme}`, width < 600)) expect(check.passed, check.message).toBe(true)
       await viewer.screenshot({ path: testInfo.outputPath(`general-readonly-${width}-${theme}.png`), fullPage: true })
       const longPage = await context.newPage(), longWorld = await setup(longPage)
       const longName = 'Plattform für gemeinsame Projektverwaltung und verlässliche Zusammenarbeit'
@@ -204,7 +209,8 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       await longPage.goto('/p/PHAROS/settings')
       await expect(longPage.getByLabel('Name', { exact: true })).toBeEnabled()
       await expect(longPage.getByLabel('Name', { exact: true })).toHaveValue(longName)
-      expect(await longPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+      await expect(longPage.getByLabel('Group', { exact: true })).toBeEnabled()
+      for (const check of await checkProjectSettings(longPage, `long-text/${width}/${theme}`, width < 600)) expect(check.passed, check.message).toBe(true)
       await longPage.screenshot({ path: testInfo.outputPath(`general-long-text-${width}-${theme}.png`), fullPage: true })
     } finally { await context.close() }
   }

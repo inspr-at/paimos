@@ -187,7 +187,7 @@ onBeforeUnmount(() => close(false))
       <div class="life-r"><AppIcon name="trash" :size="16" /><span class="lbl"><b>Delete</b><small>Removes the project and its tickets for everyone. The audit log keeps the record, and the key {{ project.routeKey }} stays reserved.</small></span><button v-if="admin" type="button" class="btn sm danger" :disabled="busy || !node" data-life="delete" aria-haspopup="dialog" :aria-expanded="confirmation?.kind === 'deleted'" @click="show('deleted', $event.currentTarget as HTMLElement)">Delete…</button></div>
     </div>
   </SettingsCard>
-  <FloatingPanel v-if="confirmation && confirmation.kind !== 'deleted'" :anchor="confirmation.anchor" :width="340" :label="actionTitle" cycle class="life-pop" @close="close($event)">
+  <FloatingPanel v-if="confirmation && confirmation.kind !== 'deleted'" :anchor="confirmation.anchor" :width="340" align="end" :label="actionTitle" cycle class="life-pop" @close="close($event)">
     <div ref="confirmationContent" class="cf" data-project-settings-overlay tabindex="-1"><h3>{{ actionTitle }}</h3><p>{{ actionCopy }}</p><div class="acts"><button type="button" class="btn sm" @click="close()">Cancel <KeyCap k="Esc" /></button><button type="button" class="btn sm primary" :disabled="busy" data-autofocus @click="confirm">{{ confirmation.kind === 'frozen' ? 'Freeze' : 'Archive' }}</button></div><p v-if="actionError" class="error" role="alert">{{ actionError }}</p></div>
   </FloatingPanel>
   <Teleport v-if="confirmation?.kind === 'deleted'" to="body">
@@ -230,8 +230,8 @@ form { min-width: 0; } form:focus { outline: none; }
 .delete-sheet { position: fixed; inset: 0 0 0 auto; margin: 0; width: min(480px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh; padding: 0; border: 0; background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-pop); }
 .delete-sheet[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }.delete-sheet::backdrop { background: var(--scrim); }
 .sh-head { display: flex; align-items: flex-start; gap: 12px; padding: max(20px, env(safe-area-inset-top)) 16px 10px 26px; }.sh-head h2 { flex: 1; font: 600 18px/1.3 var(--font); overflow-wrap: anywhere; }
-.sh-body { overflow: auto; min-width: 0; padding: 4px 26px 20px; }.sh-lead { margin-bottom: 14px; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
-.delete-key { display: grid; gap: 7px; font-size: 13px; }.delete-key .field { width: 100%; }
+.sh-body { overflow: auto; min-width: 0; padding: 4px 26px 20px; }.sh-body form { display: grid; gap: 18px; padding-top: 8px; }.sh-lead { font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }.sh-lead b { color: var(--ink); }
+.delete-key { display: grid; gap: 6px; font-size: 13px; }.delete-key b { font-weight: 600; }.delete-key .field { width: 100%; height: 38px; }
 .sh-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 14px 20px max(14px, env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 @container project-settings-body (max-width: 600px) {
   .frow { grid-template-columns: minmax(0, 1fr); row-gap: 10px; }.frow select.field { max-width: none; }
