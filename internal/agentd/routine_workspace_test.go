@@ -428,7 +428,9 @@ func TestRoutineDispatchIsolatesFailedHarnessProbe(t *testing.T) {
 			if err := s.PollScheduledOnce(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			if len(api.claims) != 1 || api.claims[0].LaunchID != api.grant.LaunchID || *allocations != 1 || len(blocked.starts) != 0 || s.accountAvailable("blocked") || s.Lifecycle("").AccountStatuses["blocked"].Reason != failure {
+			// Admission and the final pre-fork authority check repeat the same
+			// idempotent claim, while creating exactly one workspace and process.
+			if len(api.claims) != 2 || api.claims[0] != api.claims[1] || api.claims[0].LaunchID != api.grant.LaunchID || len(api.pickups) != 1 || len(s.runs) != 1 || s.runs[api.run.ID].process == nil || *allocations != 1 || len(blocked.starts) != 0 || s.accountAvailable("blocked") || s.Lifecycle("").AccountStatuses["blocked"].Reason != failure {
 				t.Fatalf("sibling failure stopped qualified routine dispatch: claims=%v allocations=%d", api.claims, *allocations)
 			}
 		})

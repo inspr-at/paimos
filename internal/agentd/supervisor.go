@@ -633,6 +633,7 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 		}
 	}
 	failures := []error{recoveryErr, settlementErr}
+	var probeFailures []error
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
 	adapters := map[string]Adapter{}
@@ -857,11 +858,17 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 		s.profilePermissions[account.ID] = errors.Is(probeErr, piprobe.ErrPrivateProfile) || errors.Is(dependencyErr, piprobe.ErrPrivateProfile)
 		s.mu.Unlock()
 		s.capacityProbeConnection(account.ID, err == nil && available)
+		if probeErr != nil {
+			probeFailures = append(probeFailures, errors.New("harness failed to start"))
+		}
 		// A harness that fails to start is a per-harness hold reported through
-		// Lifecycle, not a poll failure: siblings keep polling and dispatching.
+		// Lifecycle. It cannot fail a poll that can dispatch a ready sibling.
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
 		}
+	}
+	if !s.Lifecycle("").Ready {
+		failures = append(failures, probeFailures...)
 	}
 	for _, run := range runs {
 		if err := ctx.Err(); err != nil {
@@ -871,8 +878,10 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 			failures = append(failures, ErrScope)
 			continue
 		}
-		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) && !errors.Is(err, ErrHostCapacity) && !errors.Is(err, errAccountUnavailable) {
-			failures = append(failures, err)
+		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) && !errors.Is(err, ErrHostCapacity) {
+			if !errors.Is(err, errAccountUnavailable) || !s.Lifecycle("").Ready {
+				failures = append(failures, err)
+			}
 		}
 	}
 	return errors.Join(failures...)

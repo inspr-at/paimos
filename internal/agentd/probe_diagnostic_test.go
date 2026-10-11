@@ -205,7 +205,7 @@ func TestProbeFailureMatrixKeepsSiblingDispatchAndRecovers(t *testing.T) {
 						}
 						var diagnostics []string
 						s.pollDiagnostic = func(reason string) { diagnostics = append(diagnostics, reason) }
-						if err := s.PollScheduledOnce(t.Context()); (err != nil) != (failure == "report_refused") {
+						if err := s.PollScheduledOnce(t.Context()); (err != nil) != (failure == "report_refused" || failure == "all_failed") {
 							t.Fatalf("per-account outcome became global poll failure: %v", err)
 						}
 						status := s.Lifecycle("")
