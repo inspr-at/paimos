@@ -58,8 +58,9 @@ func lineProfiles(c boardCatalog, h, model string) []Profile {
 	return out
 }
 
-// Unlike the role-ladder token, this digest includes all registry pins and
-// preference/rule revisions, including lines that no ladder currently uses.
+// Editor tokens include all registry pins and preference/rule revisions.
+// Routing digests include only enabled pins, so archived history cannot exhaust
+// the live catalog's bounded input budget.
 func registryRevision(ctx context.Context, tx pgx.Tx, routingOnly ...bool) (string, error) {
 	profilesWhere, retirementsWhere := "", ""
 	if len(routingOnly) > 0 && routingOnly[0] {

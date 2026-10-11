@@ -67,6 +67,12 @@ func TestEditorConcurrentConditionalLegacyAndRevocationFence(t *testing.T) {
 			}}
 			h := newEditorHTTP(t, m)
 			initial := h.ladder(t, p, "build")
+			// Preserve the editor's required precondition as a test failure.
+			// Models retirement removes this token; dereferencing it would
+			// panic and hide the remaining package's regression results.
+			if initial.EditToken == nil || !initial.CanEdit || len(initial.Routes) == 0 {
+				t.Fatal("legacy editor requires a complete editable ladder; Models retirement makes this endpoint read-only")
+			}
 			wanted := append([]Route{}, initial.Routes...)
 			wanted[0].Priority = 500
 			first := startEditorRequest(t, h, p, "PUT", "/api/models/routes?role=build", editorJSON(wanted), map[string]string{"If-Match": *initial.EditToken})
