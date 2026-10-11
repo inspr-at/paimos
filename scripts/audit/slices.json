@@ -268,7 +268,9 @@
         "internal/routineactions/**",
         "internal/recurrences/runs.go",
         "internal/recurrences/runs_test.go",
-        "internal/routinebudget/**"
+        "internal/routinebudget/**",
+        "internal/recurrences/run_history.go",
+        "internal/recurrences/run_history_test.go"
       ]
     },
     {
