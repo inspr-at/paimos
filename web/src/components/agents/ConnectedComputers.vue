@@ -8,7 +8,7 @@ import {
   disconnectEnrollment, getPairingComputer, lastActiveLabel, listPairingComputers, pairingReadGeneration, pairingScopeKey,
   touchIDConfirmation, platformCaption, type DisconnectMode, type PairingPermissions, type PairingView,
 } from '../../lib/agentPairing'
-import { onAccessChange } from '../../lib/authz'
+import { onAccessRevalidate } from '../../lib/authz'
 import { harnessLabel } from '../../lib/agentState'
 import { brand } from '../../lib/brand'
 import { attachCopy } from '../../lib/attachCopy'
@@ -89,7 +89,7 @@ function pathParts(path: string) {
 let loadTurn = 0
 watch(() => props.permissions.canListComputers, can => { if (can) void load(); else dropSignedInList() }, { immediate: true })
 watch(() => props.refreshToken, token => { if (typeof token === 'number' && token > 0 && props.permissions.canListComputers) void load() })
-const stopAccess = onAccessChange(change => { if (change === 'reset') dropSignedInList() })
+const stopAccess = onAccessRevalidate({ reset: dropSignedInList })
 const poller = usePoller(() => load(), 20_000, { enabled: () => props.permissions.canListComputers })
 // Every write on /agents drops this list's read in flight and reads it again (AEON-402).
 const stopWrites = agents.onWrite({ invalidate: supersedeLoads, refresh: load })

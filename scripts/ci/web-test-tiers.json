@@ -68,7 +68,23 @@
   "policy": "ESSENTIAL runs on PRs and merge groups plus changed-area cases. GATED-FULL preserves the prior Go/unit/browser gate. NIGHTLY includes never-gated browser cases. Runtime reconciliation warns, defaults new cases to NIGHTLY and drops stale entries. Known-flaky cases and deletion candidates cannot be ESSENTIAL; AEON-679 rule B removes reviewed low-value categories; protected candidates stay available."
   ,
   "postGateCases": [
+    "browser:tests/a11y.spec.ts:axe: business parts status in dark"
+    ,
+    "browser:tests/a11y.spec.ts:axe: business parts status in light"
+    ,
     "browser:tests/account-use-matrix.spec.ts:screenshots of the matrix, light and dark"
+    ,
+    "browser:tests/account-use-matrix.spec.ts:where 1024 dark › where 1024 dark: the design's checks hold on the built page"
+    ,
+    "browser:tests/account-use-matrix.spec.ts:where 1024 light › where 1024 light: the design's checks hold on the built page"
+    ,
+    "browser:tests/account-use-matrix.spec.ts:where 1440 dark › where 1440 dark: the design's checks hold on the built page"
+    ,
+    "browser:tests/account-use-matrix.spec.ts:where 1440 light › where 1440 light: the design's checks hold on the built page"
+    ,
+    "browser:tests/account-use-matrix.spec.ts:where 390 dark › where 390 dark: the design's checks hold on the built page"
+    ,
+    "browser:tests/account-use-matrix.spec.ts:where 390 light › where 390 light: the design's checks hold on the built page"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: Remove and End now leave “Agents may use it” and everything below in place"
     ,
@@ -425,6 +441,12 @@
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 1440"
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 390"
+    ,
+    "browser:tests/business.spec.ts:a partly set up overview shows status only, and its one link to Settings › Business stays put"
+    ,
+    "browser:tests/business.spec.ts:a role that manages plugins but not settings switches the parts in Settings › Business"
+    ,
+    "browser:tests/business.spec.ts:members see a partly set up overview without the parts status or the settings link"
     ,
     "browser:tests/business.spec.ts:the overview includes open periods older than a year in its waiting count"
     ,
@@ -4712,6 +4734,10 @@
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business overview in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business parts status in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business parts status in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business setup in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business setup in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
@@ -4936,21 +4962,27 @@
     ,
     {"kind":"browser","file":"tests/account-resets.spec.ts","name":"Account floor and resets switch stay still at 400 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"\"Choose where\" from Needs you opens For new things and brings the new account's row, its first box focused (desktop and phone)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"For new things folds into one line; opened, New model versions is read-only with a link to Models (desktop and phone)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"a cleared New tag keeps its room: with a long account name the clicked box, the rows below and Add context stay put through save, the read after it and Undo (desktop and phone)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"a competing change answers 409: nothing is claimed as saved and the server state is shown","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"a refused write takes its tick back at once, even when the matrix cannot be read again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"a rule switch saves only its own rule with the revision, never new_models; keyboard moves within it and Undo restores it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"archive sends the revision the menu opened on: a rename meanwhile is refused, never overwritten","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"bulk, tri-state rows and columns, single cells and Undo all save with the matrix revision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"bulk, tri-state corner, rows and columns, single cells and Undo all save with the matrix revision","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"context menu sets \"never\" for new accounts; confirmation and running work outside stay explicit","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"controls never move while cells, rows, switches and Undo are used (desktop and phone)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"controls never move while cells, rows, the corner, rule switches and Undo are used (desktop and phone)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"grid keyboard: arrows move between boxes and Space toggles; U never fires inside a text field","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"leaving the migrated model value keeps the switch and everything after it in place (desktop and phone)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"project settings choose the context; an unmapped project says no account works there","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -4958,9 +4990,19 @@
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"screenshots of the matrix, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"switch changes save all four persisted rules with the revision; keyboard moves within a switch","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"the pairing review shows the rows the rule pre-fills","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 1024 dark › where 1024 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 1024 light › where 1024 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 1440 dark › where 1440 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 1440 light › where 1440 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 390 dark › where 390 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 390 light › where 390 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-card-fit.spec.ts","name":"accounts and computers fit every width, panel open and closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5633,6 +5675,8 @@
     {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"large budget and per-client delivery 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"pending budget saves preserve button positions and submit only once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"AEON-1195: focus replaces the proposal state and approval commit in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"a manager retries a source that could not be read","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6578,9 +6622,15 @@
     ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"the bulk bar and its menus have no axe violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/business.spec.ts","name":"a partly set up overview shows status only, and its one link to Settings › Business stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/business.spec.ts","name":"a role that manages plugins but not settings switches the parts in Settings › Business","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"an admin enables Business: every part with the compiled digests","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"disabling a part asks first and closes its page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/business.spec.ts","name":"members see a partly set up overview without the parts status or the settings link","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"the header offers Business once a business plugin is enabled","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9094,6 +9144,8 @@
     ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"AEON-1195: focus cycles retain the same lead DOM rows, order and controls during delayed refresh","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -11173,6 +11225,8 @@
     {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"ppm 390 header: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"ppm 390 version: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-ticket-links.spec.ts","name":"AEON-1195: focus during ticket lookup keeps the panel controls and resolves the ticket","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/release-ticket-links.spec.ts","name":"a lost project access takes the link and the open ticket away at the next access check","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13452,6 +13506,8 @@
     ,
     {"kind":"node","file":"tests/account-resets.test.ts","name":"the summary counts credits per expiry day and never hides later ones","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"For new things: three rules, Automatic or Ask first, each value with a sentence, an example and a short phrase in this workspace's names","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/account-use.test.ts","name":"a conflict says nothing was saved; other failures never claim success","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/account-use.test.ts","name":"a page starts exactly at a context: the cursor is the id just before it","tier":"ESSENTIAL"}
@@ -13460,13 +13516,13 @@
     ,
     {"kind":"node","file":"tests/account-use.test.ts","name":"a project summary says when the account count is incomplete","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/account-use.test.ts","name":"a rule save never carries new_models: only the rules it names travel","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/account-use.test.ts","name":"a save and its Undo restore exactly the earlier set","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/account-use.test.ts","name":"columns: default first, then by name; Unassigned never takes ticks","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/account-use.test.ts","name":"refusals for a context read \"Not allowed for X\"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"node","file":"tests/account-use.test.ts","name":"switches offer two values; a migrated \"only with updates\" model rule stays visible but is never offered fresh","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/account-use.test.ts","name":"the pairing preview matches T3: ask first ticks nothing, allow skips \"never\" and Unassigned","tier":"ESSENTIAL"}
     ,
@@ -13819,6 +13875,12 @@
     {"kind":"node","file":"tests/avatar.test.ts","name":"zones and languages read well","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/brandMarks.test.ts","name":"known harnesses and providers use distinct vendored silhouettes","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/business-setup-owner.test.ts","name":"every setup link on the Business pages ends in Settings › Business","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/business-setup-owner.test.ts","name":"only Settings › Business mounts the business parts switches","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/business-setup-owner.test.ts","name":"the overview and its parts status only read the parts","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/business.test.ts","name":"amounts display exactly with en-GB grouping and the currency scale","tier":"GATED-FULL"}
     ,
@@ -14952,6 +15014,8 @@
     ,
     {"kind":"node","file":"tests/settings.test.ts","name":"Accounts, Computers and Capacity are three sections, each for people who may read accounts (AEON-1171)","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/settings.test.ts","name":"Business opens to people who may manage plugins, for its parts card (AEON-1189)","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/settings.test.ts","name":"Personal, Developer and Policies are for everyone; workspace sections follow their grants","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/settings.test.ts","name":"agent keys read as active, expired or revoked","tier":"GATED-FULL"}
@@ -15207,6 +15271,14 @@
     {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"drops a stale key read and keeps the last keys when the newest read fails","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"refreshes the shared key cache when access settles after a key change","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/access-refresh-panels.unit.test.ts","name":"AEON-1195: focus during a held ticket-key lookup retries it and never reports a false missing ticket","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/access-refresh-panels.unit.test.ts","name":"AEON-1195: proposal refresh replaces state and approval head, removes server entries and retains only unlisted local upserts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/access-revalidate.unit.test.ts","name":"AEON-1195: access listeners use the shared boundary and cannot clear state in their refresh callback","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/access-revalidate.unit.test.ts","name":"AEON-1195: every audited store retains rows through refresh and fences delayed reads after sign-out, person switch and 401","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > accepts percent readings and structured first-run waits without inventing headroom","tier":"GATED-FULL"}
     ,

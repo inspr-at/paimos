@@ -3,7 +3,7 @@
 // screen; an answer for anything else is dropped, a refusal says so, and Undo only runs against the state it undid.
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { APIError } from './api'
-import { can, onAccessChange } from './authz'
+import { can, onAccessRevalidate } from './authz'
 import { toast } from './toast'
 import { getMembers } from './access'
 import { preferenceFailure } from './modelsSettings'
@@ -55,7 +55,7 @@ export function useModelsSimple() {
   /** What a column cannot do with a line, in the server's own words. */
   const cantReason = (column: string, line: string) => columnOf(column)?.cant.find(item => item.line === line)?.reason ?? ''
 
-  async function load(): Promise<boolean> {
+  async function load(retain = false): Promise<boolean> {
     const current = capture(), turn = ++read, target = scope.value, previous = doc.value?.person_id
     abort?.abort(); abort = new AbortController(); loading.value = true
     try {
@@ -73,7 +73,7 @@ export function useModelsSimple() {
       }
       throw new Error('Models changed while loading. Try again.')
     } catch (failure) {
-      if (current() && turn === read) { doc.value = null; tail.value = null; workspace.value = null; failed.value = true; error.value = failure instanceof Error ? failure.message : 'Models couldn’t load.' }
+      if (current() && turn === read) { if (!retain) { doc.value = null; tail.value = null; workspace.value = null }; failed.value = true; error.value = failure instanceof Error ? failure.message : 'Models couldn’t load.' }
       return false
     } finally { if (current() && turn === read) loading.value = false }
   }
@@ -263,12 +263,14 @@ export function useModelsSimple() {
   function dropError() { error.value = '' }
 
   watch(key, () => { generation++; epoch.value++; abort?.abort(); doc.value = null; workspace.value = null; tail.value = null; draft.value = null; error.value = ''; failed.value = false; announcement.value = ''; busy.value = false; loading.value = false; if (owner.value && can('models.read')) void load() }, { immediate: true, flush: 'sync' })
-  const unsubscribe = onAccessChange(() => {
-    generation++; epoch.value++; abort?.abort(); busy.value = false
+  const unsubscribe = onAccessRevalidate({ reset: () => {
+    generation++; epoch.value++; abort?.abort(); busy.value = false; loading.value = false
+    doc.value = null; workspace.value = null; tail.value = null; draft.value = null; names.value = new Map(); profiles.value = []; error.value = ''; announcement.value = ''
+  }, refresh: () => {
     if (scope.value === 'default' && !can('model_prefs.manage')) { scope.value = 'me'; return }
-    if (!can('models.read')) { doc.value = null; return }
-    void load()
-  })
+    if (can('models.read') && !busy.value) void load(true)
+  } })
+  watch(() => can('model_prefs.manage'), allowed => { if (!allowed && scope.value === 'default') scope.value = 'me' })
   watch(() => can('models.read'), allowed => { if (allowed && !doc.value && !loading.value && owner.value) void load() })
   onBeforeUnmount(() => { alive = false; generation++; epoch.value++; abort?.abort(); unsubscribe() })
 

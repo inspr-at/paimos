@@ -2,9 +2,9 @@
 // AEON-1054: the matrix helpers. Risk: a tri-state box, a bulk change or Undo
 // shows a state the server did not store, or the pairing preview promises ticks
 // the rule (trigger T3) does not give.
-import { test } from 'node:test'
+import { afterEach, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { allowedSet, applyCells, cellKey, columnState, cursorBefore, failureText, nextFromTri, predictedForNewAccount, projectContextSummary, rowState, switchChoices, SWITCHES, tickable, validMatrix, type WorkContext } from '../src/lib/accountUse.ts'
+import { allowedSet, applyCells, cellKey, columnState, contextNames, cursorBefore, failureText, modelRuleLabel, named, nextFromTri, predictedForNewAccount, projectContextSummary, rowState, ruleBody, ruleLabel, RULES, rulesPreview, saveRules, tickable, validMatrix, type RuleChange, type WorkContext } from '../src/lib/accountUse.ts'
 import { APIError } from '../src/lib/api.ts'
 import { capacityWaitText, isCapacityWait } from '../src/lib/capacityWait.ts'
 
@@ -43,16 +43,45 @@ test('the pairing preview matches T3: ask first ticks nothing, allow skips "neve
   assert.deepEqual(predictedForNewAccount({ new_accounts: 'allow' }, contexts).map(c => c.id), ['d', 'c2'])
 })
 
-test('switches offer two values; a migrated "only with updates" model rule stays visible but is never offered fresh', () => {
-  const models = SWITCHES.find(s => s.key === 'new_models')!
-  assert.deepEqual(switchChoices(models, 'allow').map(c => c.value), ['allow', 'deny'])
-  assert.deepEqual(switchChoices(models, 'shipped_only').map(c => c.label), ['Allow automatically', 'Ask first', 'Only with PAIMOS updates'])
-  // Once left, it keeps its place as a retired choice that cannot be picked (AEON-541).
-  assert.deepEqual(switchChoices(models, 'deny', true).map(c => [c.value, !!c.retired]), [['allow', false], ['deny', false], ['shipped_only', true]])
-  assert.deepEqual(switchChoices(models, 'shipped_only', true).map(c => !!c.retired), [false, false, false])
-  assert.equal(switchChoices(SWITCHES[0]!, 'allow', true).length, 2, 'only the model switch has a retired value')
-  for (const s of SWITCHES) assert.equal(s.choices.length, 2, s.key)
-  assert.deepEqual(SWITCHES.find(s => s.key === 'new_projects')!.choices.map(c => c.value), ['default', 'holding'])
+test('For new things: three rules, Automatic or Ask first, each value with a sentence, an example and a short phrase in this workspace\'s names', () => {
+  assert.deepEqual(RULES.map(d => d.key), ['new_accounts', 'new_contexts', 'new_projects'])
+  for (const d of RULES) for (const value of [d.auto, d.ask]) {
+    for (const words of [d.say, d.example, d.short]) assert.ok(words[value], `${d.key}:${value}`)
+    assert.doesNotMatch(d.example[value]!, /@|mbp\d/, 'examples name no person or computer')
+  }
+  assert.deepEqual(RULES.map(d => [ruleLabel(d, d.auto), ruleLabel(d, d.ask)]), [['Automatic', 'Ask first'], ['Automatic', 'Ask first'], ['Automatic', 'Ask first']])
+  // A renamed default context is named as it is called here.
+  const names = contextNames([ctx('d', 'Everything else', 'default'), ctx('h', 'Unassigned', 'holding')])
+  const projects = RULES.find(d => d.key === 'new_projects')!
+  assert.equal(named(projects.say.default!, names), 'A new project goes to Everything else, so the accounts ticked there work on it.')
+  assert.equal(rulesPreview({ new_accounts: 'ask', new_contexts: 'allow', new_projects: 'holding', new_models: 'allow' }, names), 'accounts ask first · contexts start with every account · projects wait in Unassigned')
+  assert.deepEqual(contextNames([]), { default: 'Default', unassigned: 'Unassigned' })
+  assert.deepEqual(['allow', 'deny', 'shipped_only'].map(v => modelRuleLabel(v as 'allow')), ['Automatic', 'Ask first', 'Only with PAIMOS updates'])
+})
+
+// Contract (AEON-1173 c2, AEON-1148): only Models' Auto-update writes new_models. A Settings rule save
+// names only its own rules, so it cannot overwrite the model rule even when handed the whole rule set.
+const originalFetch = globalThis.fetch
+afterEach(() => { globalThis.fetch = originalFetch })
+test('a rule save never carries new_models: only the rules it names travel', async () => {
+  const stored = { new_accounts: 'allow', new_contexts: 'ask', new_projects: 'default', new_models: 'deny', revision: 6, enforced_at: null, confirmation_required: false, confirmed_at: null }
+  const bodies: Record<string, unknown>[] = []
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), '/api/account-use/rules'); assert.equal(init?.method, 'PUT')
+    bodies.push(JSON.parse(String(init?.body)))
+    return Response.json(stored)
+  }
+  await saveRules(5, { new_accounts: 'allow' })
+  // A caller holding every rule (as the old screen did) still sends only the three Settings rules.
+  await saveRules(6, { ...stored } as unknown as RuleChange)
+  await saveRules(7, { new_projects: 'holding', new_models: 'allow' } as unknown as RuleChange)
+  assert.deepEqual(bodies, [
+    { expected_revision: 5, new_accounts: 'allow' },
+    { expected_revision: 6, new_accounts: 'allow', new_contexts: 'ask', new_projects: 'default' },
+    { expected_revision: 7, new_projects: 'holding' },
+  ])
+  for (const body of bodies) assert.equal('new_models' in body, false)
+  assert.deepEqual(ruleBody(1, {}), { expected_revision: 1 })
 })
 
 test('a partial or malformed matrix is rejected rather than shown', () => {

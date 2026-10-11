@@ -2,7 +2,7 @@
 import { defineStore } from 'pinia'
 import { onScopeDispose, reactive, ref } from 'vue'
 import { onReset } from '../lib/position'
-import { onAccessChange } from '../lib/authz'
+import { onAccessRevalidate } from '../lib/authz'
 import { getNode, type ListItem } from '../lib/api'
 import { rowStore } from '../lib/rowStore'
 import { addToQueue, movedQueue, readQueue, removeFromQueue, moveQueue, resetQueue, queueReadiness, readyGaps, undoQueueAddition, staleProgress, staleWork, type QueueUndoToken, type QueueReadiness, type QueueSnapshot, type QueueTarget } from '../lib/workQueue'
@@ -19,11 +19,7 @@ export const useWorkQueue = defineStore('workQueue', () => {
   const turns = new Map<string, number>()
   const clear = () => { epoch++; for (const key of Object.keys(snapshots)) delete snapshots[key]; for (const key of Object.keys(errors)) delete errors[key]; for (const key of Object.keys(advice)) delete advice[key]; pending.clear(); checking.clear(); turns.clear(); busy.value = false }
   onScopeDispose(onReset(clear))
-  onScopeDispose(onAccessChange(change => {
-    const projects = Object.keys(snapshots)
-    clear()
-    if (change === 'refresh') for (const project of projects) void load(project, true)
-  }))
+  onScopeDispose(onAccessRevalidate({ reset: clear, refresh: () => { for (const project of Object.keys(snapshots)) void load(project, true) } }))
   function load(project: string, force = false): Promise<void> {
     if (!project) return Promise.resolve()
     if (!force && pending.has(project)) return pending.get(project)!

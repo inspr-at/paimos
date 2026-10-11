@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '../../lib/api'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import { scopeOwner } from '../../lib/identityScope'
 import SettingsCard from './SettingsCard.vue'
@@ -19,6 +19,8 @@ const owner = computed(() => scopeOwner(session.identity))
 let generation = 0, alive = true
 const capture = () => { const identity = owner.value, turn = generation; return () => alive && identity === owner.value && turn === generation && session.authenticationCurrent() }
 const status = ref<Status | null>(null)
+let savedSettings = ''
+const dirty = computed(() => !!status.value && JSON.stringify(status.value.settings) !== savedSettings)
 const busy = ref(false), error = ref(''), message = ref('')
 const accounts = ref<Account[]>([]), accountId = ref(''), apiKey = ref('')
 const manageable = computed(() => session.authenticationCurrent() && session.identity?.principal.kind === 'person' && can('models.manage'))
@@ -31,7 +33,16 @@ async function request(path: string, method = 'GET', body?: unknown) {
   if (!response.ok) throw new Error(response.status === 429 ? 'The configured refresh interval has not elapsed. Try again after it expires.' : 'The model settings could not be updated. Please try again.')
   return response.json()
 }
-async function load() { const current = capture(); const result = await request('/models/refresh') as Status; if (current()) status.value = result }
+async function load(retain = false) {
+  const keepDraft = retain && dirty.value
+  const current = capture(), before = status.value && JSON.stringify(status.value.settings)
+  const result = await request('/models/refresh') as Status
+  if (!current()) return
+  const draft = status.value?.settings
+  const changed = !!draft && (keepDraft || JSON.stringify(draft) !== before)
+  savedSettings = JSON.stringify(result.settings)
+  status.value = changed ? { ...result, settings: draft! } : result
+}
 async function action(fn: () => Promise<void>) {
   if (busy.value || !owner.value || !session.authenticationCurrent() || session.identity?.principal.kind !== 'person') return
   const current = capture(); busy.value = true; error.value = ''; message.value = ''
@@ -58,17 +69,18 @@ async function credential(revoke = false) {
   const current = capture()
   await action(async () => { await request(`/models/refresh/credentials/${accountId.value}`, 'PUT', { vendor: vendor.value, api_key: key }); if (current()) message.value = revoke ? 'Discovery key removed.' : 'Discovery key saved.' })
 }
-async function initialise() {
+async function initialise(retain = false) {
   const current = capture()
-  try { await load() } catch { if (current()) error.value = 'Model refresh status could not be loaded.' }
+  try { await load(retain) } catch { if (current()) error.value = 'Model refresh status could not be loaded.' }
   if (!current()) return
   if (manageable.value && can('account.read')) {
-    try { const result = await request('/agent-accounts') as Account[]; if (current()) { accounts.value = result.filter(account => vendorFor[account.harness]); accountId.value = accounts.value[0]?.id ?? '' } } catch { /* Key setup needs an enrolled account the person can read. */ }
+    try { const result = await request('/agent-accounts') as Account[]; if (current()) { accounts.value = result.filter(account => vendorFor[account.harness]); if (!accounts.value.some(account => account.id === accountId.value)) accountId.value = accounts.value[0]?.id ?? '' } } catch { /* Key setup needs an enrolled account the person can read. */ }
   }
 }
 function reset() { generation++; status.value = null; accounts.value = []; accountId.value = ''; apiKey.value = ''; error.value = ''; message.value = ''; busy.value = false; if (owner.value && can('models.read')) void initialise() }
 watch(owner, reset, { immediate: true, flush: 'sync' })
-const stopAccess = onAccessChange(reset)
+const stopAccess = onAccessRevalidate({ reset, refresh: () => { if (owner.value && can('models.read') && !busy.value) void initialise(true) } })
+watch(() => can('models.read'), allowed => { if (allowed && !status.value && owner.value) void initialise() })
 onBeforeUnmount(() => { alive = false; generation++; apiKey.value = ''; stopAccess() })
 
 </script>

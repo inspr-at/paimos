@@ -360,6 +360,7 @@
         "web/src/lib/displayLanguage.ts",
         "web/tests/lead-adoption.unit.test.ts",
         "web/tests/lead-adoption.spec.ts",
+        "web/tests/access-refresh-panels.unit.test.ts",
         "web/src/stores/decisionDesk.ts"
       ],
       "exclude": [

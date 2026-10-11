@@ -64,6 +64,21 @@ export const businessAreas: readonly BusinessArea[] = [
 
 export const businessSections = businessAreas.filter((area): area is BusinessArea & { pluginId: string } => area.pluginId !== null)
 
+// The four parts as people name them, in the order of the Business tabs. Quotes
+// price from rates and go to a customer, and hours are priced at a rate, so a part
+// needs the ones it lists. Settings › Business switches them; the overview reads them.
+export type BusinessPartId = 'costs' | 'crm' | 'quotes' | 'hours'
+export interface BusinessPart { id: BusinessPartId; label: string; icon: 'building' | 'document' | 'clock' | 'tag'; needs: readonly BusinessPartId[] }
+export const businessParts: readonly BusinessPart[] = [
+  { id: 'crm', label: 'Customers', icon: 'building', needs: [] },
+  { id: 'quotes', label: 'Quotes', icon: 'document', needs: ['costs', 'crm'] },
+  { id: 'hours', label: 'Hours', icon: 'clock', needs: ['costs'] },
+  { id: 'costs', label: 'Rates', icon: 'tag', needs: [] },
+]
+export const partLabel = (id: BusinessPartId) => businessParts.find(part => part.id === id)?.label ?? id
+// The one place that sets Business up, as the overview and the closed pages name it.
+export const SETUP_PLACE = 'Settings › Business'
+
 // Routed business pages. Quotes are parked until the quote editor is ported.
 export const businessViews = {
   overview: { path: '/business', title: 'Business', view: 'web/src/views/business/BusinessHome.vue' },

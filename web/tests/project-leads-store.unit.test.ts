@@ -22,7 +22,7 @@ vi.mock('../src/lib/agentRows', async importOriginal => ({ ...await importOrigin
   return http.handler(`/projects/${project}/harness-sessions/${session}`)
 } }))
 vi.mock('../src/stores/agents', () => ({ useAgents: () => ({ admitSessions: (rows: unknown[]) => { http.admitted.push(...rows); return rows } }) }))
-vi.mock('../src/lib/authz', () => ({ onAccessChange: () => () => {}, can: () => true }))
+vi.mock('../src/lib/authz', () => ({ onAccessRevalidate: () => () => {}, can: () => true }))
 vi.mock('../src/stores/liveAgents', () => ({ useLiveAgents: () => ({ items: [], watch: () => () => {} }) }))
 vi.mock('../src/stores/workQueue', () => ({ useWorkQueue: () => ({ snapshots: {} }) }))
 import { useProjectLeads } from '../src/stores/projectLeads'

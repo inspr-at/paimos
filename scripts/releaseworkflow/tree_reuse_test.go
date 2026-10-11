@@ -758,6 +758,24 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				postgres["image"] = "pgvector/pgvector:pg18"
 			}
 			if id == "go-test" {
+				// AEON-1199 keeps hosted caching unchanged while pool shards use
+				// their persistent disk. Assert both guards before projecting the
+				// hosted path back to the immutable accepted-CI fixture.
+				for _, value := range reuseSteps(j) {
+					step := treeMap(value)
+					if strings.HasPrefix(fmt.Sprint(step["uses"]), "actions/setup-go@") {
+						with := treeMap(step["with"])
+						if with["cache"] != "${{ runner.environment == 'github-hosted' }}" {
+							t.Fatal("Go setup caches must be enabled only on GitHub-hosted runners")
+						}
+						with["cache"] = true
+					}
+				}
+				cache := reuseStep(t, j, "Persist Go build cache")
+				if cache["if"] != "runner.environment == 'github-hosted'" {
+					t.Fatal("Go build cache restore and save must run only on GitHub-hosted runners")
+				}
+				delete(cache, "if")
 				// AEON-777 broadens routing through the router's event switch.
 				// Pin the exact new event/ref/head boundary before normalizing to
 				// the historical main-only expressions; all other fields stay pinned.

@@ -76,3 +76,49 @@ func TestAccountUseSwitchChangesAreAuditedWithPersistedValues(t *testing.T) {
 		return nil
 	})
 }
+
+// Risk (AEON-1173): a Settings rule save overwrites the model rule that Models'
+// Auto-update saved, or an empty, invalid or stale partial write is stored.
+// A save names only its rules; every other rule keeps its stored value, with
+// the same revision guard and audit as a full write.
+func TestAccountUseRuleSaveKeepsTheRulesItDoesNotName(t *testing.T) {
+	f := setup(t)
+	f.in(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_refresh_settings(tenant_id) VALUES($1)`, f.p.TenantID)
+		return err
+	})
+	models := f.rules(t, accountuse.RuleValues{NewAccounts: "ask", NewContexts: "ask", NewProjects: "default", NewModels: "deny"})
+	w := f.call(t, f.p, "PUT", "/api/account-use/rules", map[string]any{"expected_revision": models.Revision, "new_accounts": "allow"}, 200)
+	var saved accountuse.Rules
+	if err := json.Unmarshal(w.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	want := accountuse.RuleValues{NewAccounts: "allow", NewContexts: "ask", NewProjects: "default", NewModels: "deny"}
+	if saved.RuleValues != want || saved.Revision != models.Revision+1 {
+		t.Fatalf("saved %+v at %d, want %+v at %d", saved.RuleValues, saved.Revision, want, models.Revision+1)
+	}
+	// Nothing named, an unknown value and a save from the screen before it are refused.
+	f.call(t, f.p, "PUT", "/api/account-use/rules", map[string]any{"expected_revision": saved.Revision}, 400)
+	f.call(t, f.p, "PUT", "/api/account-use/rules", map[string]any{"expected_revision": saved.Revision, "new_projects": "maybe"}, 400)
+	f.call(t, f.p, "PUT", "/api/account-use/rules", map[string]any{"expected_revision": models.Revision, "new_contexts": "allow"}, 409)
+	f.in(t, func(tx pgx.Tx) error {
+		stored, err := accountuse.ReadRules(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		var auto bool
+		var audits int
+		var raw []byte
+		if err := tx.QueryRow(t.Context(), `SELECT (SELECT auto_add_profiles FROM model_refresh_settings),count(*) OVER (),after FROM events WHERE type='account_use.rules_changed' ORDER BY id DESC LIMIT 1`).Scan(&auto, &audits, &raw); err != nil {
+			return err
+		}
+		var audited accountuse.Rules
+		if err := json.Unmarshal(raw, &audited); err != nil {
+			return err
+		}
+		if stored.RuleValues != want || stored.Revision != saved.Revision || auto || audits != 2 || audited.RuleValues != want {
+			t.Fatalf("stored %+v at %d, Auto-update %v, %d audits, last %+v", stored.RuleValues, stored.Revision, auto, audits, audited.RuleValues)
+		}
+		return nil
+	})
+}
