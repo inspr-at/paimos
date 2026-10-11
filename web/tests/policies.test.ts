@@ -35,7 +35,7 @@ test('twelve rules elsewhere; a link shows only when every permission of its pla
   assert.equal(new Set(ELSEWHERE_RULES.map(rule => rule.title)).size, 12)
   const all = () => true, none = () => false
   assert.deepEqual(ELSEWHERE_RULES.filter(rule => !ruleLink(rule, all)).map(rule => rule.title), ['Fix rounds and lane pause', 'Merge queue and code owners'])
-  assert.deepEqual(ELSEWHERE_RULES.filter(rule => ruleLink(rule, none)).map(rule => rule.to), ['/settings/routines'])
+  assert.deepEqual(ELSEWHERE_RULES.filter(rule => ruleLink(rule, none)).map(rule => rule.to), ['/settings/routines#rules'])
   const access = ELSEWHERE_RULES.find(rule => rule.title === 'Who holds which permission')!
   assert.equal(ruleLink(access, key => key === 'members.read'), null)
   assert.equal(ruleLink(access, key => key === 'members.read' || key === 'roles.read'), '/settings/access/roles')

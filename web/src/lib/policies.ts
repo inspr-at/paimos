@@ -50,7 +50,7 @@ export const ELSEWHERE_RULES: readonly ElsewhereRule[] = [
   { icon: 'inbox', title: 'Approvals in force', text: 'Exceptions a person granted; they expire.', owner: 'Decision Desk', status: 'Enforced', to: '/decision-desk', permissions: ['approvals.read'] },
   { icon: 'users', title: 'Who holds which permission', text: 'Roles decide what people and agent keys may do.', owner: 'Access', status: 'Enforced', to: '/settings/access/roles', permissions: ['members.read', 'roles.read'] },
   { icon: 'play', title: 'Autopilot', text: 'When tickets move on by themselves.', owner: 'Autopilot', status: 'Enforced', to: '/settings/autopilot', permissions: ['settings.manage'] },
-  { icon: 'shield', title: 'Routine guardrails', text: 'A hard floor no routine can lift, plus scoped rules.', owner: 'Routines', status: 'Enforced', to: '/settings/routines', permissions: [] },
+  { icon: 'shield', title: 'Routine guardrails', text: 'A hard floor no routine can lift, plus scoped rules.', owner: 'Routines', status: 'Enforced', to: '/settings/routines#rules', permissions: [] },
   { icon: 'list', title: 'Kinds of work', text: 'What each kind means; Models routes by them.', owner: 'Kinds of work', status: 'Enforced', to: '/settings/kinds', permissions: ['models.read'] },
   { icon: 'book', title: 'Agent rules and doctrine', text: 'Guides agents; it never authorises a write.', owner: 'Agent rules', status: 'Advisory', to: '/settings/agent-rules', permissions: ['rules.read'] },
   { icon: 'history', title: 'Access log', text: 'Every access change is recorded.', owner: 'Access', status: 'Enforced', to: '/settings/access/audit?category=access', permissions: ['audit.read'] },
