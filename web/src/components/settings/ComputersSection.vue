@@ -27,6 +27,9 @@ const { agents, capacity, accounts, computers, manage, open, computer, owner, re
 
 const line = (c: PairingView) => computerLine(c, agents.value.now)
 const cell = (s: SignInReference) => signinCell(s, capacity.value.rows.find(row => row.id === s.enrollment.account_id), agents.value.now)
+// Names that clamp show in full on hover and on keyboard focus (Tick, AEON-1173 review): a column
+// head's tip is the vendor and the whole address; a cell's tip starts with the sign-in's full name,
+// and a cell without one names it through the clipped label (the phone rows).
 const signinName = (a: OverviewAccount, s: SignInReference) => `${a.vendor} · ${a.records.find(r => r.id === s.enrollment.account_id)?.label ?? a.identity}`
 const selected = (c: PairingView) => open.value && computer.value?.computer_id === c.computer_id
 // The computer column stays in view while the table scrolls sideways: always past six
@@ -138,14 +141,14 @@ watch(owner, () => { menuOpen.value = false; confirmed.value = new Map(); busy.v
         <table class="ct" :class="{ many: accounts.length > 6 || overflows }" :style="{ '--ct-accounts': accounts.length }" aria-label="Computers and their sign-ins">
           <thead><tr>
             <th scope="col" class="c-pc"><span class="ct-corner">Computer</span></th>
-            <th v-for="a in accounts" :key="a.id" scope="col" class="c-acc"><button type="button" class="ct-ah" :data-tip="a.identity" :aria-label="`${a.vendor} · ${a.identity}`" @click="show('account', a.id, $event)"><b><HarnessMark :harness="a.harness" :size="18" /><span v-clip-tip>{{ a.vendor }}</span></b><small>{{ shortIdentity(a.identity) }}</small></button></th>
+            <th v-for="a in accounts" :key="a.id" scope="col" class="c-acc"><button type="button" class="ct-ah" :data-tip="`${a.vendor} · ${a.identity}`" :aria-label="`${a.vendor} · ${a.identity}`" @click="show('account', a.id, $event)"><b><HarnessMark :harness="a.harness" :size="18" /><span>{{ a.vendor }}</span></b><small>{{ shortIdentity(a.identity) }}</small></button></th>
             <th scope="col" class="c-ns"><span class="ct-nsh">New starts</span></th>
           </tr></thead>
           <tbody>
             <tr v-for="c in computers" :key="c.computer_id!" :data-row="c.computer_id" :class="{ dim: line(c).tone === 'off', current: selected(c) }">
               <th scope="row"><button type="button" class="pc" :data-computer="c.computer_id" :aria-expanded="selected(c)" :aria-current="selected(c)" @click="show('computer', c.computer_id!, $event)"><AppIcon name="monitor" /><span class="who"><b v-clip-tip>{{ c.computer_name }}</b><small><span class="dot" :class="line(c).tone" /><span v-clip-tip>{{ line(c).text }}</span></small></span></button></th>
               <td v-for="a in accounts" :key="a.id" :class="{ none: !references(a, c).length }">
-                <button v-for="s in references(a, c)" :key="s.enrollment.account_id" type="button" class="si" :class="cell(s).tone" :data-signin="s.enrollment.account_id" :data-tip="cell(s).tip || undefined" :aria-label="`${signinName(a, s)} on ${c.computer_name}: ${cell(s).word}${cell(s).tip ? `. ${cell(s).tip}` : ''}`" @click="show('computer', c.computer_id!, $event, s.enrollment.account_id)"><span class="cl" aria-hidden="true"><HarnessMark :harness="a.harness" :size="16" /><span v-clip-tip="signinName(a, s)">{{ a.vendor }} · {{ shortIdentity(a.identity) }}</span></span><span class="sv"><span class="dot" :class="cell(s).tone" /><span class="w">{{ cell(s).word }}</span></span></button>
+                <button v-for="s in references(a, c)" :key="s.enrollment.account_id" type="button" class="si" :class="cell(s).tone" :data-signin="s.enrollment.account_id" :data-tip="cell(s).tip ? `${signinName(a, s)} on ${c.computer_name}: ${cell(s).tip}` : undefined" :aria-label="`${signinName(a, s)} on ${c.computer_name}: ${cell(s).word}${cell(s).tip ? `. ${cell(s).tip}` : ''}`" @click="show('computer', c.computer_id!, $event, s.enrollment.account_id)"><span class="cl" aria-hidden="true"><HarnessMark :harness="a.harness" :size="16" /><span v-clip-tip="signinName(a, s)">{{ a.vendor }} · {{ shortIdentity(a.identity) }}</span></span><span class="sv"><span class="dot" :class="cell(s).tone" /><span class="w">{{ cell(s).word }}</span></span></button>
                 <span v-if="!references(a, c).length" class="si none"><AppIcon name="minus" :size="14" /><span class="sr-only">{{ a.vendor }} · {{ a.identity }} is not signed in on {{ c.computer_name }}</span></span>
               </td>
               <td class="nsc"><span class="cl" aria-hidden="true">New starts</span>

@@ -70,7 +70,13 @@ test('one table: a row per computer, a column per account; every cell and list a
   await expect(table.locator('thead .c-acc')).toHaveCount(6)
   const claudeHead = table.locator('thead .ct-ah').filter({ hasText: 'Claude' })
   await expect(claudeHead.locator('small')).toHaveText('markus.barta')
-  await expect(claudeHead).toHaveAttribute('data-tip', ADDRESS)
+  await expect(claudeHead).toHaveAttribute('data-tip', `Claude · ${ADDRESS}`)
+  // The whole name shows on keyboard focus too, not only on hover (Tick).
+  await table.locator('thead .ct-ah').filter({ hasText: 'Studio' }).focus()
+  await page.keyboard.press('Tab')
+  await expect(claudeHead).toBeFocused()
+  await expect(page.locator('.tooltip')).toHaveText(`Claude · ${ADDRESS}`)
+  await page.keyboard.press('Escape')
   await expect(table.locator('thead .c-ns')).toHaveText('New starts')
   // The computer column: the name, then agents running or when it was last seen.
   await expect(row(page, build7.computer_id).locator('.pc small')).toHaveText('4 of 8 agents running')
@@ -115,7 +121,7 @@ test('an expired sign-in says Expired in its cell and Needs you verifies it', as
   const { build7 } = await setup(page, { expired: true })
   const cell = row(page, build7.computer_id).locator(`.si[data-signin="${ACCOUNTS.claude}"]`)
   await expect(cell.locator('.sv')).toHaveText('Expired')
-  await expect(cell).toHaveAttribute('data-tip', 'Verification expired. New agents wait until it passes again.')
+  await expect(cell).toHaveAttribute('data-tip', `Claude · ${ADDRESS} on build-7: Verification expired. New agents wait until it passes again.`)
   await expect(page.locator('.needs-block').getByRole('button', { name: 'Verify again' })).toHaveCount(1)
 })
 
