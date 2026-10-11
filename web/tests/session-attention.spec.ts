@@ -64,7 +64,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     // The panel reopens on the remembered tab (Messages, above); evidence lives in Overview.
     await panel.getByRole('tab', { name: 'Overview' }).click()
     await expect(panel.locator('.now-step')).toContainText('awaiting a person’s decision')
-    await expect(panel.getByRole('region', { name: 'Session state evidence' }).getByRole('link', { name: 'Permission requests' })).toHaveAttribute('href', '/agents#needs-title')
+    await expect(panel.getByRole('region', { name: 'Session state evidence' }).getByRole('link', { name: 'Permission requests' })).toHaveAttribute('href', '/decision-desk')
     await page.getByRole('button', { name: 'Close session details' }).click()
     await expect(page.locator('[data-row="s:bk5-worker-1"]')).toHaveAttribute('data-state', 'working')
     await page.goto('/')
