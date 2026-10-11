@@ -62,7 +62,13 @@ async function designProbe(page: Page) {
 for (const theme of ['light', 'dark'] as const) {
   test(`AEON-1213 ${theme} 1440: one dock, presets, live divider and top-starting panes`, async ({ page }, info) => {
     await page.setViewportSize({ width: 1440, height: 1000 })
-    const errors = watchErrors(page), { data, work } = await setup(page, theme)
+    const errors = watchErrors(page), { data, work, calls } = await setup(page, theme)
+    let releaseLayout!: () => void
+    const layoutRead = new Promise<void>(resolve => { releaseLayout = resolve })
+    await page.route('**/api/preferences/**', async route => {
+      if (decodeURIComponent(new URL(route.request().url()).pathname).endsWith('/agents:layout') && route.request().method() === 'GET') await layoutRead
+      await route.fallback()
+    })
     await page.goto('/agents')
     await expect(row(page, data.sessions[0]!.id)).toBeVisible()
     await toWork(page)
@@ -78,6 +84,9 @@ for (const theme of ['light', 'dark'] as const) {
     await stability.check(async () => { await dock(page).click(); await preset(page, 'focus') })
     expect(await listWidth(page)).toBe(320)
     await expect(page.locator('.sessions .thead')).toBeHidden()
+    await page.clock.runFor(500)
+    expect(calls.filter(call => call.method === 'PUT' && call.path === '/api/preferences/agents:layout')).toEqual([])
+    releaseLayout()
     await page.screenshot({ path: info.outputPath(`focus-1440-${theme}.png`) })
     await stability.check(async () => { await dock(page).click(); await preset(page, 'overview') })
     const width = await page.locator('.agents-work').evaluate(el => el.getBoundingClientRect().width)

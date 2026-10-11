@@ -58,7 +58,8 @@ The divider sets the list's width continuously: 280 px minimum, compact rows
 below 560 px, table rows from 560 px. Releasing with less than 380 px left for
 details closes them and retains the last valid handle. The handle is stored in
 the person's `agents:layout.handle` preference; other fields in that preference
-are preserved. A person change closes details and cancels the old person's drag
+are preserved, including when the first preference read is still pending. A
+person change closes details and cancels the old person's drag
 and queued preference write. A failed save says the layout lasts for this visit.
 
 One sticky button stays at the work area's top-right corner. Both heads reserve

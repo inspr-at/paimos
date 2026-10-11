@@ -155,7 +155,8 @@ const savedHandle = computed(() => {
   return typeof width === 'number' && Number.isFinite(width) ? width : workWidth.value - DIVIDER - OVERVIEW_DETAILS
 })
 const dragWidth = ref<number | null>(null)
-const handle = computed(() => dragWidth.value ?? clampHandle(savedHandle.value))
+const pendingHandle = ref<number | null>(null)
+const handle = computed(() => dragWidth.value ?? clampHandle(pendingHandle.value ?? savedHandle.value))
 const preset = computed(() => !split.value ? 'list' : handle.value < FORM_AT ? 'focus' : 'overview')
 const layouts = { focus: ['Focus', 'sessions narrow, details wide'], overview: ['Overview', 'sessions wide, details narrow'], list: ['List only', 'no details'] } as const
 const nextPreset = computed(() => ({ list: 'focus', focus: 'overview', overview: 'list' } as const)[preset.value])
@@ -165,9 +166,20 @@ const layoutEnabled = computed(() => canSplit.value && agents.loaded && !!(sessi
 const willClose = computed(() => dragWidth.value !== null && workWidth.value - DIVIDER - handle.value < DETAILS_MIN)
 const layoutSaveFailed = computed(() => preferenceSaves.failed.has(`${person.value}/agents:layout`))
 let lastSession = '', layoutResize: ResizeObserver | undefined, layoutFrame: number | undefined
+let layoutWrite = 0
 let rowAnchor: { id: string; top: number } | null = null
 let drag: { pointer: number; x: number; width: number; person: string } | null = null
-function rememberHandle(width: number) { layoutPref.save({ ...(layoutPref.value.value ?? {}), handle: clampHandle(width) }) }
+function rememberHandle(width: number) {
+  const owner = person.value, write = ++layoutWrite, next = clampHandle(width)
+  pendingHandle.value = next
+  // Folded groups share this object. A handle chosen before the first read
+  // completes must merge that read, rather than replace another package's fields.
+  void layoutPref.ready.then(() => {
+    if (owner !== person.value || write !== layoutWrite) return
+    layoutPref.save({ ...(layoutPref.value.value ?? {}), handle: next })
+    pendingHandle.value = null
+  })
+}
 function ensureWorkTop() {
   const main = work.value?.closest('main')
   if (main && work.value) main.scrollTo({ top: main.scrollTop + work.value.getBoundingClientRect().top - main.getBoundingClientRect().top, behavior: 'instant' })
@@ -222,6 +234,7 @@ function endDrag(event: PointerEvent) {
 }
 function moveHandle(width: number) { rememberHandle(width); announce(`List width ${clampHandle(width)} pixels`) }
 watch(person, (_next, previous) => {
+  layoutWrite++; pendingHandle.value = null
   drag = null; dragWidth.value = null; rowAnchor = null; lastSession = ''; openedFromList = false; cursor.value = ''
   if (previous && sessionId.value) void router.replace({ path: '/agents', query: {} })
 })
