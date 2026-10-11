@@ -169,7 +169,9 @@ func (m *Module) saveWebhook(ctx context.Context, name, id string, raw []byte, e
 		if !matches {
 			return fail(http.StatusConflict, "delivery identity conflict")
 		}
-		return nil
+		// Main's history-worker wake timestamp and the verified receipt commit
+		// together; an ingress write cannot advertise a receipt it did not save.
+		return m.recordMetricEventTx(ctx, tx)
 	})
 }
 

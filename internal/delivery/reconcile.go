@@ -37,8 +37,13 @@ func (m *Module) observationLock(ctx context.Context) (context.Context, func(), 
 	return db.WithConnection(ctx, m.pool, conn), func() { unlock(conn, key); release() }, nil
 }
 func (m *Module) Run(ctx context.Context) {
+	jobCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); m.runMetrics(jobCtx) }()
+	defer func() { cancel(); <-done }()
 	app := &crossreview.GitHubApp{Config: m.config}
 	if m.github == nil || !app.Configured(m.config.TenantID, m.config.Repository) {
+		<-ctx.Done()
 		return
 	}
 	ticker := time.NewTicker(5 * time.Minute)

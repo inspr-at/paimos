@@ -325,3 +325,8 @@ func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte
 	}
 	return webhookRecorded, nil
 }
+
+func (m *Module) recordMetricEventTx(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `UPDATE delivery_metric_sources SET last_event_at=greatest(last_event_at,$2) WHERE repository=$1`, m.config.Repository, m.now())
+	return err
+}

@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -97,5 +98,17 @@ func TestGitHubPublishPostsGateReason(t *testing.T) {
 				t.Fatal("fixed status text replaced the gate reason")
 			}
 		})
+	}
+}
+
+func TestGitHubReadRetainsMissingActionsPermission(t *testing.T) {
+	// Risk: permission failure metadata disappears before delivery can persist it.
+	app := GitHubApp{Client: &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: 403, Header: http.Header{"X-Accepted-Github-Permissions": []string{"contents=read; actions=read"}}, Body: io.NopCloser(strings.NewReader("private response text")), Request: r}, nil
+	})}}
+	err := app.requestBounded(t.Context(), "fixture-only", "GET", "/repos/example/test/actions/runs", nil, nil, 1024)
+	var response *GitHubHTTPError
+	if !errors.As(err, &response) || response.StatusCode != 403 || !response.ActionsReadRequired || !errors.Is(err, ErrUnavailable) || strings.Contains(err.Error(), "private response") {
+		t.Fatalf("permission metadata lost: %v", err)
 	}
 }
