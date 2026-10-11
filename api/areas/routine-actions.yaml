@@ -6,11 +6,11 @@ paths:
       - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: executeRoutineAction
-      description: 'Submit one bounded internal action from the current running attempt. The persisted run and attempt are the grant; a saved assignment or queued run is insufficient. Current project qualification, execution consent, owner, scope, target project and revision, caller authority and verified guardrail allow are rechecked under the final tenant/tree fence. Missing independent evaluation holds execution. Identical run/key replay returns the original receipt; changed content conflicts. Internal mutation, receipt and audit commit together. External PR and pipeline actions use separate outbox brokers; survey, notify, command, merge, deploy and unknown actions are unavailable. Automatic execution remains default off.'
+      description: 'Submit one bounded catalogue action from the current running attempt. Current qualification, consent, owner, scope, target revision and independently verified guardrails are checked under the final tenant/tree fence. Internal effects commit with their receipt. pr.open persists an exact repository, branch, base, head and deterministic operation reference before an approved App effect; response loss reconciles that reference without another POST. pipeline.request tracks the normal person-controlled pipeline and grants no merge, publish or deploy authority. Pending or unavailable effects never report success. Automatic execution remains default off.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoutineActionRequest'}}}}
       responses:
-        '200': {description: 'Committed action receipt or identical replay', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineActionReceipt'}}}}
+        '200': {description: 'Durable action receipt or identical replay; inspect state for pending effects', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineActionReceipt'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -27,23 +27,61 @@ components:
       oneOf:
         - required: [work_create]
           properties: {kind: {const: work.create}}
-          not: {anyOf: [{required: [work_update]}, {required: [knowledge_write]}]}
+          not: {anyOf: [{required: [work_update]}, {required: [knowledge_write]}, {required: [pr_open]}, {required: [pipeline_request]}]}
         - required: [work_update]
           properties: {kind: {const: work.update}}
-          not: {anyOf: [{required: [work_create]}, {required: [knowledge_write]}]}
+          not: {anyOf: [{required: [work_create]}, {required: [knowledge_write]}, {required: [pr_open]}, {required: [pipeline_request]}]}
         - required: [knowledge_write]
           properties: {kind: {const: knowledge.write}}
-          not: {anyOf: [{required: [work_create]}, {required: [work_update]}]}
+          not: {anyOf: [{required: [work_create]}, {required: [work_update]}, {required: [pr_open]}, {required: [pipeline_request]}]}
+        - required: [pr_open]
+          properties: {kind: {const: pr.open}}
+          not: {anyOf: [{required: [work_create]}, {required: [work_update]}, {required: [knowledge_write]}, {required: [pipeline_request]}]}
+        - required: [pipeline_request]
+          properties: {kind: {const: pipeline.request}}
+          not: {anyOf: [{required: [work_create]}, {required: [work_update]}, {required: [knowledge_write]}, {required: [pr_open]}]}
       properties:
         attempt_id: {type: string, format: uuid}
         action_key: {type: string, minLength: 1, maxLength: 128, pattern: '^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$'}
-        kind: {type: string, enum: [work.create, work.update, knowledge.write]}
+        kind: {type: string, enum: [work.create, work.update, knowledge.write, pr.open, pipeline.request]}
         project_id: {type: string, format: uuid}
         target_id: {type: string, format: uuid}
         expected_revision: {type: integer, minimum: 1, maximum: 253402300799999999}
         work_create: {$ref: '#/components/schemas/RoutineWorkCreate'}
         work_update: {$ref: '#/components/schemas/RoutineWorkUpdate'}
         knowledge_write: {$ref: '#/components/schemas/RoutineKnowledgeWrite'}
+        pr_open: {$ref: '#/components/schemas/RoutinePROpen'}
+        pipeline_request: {$ref: '#/components/schemas/RoutinePipelineRequest'}
+    RoutinePROpen:
+      type: object
+      additionalProperties: false
+      required: [repository, branch, base_branch, base_sha, head_sha, title]
+      description: 'Same-repository PR against main. No fork, arbitrary URL, merge, queue or deployment operation is accepted. The approved App must already have permission; unavailable capability stays pending.'
+      properties:
+        repository: {type: string, maxLength: 201}
+        branch: {type: string, minLength: 1, maxLength: 255}
+        base_branch: {type: string, const: main}
+        base_sha: {type: string, pattern: '^[a-f0-9]{40}$'}
+        head_sha: {type: string, pattern: '^[a-f0-9]{40}$'}
+        title: {type: string, minLength: 1, maxLength: 500}
+        body: {type: string, maxLength: 32768}
+    RoutinePipelineRequest:
+      type: object
+      additionalProperties: false
+      required: [non_code]
+      description: 'Code requests reference a pr.open action key and the exact build head. A completed coordinator review/fix handoff supplies the exact reviewed head for that same PR and branch. Non-code requests require a result digest and no PR. All other catalogue receipts and required approvals must settle before completion.'
+      oneOf:
+        - required: [pr_action_key, head_sha]
+          properties: {non_code: {const: false}}
+          not: {required: [result_digest]}
+        - required: [result_digest]
+          properties: {non_code: {const: true}}
+          not: {anyOf: [{required: [pr_action_key]}, {required: [head_sha]}]}
+      properties:
+        non_code: {type: boolean}
+        pr_action_key: {type: string, minLength: 1, maxLength: 128}
+        head_sha: {type: string, pattern: '^[a-f0-9]{40}$'}
+        result_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
     RoutineWorkCreate:
       type: object
       additionalProperties: false
@@ -79,6 +117,11 @@ components:
         action_key: {type: string}
         kind: {type: string}
         request_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
-        state: {type: string, enum: [succeeded]}
+        state: {type: string, enum: [pending, awaiting_decision, awaiting_merge, succeeded]}
         node_id: {type: string, format: uuid}
         revision: {type: integer, minimum: 1}
+        operation_ref: {type: string, pattern: '^[a-f0-9]{64}$'}
+        pull_request: {type: integer, minimum: 1}
+        pull_url: {type: string, format: uri}
+        approval_id: {type: string, format: uuid}
+        wait_reason: {type: string}
