@@ -253,7 +253,7 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 		}
 		if _, exists := unavailableProfiles[candidate.ProfileID]; exists {
 			for _, reason := range candidate.SkipReasons {
-				if strings.HasPrefix(reason, "unavailable until ") && strings.HasSuffix(reason, ": fixture fallback unavailable") && !candidate.Selected {
+				if strings.HasPrefix(reason, "paused until ") && strings.HasSuffix(reason, ": fixture fallback unavailable") && !candidate.Selected {
 					unavailableProfiles[candidate.ProfileID] = true
 				}
 			}
