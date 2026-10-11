@@ -40,7 +40,7 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
   // The approved lead-chat reference has four ordinary messages before its ask.
   // These remain messages; the independent question below has its own API record.
   const messages: ProjectMessage[] = [
-    'Dispatched AEON-1160 · Grouped picker to Codex Sol xhigh on mbp2606. Next: AEON-1199 once a slot frees.',
+    'Dispatched AEON-1160 · Grouped picker to Codex Sol xhigh on laptop1. Next: AEON-1199 once a slot frees.',
     'Hold AEON-1199 until AEON-1195 lands.',
     'Done. AEON-1199 waits behind AEON-1195; next up is AEON-1205.',
     'AEON-1176 passed review and is in the gate.',
@@ -512,7 +512,7 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
   })
 }
 
-test('AEON-1212 approved check.mjs: the exact round-7 design passes and supplies the reference screenshots', async ({}, info) => {
+test('AEON-1212 approved check.mjs: the round-7 design passes and supplies the reference screenshots', async ({}, info) => {
   test.setTimeout(240_000)
   const fixture = fileURLToPath(new URL('./fixtures/aeon-1212-ag-approved/', import.meta.url))
   const output = info.outputPath('AEON-1212/approved-reference')

@@ -5592,7 +5592,7 @@
     ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"phone › light 390: the lead line, the queue chip and every row target reach 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 approved check.mjs: the exact round-7 design passes and supplies the reference screenshots","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 approved check.mjs: the round-7 design passes and supplies the reference screenshots","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1000 dark Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

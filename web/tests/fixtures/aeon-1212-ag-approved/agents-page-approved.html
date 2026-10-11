@@ -1,4 +1,5 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
+<!-- AEON-1212: approved round-7 fixture, with neutral host labels required by the public-name policy. -->
 <title>Agents page</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
@@ -1606,48 +1607,48 @@ const opener = s => s.model ? `<span class="op-mark" role="img" aria-label="${es
 // ---------- Data: what /api/agents/sessions, /leads and /capacity return, shaped as the views ----------
 // Projects in the sidebar's order (stable; never re-sorted by state).
 const PROJECTS = [
-  { key: 'AEON', name: 'Paimos Aeon', lead: 'AEON-LEAD', h: 'claude', m: 'Opus 5.5', e: 'xhigh', q: 9, host: 'mbp2606', mia: true },
-  { key: 'DOCS', name: 'Docs', lead: 'DOCS-LEAD', h: 'claude', m: 'Sonnet 5', e: 'high', q: 5, host: 'mbp2607', mia: true },
-  { key: 'JANUS', name: 'Janus', lead: 'JANUS-LEAD', h: 'codex', m: 'Sol', e: 'high', q: 2, host: 'mbp2606' },
-  { key: 'MOBILE', name: 'Aeon mobile', lead: 'MOBILE-LEAD', h: 'claude', m: 'Opus 5.5', e: 'high', q: 6, host: 'mbp2607', mia: true },
+  { key: 'AEON', name: 'Paimos Aeon', lead: 'AEON-LEAD', h: 'claude', m: 'Opus 5.5', e: 'xhigh', q: 9, host: 'laptop1', mia: true },
+  { key: 'DOCS', name: 'Docs', lead: 'DOCS-LEAD', h: 'claude', m: 'Sonnet 5', e: 'high', q: 5, host: 'laptop2', mia: true },
+  { key: 'JANUS', name: 'Janus', lead: 'JANUS-LEAD', h: 'codex', m: 'Sol', e: 'high', q: 2, host: 'laptop1' },
+  { key: 'MOBILE', name: 'Aeon mobile', lead: 'MOBILE-LEAD', h: 'claude', m: 'Opus 5.5', e: 'high', q: 6, host: 'laptop2', mia: true },
   { key: 'NIX', name: 'nixcfg', lead: 'NIX-LEAD', h: 'codex', m: 'Sol', e: 'xhigh', q: 2, host: 'imac0' },
-  { key: 'OPS', name: 'Fleet ops', lead: 'OPS', h: 'codex', m: 'Sol', e: 'xhigh', q: 4, host: 'mbp2607' },
-  { key: 'PHAROS', name: 'Pharos', lead: 'PHAROS-LEAD', h: 'claude', m: 'Opus 5.5', e: 'high', q: 3, host: 'mbp2606', mia: true },
+  { key: 'OPS', name: 'Fleet ops', lead: 'OPS', h: 'codex', m: 'Sol', e: 'xhigh', q: 4, host: 'laptop2' },
+  { key: 'PHAROS', name: 'Pharos', lead: 'PHAROS-LEAD', h: 'claude', m: 'Opus 5.5', e: 'high', q: 3, host: 'laptop1', mia: true },
   { key: 'WEB', name: 'Website', lead: null, q: 3, mia: true },
 ];
 // Asks are addressed: "Asks you" for the viewer, "Asks <name>" for everyone else.
 const ask = (who, what) => (who === me() ? `Asks you: ${what}` : `Asks ${who}: ${what}`);
 // [project, ticket, title, harness, model, effort, AgentState, minutes, host, activity (a function for asks)]
 const W = [
-  ['AEON', 'AEON-1160', 'Grouped picker', 'codex', 'Sol', 'xhigh', 'working', 42, 'mbp2606', 'Running the web checks · 212 of 340 passed'],
-  ['AEON', 'AEON-1182', 'Routines editor', 'claude', 'Opus 5.5', 'xhigh', 'working', 71, 'mbp2606', 'Editing RecurrenceEditor.vue'],
-  ['AEON', 'AEON-1195', 'Session list flicker', 'codex', 'Sol', 'xhigh', 'waiting', 18, 'mbp2607', () => ask('Markus', 'run the migrations on the dev database?')],
-  ['AEON', 'AEON-1170', 'Settings › Accounts', 'claude', 'Opus 5.5', 'high', 'working', 26, 'mbp2607', 'Writing AccountsPage.spec.ts'],
+  ['AEON', 'AEON-1160', 'Grouped picker', 'codex', 'Sol', 'xhigh', 'working', 42, 'laptop1', 'Running the web checks · 212 of 340 passed'],
+  ['AEON', 'AEON-1182', 'Routines editor', 'claude', 'Opus 5.5', 'xhigh', 'working', 71, 'laptop1', 'Editing RecurrenceEditor.vue'],
+  ['AEON', 'AEON-1195', 'Session list flicker', 'codex', 'Sol', 'xhigh', 'waiting', 18, 'laptop2', () => ask('Markus', 'run the migrations on the dev database?')],
+  ['AEON', 'AEON-1170', 'Settings › Accounts', 'claude', 'Opus 5.5', 'high', 'working', 26, 'laptop2', 'Writing AccountsPage.spec.ts'],
   ['AEON', 'AEON-1188', 'Chat code blocks', 'cursor', 'Grok 4.7', 'high', 'working', 9, 'imac0', 'Reading ChatCodeBlock.vue'],
-  ['AEON', 'AEON-1176', 'Agents card tiles', 'claude', 'Sonnet 5', 'high', 'idle', 4, 'mbp2606', 'Finished its step · waits for the lead’s review'],
-  ['AEON', 'AEON-1191', 'Tier toast copy', 'codex', 'Sol', 'high', 'working', 12, 'mbp2606', 'go test ./internal/tiers/...'],
-  ['AEON', 'AEON-1199', 'Search ranking', 'codex', 'Sol', 'xhigh', 'throttled', 33, 'mbp2607', 'Codex limit reached · resets 14:00'],
+  ['AEON', 'AEON-1176', 'Agents card tiles', 'claude', 'Sonnet 5', 'high', 'idle', 4, 'laptop1', 'Finished its step · waits for the lead’s review'],
+  ['AEON', 'AEON-1191', 'Tier toast copy', 'codex', 'Sol', 'high', 'working', 12, 'laptop1', 'go test ./internal/tiers/...'],
+  ['AEON', 'AEON-1199', 'Search ranking', 'codex', 'Sol', 'xhigh', 'throttled', 33, 'laptop2', 'Codex limit reached · resets 14:00'],
   ['AEON', 'AEON-1201', 'Footer counts', 'claude', 'Sonnet 5', 'high', 'working', 6, 'imac0', 'Reading footerSummary.ts'],
-  ['AEON', 'AEON-1203', 'Ended-session search', 'claude', 'Opus 5.5', 'high', 'working', 51, 'mbp2606', 'Running sqlc generate'],
-  ['AEON', 'AEON-1174', 'Desk chip copy', 'claude', 'Sonnet 5', 'high', 'done', 3, 'mbp2606', 'Merged · moves to Ended at 10:49'],
-  ['AEON', 'AEON-1139', 'Desk panel removal', 'codex', 'Sol', 'high', 'working', 22, 'mbp2607', 'Removing DecisionDeskPanel from AgentsView'],
-  ['DOCS', 'DOCS-17', 'API guide', 'claude', 'Sonnet 5', 'high', 'waiting', 15, 'mbp2607', () => ask('Mia', 'publish the API guide draft?')],
-  ['JANUS', 'JANUS-41', 'Token exchange', 'codex', 'Sol', 'high', 'working', 38, 'mbp2606', 'Finishing its step · its lead stopped'],
-  ['JANUS', 'JANUS-44', 'Audit export', 'claude', 'Opus 5.5', 'high', 'working', 19, 'mbp2606', 'Finishing its step · its lead stopped'],
-  ['MOBILE', 'MOBILE-12', 'Push sign-in', 'claude', 'Opus 5.5', 'high', 'working', 64, 'mbp2607', 'xcodebuild test · iPhone 17'],
-  ['MOBILE', 'MOBILE-15', 'Offline queue', 'codex', 'Sol', 'xhigh', 'problem', 47, 'mbp2607', 'Tests failed 3 times · stopped trying'],
+  ['AEON', 'AEON-1203', 'Ended-session search', 'claude', 'Opus 5.5', 'high', 'working', 51, 'laptop1', 'Running sqlc generate'],
+  ['AEON', 'AEON-1174', 'Desk chip copy', 'claude', 'Sonnet 5', 'high', 'done', 3, 'laptop1', 'Merged · moves to Ended at 10:49'],
+  ['AEON', 'AEON-1139', 'Desk panel removal', 'codex', 'Sol', 'high', 'working', 22, 'laptop2', 'Removing DecisionDeskPanel from AgentsView'],
+  ['DOCS', 'DOCS-17', 'API guide', 'claude', 'Sonnet 5', 'high', 'waiting', 15, 'laptop2', () => ask('Mia', 'publish the API guide draft?')],
+  ['JANUS', 'JANUS-41', 'Token exchange', 'codex', 'Sol', 'high', 'working', 38, 'laptop1', 'Finishing its step · its lead stopped'],
+  ['JANUS', 'JANUS-44', 'Audit export', 'claude', 'Opus 5.5', 'high', 'working', 19, 'laptop1', 'Finishing its step · its lead stopped'],
+  ['MOBILE', 'MOBILE-12', 'Push sign-in', 'claude', 'Opus 5.5', 'high', 'working', 64, 'laptop2', 'xcodebuild test · iPhone 17'],
+  ['MOBILE', 'MOBILE-15', 'Offline queue', 'codex', 'Sol', 'xhigh', 'problem', 47, 'laptop2', 'Tests failed 3 times · stopped trying'],
   ['MOBILE', 'MOBILE-18', 'Voice capture', 'claude', 'Opus 5.5', 'xhigh', 'working', 29, 'imac0', 'Editing VoiceRecorder.swift'],
   ['MOBILE', 'MOBILE-21', 'Home widget', 'cursor', 'Grok 4.7', 'high', 'waiting', 11, 'imac0', () => ask('Markus', 'add a WidgetKit entitlement?')],
-  ['MOBILE', 'MOBILE-22', 'Crash reports', 'codex', 'Sol', 'high', 'working', 8, 'mbp2607', 'Reading CrashReporter.swift'],
-  ['OPS', 'OPS-251', 'Backup rotation', 'codex', 'Sol', 'high', 'working', 35, 'mbp2607', 'Checking restic snapshots on hsb1'],
-  ['OPS', 'OPS-255', 'Runner pool health', 'codex', 'Sol', 'xhigh', 'unresponsive', 52, 'mbp2606', 'Last report: running nix flake check'],
-  ['OPS', 'OPS-258', 'Caddy cert renew', 'claude', 'Sonnet 5', 'high', 'working', 7, 'mbp2607', 'Reading caddy.nix'],
-  ['OPS', 'OPS-262', 'Uptime probes', 'claude', 'Opus 5.5', 'high', 'working', 21, 'mbp2607', 'Writing probes.yaml'],
-  ['OPS', 'OPS-266', 'Log retention', 'codex', 'Sol', 'high', 'waiting', 14, 'mbp2607', () => ask('Markus', 'change the journald limits on csb1?')],
-  ['OPS', 'OPS-240', 'Signing vault sync', 'claude', 'Opus 5.5', 'xhigh', 'working', 3, 'mbp2607', 'Reading the runbook'],
-  ['PHAROS', 'PHAROS-88', 'Host map', 'claude', 'Opus 5.5', 'high', 'working', 58, 'mbp2606', 'Editing HostMap.vue'],
-  ['PHAROS', 'PHAROS-91', 'Alert routing', 'codex', 'Sol', 'high', 'working', 17, 'mbp2606', 'go test ./internal/alerts/...'],
-  ['PHAROS', 'PHAROS-93', 'Disk forecast', 'claude', 'Sonnet 5', 'high', 'idle', 24, 'mbp2606', 'Finished its step · waits for the lead’s review'],
+  ['MOBILE', 'MOBILE-22', 'Crash reports', 'codex', 'Sol', 'high', 'working', 8, 'laptop2', 'Reading CrashReporter.swift'],
+  ['OPS', 'OPS-251', 'Backup rotation', 'codex', 'Sol', 'high', 'working', 35, 'laptop2', 'Checking restic snapshots on nas1'],
+  ['OPS', 'OPS-255', 'Runner pool health', 'codex', 'Sol', 'xhigh', 'unresponsive', 52, 'laptop1', 'Last report: running nix flake check'],
+  ['OPS', 'OPS-258', 'Caddy cert renew', 'claude', 'Sonnet 5', 'high', 'working', 7, 'laptop2', 'Reading caddy.nix'],
+  ['OPS', 'OPS-262', 'Uptime probes', 'claude', 'Opus 5.5', 'high', 'working', 21, 'laptop2', 'Writing probes.yaml'],
+  ['OPS', 'OPS-266', 'Log retention', 'codex', 'Sol', 'high', 'waiting', 14, 'laptop2', () => ask('Markus', 'change the journald limits on srv1?')],
+  ['OPS', 'OPS-240', 'Signing vault sync', 'claude', 'Opus 5.5', 'xhigh', 'working', 3, 'laptop2', 'Reading the runbook'],
+  ['PHAROS', 'PHAROS-88', 'Host map', 'claude', 'Opus 5.5', 'high', 'working', 58, 'laptop1', 'Editing HostMap.vue'],
+  ['PHAROS', 'PHAROS-91', 'Alert routing', 'codex', 'Sol', 'high', 'working', 17, 'laptop1', 'go test ./internal/alerts/...'],
+  ['PHAROS', 'PHAROS-93', 'Disk forecast', 'claude', 'Sonnet 5', 'high', 'idle', 24, 'laptop1', 'Finished its step · waits for the lead’s review'],
   ['PHAROS', 'PHAROS-97', 'Status page', 'cursor', 'Grok 4.7', 'high', 'working', 5, 'imac0', 'Reading status.html'],
 ];
 // Leads: AgentState plus what line 2 says. A lead that asks a person is `waiting` and line 2 is the ask.
@@ -1687,8 +1688,8 @@ function sessions() {
     out.push({ id: key, proj, name: `${key} · ${title}`, key, title, lead: false, parent: p.lead, h, model, eff, st, mins, beat: BEAT[st], host, act });
   }
   if (!small || has('normal')) {
-    out.push({ id: 'p-scratch', proj: '', name: 'Scratch · release notes', lead: false, h: 'claude', model: 'Opus 5.5', eff: 'high', st: 'idle', mins: 12, beat: 21, host: 'mbp2607', act: 'Attached from a terminal · personal' });
-    if (!small) out.push({ id: 'p-cleanup', proj: '', name: 'Weekly cleanup #12', lead: false, h: 'codex', model: 'Sol', eff: 'high', st: 'working', mins: 16, beat: 6, host: 'mbp2606', act: 'Routine run · workspace' });
+    out.push({ id: 'p-scratch', proj: '', name: 'Scratch · release notes', lead: false, h: 'claude', model: 'Opus 5.5', eff: 'high', st: 'idle', mins: 12, beat: 21, host: 'laptop2', act: 'Attached from a terminal · personal' });
+    if (!small) out.push({ id: 'p-cleanup', proj: '', name: 'Weekly cleanup #12', lead: false, h: 'codex', model: 'Sol', eff: 'high', st: 'working', mins: 16, beat: 6, host: 'laptop1', act: 'Routine run · workspace' });
   }
   return out;
 }
@@ -1708,7 +1709,7 @@ const matches = s => {
   return true;
 };
 const dimOf = (s, dim) => dim === 'project' ? (s.proj || 'No project') : dim === 'harness' ? HN[s.h] : dim === 'host' ? s.host : STATE_LABEL[s.st];
-const DIMS = { state: ['Working', 'Needs something', 'Throttled', 'Problem', 'No heartbeat', 'Idle', 'Paused', 'Done', 'Ended'], project: [...PROJECTS.map(p => p.key), 'No project'], harness: ['Claude Code', 'Codex', 'Cursor'], host: ['mbp2606', 'mbp2607', 'imac0'] };
+const DIMS = { state: ['Working', 'Needs something', 'Throttled', 'Problem', 'No heartbeat', 'Idle', 'Paused', 'Done', 'Ended'], project: [...PROJECTS.map(p => p.key), 'No project'], harness: ['Claude Code', 'Codex', 'Cursor'], host: ['laptop1', 'laptop2', 'imac0'] };
 const DIM_T = { state: 'State', project: 'Project', harness: 'Harness', host: 'Computer' };
 let ALL = null; const all = () => ALL || (ALL = sessions());
 
@@ -1739,7 +1740,7 @@ const noLeadLine = p => `<div class="row nolead" role="row"><span class="nl-in" 
 const thead = () => `<div class="thead" role="row"><span role="columnheader">Session</span><span role="columnheader" class="c-time">Time</span><span role="columnheader" class="c-exec">Execution</span><span role="columnheader" class="c-host">Computer</span><span role="columnheader" class="c-beat">Beat</span><span role="columnheader"><span class="sr-only">Actions</span></span></div>`;
 function endedRows() {
   const n = endedCount();
-  const sample = [['AEON-1158', 'Grouped picker spike', 'codex', 'done', 'Merged 09:12', 88], ['OPS-249', 'hsb1 swap alert', 'claude', 'done', 'Merged 08:40', 120], ['AEON-1150', 'Tier evidence copy', 'claude', 'stopped', 'Stopped by Markus 07:55', 165], ['PHAROS-86', 'Disk graph', 'codex', 'problem', 'Failed 07:31 · tests', 189], ['MOBILE-11', 'Login screen', 'claude', 'done', 'Merged yesterday 22:10', 750], ['AEON-LEAD', 'previous lead session', 'claude', 'stopped', 'Handed over yesterday 21:04', 816]];
+  const sample = [['AEON-1158', 'Grouped picker spike', 'codex', 'done', 'Merged 09:12', 88], ['OPS-249', 'nas1 swap alert', 'claude', 'done', 'Merged 08:40', 120], ['AEON-1150', 'Tier evidence copy', 'claude', 'stopped', 'Stopped by Markus 07:55', 165], ['PHAROS-86', 'Disk graph', 'codex', 'problem', 'Failed 07:31 · tests', 189], ['MOBILE-11', 'Login screen', 'claude', 'done', 'Merged yesterday 22:10', 750], ['AEON-LEAD', 'previous lead session', 'claude', 'stopped', 'Handed over yesterday 21:04', 816]];
   return `<div class="row group-row ended-head" role="row"><span role="rowheader"><button type="button" class="group-toggle" data-ended aria-expanded="${S.ended}">${ic('chevron-right', 12, S.ended ? 'turned' : '')}Ended<span class="mono">${n}</span></button><span class="faint small eh-note">in the last 24 h · older in History</span></span></div>
   ${S.ended ? sample.map(([k, t, h, st, w, m]) => { const s = { id: `e-${k}`, name: `${k} · ${t}`, h, st, mins: m, lead: false }; return `<div class="row ended" style="${appearance(st)}" data-state="${st}" role="row" aria-label="${esc(`${k} · ${t}, ${STATE_LABEL[st]}. ${w}`)}"><span class="c-who" role="gridcell"><span class="tree-sp"></span>${ava(s, 28)}<span class="who"><span class="l1">${opener({ ...s, model: { codex: 'Sol', claude: 'Opus 5.5' }[h], eff: 'high' })}<b>${k} · ${esc(t)}</b><span class="t-inline" aria-hidden="true">${w.split(' ').slice(-1)}</span></span><span class="l2">${w}</span></span></span><span class="c-time" role="gridcell"></span><span class="c-exec" role="gridcell"></span><span class="c-host" role="gridcell"></span><span class="c-beat" role="gridcell"></span><span class="c-act" role="gridcell"></span></div>`; }).join('') + `<div class="row more-row" role="row"><button type="button" class="btn sm ghost" data-toast="In the app: the next page of ended sessions loads below">Show older · ${n - sample.length}</button></div>` : ''}`;
 }
@@ -1904,7 +1905,7 @@ function panelHtml(s, mode) {
 function leadTab(s, kids) {
   const asksMe = s.st === 'waiting' && s.act.startsWith('Asks you');
   const held = s.st === 'throttled', checkBad = held || (has('busy') && s.proj === 'AEON');
-  const next = { AEON: [['AEON-1205', 'Lead row in the session tree', '6 h', 'Opus 5.5, xhigh'], ['AEON-1207', 'Controls row', '4 h', 'Sol, xhigh'], ['AEON-1199', 'Search ranking', '3 h', 'Waits: AEON-1195 first']], OPS: [['OPS-270', 'Restic prune schedule', '2 h', 'Sol, high'], ['OPS-271', 'mbp2606 pool alerts', '3 h', 'Sol, xhigh']] }[s.proj] || [[`${s.proj}-99`, 'Next queued item', '3 h', 'Model chosen by role']];
+  const next = { AEON: [['AEON-1205', 'Lead row in the session tree', '6 h', 'Opus 5.5, xhigh'], ['AEON-1207', 'Controls row', '4 h', 'Sol, xhigh'], ['AEON-1199', 'Search ranking', '3 h', 'Waits: AEON-1195 first']], OPS: [['OPS-270', 'Restic prune schedule', '2 h', 'Sol, high'], ['OPS-271', 'laptop1 pool alerts', '3 h', 'Sol, xhigh']] }[s.proj] || [[`${s.proj}-99`, 'Next queued item', '3 h', 'Model chosen by role']];
   const recent = [['10:31', `Dispatched ${kids[0]?.key || s.proj + '-98'} to ${kids[0] ? HN[kids[0].h] + ' ' + kids[0].model : 'Codex Sol'}`], ['10:12', `${s.proj === 'AEON' ? 'AEON-1176' : s.proj + '-96'} passed review · in the gate`], ['09:58', `Merged ${s.proj === 'AEON' ? 'AEON-1174 · Desk chip copy' : s.proj + '-95'}`], ['09:40', 'Started 3 workers within the dial']];
   return `${asksMe ? `<div class="needs" role="note">${markSvg('waiting', 16).replace('class="agent-state-mark"', `class="agent-state-mark" style="${appearance('waiting')}"`)}<div><strong>It asks you</strong><p>${esc(s.act.replace(/^Asks you: /, ''))}</p></div><button type="button" class="btn primary sm" data-tab="chat">Answer in Chat</button></div>` : ''}
     <section class="p-sec" aria-labelledby="lp-now"><div class="p-head"><h3 id="lp-now">Right now</h3><span class="small faint">reported 8 s ago</span></div>
@@ -1940,7 +1941,7 @@ function sessionTab(s) {
 }
 function chatTab(s) {
   const asksMe = s.st === 'waiting' && s.act.startsWith('Asks you');
-  const msgs = s.lead ? [['a', s.name, '10:31', 'Dispatched AEON-1160 · Grouped picker to Codex Sol xhigh on mbp2606. Next: AEON-1199 once a slot frees.'], ['p', 'Markus', '10:33', 'Hold AEON-1199 until AEON-1195 lands.'], ['a', s.name, '10:33', 'Done. AEON-1199 waits behind AEON-1195; next up is AEON-1205.'], ['a', s.name, '10:38', 'AEON-1176 passed review and is in the gate.'], ...(asksMe ? [['q', s.name, '10:39', s.act.replace(/^Asks you: /, '')]] : [])]
+  const msgs = s.lead ? [['a', s.name, '10:31', 'Dispatched AEON-1160 · Grouped picker to Codex Sol xhigh on laptop1. Next: AEON-1199 once a slot frees.'], ['p', 'Markus', '10:33', 'Hold AEON-1199 until AEON-1195 lands.'], ['a', s.name, '10:33', 'Done. AEON-1199 waits behind AEON-1195; next up is AEON-1205.'], ['a', s.name, '10:38', 'AEON-1176 passed review and is in the gate.'], ...(asksMe ? [['q', s.name, '10:39', s.act.replace(/^Asks you: /, '')]] : [])]
     : [['a', s.key || s.name, '10:20', 'Picked up the ticket. Plan: the picker groups by project, then by recent use.'], ['p', 'Markus', '10:24', 'Keep the search field first.'], ['a', s.key || s.name, '10:25', 'Will do. Running the web checks now.'], ...(asksMe ? [['q', s.key, '10:39', s.act.replace(/^Asks you: /, '')]] : [])];
   return `<div class="chat" aria-label="Messages">${msgs.map(([w, n, t, x]) => `<div class="msg ${w}"><span class="mh"><b>${esc(n)}</b><time>${t}</time>${w === 'q' ? '<span class="qtag">Asks you</span>' : ''}</span><p>${esc(x)}</p>${w === 'q' ? '<span class="qa"><button type="button" class="btn sm primary" data-toast="Answer sent. The Desk item closes too.">Yes</button><button type="button" class="btn sm" data-toast="Answer sent">Not now</button><span class="small faint">or reply below · the same item as on the Desk</span></span>' : ''}</div>`).join('')}</div>
     <p class="small faint chat-note">SessionChat · schematic: the live chat is the source of truth.</p>
@@ -2004,12 +2005,12 @@ function accPop() {
   const t = (i, h, v, d, flag) => `<a href="#" class="tile" data-toast="In the app: Settings › ${h}">${ic(i, 16)}<span class="tt"><b>${h}</b><span>${v}</span><small>${d}</small></span>${flag ? `<span class="flag">${flag}</span>` : '<span></span>'}${ic('chevron-right', 14)}</a>`;
   return `<div class="pop-wide" role="dialog" aria-label="Accounts and computers"><p class="pop-schem">${ic('layers', 12)}AccountsComputers tiles (AEON-1176 P6) → the Settings parts from AEON-1170</p>
     ${t('key', 'Accounts', has('busy') ? '5 ready · 1 needs a sign-in' : '3 ready', has('busy') ? 'Cursor on imac0 signed out 09:12' : 'Claude Max, ChatGPT Pro, Cursor Ultra', has('busy') ? 'Sign in' : '')}
-    ${t('monitor', 'Computers', has('busy') ? '3 online' : '1 online', 'mbp2606 · mbp2607 · imac0', '')}
+    ${t('monitor', 'Computers', has('busy') ? '3 online' : '1 online', 'laptop1 · laptop2 · imac0', '')}
     ${t('gauge', 'Capacity', has('busy') ? 'Codex at its limit until 14:00' : 'Room for 4 more today', 'pace and boosts per account', '')}</div>`;
 }
 // The Desk preview: the former Agents Desk chip's dropdown, moved unchanged to the header's split button.
 function deskPop() {
-  const items = isAdmin() ? [['waiting', 'AEON-LEAD asks: merge AEON-1182 now, or wait for the 14:00 train?', 'Claude Code · lead of AEON · question'], ['waiting', 'AEON-1195 asks to run the migrations on the dev database', 'Codex · worker of AEON-LEAD · 18 min'], ['waiting', 'OPS-266 asks to change the journald limits on csb1', 'Codex · worker of OPS · 14 min'], ['waiting', 'MOBILE-21 asks to add a WidgetKit entitlement', 'Cursor · worker of MOBILE-LEAD · 11 min']].slice(0, has('busy') ? 4 : 2) : has('busy') ? [['waiting', 'DOCS-17 asks: publish the API guide draft?', 'Claude Code · worker of DOCS-LEAD · 15 min']] : [];
+  const items = isAdmin() ? [['waiting', 'AEON-LEAD asks: merge AEON-1182 now, or wait for the 14:00 train?', 'Claude Code · lead of AEON · question'], ['waiting', 'AEON-1195 asks to run the migrations on the dev database', 'Codex · worker of AEON-LEAD · 18 min'], ['waiting', 'OPS-266 asks to change the journald limits on srv1', 'Codex · worker of OPS · 14 min'], ['waiting', 'MOBILE-21 asks to add a WidgetKit entitlement', 'Cursor · worker of MOBILE-LEAD · 11 min']].slice(0, has('busy') ? 4 : 2) : has('busy') ? [['waiting', 'DOCS-17 asks: publish the API guide draft?', 'Claude Code · worker of DOCS-LEAD · 15 min']] : [];
   return `<div class="pop-wide" role="dialog" aria-labelledby="dk-h"><div class="pop-h"><h3 id="dk-h">Decision Desk</h3><span class="small faint">${items.length ? `${plural(items.length, 'thing')} for you` : 'Nothing for you'}</span></div>
     ${items.map(([st, t, d]) => `<div class="desk-row"><span class="dr-ic" style="${appearance(st)}">${markSvg(st, 14)}</span><span class="dr-t"><b>${esc(t)}</b><small>${esc(d)}</small></span><button type="button" class="btn sm" data-toast="In the app: the Decision Desk opens at this item">Open</button></div>`).join('')}
     <a href="#" class="go" data-toast="/decision-desk">Open the Decision Desk ${ic('chevron-right', 13)}</a><p class="pop-schem">${ic('layers', 12)}Header split button (new package next to AEON-1139): the dropdown moved here unchanged</p></div>`;
