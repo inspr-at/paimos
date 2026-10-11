@@ -46,11 +46,6 @@ func (m *Module) listExecutionPrincipals(w http.ResponseWriter, r *http.Request)
 		if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
 			return err
 		}
-		// Keep the saved definition and its identity checks under the same
-		// tenant/tree access fence as consent, without writing any record.
-		if _, err := lock(ctx, tx, p.TenantID, false); err != nil {
-			return err
-		}
 		item, err := load(ctx, tx, r.PathValue("recurrenceId"), false)
 		if err != nil {
 			return err
