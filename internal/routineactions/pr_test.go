@@ -48,6 +48,7 @@ func externalSetup(t *testing.T) *externalFixture {
 	f := &externalFixture{t: t, d: dbtest.Open(t), now: time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)}
 	f.person.Kind = tenant.Person
 	f.agent.Kind = tenant.Agent
+	f.agent.Scopes = []string{"work_orders.write", "nodes.write", "approvals.propose", "approvals.read"}
 	if err := f.d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('external-actions','External fixture') RETURNING id::text`).Scan(&f.person.TenantID); err != nil {
 		t.Fatal(err)
 	}

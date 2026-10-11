@@ -11,11 +11,10 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/authz"
-	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/routineactions/evidence"
 	"github.com/inspr-at/paimos/internal/routineguard"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -37,11 +36,13 @@ func (v PipelineRequest) valid() bool {
 }
 
 type Pipeline interface {
-	RoutineSnapshot(context.Context, string, string, string, string) (delivery.RoutinePipelineFacts, error)
+	RoutineSnapshot(context.Context, string, string, string, string) (evidence.PipelineFacts, error)
+	RoutineReadyTx(context.Context, pgx.Tx, string, string, string, evidence.PipelineFacts) (string, bool, error)
+	RoutineReviewTx(context.Context, pgx.Tx, string, string) (evidence.Review, error)
+	RoutineMergeResultTx(context.Context, pgx.Tx, string, string, string, string, int64) (bool, string, error)
 }
 
-func (b *Broker) WithReviews(reviews *crossreview.Module) *Broker { b.reviews = reviews; return b }
-func (b *Broker) WithObservation(observe ObserveTx) *Broker       { b.observe = observe; return b }
+func (b *Broker) WithObservation(observe ObserveTx) *Broker { b.observe = observe; return b }
 
 // pipelineSettledTx checks durable process/usage/catalogue lineage before a
 // person handoff. A request never gives its worker merge/deploy authority.
@@ -131,7 +132,7 @@ func (b *Broker) ReconcilePipeline(ctx context.Context, tid, id string) (Receipt
 	if err != nil {
 		return out, err
 	}
-	var facts delivery.RoutinePipelineFacts
+	var facts evidence.PipelineFacts
 	unavailable := false
 	if !request.Request.PipelineRequest.NonCode {
 		if b.pipeline == nil {
@@ -165,7 +166,7 @@ func (b *Broker) ReconcilePipeline(ctx context.Context, tid, id string) (Receipt
 				return wait("pipeline_head_changed")
 			}
 			if f.Merged {
-				_, reason, err := delivery.RoutineMergeResultTx(ctx, tx, e.Request.TargetID, in.Repository, in.HeadSHA, facts.MergeSHA, pr.PullRequest)
+				_, reason, err := b.pipeline.RoutineMergeResultTx(ctx, tx, e.Request.TargetID, in.Repository, in.HeadSHA, facts.MergeSHA, pr.PullRequest)
 				if err != nil {
 					return err
 				}
@@ -174,23 +175,18 @@ func (b *Broker) ReconcilePipeline(ctx context.Context, tid, id string) (Receipt
 				}
 				return wait(reason)
 			}
-			if b.reviews == nil {
+			if b.pipeline == nil {
 				return wait("coordinator_review_unavailable")
 			}
-			var order string
-			if err := tx.QueryRow(ctx, `SELECT v.work_order_id::text FROM work_order_reviews v JOIN routine_attempts a ON a.agent_run_id=v.run_id WHERE a.run_id=$1 AND v.ticket_node_id=$2 ORDER BY v.created_at DESC,v.work_order_id DESC LIMIT 1`, r.RunID, e.Request.TargetID).Scan(&order); errors.Is(err, pgx.ErrNoRows) {
-				return wait("pipeline_review_unavailable")
-			} else if err != nil {
-				return err
-			}
-			v, err := b.reviews.RoutineResultTx(ctx, tx, order)
+			v, err := b.pipeline.RoutineReviewTx(ctx, tx, r.RunID, e.Request.TargetID)
 			if err != nil {
 				return err
 			}
-			if !v.GateOpen || v.Result.Verdict != "ok" || v.HeadSHA != in.HeadSHA || v.BaseSHA != f.Base || v.Repository != in.Repository {
+			order := v.OrderID
+			if !v.GateOpen || v.Verdict != "ok" || v.HeadSHA != in.HeadSHA || v.BaseSHA != f.Base || v.Repository != in.Repository {
 				return wait("pipeline_review_stale")
 			}
-			s, ready, err := delivery.RoutineReadyTx(ctx, tx, binding.ProjectID, in.Repository, in.HeadSHA, facts)
+			s, ready, err := b.pipeline.RoutineReadyTx(ctx, tx, binding.ProjectID, in.Repository, in.HeadSHA, facts)
 			if err != nil {
 				return err
 			}
@@ -198,11 +194,7 @@ func (b *Broker) ReconcilePipeline(ctx context.Context, tid, id string) (Receipt
 				return wait("pipeline_ci_or_artifact_pending")
 			}
 			proof["pr"], proof["head"], proof["base"], proof["artifact"], proof["queue_head"], proof["review"], proof["checks"], proof["runs"], proof["settings"] = pr.PullRequest, in.HeadSHA, f.Base, facts.ArtifactSHA, f.QueueHead, order, f.Checks, f.Runs, s
-			familyPolicy, err := reviewgate.LoadFamilyPolicyTx(ctx, tx, &binding.ProjectID)
-			if err != nil {
-				return err
-			}
-			proof["review_policy"] = familyPolicy.Effective
+			proof["review_policy"] = v.PolicyDigest
 			r.PullRequest, r.PullURL = pr.PullRequest, pr.PullURL
 		}
 		var policy, eval string
@@ -279,7 +271,7 @@ func (b *Broker) observeMerge(ctx context.Context, tid, id string) (Receipt, boo
 			return err
 		}
 		var e effect
-		if len(raw) > MaxBodyBytes || json.Unmarshal(raw, &e) != nil || json.Unmarshal(result, &out) != nil || e.Request.Validate() != nil || e.Request.PipelineRequest == nil || e.Request.PipelineRequest.NonCode {
+		if len(raw) > MaxBodyBytes || json.Unmarshal(raw, &e) != nil || json.Unmarshal(result, &out) != nil || e.Request.Validate() != nil || !workorders.UUID(e.PrincipalID) || e.Request.PipelineRequest == nil || e.Request.PipelineRequest.NonCode || out.ID != id || out.RunID != run || out.RequestDigest != routineguard.Digest(e.Request) || out.OperationRef != e.OperationRef || e.OperationRef != routineguard.Digest([]string{tid, run, e.Request.ActionKey, out.RequestDigest}) {
 			return workorders.Fail(409, "pipeline_receipt_invalid")
 		}
 		p := tenant.Principal{ID: e.PrincipalID, TenantID: tid, Kind: tenant.Agent}
@@ -294,10 +286,11 @@ func (b *Broker) observeMerge(ctx context.Context, tid, id string) (Receipt, boo
 		if err != nil {
 			return err
 		}
-		if actor.ID != binding.ExecutionPrincipalID || actor.TenantID != tid {
+		if actor.ID != binding.ExecutionPrincipalID || actor.ID != p.ID || actor.TenantID != tid {
 			return authz.ErrForbidden
 		}
-		for _, who := range []tenant.Principal{p, actor, {ID: binding.OwnerID, TenantID: tid, Kind: tenant.Person}} {
+		p = actor
+		for _, who := range []tenant.Principal{actor, {ID: binding.OwnerID, TenantID: tid, Kind: tenant.Person}} {
 			if err := authz.RequireTx(ctx, tx, who, "work_orders.write", authz.Scope{ProjectID: binding.ProjectID}); err != nil {
 				return err
 			}
@@ -319,6 +312,9 @@ func (b *Broker) observeMerge(ctx context.Context, tid, id string) (Receipt, boo
 		}
 		if !merged {
 			return nil
+		}
+		if err := pipelineSettledTx(ctx, tx, run, id, false); err != nil {
+			return err
 		}
 		approved, err := approvals.LiveRoutineHoldTx(ctx, tx, p, out.ApprovalID, work, "work_orders.write", digest, time.Now().UTC())
 		if err != nil {

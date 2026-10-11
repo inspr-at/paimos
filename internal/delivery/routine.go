@@ -6,18 +6,17 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/crossreview"
+	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/routineactions/evidence"
+	"github.com/inspr-at/paimos/internal/routineguard"
 	"github.com/jackc/pgx/v5"
 )
 
 // RoutinePipelineFacts is a qualified read, never worker-provided CI evidence.
 // ArtifactSHA identifies the exact tested source commit (queue commit when
 // queued). OPS installs an exact-artifact reader; absence remains unavailable.
-type RoutinePipelineFacts struct {
-	Facts       ShipFacts
-	ArtifactSHA string
-	ObservedAt  time.Time
-	MergeSHA    string
-}
+type RoutinePipelineFacts = evidence.PipelineFacts
 type RoutineArtifactReader func(context.Context, string, string) (string, error)
 
 func (m *Module) WithRoutineArtifacts(read RoutineArtifactReader) *Module {
@@ -130,4 +129,39 @@ func RoutineMergeResultTx(ctx context.Context, tx pgx.Tx, ticket, repo, head, me
 		return done, "", err
 	}
 	return false, "merge_done_receipt_pending_or_refused", nil
+}
+
+func (m *Module) WithRoutineReviews(reviews *crossreview.Module) *Module {
+	m.routineReviews = reviews
+	return m
+}
+func (m *Module) RoutineReviewTx(ctx context.Context, tx pgx.Tx, run, target string) (evidence.Review, error) {
+	var out evidence.Review
+	if m.routineReviews == nil {
+		return out, errRead
+	}
+	var order string
+	if err := tx.QueryRow(ctx, `SELECT v.work_order_id::text FROM work_order_reviews v JOIN routine_attempts a ON a.agent_run_id=v.run_id WHERE a.run_id=$1 AND v.ticket_node_id=$2 ORDER BY v.created_at DESC,v.work_order_id DESC LIMIT 1`, run, target).Scan(&order); err != nil {
+		return out, err
+	}
+	v, err := m.routineReviews.RoutineResultTx(ctx, tx, order)
+	if err != nil {
+		return out, err
+	}
+	var project string
+	if err := tx.QueryRow(ctx, `SELECT output_project_id::text FROM routine_runs WHERE id=$1`, run).Scan(&project); err != nil {
+		return out, err
+	}
+	policy, err := reviewgate.LoadFamilyPolicyTx(ctx, tx, &project)
+	if err != nil {
+		return out, err
+	}
+	return evidence.Review{OrderID: order, Repository: v.Repository, BaseSHA: v.BaseSHA, HeadSHA: v.HeadSHA, GateOpen: v.GateOpen, Verdict: v.Result.Verdict, PolicyDigest: routineguard.Digest(policy.Effective)}, nil
+}
+func (m *Module) RoutineReadyTx(ctx context.Context, tx pgx.Tx, project, repo, head string, f evidence.PipelineFacts) (string, bool, error) {
+	s, ready, err := RoutineReadyTx(ctx, tx, project, repo, head, f)
+	return routineguard.Digest(s), ready, err
+}
+func (m *Module) RoutineMergeResultTx(ctx context.Context, tx pgx.Tx, ticket, repo, head, merge string, pr int64) (bool, string, error) {
+	return RoutineMergeResultTx(ctx, tx, ticket, repo, head, merge, pr)
 }

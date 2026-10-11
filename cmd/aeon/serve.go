@@ -396,10 +396,10 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	reviewMod := crossreview.New(pool, reviewPublisher)
 	reviewMod.ConfigureWebhook(cfg.ReviewWebhookSecret)
 	startWorker(func() { reviewMod.RunStatusReporter(workerCtx) })
-	deliveryMod := delivery.New(pool, reviewApp.Config, cfg.ReviewWebhookSecret, delivery.AppReader{App: reviewApp}, reviewMod.HandlePullChange)
+	deliveryMod := delivery.New(pool, reviewApp.Config, cfg.ReviewWebhookSecret, delivery.AppReader{App: reviewApp}, reviewMod.HandlePullChange).WithRoutineReviews(reviewMod)
 	routineActions := routineactions.New(pool, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, b routineactions.Binding, c routineguard.Context) (tenant.Principal, routineguard.Decision, string, error) {
 		return recurringWork.AuthorizeActionTx(ctx, tx, p, recurrences.ActionBinding(b), c)
-	}).WithPullRequests(routineactions.AppPullRequests{App: reviewApp}).WithPipeline(deliveryMod).WithReviews(reviewMod).WithObservation(func(ctx context.Context, tx pgx.Tx, p tenant.Principal, b routineactions.Binding) (tenant.Principal, error) {
+	}).WithPullRequests(crossreview.AppRoutinePullRequests{App: reviewApp}).WithPipeline(deliveryMod).WithObservation(func(ctx context.Context, tx pgx.Tx, p tenant.Principal, b routineactions.Binding) (tenant.Principal, error) {
 		return recurringWork.AuthorizeObservationTx(ctx, tx, p, recurrences.ActionBinding(b))
 	})
 	// Exact runtime/gate/CI readers remain unavailable until OPS qualification.

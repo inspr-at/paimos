@@ -6,6 +6,7 @@ package delivery
 import (
 	"crypto/sha256"
 	"fmt"
+	"github.com/inspr-at/paimos/internal/routineactions/evidence"
 	"slices"
 	"time"
 )
@@ -70,11 +71,7 @@ func effective(parent, child Settings) Settings {
 	return out
 }
 
-type Check struct {
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-}
+type Check = evidence.Check
 
 // Observation is the replay source. It contains normalized platform facts at
 // observation time, not the raw webhook, PR title, body, author or review output.

@@ -16,7 +16,6 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
-	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -95,7 +94,6 @@ type Broker struct {
 	authorize AuthorizeTx
 	pr        PullRequests
 	pipeline  Pipeline
-	reviews   *crossreview.Module
 	observe   ObserveTx
 }
 
@@ -152,7 +150,7 @@ func (r Request) Validate() error {
 			return workorders.Fail(400, "invalid_knowledge_write")
 		}
 	case "pr.open":
-		if r.PROpen == nil || !r.PROpen.valid() {
+		if r.PROpen == nil || !r.PROpen.Valid() {
 			return workorders.Fail(400, "invalid_pr_open")
 		}
 	case "pipeline.request":
@@ -279,10 +277,8 @@ func (b *Broker) authorizedTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 			permission = "work_orders.write"
 		}
 		owner := tenant.Principal{ID: binding.OwnerID, TenantID: p.TenantID, Kind: tenant.Person}
-		for _, who := range []tenant.Principal{p, owner} {
-			if err := authz.RequireTx(ctx, tx, who, permission, authz.Scope{ProjectID: in.ProjectID}); err != nil {
-				return Binding{}, err
-			}
+		if err := authz.RequireTx(ctx, tx, owner, permission, authz.Scope{ProjectID: in.ProjectID}); err != nil {
+			return Binding{}, err
 		}
 		if b.authorize == nil {
 			return Binding{}, workorders.Fail(409, "routine_grant_unavailable")
@@ -293,6 +289,18 @@ func (b *Broker) authorizedTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		}
 		if actor.TenantID != p.TenantID || actor.ID != binding.ExecutionPrincipalID {
 			return Binding{}, authz.ErrForbidden
+		}
+		// Background reconciliation uses the current consent seam's execution
+		// identity and scopes, never a persisted API-key ceiling. API calls still
+		// check the original authenticated caller and its live key authority.
+		if reconcile && p.KeyID == "" {
+			if p.ID != actor.ID {
+				return Binding{}, authz.ErrForbidden
+			}
+			p = actor
+		}
+		if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: in.ProjectID}); err != nil {
+			return Binding{}, err
 		}
 		if !decision.CanExecute() || decision.ContextDigest != routineguard.Digest(in.GuardContext()) || !workorders.UUID(evaluationID) {
 			return Binding{}, workorders.Fail(409, "guardrail_evaluation_required")

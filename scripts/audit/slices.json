@@ -179,7 +179,8 @@
         "internal/routineexec/landing.go",
         "internal/delivery/routine.go",
         "internal/delivery/routine_test.go",
-        "internal/crossreview/routine_pr.go"
+        "internal/crossreview/routine_pr.go",
+        "internal/crossreview/routine_pr_app.go"
       ]
     },
     {
@@ -296,7 +297,7 @@
         "internal/recurrences/run_history.go",
         "internal/recurrences/run_history_test.go",
         "internal/routineactions/pr.go",
-        "internal/routineactions/pr_app.go",
+        "internal/routineactions/evidence/evidence.go",
         "internal/routineactions/pipeline.go",
         "internal/routineactions/pr_test.go"
       ]

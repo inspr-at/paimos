@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-package routineactions
+package crossreview
 
 import (
 	"context"
@@ -7,17 +7,17 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/inspr-at/paimos/internal/crossreview"
+	"github.com/inspr-at/paimos/internal/routineactions/evidence"
 )
 
-type AppPullRequests struct{ App *crossreview.GitHubApp }
+type AppRoutinePullRequests struct{ App *GitHubApp }
 
-func (a AppPullRequests) Configured(tid, repo string) bool {
+func (a AppRoutinePullRequests) Configured(tid, repo string) bool {
 	return a.App != nil && a.App.Configured(tid, repo)
 }
 
 type appPull struct {
-	crossreview.GitHubPull
+	GitHubPull
 	Body string `json:"body"`
 	Head struct {
 		SHA  string `json:"sha"`
@@ -29,15 +29,15 @@ type appPull struct {
 }
 
 func operationMarker(ref string) string { return "<!-- aeon-routine-operation:" + ref + " -->" }
-func appResult(p appPull, ref string) *Pull {
+func appResult(p appPull, ref string) *evidence.Pull {
 	if !strings.HasSuffix(p.Body, operationMarker(ref)) || p.Head.Repo.FullName != p.Base.Repo.FullName {
 		return nil
 	}
-	return &Pull{Number: p.Number, Repository: p.Base.Repo.FullName, Branch: p.Head.Ref, BaseBranch: p.Base.Ref, BaseSHA: p.Base.SHA, HeadSHA: p.Head.SHA, OperationRef: ref, Open: p.State == "open"}
+	return &evidence.Pull{Number: p.Number, Repository: p.Base.Repo.FullName, Branch: p.Head.Ref, BaseBranch: p.Base.Ref, BaseSHA: p.Base.SHA, HeadSHA: p.Head.SHA, OperationRef: ref, Open: p.State == "open"}
 }
-func findAppPull(get func(string, any) error, in PROpen, ref string) (*Pull, error) {
+func findAppPull(get func(string, any) error, in evidence.PROpen, ref string) (*evidence.Pull, error) {
 	owner, _, _ := strings.Cut(in.Repository, "/")
-	var found *Pull
+	var found *evidence.Pull
 	for page := 1; page <= 20; page++ {
 		var pulls []appPull
 		path := "/pulls?state=all&head=" + url.QueryEscape(owner+":"+in.Branch) + "&base=" + url.QueryEscape(in.BaseBranch) + "&per_page=100&page=" + strconv.Itoa(page)
@@ -45,29 +45,29 @@ func findAppPull(get func(string, any) error, in PROpen, ref string) (*Pull, err
 			return nil, err
 		}
 		if len(pulls) > 100 {
-			return nil, crossreview.ErrUnavailable
+			return nil, ErrUnavailable
 		}
 		for _, p := range pulls {
 			if v := appResult(p, ref); v != nil {
-				if found != nil || !v.matches(in, ref) {
-					return nil, crossreview.ErrUnavailable
+				if found != nil || !v.Matches(in, ref) {
+					return nil, ErrUnavailable
 				}
 				found = v
 			} else if p.State == "open" {
-				return nil, crossreview.ErrUnavailable
+				return nil, ErrUnavailable
 			}
 		}
 		if len(pulls) < 100 {
 			return found, nil
 		}
 	}
-	return nil, crossreview.ErrUnavailable
+	return nil, ErrUnavailable
 }
-func (a AppPullRequests) Find(ctx context.Context, in PROpen, ref string) (*Pull, error) {
+func (a AppRoutinePullRequests) Find(ctx context.Context, in evidence.PROpen, ref string) (*evidence.Pull, error) {
 	if a.App == nil {
-		return nil, crossreview.ErrUnavailable
+		return nil, ErrUnavailable
 	}
-	var out *Pull
+	var out *evidence.Pull
 	err := a.App.RoutinePullInstallation(ctx, in.Repository, false, func(get func(string, any) error, _ func(any, any) error) error {
 		var err error
 		out, err = findAppPull(get, in, ref)
@@ -75,11 +75,11 @@ func (a AppPullRequests) Find(ctx context.Context, in PROpen, ref string) (*Pull
 	})
 	return out, err
 }
-func (a AppPullRequests) Open(ctx context.Context, in PROpen, ref string) (*Pull, error) {
-	if a.App == nil || !in.valid() {
-		return nil, crossreview.ErrUnavailable
+func (a AppRoutinePullRequests) Open(ctx context.Context, in evidence.PROpen, ref string) (*evidence.Pull, error) {
+	if a.App == nil || !in.Valid() {
+		return nil, ErrUnavailable
 	}
-	var out *Pull
+	var out *evidence.Pull
 	err := a.App.RoutinePullInstallation(ctx, in.Repository, true, func(get func(string, any) error, post func(any, any) error) error {
 		var err error
 		if out, err = findAppPull(get, in, ref); err != nil || out != nil {
@@ -97,7 +97,7 @@ func (a AppPullRequests) Open(ctx context.Context, in PROpen, ref string) (*Pull
 				return err
 			}
 			if v.Ref != "refs/heads/"+branch || v.Object.Type != "commit" || v.Object.SHA != sha {
-				return crossreview.ErrUnavailable
+				return ErrUnavailable
 			}
 		}
 		var p appPull
@@ -105,8 +105,8 @@ func (a AppPullRequests) Open(ctx context.Context, in PROpen, ref string) (*Pull
 			return err
 		}
 		out = appResult(p, ref)
-		if out == nil || !out.matches(in, ref) {
-			return crossreview.ErrUnavailable
+		if out == nil || !out.Matches(in, ref) {
+			return ErrUnavailable
 		}
 		return nil
 	})

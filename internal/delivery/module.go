@@ -23,6 +23,7 @@ type Module struct {
 	now              func() time.Time
 	queueAdmission   QueueAdmission
 	routineArtifacts RoutineArtifactReader
+	routineReviews   *crossreview.Module
 	flowSlots        chan struct{}
 	// flowStreamNow is the live stream's authorization clock. Nil uses the
 	// wall clock, so a frozen business clock cannot expire every heartbeat.

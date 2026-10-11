@@ -7,44 +7,19 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/reviewgate"
+	"github.com/inspr-at/paimos/internal/routineactions/evidence"
 	"github.com/inspr-at/paimos/internal/routineguard"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
-type PROpen struct {
-	Repository string `json:"repository"`
-	Branch     string `json:"branch"`
-	BaseBranch string `json:"base_branch"`
-	BaseSHA    string `json:"base_sha"`
-	HeadSHA    string `json:"head_sha"`
-	Title      string `json:"title"`
-	Body       string `json:"body"`
-}
-
-func (v PROpen) valid() bool {
-	return reviewgate.ValidRepository(v.Repository) && validBranch(v.Branch) && v.Branch != "main" && v.BaseBranch == "main" && reviewgate.ValidSHA(v.BaseSHA) && reviewgate.ValidSHA(v.HeadSHA) && v.BaseSHA != v.HeadSHA && bounded(v.Title, 500, true) && !strings.ContainsAny(v.Title, "\r\n") && bounded(v.Body, 32768, false) && !strings.Contains(v.Body, "aeon-routine-operation:")
-}
-
-func validBranch(s string) bool {
-	if !bounded(s, 255, true) || strings.HasPrefix(s, "/") || strings.HasSuffix(s, "/") || strings.HasSuffix(s, ".") || strings.Contains(s, "..") || strings.Contains(s, "@{") || strings.Contains(s, "//") {
-		return false
-	}
-	for _, part := range strings.Split(s, "/") {
-		if strings.HasPrefix(part, ".") || strings.HasSuffix(part, ".lock") {
-			return false
-		}
-	}
-	return strings.IndexFunc(s, func(c rune) bool { return c <= 32 || c >= 127 || strings.ContainsRune("~^:?*[\\", c) }) < 0
-}
+type PROpen = evidence.PROpen
 
 // PullRequests is deliberately limited to one approved App operation. There
 // is no merge, queue, publication or deployment method. Find must return a
@@ -55,15 +30,7 @@ type PullRequests interface {
 	Open(context.Context, PROpen, string) (*Pull, error)
 }
 
-type Pull struct {
-	Number                                                         int64
-	Repository, Branch, BaseBranch, BaseSHA, HeadSHA, OperationRef string
-	Open                                                           bool
-}
-
-func (v Pull) matches(in PROpen, ref string) bool {
-	return v.Number > 0 && v.Number <= 2147483647 && v.Repository == in.Repository && v.Branch == in.Branch && v.BaseBranch == in.BaseBranch && v.BaseSHA == in.BaseSHA && v.HeadSHA == in.HeadSHA && v.OperationRef == ref && v.Open
-}
+type Pull = evidence.Pull
 
 func (b *Broker) WithPullRequests(pr PullRequests) *Broker { b.pr = pr; return b }
 func (b *Broker) WithPipeline(p Pipeline) *Broker          { b.pipeline = p; return b }
@@ -160,7 +127,7 @@ func (b *Broker) effectTx(ctx context.Context, tid, id string, fn func(pgx.Tx, t
 			return err
 		}
 		p.Kind = tenant.PrincipalKind(kind)
-		binding, _, decision, evaluation, err := b.authorizedTx(ctx, tx, p, run, v.Request, true)
+		binding, actor, decision, evaluation, err := b.authorizedTx(ctx, tx, p, run, v.Request, true)
 		if err != nil {
 			return err
 		}
@@ -178,7 +145,7 @@ func (b *Broker) effectTx(ctx context.Context, tid, id string, fn func(pgx.Tx, t
 		if _, err := tx.Exec(ctx, `UPDATE routine_actions SET policy_digest=$2,evaluation_id=$3 WHERE id=$1`, id, decision.PolicyDigest, evaluation); err != nil {
 			return err
 		}
-		if err := fn(tx, p, binding, v, state, &out); err != nil {
+		if err := fn(tx, actor, binding, v, state, &out); err != nil {
 			return err
 		}
 		return saveReceiptTx(ctx, tx, out)
@@ -234,7 +201,7 @@ func (b *Broker) ReconcilePR(ctx context.Context, tid, id string) (Receipt, erro
 		if err != nil {
 			pull = nil
 		}
-		if pull != nil && !pull.matches(in, ref) {
+		if pull != nil && !pull.Matches(in, ref) {
 			reason = "pr_binding_changed"
 			pull = nil
 		}
