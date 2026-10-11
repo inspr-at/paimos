@@ -8844,6 +8844,8 @@
     ,
     {"kind":"go","package":"internal/routineactions","name":"TestRoutinePRResponseLossAndFinalAuthority","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/routineactions","name":"TestRoutinePipelineRecoversMergeFixAndTargetEdits","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetAdmissionAndOwnership","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetAdmissionBoundsHistoricalWindows","tier":"ESSENTIAL"}
