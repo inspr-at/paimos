@@ -381,6 +381,9 @@ func TestReviewOrderCatalogUpgradePreservesSavedV2Default(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "saved-v2-upgrade", "person", "Owner", []string{"admin"})
 	inRegistry(t, p, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,'2')`, p.TenantID); err != nil {
+			return err
+		}
 		slugs := []string{"codex-astra-xhigh", "claude-fable-xhigh", "claude-opus-xhigh", "cursor-grok-xhigh", "gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default"}
 		ids := []string{}
 		for _, slug := range slugs {

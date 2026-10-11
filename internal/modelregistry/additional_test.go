@@ -11,10 +11,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Risk: the additive catalog upgrade rewrites a saved Models choice or
-// quietly routes new harnesses. New lines wait for an explicit Models choice
-// (approved Models v2 design: additional.go appends to no order).
-func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) {
+// Risk: reading catalog facts appends guessed harness pins or replaces a saved Models choice.
+func TestExistingTenantCatalogFactsPreservePolicyAndPins(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "upgrade", "person", "Ada", []string{"admin"})
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
@@ -52,29 +50,15 @@ func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) 
 		t.Fatal("unexpected saved policy fixture", saved)
 	}
 	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
-	if len(profiles) != 51 {
+	if len(profiles) != 40 {
 		t.Fatal("upgrade profiles", len(profiles))
 	}
 	if got := readOrders(); got != saved {
 		t.Fatal("saved policy missing or replaced", got)
 	}
-	for _, h := range []string{"gemini", "opencode"} {
-		found := false
-		for _, profile := range profiles {
-			if profile.Harness != h {
-				continue
-			}
-			found = true
-			if h == "gemini" && profile.Effort == "16384" && (profile.EffortLevel == nil || *profile.EffortLevel != 3) {
-				t.Fatal("budget level missing", profile)
-			}
-		}
-		if !found {
-			t.Fatal("new harness missing from the registry", h)
-		}
-		r := decode[Resolution](t, &p, http.MethodGet, "/api/models/resolve?role=build&harness="+h, "", http.StatusOK)
-		if r.Profile != nil {
-			t.Fatal("new harness routed without a Models choice", r)
+	for _, profile := range profiles {
+		if profile.Harness == "gemini" || profile.Harness == "opencode" {
+			t.Fatal("catalog fabricated additional harness pin", profile)
 		}
 	}
 	decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)

@@ -29,6 +29,14 @@ func routingFixture(t *testing.T) *fixture {
 	f.call(t, f.person, "GET", "/api/model-preferences/board", nil, 200, nil)
 	f.tx(t, func(tx pgx.Tx) error {
 		ctx := t.Context()
+		// These routing regressions use explicitly registered, known effort
+		// levels. ID-only discovery must never supply their pins or calibration.
+		if _, err := tx.Exec(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES
+			($1,'routing-sol-high','routing-fixture','codex','openai','gpt-6.1-sol','high','standard',3),
+			($1,'routing-sol-xhigh','routing-fixture','codex','openai','gpt-6.1-sol','xhigh','strong',4),
+			($1,'routing-opus-xhigh','routing-fixture','claude','anthropic','opus','xhigh','strong',4)`, f.person.TenantID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `UPDATE nodes SET fields='{"area":"backend","estimate_hours":4}' WHERE id=$1`, f.ticket); err != nil {
 			return err
 		}

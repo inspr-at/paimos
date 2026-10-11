@@ -163,7 +163,7 @@ test('a name, a cell and Details open the right panel in Settings', async ({ pag
   await open(page)
   await section(page).locator('.att-row').filter({ hasText: 'Codex is low' }).getByRole('button', { name: 'Details' }).click()
   await expect(page).toHaveURL(/\/settings\/accounts$/)
-  await expect(page.locator('section.pane')).toContainText('Shared quota')
+  await expect(page.locator('section.pane')).toContainText('Limits on this account')
   await page.goBack()
   // AEON-1171: computer links land in Settings › Computers, account links in Settings › Accounts.
   await section(page).getByRole('link', { name: 'Claude verification on build-7' }).click()
@@ -178,7 +178,7 @@ test('a name, a cell and Details open the right panel in Settings', async ({ pag
   await page.goBack()
   await section(page).getByRole('table').getByRole('rowheader').first().getByRole('link').click()
   await expect(page).toHaveURL(/\/settings\/accounts$/)
-  await expect(page.locator('section.pane')).toContainText('Shared quota')
+  await expect(page.locator('section.pane')).toContainText('Limits on this account')
 })
 
 test('Away stays in the head with Back now, and one click ends it', async ({ page }) => {

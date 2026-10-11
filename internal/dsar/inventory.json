@@ -730,6 +730,58 @@
       "table": "inbox_messages"
     },
     {
+      "table": "model_catalog_credentials",
+      "classification": "secret",
+      "columns": {
+        "account_id": "metadata",
+        "ciphertext": "secret",
+        "tenant_id": "metadata",
+        "vendor": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      }
+    },
+    {
+      "table": "model_catalog_facts",
+      "classification": "metadata",
+      "columns": {
+        "fact": "metadata",
+        "fetched_at": "metadata",
+        "field_path": "metadata",
+        "model_id": "metadata",
+        "provider": "metadata",
+        "route": "metadata",
+        "source": "metadata",
+        "source_kind": "metadata",
+        "tenant_id": "metadata",
+        "value": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      }
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "account_id": "metadata",
+        "binding_revision": "metadata",
+        "completed_at": "metadata",
+        "daemon_generation": "metadata",
+        "lease_until": "metadata",
+        "model_count": "metadata",
+        "report_digest": "metadata",
+        "request_id": "metadata",
+        "requested_at": "metadata",
+        "state": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "model_harness_probes"
+    },
+    {
       "classification": "personal",
       "columns": {
         "harness": "metadata",

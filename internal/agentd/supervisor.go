@@ -169,6 +169,7 @@ type Supervisor struct {
 	power                  Power
 	queuePollMu            sync.Mutex
 	queueNext              time.Time
+	catalogCursor          string // Protected by mu; rotate bounded account pages fairly.
 	queueDirty             atomic.Bool
 	queueWake              chan struct{}
 	chatGate               chatRelayGate
@@ -922,6 +923,10 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 }
 
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
+	if run.RoutineBudget != nil {
+		budget := *run.RoutineBudget
+		run.RoutineBudget = &budget
+	}
 	if err := s.dispatchMu.LockContext(ctx); err != nil {
 		return err
 	}
@@ -1043,6 +1048,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return ErrUnsupported
 	}
 	if err := validQueuedExecutionMode(run, adapter); err != nil {
+		return err
+	}
+	budgetBroker, _ := s.api.(RoutineBudgetBroker)
+	routineBudget, err := newRoutineCallBudget(StartRequest{Run: run, Profile: profile,
+		TenantID: s.tenantID, PrincipalID: s.principalID, Generation: s.generation}, adapter, budgetBroker, s.capacityNow)
+	if err != nil {
 		return err
 	}
 	verification := run.Purpose == VerificationPurpose
@@ -1280,6 +1291,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	run.AccountID = route.AccountID
 	if err := validExecutionMode(run, adapter); err != nil {
 		return err
+	}
+	if routineBudget != nil && (route.AccountID != routineBudget.binding.Grant.AccountID || route.BillingMode != routineBudget.binding.Grant.BillingMode) {
+		return ErrRoutineBudgetBinding
 	}
 	if entry == nil {
 		rec := Record{RoutineWorkspace: routineWorkspace, WorkerPickup: pickup, LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: runWorkspace, State: "claim_pending", Controls: map[string]replay{}}
@@ -1609,8 +1623,8 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	runCtx, cancelRun := context.WithTimeout(s.lifetime, duration)
 	startCtx, cancelStart := context.WithDeadline(ctx, launchedAt.Add(duration))
 	releasePower := s.holdRunPower()
-	proc, err := adapter.Start(startCtx, StartRequest{ResourceEnvironment: resourceEnvironment, Lifetime: runCtx, TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
-		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, ServiceTier: entry.harness.ServiceTier, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
+	proc, err := startRoutineBudgetAdapter(startCtx, adapter, StartRequest{ResourceEnvironment: resourceEnvironment, Lifetime: runCtx, TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
+		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, ServiceTier: entry.harness.ServiceTier, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, routineBudget, observe)
 	cancelStart()
 	if err != nil {
 		releasePower()

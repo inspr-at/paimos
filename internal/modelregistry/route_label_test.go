@@ -54,6 +54,12 @@ func TestRevisionFollowsRoutes(t *testing.T) {
 			t.Fatalf("seed: %d %s", code, body)
 		}
 	}
+	for _, who := range []tenant.Principal{p, twin} {
+		if got := revision(who); got != "" {
+			t.Fatalf("ID-only catalog created routing revision %q", got)
+		}
+		inRegistry(t, who, func(tx pgx.Tx) error { return ensureCatalog(t.Context(), tx, who) })
+	}
 	seeded := revision(p)
 	if !regexp.MustCompile(`^[0-9a-f]{8}$`).MatchString(seeded) || revision(p) != seeded {
 		t.Fatalf("seeded revision %q", seeded)

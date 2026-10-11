@@ -6,8 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"strings"
+	"time"
 
+	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -151,6 +152,20 @@ func recordReports(ctx context.Context, tx pgx.Tx, p tenant.Principal, in []Obse
 		if err := observe(ctx, tx, p.TenantID, o, source); err != nil {
 			return out, err
 		}
+		provider, identity := CatalogIdentity("", o.Harness, o.Model, o.Effort)
+		value, _ := json.Marshal(o.Model)
+		var fetchedAt time.Time
+		if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&fetchedAt); err != nil {
+			return out, err
+		}
+		facts := []CatalogFact{{Provider: provider, ModelID: identity, Route: o.Harness + "/" + o.Model, Fact: "model_id", Value: value, Source: "agent-report:" + o.Harness, SourceKind: "harness", FieldPath: "model", FetchedAt: fetchedAt}}
+		if o.Status != "invalid" {
+			facts = append(facts, CatalogFact{Provider: provider, ModelID: identity, Route: o.Harness + "/" + o.Model, Fact: "observed_level." + o.Effort, Value: json.RawMessage("true"), Source: "agent-report:" + o.Harness, SourceKind: "harness", FieldPath: "effort", FetchedAt: fetchedAt})
+		}
+		if err := RecordCatalogFacts(ctx, tx, p.TenantID, facts); err != nil {
+			return out, err
+		}
+
 		out.Recorded++
 		if o.Status == "invalid" || KnownInvalid(o.Model) {
 			continue
@@ -193,36 +208,15 @@ func observe(ctx context.Context, tx pgx.Tx, tenantID string, o Observation, sou
 	return err
 }
 
-// Known pins retain declared tiers and efforts. Unknown identifiers are never
-// added to ladders; conservative profiles are merely available for person policy.
+// Evidence supplies a native name. Validation bounds names without a level allowlist.
+// Profiles remain inactive until a person or the successor fence authorizes them.
 func observedPin(o Observation) (profileWrite, bool) {
-	for _, model := range seedModels {
-		if model.Harness == o.Harness && model.ID == o.Model {
-			for _, e := range model.Efforts {
-				if e == o.Effort {
-					return profileWrite{Slug: catalogSlug(model, e), Version: CatalogVersion, Harness: model.Harness, Family: model.Family, Model: model.ID, Effort: e, Tier: model.Tier}, true
-				}
-			}
-			return profileWrite{}, false
-		}
-	}
-	family := map[string]string{"codex": "openai", "claude": "anthropic", "grok": "xai", "cursor": "cursor"}[o.Harness]
-	if o.Harness == "pi" {
-		for _, f := range []string{"anthropic", "openai", "xai"} {
-			if strings.HasPrefix(o.Model, f+"/") {
-				family = f
-			}
-		}
-	}
+	family := harnesslaunch.ModelFamily(o.Harness, o.Model)
 	if family == "" {
 		return profileWrite{}, false
 	}
-	// Bound supported efforts instead of trusting agent-supplied capabilities.
-	if o.Effort != "default" && o.Effort != "medium" && o.Effort != "high" && o.Effort != "xhigh" && o.Effort != "low" {
-		return profileWrite{}, false
-	}
 	sum := sha256.Sum256([]byte(o.Harness + "/" + o.Model + "/" + o.Effort))
-	return profileWrite{Slug: "observed-" + o.Harness + "-" + hex.EncodeToString(sum[:12]), Version: "observed-1", Harness: o.Harness, Family: family, Model: o.Model, Effort: o.Effort, Tier: "standard"}, true
+	return profileWrite{Slug: "observed-" + o.Harness + "-" + hex.EncodeToString(sum[:12]), Version: "observed-2", Harness: o.Harness, Family: family, Model: o.Model, Effort: o.Effort, Tier: "standard"}, true
 }
 
 // EvidenceID derives a stable id from public evidence.

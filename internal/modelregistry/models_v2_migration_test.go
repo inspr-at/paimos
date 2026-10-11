@@ -344,6 +344,12 @@ func TestModelsV2NoRuntimeLadderReaders(t *testing.T) {
 		if err != nil {
 			return err
 		}
+		// The merge-main brief preserves main's retirement and Undo of retained
+		// historical pins. These two files are the explicit deprecation path;
+		// no resolver, catalog initializer or dispatch reader is exempted.
+		if path == "../modelregistry/catalog_retire_snapshot.go" || path == "../modelregistry/catalog_retire_http.go" {
+			return nil
+		}
 		for _, table := range []string{"model_role_routes", "model_security_role_routes"} {
 			if strings.Contains(string(raw), table) {
 				t.Errorf("runtime ladder reference in %s", path)

@@ -281,10 +281,10 @@ func planningSetup(t *testing.T) planningWorld {
 	// Default runs. Models routes only to accounts that can take the work.
 	w.agent = insertNamedAgent(t, admin.TenantID, "Builder")
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles (tenant_id, slug, version, harness, family, model, effort, tier)
-            VALUES ($1,'codex-astra-xhigh','2','codex','openai','gpt-6-astra','xhigh','frontier'),
-                   ($1,'claude-opus-high','2','claude','anthropic','opus','high','strong'),
-                   ($1,'codex-sol-xhigh','2','codex','openai','gpt-6-sol','xhigh','strong')`, admin.TenantID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles (tenant_id, slug, version, harness, family, model, effort, tier,registered_effort_level,display_overrides)
+            VALUES ($1,'codex-astra-xhigh','2','codex','openai','gpt-6-astra','xhigh','frontier',4,'{"display_name":"Codex Astra","short_name":"Astra","model_version":"6"}'),
+                   ($1,'claude-opus-high','2','claude','anthropic','opus','high','strong',3,'{"display_name":"Claude Opus","short_name":"Opus","model_version":""}'),
+                   ($1,'codex-sol-xhigh','2','codex','openai','gpt-6-sol','xhigh','strong',4,'{"display_name":"Codex Sol","short_name":"Sol","model_version":"6"}')`, admin.TenantID); err != nil {
 			return err
 		}
 		if err := planningModelsOrder(t, tx, admin.TenantID, "first", "wait", "claude-opus-high"); err != nil {

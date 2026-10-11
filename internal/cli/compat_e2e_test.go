@@ -241,13 +241,25 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatalf("knowledge update code %d out %q err %q", code, out, errOut)
 	}
 
-	// Launch templates require enrolled accounts; seed the catalog through the
-	// same API before giving the fixture live accounts for both native harnesses.
+	// Risk: an ID-only catalog must not erase this fixture's selected model or
+	// launch template. Prepare through the API, then own its pins and routes
+	// before enrolling accounts for both native harnesses.
 	status, raw := doJSON(t, &http.Client{}, http.MethodGet, srv.URL+"/api/models", "", http.Header{"Authorization": {"Bearer " + worker.Token}})
 	if status != http.StatusOK {
 		t.Fatalf("models %d %s", status, raw)
 	}
 	if err := db.InTenant(dbtest.Seed(ctx), opened.App, worker.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES
+			($1,'compat-codex','compat-fixture','codex','openai','gpt-6.1-sol','high','standard'),
+			($1,'compat-claude','compat-fixture','claude','anthropic','opus','xhigh','frontier')`, worker.TenantID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state)
+			SELECT $1,roles.role,CASE harness WHEN 'codex' THEN 1 ELSE 2 END,id,'available'
+			FROM model_profiles CROSS JOIN (VALUES ('build'),('review-gate')) AS roles(role)
+			WHERE slug IN ('compat-codex','compat-claude')`, worker.TenantID); err != nil {
+			return err
+		}
 		var owner string
 		if err := tx.QueryRow(ctx, `SELECT created_by_principal_id::text FROM agent_keys WHERE principal_id=$1`, worker.PrincipalID).Scan(&owner); err != nil {
 			return err
