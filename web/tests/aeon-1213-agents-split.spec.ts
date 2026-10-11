@@ -162,6 +162,8 @@ for (const theme of ['light', 'dark'] as const) {
       await page.setViewportSize({ width: referenceWidth, height: 1000 })
       await expect(pane(page)).toHaveClass(/sheet/)
       await expect(dock(page)).toBeHidden()
+      // The visual viewport updates the phone sheet on its next animation frame.
+      if (referenceWidth === 400) await expect(pane(page)).toHaveCSS('height', '1000px')
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
       await page.screenshot({ path: info.outputPath(`${referenceWidth === 1000 ? '1000-sheet' : 'sheet'}-${referenceWidth}-${theme}.png`) })
       await page.setViewportSize({ width, height: 900 })
