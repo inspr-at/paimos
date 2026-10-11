@@ -2240,7 +2240,7 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 		}
 		for index := 0; index < len(entry.pending); {
 			control := entry.pending[index]
-			if control.ExpectedGeneration != "" && control.ExpectedGeneration != entry.harness.ID {
+			if entry.record.RoutineWorkspace != nil && control.ExpectedGeneration != "" && control.ExpectedGeneration != entry.harness.ID {
 				return ErrGeneration
 			}
 			entry.mu.Lock()
