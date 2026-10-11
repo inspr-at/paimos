@@ -149,7 +149,7 @@
         "Delayed empty-subject suite records zero Actions reads/flow facts after synchronization instead of the asserted linked run.",
         "Unconfigured completed failure redelivery changes the established flaky outcome and emits another flow event."
       ],
-      "runtime_result": "INCOMPLETE: three approved remote baseline attempts refused exit 3 for two occupied global remote slots. No negative-control commit was merged/cherry-picked onto the work branch."
+      "runtime_result": "INCOMPLETE: four approved remote baseline attempts refused exit 3 for two occupied global remote slots. No negative-control commit was merged/cherry-picked onto the work branch."
     },
     "blocking_findings": [
       {
@@ -195,11 +195,11 @@
       },
       {
         "command": "remote-test.sh <assigned-worktree> ./internal/delivery -count=1",
-        "result": "INCOMPLETE: first fixed-head attempt refused exit 3 for full CI pool 4/4."
+        "result": "INCOMPLETE: fixed-head attempt on 0af041959 refused exit 3 for full CI pool 4/4; retry on 9094450a1 refused exit 3 for two occupied global remote slots. Both commits have the same Go source."
       },
       {
         "command": "ci-static-locked.sh",
-        "result": "INCOMPLETE: first fixed-head attempt refused exit 3 for two occupied global remote slots; static and web prerequisites not executed."
+        "result": "INCOMPLETE: both approved attempts on the implementation/evidence heads refused exit 3 for two occupied global remote slots; static and web prerequisites not executed."
       },
       {
         "command": "git diff --check",
@@ -207,6 +207,7 @@
       }
     ],
     "web_scope": "No authored UI/web changes; no affected web unit test or browser spec. Full static web prerequisites await the approved runner.",
-    "handoff": "Worker completion is a local handoff, not ticket/release acceptance. Coordinator must reserve the expansion and complete durable retries; run the recorded negative control and final DB/static checks before accepting the fixes."
+    "handoff": "Worker completion is a local handoff, not ticket/release acceptance. Coordinator must reserve the expansion and complete durable retries; run the recorded negative control and final DB/static checks before accepting the fixes.",
+    "migration_request_result": "Posted the reservation request on AEON-1241; final recheck of the ticket and migration ledger still found no assigned number. Coordinator action is required; worker exits without waiting for input."
   }
 }
