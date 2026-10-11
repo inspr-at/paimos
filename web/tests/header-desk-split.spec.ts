@@ -331,10 +331,12 @@ for (const width of [601, 640, 721]) for (const theme of ['light', 'dark'] as co
 
 // Every width from just above phone width to where the places show their labels:
 // the trail never shows a cut chip, and it returns whole when the window widens.
-test('from 601 to 1180 px the trail never cuts a chip and returns whole when the window widens', async ({ page }) => {
+test('from 601 to 1180 px the trail never cuts a chip and returns whole when the window widens', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1180, height: 900 })
   await page.emulateMedia({ colorScheme: 'light' })
   await setup(page)
+  const dir = testInfo.outputPath('AEON-1214')
+  await mkdir(dir, { recursive: true })
   for (const trail of TRAILS.slice(0, 2)) {
     await page.setViewportSize({ width: 1180, height: 900 })
     await page.goto(trail.path)
@@ -347,6 +349,8 @@ test('from 601 to 1180 px the trail never cuts a chip and returns whole when the
       await settle(page)
       const fit = await trailFit(page)
       expect(fit.cut, `${trail.path} at ${width}: ${fit.parts.join(' ')}`).toEqual([])
+      // Each step the trail takes, for the reviewer's eye.
+      if (fit.parts.join(' ') !== seen.at(-1)) await page.screenshot({ path: join(dir, `trail-step-${trail.slug}-${width}.png`), clip: { x: 0, y: 0, width, height: 64 } })
       seen.push(fit.parts.join(' '))
     }
     // Narrow enough, whole segments went; they come back with the room.
