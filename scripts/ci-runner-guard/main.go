@@ -51,7 +51,7 @@ var reservedCIJobs = map[string]bool{
 	"cross-family": true, "gate/cross-family": true,
 	"go-test": true, "go-static": true, "go-timing": true, "runner-route": true,
 	"tier-plan": true,
-	"ci-plan":   true, "web-setup": true, "web-unit": true, "web-shard": true,
+	"ci-plan":   true, "web-catalogue": true, "web-setup": true, "web-unit": true, "web-shard": true,
 	"release-check-run": true, "e2e-run": true,
 }
 
@@ -531,14 +531,14 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			return fmt.Errorf("CI job %q must depend on the effective lane publisher", id)
 		}
 	}
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-catalogue", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
 		job := mapping(jobs[id])
 		if job == nil {
 			return fmt.Errorf("required CI job %q is missing", id)
 		}
 		condition := "needs.tier-plan.outputs.lane == 'full'"
 		switch id {
-		case "web-setup", "web-unit", "web-shard":
+		case "web-catalogue", "web-setup", "web-unit", "web-shard":
 			condition = "needs.tier-plan.outputs.lane != 'docs-only'"
 		}
 		// OPS-257 L4: the static layout (PR-only affected lane) skips exactly
@@ -647,12 +647,12 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 				return fmt.Errorf("go must gate every shard, static checks and timing: %v", job["needs"])
 			}
 		} else if context == "web" {
-			// OPS-257: web is the aggregate over setup and the sharded UI jobs, like go.
+			// Web joins strict catalogue validation, setup and both shard matrices.
 			if job["if"] != "always()" {
 				return fmt.Errorf("web must report failures even when its dependencies fail: %v", job["if"])
 			}
-			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-setup", "web-unit", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}) {
-				return fmt.Errorf("web must gate setup, every unit shard and every UI shard: %v", job["needs"])
+			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-catalogue", "web-setup", "web-unit", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}) {
+				return fmt.Errorf("web must gate setup, every unit shard, every UI shard and the strict catalogue: %v", job["needs"])
 			}
 		} else {
 			needs := []any{"ci-plan", context + "-run", "tree-reuse", "cache-prime"}
