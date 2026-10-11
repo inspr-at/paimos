@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
@@ -101,6 +102,8 @@ type CatalogEffort struct {
 type catalogProfile struct {
 	ID, Harness, Model, Family, Effort, Version string
 	Priority                                    *int
+	line                                        string
+	level                                       *int
 }
 
 func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
@@ -147,6 +150,9 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 		}
 		profiles, err := catalogProfiles(r.Context(), tx, role, family, now)
 		if err != nil {
+			return err
+		}
+		if err := catalogPriorities(r.Context(), tx, role, family, projectID, profiles); err != nil {
 			return err
 		}
 		out = buildCatalog(accounts, profiles, used, role, now)
@@ -204,7 +210,7 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 	// Use current model pauses and the review qualification rule. Catalog reads
 	// never initialize profiles or grant models dispatch authority.
 	rows, err := tx.Query(ctx, `
-		SELECT p.id::text,p.harness,p.model,p.family,p.effort,p.version,NULL::integer
+		SELECT p.id::text,p.harness,p.model,p.family,p.effort,p.version,aeon_models_line(p.family,p.harness,p.model),coalesce(p.registered_effort_level,d.effort_level)::integer
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id LEFT JOIN (`+ModelPausesSQL+`) r
 		  ON r.tenant_id=p.tenant_id AND r.profile_id=p.id
 		LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
@@ -222,7 +228,7 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 	profiles := []catalogProfile{}
 	for rows.Next() {
 		var p catalogProfile
-		if err := rows.Scan(&p.ID, &p.Harness, &p.Model, &p.Family, &p.Effort, &p.Version, &p.Priority); err != nil {
+		if err := rows.Scan(&p.ID, &p.Harness, &p.Model, &p.Family, &p.Effort, &p.Version, &p.line, &p.level); err != nil {
 			return nil, err
 		}
 		family := harnesslaunch.ModelFamily(p.Harness, p.Model)
@@ -232,6 +238,80 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 		profiles = append(profiles, p)
 	}
 	return profiles, rows.Err()
+}
+
+// catalogPriorities ranks profiles by the workspace Models walk for the role:
+// its row and situation order, then each step's route at the step's native
+// effort (else the nearest level, ties up; reviews take the highest). Quick
+// jobs and an Automatic review keep no saved order, so nothing is preselected.
+// A board beyond its bounds preselects nothing rather than failing the catalog.
+func catalogPriorities(ctx context.Context, tx pgx.Tx, role, authorFamily, project string, profiles []catalogProfile) error {
+	q := modelprefs.BoardQuery{Column: "other", Situation: "first"}
+	switch role {
+	case "scout", "mechanical":
+		return nil
+	case "build-hard":
+		q.Situation = "stuck"
+	case "review-gate", "review-gate-security":
+		q.Review, q.AuthorFamily = true, authorFamily
+	}
+	s, err := modelprefs.LoadBoardRouting(ctx, tx, nil, project)
+	if errors.Is(err, modelprefs.ErrBoardBounds) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	d := modelprefs.ResolveModelsBoard(s, q)
+	for n, step := range d.Steps {
+		if slices.Contains(d.Not, step.Line) {
+			continue
+		}
+		routes := map[string][]int{}
+		keys := []string{}
+		for i, p := range profiles {
+			if p.line != step.Line {
+				continue
+			}
+			key := p.Harness + "\x00" + p.Model
+			if _, ok := routes[key]; !ok {
+				keys = append(keys, key)
+			}
+			routes[key] = append(routes[key], i)
+		}
+		// A route lacking the step's effort name takes the nearest level to
+		// the line's named effort, as dispatch does (modelsRouteCandidates).
+		level := step.Level
+		for _, key := range keys {
+			for _, i := range routes[key] {
+				if step.Effort != "" && profiles[i].Effort == step.Effort && profiles[i].level != nil {
+					level = *profiles[i].level
+				}
+			}
+		}
+		for _, key := range keys {
+			exact, levels := false, []int{}
+			for _, i := range routes[key] {
+				exact = exact || step.Effort != "" && profiles[i].Effort == step.Effort
+				if profiles[i].level != nil {
+					levels = append(levels, *profiles[i].level)
+				}
+			}
+			nearest := modelprefs.NearestEffort(level, levels)
+			if q.Review {
+				exact, nearest = false, slices.Max(append(levels, -1))
+			}
+			for _, i := range routes[key] {
+				p := &profiles[i]
+				if exact && p.Effort != step.Effort || !exact && (p.level == nil || *p.level != nearest) || p.Priority != nil {
+					continue
+				}
+				priority := n
+				p.Priority = &priority
+			}
+		}
+	}
+	return nil
 }
 
 func buildCatalog(accounts []Account, profiles []catalogProfile, occupancy map[string]int, role string, now time.Time) Catalog {

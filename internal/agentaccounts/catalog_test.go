@@ -119,8 +119,11 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'other','1','claude','anthropic','other-model','high','standard') RETURNING id::text`, admin.TenantID).Scan(&wrongHarness); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2),($1,'build',2,$3),($1,'review-gate',1,$2)`, admin.TenantID, otherProfile, profile)
-		return err
+		// The Models orders the retired build and review ladders migrate into.
+		if err := dbtest.ModelsOrder(t.Context(), tx, admin.TenantID, "other", "first", "wait", otherProfile, profile); err != nil {
+			return err
+		}
+		return dbtest.ModelsOrder(t.Context(), tx, admin.TenantID, "other", "review", "wait", otherProfile)
 	})
 	register := func(key, daemon string) Account {
 		t.Helper()

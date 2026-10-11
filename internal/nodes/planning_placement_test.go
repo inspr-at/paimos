@@ -17,7 +17,6 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -84,16 +83,13 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 				return err
 			}
 		}
-		eu := "eu"
-		scope, err := modelprefs.SaveScope(t.Context(), tx, w.admin, modelprefs.Scope{Level: "person", PersonID: &w.admin.ID, Residency: &eu})
-		if err != nil {
+		// The person's own Models row for the kind, with EU residency (a
+		// pinned matrix cell and an EU person scope before migration 1275).
+		if err := dbtest.PersonModelsOrder(t.Context(), tx, w.admin.TenantID, w.admin.ID, "backend", "first", "default", grok); err != nil {
 			return err
 		}
-		kind, _, err := modelprefs.LookupKind(t.Context(), tx, "backend", "")
-		if err != nil {
-			return err
-		}
-		return modelprefs.PutRow(t.Context(), tx, w.admin, scope, kind.ID, modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": {Mode: "pinned", ProfileID: grok}}})
+		_, err := tx.Exec(t.Context(), `UPDATE model_pref_profiles SET residency='eu' WHERE person_id=$1`, w.admin.ID)
+		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +130,8 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 		}
 		for _, i := range []int{0, 1, 2, 4} {
 			v := byID[tickets[i].ID]
-			if v == nil || v.Route == nil || v.Route.Profile != "grok-pref-high" || v.Route.SetBy != "person" || !v.Route.Pinned || v.Route.Effort != "high" || v.Tokens.Calibration.TokensPerHour != 1_000_000 || *v.Tokens.Estimated != 2_000_000 || *v.Cost.ListEstimated != "2.000000" {
+			// Models has picks, not matrix modes: the person's own row is not "pinned".
+			if v == nil || v.Route == nil || v.Route.Profile != "grok-pref-high" || v.Route.SetBy != "person" || v.Route.Pinned || v.Route.Effort != "high" || v.Tokens.Calibration.TokensPerHour != 1_000_000 || *v.Tokens.Estimated != 2_000_000 || *v.Cost.ListEstimated != "2.000000" {
 				t.Fatalf("canonical You preview %d on %s: %+v", i, order, v)
 			}
 			if !reflect.DeepEqual(v, byID[tickets[4].ID]) {
@@ -232,9 +229,9 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 				e.gap = "area"
 			case role == "review-gate":
 				e.gap = "review_gate"
-			case role == "mechanical":
-				e.gap = "registry"
-			case role == "build":
+			case role == "build" || role == "mechanical":
+				// Quick jobs has no fast model here, so mechanical work runs
+				// the Default (approved Models v2 design c1).
 				e.profile, e.rate, e.cost = "claude-opus-high", 8_000_000, 16
 			case role == "build-hard":
 				e.profile, e.rate, e.cost = "codex-astra-xhigh", 2_000_000, 4
