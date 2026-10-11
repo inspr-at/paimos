@@ -40,6 +40,8 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [['j'], ['k']], label: 'Next and previous request or session' },
     { keys: [['a'], ['d']], label: 'Approve or deny a permission; resolve or dismiss a held request' },
     { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Open the selected session' },
+    { keys: [['f'], ['/']], label: 'Search sessions in this list' },
+    { keys: [[{ icon: 'shift', label: 'Shift' }, 'F']], label: 'Add a filter to the sessions' },
   ] },
   { title: 'Hours', rows: [
     { keys: [['l']], label: 'Log time' },

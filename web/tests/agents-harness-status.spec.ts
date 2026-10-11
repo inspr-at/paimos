@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Per-harness readiness and recovery on /agents (AEON-499), as the status line
-// and Needs you of AEON-782 show it: a blocked sign-in is a Needs you row with
-// its state, the one fix command (never a daemon-supplied one) and any short
-// hint; the grid cell carries the sign-in's own words; an offline or revoked
-// computer never presents an old report as live readiness.
+// Per-harness readiness and recovery on /agents (AEON-499), as the accounts chip's popover
+// shows it (AEON-1209; the status line of AEON-782): the line counts what is ready and names
+// the first thing that blocks agents; the popover leads with that sign-in, its state, the one
+// fix command (never a daemon-supplied one) and any short hint. An offline or revoked computer
+// never presents an old report as live readiness. The sign-ins table lives in Settings › Computers.
 import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -25,10 +25,10 @@ function computerReport() {
   }
 }
 type Report = ReturnType<typeof computerReport> & Record<string, unknown>
-const section = (page: Page) => page.getByRole('region', { name: 'Accounts and computers' })
-/** The Needs you row that names this vendor or account. */
-const row = (page: Page, text: string) => section(page).locator('.att-row').filter({ hasText: text })
-const cell = (page: Page, name: string) => section(page).getByRole('link', { name })
+const section = (page: Page) => page.getByRole('dialog', { name: 'Accounts and computers' })
+/** The popover's lead: the first thing that blocks agents, when it names this vendor or account. */
+const row = (page: Page, text: string) => section(page).locator('.acc-fix').filter({ hasText: text })
+const line = (page: Page) => section(page).locator('.acc-state')
 /** The page's poll reads the computers again (the online event refreshes every list). */
 const refresh = (page: Page) => page.evaluate(() => window.dispatchEvent(new Event('online')))
 const fits = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
@@ -47,7 +47,8 @@ async function setup(page: Page, report: Report) {
 }
 async function open(page: Page) {
   await page.goto('/agents')
-  await expect(section(page).getByRole('table')).toBeVisible()
+  await page.locator('.cap-row .acc-chip').click()
+  await expect(line(page)).toBeVisible()
 }
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
@@ -62,23 +63,23 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(row(page, 'Claude')).toContainText('Dependency needs repair')
     await expect(row(page, 'Claude')).toContainText('run aeon-agentd repin --harness claude')
     await expect(section(page)).not.toContainText('ignored daemon-supplied command')
-    await expect(cell(page, 'Codex on studio: Ready')).toBeVisible()
-    await expect(section(page).locator('.fs-sum')).toContainText('1 of 2 ready · Claude needs attention on studio')
+    await expect(line(page)).toContainText('1 of 2 ready · Claude needs attention on studio')
+    await expect(page.locator('.cap-row .acc-chip .flag')).toHaveText('1 needs you')
     expect(await fits(page)).toBe(true)
     if (process.env.HARNESS_STATUS_SHOTS) {
       mkdirSync(process.env.HARNESS_STATUS_SHOTS, { recursive: true })
       await section(page).screenshot({ path: join(process.env.HARNESS_STATUS_SHOTS, `agents-harnesses-${width}-${theme}.png`), animations: 'disabled' })
     }
-    // A hold that settles by itself is not a request for action: the row goes, the cell says why.
+    // A hold that settles by itself is not a request for action: the lead goes and nothing is flagged.
     report.harness_details.claude = { state: 'blocked', reason: 'repin_pending', fix: 'must not be shown' }
     await refresh(page)
-    await expect(cell(page, 'Claude on studio: Waiting for repin')).toBeVisible()
-    await expect(section(page).locator('.att-row')).toHaveCount(0)
+    await expect(section(page).locator('.acc-fix')).toHaveCount(0)
+    await expect(page.locator('.cap-row .acc-chip .flag')).toHaveCount(0)
+    await expect(section(page)).not.toContainText('must not be shown')
     report.harness_statuses.claude = 'ready'
     report.harness_details.claude = { state: 'ready' }
     await refresh(page)
-    await expect(cell(page, 'Claude on studio: Ready')).toBeVisible()
-    await expect(section(page).getByRole('heading', { name: 'Nothing needs you' })).toBeVisible()
+    await expect(line(page)).toContainText('All 2 ready')
     expect(calls.every(call => call.method === 'GET')).toBe(true)
     expect(errors).toEqual([])
   })
@@ -88,16 +89,15 @@ test('offline and revoked computers do not present prior harness reports as live
   const report: Report = { ...computerReport(), connectivity: 'offline' }
   await setup(page, report)
   await open(page)
-  // Never a problem row from an old report, and never Ready on an offline computer.
-  await expect(section(page).locator('.att-row')).toHaveCount(0)
-  await expect(section(page).getByText('Ready', { exact: true })).toHaveCount(0)
-  await expect(section(page).getByRole('link', { name: /^Claude on studio: Last reported: / })).toBeVisible()
-  await expect(section(page).locator('thead').getByText('studio')).toBeVisible()
+  // Never a problem from an old report, and never ready on an offline computer.
+  await expect(section(page).locator('.acc-fix')).toHaveCount(0)
+  await expect(line(page)).toContainText('0 of 2 ready')
+  await expect(section(page).locator('.tile[data-part="computers"]')).toContainText('0 of 1 online')
   report.computer_state = 'revoked'
   await refresh(page)
-  // A revoked computer is named as removed, with no harness reports.
-  await expect(section(page).locator('thead')).toContainText('Removed')
-  await expect(section(page).getByText('Ready', { exact: true })).toHaveCount(0)
+  // A revoked computer reports no harnesses: still nothing ready, and the tile names the removal.
+  await expect(line(page)).toContainText('0 of 2 ready')
+  await expect(section(page).locator('.tile[data-part="computers"]')).toContainText('studio removed · cleanup pending')
 })
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) for (const [reason, command] of [
@@ -136,7 +136,8 @@ for (const [width, theme] of [[1600, 'light'], [390, 'dark']] as const) {
       })),
     } as unknown as Report)
     await open(page)
-    await expect(section(page).locator('.att-row')).toHaveCount(1)
+    await expect(line(page)).toContainText('1 of 2 ready')
+    await expect(line(page)).not.toContainText('+1')
     await expect(row(page, 'Codex')).toContainText('Pin changed')
     await expect(row(page, 'Codex')).toContainText('run aeon-agentd add-harness --harness codex')
     await expect(section(page)).not.toContainText('untrusted')
@@ -162,13 +163,14 @@ test('six blocked accounts of seven stay blocked when the list is truncated', as
   } as unknown as Report
   await setup(page, report)
   await open(page)
-  await expect(section(page).locator('.att-row').filter({ hasText: 'Pin changed' })).toHaveCount(6)
-  await expect(section(page).locator('.fs-sum')).toContainText('1 of 7 ready')
+  await expect(line(page)).toContainText('1 of 7 ready')
+  await expect(line(page)).toContainText('· +5')
+  await expect(section(page).locator('.acc-fix')).toContainText('Pin changed')
   report.harness_details.codex = { state: 'ready', attention_count: 6, attention_truncated: true, attention_accounts: ids.slice(1, 6).map(account_id => ({ account_id, reason: 'pin_drifted' })) }
   await refresh(page)
-  // The list is cut: nobody is called Ready that the report cannot vouch for.
-  await expect(section(page).locator('.att-row')).toHaveCount(7)
-  await expect(section(page).getByText('Ready', { exact: true })).toHaveCount(0)
+  // The list is cut: nobody is called ready that the report cannot vouch for.
+  await expect(line(page)).toContainText('0 of 7 ready')
+  await expect(line(page)).toContainText('· +6')
   expect(await fits(page)).toBe(true)
   expect(errors).toEqual([])
 })
@@ -230,10 +232,11 @@ for (const [width, theme] of [[1600, 'light'], [390, 'dark']] as const) {
     Object.assign(report.enrollments[0]!, { verification_state: 'failed', verification_error: 'verification_unavailable', verification_reason: 'adapter_unsupported' })
     await setup(page, report)
     await open(page)
-    await expect(row(page, 'Codex')).toContainText("Codex was approved but isn't set up on this computer")
+    // The popover leads with the first blocker; the line counts the rest (the full list is in Settings › Computers).
     await expect(row(page, 'Claude')).toContainText("Claude verification couldn't run on this computer")
     await expect(row(page, 'Claude')).toContainText('installed adapter cannot enforce safe verification')
-    await expect(row(page, 'Codex')).toContainText('run aeon-agentd add-harness --harness codex')
+    await expect(line(page)).toContainText('· +1')
+    await expect(page.locator('.cap-row .acc-chip .flag')).toHaveText('2 need you')
     expect(await fits(page)).toBe(true)
   })
 }
@@ -244,15 +247,15 @@ for (const width of [1600, 390]) test(`a computer that needs an update says so a
   const report = { ...computerReport(), harness_statuses: { claude: 'ready', codex: 'ready' }, harness_details: { claude: { state: 'ready' }, codex: { state: 'ready' } }, agent_compatibility: { status: 'compatible', action: '' } }
   await setup(page, report)
   await open(page)
-  await expect(section(page).locator('.att-row')).toHaveCount(0)
+  await expect(section(page).locator('.acc-fix')).toHaveCount(0)
   for (const status of ['update_required', 'protocol_mismatch']) {
     Object.assign(report.agent_compatibility, { status, action: advice })
     await refresh(page)
     await expect(row(page, 'studio needs an update')).toContainText(advice)
-    await expect(section(page).locator('.fs-sum')).toContainText('studio needs an update')
+    await expect(line(page)).toContainText('studio needs an update')
   }
   Object.assign(report.agent_compatibility, { status: 'unknown', action: '' })
   await refresh(page)
-  await expect(section(page).locator('.att-row')).toHaveCount(0)
+  await expect(section(page).locator('.acc-fix')).toHaveCount(0)
   expect(await fits(page)).toBe(true)
 })

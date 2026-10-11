@@ -6,7 +6,9 @@ import { startHold } from '../../lib/pressHold'
 import AppIcon from '../AppIcon.vue'
 
 // interrupt changes when a save conflicts: an active hold ends and needs a fresh press.
-const props = defineProps<{ value: HarnessLimit | undefined; effective: number; label: string; viewer: string; revision: string | null; total?: boolean; interrupt?: number }>()
+// unit (AEON-1209): the light dial unit of the capacity row. The mark and flag slots sit
+// beside the number; − and + are muted, keep their room and show on hover or focus.
+const props = defineProps<{ value: HarnessLimit | undefined; effective: number; label: string; viewer: string; revision: string | null; total?: boolean; interrupt?: number; unit?: boolean }>()
 // hold: true while − or + is held (pointer or arrow key); the parent saves only once it is false again.
 const emit = defineEmits<{ step: [delta: number]; edit: [value: HarnessLimit]; boundary: [mode: 'off' | 'none']; hold: [active: boolean] }>()
 const editing = ref(false), draft = ref(''), input = ref<HTMLInputElement>(), valueButton = ref<HTMLButtonElement>(), group = ref<HTMLElement>()
@@ -137,8 +139,9 @@ onBeforeUnmount(release)
 </script>
 
 <template>
-  <span ref="group" class="f-pm" :class="{ 'f-pm-total': total, [`is-${mode}`]: !total }" @keydown="keys" @keyup="keyUp" @focusout="focusOut">
-    <button type="button" class="pm dec" :aria-label="destination(-1)" :data-tip="destination(-1)" :disabled="downDisabled" @pointerdown="pointerDown($event, -1)" @pointerup="release" @pointercancel="release" @pointerleave="release" @contextmenu.prevent @click="click($event, -1)"><AppIcon name="minus" :size="total ? 12 : 10" /></button>
+  <span ref="group" class="f-pm" :class="{ 'f-pm-total': total, [`is-${mode}`]: !total, du: unit }" @keydown="keys" @keyup="keyUp" @focusout="focusOut">
+    <button type="button" class="pm dec" :class="{ 'dv dm': unit }" :aria-label="destination(-1)" :data-tip="destination(-1)" :disabled="downDisabled" @pointerdown="pointerDown($event, -1)" @pointerup="release" @pointercancel="release" @pointerleave="release" @contextmenu.prevent @click="click($event, -1)"><AppIcon name="minus" :size="unit ? 11 : total ? 12 : 10" /></button>
+    <span v-if="unit" class="du-mark"><slot name="mark" /></span>
     <span class="value-slot" :class="total ? 'f-num' : 'f-n lim-num'">
       <input v-if="editing" ref="input" v-model="draft" class="f-edit" type="text" inputmode="numeric" maxlength="64" :placeholder="!total && mode === 'none' ? '∞' : undefined" :aria-label="`${label}: type ${total ? '0 to 30' : 'a limit; empty for no own limit, 0 for off'}`" @blur="finishEdit()">
       <button v-else ref="valueButton" type="button" class="value" :aria-label="editTip" :data-tip="editTip" @click="startEdit">
@@ -146,7 +149,8 @@ onBeforeUnmount(release)
         <template v-else>{{ value === 'off' ? 'off' : value }}</template>
       </button>
     </span>
-    <button type="button" class="pm inc" :aria-label="destination(1)" :data-tip="destination(1)" :disabled="upDisabled" @pointerdown="pointerDown($event, 1)" @pointerup="release" @pointercancel="release" @pointerleave="release" @contextmenu.prevent @click="click($event, 1)"><AppIcon name="plus" :size="total ? 12 : 10" /></button>
+    <slot v-if="unit" name="flag" />
+    <button type="button" class="pm inc" :class="{ 'dv dp': unit }" :aria-label="destination(1)" :data-tip="destination(1)" :disabled="upDisabled" @pointerdown="pointerDown($event, 1)" @pointerup="release" @pointercancel="release" @pointerleave="release" @contextmenu.prevent @click="click($event, 1)"><AppIcon name="plus" :size="unit ? 11 : total ? 12 : 10" /></button>
     <span class="sr-only" aria-live="polite">{{ announced }}</span>
   </span>
 </template>
@@ -174,4 +178,52 @@ onBeforeUnmount(release)
 }
 @media (pointer: coarse) { .f-pm { --pm-size: 44px; --value-width: 44px; --value-height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .pm { transition: none; } }
+
+/* The light dial unit (AEON-1209, design AEON-1196 r7): no outline and no fill; the mark and
+   its number sit 4 px apart and bind the unit by proximity. − and + are muted, keep their room
+   and show on hover or focus, so nothing moves. The number keeps a fixed slot, so a step never
+   moves a neighbour. */
+.f-pm.du { --pm-size: 20px; --value-width: 22px; --value-height: 28px; --value-size: 13.5px; position: relative; height: 28px; gap: 0; border-radius: 999px; color: var(--ink); }
+.du .du-mark { position: relative; z-index: 3; display: inline-grid; place-items: center; flex: none; margin: 0 4px 0 2px; }
+.du .value-slot, .du .f-num { position: relative; z-index: 3; color: var(--ink); font-weight: 650; }
+.du.is-none .value-slot, .du.is-off .value-slot { color: var(--ink-2); font-weight: 600; }
+.du .value { place-items: center start; padding: 0 1px; }
+.du .pm { position: relative; z-index: 4; background: transparent; box-shadow: none; color: var(--ink-3); opacity: 0; transition: opacity .15s ease, background-color .15s ease; }
+.du .pm:disabled { opacity: 0; color: color-mix(in srgb, var(--ink-3) 45%, transparent); }
+.du:is(:focus-within, .open) .pm { opacity: 1; }
+@media (hover: hover) {
+  .du:hover .pm { opacity: 1; }
+  .du .pm:hover:not(:disabled) { background: var(--seg-on); color: var(--teal-ink); }
+}
+/* Touch: the wide row always shows − and +; each has a 44 px reach without growing. */
+@media (pointer: coarse) {
+  .f-pm.du { --pm-size: 28px; --value-width: 22px; --value-height: 28px; height: 36px; }
+  .du .pm, .du .pm:disabled { opacity: 1; }
+  .du .pm::after, .du .value::after { content: ''; position: absolute; }
+  .du .pm::after { inset: -8px; }
+  .du .value { position: relative; }
+  .du .value::after { inset: -8px -11px; }
+}
+/* A tight capacity row (under 900 px) shows only the units. Hover, focus or a tap lifts THAT
+   unit onto a light plate above its neighbours, with − and + at its ends; nothing beside it
+   moves (AEON-541). The plate floats on a shadow, never an outline. */
+@container cap (max-width: 899px) {
+  .du .pm, .du .pm:disabled { position: absolute; top: 50%; translate: 0 -50%; opacity: 0; pointer-events: none; }
+  .du .dec { left: -21px; }
+  .du .inc { right: -21px; }
+  .du::before { content: ''; position: absolute; z-index: 2; inset: -4px -25px; border-radius: 999px; background: var(--surface-raised); box-shadow: var(--shadow-pop); opacity: 0; transform: scale(.9); transition: opacity .15s ease, transform .15s ease; pointer-events: none; }
+  .du:is(:focus-within, .open) { z-index: 6; }
+  .du:is(:focus-within, .open)::before { opacity: 1; transform: none; }
+  .du:is(:focus-within, .open) .pm { opacity: 1; pointer-events: auto; }
+  .du:is(:focus-within, .open) .pm:disabled { opacity: .45; }
+}
+@media (hover: hover) {
+  @container cap (max-width: 899px) {
+    .du:hover { z-index: 6; }
+    .du:hover::before { opacity: 1; transform: none; }
+    .du:hover .pm { opacity: 1; pointer-events: auto; }
+    .du:hover .pm:disabled { opacity: .45; }
+  }
+}
+@media (prefers-reduced-motion: reduce) { .du .pm, .du::before { transition: none; } }
 </style>

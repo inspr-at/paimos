@@ -102,7 +102,9 @@ function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
 // Pages with their own list search keep '/'; everywhere else it opens the palette.
-const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || route.path === '/business/quotes' || route.path === '/knowledge' || route.path === '/tickets' || (!!projectKey.value && route.query.view !== 'full' && !knowledgeSlug.value))
+// /agents (and a session open on it) searches its Sessions list with / (AEON-1209).
+const agentsPage = computed(() => /^\/agents(\/(?!usage$|register-agent$)[^/]+)?$/.test(route.path))
+const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || route.path === '/business/quotes' || route.path === '/knowledge' || route.path === '/tickets' || agentsPage.value || (!!projectKey.value && route.query.view !== 'full' && !knowledgeSlug.value))
 function shortcut(event: KeyboardEvent) {
   if (!globalSearch.value) return
   const isK = event.key.toLowerCase() === 'k' || event.code === 'KeyK'

@@ -48,7 +48,13 @@ async function setup(page: Page, state: keyof typeof states = 'wind', folded = f
   await page.route('**/api/queue', route => route.fulfill({ json: { items: queue, manual_order: false, capacity: {} } }))
   return { work, calls, data }
 }
-const dial = (page: Page) => page.getByRole('region', { name: 'Agents at once' })
+// AEON-1209: folded, the dial is the light control in the capacity row; unfolded, its body is a
+// card under that row. Child lookups search both; a whole-element check names the one it means.
+const dial = (page: Page) => page.locator(':is(.cdial, .dial-card)')
+const control = (page: Page) => page.locator('.cdial')
+const body = (page: Page) => page.locator('.dial-card')
+/** A tight capacity row (under 900 px) lifts a unit's − and + onto its plate on hover first. */
+async function lift(page: Page, unit: string, width: number) { if (width < 900) await control(page).locator(`[data-unit="${unit}"] .du-mark`).hover() }
 const totalMore = (page: Page) => dial(page).getByRole('button', { name: 'One agent more at once' })
 const totalFewer = (page: Page) => dial(page).getByRole('button', { name: 'One agent fewer at once' })
 
@@ -73,8 +79,8 @@ test('AEON-720: idle dial reports real account room and explains unknown reading
     for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
       await page.setViewportSize({ width, height: 1800 })
       await page.emulateMedia({ colorScheme: theme })
-      expect(await card.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
-      await card.screenshot({ path: `${shots}/${width}-${theme}-idle-${reading}.png`, animations: 'disabled' })
+      expect(await body(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+      await body(page).screenshot({ path: `${shots}/${width}-${theme}-idle-${reading}.png`, animations: 'disabled' })
     }
     await page.setViewportSize({ width: 1440, height: 1800 })
   }
@@ -88,7 +94,7 @@ test('AEON-720: idle dial reports real account room and explains unknown reading
   await capture()
   await expectStableControls({
     controls: { more: totalMore(page), fewer: totalFewer(page), fold: card.locator('.fs-tog'), choices: card.locator('[data-key="codex"] .seg'), row: card.locator('[data-key="codex"]') },
-    scrollAreas: { card },
+    scrollAreas: { body: body(page) },
     interactions: [
       { name: 'reading disappears during a poll', run: async () => {
         const before = capacityReads
@@ -141,28 +147,28 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect(codex).toBeVisible()
     await expect(card.locator('.f-num')).toHaveText(String(states[state].total))
     await expect(card.locator('.f-bot')).toHaveClass(/busy/)
-    expect(await card.locator('.f-dial').evaluate(el => el.firstElementChild?.classList.contains('f-bot'))).toBe(true)
+    await expect(control(page).locator('[data-unit="total"] .du-mark .f-bot')).toBeVisible()
     expect(await card.locator('.f-bot').evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
     const expected = { wind: '16 running · winding down to 5', room: '3 running · room for 5 more', zero: '2 running · nothing new starts', off: '4 running · room for 4 more', full: '3 running · accounts full' }
     await expect(card.locator('.f-status')).toContainText(expected[state])
     if (shots) {
       mkdirSync(shots, { recursive: true })
-      const bounds = (await card.boundingBox())!
+      const bounds = (await body(page).boundingBox())!
       // An element screenshot inside the app's scroller otherwise clips long
       // phone details. Expand only the capture height, then restore the guard's viewport.
       await page.setViewportSize({ width, height: Math.ceil(Math.max(1000, bounds.y + bounds.height + 100)) })
-      await card.screenshot({ path: `${shots}/${width}-${theme}-${state}-unfolded.png`, animations: 'disabled' })
+      await body(page).screenshot({ path: `${shots}/${width}-${theme}-${state}-unfolded.png`, animations: 'disabled' })
       await page.setViewportSize({ width, height: 1000 })
       await fold.click()
-      await card.screenshot({ path: `${shots}/${width}-${theme}-${state}-folded.png`, animations: 'disabled' })
+      await page.locator('.cap-row').screenshot({ path: `${shots}/${width}-${theme}-${state}-folded.png`, animations: 'disabled' })
       await fold.click()
     }
     await expectStableControls({
-      controls: { more, fewer, fold, dial: card.locator('.f-dial'), total: card.locator('.f-num'), row: codex, selectors: codex.getByRole('radiogroup'), none: codex.getByRole('radio', { name: 'No limit', exact: true }), max: codex.getByRole('radio', { name: 'At most', exact: true }), off: codex.getByRole('radio', { name: 'Off', exact: true }), stepper: codex.locator('.f-pm'), minus: codex.locator('.pm').first(), plus: codex.locator('.pm').last(), value: codex.locator('.f-n'), mark: codex.locator('.f-mode') },
-      scrollAreas: { card, rows: card.locator('.rows') },
+      controls: { more, fewer, fold, dial: control(page).locator('[data-unit="total"]'), total: card.locator('.f-num'), row: codex, selectors: codex.getByRole('radiogroup'), none: codex.getByRole('radio', { name: 'No limit', exact: true }), max: codex.getByRole('radio', { name: 'At most', exact: true }), off: codex.getByRole('radio', { name: 'Off', exact: true }), stepper: codex.locator('.f-pm'), minus: codex.locator('.pm').first(), plus: codex.locator('.pm').last(), value: codex.locator('.f-n'), mark: codex.locator('.f-mode') },
+      scrollAreas: { body: body(page), rows: card.locator('.rows') },
       interactions: [
-        { name: 'cross total digit boundary', run: async () => { for (let n = states[state].total; n < 10; n++) await more.click(); await expect(card.locator('.f-num')).toHaveText('10') } },
-        { name: 'lower ceiling', run: async () => { await fewer.click(); await expect(card.locator('.f-num')).toHaveText('9') } },
+        { name: 'cross total digit boundary', run: async () => { for (let n = states[state].total; n < 10; n++) { await lift(page, 'total', width); await more.click() } await expect(card.locator('.f-num')).toHaveText('10') } },
+        { name: 'lower ceiling', run: async () => { await lift(page, 'total', width); await fewer.click(); await expect(card.locator('.f-num')).toHaveText('9') } },
         ...['Off', 'No limit', 'At most'].map(name => ({ name: `mode ${name}`, run: async () => { await codex.getByRole('radio', { name, exact: true }).click(); await expect(codex.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true') } })),
         { name: 'type total without moving its slot', run: async () => { await card.locator('.f-num .value').click(); await expect(card.locator('.f-num input')).toBeFocused() } },
         { name: 'apply total on Enter', run: async () => { await card.locator('.f-num input').fill('10'); await card.locator('.f-num input').press('Enter'); await expect(card.locator('.f-num')).toHaveText('10') } },
@@ -177,40 +183,30 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       ],
     })
     await expectStableControls({
-      controls: { more, fewer, fold, dial: card.locator('.f-dial') }, scrollAreas: { card },
+      controls: { more, fewer, fold, dial: control(page).locator('[data-unit="total"]'), chip: page.locator('.cap-row .acc-chip') }, scrollAreas: { control: control(page) },
       interactions: [
-        { name: 'fold', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'false') } },
-        { name: 'unfold', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'true') } },
+        { name: 'fold', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'false'); await expect(body(page)).toHaveCount(0) } },
+        { name: 'unfold', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'true'); await expect(body(page)).toBeVisible() } },
       ],
     })
     await fold.click()
-    const phone = width < 600
-    const chip = card.locator('[data-harness="codex"]'), cycle = chip.locator('.f-mode'), dec = chip.locator('.pm').first(), inc = chip.locator('.pm').last()
-    if (phone) {
-      // Phones show each harness as its icon with the count; the steppers live in the open dial.
-      const ph = chip.locator('.f-ph')
-      expect((await ph.boundingBox())!.height).toBeGreaterThanOrEqual(44)
-      await expectStableControls({
-        controls: { more, fewer, fold, chips: card.locator('.f-chips'), chip, ph, claude: card.locator('[data-harness="claude"]'), live: card.locator('.f-live') }, scrollAreas: { card, chips: card.locator('.f-chips') },
-        interactions: [{ name: 'phone total up', run: () => more.click() }, { name: 'phone total down', run: () => fewer.click() }],
-      })
-    } else {
-      await expectStableControls({
-        controls: { more, fewer, fold, chips: card.locator('.f-chips'), chip, cycle, dec, inc, claude: card.locator('[data-harness="claude"]'), cursor: card.locator('[data-harness="cursor"]'), value: chip.locator('.f-n') }, scrollAreas: { card, chips: card.locator('.f-chips') },
-        interactions: [
-          { name: 'compact plus', run: () => inc.click() }, { name: 'compact minus', run: () => dec.click() },
-          ...[1, 2, 3].map(n => ({ name: `cycle harness ${n}`, run: () => cycle.click() })),
-          { name: 'folded draft starts in its value slot', run: () => chip.locator('.value').click() },
-          { name: 'typed zero gives off on blur', run: async () => { await chip.locator('input').fill('0'); await more.focus(); await expect(chip.locator('.f-n')).toHaveText('off') } },
-          { name: 'off plus gives one', run: async () => { await inc.click(); await expect(chip.locator('.f-n')).toHaveText('1') } },
-          { name: 'one minus gives off', run: async () => { await dec.click(); await expect(chip.locator('.f-n')).toHaveText('off') } },
-          { name: 'empty value starts in its slot', run: () => chip.locator('.value').click() },
-          { name: 'empty value gives no own limit', run: async () => { await chip.locator('input').fill(''); await chip.locator('input').press('Enter'); await expect(chip.locator('.value svg')).toBeVisible() } },
-          { name: 'cancel a draft', run: async () => { await chip.locator('.value').click(); await chip.locator('input').fill('6'); await chip.locator('input').press('Escape'); await expect(chip.locator('.value svg')).toBeVisible(); await expect(chip.locator('.value')).toBeFocused() } },
-        ],
-      })
-    }
-    if (!phone) expect((await inc.boundingBox())!.width).toBe(22)
+    // Folded, each harness is a light unit in the capacity row; a tight row lifts it onto its plate first.
+    const chip = control(page).locator('[data-harness="codex"]'), dec = chip.locator('.pm').first(), inc = chip.locator('.pm').last()
+    const step = async (button: typeof inc) => { await lift(page, 'codex', width); await button.click() }
+    await expectStableControls({
+      controls: { more, fewer, fold, chip, dec, inc, claude: control(page).locator('[data-harness="claude"]'), cursor: control(page).locator('[data-harness="cursor"]'), value: chip.locator('.f-n') }, scrollAreas: { control: control(page) },
+      interactions: [
+        { name: 'compact plus', run: () => step(inc) }, { name: 'compact minus', run: () => step(dec) },
+        { name: 'folded draft starts in its value slot', run: () => chip.locator('.value').click() },
+        { name: 'typed zero gives off on blur', run: async () => { await chip.locator('input').fill('0'); await more.focus(); await expect(chip.locator('.f-n')).toHaveText('off') } },
+        { name: 'off plus gives one', run: async () => { await step(inc); await expect(chip.locator('.f-n')).toHaveText('1') } },
+        { name: 'one minus gives off', run: async () => { await step(dec); await expect(chip.locator('.f-n')).toHaveText('off') } },
+        { name: 'empty value starts in its slot', run: () => chip.locator('.value').click() },
+        { name: 'empty value gives no own limit', run: async () => { await chip.locator('input').fill(''); await chip.locator('input').press('Enter'); await expect(chip.locator('.value svg')).toBeVisible() } },
+        { name: 'cancel a draft', run: async () => { await chip.locator('.value').click(); await chip.locator('input').fill('6'); await chip.locator('input').press('Escape'); await expect(chip.locator('.value svg')).toBeVisible(); await expect(chip.locator('.value')).toBeFocused() } },
+      ],
+    })
+    if (width >= 900) expect((await inc.boundingBox())!.width).toBe(20)
     await expect.poll(() => work.preferences['ui.agents.sections']).toMatchObject({ dial: false })
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
     expect(calls.filter(c => c.method !== 'GET' && /harness-sessions|\/controls|\/stop|\/interrupt/.test(c.path))).toEqual([])
@@ -235,7 +231,7 @@ test('fold memory survives reload; mode and step keys preserve browser shortcuts
   await max.focus(); await max.press('ArrowRight')
   await expect(row.getByRole('radio', { name: 'Off', exact: true })).toBeFocused()
   await expect(row.getByRole('radio', { name: 'Off', exact: true })).toHaveAttribute('aria-checked', 'true')
-  const axe = await new AxeBuilder({ page }).include('.working').analyze()
+  const axe = await new AxeBuilder({ page }).include('.cap-row').include('.dial-card').analyze()
   expect(axe.violations.map(v => v.id)).toEqual([])
 })
 
@@ -245,7 +241,8 @@ test('a failed ceiling write restores the confirmed value and keeps the live fee
   await page.goto('/agents')
   const card = dial(page), more = totalMore(page)
   await expect(card.locator('.f-num')).toHaveText('5')
-  await expectStableControls({ controls: { more, fewer: totalFewer(page), fold: card.locator('.fs-tog'), live: card.locator('.f-live > svg') }, interactions: [{ name: 'write failure', run: async () => { await more.click(); await expect(card.locator('.f-live')).toContainText('Couldn’t save'); await expect(card.locator('.f-num')).toHaveText('5') } }] })
+  // AEON-1209: the failure is said by the red dot, its status and a toast; the live words, and the chip beside the dial, stay put.
+  await expectStableControls({ controls: { more, fewer: totalFewer(page), fold: card.locator('.fs-tog'), live: card.locator('.f-live > svg'), chip: page.locator('.cap-row .acc-chip') }, interactions: [{ name: 'write failure', run: async () => { await more.click(); await expect(card.locator('.f-status')).toContainText('Couldn’t save'); await expect(card.locator('.f-num')).toHaveText('5'); await expect(card.locator('.f-live')).toHaveClass(/failed/); await expect(page.locator('.toast').filter({ hasText: 'Couldn’t save' })).toBeVisible() } }] })
   await expect(card.locator('.f-now')).toContainText('16 are running')
 })
 
@@ -262,7 +259,7 @@ test('zero and thirty are real ceilings; idle glyph rests and disabled boundarie
   expect(await card.locator('.f-bot').evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
   // Only the released value is saved, after the settle time; wait for that save to land.
   const savedOne = page.waitForResponse(r => r.request().method() === 'PUT' && r.url().endsWith('/api/preferences/agents.working') && r.request().postDataJSON().value.total === 1)
-  await expectStableControls({ controls: { more, fewer, fold: card.locator('.fs-tog'), unit: card.locator('.f-unit') }, interactions: [{ name: 'one to zero', run: async () => { await fewer.click(); await expect(card.locator('.f-num')).toHaveText('0'); await expect(more).toBeFocused() } }, { name: 'zero to one', run: async () => { await more.click(); await expect(card.locator('.f-num')).toHaveText('1') } }] })
+  await expectStableControls({ controls: { more, fewer, fold: card.locator('.fs-tog'), unit: control(page).locator('[data-unit="total"]') }, interactions: [{ name: 'one to zero', run: async () => { await fewer.click(); await expect(card.locator('.f-num')).toHaveText('0'); await expect(more).toBeFocused() } }, { name: 'zero to one', run: async () => { await more.click(); await expect(card.locator('.f-num')).toHaveText('1') } }] })
   await savedOne
   await expect.poll(() => work.preferences['agents.working']).toMatchObject({ total: 1 })
   work.preferences['agents.working'] = { total: 29, limits: { codex: 30 } }
@@ -316,11 +313,11 @@ test('save failure remains visible after a successful scheduled poll', async ({ 
   await totalMore(page).click()
   // The released value is saved once the settle time has passed.
   await page.clock.runFor(SETTLE_MS)
-  await expect(dial(page).locator('.f-live')).toContainText('Couldn’t save')
+  await expect(dial(page).locator('.f-status')).toContainText('Couldn’t save')
   const initialReads = reads
   await page.clock.fastForward(15_000)
   await expect.poll(() => reads).toBeGreaterThan(initialReads)
-  await expect(dial(page).locator('.f-live')).toContainText('Couldn’t save')
+  await expect(dial(page).locator('.f-status')).toContainText('Couldn’t save')
 })
 
 test('a conflicted save re-reads newer limits before the next deliberate change', async ({ page }) => {
@@ -345,7 +342,7 @@ test('a conflicted save re-reads newer limits before the next deliberate change'
   await page.goto('/agents')
   await expect(dial(page).locator('.f-num')).toHaveText('8')
   await totalFewer(page).click()
-  await expect(dial(page).locator('.f-live')).toContainText('changed elsewhere')
+  await expect(dial(page).locator('.f-status')).toContainText('changed elsewhere')
   await expect(dial(page).locator('.f-num')).toHaveText('7')
   await expect(dial(page).locator('[data-key="claude"]').getByRole('radio', { name: 'Off', exact: true })).toHaveAttribute('aria-checked', 'true')
   await totalFewer(page).click()
@@ -377,7 +374,8 @@ for (const width of [1440, 390]) test(`all seven harnesses fit at ${width} and r
   await expect(card.locator('.f-chip')).toHaveCount(7)
   await expect(card.locator('[data-harness="codex"] .f-n')).toHaveText('30')
   await expect(card.locator('[data-harness="gemini"] .f-n')).toHaveText('0')
-  expect(await card.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+  expect(await control(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+  expect(await page.locator('main').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
   await expectStableControls({ controls: { more: totalMore(page), fewer: totalFewer(page), fold: card.locator('.fs-tog') }, interactions: [{ name: 'unfold seven harnesses', run: () => card.locator('.fs-tog').click() }] })
   await expect(card.locator('.rows > li')).toHaveCount(7)
   await expect(card.locator('[data-key="claude"] .lim-num')).toHaveText('30')
@@ -434,7 +432,7 @@ test('a typed write failure restores the confirmed harness value', async ({ page
     controls: { value: chip.locator('.f-n'), minus: chip.locator('.pm').first(), plus: chip.locator('.pm').last(), fold: card.locator('.fs-tog'), live: card.locator('.f-live > svg') },
     interactions: [{ name: 'failed typed limit', run: async () => {
       await chip.locator('.value').click(); await chip.locator('input').fill('30'); await chip.locator('input').press('Enter')
-      await expect(card.locator('.f-live')).toContainText('Couldn’t save')
+      await expect(card.locator('.f-status')).toContainText('Couldn’t save')
       await expect(chip.locator('.f-n')).toHaveText('4')
     } }],
   })
@@ -468,33 +466,46 @@ test('a changed plan revision discards a typed draft even when its value is unch
 
 test.describe('phone touch targets', () => {
   test.use({ viewport: { width: 390, height: 1000 }, hasTouch: true, isMobile: true })
-  test('every dial target is at least 44 px and all seven harnesses stay stable', async ({ page }) => {
+  test('every dial target reaches 44 px and all seven harnesses stay stable', async ({ page }) => {
     const { work } = await setup(page, 'room', true)
     work.preferences['agents.working'] = { total: 8, limits: { codex: 4, claude: 'no_limit', cursor: 'off', grok: 2, pi: 'off', gemini: 'no_limit', opencode: 3 } }
     await page.goto('/agents')
-    const card = dial(page), chip = card.locator('[data-harness="codex"]'), fold = card.locator('.fs-tog')
+    const card = dial(page), chip = control(page).locator('[data-harness="codex"]'), fold = card.locator('.fs-tog')
     await expect(chip).toBeVisible()
+    // Every target a finger can use reaches 44 px, its own box or its ::after reach; unseen − and + are no target.
     const targets = async () => {
-      const sizes = await card.locator('button:visible').evaluateAll(elements => elements.map(el => { const box = el.getBoundingClientRect(); return { width: box.width, height: box.height } }))
-      expect(sizes.length).toBeGreaterThan(0)
-      for (const size of sizes) { expect(size.width).toBeGreaterThanOrEqual(44); expect(size.height).toBeGreaterThanOrEqual(44) }
+      const small = await card.locator('button').evaluateAll(elements => elements.flatMap(el => {
+        const r = el.getBoundingClientRect(), cs = getComputedStyle(el)
+        if (!r.width || !r.height || Number(cs.opacity) === 0 || cs.pointerEvents === 'none' || cs.visibility === 'hidden') return []
+        const a = getComputedStyle(el, '::after'); let w = r.width, h = r.height
+        if (a.content !== 'none' && a.position === 'absolute') {
+          const v = (k: string) => { const x = parseFloat(a.getPropertyValue(k)); return Number.isFinite(x) ? x : 0 }
+          w = Math.max(w, r.width - Math.min(0, v('left')) - Math.min(0, v('right'))); h = Math.max(h, r.height - Math.min(0, v('top')) - Math.min(0, v('bottom')))
+        }
+        return w < 43.5 || h < 43.5 ? [`${el.className} ${Math.round(w)}x${Math.round(h)}`] : []
+      }))
+      expect(small).toEqual([])
     }
     await targets()
-    // Folded on a phone, each harness is its icon with the count; a tap opens the dial at that harness.
-    await expect(card.locator('.f-ph')).toHaveCount(7)
+    await expect(control(page).locator('.f-chip')).toHaveCount(7)
     await expectStableControls({
-      controls: { fold, more: totalMore(page), fewer: totalFewer(page), chips: card.locator('.f-chips'), chip, ph: chip.locator('.f-ph'), live: card.locator('.f-live') },
-      scrollAreas: { card, chips: card.locator('.f-chips') },
-      interactions: [{ name: 'touch step', run: () => totalMore(page).tap() }, { name: 'touch step back', run: () => totalFewer(page).tap() }],
+      controls: { fold, total: control(page).locator('[data-unit="total"]'), chip, live: card.locator('.f-live') },
+      scrollAreas: { control: control(page), main: page.locator('main') },
+      interactions: [
+        // A tap on a unit's mark lifts it onto its plate with − and +; a tap on + steps it.
+        { name: 'tap opens the plate', run: async () => { await chip.locator('.du-mark').tap(); await expect(chip).toHaveClass(/\bopen\b/) } },
+        { name: 'touch step', run: async () => { await chip.locator('.pm.inc').tap(); await expect(chip.locator('.f-n')).toHaveText('5') } },
+        { name: 'touch step back', run: async () => { await chip.locator('.pm.dec').tap(); await expect(chip.locator('.f-n')).toHaveText('4') } },
+      ],
     })
-    await chip.locator('.f-ph').tap()
+    await targets()
+    await fold.tap()
     await expect(fold).toHaveAttribute('aria-expanded', 'true')
-    await expect(card.locator('[data-key="codex"]')).toHaveClass(/sel/)
-    await expect(card.locator('.rows > li')).toHaveCount(7)
+    await expect(body(page).locator('.rows > li')).toHaveCount(7)
     await targets()
     await expectStableControls({
       controls: { fold, more: totalMore(page), selectors: card.locator('[data-key="codex"] .seg'), plus: card.locator('[data-key="codex"] .pm').last(), row: card.locator('[data-key="codex"]') },
-      scrollAreas: { card },
+      scrollAreas: { body: body(page) },
       interactions: ['No limit', 'Off', 'At most'].map(name => ({ name: `touch mode ${name}`, run: () => card.locator('[data-key="codex"]').getByRole('radio', { name, exact: true }).tap() })),
     })
   })
@@ -510,8 +521,8 @@ test('long German waiting details wrap at every evidence width and theme', async
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: 1600 })
     await page.emulateMedia({ colorScheme: theme })
-    expect(await card.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
-    await card.screenshot({ path: `${shots}/${width}-${theme}-long-german-unfolded.png`, animations: 'disabled' })
+    expect(await body(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+    await body(page).screenshot({ path: `${shots}/${width}-${theme}-long-german-unfolded.png`, animations: 'disabled' })
   }
 })
 
@@ -629,13 +640,13 @@ test('AEON-781: a save conflict ends a hold; the next step needs a fresh press',
   await more.hover(); await page.mouse.down()
   await expect(total).toHaveText('7')
   answer()
-  await expect(dial(page).locator('.f-live')).toContainText('changed elsewhere')
+  await expect(dial(page).locator('.f-status')).toContainText('changed elsewhere')
   await expect(total).toHaveText('12')
   // The hold has ended: still held, nothing repeats, the warning stays and the newly read total is announced.
   await expect(said).toHaveText('Run up to 12 at once')
   await page.clock.runFor(5_000)
   await expect(total).toHaveText('12')
-  await expect(dial(page).locator('.f-live')).toContainText('changed elsewhere')
+  await expect(dial(page).locator('.f-status')).toContainText('changed elsewhere')
   await page.mouse.up()
   await page.clock.runFor(SETTLE_MS)
   expect(puts).toHaveLength(1)
@@ -647,7 +658,7 @@ test('AEON-781: a save conflict ends a hold; the next step needs a fresh press',
   expect(puts[1]).toEqual({ value: { total: 13, limits: {} }, expected_updated_at: '2026-10-02T18:00:00.000001Z' })
 })
 
-test('AEON-781: the chevron comes first, folding moves nothing above the body, and the fold follows the person', async ({ page }) => {
+test('AEON-781: the chevron comes first, folding moves nothing in the capacity row, and the fold follows the person', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   const { work } = await setup(page, 'wind')
@@ -656,27 +667,16 @@ test('AEON-781: the chevron comes first, folding moves nothing above the body, a
   const card = dial(page), tog = card.locator('.fs-tog')
   // First visit: open.
   await expect(tog).toHaveAttribute('aria-expanded', 'true')
-  await expect(tog).toHaveAttribute('aria-label', 'Agents at once: fold')
-  expect(await card.locator('.fs-head').evaluate(el => el.firstElementChild?.classList.contains('fs-tog'))).toBe(true)
+  await expect(tog).toHaveAttribute('aria-label', 'Fold the dial')
+  expect(await control(page).evaluate(el => el.firstElementChild?.classList.contains('fs-tog'))).toBe(true)
   await expect(card.locator('[data-key="codex"]')).toBeVisible()
-  // Sample every frame of the fold: the chevron and the sentence with its stepper stay put.
-  const watchFold = () => card.evaluate(async el => {
-    const parts = ['.fs-tog', '.f-dial', '.f-num'].map(s => el.querySelector(s)!)
-    const rects = () => JSON.stringify(parts.map(p => { const r = p.getBoundingClientRect(); return [r.x, r.y, r.width, r.height] }))
-    const before = rects(), body = el.querySelector('.fs-body')!
-    let done = false
-    body.addEventListener('transitionend', () => { done = true }, { once: true })
-    ;(el.querySelector('.fs-tog') as HTMLButtonElement).click()
-    let frames = 0, moved = 0
-    while (!done) { await new Promise(r => requestAnimationFrame(r)); frames++; if (rects() !== before) moved++ }
-    return { frames, moved }
-  })
-  const folding = await watchFold()
-  expect(folding.frames).toBeGreaterThan(1)
-  expect(folding.moved).toBe(0)
+  // The chevron, the total and the units stay put; the body comes and goes under the row.
+  const parts = () => control(page).evaluate(el => JSON.stringify(['.fs-tog', '[data-unit="total"]', '.f-num', '[data-unit="codex"]', '.cd-live'].map(s => { const r = el.querySelector(s)!.getBoundingClientRect(); return [r.x, r.y, r.width, r.height] })))
+  const before = await parts()
+  await tog.click()
   await expect(tog).toHaveAttribute('aria-expanded', 'false')
-  await expect(card.locator('.fs-body')).toHaveAttribute('inert', '')
-  await expect(card.locator('[data-key="codex"]')).toBeHidden()
+  expect(await parts()).toBe(before)
+  await expect(body(page)).toHaveCount(0)
   await expect(card.locator('[data-harness="codex"]')).toBeVisible()
   await expect.poll(() => work.preferences['ui.agents.sections']).toEqual({ dial: false, accounts: false, sessions: true, queued: true })
   // The fold follows the person, and the cache paints it before the server answers.
@@ -686,8 +686,8 @@ test('AEON-781: the chevron comes first, folding moves nothing above the body, a
   await page.reload()
   await expect(tog).toHaveAttribute('aria-expanded', 'false')
   release()
-  const unfolding = await watchFold()
-  expect(unfolding.moved).toBe(0)
+  await tog.click()
+  expect(await parts()).toBe(before)
   await expect(card.locator('[data-key="codex"]')).toBeVisible()
   await expect.poll(() => work.preferences['ui.agents.sections']).toMatchObject({ dial: true })
 })

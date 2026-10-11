@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { SessionControl } from '../../lib/agents'
 import { reparentSession, undoRemoval } from '../../lib/agentRows'
 import { movableWorker, moveTarget } from './sessionMove'
@@ -39,8 +39,6 @@ import { useSession } from '../../stores/session'
 import { DEFAULT_SORT, nextSort, orderForest, readSort, writeSort, type SessionSort, type SortKey } from './sessionOrder'
 import TierCell from './TierCell.vue'
 import { LEAD_WORDS } from '../../lib/lead'
-import FoldSection from './FoldSection.vue'
-import { useSectionFold } from '../../stores/sectionPrefs'
 import { below, shownBelow, treeRows, type TreeRow } from './sessionTree'
 import { useServiceTiers } from '../../stores/serviceTiers'
 import { TIER_NAME } from '../../lib/serviceTier'
@@ -52,9 +50,11 @@ const serviceTiers = useServiceTiers()
 const props = defineProps<{
   history?: SessionView[]; historyState?: 'idle' | 'loading' | 'ready' | 'error'; historyMore?: boolean; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
   loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean; canLead?: boolean; filter?: HeadFilter | null
+  /** The card head's search (AEON-1209): it filters this list only. */
+  query?: string
 }>()
 const agentRecovery = useAgentRecovery()
-const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: []; clearFilter: [] }>()
+const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: []; clearFilter: []; filter: [filter: HeadFilter]; search: [query: string] }>()
 const showStopped = ref(false)
 // History is a separate, opt-in list of every ended or removed session. The
 // main list keeps only sessions that ended in the last 24 hours (AEON-291).
@@ -81,16 +81,24 @@ const forest = computed(() => orderForest(sessionForest(showRemoved.value ? prop
 type Bucket = 'attention' | 'live' | 'pausing' | 'paused' | 'stopped'
 const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'pausing', label: 'Pausing' }, { id: 'paused', label: 'Paused' }, { id: 'stopped', label: 'Ended' }]
 const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped' : group === 'pausing' ? 'pausing' : group === 'paused' ? 'paused' : group === 'working' || group === 'idle' ? 'live' : 'attention'
-// A head count's filter (AEON-780) keeps matching sessions and their ancestors,
-// which stay as dimmed context, unfolded.
-const filtering = computed(() => showRemoved.value ? null : props.filter ?? null)
+// A head count's filter (AEON-780) and the card head's search (AEON-1209) keep matching
+// sessions and their ancestors, which stay as dimmed context, unfolded. The state filter
+// applies to the live list; the search to History too.
+const stateFilter = computed(() => showRemoved.value ? null : props.filter ?? null)
+const terms = computed(() => (props.query ?? '').toLowerCase().split(/\s+/).filter(Boolean))
+const searchText = (view: SessionView) => [view.name, view.harness, view.account, view.model, view.projectKey, view.projectTitle, view.ticket?.key, view.ticket?.title, view.session.host, view.session.display_label, intendedResult(view)].filter(Boolean).join(' ').toLowerCase()
+const filtering = computed<((view: SessionView) => boolean) | null>(() => {
+  const state = stateFilter.value, words = terms.value
+  if (!state && !words.length) return null
+  return view => (!state || matchesFilter(view, state)) && (!words.length || words.every(word => searchText(view).includes(word)))
+})
 const kept = computed(() => {
   const ids = new Set<string>()
   const active = filtering.value
   if (!active) return ids
   const walk = (branch: Branch): boolean => {
     const below = branch.children.map(walk).some(Boolean)
-    const keep = below || matchesFilter(branch.view, active)
+    const keep = below || active(branch.view)
     if (keep) ids.add(branch.view.session.id)
     return keep
   }
@@ -99,7 +107,7 @@ const kept = computed(() => {
 })
 const keeps = (branch: Branch) => !filtering.value || kept.value.has(branch.view.session.id)
 const roots = (bucket: Bucket) => showRemoved.value
-  ? (bucket === 'stopped' ? forest.value : [])
+  ? (bucket === 'stopped' ? forest.value.filter(keeps) : [])
   : forest.value.filter(branch => bucketOf(branch.group) === bucket && keeps(branch))
 // Count sessions, including folded descendants, rather than family roots.
 const pausedCount = (branch: Branch): number => Number(branch.view.status.state === 'paused') + branch.children.reduce((sum, child) => sum + pausedCount(child), 0)
@@ -140,7 +148,7 @@ function visible(group: Bucket): Row[] {
   const rows = treeRows(shown, {
     children: candidates,
     isOpen: isExpanded,
-    match: filtering.value ? (view: SessionView) => matchesFilter(view, filtering.value!) : null,
+    match: filtering.value,
   })
   return rows.map((row, index) => {
     const view = row.branch.view
@@ -380,22 +388,9 @@ function pendingLabel(view: SessionView) {
   if (!c || c.state === 'completed') return ''
   return c.kind === 'stop' ? (c.state === 'claimed' ? 'Stopping…' : 'Stop sent') : (c.state === 'claimed' ? 'Interrupting…' : 'Interrupt sent')
 }
-// The section folds per person (AEON-781/784). Folded, its head still says the
-// state: how many run where, and what needs a look.
-// A page action that leads into the section (a state count, History) opens it
-// for this visit, without changing the preference.
-const { open: sectionOpen, toggle: toggleFold, reveal } = useSectionFold('sessions')
-const liveViews = computed(() => current.value.filter(view => live(view)))
-const foldedSummary = computed(() => {
-  if (!props.loaded || props.state !== 'ready') return props.state === 'error' ? 'Could not be loaded' : ''
-  if (showRemoved.value) return removedCount.value ? plural(removedCount.value, 'ended session') : 'No ended sessions yet'
-  const n = liveViews.value.length
-  if (!n) return 'None running'
-  const hosts = new Set(liveViews.value.map(view => view.session.host).filter(Boolean)).size
-  const problems = liveViews.value.filter(view => view.status.group === 'problem' || view.status.group === 'unresponsive').length
-  const asks = liveViews.value.filter(view => view.status.group === 'needs').length
-  return [`${n} live${hosts ? ` on ${plural(hosts, 'computer')}` : ''}`, problems ? plural(problems, 'problem') : '', asks ? `${asks} ${asks === 1 ? 'asks' : 'ask'} you` : ''].filter(Boolean).join(' · ')
-})
+// The Sessions card is always open (AEON-1209): its head carries the list's own tools.
+// A page action that leads into the list (a state count, History) has nothing to unfold.
+const reveal = () => false
 const sortMenu = ref<HTMLElement | null>(null)
 function rowClick(event: MouseEvent, id: string) {
   if ((event.target as HTMLElement).closest('a, button')) return
@@ -421,7 +416,93 @@ function revealSession(id: string) {
   if (roots('stopped').some(holds)) showStopped.value = true
   reveal()
 }
-defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
+// ---------- The card head (AEON-1209, design AEON-1196): search, Filter and Display ----------
+// It sticks inside the card under the app header; the pills and the column heads stick
+// with it. Sticking adds a hairline shadow only, so its box never changes.
+const search = ref<HTMLInputElement>()
+const draft = ref(props.query ?? '')
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+watch(() => props.query, value => { if ((value ?? '') !== draft.value.trim()) draft.value = value ?? '' })
+watch(draft, value => {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => { if (value.trim() !== (props.query ?? '')) emit('search', value.trim().slice(0, 200)) }, 220)
+})
+function clearSearch() {
+  clearTimeout(searchTimer)
+  draft.value = ''
+  if (props.query) emit('search', '')
+  search.value?.focus()
+}
+// Esc clears the search, then leaves the field on the next press.
+function searchKey(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || event.isComposing) return
+  event.preventDefault(); event.stopPropagation()
+  if (draft.value) clearSearch()
+  else search.value?.blur()
+}
+function focusSearch() {
+  if (!search.value) return false
+  search.value.focus(); search.value.select()
+  return true
+}
+const filterButton = ref<HTMLButtonElement>()
+const filterMenu = ref<HTMLElement | null>(null)
+function openFilter() {
+  if (!filterButton.value) return false
+  filterMenu.value = filterMenu.value ? null : filterButton.value
+  return true
+}
+function closeFilter(restore: boolean) {
+  const anchor = filterMenu.value
+  filterMenu.value = null
+  if (restore) anchor?.focus()
+}
+const STATES = Object.keys(FILTER_LABEL) as HeadFilter[]
+const stateCount = (state: HeadFilter) => current.value.filter(view => matchesFilter(view, state)).length
+function pickState(state: HeadFilter) {
+  filterMenu.value = null
+  emit('filter', state)
+  filterButton.value?.focus({ preventScroll: true })
+}
+function filterMenuKeys(event: KeyboardEvent) {
+  if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="menuitemradio"]:not([aria-disabled="true"])')]
+  if (!items.length) return
+  event.preventDefault(); event.stopPropagation()
+  const index = items.indexOf(document.activeElement as HTMLElement)
+  items[event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
+}
+function clearAll() {
+  if (stateFilter.value) emit('clearFilter')
+  if (draft.value || props.query) { clearTimeout(searchTimer); draft.value = ''; emit('search', '') }
+  search.value?.focus({ preventScroll: true })
+}
+// What the head counts: the sessions on show, without the dimmed context rows.
+const shownCount = computed(() => {
+  const views = showRemoved.value ? props.history ?? [] : current.value
+  return filtering.value ? views.filter(filtering.value).length : views.length
+})
+const root = ref<HTMLElement>()
+const stick = ref<HTMLElement>()
+const stuck = ref(false)
+let scroller: HTMLElement | null = null, frame = 0, resize: ResizeObserver | undefined
+function measure() {
+  frame = 0
+  if (!root.value || !stick.value) return
+  const top = scroller?.getBoundingClientRect().top ?? 0
+  stuck.value = root.value.getBoundingClientRect().top < top - 0.5
+}
+const onScroll = () => { if (!frame) frame = requestAnimationFrame(measure) }
+onMounted(() => {
+  scroller = root.value?.closest('main') ?? null
+  scroller?.addEventListener('scroll', onScroll, { passive: true })
+  // The column heads stick right under the head, whatever its height (a pill row comes and goes).
+  resize = new ResizeObserver(([entry]) => { root.value?.style.setProperty('--stick-h', `${Math.round(entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height)}px`) })
+  if (stick.value) resize.observe(stick.value)
+  measure()
+})
+onBeforeUnmount(() => { clearTimeout(searchTimer); cancelAnimationFrame(frame); scroller?.removeEventListener('scroll', onScroll); resize?.disconnect() })
+defineExpose({ toggleHistory, menuHistory, reveal, revealSession, focusSearch, openFilter })
 function sessionLinkClick(event: MouseEvent, id: string) {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
   event.preventDefault()
@@ -430,29 +511,54 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 </script>
 
 <template>
-  <FoldSection class="sessions" label="Sessions" :open="sectionOpen" :tip="sectionOpen ? 'Fold sessions' : 'Unfold sessions'" @toggle="toggleFold">
-    <template #title><span id="sessions-title">{{ showRemoved ? 'History' : 'Sessions' }}</span><span v-if="loaded && state === 'ready'" class="fs-count" aria-hidden="true">{{ showRemoved ? removedCount : total }}</span></template>
-    <template #head>
-      <span v-if="filtering" class="filter-chip"><span class="chip-main">State<span class="chip-value">{{ FILTER_LABEL[filtering] }}</span></span><button type="button" class="chip-x" aria-label="Show all sessions" data-tip="Show all sessions · Esc" @click="emit('clearFilter')"><AppIcon name="close" :size="11" /></button></span>
-      <span v-if="!sectionOpen && foldedSummary" class="fs-sum">{{ foldedSummary }}</span>
-      <span v-if="sectionOpen && loaded && state === 'ready'" class="head-tools">
-        <button v-if="sort" type="button" class="btn sm ghost quiet-btn" data-tip="Order by state, then start time" @click="resetSort">Default order</button>
-        <button
-          v-if="sortable" type="button" class="btn sm ghost quiet-btn sort-tool" aria-haspopup="dialog" :aria-expanded="!!sortMenu"
-          :aria-label="`Sort sessions: ${COLUMNS.find(c => c.key === effectiveSort.key)?.label ?? ''}, ${dirWord}`" data-tip="Sort"
-          @click="sortMenu = sortMenu ? null : ($event.currentTarget as HTMLElement)"
-        ><AppIcon name="sort" :size="14" /></button>
-        <button
-          v-if="!showRemoved && stale.length" type="button" class="btn sm ghost quiet-btn" :disabled="removal.busy.value"
-          :aria-label="`Clear stale: ${stale.length} without a heartbeat for 15 minutes`"
-          :data-tip="`${stale.length} without a heartbeat for 15 minutes`" @click="removal.clearStale(stale)"
-        ><AppIcon name="trash" :size="13" /><span class="tool-label">Clear stale</span></button>
-        <button
-          type="button" class="btn sm ghost quiet-btn" :aria-pressed="showRemoved"
-          :aria-label="showRemoved ? 'Back to sessions' : 'Show history: every ended or removed session'" @click="toggleHistory"
-        ><template v-if="showRemoved"><AppIcon name="arrow-left" :size="13" /><span class="tool-label">Sessions</span></template><template v-else><AppIcon name="history" :size="13" /><span class="tool-label">History</span></template></button>
-      </span>
-    </template>
+  <section ref="root" class="sessions glass-card" aria-labelledby="sessions-title">
+    <!-- The card head (AEON-1209, design AEON-1196): the list's own tools. It sticks inside the card,
+         at the card's width, under the app header; the pills and the column heads stick with it. -->
+    <div ref="stick" class="th-stick" :class="{ stuck }" data-stick>
+      <div class="tree-head">
+        <h2 class="sess-title"><span id="sessions-title">{{ showRemoved ? 'History' : 'Sessions' }}</span><span v-if="loaded && state === 'ready'" class="fs-count" aria-hidden="true">{{ shownCount }}</span></h2>
+        <div class="list-tools" role="group" aria-label="Filter this list">
+          <label class="search-field sess-search">
+            <AppIcon name="search" :size="14" />
+            <input
+              id="sessions-q" ref="search" v-model="draft" class="field" type="search" placeholder="Search sessions" maxlength="200" autocomplete="off" spellcheck="false"
+              aria-label="Search sessions in this list" aria-keyshortcuts="F /" data-tip="Filters this list · F or /" @keydown="searchKey"
+            />
+            <kbd v-if="!draft" class="keycap sk-cap" aria-hidden="true">F</kbd>
+            <button v-else type="button" class="clear-q" aria-label="Clear the search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
+          </label>
+          <button
+            ref="filterButton" type="button" class="btn facet-btn tool-btn" :class="{ on: !!stateFilter }" aria-haspopup="menu" :aria-expanded="!!filterMenu"
+            aria-label="Filter" aria-keyshortcuts="Shift+F" :data-tip="filterMenu ? undefined : 'Add a filter · Shift F'" @click="openFilter"
+          ><AppIcon name="filter" :size="13" /><span class="bl">Filter</span></button>
+          <button
+            type="button" class="btn facet-btn tool-btn sort-tool" :class="{ on: !!sort }" aria-haspopup="dialog" :aria-expanded="!!sortMenu" :aria-disabled="!sortable || undefined"
+            :aria-label="`Display: sort sessions by ${COLUMNS.find(c => c.key === effectiveSort.key)?.label ?? ''}, ${dirWord}`" :data-tip="sortMenu ? undefined : sortable ? 'Sort' : 'Nothing to sort yet'"
+            @click="sortMenu = sortMenu || !sortable ? null : ($event.currentTarget as HTMLElement)"
+          ><AppIcon name="sort" :size="13" /><span class="bl">Display</span></button>
+        </div>
+        <span class="grow" />
+        <span v-if="loaded && state === 'ready'" class="head-tools">
+          <button
+            v-if="!showRemoved && stale.length" type="button" class="btn sm ghost quiet-btn" :disabled="removal.busy.value"
+            :aria-label="`Clear stale: ${stale.length} without a heartbeat for 15 minutes`"
+            :data-tip="`${stale.length} without a heartbeat for 15 minutes`" @click="removal.clearStale(stale)"
+          ><AppIcon name="trash" :size="13" /><span class="tool-label">Clear stale</span></button>
+          <button
+            type="button" class="btn sm ghost quiet-btn" :aria-pressed="showRemoved"
+            :aria-label="showRemoved ? 'Back to sessions' : 'Show history: every ended or removed session'" @click="toggleHistory"
+          ><template v-if="showRemoved"><AppIcon name="arrow-left" :size="13" /><span class="tool-label">Sessions</span></template><template v-else><AppIcon name="history" :size="13" /><span class="tool-label">History</span></template></button>
+        </span>
+      </div>
+      <!-- Applied filters sit under the head and stick with it; the state filter is the head count's (AEON-780). -->
+      <div v-if="stateFilter || terms.length" class="pills-row" role="group" aria-label="Applied filters">
+        <span v-if="stateFilter" class="facet-control filter-chip">
+          <button type="button" class="btn facet-btn on chip-main" aria-haspopup="menu" :aria-expanded="!!filterMenu" :aria-label="`State: ${FILTER_LABEL[stateFilter]}. Change the filter`" @click="filterMenu = filterMenu ? null : ($event.currentTarget as HTMLElement)">State<span class="facet-value chip-value">{{ FILTER_LABEL[stateFilter] }}</span></button>
+          <button type="button" class="facet-x chip-x" aria-label="Show all sessions" data-tip="Show all sessions · Esc" @click="emit('clearFilter')"><AppIcon name="close" :size="11" /></button>
+        </span>
+        <button type="button" class="btn ghost clear-all" @click="clearAll">Clear all</button>
+      </div>
+    </div>
     <span v-if="sortable" id="sort-beat-help" class="sr-only">{{ HEARTBEAT_HELP }}</span>
 
     <div v-if="state === 'forbidden'" class="state">
@@ -485,7 +591,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         </template>
         <span role="columnheader"><span class="sr-only">Actions</span></span>
       </div>
-      <div v-if="filtering && !kept.size" class="group-row filter-empty" role="row"><span role="cell">No session is {{ FILTER_LABEL[filtering].toLowerCase() }} right now.</span></div>
+      <div v-if="filtering && !kept.size" class="group-row filter-empty" role="row"><span role="cell"><template v-if="terms.length">No session matches “{{ query }}”{{ stateFilter ? ` among ${FILTER_LABEL[stateFilter].toLowerCase()} sessions` : '' }}.</template><template v-else-if="stateFilter">No session is {{ FILTER_LABEL[stateFilter].toLowerCase() }} right now.</template></span></div>
       <template v-for="group in BUCKETS" :key="group.id">
         <div v-if="roots(group.id).length" class="group-row" :class="group.id" role="row">
           <span role="rowheader" class="group-label">
@@ -634,7 +740,17 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         <p v-else-if="menuItems.note" class="menu-note">{{ menuItems.note }}</p>
       </div>
     </FloatingPanel>
-    <FloatingPanel v-if="sortMenu" :anchor="sortMenu" align="end" :width="280" label="Sort sessions" cycle @close="sortMenu = null">
+    <FloatingPanel v-if="filterMenu" :anchor="filterMenu" :width="248" label="Filter sessions" @close="closeFilter">
+      <p class="eyebrow menu-eyebrow">Filter by state</p>
+      <div role="menu" aria-label="Filter sessions by state" @keydown="filterMenuKeys">
+        <button
+          v-for="(key, index) in STATES" :key="key" type="button" role="menuitemradio" class="menu-item state-item" :aria-checked="stateFilter === key"
+          :aria-disabled="!stateCount(key) && stateFilter !== key ? 'true' : undefined" :data-autofocus="index === 0 ? '' : undefined" :data-filter="key" @click="(stateCount(key) || stateFilter === key) && pickState(key)"
+        ><AppIcon :name="stateFilter === key ? 'check' : 'filter'" :size="14" :class="{ off: stateFilter !== key }" /><span class="mi-text">{{ FILTER_LABEL[key] }}</span><span class="mi-count">{{ stateCount(key) }}</span></button>
+      </div>
+    </FloatingPanel>
+    <FloatingPanel v-if="sortMenu" :anchor="sortMenu" :width="280" label="Display" cycle @close="sortMenu = null">
+      <p class="eyebrow menu-eyebrow">Sort</p>
       <div class="sort-pop" role="group" aria-label="Sort sessions">
         <label class="sort-pick">
           <span class="sort-label">Sort</span>
@@ -647,6 +763,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
           :data-tip="`Order ${dirWord}`" @click="sortBy(effectiveSort.key)"
         ><AppIcon :name="effectiveSort.dir === 'asc' ? 'arrow-up' : 'arrow-down'" :size="14" /></button>
         <p v-if="effectiveSort.key === 'heartbeat'" class="sort-note">{{ HEARTBEAT_HELP }}</p>
+        <button v-if="sort" type="button" class="btn sm ghost quiet-btn" data-tip="Order by state, then start time" @click="resetSort">Default order</button>
       </div>
     </FloatingPanel>
     <FloatingPanel v-if="moveMenu" :anchor="moveMenu.anchor" align="end" :width="248" :label="`Move ${moveMenu.view.name} to ${LEAD_WORDS.l}`" @close="closeMove">
@@ -657,7 +774,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         </button>
       </div>
     </FloatingPanel>
-  </FoldSection>
+  </section>
 </template>
 
 <style scoped>
@@ -669,22 +786,46 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .lineage a, .lineage.adopted { color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lineage a:hover, .lineage.adopted:hover { text-decoration: underline; }
 .lineage .history-toggle { flex-shrink: 0; }
-.sessions { overflow: clip; container: sessions / inline-size; }
-/* The section head (FoldSection): title and count, the folded state, then quiet
-   tools at the line end, so a tool that appears moves nothing before it. */
-.fs-count { font: 500 12px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.fs-sum { min-width: 0; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.head-tools { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; margin-right: -4px; }
+.sessions { overflow: clip; container: sessions / inline-size; padding: 0; }
+/* The card head (AEON-1209, design AEON-1196): sticky inside the card, at the card's width, right
+   under the app header. Sticking adds a hairline shadow only; its box and insides never change. */
+.th-stick { position: sticky; top: 0; z-index: 20; padding: 6px 8px 0; border-radius: var(--radius) var(--radius) 0 0; background: color-mix(in srgb, var(--surface-raised) 94%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transition: box-shadow .15s ease; }
+.th-stick.stuck { box-shadow: 0 8px 14px -12px var(--shadow-color), 0 1px 0 var(--line); }
+@media (prefers-reduced-motion: reduce) { .th-stick { transition: none; } }
+.tree-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-height: 52px; padding: 4px 10px 6px; }
+.sess-title { display: inline-flex; align-items: baseline; gap: 8px; margin: 0; color: var(--ink); font: 650 15px/1.3 var(--font); letter-spacing: -.005em; white-space: nowrap; }
+.fs-count { display: inline-block; min-inline-size: 3ch; font: 500 12px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.list-tools { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 8px; margin-left: 10px; min-width: 0; }
+.sess-search { flex: none; width: 216px; }
+.sess-search .field { height: var(--ctl-h, 36px); padding-right: 34px; border-radius: 999px; font-size: 13px; }
+.sess-search .field::-webkit-search-cancel-button { display: none; }
+.sk-cap { position: absolute; right: 9px; pointer-events: none; }
+@media (hover: none) { .sk-cap { display: none; } }
+.clear-q { position: absolute; right: 7px; display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: var(--chip-bg); color: var(--ink-2); }
+.clear-q:hover { color: var(--ink); background: var(--row-selected); }
+.clear-q:focus-visible { box-shadow: var(--focus-ring); }
+.tool-btn { flex: none; gap: 6px; height: var(--ctl-h, 36px); padding: 0 14px 0 12px; color: var(--ink-2); font-size: 13px; }
+.tool-btn:hover, .tool-btn[aria-expanded="true"] { color: var(--ink); }
+.tool-btn.on { color: var(--teal-ink); }
+.tool-btn[aria-disabled="true"] { opacity: .55; cursor: default; }
+.grow { flex: 1 1 0; min-width: 0; }
+.head-tools { display: inline-flex; align-items: center; gap: 2px; margin-right: -4px; }
 .tool-label { white-space: nowrap; }
-.sort-tool { display: none; }
-/* The head count's filter (AEON-780): a teal chip after the title; × or Esc clears it. */
-.filter-chip { display: inline-flex; align-items: stretch; align-self: center; flex: none; height: 28px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
-.chip-main { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px 0 12px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+/* Applied filters, under the head: the state filter is the head count's (AEON-780); × or Esc clears it. */
+.pills-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 10px 8px; }
+.facet-control { display: inline-flex; align-items: stretch; flex: none; }
+.chip-main { gap: 0; height: var(--ctl-h, 36px); padding: 0 8px 0 14px; border-top-right-radius: 0; border-bottom-right-radius: 0; font-size: 13px; }
 .chip-value { color: var(--ink); font-weight: 500; }
-.chip-value::before { content: '·'; margin-right: 6px; color: var(--ink-3); }
-.chip-x { display: grid; place-items: center; width: 28px; padding: 0; border: 0; border-radius: 0 999px 999px 0; background: transparent; color: var(--teal-ink); }
-@media (hover: hover) { .chip-x:hover { background: var(--row-hover); } }
+.chip-value::before { content: '·'; margin: 0 6px; color: var(--ink-3); }
+.chip-x { display: grid; place-items: center; width: 32px; height: var(--ctl-h, 36px); padding: 0; border: 1px solid var(--chip-teal-line); border-left: 0; border-radius: 0 999px 999px 0; background: var(--chip-teal-bg); color: var(--teal-ink); }
+@media (hover: hover) { .chip-x:hover { background: var(--row-selected); } }
 .chip-x:focus-visible { box-shadow: var(--focus-ring); }
+.clear-all { height: var(--ctl-h, 36px); padding: 0 12px; color: var(--ink-2); font-size: 13px; }
+/* The filter menu and the Display popover. */
+.menu-eyebrow { margin: 0; padding: 6px 10px 4px; }
+.state-item { align-items: center; }
+.state-item .off { opacity: 0; }
+.mi-count { margin-left: auto; font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .filter-empty { color: var(--ink-3); font-size: 13px; }
 .quiet-btn { color: var(--ink-2); font-weight: 550; }
 .quiet-btn:hover { color: var(--ink); }
@@ -693,7 +834,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .quiet-btn .count { margin-left: 2px; font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .table { --state-width: 164px; --tree-step: 28px; display: grid; grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(72px, .48fr) minmax(128px, .82fr) 80px 132px 80px 80px 108px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
-.thead { height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
+.thead { position: sticky; top: var(--stick-h, 0px); z-index: 19; height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-raised) 94%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span, .execution-host > span { padding: 0 8px; min-width: 0; }
 .execution-host { display: contents; }
 .right { text-align: right; justify-content: flex-end; }
@@ -860,7 +1001,6 @@ function sessionLinkClick(event: MouseEvent, id: string) {
    or increase existing row heights. The other flexible tracks absorb Host. */
 .table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(max(112px, calc((100% - var(--state-width) - 236px) * .48 / 2.75)), .48fr) minmax(128px, .82fr) 80px 132px 80px 80px 108px; }
 @container sessions (max-width: 1000px) {
-  .sort-tool { display: inline-flex; }
   .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(100px, 1.35fr) minmax(68px, .42fr) minmax(108px, .75fr) 80px 132px 64px 108px; }
   .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.35fr) minmax(104px, .42fr) minmax(108px, .75fr) 80px 132px 64px 108px; }
   .c-elapsed { display: none; }
@@ -957,13 +1097,25 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 /* AEON-304: the overflow sits top-right, its icon centred on the title's first line. */
 @container sessions (max-width: 880px) {
   .row > .c-actions { align-self: start; margin-top: calc(var(--title-line) / 2 - 22px); }
-  /* Phone tools: 44 px icon buttons; their names stay for screen readers. The head
-     keeps their height when it folds and they leave, so the fold control stays put. */
-  .sessions > :deep(.fs-head) { min-height: 60px; }
-  .filter-chip { height: 44px; }
+}
+/* Phone tools: 44 px icon buttons; their names stay for screen readers. The list's tools take
+   their own line under the title, the search first and widest. */
+@container sessions (max-width: 640px) {
+  .th-stick { padding: 4px 4px 0; }
+  .tree-head { padding: 4px 6px 6px; }
+  .list-tools { order: 3; flex: 1 1 100%; margin-left: 0; }
+  .sess-search { flex: 1 1 auto; width: auto; }
+  .tool-btn { width: 44px; padding: 0; }
+  .tool-btn .bl { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .chip-x { width: 44px; }
   .head-tools .btn { min-width: 44px; min-height: 44px; justify-content: center; }
   .head-tools .tool-label { display: none; }
+}
+/* Touch: 44 px everywhere in the head. */
+@media (pointer: coarse) {
+  .clear-q::after { content: ''; position: absolute; inset: -11px; }
+  .head-tools .btn, .clear-all { min-height: 44px; }
+  .chip-x { width: 44px; }
 }
 /* A very narrow list cannot fit both Terminal and its command beside Host.
    Grow the execution copy downward to leave room for command text. */

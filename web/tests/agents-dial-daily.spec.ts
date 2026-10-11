@@ -49,56 +49,56 @@ async function setup(page: Page, options: SetupOptions = {}) {
   await page.route('**/api/queue', route => route.fulfill({ json: { items: queue, manual_order: false, capacity: {} } }))
   return { work, calls, backend, capacity }
 }
-const dial = (page: Page) => page.getByRole('region', { name: 'Agents at once' })
+// AEON-1209: folded, the dial is the light control in the capacity row; unfolded, its body is a
+// card under that row. Child lookups search both; a whole-element check names the one it means.
+const dial = (page: Page) => page.locator(':is(.cdial, .dial-card)')
+const control = (page: Page) => page.locator('.cdial')
+const body = (page: Page) => page.locator('.dial-card')
 const more = (page: Page) => dial(page).getByRole('button', { name: 'One agent more at once' })
 const fewer = (page: Page) => dial(page).getByRole('button', { name: 'One agent fewer at once' })
 const row = (page: Page, key: string) => dial(page).locator(`.row[data-key="${key}"]`)
-const chip = (page: Page, key: string) => dial(page).locator(`.f-chip[data-harness="${key}"]`)
+const chip = (page: Page, key: string) => control(page).locator(`.f-chip[data-harness="${key}"]`)
+const flag = (page: Page, key: string) => chip(page, key).locator('.cd-flag')
 /** The live detail on the right; the same-height copies laid under it for sizing have no data-detail. */
 const detail = (page: Page, key: string) => dial(page).locator(`[data-detail="${key}"]`)
 const writes = (calls: { path: string; method: string }[]) => calls.filter(c => c.method !== 'GET' && /harness-sessions|\/controls|\/stop|\/interrupt|agent-accounts\/boost/.test(c.path))
 
-test('AEON-1036: folded, the dial is one row as high as the other folded cards and flags only what needs attention', async ({ page }) => {
+test('AEON-1036: folded, the dial is one light control in the capacity row and flags only what needs attention', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const { backend } = await setup(page, { example: 'over', folded: true })
   await page.goto('/agents')
-  const card = dial(page), accounts = page.getByRole('region', { name: 'Accounts and computers' })
-  await expect(card.locator('.f-chip')).toHaveCount(3)
-  await expect(card.locator('.f-live')).toContainText('11 running (1 waiting)')
-  // One row: the sentence, the harnesses and the live state share a line, as high as the folded Accounts card.
-  const [dialBox, chipsBox, liveBox, accountsBox] = await Promise.all([card.boundingBox(), card.locator('.f-chips').boundingBox(), card.locator('.f-live').boundingBox(), accounts.boundingBox()])
+  const accounts = page.locator('.cap-row .acc-chip')
+  await expect(control(page).locator('.f-chip')).toHaveCount(3)
+  await expect(control(page).locator('.f-live')).toContainText('11 running (1 in line)')
+  // One line: the units and the live state share it, as high as the accounts chip beside it (AEON-1209).
+  const [dialBox, chipBox, liveBox, accountsBox] = await Promise.all([control(page).boundingBox(), chip(page, 'codex').boundingBox(), control(page).locator('.f-live').boundingBox(), accounts.boundingBox()])
   expect(Math.abs(dialBox!.height - accountsBox!.height)).toBeLessThanOrEqual(0.5)
-  expect(Math.abs(chipsBox!.y + chipsBox!.height / 2 - (liveBox!.y + liveBox!.height / 2))).toBeLessThanOrEqual(2)
-  // Over pace is one gold flag on Claude; on pace and no daily limit leave no flag.
-  await expect(card.locator('.cap-flag')).toHaveCount(1)
-  await expect(chip(page, 'claude').locator('.cap-flag')).toHaveClass(/st-over_pace/)
-  await expect(chip(page, 'claude').locator('.cap-flag')).toHaveAccessibleName('Claude · at most 2 · ≤ 60 % used today · 4 percentage points over pace. Open the dial at Claude')
-  await expect(chip(page, 'codex').locator('.cap-flag')).toHaveCount(0)
-  await expect(chip(page, 'cursor').locator('.cap-flag')).toHaveCount(0)
-  // Everything else is hover and keyboard focus: the chip says its limit and today's state.
-  const tip = chip(page, 'codex').locator('.chip-tip')
-  await expect(tip).toBeHidden()
-  await chip(page, 'codex').hover()
-  await expect(tip).toBeVisible()
-  await expect(tip).toHaveText('Codex · at most 6 · ≤ 68 % used today · on pace')
-  await page.mouse.move(700, 600)
-  await expect(tip).toBeHidden()
-  await chip(page, 'cursor').getByRole('button', { name: /^Cursor: / }).first().focus()
-  await expect(chip(page, 'cursor').locator('.chip-tip')).toHaveText('Cursor · no own limit · no daily limit')
+  expect(Math.abs(dialBox!.y - accountsBox!.y)).toBeLessThanOrEqual(0.5)
+  expect(Math.abs(chipBox!.y + chipBox!.height / 2 - (liveBox!.y + liveBox!.height / 2))).toBeLessThanOrEqual(2)
+  // Over pace is one flag after Claude's number, with no fill; on pace and no daily limit leave none.
+  await expect(control(page).locator('.cd-flag svg')).toHaveCount(1)
+  await expect(flag(page, 'claude')).toHaveClass(/st-over_pace/)
+  expect(await flag(page, 'claude').evaluate(el => getComputedStyle(el).backgroundColor)).toMatch(/rgba\(0, 0, 0, 0\)|transparent/)
+  await expect(chip(page, 'claude')).toHaveAccessibleName('Claude: at most 2, 4 percentage points over pace')
+  await expect(flag(page, 'codex').locator('svg')).toHaveCount(0)
+  await expect(flag(page, 'cursor').locator('svg')).toHaveCount(0)
+  // Everything else is hover and focus text: each unit says its limit and today's state.
+  await expect(chip(page, 'codex').locator('.du-face')).toHaveAttribute('data-tip', 'Codex · at most 6 · ≤ 68 % used today · on pace')
+  await expect(chip(page, 'cursor')).toHaveAccessibleDescription('Cursor · no own limit · no daily limit')
   await expect(chip(page, 'cursor')).toHaveAttribute('aria-describedby', /tip-cursor$/)
   expect(backend.puts).toEqual([])
 })
 
-test('AEON-1036: at the limit the flag is red and says where new work goes', async ({ page }) => {
+test('AEON-1036: at the limit the flag is a gold pause mark and the unit says where new work goes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await setup(page, { example: 'limit', folded: true })
   await page.goto('/agents')
-  const flag = chip(page, 'claude').locator('.cap-flag')
-  await expect(flag).toHaveClass(/st-at_limit/)
-  await expect(flag).toHaveAccessibleName('Claude · at most 2 · at today’s limit · Codex next. Open the dial at Claude')
-  const sample = await flag.evaluate(el => ({ background: getComputedStyle(el).backgroundColor, width: el.getBoundingClientRect().width }))
-  expect(sample.background).not.toBe('rgba(0, 0, 0, 0)')
-  expect(sample.width).toBe(22)
+  await expect(flag(page, 'claude')).toHaveClass(/st-at_limit/)
+  await expect(chip(page, 'claude')).toHaveAccessibleName('Claude: at most 2, at today’s limit · Codex next')
+  await expect(chip(page, 'claude')).toHaveAccessibleDescription('Claude · at most 2 · at today’s limit · Codex next')
+  const sample = await flag(page, 'claude').evaluate(el => ({ background: getComputedStyle(el).backgroundColor, width: el.getBoundingClientRect().width }))
+  expect(sample.background).toMatch(/rgba\(0, 0, 0, 0\)|transparent/)
+  expect(sample.width).toBe(12)
 })
 
 test('AEON-1036: a stale reading never claims the limit, although the server also refuses starts then', async ({ page }) => {
@@ -106,9 +106,8 @@ test('AEON-1036: a stale reading never claims the limit, although the server als
   await setup(page, { example: 'stale', folded: true })
   await page.goto('/agents')
   await expect(chip(page, 'claude')).toBeVisible()
-  await expect(chip(page, 'claude').locator('.cap-flag')).toHaveCount(0)
-  await chip(page, 'claude').hover()
-  await expect(chip(page, 'claude').locator('.chip-tip')).toHaveText('Claude · at most 2 · usage not measured right now')
+  await expect(flag(page, 'claude').locator('svg')).toHaveCount(0)
+  await expect(chip(page, 'claude').locator('.du-face')).toHaveAttribute('data-tip', 'Claude · at most 2 · usage not measured right now')
 })
 
 test('AEON-1036: "● N running (M waiting) ▾" opens the info area, from the folded dial too, and it is remembered', async ({ page }) => {
@@ -116,7 +115,7 @@ test('AEON-1036: "● N running (M waiting) ▾" opens the info area, from the f
   const { work } = await setup(page, { example: 'pace', folded: true })
   await page.goto('/agents')
   const card = dial(page), toggle = card.locator('.f-live'), info = card.locator('.wh')
-  await expect(toggle).toHaveAccessibleName(/11 running \(1 waiting\)/)
+  await expect(toggle).toHaveAccessibleName(/11 running \(1 in line\)/)
   await expect(toggle).toHaveAttribute('aria-expanded', 'false')
   await expect(info).toBeHidden()
   // From the folded dial it opens the dial with the area open.
@@ -197,7 +196,7 @@ test('AEON-1036: the info area states demand against the dial, with and without 
   await setup(page, { example: 'pace', waiting: 3, dial: { info_open: true } })
   await page.goto('/agents')
   const info = dial(page).locator('.wh')
-  await expect(dial(page).locator('.f-live')).toContainText('11 running (3 waiting)')
+  await expect(dial(page).locator('.f-live')).toContainText('11 running (3 in line)')
   await expect(info).toContainText('14 needed · the dial allows 12')
   await expect(info).not.toContainText('needed now')
   await page.route('**/api/queue', route => route.fulfill({ json: { items: [], manual_order: false, capacity: {} } }))
@@ -208,18 +207,18 @@ test('AEON-1036: the info area states demand against the dial, with and without 
   await expect(info.locator('.f-wait')).toHaveCount(0)
 })
 
-test('AEON-1036: a flag opens the dial at that harness, and a pick is remembered per person', async ({ page }) => {
+test('AEON-1036: unfolding opens at what needs attention, and a pick is remembered per person', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const { work } = await setup(page, { example: 'limit', folded: true })
   await page.goto('/agents')
   const card = dial(page)
-  await chip(page, 'claude').locator('.cap-flag').click()
+  // The flag is a mark, not a control (AEON-1209); the chevron unfolds the dial at the harness at its limit.
+  await expect(flag(page, 'claude').locator('button')).toHaveCount(0)
+  await card.locator('.fs-tog').click()
   await expect(card.locator('.fs-tog')).toHaveAttribute('aria-expanded', 'true')
   await expect(row(page, 'claude')).toHaveClass(/sel/)
   await expect(card.locator('.f-sel[data-sel="claude"]')).toHaveAttribute('aria-pressed', 'true')
-  await expect(card.locator('.f-sel[data-sel="claude"]')).toBeFocused()
   await expect(detail(page, 'claude').getByRole('heading')).toHaveText('Claude · daily limit: up to 50 % used')
-  await expect.poll(() => work.preferences['ui.agents.dial']).toMatchObject({ selected: 'claude' })
   // Another pick replaces it; a click on the row (not its controls) picks too, a click on its controls does not.
   await row(page, 'codex').locator('.sub').click()
   await expect(row(page, 'codex')).toHaveClass(/sel/)
@@ -273,7 +272,8 @@ test('AEON-1036: the detail reads week, today, the bar and the pace state, then 
   await expect(codex.locator('.cd-acc li').nth(0)).toHaveText('agentone64 % used of 68 %floor 10 %')
   await expect(codex.locator('.cd-acc li').nth(1)).toHaveText('markus22 % used of 30 %floor 20 %')
   await expect(codex.locator('.cd-acc li.now')).toHaveText('agentone64 % used of 68 %floor 10 %')
-  await expect(codex.getByRole('link', { name: 'Per-account settings' })).toHaveAttribute('href', '/settings/accounts')
+  // AEON-1176 P6 (in AEON-1209): Per-account settings opens the account in use.
+  await expect(codex.getByRole('link', { name: 'Per-account settings' })).toHaveAttribute('href', '/settings/accounts?account=d1000000-0000-4000-8000-000000000012')
   await expect(codex.getByRole('link', { name: 'Add account' })).toHaveAttribute('href', '/settings/accounts#add-account')
   // Billed by use: nothing to pace, and the words never call it "No limit" (the agent-count control already does).
   await row(page, 'cursor').locator('.nm').click()
@@ -317,7 +317,8 @@ test.describe('settings written from the detail', () => {
     const points = claude.getByLabel('Percentage points a day')
     await expect(points).toHaveValue('10')
     await expect(claude.getByText('default ·')).toBeVisible()
-    await expect(claude.getByRole('link', { name: 'edit' })).toHaveAttribute('href', '/settings/accounts')
+    // Pace has its home in Settings › Capacity, at this harness's row (AEON-1176 P6, in AEON-1209).
+    await expect(claude.getByRole('link', { name: 'in Capacity' })).toHaveAttribute('href', '/settings/capacity#pace-claude')
     await points.fill('15'); await points.press('Enter')
     await expect.poll(() => backend.puts.length).toBe(1)
     expect(backend.puts[0]!.value).toEqual({
@@ -473,7 +474,7 @@ test.describe('settings written from the detail', () => {
     await page.goto('/agents')
     const claude = detail(page, 'claude')
     await claude.getByRole('radio', { name: 'Use everything before the reset' }).click()
-    await expect(dial(page).locator('.f-live')).toContainText('Couldn’t save the daily limit. Please try again.')
+    await expect(dial(page).locator('.f-status')).toContainText('Couldn’t save the daily limit. Please try again.')
     await expect(claude).toContainText('Stay on pace · 10 percentage points a day')
     await expect(claude.getByRole('radio', { name: 'Stay on pace' })).toBeChecked()
     expect(backend.puts).toHaveLength(1)
@@ -485,7 +486,7 @@ test.describe('settings written from the detail', () => {
     backend.conflicts = 1
     await page.goto('/agents')
     await detail(page, 'claude').getByRole('radio', { name: 'Wait' }).click()
-    await expect(dial(page).locator('.f-live')).toContainText('changed elsewhere')
+    await expect(dial(page).locator('.f-status')).toContainText('changed elsewhere')
     await expect(detail(page, 'claude').getByRole('radio', { name: 'Follow the model ladder' })).toHaveAttribute('aria-checked', 'true')
     expect(backend.puts).toHaveLength(1)
   })
@@ -496,7 +497,7 @@ test('AEON-1036: honest states: no reading is not on pace, and nothing is flagge
   await setup(page, { example: 'unknown', folded: true })
   await page.goto('/agents')
   await expect(chip(page, 'claude')).toBeVisible()
-  await expect(dial(page).locator('.cap-flag')).toHaveCount(0)
+  await expect(control(page).locator('.cd-flag svg')).toHaveCount(0)
   await dial(page).locator('.fs-tog').click()
   await expect(row(page, 'claude').locator('.cap-stl')).toHaveText('Usage not measured right now')
   await expect(row(page, 'claude').locator('.sub')).toHaveText('2 running')
@@ -515,7 +516,7 @@ test('AEON-1036: a harness with no account says so and links to add one', async 
   await expect(detail(page, 'claude').getByRole('heading')).toHaveText('Claude · no account yet')
   await expect(detail(page, 'claude').getByRole('link', { name: 'Add account' })).toHaveAttribute('href', '/settings/accounts#add-account')
   await expect(row(page, 'claude').locator('.cap-stl')).toHaveText('No account to read')
-  await expect(dial(page).locator('.cap-flag')).toHaveCount(0)
+  await expect(control(page).locator('.cd-flag svg')).toHaveCount(0)
 })
 
 test('AEON-1036: an older plan without daily fields still draws the dial', async ({ page }) => {
@@ -532,7 +533,7 @@ test('AEON-1036: the old header Boost today is gone and nothing writes to its en
   await page.setViewportSize({ width: 1440, height: 1000 })
   const { calls } = await setup(page, { example: 'pace' })
   await page.goto('/agents')
-  await expect(dial(page).locator('.f-dial')).toBeVisible()
+  await expect(control(page).locator('[data-unit="total"]')).toBeVisible()
   await expect(page.locator('[data-boost-today]')).toHaveCount(0)
   await expect(page.locator('.working .boost-today')).toHaveCount(0)
   await expect(detail(page, 'codex').getByRole('button', { name: 'Boost today' })).toBeVisible()
@@ -552,19 +553,21 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
     mkdirSync(shots, { recursive: true })
     // The capture grows the viewport to the card; an element screenshot otherwise clips a long phone dial.
     const shoot = async (name: string) => {
-      const bounds = (await card.boundingBox())!
+      // Open: the body card; folded: the capacity row with the light units (AEON-1209).
+      const target = await body(page).count() ? body(page) : page.locator('.cap-row')
+      const bounds = (await target.boundingBox())!
       await page.setViewportSize({ width, height: Math.ceil(Math.max(1000, bounds.y + bounds.height + 100)) })
-      await card.screenshot({ path: `${shots}/${width}-${theme}-${name}.png`, animations: 'disabled' })
-      await card.screenshot({ path: info.outputPath(`${width}-${theme}-${name}.png`), animations: 'disabled' })
+      await target.screenshot({ path: `${shots}/${width}-${theme}-${name}.png`, animations: 'disabled' })
+      await target.screenshot({ path: info.outputPath(`${width}-${theme}-${name}.png`), animations: 'disabled' })
       await page.setViewportSize({ width, height: 1000 })
     }
     await shoot('open-over-pace')
 
     // 1 · Fold and unfold, and the info area, keep the head still; the rows are below the area and move with it by design.
-    const head: Record<string, Locator> = { more: more(page), fewer: fewer(page), fold, dial: card.locator('.f-dial'), toggle, chevron: toggle.locator('> svg') }
+    const head: Record<string, Locator> = { more: more(page), fewer: fewer(page), fold, dial: control(page).locator('[data-unit="total"]'), toggle, chevron: toggle.locator('> svg') }
     await expectStableControls({
       controls: head,
-      scrollAreas: { card },
+      scrollAreas: { control: control(page) },
       interactions: [
         { name: 'fold', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'false') } },
         { name: 'unfold', run: async () => { await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'true') } },
@@ -586,7 +589,7 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
     const pick = (key: string) => async () => { await row(page, key).locator('.nm').click(); await expect(row(page, key)).toHaveClass(/sel/) }
     const mode = (name: string) => async () => { const radio = row(page, 'codex').getByRole('radio', { name, exact: true }); await radio.click(); await expect(radio).toHaveAttribute('aria-checked', 'true') }
     await expectStableControls({
-      controls, scrollAreas: { card, rows: card.locator('.rows') },
+      controls, scrollAreas: { body: body(page), rows: card.locator('.rows') },
       interactions: [
         { name: 'pick codex', run: pick('codex') },
         { name: 'pick cursor (no daily limit)', run: pick('cursor') },
@@ -603,7 +606,7 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
     const pace = claude.getByRole('button', { name: 'Pace' }), boost = claude.getByRole('button', { name: 'Boost today' })
     await expectStableControls({
       controls: { ...head, claude: row(page, 'claude'), codex: row(page, 'codex'), cursor: row(page, 'cursor'), headline: claude.getByRole('heading'), bar: claude.getByRole('img'), pace },
-      scrollAreas: { card, rows: card.locator('.rows') },
+      scrollAreas: { body: body(page), rows: card.locator('.rows') },
       interactions: [
         { name: 'open Pace', run: async () => { await pace.click(); await expect(pace).toHaveAttribute('aria-expanded', 'true'); await expect(claude.getByLabel('Percentage points a day')).toBeVisible() } },
         { name: 'type a wrong number', run: async () => { const points = claude.getByLabel('Percentage points a day'); await points.fill('99'); await points.press('Enter'); await expect(claude.getByText('Whole numbers from 1 to 50.')).toBeVisible() } },
@@ -622,22 +625,19 @@ for (const width of [1440, 1024, 400]) for (const theme of ['light', 'dark'] as 
     await fold.click()
     await expect(fold).toHaveAttribute('aria-expanded', 'false')
     await shoot('folded-over-pace')
-    if (width < 600) {
-      expect((await chip(page, 'codex').locator('.f-ph').boundingBox())!.height).toBeGreaterThanOrEqual(44)
-      await expect(chip(page, 'claude').locator('.f-ph.st-over_pace')).toBeVisible()
-      await expect(chip(page, 'codex').locator('.pm.dec')).toBeHidden()
-    } else {
-      await expectStableControls({
-        controls: { ...head, codex: chip(page, 'codex'), claude: chip(page, 'claude'), cursor: chip(page, 'cursor'), flag: chip(page, 'claude').locator('.cap-flag'), steps: chip(page, 'codex').locator('.f-pm') },
-        scrollAreas: { card },
-        interactions: [
-          { name: 'step Codex', run: async () => { await chip(page, 'codex').locator('.pm.inc').click(); await expect(chip(page, 'codex').locator('.f-n')).toHaveText('7') } },
-          { name: 'step Codex back', run: async () => { await chip(page, 'codex').locator('.pm.dec').click(); await expect(chip(page, 'codex').locator('.f-n')).toHaveText('6') } },
-          { name: 'hover the Claude chip', run: async () => { await chip(page, 'claude').hover(); await expect(chip(page, 'claude').locator('.chip-tip')).toBeVisible() } },
-          { name: 'leave it', run: async () => { await page.mouse.move(1, 1); await expect(chip(page, 'claude').locator('.chip-tip')).toBeHidden() } },
-        ],
-      })
-    }
+    // A tight row (under 900 px) lifts a unit onto its plate on hover; − and + then step it.
+    const lift = async (key: string) => { if (width < 900) await chip(page, key).locator('.du-mark').hover() }
+    await expect(flag(page, 'claude')).toHaveClass(/st-over_pace/)
+    await expectStableControls({
+      controls: { ...head, codex: chip(page, 'codex'), claude: chip(page, 'claude'), cursor: chip(page, 'cursor'), flag: flag(page, 'claude'), steps: chip(page, 'codex').locator('.value-slot') },
+      scrollAreas: { control: control(page) },
+      interactions: [
+        { name: 'step Codex', run: async () => { await lift('codex'); await chip(page, 'codex').locator('.pm.inc').click(); await expect(chip(page, 'codex').locator('.f-n')).toHaveText('7') } },
+        { name: 'step Codex back', run: async () => { await lift('codex'); await chip(page, 'codex').locator('.pm.dec').click(); await expect(chip(page, 'codex').locator('.f-n')).toHaveText('6') } },
+        { name: 'hover the Claude unit', run: async () => { await chip(page, 'claude').locator('.du-mark').hover(); await expect.poll(() => chip(page, 'claude').locator('.pm.inc').evaluate(el => getComputedStyle(el).opacity)).toBe('1') } },
+        { name: 'leave it', run: async () => { await page.mouse.move(1, 1); await expect.poll(() => chip(page, 'claude').locator('.pm.inc').evaluate(el => getComputedStyle(el).opacity)).toBe('0') } },
+      ],
+    })
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
     expect(writes(calls)).toEqual([])
     // Picking and folding wrote no daily setting; only the plan's own limits changed above.
@@ -654,17 +654,17 @@ test('AEON-1036: the folded dial keeps its place when a flag appears', async ({ 
   const card = dial(page)
   await expect(chip(page, 'claude')).toBeVisible()
   await expectStableControls({
-    controls: { more: more(page), fewer: fewer(page), fold: card.locator('.fs-tog'), dial: card.locator('.f-dial'), codex: chip(page, 'codex'), claude: chip(page, 'claude'), cursor: chip(page, 'cursor'), live: card.locator('.f-live > svg') },
-    scrollAreas: { card },
+    controls: { more: more(page), fewer: fewer(page), fold: card.locator('.fs-tog'), dial: control(page).locator('[data-unit="total"]'), codex: chip(page, 'codex'), claude: chip(page, 'claude'), cursor: chip(page, 'cursor'), live: card.locator('.f-live > svg') },
+    scrollAreas: { control: control(page) },
     interactions: [{ name: 'Claude goes over pace while the dial is folded', run: async () => {
       backend.example = 'over'
       backend.settings = { ...backend.settings, claude: { ...backend.settings.claude!, boost_today: { limit_used_pct: 60, entered_as: 'used', until: UNTIL } } }
       await page.clock.fastForward(16_000)
-      await expect(chip(page, 'claude').locator('.cap-flag')).toHaveClass(/st-over_pace/)
+      await expect(flag(page, 'claude')).toHaveClass(/st-over_pace/)
     } }, { name: 'then at its limit', run: async () => {
       backend.example = 'limit'; backend.settings = { ...backend.settings, claude: { ...backend.settings.claude!, boost_today: null } }
       await page.clock.fastForward(16_000)
-      await expect(chip(page, 'claude').locator('.cap-flag')).toHaveClass(/st-at_limit/)
+      await expect(flag(page, 'claude')).toHaveClass(/st-at_limit/)
     } }],
   })
 })
@@ -676,39 +676,52 @@ test('AEON-1036: the dial and its detail pass axe, open with both folds and fold
   await expect(detail(page, 'claude')).toBeVisible()
   for (const theme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
-    expect((await new AxeBuilder({ page }).include('.working').analyze()).violations.map(v => v.id), `open ${theme}`).toEqual([])
+    expect((await new AxeBuilder({ page }).include('.cap-row').include('.dial-card').analyze()).violations.map(v => v.id), `open ${theme}`).toEqual([])
   }
   await dial(page).locator('.fs-tog').click()
   await expect(dial(page).locator('.f-chip')).toHaveCount(3)
   for (const theme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
-    expect((await new AxeBuilder({ page }).include('.working').analyze()).violations.map(v => v.id), `folded ${theme}`).toEqual([])
+    expect((await new AxeBuilder({ page }).include('.cap-row').analyze()).violations.map(v => v.id), `folded ${theme}`).toEqual([])
   }
 })
 
 test.describe('phone', () => {
   test.use({ viewport: { width: 400, height: 1000 }, hasTouch: true, isMobile: true })
-  test('AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list', async ({ page }) => {
-    const { work } = await setup(page, { example: 'over', folded: true })
+  test('AEON-1036: a tap lifts a unit onto its plate; every target reaches 44 px and the detail sits under the list', async ({ page }) => {
+    await setup(page, { example: 'over', folded: true })
     await page.goto('/agents')
     const card = dial(page)
-    await expect(card.locator('.f-ph')).toHaveCount(3)
-    // Two lines in all: the sentence, then the harnesses with the running state on the right.
-    const [sentence, chips, live] = await Promise.all([card.locator('.f-dial').boundingBox(), card.locator('.f-chips').boundingBox(), card.locator('.f-live').boundingBox()])
-    expect(chips!.y).toBeGreaterThan(sentence!.y + sentence!.height - 1)
-    expect(live!.x).toBeGreaterThan(chips!.x + chips!.width - 1)
-    await expect(chip(page, 'claude').locator('.f-ph')).toHaveClass(/st-over_pace/)
-    await expect(chip(page, 'claude').locator('.f-ph')).toHaveText('2')
-    await expect(chip(page, 'cursor').locator('.f-ph')).toHaveText('∞')
-    await chip(page, 'codex').locator('.f-ph').tap()
-    await expect(card.locator('.fs-tog')).toHaveAttribute('aria-expanded', 'true')
-    await expect(row(page, 'codex')).toHaveClass(/sel/)
-    await expect.poll(() => work.preferences['ui.agents.dial']).toMatchObject({ selected: 'codex' })
+    await expect(control(page).locator('.f-chip')).toHaveCount(3)
+    // The units wrap inside the full-width control; the live state ends the last line on the right.
+    const [total, live, row1] = await Promise.all([control(page).locator('[data-unit="total"]').boundingBox(), control(page).locator('.f-live').boundingBox(), control(page).boundingBox()])
+    expect(live!.x + live!.width).toBeGreaterThan(row1!.x + row1!.width - 20)
+    expect(total!.x).toBeLessThan(row1!.x + 60)
+    await expect(flag(page, 'claude')).toHaveClass(/st-over_pace/)
+    await expect(chip(page, 'claude').locator('.f-n')).toHaveText('2')
+    await expect(chip(page, 'cursor').locator('.value svg')).toBeVisible()
+    await chip(page, 'codex').locator('.du-mark').tap()
+    await expect(chip(page, 'codex')).toHaveClass(/\bopen\b/)
+    await chip(page, 'codex').locator('.pm.inc').tap()
+    await expect(chip(page, 'codex').locator('.f-n')).toHaveText('7')
+    // Every target a finger can use reaches 44 px, its own box or its ::after reach; unseen − and + are no target.
     const targets = async () => {
-      const sizes = await card.locator('button:visible').evaluateAll(elements => elements.map(el => { const box = el.getBoundingClientRect(); return { name: el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '', width: box.width, height: box.height } }))
-      expect(sizes.length).toBeGreaterThan(0)
-      for (const size of sizes) { expect(size.width, size.name).toBeGreaterThanOrEqual(44); expect(size.height, size.name).toBeGreaterThanOrEqual(44) }
+      const small = await card.locator('button').evaluateAll(elements => elements.flatMap(el => {
+        const r = el.getBoundingClientRect(), cs = getComputedStyle(el)
+        if (!r.width || !r.height || Number(cs.opacity) === 0 || cs.pointerEvents === 'none' || cs.visibility === 'hidden') return []
+        const a = getComputedStyle(el, '::after'); let w = r.width, h = r.height
+        if (a.content !== 'none' && a.position === 'absolute') {
+          const v = (k: string) => { const x = parseFloat(a.getPropertyValue(k)); return Number.isFinite(x) ? x : 0 }
+          w = Math.max(w, r.width - Math.min(0, v('left')) - Math.min(0, v('right'))); h = Math.max(h, r.height - Math.min(0, v('top')) - Math.min(0, v('bottom')))
+        }
+        return w < 43.5 || h < 43.5 ? [`${el.getAttribute('aria-label') ?? el.textContent?.trim()} ${Math.round(w)}x${Math.round(h)}`] : []
+      }))
+      expect(small).toEqual([])
     }
+    await targets()
+    await card.locator('.fs-tog').tap()
+    await expect(card.locator('.fs-tog')).toHaveAttribute('aria-expanded', 'true')
+    await expect(row(page, 'claude')).toHaveClass(/sel/)
     await targets()
     await row(page, 'claude').locator('.nm').tap()
     await detail(page, 'claude').getByRole('button', { name: 'Pace' }).tap()

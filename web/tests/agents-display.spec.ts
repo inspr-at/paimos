@@ -11,7 +11,8 @@ const id = (n: number) => `5e000000-0000-4000-8000-${String(n).padStart(12, '0')
 const row = (page: Page, n: number) => page.locator(`[data-row="s:${id(n)}"]`)
 // The tree's live-family fold; `.worker-toggle` is the stopped-history control.
 const familyFold = (page: Page, n: number) => row(page, n).locator('[data-fold="family"]')
-const dial = (page: Page) => page.getByRole('region', { name: 'Agents at once' })
+// AEON-1209: the folded dial is the light control in the capacity row; unfolded, its body is a card under it.
+const dial = (page: Page) => page.locator(':is(.cdial, .dial-card)')
 const liveCount = (page: Page) => page.locator('.sessions .group-row.live .mono')
 const shots = process.env.AEON691_SHOTS
 
@@ -223,8 +224,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect(row(page, 2).locator('.pct')).toHaveText('80%')
     await expectStableControls({
       controls: { more: dial(page).getByRole('button', { name: 'One agent more at once' }), fewer: dial(page).getByRole('button', { name: 'One agent fewer at once' }), fold: dial(page).locator('.fs-tog') },
-      scrollAreas: { dial: dial(page), page: page.locator('.agents-page') },
-      interactions: [{ name: 'increase total without moving actions', run: async () => { await dial(page).getByRole('button', { name: 'One agent more at once' }).click(); await expect(dial(page).locator('.f-num')).toHaveText('21') } }],
+      scrollAreas: { dial: page.locator('.cdial'), page: page.locator('.agents-page') },
+      interactions: [{ name: 'increase total without moving actions', run: async () => {
+        // A tight capacity row lifts the unit onto its plate on hover first.
+        if (width < 900) await page.locator('.cdial [data-unit="total"] .du-mark').hover()
+        await dial(page).getByRole('button', { name: 'One agent more at once' }).click(); await expect(dial(page).locator('.f-num')).toHaveText('21')
+      } }],
     })
     if (shots) {
       mkdirSync(shots, { recursive: true })

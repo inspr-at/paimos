@@ -122,8 +122,6 @@ async function open(page: Page) {
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
 }
-const panel = (page: Page) => page.getByRole('region', { name: 'Accounts and computers' })
-const setupToggle = (page: Page) => page.getByRole('button', { name: 'Accounts and computers', exact: true })
 const noScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)
 async function shots(page: Page, state: string) {
   const dir = process.env.AEON402_SHOTS
@@ -202,8 +200,8 @@ test('a section preference that lands after a run link keeps Queued open until t
   const read = page.waitForResponse(r => r.request().method() === 'GET' && new URL(r.url()).pathname === '/api/preferences/ui.agents.sections')
   release()
   await read
-  // The late read did land: Sessions follows the stored fold.
-  await expect(page.getByRole('region', { name: 'Sessions' }).locator('.fs-head > .fs-tog')).toHaveAttribute('aria-expanded', 'false')
+  // The late read did land (the Sessions card no longer folds, AEON-1209); Queued stays open for the link.
+  await expect(page.getByRole('region', { name: 'Sessions' }).locator('.fs-tog')).toHaveCount(0)
   await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   await expect(item).toBeVisible()
   // Folding ends the visit's reveal and writes nothing: the preference already says folded.
@@ -213,29 +211,18 @@ test('a section preference that lands after a run link keeps Queued open until t
   expect(work.preferences['ui.agents.sections']).toMatchObject({ queued: false })
 })
 
-test('accounts and computers fold into one calm line, remembered per person', async ({ page }) => {
-  const { work } = await setup(page)
-  await open(page)
-  // Folded on the first visit: the line states the state, the body is not there to tab into.
-  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'false')
-  await expect(panel(page)).toContainText(/\d+ of \d+ ready/)
-  await expect(panel(page).getByRole('table')).toBeHidden()
-  await shots(page, 'folded')
-  await setupToggle(page).click()
-  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'true')
-  await expect(panel(page).getByRole('table')).toBeVisible()
-  await expect.poll(() => work.preferences['ui.agents.sections']).toMatchObject({ accounts: true })
-  await shots(page, 'expanded')
-  await page.reload()
-  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'true')
-  await setupToggle(page).click()
-  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'false')
-  await expect.poll(() => work.preferences['ui.agents.sections']).toMatchObject({ accounts: false })
-})
-
-test('a stored open choice opens open, without a flash of the folded line', async ({ page }) => {
+// AEON-1209: Accounts and computers is the accounts chip in the capacity row; a fold stored for
+// the old card changes nothing, and the popover holds the line and the three tiles.
+test('accounts and computers is one chip whose popover states the state; a stored fold changes nothing', async ({ page }) => {
   await setup(page, { unfolded: true })
   await open(page)
-  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'true')
-  await expect(panel(page).getByRole('table')).toBeVisible()
+  const chip = page.locator('.cap-row .acc-chip')
+  await expect(chip).toHaveAttribute('aria-expanded', 'false')
+  await expect(page.getByRole('table')).toHaveCount(0)
+  await shots(page, 'folded')
+  await chip.click()
+  const pop = page.getByRole('dialog', { name: 'Accounts and computers' })
+  await expect(pop.locator('.acc-state')).toContainText(/\d+ of \d+ ready|All \d+ ready/)
+  await expect(pop.locator('.tile')).toHaveCount(3)
+  await shots(page, 'expanded')
 })

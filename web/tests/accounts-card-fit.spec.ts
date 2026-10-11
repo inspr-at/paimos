@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-355, kept for the status line and grid of AEON-782: Accounts and
-// computers stays inside itself from 390 to 2560, with the session panel open
-// and closed. Long names, one unbroken account name, a computer with six
-// accounts and one with one, including an account with no reading yet. Names
-// stay on one line. The section, main and the document have no horizontal
-// overflow. Sprint and Hold badges moved to Settings with the account menu.
+// AEON-355, kept for the capacity row of AEON-1209 (design AEON-1196): the dial's
+// units and the accounts chip stay inside the row from 390 to 2560, with the session
+// panel open and closed, and the accounts popover stays inside the window. Long names,
+// one unbroken account name, a computer with six accounts and one with one, including
+// an account with no reading yet. The row, main and the document have no horizontal
+// overflow.
 import { mkdirSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
@@ -62,18 +62,19 @@ async function fit(page: Page) {
     const documentOver = Math.max(root.scrollWidth - root.clientWidth, root.scrollWidth - window.innerWidth)
     const main = document.querySelector('main')
     const mainOver = main ? main.scrollWidth - main.clientWidth : null
-    const card = document.querySelector('.acc-section')
-    if (!card) return { missing: true as const, documentOver, mainOver, offenders: [], pageOffender: '' }
-    const edge = card.getBoundingClientRect().right
+    const row = document.querySelector('.cap-row')
+    if (!row) return { missing: true as const, documentOver, mainOver, offenders: [], pageOffender: '', popover: '' }
+    const edge = row.getBoundingClientRect().right
     const describe = (el: Element) => {
       const cls = (el.getAttribute('class') || '').split(/\s+/).filter(Boolean).slice(0, 3).join('.')
       const text = [...el.childNodes].every(node => node.nodeType === 3) ? (el.textContent || '').trim().slice(0, 48) : ''
       return `${el.tagName.toLowerCase()}${cls ? '.' + cls : ''}${text ? ` "${text}"` : ''}`
     }
     const offenders: { over: number; desc: string }[] = []
-    for (const el of card.querySelectorAll('*')) {
-      const box = el.getBoundingClientRect()
-      if (box.width < 1 && box.height < 1) continue
+    for (const el of row.querySelectorAll('*')) {
+      const box = el.getBoundingClientRect(), cs = getComputedStyle(el)
+      // The unseen − and + of a tight row keep their place over the neighbours; they are not drawn.
+      if ((box.width < 1 && box.height < 1) || Number(cs.opacity) === 0 || el.closest('.pm')) continue
       const over = box.right - edge
       if (over > 1) offenders.push({ over: Math.round(over * 10) / 10, desc: describe(el) })
     }
@@ -89,32 +90,22 @@ async function fit(page: Page) {
         }
       }
     }
-    // A flex item's own box is one rect even when its text wraps, so the line
-    // count comes from the text range.
-    const names = [...card.querySelectorAll('.mx-name')].map(el => {
-      const range = document.createRange()
-      range.selectNodeContents(el)
-      const rects = [...range.getClientRects()].filter(r => r.width > 0.5 && r.height > 0.5)
-      const lines = new Set(rects.map(r => Math.round(r.top))).size
-      return { name: (el.textContent || '').trim(), lines }
-    })
-    return { missing: false as const, offenders: offenders.slice(0, 4), documentOver, mainOver, pageOffender, card: Math.round(edge), names }
+    const pop = document.querySelector('.floating')?.getBoundingClientRect()
+    const popover = pop && (pop.left < -0.5 || pop.right > window.innerWidth + 0.5) ? `popover spans ${Math.round(pop.left)}–${Math.round(pop.right)}` : ''
+    return { missing: false as const, offenders: offenders.slice(0, 4), documentOver, mainOver, pageOffender, popover }
   })
 }
 
-test('accounts and computers fit every width, panel open and closed', async ({ page }) => {
+test('the capacity row and the accounts popover fit every width, panel open and closed', async ({ page }) => {
   test.setTimeout(600_000)
   const errors = watchErrors(page)
   await setup(page)
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-  const card = page.getByRole('region', { name: 'Accounts and computers' })
-  await expect(card.getByRole('table')).toBeVisible()
-  // Computers and accounts are columns and rows of one grid: a computer with six accounts and one with one.
-  await expect(card.getByRole('columnheader')).toHaveCount(3)
-  await expect(card.getByRole('row')).toHaveCount(1 + (await card.getByRole('rowheader').count()))
-  await expect(card.getByRole('rowheader').first().getByRole('link')).toBeVisible()
+  const row = page.locator('.cap-row'), chip = row.locator('.acc-chip')
+  await expect(chip).toBeVisible()
+  await expect(row.locator('.cdial [data-unit="total"]')).toBeVisible()
   if (shots) mkdirSync(shots, { recursive: true })
 
   const problems: string[] = []
@@ -122,22 +113,28 @@ test('accounts and computers fit every width, panel open and closed', async ({ p
     for (const width of widths()) {
       await page.setViewportSize({ width, height: width < 800 ? 844 : 1000 })
       if (shots && [390, 610, 720, 721, 1100, 1320, 1400, 1440, 1600, 2560].includes(width)) {
-        await card.screenshot({ path: `${shots}/${label}-${width}.png` })
+        await row.screenshot({ path: `${shots}/${label}-${width}.png` })
       }
       const result = await fit(page)
-      if (result.missing) problems.push(`${label} ${width}px has no accounts card`)
+      if (result.missing) problems.push(`${label} ${width}px has no capacity row`)
       else if (result.offenders?.length) problems.push(`${label} ${width}px spills ${result.offenders.map(o => `${o.desc} (+${o.over}px)`).join('; ')}`)
       if ((result.documentOver ?? 0) > 1) problems.push(`${label} ${width}px document scrolls by ${result.documentOver}px via ${result.pageOffender}`)
       if (result.mainOver == null) problems.push(`${label} ${width}px has no main`)
       else if (result.mainOver > 1) problems.push(`${label} ${width}px main scrolls by ${Math.round(result.mainOver * 10) / 10}px`)
-      if (!result.missing) {
-        for (const n of result.names) {
-          if (n.lines !== 1) problems.push(`${label} ${width}px ${n.name} is ${n.lines} lines`)
-        }
-      }
     }
   }
   await sweep('closed')
+  // The popover with the long names stays inside the window at the edges of the layouts.
+  for (const width of [390, 600, 720, 1100, 1440, 2560]) {
+    await page.setViewportSize({ width, height: 900 })
+    await chip.click()
+    await expect(page.getByRole('dialog', { name: 'Accounts and computers' })).toBeVisible()
+    const result = await fit(page)
+    if (result.popover) problems.push(`${width}px ${result.popover}`)
+    if ((result.documentOver ?? 0) > 1) problems.push(`${width}px popover makes the document scroll by ${result.documentOver}px`)
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('dialog', { name: 'Accounts and computers' })).toHaveCount(0)
+  }
   await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
   await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
   await sweep('panel')
