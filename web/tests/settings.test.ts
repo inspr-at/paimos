@@ -25,6 +25,17 @@ test('Personal, Developer and Policies are for everyone; workspace sections foll
   assert.equal(visibleSections(true).some(section => section.id === 'agent-rules'), false)
 })
 
+test('Accounts, Computers and Capacity are three sections, each for people who may read accounts (AEON-1171)', () => {
+  const parts = visibleSections(false, permission => permission === 'account.read').filter(section => ['accounts', 'computers', 'capacity'].includes(section.id))
+  assert.deepEqual(parts.map(s => [s.id, s.group, s.label, s.summary, s.permission]), [
+    ['accounts', 'Agents and automation', 'Accounts', 'Which logins agents use', 'account.read'],
+    ['computers', 'Agents and automation', 'Computers', 'Where agents run', 'account.read'],
+    ['capacity', 'Agents and automation', 'Capacity', 'How much, and when', 'account.read'],
+  ])
+  assert.equal(visibleSections(true).some(section => ['accounts', 'computers', 'capacity'].includes(section.id)), false)
+  for (const id of ['accounts', 'computers', 'capacity']) assert.equal(sectionOf(id), id)
+})
+
 test('agent keys read as active, expired or revoked', () => {
   const key = (extra: Partial<AgentKey>): AgentKey => ({ id: '1', principal_id: 'p', name: 'k', prefix: 'ab12', scopes: [], created_at: '2026-09-01T00:00:00Z', expires_at: null, last_used_at: null, revoked_at: null, ...extra })
   const now = Date.parse('2026-09-24T12:00:00Z')

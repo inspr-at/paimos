@@ -229,8 +229,8 @@ test('saving a pacing option keeps keyboard focus on it', async ({ page }) => {
     if (route.request().method() === 'PUT') await pending
     await route.fallback()
   })
-  // AEON-782: the pacing settings live in Settings › Accounts and computers › Capacity and load.
-  await page.goto('/settings/accounts#capacity-and-load')
+  // AEON-782: the pacing settings live in Settings › Capacity › Capacity and load (AEON-1171).
+  await page.goto('/settings/capacity#when')
   const pacing = page.locator('#capacity-and-load')
   const seven = pacing.getByRole('radio', { name: '7', exact: true })
   await seven.click()

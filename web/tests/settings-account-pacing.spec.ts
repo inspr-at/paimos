@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-786: Settings › Accounts and computers carries what the Agents page
-// offered before AEON-782 removes it there: the account menu (Back to the
-// plan, Sprint until reset, Hold, Remove account…), the one-time plan card and
-// the pacing editors under Capacity and load. AEON786_SHOTS=1 also writes
-// screenshots into this test's output directory.
+// AEON-786: Settings carries what the Agents page offered before AEON-782
+// removes it there: the account menu (Back to the plan, Sprint until reset,
+// Hold, Remove account…) in Settings › Accounts, the one-time plan card and the
+// pacing editors under Capacity and load in Settings › Capacity (AEON-1171).
+// AEON786_SHOTS=1 also writes screenshots into this test's output directory.
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
@@ -29,10 +29,13 @@ async function setup(page: Page, options: CapacityOptions & { manage?: boolean }
 }
 const listRow = (page: Page, id: string) => page.locator(`.list-row[data-accounts~="${id}"]`)
 const zone = (page: Page) => page.locator('#capacity-and-load')
+// Old links to Accounts and computers' pacing land on Capacity (AEON-1171).
 async function open(page: Page, path = '/settings/accounts') {
   await page.goto(path)
-  await expect(listRow(page, ACCOUNTS.main)).toBeVisible()
+  if (path.startsWith('/settings/capacity') || path.endsWith('#capacity-and-load')) await expect(zone(page)).toBeVisible()
+  else await expect(listRow(page, ACCOUNTS.main)).toBeVisible()
 }
+const openCapacity = (page: Page) => open(page, '/settings/capacity')
 async function accountMenu(page: Page, id: string) {
   await listRow(page, id).click()
   await page.locator('section.pane').getByRole('button', { name: /^More actions for / }).click()
@@ -174,6 +177,7 @@ test('people without account management get no account menu and read-only pacing
   await open(page)
   await listRow(page, ACCOUNTS.main).click()
   await expect(page.locator('section.pane').getByRole('button', { name: /^More actions for / })).toHaveCount(0)
+  await openCapacity(page)
   await expect(page.getByRole('region', { name: 'The plan' })).toHaveCount(0)
   await expect(zone(page).getByRole('radio', { name: '5' })).toBeDisabled()
   await expect(zone(page).getByRole('button', { name: 'Customize work week' })).toBeDisabled()
@@ -183,7 +187,7 @@ test('people without account management get no account menu and read-only pacing
 test('the plan card shows until it is answered: Looks right saves Auto, then it is gone', async ({ page }) => {
   const errors = watchErrors(page)
   const { capacity } = await setup(page, { planCard: 'first' })
-  await open(page)
+  await openCapacity(page)
   const card = page.getByRole('region', { name: 'The plan' })
   await expect(card).toContainText("Here's the plan.")
   await card.getByRole('button', { name: 'Looks right' }).click()
@@ -191,14 +195,14 @@ test('the plan card shows until it is answered: Looks right saves Auto, then it 
   expect(capacity.puts[0]).toMatchObject({ scope: 'user', schedule: { reserve: 'auto' } })
   await expect(card).toHaveCount(0)
   await page.reload()
-  await expect(listRow(page, ACCOUNTS.main)).toBeVisible()
+  await expect(zone(page)).toBeVisible()
   await expect(page.getByRole('region', { name: 'The plan' })).toHaveCount(0)
   expect(errors).toEqual([])
 })
 
 test('the plan card: Change leads to Capacity and load without saving', async ({ page }) => {
   const { capacity } = await setup(page, { planCard: 'first' })
-  await open(page)
+  await openCapacity(page)
   await page.getByRole('region', { name: 'The plan' }).getByRole('button', { name: 'Change' }).click()
   await expect(page.getByRole('region', { name: 'The plan' })).toHaveCount(0)
   await expect(zone(page).getByRole('radio', { name: '5' })).toBeFocused()
@@ -207,7 +211,7 @@ test('the plan card: Change leads to Capacity and load without saving', async ({
 
 test('the plan card for an existing schedule: Turn off keeps nothing for you', async ({ page }) => {
   const { capacity } = await setup(page, { planCard: 'new' })
-  await open(page)
+  await openCapacity(page)
   const card = page.getByRole('region', { name: 'The plan' })
   await expect(card).toContainText('New:')
   await card.getByRole('button', { name: 'Turn off' }).click()
@@ -221,6 +225,7 @@ test('Capacity and load: work days, nights and the editors, with controls that s
   await page.setViewportSize({ width: 1280, height: 1000 })
   const { capacity } = await setup(page)
   await open(page, '/settings/accounts#capacity-and-load')
+  await expect(page).toHaveURL('/settings/capacity')
   await expect(zone(page).getByRole('radio', { name: '5' })).toBeFocused()
   const guard = await controlStability(page, {
     weekGear: zone(page).getByRole('button', { name: 'Customize work week' }),
@@ -285,7 +290,7 @@ test('Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them'
 test('phone: the editor is a full-height sheet and nothing scrolls sideways', async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await setup(page, { planCard: 'first' })
-  await open(page)
+  await openCapacity(page)
   await expect(page.getByRole('region', { name: 'The plan' })).toBeVisible()
   await shots(page, info, 'phone-plan-card')
   await zone(page).getByRole('button', { name: 'Customize night and shifts' }).click()
