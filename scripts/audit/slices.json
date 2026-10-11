@@ -278,6 +278,8 @@
         "internal/routineactions/**",
         "internal/recurrences/runs.go",
         "internal/recurrences/runs_test.go",
+        "internal/recurrences/templates.go",
+        "internal/recurrences/templates_test.go",
         "internal/routinebudget/**",
         "internal/recurrences/reads.go",
         "internal/recurrences/consent_reads.go",
