@@ -3,6 +3,7 @@
 import { computed, reactive } from 'vue'
 import { ROUTINE_ACTIONS, ROUTINE_NEVER, actionOutcome, budgetWords, budgetFrom, mayWords, ruleLevel, ruleOutcome, ruleWords, type RoutineAction, type RoutineDraft, type RoutineExecutionPolicy, type RoutineGuardEntry } from '../../lib/recurrences'
 import AppIcon from '../AppIcon.vue'
+import SettingsPlace from './SettingsPlace.vue'
 
 // The three folds under "Who does it" (spec "Folds"): one row each with a one-line
 // summary, growing in place below the row. Values that change keep fixed slots
@@ -68,7 +69,7 @@ const id = (name: string) => `${props.idPrefix}-${name}`
       <p class="hint">Counts every agent in the run: the builder, the checks, review and fixes. Money means what a paid API actually charges; subscriptions count as $0.</p>
       <div class="note-slot">
         <p class="warn-line" role="note" :aria-hidden="!budgetUnqualified"><AppIcon name="alert" :size="13" /><span><b>This limit can’t be enforced on this route yet,</b> so a run with it won’t start. Choose another limit, or wait until OPS qualifies it for {{ project }}. <span class="code">budget_mode_unqualified</span></span></p>
-        <p class="room" :aria-hidden="budgetUnqualified"><AppIcon name="pulse" :size="13" /><span><b>Room:</b> {{ fresh ? 'no runs yet, so no estimate.' : 'how much a run uses and how many fit isn’t measured here yet.' }} A run starts only when an account has room; see <a href="/settings/capacity" target="_blank" rel="noopener" class="link-btn quiet">Settings › Capacity</a>.</span></p>
+        <p class="room" :aria-hidden="budgetUnqualified"><AppIcon name="pulse" :size="13" /><span><b>Room:</b> {{ fresh ? 'no runs yet, so no estimate.' : 'how much a run uses and how many fit isn’t measured here yet.' }} A run starts only when an account has room; see <a href="/settings/capacity" target="_blank" rel="noopener" class="link-btn quiet"><SettingsPlace page="Capacity" /></a>.</span></p>
       </div>
     </div></div></div>
 
@@ -76,14 +77,14 @@ const id = (name: string) => `${props.idPrefix}-${name}`
       <AppIcon name="chevron-right" :size="13" /><span class="fr-ic"><AppIcon name="monitor" :size="15" /></span><span class="fr-t">Where it runs</span><span class="fr-s"><AppIcon v-if="browserUnqualified" name="alert" :size="12" />{{ draft.browser ? 'Browser' : 'Coding' }} · {{ browserUnqualified ? 'not qualified yet' : `a computer ${mine ? 'of yours' : `${owner} allowed`}` }}</span>
     </button>
     <div :id="id('fb-needs')" class="fold" :class="{ open: open.needs }" :inert="!open.needs"><div class="fold-in"><div class="fb">
-      <p class="fb-lead">It runs on a computer {{ mine ? 'you' : owner }} allowed in Settings › Computers, in its own copy of the repository.</p>
+      <p class="fb-lead">It runs on a computer {{ mine ? 'you' : owner }} allowed in <SettingsPlace page="Computers" />, in its own copy of the repository.</p>
       <label class="act single"><span class="switch"><input :id="id('needs-browser')" v-model="draft.browser" type="checkbox" role="switch" /></span><span class="act-t"><b>Needs a browser</b><small>For pages it must open, like a link check.</small></span><span class="out" :class="draft.browser ? 'ok' : 'off'">{{ draft.browser ? 'On' : 'Off' }}</span></label>
       <div class="route-slot">
         <p v-if="browserUnqualified" class="warn-line" role="note"><AppIcon name="alert" :size="13" /><span><b>Not qualified yet:</b> no computer has passed the check for this kind of work, so runs wait and say why. It stays saved. <span class="code">capability_unqualified</span></span></p>
         <p v-else-if="capabilityKnown" class="ok-line"><AppIcon name="check" :size="13" /><span><b>Ready:</b> a qualified computer in {{ project }} can take {{ draft.browser ? 'browser' : 'coding' }} work.</span></p>
         <p v-else class="calm-line"><AppIcon name="info" :size="13" /><span>Which computer qualifies is checked once agents may run routines in {{ project }}.</span></p>
       </div>
-      <p class="hint">Which computers: <a href="/settings/computers" target="_blank" rel="noopener" class="link-btn quiet">Settings › Computers</a>. A routine never falls back to a computer that isn’t qualified.</p>
+      <p class="hint">Which computers: <a href="/settings/computers" target="_blank" rel="noopener" class="link-btn quiet"><SettingsPlace page="Computers" /></a>. A routine never falls back to a computer that isn’t qualified.</p>
     </div></div></div>
   </div>
 </template>

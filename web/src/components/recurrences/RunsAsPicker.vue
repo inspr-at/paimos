@@ -6,6 +6,7 @@ import { useIdentityScope } from '../../lib/useIdentityScope'
 import type { ExecutionPrincipal } from '../../lib/recurrences'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
+import SettingsPlace from './SettingsPlace.vue'
 
 // Runs as (AEON-1184): the restricted agents the owner may pick for a project or
 // workspace routine. Pages are read until next_cursor is null, even past an empty
@@ -61,7 +62,7 @@ function keys(event: KeyboardEvent) {
           <AppIcon :name="item.id === modelValue ? 'check' : 'agent'" :size="14" /><span class="ra-t">{{ item.label }}</span><span class="ra-d">Agent · restricted to {{ scopeLabel }}</span>
         </button>
       </div>
-      <p class="ra-foot">{{ truncated ? `The first ${items.length} are listed. ` : '' }}Only agents that pass the same check as consent are listed. An admin adds one in Settings › Access.</p>
+      <p class="ra-foot">{{ truncated ? `The first ${items.length} are listed. ` : '' }}Only agents that pass the same check as consent are listed. An admin adds one in <SettingsPlace page="Access" />.</p>
     </div>
   </FloatingPanel>
 </template>

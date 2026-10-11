@@ -9,6 +9,7 @@ import type { WorkKind } from '../../lib/workKinds'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import RoutineFolds from './RoutineFolds.vue'
+import SettingsPlace from './SettingsPlace.vue'
 
 // "Who does it" (AEON-1182): just the ticket, as today, or an agent works on it.
 // Agent-only rows sit below the switch, so switching moves nothing above it.
@@ -63,7 +64,7 @@ const efforts = computed(() => ROUTINE_EFFORTS.some(([role]) => role === draft.v
           <button type="button" class="btn sm ghost" :disabled="draft.sources.length >= 32" aria-haspopup="dialog" :aria-expanded="!!picker" @click="openPicker"><AppIcon name="plus" :size="12" />Add a ticket or knowledge…</button>
           <span class="hint">Up to 32. Read before each run; nothing is fetched from outside.</span>
         </div></div>
-        <p class="route"><AppIcon name="agent" :size="14" /><span class="rt-txt"><template v-if="routeState === 'ready' && route">Today <b>{{ route }}</b> {{ effortVerb(draft.role) }}; a model of another family checks each action.</template><template v-else-if="routeState === 'loading'">Finding the model for {{ effortWord(draft.role) }}…</template><template v-else>No model is set for {{ effortWord(draft.role) }} yet{{ routeState === 'failed' ? ' (the route couldn’t be read)' : '' }}; Settings › Models decides.</template></span><a href="/settings/models" target="_blank" rel="noopener" class="go">Settings › Models<AppIcon name="chevron-right" :size="12" /></a></p>
+        <p class="route"><AppIcon name="agent" :size="14" /><span class="rt-txt"><template v-if="routeState === 'ready' && route">Today <b>{{ route }}</b> {{ effortVerb(draft.role) }}; a model of another family checks each action.</template><template v-else-if="routeState === 'loading'">Finding the model for {{ effortWord(draft.role) }}…</template><template v-else>No model is set for {{ effortWord(draft.role) }} yet{{ routeState === 'failed' ? ' (the route couldn’t be read)' : '' }}; <SettingsPlace page="Models" /> decides.</template></span><a href="/settings/models" target="_blank" rel="noopener" class="go"><SettingsPlace page="Models" /><AppIcon name="chevron-right" :size="12" /></a></p>
         <p class="hint pad">It follows the ticket’s description and criteria as its instructions.</p>
       </template>
     </div>
