@@ -297,7 +297,8 @@ test('many models stay calm: one option per line, older versions fold per provid
   // A person can still click it: nothing is picked and the menu stays (Playwright needs force for aria-disabled).
   await opus48.click({ force: true }); await expect(menu).toBeVisible(); expect(state.writes).toHaveLength(0)
   // Typing searches older versions too; Enter on one says why it isn't picked, Enter on the newest picks it.
-  await page.getByRole('combobox').fill('opus')
+  await page.keyboard.press('Escape'); await expect(menu).toHaveCount(0); await page.keyboard.press('Enter'); await expect(page.getByRole('combobox')).toBeFocused()
+  await page.keyboard.type('opus')
   await expect(menu.locator('[role="option"]')).toHaveCount(2)
   await page.keyboard.press('ArrowDown'); await expect(opus48).toHaveClass(/\bon\b/)
   await page.keyboard.press('Enter'); await expect(menu.locator('[aria-live="polite"]')).toHaveText('Opus 4.8 is an older version. Its line runs Opus 5.5; pick that to use it.')
