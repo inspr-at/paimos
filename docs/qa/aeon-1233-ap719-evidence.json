@@ -17,7 +17,7 @@
     "changed_specs": [
       "web/tests/project-settings.spec.ts"
     ],
-    "runner": "LEAD remote-spec.sh on mbp2606; bundled headless Chromium; one worker; owned run directory and process cleanup.",
+    "runner": "LEAD remote-spec.sh on the approved test host; bundled headless Chromium; one worker; owned run directory and process cleanup.",
     "command": "remote-spec.sh <assigned-worktree> \"tests/project-settings.spec.ts --output=test-results/AEON-1233/ap719-validation\" \"\" <assigned-worktree>/web/test-results/AEON-1233/ap719-validation-remote",
     "exit_code": 0,
     "passed": 4,
