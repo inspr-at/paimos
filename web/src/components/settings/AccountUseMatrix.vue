@@ -538,13 +538,17 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
   .nt-v { white-space: normal; flex-wrap: wrap; }
   .matrix-scroll { overflow: visible; }
   .grid, .grid thead, .grid tbody, .grid tr, .grid th, .grid td { display: block; width: auto; min-width: 0; }
-  .grid thead tr { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 12px; border-bottom: 1px solid var(--line-2); }
+  .grid thead tr { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 6px 12px; border-bottom: 1px solid var(--line-2); }
   .grid thead th { border: 0; }
   .grid .corner { flex-basis: 100%; width: auto; min-width: 0; padding: 4px 0; }
   .corner-in .ph { display: inline; letter-spacing: 0; text-transform: none; font: 500 12px/1.4 var(--font); color: var(--ink-3); }
   .col-head { min-height: 44px; padding: 0 2px 0 10px; border-radius: 12px; background: var(--surface-sunken); }
   .col-name small { display: none; }
-  .grid tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; padding: 10px 0 12px; border-bottom: 1px solid var(--line); }
+  .grid tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 8px; padding: 10px 6px 12px; border-bottom: 1px solid var(--line); }
+  /* A stacked row takes the tint as one band; its cells stay clear so the column gaps show no seams. */
+  .grid tbody tr.new { background: color-mix(in srgb, var(--teal) 6%, transparent); }
+  .grid tbody tr.flash { background: var(--row-selected); transition: background .3s ease; }
+  .grid tbody tr.new th, .grid tbody tr.new td, .grid tbody tr.flash th, .grid tbody tr.flash td { background: transparent; }
   .grid tbody th { grid-column: 1 / -1; border: 0; }
   .grid tbody td { border: 0; }
   .row-head { min-height: 52px; padding: 4px 0; }
