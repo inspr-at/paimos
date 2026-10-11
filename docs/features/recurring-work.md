@@ -53,11 +53,14 @@ person, Held, Stopped; Running and Failed once runs are reported).
 ### Agents › Routines and the logbook (AEON-1192)
 
 **Agents › Routines** (`/agents/routines`, in the Agents page's More menu)
-lists every routine the signed-in person can see once, whichever box made it.
+lists every routine the signed-in person can see once, whichever box made it;
+read access in some projects is enough, and without any the page says so.
 Scope (All, Projects, Yours, Workspace), project and state filters live in the
 query (`?scope=&project=&state=&routine=&run=`), so a link reopens the same
 view. Counts cover the loaded pages and read "N+" while more pages remain;
-**More routines** appends the next 100 once per definition. The Agents page
+**More routines** appends the next 100 once per definition. The poll rereads
+every loaded page and keeps the selected routine, reading it on its own when no
+loaded page lists it. The Agents page
 shows one **Routines** line while a routine waits for a person or failed.
 Each project, personal and workspace box links to the page, and
 `/settings/routines` opens Settings → Routines directly.
@@ -72,9 +75,13 @@ logbook. Agent routines list their S21 runs (`GET /api/recurrences/{id}/runs`,
 Changes from the history (50 a page). A run opens into its chain from
 `GET /api/recurrences/{id}/runs/{runId}`: ticket, agent attempts, actions,
 checks, the person's decision (with a Decision Desk link) and the settled
-usage. Only Done uses the Done tint; a created ticket says it is not a
-finished run; unknown or partial usage is never shown as zero or complete,
-and paid, API-list-price and reserved amounts are kept apart. A failed older
+usage. A run link older than the loaded page is read on its own, shown first
+and kept open through Show older; a changed `?run=` opens that run, and a run
+the logbook doesn't have is said. Only Done uses the Done tint; a created
+ticket says it is not a finished run; unknown or partial usage and unknown
+reservations are never shown as zero or complete (only a run that never
+started, with a zero balance, reads "Nothing used, nothing held"), and paid,
+API-list-price and reserved amounts are kept apart. A failed older
 page says so and keeps what is shown. Each routine and filter has its own
 read lane, so a late page for another routine or person never alters the
 logbook on screen; a person switch clears the list, filters, open logbook and

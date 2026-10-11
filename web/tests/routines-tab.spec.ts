@@ -281,8 +281,15 @@ test('a link to an older run opens that run, keeps it through Show older, and fo
   const old = entry(DEPS, 10, 'done', '2026-08-31T06:00:00Z')
   await page.route(url => url.pathname === `/api/recurrences/${DEPS}/runs/${run(10)}`, route => route.fulfill({ json: detail(old) }))
   await page.route(url => url.pathname === `/api/recurrences/${DEPS}/runs` && url.searchParams.get('before') === 'older-1', route => route.fulfill({ json: { items: [old], next_cursor: null } }))
+  // The first run ever drawn is the linked one: it never arrives above runs already shown.
+  await page.addInitScript(() => {
+    const first: string[] = []
+    Object.assign(window, { firstRun: first })
+    new MutationObserver(() => { const shown = document.querySelector('[data-logbook] [data-run]'); if (!first.length && shown) first.push(shown.getAttribute('data-run') ?? '') }).observe(document, { subtree: true, childList: true })
+  })
   await page.goto(`/agents/routines?routine=${DEPS}&run=${run(10)}`)
   await expect(runButton(page, 10)).toHaveAttribute('aria-expanded', 'true')
+  expect(await page.evaluate(() => (window as unknown as { firstRun: string[] }).firstRun)).toEqual([run(10)])
   await expect(runButton(page, 10)).toContainText('the linked run, older than the runs below')
   await expect(logbook(page).locator('[data-run]').first()).toHaveAttribute('data-run', run(10))
   await expect(runButton(page, 15)).toHaveAttribute('aria-expanded', 'false')

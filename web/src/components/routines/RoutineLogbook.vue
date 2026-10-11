@@ -35,6 +35,8 @@ const runs = ref<RoutineRun[]>([]), entries = ref<RecurrenceHistoryEntry[]>([]),
 const loading = ref(false), failure = ref(''), refreshFailure = ref(''), older = ref<'' | 'busy' | 'failed'>(''), olderReason = ref(''), gone = ref(false)
 const opened = ref(new Set<string>()), defaulted = ref(false)
 const linkedRun = ref<RoutineRun | null>(null), linkNote = ref<'' | 'missing' | 'failed'>(''), linkReason = ref('')
+// While a linked run is first resolved the runs wait with it, so it never pushes painted runs down.
+const linkWait = ref(false), waiting = computed(() => filter.value === 'runs' && linkWait.value)
 const shown = computed(() => filter.value === 'runs' ? runs.value.length : entries.value.length)
 // A running run says how long so far; the clock moves once a minute.
 const now = ref(Date.now()), clock = setInterval(() => { now.value = Date.now() }, 60_000)
@@ -82,7 +84,7 @@ function load(mode: 'first' | 'refresh' | 'older' = 'first') {
 const expandable = (run: RoutineRun) => run.state !== 'skipped'
 // The first open run is the one that needs attention (or the newest); a linked run wins.
 function openDefault() {
-  if (props.openRun) { defaulted.value = true; openLinked(); return }
+  if (props.openRun) { defaulted.value = true; linkWait.value = true; openLinked(); return }
   if (!runs.value.length) return
   defaulted.value = true
   openFirst()
@@ -99,13 +101,13 @@ function openLinked() {
   const want = props.openRun
   if (!want) return
   const listed = runs.value.find(run => run.id === want)
-  if (listed) opened.value = expandable(listed) ? new Set([want]) : new Set()
+  if (listed) { opened.value = expandable(listed) ? new Set([want]) : new Set(); linkWait.value = false }
   else readLinked(true)
 }
 function readLinked(open: boolean) {
   const id = props.item.id, want = props.openRun
   const current = () => props.item.id === id && props.openRun === want
-  if (!want) return
+  if (!want) { linkWait.value = false; return }
   linkNote.value = ''
   void links.run(({ after, signal }) => after(getRoutineRun(id, want, signal), raw => {
     const found = checkedDetail(raw, want).run
@@ -113,15 +115,17 @@ function readLinked(open: boolean) {
     if (found.recurrence_id !== id) throw new Error('the run belongs to another routine')
     linkedRun.value = { ...found, state: runState(found.state) }
     if (open) opened.value = expandable(linkedRun.value) ? new Set([want]) : new Set()
+    linkWait.value = false
   }), { failed: error => {
     if (!current()) return
+    linkWait.value = false
     if ((error as { status?: number }).status === 404) linkNote.value = 'missing'
     else { linkNote.value = 'failed'; linkReason.value = error instanceof Error ? error.message : 'the server didn’t answer' }
     if (open && !opened.value.size) openFirst()
   } })
 }
 function toggleRun(id: string) { const next = new Set(opened.value); if (next.has(id)) next.delete(id); else next.add(id); opened.value = next }
-function forget() { reset(); links.cancel(); opened.value = new Set(); defaulted.value = false; gone.value = false; linkedRun.value = null; linkNote.value = ''; linkReason.value = '' }
+function forget() { reset(); links.cancel(); opened.value = new Set(); defaulted.value = false; gone.value = false; linkedRun.value = null; linkNote.value = ''; linkReason.value = ''; linkWait.value = false }
 // Another routine on screen starts from nothing, synchronously, before any read.
 watch(() => props.item.id, () => { forget(); filter.value = defaultFilter() }, { flush: 'sync' })
 watch(agent, () => { if (!filters.value.some(([key]) => key === filter.value)) filter.value = defaultFilter() }, { flush: 'sync' })
@@ -130,7 +134,7 @@ watch(filter, () => { reset() }, { flush: 'sync' })
 watch(() => scope.owner.value, () => { forget(); if (scope.owner.value) load('first') }, { flush: 'sync' })
 // The link moved on (back, forward or another link to this routine): that run opens instead.
 watch(() => props.openRun, want => {
-  if (!want) { links.cancel(); linkedRun.value = null; linkNote.value = ''; return }
+  if (!want) { links.cancel(); linkedRun.value = null; linkNote.value = ''; linkWait.value = false; return }
   if (!agent.value) return
   if (filter.value !== 'runs') { defaulted.value = false; filter.value = 'runs'; return }
   if (defaulted.value) openLinked()
@@ -238,9 +242,9 @@ const ticketLink = (key: string) => `/p/${encodeURIComponent(props.projectKey)}/
       </dl>
       <div class="lb-filter"><p class="eyebrow">Logbook</p><div class="seg" role="radiogroup" aria-label="Show in the logbook"><button v-for="[value, label] in filters" :key="value" type="button" role="radio" :data-lf="value" :aria-checked="filter === value" @click="filter = value">{{ label }}</button></div></div>
       <p v-if="failure" class="m-err" role="alert"><AppIcon name="alert" :size="15" /><span>The logbook couldn’t be read: {{ failure }}. Nothing here changed.</span><button type="button" class="btn sm" @click="load()">Try again</button></p>
-      <div v-else-if="loading && !shown" class="runs-loading" role="status" aria-label="Loading the logbook"><span v-for="index in 3" :key="index" class="skeleton" /></div>
+      <div v-else-if="(loading && !shown) || waiting" class="runs-loading" role="status" aria-label="Loading the logbook"><span v-for="index in 3" :key="index" class="skeleton" /></div>
       <p v-else-if="!shown && !(filter === 'runs' && pinned)" class="empty">{{ emptyWords }}</p>
-      <ol v-if="filter === 'runs' && runRows.length" class="runs">
+      <ol v-if="filter === 'runs' && runRows.length && !waiting" class="runs">
         <li v-for="{ run, look, title, line, usage } in runRows" :key="run.id" class="run" :class="[look.tone, { open: opened.has(run.id) }]">
           <button type="button" class="run-btn" :data-run="run.id" :aria-expanded="expandable(run) ? opened.has(run.id) : undefined" :disabled="!expandable(run)" @click="toggleRun(run.id)">
             <span class="r-ic" :class="look.tone" aria-hidden="true"><span v-if="look.icon === 'live'" class="pulse" /><AppIcon v-else :name="look.icon as IconName" :size="13" /></span>
@@ -257,7 +261,7 @@ const ticketLink = (key: string) => `/p/${encodeURIComponent(props.projectKey)}/
           <span class="run-t"><b>{{ look.before }}<RouterLink v-if="look.key" class="key" :to="ticketLink(look.key)">{{ look.key }}</RouterLink>{{ look.after }}</b><small>{{ look.small }}</small></span>
         </li>
       </ol>
-      <p v-if="shown" class="lb-foot">
+      <p v-if="shown && !waiting" class="lb-foot">
         <span v-if="older === 'failed'" class="warn-line" role="alert"><AppIcon name="alert" :size="13" /><span>Older entries couldn’t be read ({{ olderReason }}). Shown: the newest {{ shown }}.</span></span>
         <span v-else-if="refreshFailure" class="warn-line" role="alert"><AppIcon name="alert" :size="13" /><span>Newer entries couldn’t be read ({{ refreshFailure }}). Shown: what was read before.</span></span>
         <span v-else>{{ cursor !== null ? `Showing the newest ${shown} · ${filter === 'runs' ? RUNS_PAGE : HISTORY_PAGE} per page` : `Showing all ${shown}` }}</span>

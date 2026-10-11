@@ -359,9 +359,9 @@ const stateIcon = (state: RoutineState) => STATE_LOOK[state].icon as IconName | 
             <div class="rt-lh" aria-hidden="true"><span /><span>Routine</span><span>Next run</span><span>State</span><span /></div>
             <RoutineRow v-for="item in rows" :key="item.id" :item="item" :selected="chosen?.id === item.id" :me="me" :owner-name="owners.get(item.definition?.owner_principal_id ?? '')" :project-key="projectKeyOf(item)" @select="select(item.id)" />
           </template>
-          <p v-if="failure && items.length" class="m-err small" role="alert"><AppIcon name="alert" :size="13" /><span>Routines couldn’t be refreshed: {{ failure }}. The ones shown stay and may be out of date.</span></p>
           <p v-if="moreFailure" class="m-err small" role="alert"><AppIcon name="alert" :size="13" /><span>More routines couldn’t be read: {{ moreFailure }}. The ones shown stay.</span></p>
           <button v-if="cursor && items.length" type="button" class="btn sm ghost more" :disabled="loading" @click="load('more')">More routines</button>
+          <p v-if="failure && items.length" class="m-err small" role="alert"><AppIcon name="alert" :size="13" /><span>Routines couldn’t be refreshed: {{ failure }}. The ones shown stay and may be out of date.</span></p>
           <p v-if="rows.length" class="list-hint" aria-hidden="true"><KeyCap k="j" /><KeyCap k="k" /> move · <KeyCap k="enter" /> open the logbook · <KeyCap k="n" /> run now</p>
         </section>
         <div class="lb-col">
