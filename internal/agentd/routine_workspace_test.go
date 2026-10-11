@@ -17,6 +17,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
 func routineTestGrant(n string) agentsetup.RoutineGrant {
@@ -620,7 +621,8 @@ func TestRoutineSupervisorReleasesObsoleteRouting(t *testing.T) {
 }
 
 // Risk: capacity and completed-writer fix continuations must retain work and
-// refuse a changed artifact/lineage or unknown exit before allocation.
+// refuse a changed artifact/lineage or unknown exit before allocation. Sealed
+// review must see the private committed artifact without publishing local edits.
 func TestRoutineContinuationRetainsOriginalCheckout(t *testing.T) {
 	s, api, _, repository, _ := routineSupervisorFixture(t)
 	oldRun, oldGrant := api.run, api.grant
@@ -642,6 +644,18 @@ func TestRoutineContinuationRetainsOriginalCheckout(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(w.Path, "retained.txt"), []byte("retained work\n"), 0600); err != nil {
 		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", repository.Repository, "remote", "add", "origin", "https://example.invalid/example/routine.git").CombinedOutput(); err != nil {
+		t.Fatal("review repository fixture", err, string(out))
+	}
+	profile := Profile{ID: "review-profile", Harness: Claude, Family: "anthropic", Model: "review-model"}
+	binding := reviewgate.Binding{TicketSnapshot: "Review the retained commit.", TicketID: oldGrant.ProjectID, Repository: "example/routine", BaseSHA: repository.BaseCommit, HeadSHA: strings.TrimSpace(retainedHEAD), AuthorRunID: &oldRun.ID, AuthorFamily: "openai", ProfileID: &profile.ID, ReviewerFamily: &profile.Family}
+	prompt, err := reviewPrompt(t.Context(), repository.Repository, WorkOrder{Review: &binding}, profile)
+	if err != nil || !strings.Contains(prompt, "retained-commit.txt") || strings.Contains(prompt, "retained work") {
+		t.Fatal("sealed review lost unpublished commit or included local edits", err)
+	}
+	if head, err := routineGit(t.Context(), repository.Repository, "rev-parse", "HEAD"); err != nil || strings.TrimSpace(head) != repository.BaseCommit {
+		t.Fatal("review changed the approved source branch", err)
 	}
 	record := Record{RoutineWorkspace: w, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: oldRun.ID, WorkOrderID: oldRun.WorkOrderID, Generation: s.generation, Workspace: w.Path, LaunchBranch: w.Branch, AccountID: oldGrant.AccountID, LaunchState: launchAttempted, State: "failed", ExitObserved: true}
 	prior := &owned{record: record, process: &routineExitedFixture{fakeProcess: &fakeProcess{}, fixturesExited: true}}
