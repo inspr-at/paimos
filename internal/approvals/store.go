@@ -530,6 +530,12 @@ func Review(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) (Appr
 
 // CanDecide applies the same live actor and permission policy used by decision writes.
 func CanDecide(ctx context.Context, tx pgx.Tx, p tenant.Principal, a Approval) error {
+	if hasRoutineScope(a.Scope) {
+		if !routineApproval(a) {
+			return fail(http.StatusForbidden, "invalid exact-action routine approval")
+		}
+		return canDecideRoutine(ctx, tx, p, a)
+	}
 	if authz.OwnerWorkstation(p) {
 		if a.AgentPrincipalID == p.ID {
 			return fail(http.StatusForbidden, "agents cannot decide their own requests")

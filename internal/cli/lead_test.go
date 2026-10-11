@@ -249,3 +249,109 @@ func TestHarnessLeadClaimUsesExistingFilesAndRedactsProof(t *testing.T) {
 		})
 	}
 }
+
+// Risk: native coordinators register a different proof than session.ref, and
+// claim must work while the heartbeat owns its lock without printing either proof.
+func TestHarnessLeadClaimDerivesRegisteredReferenceFromState(t *testing.T) {
+	for _, shape := range []string{"random", "native"} {
+		for _, legacy := range []bool{false, true} {
+			t.Run(shape+map[bool]string{false: "/saved", true: "/legacy"}[legacy], func(t *testing.T) {
+				var calls []hbCall
+				claims, metadataReads := 0, 0
+				var expectedRef, expectedLease string
+				srv := hbServer(t, &calls, func(r *http.Request, body map[string]any, w http.ResponseWriter) bool {
+					switch r.URL.Path {
+					case harnessPath(transcriptProjectID, transcriptSessionID):
+						metadataReads++
+						if r.Method != "GET" || r.Header.Get("X-Aeon-Worker-Lease") != "" {
+							t.Error("metadata read mutated or leaked proof")
+						}
+						_ = json.NewEncoder(w).Encode(map[string]any{"id": transcriptSessionID, "harness": "claude", "role": "coordinator"})
+						return true
+					case "/api/projects/" + transcriptProjectID + "/lead":
+						if r.Method != "GET" || r.Header.Get("X-Aeon-Worker-Lease") != "" {
+							t.Error("lead read mutated or leaked proof")
+						}
+						_ = json.NewEncoder(w).Encode(map[string]any{"revision": 4, "reason": "adoption_pending"})
+						return true
+					case "/api/projects/" + transcriptProjectID + "/lead/claim":
+						claims++
+						if r.Method != "POST" || r.Header.Get("X-Aeon-Worker-Lease") != expectedLease || body["harness_session_ref"] != expectedRef || body["expected_revision"] != float64(4) || len(body) != 2 {
+							t.Error("claim did not match registered proof and displayed revision")
+						}
+						_ = json.NewEncoder(w).Encode(map[string]any{"project_id": transcriptProjectID, "revision": 5, "generation": 1, "state": "working"})
+						return true
+					}
+					return false
+				})
+				defer srv.Close()
+				rt, _, _ := heartbeatRuntime(t, srv)
+				o := heartbeatTestOptions(t.TempDir())
+				o.Role = "coordinator"
+				if shape == "native" {
+					o.SourceSession = strings.ToUpper(transcriptEntryID)
+				}
+				session, created, err := rt.openHeartbeatSession(t.Context(), o, heartbeatDeps{alive: func(int) bool { return true }})
+				if err != nil || !created {
+					t.Fatal("heartbeat registration did not create the fixture")
+				}
+				defer session.hold.release()
+				regs := hbWhere(calls, "POST", "/harness-sessions")
+				if len(regs) != 1 {
+					t.Fatal("fixture did not retain registration")
+				}
+				expectedRef, expectedLease = regs[0].body["harness_session_ref"].(string), session.lease
+				fallback, err := readStateSecret(&session.hold, "session.ref")
+				if err != nil {
+					t.Fatal("fixture reference unavailable")
+				}
+				if shape == "native" && (expectedRef != "claude:"+strings.ToLower(o.SourceSession) || expectedRef == fallback) || shape == "random" && expectedRef != fallback {
+					t.Fatal("fixture did not establish both registration shapes")
+				}
+				if legacy {
+					session.disk.RegisteredRef = ""
+					if shape == "native" {
+						if err := session.hold.writeFile("index.source", []byte(o.SourceSession+"\n")); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				if err := saveHeartbeatSession(&session); err != nil {
+					t.Fatal(err)
+				}
+				for _, jsonOut := range []bool{false, true} {
+					args := []string{"aeon", "harness", "lead", "claim", "--state-dir", o.StateDir}
+					if jsonOut {
+						args = append(args, "--json")
+					}
+					code, out, stderr := runCLI(args, "")
+					if code != 0 || !strings.Contains(out, "working") {
+						t.Fatal("state directory claim failed")
+					}
+					if strings.Contains(out+stderr, expectedRef) || strings.Contains(out+stderr, fallback) || strings.Contains(out+stderr, expectedLease) {
+						t.Fatal("claim printed private proof")
+					}
+					assertNoSecret(t, out+stderr)
+				}
+				wantReads := 0
+				if legacy && shape == "native" {
+					wantReads = 2
+				}
+				if claims != 2 || metadataReads != wantReads || len(hbWhere(calls, "POST", "/harness-sessions")) != 1 {
+					t.Fatal("claim performed unexpected registration or metadata work")
+				}
+			})
+		}
+	}
+	t.Run("help_and_exclusive_flags", func(t *testing.T) {
+		isolate(t)
+		code, out, stderr := runCLI([]string{"aeon", "harness", "lead", "claim", "--help"}, "")
+		if code != 0 || !strings.Contains(out+stderr, "--state-dir") || !strings.Contains(out+stderr, "HARNESS:SOURCE-UUID") {
+			t.Fatal("claim help does not explain state and native references")
+		}
+		code, _, stderr = runCLI([]string{"aeon", "harness", "lead", "claim", "--state-dir", "absent", "--harness-session-file", "absent"}, "")
+		if code != 2 || !strings.Contains(stderr, "cannot be combined") {
+			t.Fatal("ambiguous proof sources were accepted")
+		}
+	})
+}

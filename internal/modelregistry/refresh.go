@@ -228,8 +228,12 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 				return err
 			}
 		}
-		for _, source := range publicCatalogSources {
-			inputs = append(inputs, discoveryInput{DiscoverySource: DiscoverySource{Vendor: source}})
+		// Explicit refreshes can discover public facts without a key. Startup
+		// and interval workers need the existing person's discovery opt-in.
+		if !scheduled || cfg.APIEnabled {
+			for _, source := range publicCatalogSources {
+				inputs = append(inputs, discoveryInput{DiscoverySource: DiscoverySource{Vendor: source}})
+			}
 		}
 
 		_, err = tx.Exec(ctx, `UPDATE model_refresh_settings SET last_run_at=$1,last_manual_run_at=CASE WHEN $2 THEN $1 ELSE last_manual_run_at END`, out.At, !scheduled && p.Kind == tenant.Person)
@@ -256,7 +260,13 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 		var err error
 		key := ""
 		if input.AccountID == "" {
-			allowed = true
+			if scheduled {
+				err = m.in(fetchCtx, p.TenantID, func(tx pgx.Tx) error {
+					return tx.QueryRow(fetchCtx, `SELECT api_enabled FROM model_refresh_settings`).Scan(&allowed)
+				})
+			} else {
+				allowed = true
+			}
 		} else {
 			err = m.in(fetchCtx, p.TenantID, func(tx pgx.Tx) error {
 				return tx.QueryRow(fetchCtx, `SELECT api_enabled AND EXISTS(SELECT 1 FROM (`+discoveryCredentialsSQL+`) c JOIN agent_accounts a ON a.tenant_id=c.tenant_id AND a.id=c.account_id WHERE c.account_id=$1 AND c.vendor=$2 AND c.ciphertext=$3 AND a.state='available') FROM model_refresh_settings`, input.AccountID, input.Vendor, input.cipher).Scan(&allowed)
@@ -306,7 +316,7 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 					return err
 				}
 			}
-			if (input.AccountID == "" || cfg.APIEnabled) && valid && fetched.fresh {
+			if (!scheduled || cfg.APIEnabled) && (input.AccountID == "" || cfg.APIEnabled) && valid && fetched.fresh {
 				if err := RecordCatalogFacts(ctx, tx, p.TenantID, fetched.catalog.Facts); err != nil {
 					return err
 				}

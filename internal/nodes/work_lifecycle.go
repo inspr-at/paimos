@@ -295,7 +295,7 @@ func (m *Module) handleWorkLifecycle(w http.ResponseWriter, r *http.Request) {
 			}
 			if !fresh {
 				// A continuation renews expired cooperative delivery. The shared
-				// busy predicate still waits for every original confirmed stop.
+				// busy predicate still waits for each live generation and stop grace period.
 				ids := make([]string, 0, len(a.targets))
 				for _, target := range a.targets {
 					ids = append(ids, target.ID)
@@ -429,10 +429,14 @@ func (m *Module) finishWorkAction(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			}
 		}
 		var busy bool
-		// An order marked running can be settled only after every real run reports
-		// terminal and every bound generation reports stopped. Heartbeat loss alone
-		// is not process exit and aeon_work_busy deliberately keeps that fence.
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.ticket_node_id=$1 OR s.ticket_node_id IN(SELECT id FROM nodes WHERE parent_id=$1) OR s.work_order_id IN(SELECT id FROM nodes WHERE parent_id=$1) OR s.run_id IN(SELECT id FROM agent_runs WHERE queue_node_id=$1 OR work_order_id IN(SELECT id FROM nodes WHERE parent_id=$1))) AND NOT aeon_work_session_stopped(s.stopped_at,s.stop_reason))
+		// Settle orphaned run holds under the original person's current authority.
+		// Expiry records ownership_lost, retaining writer and accounting evidence.
+		if err = m.releaseStaleWorkRuns(ctx, tx, p, target.ID, a.ID); err != nil {
+			return err
+		}
+		// Live runs and generations still block; uncertain closures retain a
+		// two-hour grace period. Expiry does not assert process exit.
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.ticket_node_id=$1 OR s.ticket_node_id IN(SELECT id FROM nodes WHERE parent_id=$1) OR s.work_order_id IN(SELECT id FROM nodes WHERE parent_id=$1) OR s.run_id IN(SELECT id FROM agent_runs WHERE queue_node_id=$1 OR work_order_id IN(SELECT id FROM nodes WHERE parent_id=$1))) AND NOT aeon_work_session_released(s.stopped_at,s.stop_reason,s.heartbeat_at))
    OR EXISTS(SELECT 1 FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id WHERE (r.queue_node_id=$1 OR o.parent_id=$1) AND r.status IN ('queued','starting','running','waiting'))`, target.ID).Scan(&busy); err != nil {
 			return err
 		}
@@ -510,4 +514,68 @@ func (m *Module) finishWorkAction(ctx context.Context, tx pgx.Tx, p tenant.Princ
 	result, _ := json.Marshal(a.Result)
 	_, err := tx.Exec(ctx, `UPDATE work_lifecycle_actions SET state=$2,result=$3,completed_at=CASE WHEN $2='completed' THEN clock_timestamp() ELSE NULL END WHERE id=$1`, a.ID, a.State, string(result))
 	return err
+}
+
+// The caller holds the tenant/tree access fence and uses deferredWorkEvents:
+// every run/resource mutation finishes before the event counter is acquired.
+func (m *Module) releaseStaleWorkRuns(ctx context.Context, tx pgx.Tx, p tenant.Principal, node, action string) error {
+	if p.Kind != tenant.Person {
+		return authz.ErrForbidden
+	}
+	rows, err := tx.Query(ctx, `SELECT r.id::text,o.id::text,coalesce(o.project_id::text,'')
+ FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id
+ WHERE (r.queue_node_id=$1 OR o.parent_id=$1) AND aeon_work_run_releasable(r.id)
+ ORDER BY r.id LIMIT 101 FOR UPDATE OF r`, node)
+	if err != nil {
+		return err
+	}
+	type hold struct{ id, order, project string }
+	holds := []hold{}
+	for rows.Next() {
+		var h hold
+		if err = rows.Scan(&h.id, &h.order, &h.project); err != nil {
+			rows.Close()
+			return err
+		}
+		holds = append(holds, h)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if len(holds) > 100 {
+		return badRequest("stale run scope exceeds 100 per leaf")
+	}
+	for _, h := range holds {
+		// Re-check the current order as well as the work target inside this write.
+		if err = authz.RequireTx(ctx, tx, p, "run.create", authz.Scope{ProjectID: h.project}); err != nil {
+			return err
+		}
+		if err = authz.RequireTx(ctx, tx, p, "work_orders.write", authz.Scope{ProjectID: h.project}); err != nil {
+			return err
+		}
+		var before, after json.RawMessage
+		if err = tx.QueryRow(ctx, `SELECT to_jsonb(r)-'tenant_id' FROM agent_runs r WHERE id=$1`, h.id).Scan(&before); err != nil {
+			return err
+		}
+		// No capacity release or completed assignment: an uncertain writer may
+		// still exist. Its daemon can reconcile ownership_lost through telemetry.
+		err = tx.QueryRow(ctx, `UPDATE agent_runs r SET status='ownership_lost',
+   started_at=coalesce(started_at,created_at),ended_at=clock_timestamp(),
+   trace=jsonb_set(coalesce(nullif(trace,'null'::jsonb),'{}'::jsonb),'{work_lifecycle_release}',
+    jsonb_build_object('action_id',$2::text,'exit_unconfirmed',true))
+   WHERE id=$1 AND aeon_work_run_releasable(id) RETURNING to_jsonb(r)-'tenant_id'`, h.id, action).Scan(&after)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err = m.record(ctx, tx, p.ID, &h.order, "run.stale_hold_released", before,
+			map[string]any{"run": after, "action_id": action, "reason": "graceful_work_lifecycle", "process_exit_confirmed": false}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
