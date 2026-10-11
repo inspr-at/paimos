@@ -98,6 +98,20 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"ledger.go", "enrollLedger", "out, err = view(", "return audit("},
 		{"../agentaccounts/route.go", "reserve", "RequireLedgerWork(", "activeRoute("},
 		{"../agentruns/runs.go", "claim", "RequireLedgerWork(", "refuseVerification("},
+		// Routine review/fix continuation (AEON-1201) takes tenant/tree/pairing,
+		// then the account-use fence before outbox/resource rows. The owner is
+		// re-authorized inside that transaction; child writes precede events.
+		{"../routineexec/review.go", "ContinueTx", "agentpairing.Lock(", "accountuse.LockShared("},
+		{"../routineexec/review.go", "ContinueTx", "accountuse.LockShared(", "FOR NO KEY UPDATE"},
+		{"../routineexec/review.go", "advance", "authz.RequireTx(", "FOR NO KEY UPDATE"},
+		{"../routineexec/review.go", "advance", "e.fix(", "events.Append("},
+		{"../routineexec/review.go", "advance", "e.finishActor(", "events.Append("},
+		// The fix account's project matrix is checked in the fenced write,
+		// before profile compatibility and the new run, rather than inherited
+		// from the completed writer's historical admission.
+		{"../agentruns/review.go", "QueueRoutineFixTx", "authz.RequireTx(", "accountuse.RequireProject("},
+		{"../agentruns/review.go", "QueueRoutineFixTx", "accountuse.RequireProject(", "aeon_account_allows_profile("},
+		{"../agentruns/review.go", "QueueRoutineFixTx", "aeon_account_allows_profile(", "INSERT INTO agent_runs"},
 		{"../db/fences.go", "LockTree", "LockTenant(", "pg_advisory_xact_lock"},
 		{"lifecycle.go", "Lock", "db.LockCurrentTree(", "aeon-pairing:"},
 		{"../auth/store.go", "revokeAgentKeyTx", "db.LockTenant(", "lockAgentKey("},

@@ -23,6 +23,7 @@ func (rt *runtime) cmdIssue() *Command {
 		Use:   "issue <command>",
 		subs: []*Command{
 			rt.cmdIssueList(),
+			rt.cmdIssuePillReport(),
 			rt.cmdIssueGet(),
 			rt.cmdIssueCreate(),
 			rt.cmdIssueUpdate(),
@@ -31,6 +32,21 @@ func (rt *runtime) cmdIssue() *Command {
 			rt.cmdIssueComment(),
 			rt.cmdIssueMove(),
 			rt.cmdSearch("issue search"),
+		},
+	}
+}
+
+func (rt *runtime) cmdIssuePillReport() *Command {
+	var project string
+	return &Command{
+		Name: "pill-report", Short: "Report invalid pills on visible open tickets (read-only)",
+		Use: "issue pill-report --project KEY", maxArgs: 0,
+		addFlags: func(fs *flagSet) { fs.string(&project, "project", 'p', "project key (required)") },
+		run: func(_ []string) error {
+			if strings.TrimSpace(project) == "" {
+				return usagef("--project is required")
+			}
+			return rt.reportInvalidPills(project)
 		},
 	}
 }
