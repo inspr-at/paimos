@@ -62,6 +62,8 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
   })
   await page.route('**/api/**', route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname
+    // Full-viewport evidence also renders the predecessor's background reads.
+    if (['/api/approvals', '/api/agent-accounts', '/api/agent-accounts/capacity', '/api/agent-accounts/capacity/schedule'].includes(path)) return route.fulfill({ json: [] })
     if (path === '/api/projects/p-pharos/message-targets') return route.fulfill({ json: [{ id: 'lead-target', principal_id: LEAD_AGENT, address: 'claude:lead', adapter: 'claude', target_kind: 'agent', maximum_level: 'simple', role: 'coordinator', enabled: true }] })
     if (path === '/api/projects/p-pharos/messages') {
       if (request.method() === 'POST') {
