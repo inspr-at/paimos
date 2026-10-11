@@ -55,10 +55,8 @@ const ticketHref = (agent: LiveAgent) => {
   return routeKey ? `/p/${encodeURIComponent(routeKey)}/${encodeURIComponent(agent.ticket.key)}` : ''
 }
 
-function preferences() {
-  const project = projects.byRouteKey(props.project.routeKey)
-  if (project) { hide(); openModelPrefs({ project: { id: project.id, title: project.title }, level: 'project' }) }
-}
+// Settings › Models has no per-project choices, so the link promises none (Tick, AEON-1138): it opens Models as it is.
+function preferences() { hide(); openModelPrefs() }
 
 // ---------- Opening ----------
 let openTimer: ReturnType<typeof setTimeout> | undefined
@@ -173,7 +171,7 @@ onBeforeUnmount(() => {
         <p class="pop-head">
           <span>{{ headLabel }}</span>
           <span class="pop-project">{{ project.title }}</span>
-          <button type="button" class="icon-btn sm flat" :aria-label="`Model preferences for ${project.title}`" @click="preferences"><AppIcon name="gear" :size="14" /></button>
+          <button type="button" class="icon-btn sm flat" aria-label="Model preferences" @click="preferences"><AppIcon name="gear" :size="14" /></button>
         </p>
         <ul class="pop-list">
           <li v-for="(agent, i) in shown" :key="agent.session_id ?? `${agent.since}${i}`" class="pop-agent agent-state-surface" :style="appearance(agent.state ?? 'working')">

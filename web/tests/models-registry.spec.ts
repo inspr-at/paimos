@@ -151,7 +151,7 @@ test('Add model: a pi OpenRouter slug is stored with its route, in place errors 
   const form = editor(page)
   await expect(form).toBeVisible()
   await expect(form.getByLabel('Name', { exact: true })).toBeFocused()
-  await expect(form.getByLabel('Harness').locator('option')).toHaveText(['Codex', 'Claude', 'Grok', 'Gemini', 'Cursor', 'pi', 'OpenCode'])
+  await expect(form.getByLabel('Harness').locator('option')).toHaveText(['Codex', 'Claude Code', 'Grok', 'Gemini', 'Cursor', 'pi', 'OpenCode'])
   await expect(form.getByLabel('Route or provider').locator('option')).toHaveText(['OpenRouter', 'Anthropic', 'OpenAI', 'Local'])
   await expect(form).toContainText('Any OpenRouter slug, as pi passes it on.')
   // Every mistake is named next to its field and focus goes to the first one.
