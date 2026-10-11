@@ -22,6 +22,14 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', handle?: num
   // A long list and long German content test actual scrolling and text bounds.
   for (let i = 20; i < 42; i++) data.sessions.push({ ...data.sessions[1]!, id: `5e000000-0000-4000-8000-0000000000${i}`, display_label: `Worker ${i}: Sicherungskopien auf allen Produktionsservern überprüfen`, ticket_node_id: null, ticket: null, run_id: null, parent_harness_session_id: data.sessions[0]!.id })
   await mockAgents(page, data)
+  // The panel reads tier evidence separately from the sessions list. Keep the
+  // capture honest: no invented vendor report and no unmocked backend error.
+  await page.route('**/api/projects/*/harness-sessions/*/tier', route => {
+    const id = new URL(route.request().url()).pathname.split('/').at(-2)
+    const session = data.sessions.find(s => s.id === id)
+    if (!session || route.request().method() !== 'GET') return route.fallback()
+    return route.fulfill({ json: { session_id: session.id, revision: 0, active_tier: null, pending: null, reports: [], requests: [], read_only: true } })
+  })
   return { work, calls, data }
 }
 const dock = (page: Page) => page.locator('[data-layout-cycle]')
@@ -55,8 +63,40 @@ async function designProbe(page: Page) {
     }
     const avatars = [...work.querySelectorAll('.row .ava')].filter(visible).map(el => ({ name: el.getAttribute('aria-label'), badges: el.querySelectorAll('svg.agent-state-mark').length, harness: el.querySelectorAll('.harness-badge').length }))
     const english = (work.querySelector('.th-stick') as HTMLElement).innerText.match(/[äöüÄÖÜß]|\b(und|der|die|das|nicht|mit|für|oder|ist|Sitzung|Agenten|Projekt|Fehler|bitte)\b/g) ?? []
-    return { edges, glyphs, avatars, english, overflow: document.documentElement.scrollWidth - innerWidth }
+    // check.mjs's row contract also applies to the real table and compact
+    // forms. Measure rendered text, including each parent's summary, clipping
+    // ranges to overflow bounds so hidden ellipsis text is never counted.
+    const texts = [...work.querySelectorAll('.sessions .row[data-row]')].filter(visible).map(row => {
+      const samples: { text: string; left: number; right: number; top: number; bottom: number }[] = []
+      const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT)
+      while (walker.nextNode()) {
+        const node = walker.currentNode, parent = node.parentElement!
+        if (!node.textContent?.trim() || parent.closest('.sr-only, svg, [aria-hidden="true"]') || !visible(parent)) continue
+        const range = document.createRange(); range.selectNodeContents(node)
+        for (const rect of range.getClientRects()) {
+          let { left, right, top, bottom } = rect
+          for (let ancestor: Element | null = parent; ancestor && work.contains(ancestor); ancestor = ancestor.parentElement) {
+            const css = getComputedStyle(ancestor), box = ancestor.getBoundingClientRect()
+            if (css.overflowX !== 'visible') { left = Math.max(left, box.left); right = Math.min(right, box.right) }
+            if (css.overflowY !== 'visible') { top = Math.max(top, box.top); bottom = Math.min(bottom, box.bottom) }
+          }
+          if (right - left > .5 && bottom - top > .5) samples.push({ text: node.textContent.trim().slice(0, 40), left, right, top, bottom })
+        }
+      }
+      return samples
+    })
+    const overlaps: string[] = []
+    for (let i = 0; i < texts.length; i++) for (let j = i + 1; j < texts.length; j++) for (const a of texts[i]!) for (const b of texts[j]!) {
+      if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > .5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > .5) overlaps.push(`${a.text} / ${b.text}`)
+    }
+    return { edges, glyphs, avatars, english, overlaps, overflow: document.documentElement.scrollWidth - innerWidth }
   })
+}
+async function checkRows(page: Page, label: string) {
+  const probe = await designProbe(page)
+  expect(probe.overlaps, `${label}: no two row texts overlap`).toEqual([])
+  expect(probe.edges).toEqual([]); expect(probe.glyphs).toEqual([]); expect(probe.english).toEqual([]); expect(probe.overflow).toBeLessThanOrEqual(1)
+  console.log(`check.mjs (P5 routed adapter): PASS ${label} · row texts do not overlap · no edge accents · SVG icons · English controls · no sideways scroll`)
 }
 
 for (const theme of ['light', 'dark'] as const) {
@@ -87,6 +127,29 @@ for (const theme of ['light', 'dark'] as const) {
     await page.clock.runFor(500)
     expect(calls.filter(call => call.method === 'PUT' && call.path === '/api/preferences/agents:layout')).toEqual([])
     releaseLayout()
+    await checkRows(page, `1440 ${theme} Focus`)
+    const stale = page.locator('.sessions .row:has(.bin)').first()
+    await expect(stale.locator('.bin')).toBeHidden()
+    // A short name is fully readable; a long worker name retains twelve
+    // characters plus its ellipsis before the time in the 320 px sidebar.
+    for (const name of [stale.locator('.result'), row(page, data.sessions[9]!.id).locator('.result')]) {
+      expect(await name.evaluate(el => {
+        const text = el.textContent!.trim(), context = document.createElement('canvas').getContext('2d')!
+        context.font = getComputedStyle(el).font
+        return el.clientWidth - context.measureText(text.length > 12 ? `${text.slice(0, 12)}…` : text).width
+      }), 'readable compact name').toBeGreaterThanOrEqual(-.5)
+    }
+    const actions = stale.getByRole('button', { name: /^Actions for / })
+    await page.mouse.move(1400, 950)
+    await pane(page).focus()
+    await expect(actions).toHaveCSS('opacity', '0')
+    const rowGuard = await controlStability(page, { row: stale, name: stale.locator('.result'), time: stale.locator('.t-inline'), actions })
+    await rowGuard.check(async () => { await stale.hover(); await expect(actions).toHaveCSS('opacity', '1') })
+    await rowGuard.check(async () => { await actions.focus(); await page.mouse.move(1400, 950); await expect(actions).toHaveCSS('opacity', '1') })
+    await rowGuard.check(async () => { await actions.click(); await expect(page.getByRole('menuitem', { name: 'Remove stale session', exact: true })).toBeVisible() })
+    await page.keyboard.press('Escape')
+    rowGuard.done()
+    await pane(page).focus()
     await page.screenshot({ path: info.outputPath(`focus-1440-${theme}.png`) })
     await stability.check(async () => { await dock(page).click(); await preset(page, 'overview') })
     const width = await page.locator('.agents-work').evaluate(el => el.getBoundingClientRect().width)
@@ -94,6 +157,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page.locator('.sessions .thead')).toBeVisible()
     const dimensions = await pane(page).evaluate(el => ({ top: el.getBoundingClientRect().top, height: el.getBoundingClientRect().height, want: document.querySelector('main')!.clientHeight - 8, header: document.querySelector('main')!.getBoundingClientRect().top }))
     expect(dimensions.top).toBe(dimensions.header); expect(dimensions.height).toBe(dimensions.want)
+    await checkRows(page, `1440 ${theme} Overview`)
     await page.screenshot({ path: info.outputPath(`overview-1440-${theme}.png`) })
     // The divider is continuous; crossing 560 changes the rows, without moving the dock.
     await stability.check(async () => { await dragTo(page, 559); expect(await listWidth(page)).toBe(559) })
@@ -137,6 +201,7 @@ for (const theme of ['light', 'dark'] as const) {
     expect(probe.edges).toEqual([]); expect(probe.glyphs).toEqual([]); expect(probe.english).toEqual([]); expect(probe.overflow).toBeLessThanOrEqual(1)
     expect(probe.avatars.length).toBeGreaterThan(3)
     for (const avatar of probe.avatars) { expect(avatar.name).toBeTruthy(); expect(avatar.badges).toBe(1); expect(avatar.harness).toBe(0) }
+    await checkRows(page, `1440 ${theme} List only`)
     await page.screenshot({ path: info.outputPath(`list-1440-${theme}.png`) })
     expect(errors).toEqual([])
   })
@@ -150,17 +215,22 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(dock(page)).toBeHidden()
       await expect(page.locator('.agents-divider')).not.toHaveAttribute('role', 'separator')
       await expect(page.getByRole('button', { name: 'Back to the list', exact: true })).toBeVisible()
+      const body = pane(page).locator('.scroll:visible')
+      await expect.poll(() => body.evaluate(el => el.scrollTop)).toBe(0)
       const guard = await controlStability(page, { back: page.getByRole('button', { name: 'Back to the list', exact: true }), frame: pane(page) })
-      await guard.check(async () => { await pane(page).locator('.scroll:visible').evaluate(el => { el.scrollTop = 200 }) })
+      await guard.check(async () => { await body.evaluate(el => { el.scrollTop = 200 }); await expect.poll(() => body.evaluate(el => el.scrollTop)).toBeGreaterThan(0) })
+      await guard.check(async () => { await body.evaluate(el => { el.scrollTop = 0 }); await expect.poll(() => body.evaluate(el => el.scrollTop)).toBe(0) })
       guard.done()
       const box = (await pane(page).boundingBox())!
       if (width === 390) { expect(box.y).toBe(0); expect(box.height).toBe(900); expect((await page.getByRole('button', { name: 'Back to the list', exact: true }).boundingBox())!.height).toBeGreaterThanOrEqual(44) }
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
       await page.screenshot({ path: info.outputPath(`sheet-${width}-${theme}.png`) })
+      console.log(`check.mjs (P5 routed adapter): PASS ${width} ${theme} sheet · opens at top · pinned Back control`)
       // Tick's reference comparison uses 400 px phones and a 1000 px tablet.
       const referenceWidth = width === 390 ? 400 : 1000
       await page.setViewportSize({ width: referenceWidth, height: 1000 })
       await expect(pane(page)).toHaveClass(/sheet/)
+      await expect.poll(() => body.evaluate(el => el.scrollTop)).toBe(0)
       await expect(dock(page)).toBeHidden()
       // The visual viewport updates the phone sheet on its next animation frame.
       if (referenceWidth === 400) await expect(pane(page)).toHaveCSS('height', '1000px')
@@ -170,9 +240,14 @@ for (const theme of ['light', 'dark'] as const) {
       await page.keyboard.press('s'); await expect(pane(page)).toHaveClass(/sheet/)
       await page.keyboard.press('Escape'); await expect(pane(page)).toHaveCount(0)
       await expect(row(page, data.sessions[1]!.id)).toBeFocused()
+      await row(page, data.sessions[1]!.id).click()
+      await expect(pane(page)).toHaveClass(/sheet/)
+      await expect.poll(() => pane(page).locator('.scroll:visible').evaluate(el => el.scrollTop)).toBe(0)
+      await page.keyboard.press('Escape'); await expect(pane(page)).toHaveCount(0)
       await toWork(page)
       const probe = await designProbe(page)
       expect(probe.edges).toEqual([]); expect(probe.glyphs).toEqual([]); expect(probe.english).toEqual([]); expect(probe.overflow).toBeLessThanOrEqual(1)
+      await checkRows(page, `${width} ${theme} list`)
       await page.screenshot({ path: info.outputPath(`list-${width}-${theme}.png`) })
     })
   }
@@ -337,6 +412,9 @@ test('AEON-1213 regression: the table uses the approved columns with the ticket 
     expect(body.x).toBeCloseTo(heading.x, 1)
     expect(body.width).toBeCloseTo(heading.width, 1)
   }
+  await dock(page).click(); await preset(page, 'focus')
+  await dock(page).click(); await preset(page, 'overview')
+  await checkRows(page, '1440 light Overview column regression')
 })
 
 test.describe('touch', () => {
@@ -350,9 +428,18 @@ test.describe('touch', () => {
     expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44)
     const hitWidth = await page.locator('.agents-divider').evaluate(el => { const css = getComputedStyle(el, '::after'); return el.getBoundingClientRect().width - parseFloat(css.left) - parseFloat(css.right) })
     expect(hitWidth).toBeGreaterThanOrEqual(44)
+    await dragTo(page, 320)
+    const more = page.locator('.sessions .row').first().getByRole('button', { name: /^Actions for / })
+    await expect(more).toHaveCSS('opacity', '1')
+    const moreBox = (await more.boundingBox())!
+    expect(moreBox.width).toBeGreaterThanOrEqual(44); expect(moreBox.height).toBeGreaterThanOrEqual(44)
+    await expect(page.locator('.sessions .bin').first()).toBeHidden()
     await page.screenshot({ path: info.outputPath('1440-dark-touch.png') })
+    await pane(page).locator('.scroll:visible').evaluate(el => { el.scrollTop = 200 })
+    await expect.poll(() => pane(page).locator('.scroll:visible').evaluate(el => el.scrollTop)).toBeGreaterThan(0)
     await page.setViewportSize({ width: 390, height: 900 })
     await expect(pane(page)).toHaveClass(/sheet/)
+    await expect.poll(() => pane(page).locator('.scroll:visible').evaluate(el => el.scrollTop)).toBe(0)
     const back = (await page.getByRole('button', { name: 'Back to the list', exact: true }).boundingBox())!
     expect(back.width).toBeGreaterThanOrEqual(44); expect(back.height).toBeGreaterThanOrEqual(44)
     expect(await pane(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)

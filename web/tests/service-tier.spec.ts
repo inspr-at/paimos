@@ -484,9 +484,12 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
   })
 }
 test('failed evidence reads show placeholders, never a zero-run or vendor conclusion', async ({ page }) => {
-  await setup(page, { tierRead: 'error' }); await page.goto(`/agents/${id}`)
+  const { getState } = await setup(page, { tierRead: 'error' }); await page.goto(`/agents/${id}`)
   const panel = page.getByRole('region', { name: 'Service tier', exact: true })
-  await expect(panel.getByRole('alert')).toContainText('Tier evidence unavailable')
+  await expect(panel.getByRole('alert')).toContainText("Couldn't read the service tier.")
+  await expect(panel.getByRole('alert')).not.toContainText('Tier evidence unavailable')
+  const retry = panel.getByRole('button', { name: 'Try again', exact: true })
+  await expect(retry).toBeVisible()
   await expect(panel.locator('.compare-estimate').first()).toHaveText('—')
   await expect(panel.locator('.estimate-source')).toHaveCount(0)
   await panel.getByRole('button', { name: 'Change tier', exact: true }).click()
@@ -495,6 +498,16 @@ test('failed evidence reads show placeholders, never a zero-run or vendor conclu
   await expect(dialog.locator('[data-option=fast] .tp-estimate')).toHaveText('—')
   await expect(dialog.locator('[data-option=fast] .tp-text')).not.toContainText('not offered')
   await expect(dialog.locator('.estimate-source')).toHaveCount(0)
+  await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0)
+  await expectStableControls({ controls: { retry, change: panel.getByRole('button', { name: 'Change tier', exact: true }) }, scrollAreas: { details: page.locator('.session-panel > .scroll') }, interactions: [{ name: 'failed retry keeps the human error and its controls', run: async () => {
+    const failed = page.waitForResponse(response => response.url().endsWith(`/harness-sessions/${id}/tier`) && response.status() === 503)
+    await retry.click(); await (await failed).finished()
+    await expect(panel.getByRole('alert')).toContainText("Couldn't read the service tier.")
+  } }] })
+  await page.route('**/api/projects/*/harness-sessions/*/tier', route => route.fulfill({ json: getState() }))
+  await retry.click()
+  await expect(panel.getByRole('alert')).toHaveCount(0)
+  await expect(panel.locator('.source')).toContainText('fixture-adapter')
 })
 
 test('live evidence ignores sibling sessions and batches selected telemetry over five seconds', async ({ page }) => {
