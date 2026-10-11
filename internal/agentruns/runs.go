@@ -91,16 +91,17 @@ type UsageRecorder func(context.Context, pgx.Tx, tenant.Principal, Run, Telemetr
 type CompletionReviewer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange, *[]events.Change) error
 type CompletionPreparer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange) (bool, error)
 type module struct {
-	routines         RoutineLaunchChecks
-	routineQueue     RoutineQueueDispatcher
-	queueHintMu      sync.Mutex
-	queueHintReaders map[string]int
-	queueTimeout     func(context.Context, time.Duration) (context.Context, context.CancelFunc)
-	leadAdmission    harness.LeadAdmission
-	reviews          CompletionReviewer
-	prepare          CompletionPreparer
-	pool             *pgxpool.Pool
-	usage            UsageRecorder
+	routineCompletion UsageRecorder
+	routines          RoutineLaunchChecks
+	routineQueue      RoutineQueueDispatcher
+	queueHintMu       sync.Mutex
+	queueHintReaders  map[string]int
+	queueTimeout      func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	leadAdmission     harness.LeadAdmission
+	reviews           CompletionReviewer
+	prepare           CompletionPreparer
+	pool              *pgxpool.Pool
+	usage             UsageRecorder
 }
 
 // New returns the /api/runs and /api/work-orders/{id}/runs module. The optional

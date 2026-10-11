@@ -44,6 +44,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 
 type CreateInput struct {
+	routineRunID string
 	RequestID    string  `json:"request_id"`
 	Repository   string  `json:"repository"`
 	BaseSHA      string  `json:"base_sha"`
@@ -268,7 +269,7 @@ func (m *Module) createResources(ctx context.Context, tx pgx.Tx, p tenant.Princi
 		return nil, workorders.Fail(400, "ticket exceeds review prompt bound")
 	}
 	duration := int64(1800)
-	o, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: "Review " + key + " · " + in.HeadSHA[:12], Body: snapshot, Parent: &id, Assignee: assignee, MaxDuration: &duration, Criteria: []string{"Review the pinned commit range against the ticket and return a final verdict with file:line findings."}})
+	o, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{RoutineRunID: in.routineRunID, Title: "Review " + key + " · " + in.HeadSHA[:12], Body: snapshot, Parent: &id, Assignee: assignee, MaxDuration: &duration, Criteria: []string{"Review the pinned commit range against the ticket and return a final verdict with file:line findings."}})
 	if err != nil {
 		return nil, err
 	}
@@ -277,6 +278,17 @@ func (m *Module) createResources(ctx context.Context, tx pgx.Tx, p tenant.Princi
 	trace, err := json.Marshal(route.Trace)
 	if err != nil {
 		return nil, err
+	}
+	if in.routineRunID != "" {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(trace, &fields); err != nil {
+			return nil, err
+		}
+		fields["routine_run_id"], _ = json.Marshal(in.routineRunID)
+		trace, err = json.Marshal(fields)
+		if err != nil {
+			return nil, err
+		}
 	}
 	githubStatus := "unconfigured"
 	if m.publisher != nil && in.PullRequest != nil && m.publisher.Configured(p.TenantID, in.Repository) {
@@ -440,6 +452,9 @@ func completionTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID 
 // telemetry preparation transaction. Its caller has checked the decoded report,
 // exact telemetry key, replay, live run and current account/daemon generation.
 func (m *Module) PrepareForRun(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID string, commitRange reviewgate.CommitRange) (bool, error) {
+	if routine, err := routineAuthor(ctx, tx, runID); err != nil || routine {
+		return false, err
+	}
 	ticket, _, err := completionTarget(ctx, tx, p, runID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
@@ -458,6 +473,11 @@ func (m *Module) PrepareForRun(ctx context.Context, tx pgx.Tx, p tenant.Principa
 // RequestForRun contributes to terminal telemetry's pending batch; it never
 // initializes, opens a second transaction, synthesizes HTTP or flushes events.
 func (m *Module) RequestForRun(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID string, commitRange reviewgate.CommitRange, pending *[]events.Change) error {
+	// Routine workers report artifacts only. The coordinator executor owns the
+	// separate, budgeted continuation after observed exit and settlement.
+	if routine, err := routineAuthor(ctx, tx, runID); err != nil || routine {
+		return err
+	}
 	ticket, project, err := completionTarget(ctx, tx, p, runID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
@@ -514,4 +534,79 @@ func (m *Module) RequestForRun(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	}
 	*pending = append(*pending, changes...)
 	return nil
+}
+
+func routineAuthor(ctx context.Context, tx pgx.Tx, runID string) (bool, error) {
+	var routine bool
+	err := tx.QueryRow(ctx, `SELECT routine_launch_id IS NOT NULL OR coalesce(trace->>'routine_run_id','')<>'' FROM agent_runs WHERE id=$1`, runID).Scan(&routine)
+	return routine, err
+}
+
+// CreateRoutineTx reuses the ordinary registry-selected review, parser and
+// evidence path. Only the exact routine owner may create this internal child;
+// worker HTTP requests cannot supply lineage or bypass child-budget guards.
+// The caller holds tenant/tree/pairing fences and appends the batch last.
+func (m *Module) CreateRoutineTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routine, ticket string, in CreateInput, pending *[]events.Change) (Review, error) {
+	if err := validateCreate(ticket, in); err != nil {
+		return Review{}, err
+	}
+	if in.AuthorRunID == nil || p.Kind != tenant.Person {
+		return Review{}, authz.ErrForbidden
+	}
+	var bound bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_runs r JOIN routine_attempts a ON a.tenant_id=r.tenant_id AND a.run_id=r.id JOIN agent_runs ar ON ar.tenant_id=a.tenant_id AND ar.id=a.agent_run_id WHERE r.id=$1 AND r.work_node_id=$2 AND r.owner_principal_id=$3 AND ar.id=$4 AND a.role IN ('build','fix') AND a.assignment_digest=r.assignment_digest AND ar.status='completed')`, routine, ticket, p.ID, *in.AuthorRunID).Scan(&bound)
+	if err != nil {
+		return Review{}, err
+	}
+	if !bound {
+		return Review{}, authz.ErrForbidden
+	}
+	in.routineRunID = routine
+	out, err := m.createResources(ctx, tx, p, ticket, in, pending)
+	if err != nil {
+		return Review{}, err
+	}
+	return out.(Review), nil
+}
+
+// RoutineResultTx validates the existing result, including changes verdicts,
+// against current policy and exact author/reviewer model proof. It returns no
+// merge authority and never parses a second verdict format.
+func (m *Module) RoutineResultTx(ctx context.Context, tx pgx.Tx, order string, admittedFix ...string) (Review, error) {
+	v, err := load(ctx, tx, order)
+	if err != nil {
+		return v, err
+	}
+	var current, evidence bool
+	var fixing any
+	if len(admittedFix) == 1 {
+		fixing = admittedFix[0]
+	}
+	err = tx.QueryRow(ctx, `SELECT v.evidence_id IS NOT NULL,
+ v.work_order_id=(SELECT x.work_order_id FROM work_order_reviews x WHERE x.ticket_node_id=v.ticket_node_id ORDER BY x.created_at DESC,x.work_order_id DESC LIMIT 1)
+ AND NOT EXISTS(SELECT 1 FROM agent_runs newer JOIN nodes n ON n.id=newer.work_order_id JOIN work_orders w ON w.node_id=n.id WHERE n.parent_id=v.ticket_node_id AND w.kind='build' AND newer.created_at>ar.created_at AND ($2::uuid IS NULL OR newer.id<>$2))
+ FROM work_order_reviews v JOIN agent_runs ar ON ar.id=v.author_run_id WHERE v.work_order_id=$1`, order, fixing).Scan(&evidence, &current)
+	if err != nil {
+		return v, err
+	}
+	result := v.Result
+	v.Result.Verdict = "ok"
+	var project *string
+	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1`, v.TicketID).Scan(&project); err != nil {
+		return v, err
+	}
+	policy, err := reviewgate.LoadFamilyPolicyTx(ctx, tx, project)
+	if err != nil {
+		return v, err
+	}
+	proof, _ := reviewgate.Gate(v.Status, v.modelEvidence, v.EffectiveModel, v.Binding, v.Result, policy.Effective)
+	v.Result = result
+	if !evidence || !current || !proof || v.GitHubStatus == "stale" || v.policyDenied || v.Model == nil || v.EffectiveModel == nil || !reviewgate.ModelMatches(*v.Model, *v.EffectiveModel) || v.ReviewerFamily == nil || *v.ReviewerFamily == v.AuthorFamily || result.Reason != "" || result.Verdict != "ok" && (result.Verdict != "changes" || len(result.Findings) == 0) {
+		return v, workorders.Fail(409, "routine_review_proof_unavailable")
+	}
+	// load's full profile/author checks also apply to a changes verdict.
+	if !v.GateOpen && v.GateReason != "Changes are required before this commit range can pass review." {
+		return v, workorders.Fail(409, "routine_review_proof_unavailable")
+	}
+	return v, nil
 }
