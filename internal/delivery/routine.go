@@ -71,6 +71,16 @@ func (m *Module) RoutineSnapshot(ctx context.Context, tid, repo, branch, head st
 // queue commit refreshes the proof: the PR's green rollup cannot stand in for
 // the synthetic merge commit. Caller holds the standard final-write fence.
 func RoutineReadyTx(ctx context.Context, tx pgx.Tx, project, repo, head string, f RoutinePipelineFacts) (Settings, bool, error) {
+	if len(f.Facts.Checks) > 1000 || len(f.Facts.Runs) > 100 {
+		return Settings{}, false, errRead
+	}
+	jobs := 0
+	for _, r := range f.Facts.Runs {
+		jobs += len(r.Jobs)
+		if len(r.Jobs) > 1000 || jobs > 4000 {
+			return Settings{}, false, errRead
+		}
+	}
 	s, err := settingsTx(ctx, tx, &project)
 	if err != nil {
 		return s, false, err

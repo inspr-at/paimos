@@ -60,6 +60,13 @@ func pipelineSettledTx(ctx context.Context, tx pgx.Tx, run, id string, nonCode b
 	if pending != 0 {
 		return workorders.Fail(409, "catalogue_actions_unsettled")
 	}
+	var approvalPending bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_actions a WHERE a.run_id=$1 AND a.id<>$2 AND a.approval_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM agent_permission_grants g JOIN approval_decisions d ON d.request_id=g.approval_request_id WHERE g.approval_request_id=a.approval_id AND g.revoked_at IS NULL AND g.valid_until>clock_timestamp() AND d.decision='approved'))`, run, id).Scan(&approvalPending); err != nil {
+		return err
+	}
+	if approvalPending {
+		return workorders.Fail(409, "catalogue_approvals_unsettled")
+	}
 	var unsettled, noExit, code bool
 	err := tx.QueryRow(ctx, `SELECT
  EXISTS(SELECT 1 FROM routine_budget_grants WHERE run_id=$1 AND state<>'settled'),
@@ -256,6 +263,9 @@ func (b *Broker) observeMerge(ctx context.Context, tid, id string) (Receipt, boo
 	var out Receipt
 	done := false
 	err := db.InTenant(db.AllProjects(ctx, "observe routine main merge receipt"), b.pool, tid, func(tx pgx.Tx) error {
+		if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
+			return err
+		}
 		if err := agentpairing.Lock(ctx, tx); err != nil {
 			return err
 		}
