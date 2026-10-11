@@ -261,8 +261,14 @@ func TestRoutineConsentProjectionMatchesNativePolicyAndPages(t *testing.T) {
 		if r.ExecutionPolicy == nil || !r.ExecutionPolicy.Eligible || r.ExecutionPolicy.WaitReason != "" || r.ExecutionPolicy.ConsentRevision != r.Revision {
 			t.Fatalf("%s: renewed consent did not restore eligibility: %+v", change, r)
 		}
-		if got := consents(read(f.person)); len(got) != 2 {
+		got := consents(read(f.person))
+		if len(got) != 2 {
 			t.Fatalf("%s: renewed consent stayed projected: %+v", change, got)
+		}
+		for _, item := range got {
+			if item.ID == r.ID {
+				t.Fatalf("%s: renewed routine still has a consent pointer: %+v", change, item)
+			}
 		}
 	}
 	if err := json.Unmarshal(request(f.person, "POST", "/api/recurrences/"+r.ID+"/resume", map[string]any{"expected_revision": r.Revision}, 200), &r); err != nil {
