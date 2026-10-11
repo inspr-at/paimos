@@ -169,6 +169,10 @@
         "internal/agentruns/queue_notifications_test.go",
         "internal/runisolation/**",
         "internal/routineexec/**",
+        "internal/harness/lead_runtime.go",
+        "internal/harness/lead_runtime_test.go",
+        "internal/agentd/lead_runtime.go",
+        "internal/agentd/lead_runtime_test.go",
         "internal/modelregistry/routine_reads.go"
       ]
     },
