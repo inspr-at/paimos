@@ -26,7 +26,6 @@ import (
 	"github.com/inspr-at/paimos/internal/engineadmission"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/modelregistry"
-	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/routinebudget"
 	"github.com/inspr-at/paimos/internal/tenant"

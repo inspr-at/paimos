@@ -447,6 +447,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
 				return "nodes.read", true
 			}
+		case "lead-runtime":
+			if validRouteUUID(parts[1]) && (len(parts) == 3 && read || len(parts) == 4 && r.Method == http.MethodPost && (parts[3] == "claim" || parts[3] == "report")) {
+				return "harness.worker", true
+			}
 		case "lead":
 			if len(parts) == 4 && parts[3] == "usage" && read {
 				return "harness.read", true

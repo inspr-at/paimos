@@ -74,7 +74,9 @@ func (e *Executor) Bind(module httpapi.Module) error {
 // An absent qualified actor reserver remains an explicit runtime wait. This
 // seam never enables projects or treats worker launch checks as lead authority.
 func (e *Executor) BindHarness(module *harness.Module) {
-	module.WithRoutineExecutionRuntime(e.options.Runtime).WithLeadAdmission(e.options.LeadAdmission).WithLeadRuntime(e.options.LeadRuntime)
+	checks := e.options.LeadRuntime
+	checks.Consent = recurrences.RequireExecutionConsentTx
+	module.WithRoutineExecutionRuntime(e.options.Runtime).WithLeadAdmission(e.options.LeadAdmission).WithLeadRuntime(checks)
 }
 
 // Pass reports partial work explicitly; a capped pass is never a complete scan.

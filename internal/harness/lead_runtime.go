@@ -17,7 +17,6 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
-	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -30,6 +29,10 @@ import (
 // No collaborator may call a model/network, append events or infer exit.
 // An installation without qualified collaborators remains visibly unavailable.
 type LeadRuntimeChecks struct {
+	// Consent rechecks the current routine definition and execution identity
+	// inside the final transaction. The executor binds the recurrence authority;
+	// an absent check cannot authorize a claim or native-start preflight.
+	Consent  func(context.Context, pgx.Tx, string, string, int64, modelregistry.ExecutionRuntimeReader) (string, error)
 	Prepare  func(context.Context, pgx.Tx, tenant.Principal, agentsetup.LeadPickup) (agentsetup.LeadLaunch, error)
 	Validate func(context.Context, pgx.Tx, tenant.Principal, agentsetup.LeadLaunch) error
 	Exit     func(context.Context, pgx.Tx, tenant.Principal, agentsetup.LeadLaunch, ownedprocess.Identity) error
@@ -127,7 +130,7 @@ func (m *Module) readLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principal)
 		out.Reason = settings.WaitReason
 		return out, nil
 	}
-	if m.leadRuntime.Prepare == nil || m.leadRuntime.Validate == nil || m.leadRuntime.Exit == nil || m.leadRuntime.Abandon == nil || m.leadAdmission == nil {
+	if m.leadRuntime.Consent == nil || m.leadRuntime.Prepare == nil || m.leadRuntime.Validate == nil || m.leadRuntime.Exit == nil || m.leadRuntime.Abandon == nil || m.leadAdmission == nil {
 		out.Reason = "lead_runtime_unqualified"
 		return out, nil
 	}
@@ -204,7 +207,10 @@ func (m *Module) validateLeadLaunch(ctx context.Context, tx pgx.Tx, p tenant.Pri
 	if !now.Before(g.ExpiresAt) || g.ExpiresAt.Sub(now) > 2*time.Minute {
 		return workorders.Fail(409, "lead_grant_expired")
 	}
-	principal, err := recurrences.RequireExecutionConsentTx(ctx, tx, p.TenantID, recurrence, g.DefinitionRevision, m.routineRuntime)
+	if m.leadRuntime.Consent == nil {
+		return workorders.Fail(409, "lead_runtime_unqualified")
+	}
+	principal, err := m.leadRuntime.Consent(ctx, tx, p.TenantID, recurrence, g.DefinitionRevision, m.routineRuntime)
 	if err != nil {
 		return err
 	}
@@ -326,7 +332,7 @@ func (m *Module) claimLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principal
 			return nil, workorders.Fail(409, "lead_exit_unconfirmed")
 		}
 	}
-	if m.leadRuntime.Prepare == nil || m.leadRuntime.Validate == nil || m.leadRuntime.Exit == nil || m.leadRuntime.Abandon == nil || m.leadAdmission == nil {
+	if m.leadRuntime.Consent == nil || m.leadRuntime.Prepare == nil || m.leadRuntime.Validate == nil || m.leadRuntime.Exit == nil || m.leadRuntime.Abandon == nil || m.leadAdmission == nil {
 		return nil, workorders.Fail(409, "lead_runtime_unqualified")
 	}
 	settings, e := modelregistry.ProjectExecutionTx(ctx, tx, p.TenantID, l.ProjectID, m.routineRuntime)

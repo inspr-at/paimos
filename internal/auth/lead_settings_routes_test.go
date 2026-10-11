@@ -161,6 +161,25 @@ func TestLeadSettingsProductionMiddleware(t *testing.T) {
 
 // Risk: a daemon route works on a bare mux but production auth rejects every key.
 func TestLeadRuntimeProductionMiddleware(t *testing.T) {
+	// The outer ceiling admits only the declared daemon routes and preserves
+	// malformed-id, unknown-subpath and method denials.
+	base := "/api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/lead-runtime"
+	for _, route := range []struct{ method, path, scope string }{
+		{"GET", base, "harness.worker"}, {"HEAD", base, "harness.worker"},
+		{"POST", base + "/claim", "harness.worker"}, {"POST", base + "/report", "harness.worker"},
+		{"POST", base, ""}, {"PUT", base, ""}, {"DELETE", base, ""},
+		{"GET", base + "/claim", ""}, {"GET", base + "/report", ""},
+		{"PUT", base + "/claim", ""}, {"DELETE", base + "/report", ""},
+		{"POST", base + "/claim/extra", ""}, {"POST", base + "/extra", ""},
+		{"GET", "/api/projects/bad/lead-runtime", ""},
+		{"POST", "/api/projects/bad/lead-runtime/claim", ""},
+		{"POST", "/api/projects/bad/lead-runtime/report", ""},
+	} {
+		scope, allowed := coreAgentScope(httptest.NewRequest(route.method, route.path, nil))
+		if scope != route.scope || allowed != (route.scope != "") {
+			t.Fatalf("%s %s: scope %q allowed %v; want %q", route.method, route.path, scope, allowed, route.scope)
+		}
+	}
 	reset(t)
 	m := newMod(t, Config{})
 	handler := (&httpapi.Server{Pool: appPool, Modules: []httpapi.Module{m, harness.New(appPool)}, Middleware: []func(http.Handler) http.Handler{m.Middleware}}).Handler()
