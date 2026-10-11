@@ -571,7 +571,13 @@ protect concurrent edits; on conflict re-read the ticket before trying again.
 The raw node API replaces the whole `fields` object, so retain unrelated fields
 and send its precondition when clearing or editing a field.
 
-Pills have 2–4 words; benefits have one or two positive plain-language sentences.
+Every non-empty pill must have 2–4 whitespace-separated words when a ticket is
+created, updated or changes status; invalid pills return 422 and the CLI exits
+with an error. Empty draft fields remain optional until completion.
+Run `aeon issue pill-report --project AEON` (optionally `--json`) once to list
+visible open tickets with invalid non-empty pills. The report is read-only,
+uses tenant-defined closed status categories, and fails if pagination is incomplete.
+Benefits have one or two positive plain-language sentences.
 German is neutral without direct address. Hidden tickets still require benefits.
 The proposal in `proposals/ticket-benefit-writing.json` is compatible with AR1's
 rule draft shape and is not a published company rule. See `RELEASE.md` for the

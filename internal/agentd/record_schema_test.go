@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/localjournal"
 )
 
@@ -74,6 +75,26 @@ func TestRecordSchemaGolden(t *testing.T) {
 // Risk: 123 and 124 shared version 2. Forward migration must keep their evidence
 // and leave persisted PIDs unowned through both startup and offline inspection.
 func TestRecordSchemaForwardRecoveryAndDowngrade(t *testing.T) {
+	t.Run("routine-version-6", func(t *testing.T) {
+		g := routineTestGrant("31")
+		old := Record{RoutineWorkspace: &RoutineWorkspace{Grant: g}}
+		raw, err := json.Marshal(old)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := migrateRecordV6(raw)
+		if err != nil || got.RoutineWorkspace == nil || got.RoutineWorkspace.Grant.Lineage != nil || got.RoutineWorkspace.Grant.AgentRunID != g.AgentRunID {
+			t.Fatal("schema 6 migration changed routine authority", err)
+		}
+		old.RoutineWorkspace.Grant.Lineage = &agentsetup.RoutineLineage{Role: "fix"}
+		raw, err = json.Marshal(old)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := migrateRecordV6(raw); err == nil {
+			t.Fatal("legacy record gained continuation authority")
+		}
+	})
 	t.Run("routine-version-5", func(t *testing.T) {
 		grant := routineTestGrant("31")
 		// Persistence stores wall-clock UTC, without time.Now's monotonic data.

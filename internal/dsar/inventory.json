@@ -48,6 +48,19 @@
       "table": "account_reset_actions"
     },
     {
+      "classification": "metadata",
+      "columns": {
+        "account_id": "metadata",
+        "added_at": "metadata",
+        "rule_revision": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "account_use_awaiting"
+    },
+    {
       "classification": "personal",
       "columns": {
         "account_id": "metadata",
@@ -147,7 +160,8 @@
     {
       "classification": "personal",
       "columns": {
-        "routine_launch_id": "metadata"
+        "routine_launch_id": "metadata",
+        "trace": "personal"
       },
       "locator": {
         "tenant_column": "tenant_id"

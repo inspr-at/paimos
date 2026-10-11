@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -135,6 +136,66 @@ func TestRoutineLaunchClaimReplayAndCurrentAuthority(t *testing.T) {
 		return nil
 	})
 	g := agentsetup.RoutineGrant{LedgerGeneration: ledger, LaunchID: uuid(), TenantID: f.person.TenantID, OwnerID: f.person.ID, ProjectID: project, RoutineRunID: occurrence.Run.ID, AgentRunID: run.ID, PrincipalID: f.agent.ID, ExecutionPrincipalID: service, AccountID: account, ComputerID: computer, DaemonID: "daemon-test", DaemonGeneration: "generation-1", AssignmentDigest: occurrence.Run.AssignmentDigest, DefinitionRevision: recurrence.Revision, ConsentRevision: recurrence.Revision, ExecutionRevision: 1, QualificationID: q.ID, DaemonDigest: runtime.DaemonDigest, CapabilityDigest: runtime.CapabilityDigest, HostMappingDigest: runtime.HostMappingDigest, Capability: agentsetup.RoutineExecutionCapability, RuntimeCapability: "routine_native_coding_v1", BudgetMode: "off", BudgetGrantID: grantID, ExpiresAt: time.Now().Add(90 * time.Second)}
+	// A qualified coding grant must not masquerade as a browser assignment.
+	// Browser routing additionally requires trusted exact native launcher facts
+	// and current unattended/enrollment signals inside the final transaction.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		browser := g
+		browser.RuntimeCapability = agentsetup.RoutineBrowserCapability
+		if err := agentruns.PrepareRoutineLaunchTx(t.Context(), tx, f.person, browser, checks); err == nil || !strings.Contains(err.Error(), "routine_assignment_changed") {
+			t.Fatalf("coding/browser requirement binding: %v", err)
+		}
+		if err := workqueue.RequireNativeBrowserRouteTx(t.Context(), tx, browser, nil); err == nil || !strings.Contains(err.Error(), "native_browser_launcher_unavailable") {
+			t.Fatalf("missing native launcher: %v", err)
+		}
+		// Savepoint changes are synthetic qualification, never persisted into
+		// the fixture's ordinary coding route or its model registry pins.
+		local, err := tx.Begin(t.Context())
+		if err != nil {
+			return err
+		}
+		defer local.Rollback(t.Context())
+		browserProfile := uuid()
+		if _, err = local.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier)
+ VALUES($1,$2,'browser-fixture','1','claude','anthropic','requested-browser-fixture','high','strong')`, g.TenantID, browserProfile); err != nil {
+			return err
+		}
+		// A paired account's harness is immutable. Enroll a separate Claude
+		// account instead of rewriting the coding account's existing binding.
+		browser.AccountID = uuid()
+		if _, err = local.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation)
+ VALUES($1,$2::uuid,$2::text,'claude',$3,$4,'Browser fixture',clock_timestamp(),true,$5)`, browser.TenantID, browser.AccountID, browser.DaemonID, browser.PrincipalID, browser.DaemonGeneration); err != nil {
+			return err
+		}
+		if _, err = local.Exec(t.Context(), `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at,verification_expires_at)
+ VALUES($1,$2,$3,$4,$5,clock_timestamp(),clock_timestamp()+interval '1 hour')`, browser.TenantID, browser.AccountID, browser.ComputerID, request, browserProfile); err != nil {
+			return err
+		}
+		if _, err = local.Exec(t.Context(), `UPDATE agent_runs SET model_profile_id=$2,account_id=$3 WHERE id=$1`, g.AgentRunID, browserProfile, browser.AccountID); err != nil {
+			return err
+		}
+		if _, err = local.Exec(t.Context(), `UPDATE agent_pairing_computers SET capacity_signals='{"unattended":{"login_session":"ready","idle_sleep":"disabled","filevault":"off"}}',capacity_reported_at=clock_timestamp() WHERE id=$1`, g.ComputerID); err != nil {
+			return err
+		}
+		read := func(_ context.Context, _ pgx.Tx, grant agentsetup.RoutineGrant) (agentsetup.NativeBrowserRuntime, error) {
+			return agentsetup.NativeBrowserRuntime{TenantID: grant.TenantID, OwnerID: grant.OwnerID, ProjectID: grant.ProjectID, AccountID: grant.AccountID, ComputerID: grant.ComputerID,
+				DaemonID: grant.DaemonID, DaemonGeneration: grant.DaemonGeneration, DaemonDigest: grant.DaemonDigest, CapabilityDigest: grant.CapabilityDigest, HostMappingDigest: grant.HostMappingDigest,
+				ChromeDigest: strings.Repeat("1", 64), InterpreterDigest: strings.Repeat("2", 64), LauncherDigest: strings.Repeat("3", 64), Platform: "darwin", Adapter: "claude",
+				QualifiedChromeDigest: strings.Repeat("1", 64), QualifiedInterpreterDigest: strings.Repeat("2", 64), QualifiedLauncherDigest: strings.Repeat("3", 64),
+				Capabilities: []string{agentsetup.RoutineExecutionCapability, agentsetup.RoutineBrowserCapability}, ReportedAt: grant.ExpiresAt.Add(-90 * time.Second),
+				OwnerApproved: true, LauncherReady: true, Qualified: true, Native: true, ReadOnlyNetwork: true, EphemeralProfile: true}, nil
+		}
+		if err := workqueue.RequireNativeBrowserRouteTx(t.Context(), local, browser, read); err != nil {
+			return err
+		}
+		if _, err = local.Exec(t.Context(), `UPDATE agent_pairing_computers SET capacity_reported_at=clock_timestamp()-interval '2 minutes' WHERE id=$1`, g.ComputerID); err != nil {
+			return err
+		}
+		if err := workqueue.RequireNativeBrowserRouteTx(t.Context(), local, browser, read); err == nil || !strings.Contains(err.Error(), "unattended_host_unreachable") {
+			t.Fatalf("stale native host was available: %v", err)
+		}
+		return nil
+	})
 	f.tx(t, f.person, func(tx pgx.Tx) error { return agentruns.PrepareRoutineLaunchTx(t.Context(), tx, f.person, g, checks) })
 	pickup := agentsetup.RoutinePickup{LaunchID: g.LaunchID, WorktreeID: strings.Repeat("7", 64), Capability: g.Capability, DaemonDigest: g.DaemonDigest, CapabilityDigest: g.CapabilityDigest, ComputerID: g.ComputerID}
 	claim := func(ctx context.Context, mux *http.ServeMux, body map[string]any) *httptest.ResponseRecorder {

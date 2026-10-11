@@ -48,6 +48,11 @@ export const getRoutineExecutionSettings = (projectId: string, signal?: AbortSig
 export const putRoutineExecutionSettings = (projectId: string, body: { expected_revision: number; automatic_launch_enabled: boolean; qualification_id: string | null }, signal?: AbortSignal) => json<RoutineExecutionSettings>(`/projects/${encodeURIComponent(projectId)}/routine-execution-settings`, 'PUT', body, {}, signal)
 // Kind of work for a routine's output project (one bounded page) and the route its effort resolves to today.
 export const listRoutineWorkKinds = (projectId: string, lang: string, signal?: AbortSignal) => json<Page<import('./workKinds').WorkKind>>(`/work-kinds${query({ project_id: projectId, limit: 100, lang })}`, 'GET', undefined, {}, signal)
+// The routine logbook (AEON-1192, S21 reads): runs newest first, and one run's bounded evidence.
+// These are a routine's own runs under /recurrences, not the agent run endpoints agentRows.ts owns.
+const routineRunsPath = (id: string, ...rest: string[]) => ['/recurrences', encodeURIComponent(id), 'runs', ...rest.map(encodeURIComponent)].join('/')
+export const listRoutineRuns = (id: string, before?: string, signal?: AbortSignal) => json<unknown>(routineRunsPath(id) + query({ before, limit: 20 }), 'GET', undefined, {}, signal)
+export const getRoutineRun = (id: string, runId: string, signal?: AbortSignal) => json<unknown>(routineRunsPath(id, runId), 'GET', undefined, {}, signal)
 export const resolveRoutineRoute = (role: string, projectId: string, signal?: AbortSignal) => json<{ role: string; profile: import('./modelsSimple').RegistryProfile | null; owner_required: boolean }>(`/models/resolve${query({ role, project_id: projectId })}`, 'GET', undefined, {}, signal)
 
 export class StaleRequestError extends Error {}

@@ -24,7 +24,7 @@ func TestAccountUseSelectionCallSiteGuard(t *testing.T) {
 		"internal/agentaccounts/routing_plan.go":      1,
 		"internal/agentruns/queue.go":                 2,
 		"internal/agentruns/queue_list.go":            1,
-		"internal/agentruns/review.go":                1,
+		"internal/agentruns/review.go":                2,
 		"internal/agentruns/runs.go":                  3,
 		"internal/engineadmission/module.go":          1,
 		"internal/harness/session_requests.go":        1,
@@ -34,6 +34,7 @@ func TestAccountUseSelectionCallSiteGuard(t *testing.T) {
 		// AEON-1158 removed the ladder re-pin; only the successor lookup remains.
 		"internal/modelregistry/refresh_successor.go": 1,
 		"internal/routineexec/dispatch.go":            1,
+		"internal/routineexec/review.go":              1,
 		"internal/workqueue/route.go":                 1,
 	}
 	root := filepath.Join("..", "..")
@@ -83,14 +84,17 @@ func TestAccountUseSelectionCallSiteGuard(t *testing.T) {
 		"internal/agentaccounts/route.go":            {"aeon_account_use_allowed(id", "RequireRun("},
 		"internal/agentruns/runs.go":                 {"RequireRun(", "RequireProject(", "accountuse.LockShared("},
 		"internal/agentruns/queue.go":                {"RequireProject("},
-		"internal/agentruns/review.go":               {"RequireProject("},
+		"internal/agentruns/review.go":               {"RequireProject(", "accountuse.RequireProject(ctx, tx, account, project)"},
 		"internal/agentruns/queue_list.go":           {"aeon_account_use_allowed_for_project("},
 		"internal/agentaccounts/engine_admission.go": {"AllowedForProject("},
 		"internal/modelregistry/daily.go":            {"ProjectDailySnapshot(", "allDenied[harness]"},
 		"internal/engineadmission/module.go":         {"ProjectDailySnapshot(", "allDenied[in.Harness]"},
 		"internal/harness/session_requests.go":       {"RequireProject("},
 		"internal/routineexec/dispatch.go":           {"aeon_account_use_allowed_for_project(", "accountuse.LockShared("},
-		"internal/workqueue/route.go":                {"aeon_account_use_allowed_for_project("},
+		// The continuation's compatibility selection delegates the project
+		// matrix check to QueueRoutineFixTx while holding the shared fence.
+		"internal/routineexec/review.go": {"accountuse.LockShared(", "agentruns.QueueRoutineFixTx("},
+		"internal/workqueue/route.go":    {"aeon_account_use_allowed_for_project("},
 	} {
 		raw, err := os.ReadFile(filepath.Join(root, file))
 		if err != nil {

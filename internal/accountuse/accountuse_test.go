@@ -419,6 +419,65 @@ func TestAccountUseBulkAndStaleUndo(t *testing.T) {
 	})
 }
 
+// Risk (AEON-1173): Needs you calls an account new although a person already
+// chose for it or it was added under Automatic, misses one added while New
+// accounts asks first, or keeps naming a project that left Unassigned.
+func TestAccountUseReportsAwaitingAccountsAndWaitingProjects(t *testing.T) {
+	f := setup(t)
+	f.rules(t, accountuse.RuleValues{"allow", "ask", "holding", "allow"})
+	early := f.addAccount(t, "early")
+	f.in(t, func(tx pgx.Tx) error {
+		// Added under Automatic, then left with no cell: still not new.
+		_, err := tx.Exec(t.Context(), `DELETE FROM account_use_cells WHERE account_id=$1`, early)
+		return err
+	})
+	f.rules(t, accountuse.RuleValues{"ask", "ask", "holding", "allow"})
+	late := f.addAccount(t, "late")
+	var waiting, archived, waitingKey string
+	f.in(t, func(tx pgx.Tx) error {
+		for _, p := range []struct {
+			title string
+			id    *string
+		}{{"Old idea", &archived}, {"Website relaunch", &waiting}} {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),$2 FROM node_kinds k WHERE k.slug='project' RETURNING id::text`, f.p.TenantID, p.title).Scan(p.id); err != nil {
+				return err
+			}
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT key FROM nodes WHERE id=$1`, waiting).Scan(&waitingKey); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='archived' WHERE id=$1`, archived)
+		return err
+	})
+	read := func() (accountuse.Matrix, map[string]bool) {
+		var m accountuse.Matrix
+		if err := json.Unmarshal(f.call(t, f.p, "GET", "/api/account-use", nil, 200).Body.Bytes(), &m); err != nil {
+			t.Fatal(err)
+		}
+		marks := map[string]bool{}
+		for _, a := range m.Accounts {
+			marks[a.ID] = a.Awaiting
+		}
+		return m, marks
+	}
+	m, marks := read()
+	if marks[late] != true || marks[early] != false || len(marks) != 2 {
+		t.Fatalf("awaiting %v, want only %s", marks, late)
+	}
+	if want := (accountuse.HoldingProject{ProjectID: waiting, Key: waitingKey, Name: "Website relaunch"}); m.HoldingProjects.Count != 1 || len(m.HoldingProjects.First) != 1 || m.HoldingProjects.First[0] != want {
+		t.Fatalf("holding projects %+v, want only %+v", m.HoldingProjects, want)
+	}
+	// A person's first save for the account ends the wait, even after its Undo leaves no cell.
+	saved := f.save(t, accountuse.CellWrite{ExpectedRevision: m.Rules.Revision, Changes: []accountuse.Cell{{AccountID: late, ContextID: f.defaultContext, Allowed: true}}}, 200)
+	undone := f.save(t, accountuse.CellWrite{ExpectedRevision: saved.Revision, Changes: saved.Undo}, 200)
+	// The project leaves Unassigned with its context.
+	f.call(t, f.p, "PUT", "/api/projects/"+waiting+"/work-context", map[string]any{"expected_revision": undone.Revision, "context_id": f.defaultContext}, 200)
+	m, marks = read()
+	if marks[late] || marks[early] || m.HoldingProjects.Count != 0 || len(m.HoldingProjects.First) != 0 {
+		t.Fatalf("after the choices: awaiting %v, holding %+v", marks, m.HoldingProjects)
+	}
+}
+
 // Risk: a stale person retains matrix authority while waiting behind revocation.
 // Real backend barriers prove the tenant fence precedes the matrix lock.
 func TestAccountUseFenceOrderAndRevocationDuringBlockedWrite(t *testing.T) {
