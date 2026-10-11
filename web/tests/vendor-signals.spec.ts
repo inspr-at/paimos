@@ -56,7 +56,7 @@ test('a computer approver loses the statusline toggle when account.manage is rev
   await expect(toggle).toHaveCount(0)
   expect(changes).toEqual([])
   await page.reload()
-  await expect(page.getByRole('heading', { name: 'Accounts and computers', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Which logins agents use', exact: true })).toBeVisible()
   await openAccount(page, account.id)
   await expect(page.locator(`section.pane [data-account="${account.id}"] .detail`)).toBeVisible()
   await expect(toggle).toHaveCount(0)
