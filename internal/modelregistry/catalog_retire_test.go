@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -150,16 +151,48 @@ func TestCatalogProfileLifecycleBestEffort(t *testing.T) {
 			}
 		}
 	})
+	t.Run("failed lifecycle query returns profiles with null lifecycle", func(t *testing.T) {
+		admin, _, _ := retireFixture(t)
+		before := boardDecode[[]lifecycleTestProfile](t, boardCall(t, admin, "GET", "/api/models", nil, ""), 200)
+		probe := &lifecycleQueryBarrier{fail: true}
+		config := appPool.Config()
+		config.ConnConfig.Tracer = probe
+		pool, err := pgxpool.NewWithConfig(t.Context(), config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pool.Close()
+		r := httptest.NewRequest("GET", "/api/models", nil).WithContext(tenant.WithPrincipal(t.Context(), admin))
+		w := httptest.NewRecorder()
+		(&Module{pool: pool}).list(w, r)
+		profiles := boardDecode[[]lifecycleTestProfile](t, w, 200)
+		if probe.calls.Load() != 1 || len(profiles) != len(before) {
+			t.Fatal("fixture did not fail exactly one lifecycle query or preserve profiles")
+		}
+		for i, profile := range profiles {
+			if profile.ID != before[i].ID || profile.Lifecycle != nil {
+				t.Fatalf("failed enrichment must preserve profiles and report null: %+v", profile)
+			}
+		}
+	})
 }
 
 type lifecycleQueryBarrier struct {
 	entered chan struct{}
 	release chan struct{}
 	once    sync.Once
+	calls   atomic.Int32
+	fail    bool
 }
 
 func (b *lifecycleQueryBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	if strings.Contains(data.SQL, "aeon_model_version_newer") {
+		b.calls.Add(1)
+		if b.fail {
+			ctx, cancel := context.WithCancel(ctx)
+			cancel()
+			return ctx
+		}
 		b.once.Do(func() {
 			close(b.entered)
 			select {
@@ -176,6 +209,12 @@ func (*lifecycleQueryBarrier) TraceQueryEnd(context.Context, *pgx.Conn, pgx.Trac
 // A query barrier proves overlap; NOWAIT rejects the specific lock conflict.
 func TestCatalogProfileLifecycleReleasesTenantFence(t *testing.T) {
 	admin, old, _ := retireFixture(t)
+	var older Profile
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		var err error
+		older, err = insertActivatedProfile(t.Context(), tx, admin, profileWrite{Slug: "fence-older-opus", Version: "1", Harness: "claude", Family: "anthropic", Model: "claude-opus-4", Effort: "high", Tier: "strong"}, true, modelactivation.Person)
+		return err
+	})
 	barrier := &lifecycleQueryBarrier{entered: make(chan struct{}), release: make(chan struct{})}
 	config := appPool.Config()
 	config.ConnConfig.Tracer = barrier
@@ -184,7 +223,9 @@ func TestCatalogProfileLifecycleReleasesTenantFence(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	defer close(barrier.release)
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(barrier.release) }) }
+	defer release()
 	done := make(chan *httptest.ResponseRecorder, 1)
 	go func() {
 		r := httptest.NewRequest("GET", "/api/models", nil).WithContext(tenant.WithPrincipal(t.Context(), admin))
@@ -206,14 +247,23 @@ func TestCatalogProfileLifecycleReleasesTenantFence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lifecycle held tenant writer fence: %v", err)
 	}
-	barrier.release <- struct{}{}
+	release()
 	profiles := boardDecode[[]lifecycleTestProfile](t, finishEditorRequest(t, done), 200)
+	if barrier.calls.Load() != 1 {
+		t.Fatalf("successor comparisons used %d queries, want one", barrier.calls.Load())
+	}
+	found := 0
 	for _, profile := range profiles {
-		if profile.ID == old.ID && profile.Lifecycle != nil && profile.Lifecycle.Successor != nil && *profile.Lifecycle.Successor == "anthropic:claude-opus-5.5" {
-			return
+		if profile.ID == old.ID || profile.ID == older.ID {
+			if profile.Lifecycle == nil || profile.Lifecycle.Successor == nil || *profile.Lifecycle.Successor != "anthropic:claude-opus-5.5" {
+				t.Fatalf("batched successor query failed: %+v", profile)
+			}
+			found++
 		}
 	}
-	t.Fatal("successor query did not complete after fence check")
+	if found != 2 {
+		t.Fatal("batched successor query lost a listed profile")
+	}
 }
 
 func retireFixture(t *testing.T) (tenant.Principal, Profile, Profile) {
