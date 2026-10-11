@@ -5458,6 +5458,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"the last row stays under the pointer when the live list empties","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"the search finds a row by the model name it shows, and still by its raw ids","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"touch › 390: every target in the Sessions card is 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -18065,6 +18067,8 @@
     {"kind":"vitest","file":"tests/sessionRow.unit.test.ts","name":"intended result prefers an explicit phrase, then the bound ticket title, then the existing label","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/sessionRow.unit.test.ts","name":"media and terminal use their execution label and never infer an AI vendor","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/sessionRow.unit.test.ts","name":"search reads the model as the row names it, and keeps the raw ids","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-a\"},\"principal\":{\"id\":\"person-b\"}})","tags":[],"tier":"GATED-FULL"}
     ,

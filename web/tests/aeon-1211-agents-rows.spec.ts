@@ -433,3 +433,34 @@ test('a held move shows the newest line 2: a working row that starts asking says
   await expect(asking.locator('.l2t')).toContainText(/1 permission request awaiting a person.s decision/)
   await expect(asking.locator('.l2t')).not.toContainText('Editing the fleet list')
 })
+
+// Fix round 4 (gate on f3acf3b1). Risk: rows name models as the registry does, but the list's search
+// still reads raw ids only, so searching what a row says ("Opus 5.5", "Composer fast 2.5") hides that
+// row. A raw reported or launch id still finds it.
+test('the search finds a row by the model name it shows, and still by its raw ids', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const data = await setup(page)
+  await page.goto('/agents')
+  const lead = row(page, data.sessions[0]!.id), worker = row(page, data.sessions[1]!.id), cursor = row(page, data.sessions[3]!.id)
+  await expect(cursor.locator('.exec-model')).toHaveText('Composer fast 2.5')
+  const search = page.getByRole('searchbox', { name: 'Search sessions in this list' })
+  // The rows a search matches; ancestors it keeps as dimmed context do not count.
+  const matched = page.locator('.sessions .row[data-row]:not(.context-only)')
+  for (const [query, found, shows] of [
+    ['Opus 5.5', [lead, row(page, DONE)], 'Opus 5.5 · xhigh'],
+    ['gpt-6.1 sol', [worker], 'GPT-6.1 Sol · xhigh'],
+    ['Composer fast 2.5', [cursor], 'Composer fast 2.5'],
+  ] as const) {
+    await search.fill(query)
+    for (const one of found) await expect(one, `${query} finds it`).toBeVisible()
+    await expect(matched).toHaveCount(found.length)
+    expect(await matched.locator('.exec-model').allInnerTexts(), `${query} matches only rows that show it`).toEqual(found.map(() => shows))
+  }
+  // Raw ids keep matching: the model the session reports and the run's launch profile.
+  for (const [query, found] of [['claude-opus-5-5', lead], ['gpt-6.1-sol', worker], ['codex-astra-xhigh', worker]] as const) {
+    await search.fill(query)
+    await expect(found, `${query} finds it`).toBeVisible()
+    await expect(found).not.toHaveClass(/context-only/)
+  }
+})

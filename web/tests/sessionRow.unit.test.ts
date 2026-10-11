@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { test } from 'vitest'
 import type { ModelProfile } from '../src/lib/agents'
 import type { SessionView } from '../src/stores/agents'
-import { explicitOutcome, intendedResult, modelNames, modelProvider, sessionExecution, sessionEtaEligible } from '../src/components/agents/sessionRow'
+import { explicitOutcome, intendedResult, modelNames, modelProvider, sessionExecution, sessionEtaEligible, sessionSearchText } from '../src/components/agents/sessionRow'
 
 function view(partial: Partial<SessionView> & { session?: Partial<SessionView['session']> } = {}): SessionView {
   const session = {
@@ -111,4 +111,25 @@ test('execution uses the registry display name and level, and never a raw id', (
   const unlisted = sessionExecution(view({ harness: 'Cursor', model: 'cursor-composer-2-5-fast', session: { harness: 'cursor' } }), names)
   assert.equal(unlisted.modelLine, 'Cursor Composer 2.5 Fast')
   for (const exec of [pinned, reported, unlisted]) assert.doesNotMatch(exec.modelLine, /[a-z]+-[a-z0-9]+-/)
+})
+
+// Risk (AEON-1211 fix round 4): the row says "Opus 5.5 · high", but the list's search reads only raw
+// ids, so searching what the row says hides it; a registry line's own name fails the same way.
+test('search reads the model as the row names it, and keeps the raw ids', () => {
+  const profile = (fields: Partial<ModelProfile>): ModelProfile => ({ id: 'p', slug: '', harness: 'claude', family: 'anthropic', model: '', effort: 'high', tier: 'standard', enabled: true, ...fields })
+  const names = modelNames([
+    profile({ id: 'p1', slug: 'claude-opus-high', model: 'claude-opus-5-5', display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5' }),
+    profile({ id: 'p2', slug: 'claude-house-high', model: 'claude-house', display_name: 'Haus Modell', model_version: '' }),
+  ])
+  const finds = (text: string, query: string) => query.toLowerCase().split(/\s+/).every(word => text.includes(word))
+  const pinned = view({ harness: 'Claude', model: 'claude-opus-high', session: { harness: 'claude' } })
+  assert.equal(sessionExecution(pinned, names).modelLine, 'Opus 5.5 · high')
+  for (const query of ['Opus 5.5', 'opus 5.5 · high', 'claude-opus-high']) assert.ok(finds(sessionSearchText(pinned, names), query), query)
+  // The reported model is named and searchable by its id; the launch profile's id still matches.
+  const reported = view({ harness: 'Claude', model: 'claude-opus-high', session: { harness: 'claude', model: 'claude-opus-5-5', reasoning_effort: 'xhigh' } })
+  for (const query of ['Opus 5.5 xhigh', 'claude-opus-5-5', 'claude-opus-high']) assert.ok(finds(sessionSearchText(reported, names), query), query)
+  const custom = view({ harness: 'Claude', model: 'claude-house-high', session: { harness: 'claude' } })
+  assert.equal(sessionExecution(custom, names).modelLine, 'Haus Modell · high')
+  assert.ok(finds(sessionSearchText(custom, names), 'Haus Modell'))
+  assert.equal(finds(sessionSearchText(custom, names), 'Opus'), false)
 })

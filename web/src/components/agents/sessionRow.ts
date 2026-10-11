@@ -123,3 +123,11 @@ export function sessionExecution(view: SessionView, names?: ModelNames): Session
     providerLabel: PROVIDER_LABEL[provider],
   }
 }
+
+// What the list's search reads (AEON-1209): the words the row shows, so its model matches as the
+// registry names it ("Opus 5.5 · high"), and the raw launch and reported ids, so a pasted id still finds it.
+export function sessionSearchText(view: SessionView, names?: ModelNames): string {
+  const exec = sessionExecution(view, names)
+  return [view.name, view.harness, view.account, exec.accountLine, view.model, exec.model, exec.modelLine, view.projectKey, view.projectTitle, view.ticket?.key, view.ticket?.title, view.session.host, view.session.display_label, intendedResult(view)]
+    .filter(Boolean).join(' ').toLowerCase()
+}

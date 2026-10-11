@@ -28,7 +28,7 @@ import { STATE_LABEL } from '../../lib/agentSignals'
 import ExecutionMark from './ExecutionMark.vue'
 import SessionHost from './SessionHost.vue'
 import { listHostLabels } from '../../lib/agents'
-import { intendedResult, modelNames, sessionExecution } from './sessionRow'
+import { intendedResult, modelNames, sessionExecution, sessionSearchText } from './sessionRow'
 import { brand } from '../../lib/brand'
 import { toast } from '../../lib/toast'
 import { useAgentRecovery } from '../../lib/agentRecovery'
@@ -113,13 +113,16 @@ const keptRank = (view: SessionView) => keepsPlace(view) ? lastRank.get(view.ses
 // applies to the live list; the search to History too.
 const stateFilter = computed(() => showRemoved.value ? null : props.filter ?? null)
 const terms = computed(() => (props.query ?? '').toLowerCase().split(/\s+/).filter(Boolean))
-const searchText = (view: SessionView) => [view.name, view.harness, view.account, view.model, view.projectKey, view.projectTitle, view.ticket?.key, view.ticket?.title, view.session.host, view.session.display_label, intendedResult(view)].filter(Boolean).join(' ').toLowerCase()
 // It judges the copy on screen: whether a row matches is part of its place, so a refresh that
-// changes it waits like any other move.
+// changes it waits like any other move. Models match by the names the rows show (AEON-1211).
 const filtering = computed<((view: SessionView) => boolean) | null>(() => {
-  const state = stateFilter.value, words = terms.value
+  const state = stateFilter.value, words = terms.value, models = names.value
   if (!state && !words.length) return null
-  return view => (!state || matchesFilter(view, state)) && (!words.length || words.every(word => searchText(view).includes(word)))
+  return view => {
+    if (state && !matchesFilter(view, state)) return false
+    const text = words.length ? sessionSearchText(view, models) : ''
+    return words.every(word => text.includes(word))
+  }
 })
 // Structure waits while the person points at the list, has keyboard focus in a row or a menu
 // open; a refresh then never moves, adds or removes a row under them (sessionHold.ts).
