@@ -134,7 +134,7 @@ func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
 			// comes from the person-owned Models pause, with the same evidence.
 			if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by)
 				SELECT tenant_id,harness,model,now()+interval '1 hour','fixture fallback unavailable',$2
-				FROM model_profiles WHERE slug IN ('gemini-gemini-2-5-pro-32768','opencode-google-gemini-2-5-pro-default')`, tid, f.person.ID); err != nil {
+				FROM model_profiles WHERE tenant_id=$1 AND slug IN ('gemini-gemini-2-5-pro-32768','opencode-google-gemini-2-5-pro-default')`, tid, f.person.ID); err != nil {
 				return err
 			}
 		}

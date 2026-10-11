@@ -782,7 +782,7 @@ func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 
 	resetRoutingFixture := func() {
 		f.tx(t, f.person, func(tx pgx.Tx) error {
-			if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields-'route_role' WHERE id=ANY($1::uuid[])`, tickets[:2]); err != nil {
+			if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields-'route_role'-'area' WHERE id=ANY($1::uuid[])`, tickets[:2]); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_target_agent_id=NULL,agent_principal_id=tenant_id,model_profile_id=NULL WHERE id=ANY($1::uuid[])`, runs[:2]); err != nil {
@@ -796,9 +796,18 @@ func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 		})
 	}
 	resetRoutingFixture()
-	// Shared demand with no model route also yields to a ready project.
+	// Shared demand with no model route also yields to a ready project. Quick
+	// jobs fall back to the Default, so the kind's own Models order holds only
+	// a model without an account and ends in Wait.
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"route_role":"scout"}'::jsonb WHERE id=ANY($1::uuid[])`, tickets[:2])
+		var accountless string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'accountless','1','claude','anthropic','accountless-test-model','high','strong') RETURNING id::text`, f.person.TenantID).Scan(&accountless); err != nil {
+			return err
+		}
+		if err := dbtest.SetModelOrder(t.Context(), tx, f.person.TenantID, "", "frontend", "first", accountless); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"area":"frontend"}'::jsonb WHERE id=ANY($1::uuid[])`, tickets[:2])
 		return err
 	})
 	next(1, tickets[2], "")

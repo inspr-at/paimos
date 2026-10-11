@@ -29,8 +29,8 @@ func TestCatalogSecurityRoutesHonorOverridesAndAuthorFamily(t *testing.T) {
 		}
 	}
 	seed(admin.TenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier)
-		 VALUES($1,'security-sol','1','codex','openai','gpt-6.1-sol','xhigh','frontier') RETURNING id::text`, admin.TenantID).Scan(&profile); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level)
+		 VALUES($1,'security-sol','1','codex','openai','gpt-6.1-sol','xhigh','frontier',4) RETURNING id::text`, admin.TenantID).Scan(&profile); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,until_at,set_by)

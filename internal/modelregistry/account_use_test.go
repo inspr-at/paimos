@@ -188,7 +188,8 @@ func TestEscalationSkipsAccountlessHarnessForRunnableSuccessor(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&first); err != nil {
 			return err
 		}
-		if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, "", "other", "stuck", first, successor); err != nil {
+		// Stuck work walks its own kind's Stuck order, else that row's order.
+		if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, "", "backend", "stuck", first, successor); err != nil {
 			return err
 		}
 		out, err := ResolveEscalation(ctx, tx, p, WorkQuery{Role: "build", Area: "backend"}, nil, now)
