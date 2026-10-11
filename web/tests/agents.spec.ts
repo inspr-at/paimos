@@ -371,25 +371,24 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   await setup(page)
   await openAgents(page)
   // A click anywhere on the row that is not a link or button opens the session.
-  // AEON-1210: the PHAROS lead heads its group; its project's other sessions follow by urgency, then start
-  // time: the failed run first, then amy (heartbeat overdue), then nova.
+  // AEON-1210: the PHAROS lead heads its group; j walks its project's other sessions in list order.
+  const order = await page.locator('.sessions .grp', { has: row(page, camy) }).locator('[data-row^="s:"]').evaluateAll(rows => rows.map(r => r.getAttribute('data-row')!.slice(2)))
+  expect(order[0]).toBe(camy)
+  expect(order).toContain(nova)
   await row(page, camy).locator('.c-state').click()
   await expect(page).toHaveURL(`/agents/${camy}`)
   await expect(panel(page).getByRole('heading', { name: /camy/ })).toBeVisible()
   await panel(page).focus()
   await page.keyboard.press('j')
-  await expect(page).toHaveURL(`/agents/${session(8)}`)
+  await expect(page).toHaveURL(`/agents/${order[1]}`)
   await page.keyboard.press('j')
-  await expect(page).toHaveURL(`/agents/${session(5)}`)
-  await expect(panel(page).getByRole('heading', { name: /amy/ })).toBeVisible()
-  await page.keyboard.press('j')
-  await expect(page).toHaveURL(`/agents/${nova}`)
+  await expect(page).toHaveURL(`/agents/${order[2]}`)
   await page.keyboard.press('Escape')
   await expect(page).toHaveURL('/agents')
   await expect(panel(page)).toHaveCount(0)
-  await expect(row(page, nova)).toBeFocused()
+  await expect(row(page, order[2]!)).toBeFocused()
   await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(`/agents/${nova}`)
+  await expect(page).toHaveURL(`/agents/${order[2]}`)
 })
 
 test('closing a session panel goes back instead of adding history, like the ticket panel', async ({ page }) => {

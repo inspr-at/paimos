@@ -49,7 +49,9 @@ const nextUp = ref<HTMLElement>()
 function showSection() {
   if (leadOverlay.section !== 'next-up' || !nextUp.value) return false
   leadOverlay.section = null
-  nextUp.value.scrollIntoView({ block: 'start', behavior: 'auto' })
+  // Only the panel's own body scrolls; the page behind it stays where it is.
+  const body = nextUp.value.closest<HTMLElement>('.pane-body')
+  if (body) body.scrollTop += nextUp.value.getBoundingClientRect().top - body.getBoundingClientRect().top
   nextUp.value.focus({ preventScroll: true })
   return true
 }
