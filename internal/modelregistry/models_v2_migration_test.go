@@ -32,7 +32,7 @@ func modelsMigrationFixture(t *testing.T) (tenant.Principal, tenant.Principal) {
 // ownership, or emits an incomplete/duplicate migration audit.
 func TestModelsV2MigrationGolden(t *testing.T) {
 	admin, waiter := modelsMigrationFixture(t)
-	runner := addPrincipal(t, admin.TenantID, "agent", "Migration runner", nil)
+	runner := addPrincipal(t, admin.TenantID, "agent", "Migration runner", []string{"admin"})
 	var now, until time.Time
 	var workspace string
 	ids := map[string]string{}
