@@ -157,6 +157,8 @@ test('AEON-1200 static typecheck scratch configs cannot invalidate a concurrent 
   assert.deepEqual(during, initial, 'reserved typecheck output is absent from the source snapshot')
   assert.deepEqual(cachedGoList(goPackageKeys(during, inventory, identity), list, { directory }), golden)
   assert.equal(calls.length, 1, 'creating static-check output does not compile a Go test binary')
+  command('git', ['add', 'web/.ci-static-typecheck-fixture'], { cwd: base })
+  assert.notDeepEqual(inputSnapshot(base, command), initial, 'tracked inputs cannot hide in the generated namespace')
   rmSync(scratch, { recursive: true })
   assert.deepEqual(inputSnapshot(base, command), initial, 'scratch cleanup also leaves discovery stable')
   writeFileSync(resolve(base, 'web/src/view.ts'), '// changed view\n')

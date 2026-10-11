@@ -28,7 +28,10 @@ export function inputSnapshot(base, run) {
     const [, mode, hash, , file] = match
     if (safe(file)) rows.set(file, { mode, hash })
   }
-  for (const file of git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(safe)) {
+  // ci-static generates these untracked configs below the web Go package.
+  // Parallel typechecking is not a source edit; tracked inputs remain keyed.
+  for (const file of git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0')
+    .filter(file => safe(file) && !/^web\/\.ci-static-typecheck-[^/]+\//.test(file))) {
     rows.set(file, { mode: '100644' }); dirty.add(file)
   }
   for (const [file, row] of rows) {
