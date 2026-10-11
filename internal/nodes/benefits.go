@@ -4,6 +4,7 @@ package nodes
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
 	"github.com/jackc/pgx/v5"
@@ -28,5 +29,9 @@ func benefitTransition(ctx context.Context, tx pgx.Tx, kindID, slug, before, aft
 	if err := tx.QueryRow(ctx, `SELECT aeon_work_status_category($2,field_schema),aeon_work_status_category($3,field_schema) FROM node_kinds WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND id=$1`, kindID, before, after).Scan(&priorCategory, &nextCategory); err != nil {
 		return nil, err
 	}
-	return ticketbenefits.Transition(slug, priorCategory, nextCategory, fields), nil
+	issues := ticketbenefits.Transition(slug, priorCategory, nextCategory, fields)
+	if len(issues) > 0 && (ticketbenefits.Completed(priorCategory) || !ticketbenefits.Completed(nextCategory)) {
+		return nil, unprocessable(strings.Join(issues, "; "))
+	}
+	return issues, nil
 }

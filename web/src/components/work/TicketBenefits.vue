@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, useId } from 'vue'
-import { benefitIssues, pillWords } from '../../lib/ticketBenefits'
+import { benefitIssues, pillIssues, pillWords } from '../../lib/ticketBenefits'
 import AppIcon from '../AppIcon.vue'
 import ParentBenefitGeneration from './ParentBenefitGeneration.vue'
 
@@ -12,6 +12,7 @@ const props = defineProps<{ fields: Record<string, unknown>; parent?: boolean; n
 const emit = defineEmits<{ change: [key: string, value: string | boolean]; edit: []; generated: [] }>()
 const uid = useId()
 const issues = computed(() => benefitIssues(props.fields))
+const invalidPills = computed(() => pillIssues(props.fields))
 const languages = [
   { key: 'en', label: 'English', short: 'EN', pill: 'e.g. Hosts in minutes', benefit: 'What people gain, in one or two sentences.' },
   { key: 'de', label: 'Deutsch', short: 'DE', pill: 'z. B. Hosts in Minuten', benefit: 'Was Menschen gewinnen, neutral formuliert, ohne direkte Anrede.' },
@@ -19,6 +20,7 @@ const languages = [
 const text = (key: string) => typeof props.fields[key] === 'string' ? (props.fields[key] as string).trim() : ''
 const filled = computed(() => languages.filter(language => text(`pill_${language.key}`) || text(`benefit_${language.key}`)))
 const guidance = computed(() => {
+  if (props.editing && !props.done) return 'Each non-empty pill needs 2–4 words to save. Before Done, both languages and benefits are required.'
   if (props.parent || !issues.value.length) return ''
   return props.done
     ? 'This completed ticket has incomplete benefit fields. Completing it again needs both languages.'
@@ -47,9 +49,9 @@ const countLabel = (value: string) => { const n = pillWords(value); return n ? `
         <div v-for="language in languages" :key="language.key" :lang="language.key" class="language-edit">
           <div class="label-row">
             <label :for="`${uid}-pill-${language.key}`">Pill · {{ language.label }}</label>
-            <span class="count" :class="{ off: pillWords(text(`pill_${language.key}`)) > 4 || pillWords(text(`pill_${language.key}`)) === 1 }" aria-hidden="true">{{ countLabel(text(`pill_${language.key}`)) }}</span>
+            <span :id="`${uid}-count-${language.key}`" class="count" :class="{ off: invalidPills.some(issue => issue.startsWith(`pill_${language.key} `)) }">{{ countLabel(text(`pill_${language.key}`)) }}</span>
           </div>
-          <input :id="`${uid}-pill-${language.key}`" class="field" :value="raw(`pill_${language.key}`)" :placeholder="language.pill" :disabled="disabled" :aria-invalid="invalidKey === `pill_${language.key}` ? 'true' : undefined" :aria-describedby="invalidKey === `pill_${language.key}` && notice ? `${uid}-notice` : undefined" @input="emit('change', `pill_${language.key}`, ($event.target as HTMLInputElement).value)" />
+          <input :id="`${uid}-pill-${language.key}`" class="field" :value="raw(`pill_${language.key}`)" :placeholder="language.pill" :disabled="disabled" :aria-invalid="invalidKey === `pill_${language.key}` || invalidPills.some(issue => issue.startsWith(`pill_${language.key} `)) ? 'true' : undefined" :aria-describedby="`${uid}-count-${language.key}${invalidKey === `pill_${language.key}` && notice ? ` ${uid}-notice` : ''}`" @input="emit('change', `pill_${language.key}`, ($event.target as HTMLInputElement).value)" />
           <label :for="`${uid}-benefit-${language.key}`">Benefit · {{ language.label }}</label>
           <textarea :id="`${uid}-benefit-${language.key}`" class="field" rows="3" :value="raw(`benefit_${language.key}`)" :placeholder="language.benefit" :disabled="disabled" :aria-invalid="invalidKey === `benefit_${language.key}` ? 'true' : undefined" :aria-describedby="invalidKey === `benefit_${language.key}` && notice ? `${uid}-notice` : undefined" @input="emit('change', `benefit_${language.key}`, ($event.target as HTMLTextAreaElement).value)" />
         </div>

@@ -4874,6 +4874,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestPersonAPIErrorPreservesStatusAndRedactsSession","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestPillWritesSurface422AndReportOpenInvalidPills","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestPrintHeartbeatPauseAndBoundedHandover","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestPrintHeartbeatRequestsRejectsUnsafeOrUncataloguedValues","tier":"GATED-FULL"}
@@ -7849,6 +7851,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestTicketGraphQueryCount","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestTicketGraphShapeClosedFilterAndIsolation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestTicketPillsValidatedAtWriteTime","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestTrimDecimal","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,

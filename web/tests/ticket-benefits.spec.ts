@@ -13,6 +13,25 @@ test('ticket benefits edit together with a precondition and preserve unrelated f
   const ws = page.getByRole('complementary', { name: 'Ticket details' })
   await expect(ws.getByRole('region', { name: 'User benefit' })).toContainText('Before Done')
   await ws.getByRole('button', { name: 'Edit', exact: true }).click()
+  // Risk: an open draft saves an invalid pill that later prevents completion.
+  const pillControls = await controlStability(page, {
+    english: ws.getByLabel('Pill · English'), german: ws.getByLabel('Pill · Deutsch'),
+    save: ws.getByRole('button', { name: 'Save', exact: true }),
+  })
+  const writesBefore = calls.filter(c => c.method === 'PATCH').length
+  for (const label of ['Pill · English', 'Pill · Deutsch']) {
+    const field = ws.getByLabel(label)
+    for (const value of ['Word', 'One two three four five']) {
+      await pillControls.check(() => field.fill(value))
+      await expect(field).toHaveAttribute('aria-invalid', 'true')
+      await pillControls.check(() => ws.getByRole('button', { name: 'Save', exact: true }).click())
+      await expect(field).toBeFocused()
+      expect(calls.filter(c => c.method === 'PATCH')).toHaveLength(writesBefore)
+    }
+    await pillControls.check(() => field.fill('One two'))
+    await expect(field).not.toHaveAttribute('aria-invalid', 'true')
+  }
+  pillControls.done()
   await ws.getByLabel('Pill · English').fill('Clear release notes')
   await ws.getByLabel('Pill · Deutsch').fill('Verständliche Release Notes')
   await ws.getByLabel('Benefit · English').fill('Tickets explain what you gain.')

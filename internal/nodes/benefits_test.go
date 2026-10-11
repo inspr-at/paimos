@@ -21,6 +21,76 @@ import (
 
 const benefitFields = `{"pill_en":"Clear release notes","pill_de":"Verständliche Release Notes","benefit_en":"Tickets explain the benefit.","benefit_de":"Tickets erklären den Nutzen."}`
 
+// Risk: accepting invalid pills strands delivered work at the completion gate.
+func TestTicketPillsValidatedAtWriteTime(t *testing.T) {
+	p := newPrincipal(t, "pill-writes")
+	k := kindBySlug(t, p, "work")
+	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Valid draft","fields":%s}`, k.ID, benefitFields))
+	snapshot := func() json.RawMessage {
+		t.Helper()
+		var raw json.RawMessage
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT jsonb_build_object('nodes',(SELECT jsonb_agg(to_jsonb(n) ORDER BY id) FROM nodes n),'events',(SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e))`).Scan(&raw)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	for _, key := range []string{"pill_en", "pill_de"} {
+		for _, value := range []string{"Word", "One two three four five"} {
+			for _, method := range []string{http.MethodPost, http.MethodPatch} {
+				t.Run(key+"/"+value+"/"+method, func(t *testing.T) {
+					var fields map[string]any
+					if err := json.Unmarshal([]byte(benefitFields), &fields); err != nil {
+						t.Fatal(err)
+					}
+					fields[key] = value
+					body := map[string]any{"fields": fields}
+					path := "/api/nodes/" + n.ID
+					if method == http.MethodPost {
+						path = "/api/nodes"
+						body["kind_id"] = k.ID
+						body["title"] = "Invalid draft"
+					}
+					rawBody, _ := json.Marshal(body)
+					before := snapshot()
+					code, raw := call(t, &p, method, path, string(rawBody))
+					if code != http.StatusUnprocessableEntity || !strings.Contains(string(raw), key+" must contain 2–4 words") {
+						t.Fatalf("invalid pill accepted: %d %s", code, raw)
+					}
+					if !sameJSON(before, snapshot()) {
+						t.Fatal("rejected write changed nodes or audit events")
+					}
+				})
+			}
+		}
+		for _, value := range []string{"One two", "One two three", "One two three four", "One\u00a0two"} {
+			fields, _ := json.Marshal(map[string]string{key: value})
+			created := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Optional benefits","fields":%s}`, k.ID, fields))
+			code, raw := call(t, &p, http.MethodPatch, "/api/nodes/"+created.ID, fmt.Sprintf(`{"fields":%s}`, fields))
+			decode[nodeJSON](t, code, raw, http.StatusOK)
+		}
+	}
+	// Old open data must still fail status-only writes and completion, rather
+	// than bypassing the validator because the request does not include fields.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{pill_en}','"One two three four five"') WHERE id=$1`, n.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"in_progress", "done", "accepted", "delivered"} {
+		before := snapshot()
+		code, raw := call(t, &p, http.MethodPatch, "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q}`, state))
+		if code != http.StatusUnprocessableEntity || !strings.Contains(string(raw), "pill_en must contain 2–4 words") {
+			t.Fatalf("status bypass: %d %s", code, raw)
+		}
+		if !sameJSON(before, snapshot()) {
+			t.Fatal("rejected transition changed nodes or audit events")
+		}
+	}
+}
+
 func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
 	for _, state := range []string{"done", "accepted", "delivered", "custom-complete", " CUSTOM--COMPLETE "} {
 		t.Run(state, func(t *testing.T) {
