@@ -505,6 +505,31 @@ func (w RoutineWorkspace) pickup() agentsetup.RoutinePickup {
 	return agentsetup.RoutinePickup{LaunchID: g.LaunchID, WorktreeID: w.ID, Capability: g.Capability, DaemonDigest: g.DaemonDigest, CapabilityDigest: g.CapabilityDigest, ComputerID: g.ComputerID}
 }
 
+// Caller holds dispatchMu. A terminal route_pending launch state is durable
+// proof that neither the adapter nor any native fixture was launched. Keep the
+// journal and allocation, while releasing only this attempt's live owners.
+func (s *Supervisor) releaseObsoleteRoutineRoute(r Record) error {
+	if r.RoutineWorkspace == nil || r.LaunchState != launchRoutePending || (r.State != "cancelled" && r.State != "failed" && r.State != "completed") {
+		return ErrProcessesUnconfirmed
+	}
+	if lease := s.routineResources[r.RunID]; lease != nil {
+		if err := lease.Finish(true); err != nil {
+			return err
+		}
+		delete(s.routineResources, r.RunID)
+	}
+	if store := s.routineCheckouts[r.RunID]; store != nil {
+		if err := store.Write("owner.json", []byte("[]"), false); err != nil {
+			return err
+		}
+		if err := store.Close(); err != nil {
+			return err
+		}
+		delete(s.routineCheckouts, r.RunID)
+	}
+	return nil
+}
+
 func (s *Supervisor) releaseRoutineCheckouts() error {
 	var resultErr error
 	for runID, lease := range s.routineResources {

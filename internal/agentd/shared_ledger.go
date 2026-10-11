@@ -414,6 +414,13 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 				entry.mu.Unlock()
 			}
 		}
+		if r.RoutineWorkspace != nil && r.LaunchState == launchRoutePending && r.State != "route_pending" {
+			// A terminal route intent proves no native launch was attempted.
+			// Retry resource/checkout cleanup even after ledger coordinates clear.
+			if err = s.releaseObsoleteRoutineRoute(r); err != nil {
+				return err
+			}
+		}
 		if r.LedgerGroup == "" {
 			continue
 		}
@@ -436,16 +443,30 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 				// A generic 409 includes capacity/grant/generation refusals. Release only
 				// after independent run state confirms this attempt can no longer route.
 				var status *client.StatusError
-				// Routine records also own checkout/resource provenance. An account
-				// binding may be the very route whose response was lost; a refusal
-				// cannot discard that durable owner or convert it to a manual route.
-				if r.RoutineWorkspace == nil && errors.As(e, &status) && status.Status == 409 {
+				if errors.As(e, &status) && status.Status == 409 {
 					readCtx, readCancel := context.WithTimeout(replayCtx, 500*time.Millisecond)
 					run, readErr := s.api.GetRun(readCtx, r.RunID)
 					readCancel()
 					if readErr == nil && ledgerAttemptObsolete(r, run) {
 						if err = s.releaseLedger(r); err != nil {
 							return err
+						}
+						if r.RoutineWorkspace != nil {
+							// Keep the allocation's durable journal anchor. Release
+							// only this never-launched attempt's ownership, not its files.
+							r.State = "failed"
+							if run.Status == "cancelled" {
+								r.State = "cancelled"
+							}
+							r.LedgerGroup, r.LedgerGeneration, r.RouteCandidates = "", "", nil
+							if err = s.journal.Put(r); err != nil {
+								return err
+							}
+							s.setLedgerRecord(r)
+							if err = s.releaseObsoleteRoutineRoute(r); err != nil {
+								return err
+							}
+							continue
 						}
 						// Nothing was forked for an attempt. Remove its private marker
 						// only after owner release; a crash before Delete replays safely.
@@ -497,6 +518,11 @@ func ledgerAttemptObsolete(record Record, run Run) bool {
 	}
 	switch run.Status {
 	case "queued":
+		// A routine account binding may be our own committed route whose
+		// response was lost. Retain its pickup and allocation for replay.
+		if record.RoutineWorkspace != nil {
+			return false
+		}
 		// Route did not give this daemon a confirmed account binding. An
 		// independently observed binding makes this pending attempt obsolete.
 		return run.AccountID != ""

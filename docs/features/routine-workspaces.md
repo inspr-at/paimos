@@ -36,7 +36,13 @@ Pre-launch checkout disables hooks, fsmonitor and effective filters, including
 included and worktree-specific configuration. Metadata is allocated without
 checkout first, so destination-specific includes are sanitized before files
 are materialized. Interrupted routing replays the persisted routine pickup and
-keeps checkout, resource and ledger ownership evidence through refusals.
+keeps checkout, resource and ledger ownership evidence through unconfirmed
+refusals. After a route conflict, an independent run read may prove the attempt
+obsolete: terminal or already-started runs release the ledger hold and the
+never-launched resource/checkout owners. A queued routine remains retained,
+including a bound account whose route response may have been lost. The terminal
+route intent stays in the journal as the allocation's recovery anchor; cleanup
+errors are reported and retried. The branch and worktree files remain intact.
 
 Managed Git uses the owned linked worktree's index and HEAD, common objects and
 only its branch's writable refs and logs. Sibling checkouts and their private
