@@ -252,6 +252,42 @@ func TestResolveHarnessFilterIgnoresDisabledHistoryBound(t *testing.T) {
 	}
 }
 
+// Risk: a harness that only a project rule brings into the role's routes is
+// refused as unsupported, although resolution for that project runs it.
+func TestResolveHarnessFilterIncludesProjectRules(t *testing.T) {
+	admin, _ := boardFixture(t)
+	var project string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'PIN-1','Pinned project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"openai:sol"}, "not": []string{}, "revision": 0}, ""), 200)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_rules(tenant_id,scope,project_id,column_key,line,lock,why,set_by) VALUES($1,'project',$2,'other','anthropic:opus','top','Project pins Opus',$3)`, admin.TenantID, project, admin.ID)
+		return err
+	})
+	opus := map[string]bool{}
+	for _, profile := range decode[[]Profile](t, &admin, http.MethodGet, "/api/models", "", http.StatusOK) {
+		if profile.Enabled && profile.Harness == "claude" && profile.Family == "anthropic" && strings.Contains(profile.Model, "opus") {
+			minimalAccount(t, admin, profile)
+			opus[profile.ID] = true
+		}
+	}
+	if len(opus) == 0 {
+		t.Fatal("fixture needs an enabled Claude Opus route")
+	}
+	path := "/api/models/resolve?role=build&harness=claude"
+	status, body := call(t, &admin, http.MethodGet, path, "")
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "role and harness combination is unsupported") {
+		t.Fatalf("fixture Default must offer no Claude route without the project: %d %s", status, body)
+	}
+	pinned := decode[Resolution](t, &admin, http.MethodGet, path+"&project_id="+project, "", http.StatusOK)
+	if pinned.Profile == nil || !opus[pinned.Profile.ID] || pinned.CommandTemplate == "" || pinned.OwnerRequired {
+		t.Fatalf("project-pinned Claude route was not resolved: %+v", pinned)
+	}
+}
+
 func TestEndpointBodyDeadlineBeforePreparation(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "body-deadline", "person", "Owner", []string{"admin"})
