@@ -12854,6 +12854,8 @@
     ,
     {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"s, p and a open status, priority and assignee from the panel","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the first edit shows Unsaved in place, and the editing header fits the dock","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the panel counts the whole list and next loads the following page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/ticket-panel.spec.ts","name":"the panel shows title, properties, Markdown sections, relations and the timeline","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
