@@ -151,7 +151,25 @@ func setupWithActions(t *testing.T, mode string, paid bool, actions []string, sc
 	path := "/api/recurrences/" + f.routine.ID
 	f.call("POST", path+"/resume", map[string]any{"expected_revision": f.routine.Revision}, nil)
 	f.call("GET", path, nil, &f.routine)
-	f.call("PUT", path+"/execution-consent", map[string]any{"expected_revision": f.routine.Revision, "execute_consent": true}, nil)
+	consent := map[string]any{"expected_revision": f.routine.Revision, "execute_consent": true}
+	if scopeKind == "project" {
+		var service, role string
+		must(t, f.tx(func(tx pgx.Tx) error {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,agent_access_configured) VALUES($1,'agent','Controlled routine service',true) RETURNING id::text`, f.owner.TenantID).Scan(&service); err != nil {
+				return err
+			}
+			if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'controlled_routine','Controlled routine') RETURNING id::text`, f.owner.TenantID).Scan(&role); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, f.owner.TenantID, role, []string{"nodes.read", "run.create", "work_orders.write", "nodes.write"}); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'project',$4)`, f.owner.TenantID, service, role, f.project)
+			return err
+		}))
+		consent["execution_principal_id"] = service
+	}
+	f.call("PUT", path+"/execution-consent", consent, nil)
 	f.call("GET", path, nil, &f.routine)
 	var occurrence recurrences.Occurrence
 	f.call("POST", path+"/run-now", map[string]string{"idempotency_key": "budget"}, &occurrence)
