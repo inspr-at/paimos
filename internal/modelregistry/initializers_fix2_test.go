@@ -2,6 +2,7 @@
 package modelregistry
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -20,7 +21,8 @@ func incompleteCatalogFixture(t *testing.T, p tenant.Principal) {
 		if err != nil {
 			return err
 		}
-		return insertRoute(t.Context(), tx, p.TenantID, Route{Role: "build", Priority: 17, ProfileID: profile.ID, State: "available"})
+		// A saved Models choice that catalog preparation must keep.
+		return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "first", "wait", profile.ID)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -73,8 +75,20 @@ func TestInvalidInitializerStructureDoesNotPrepareCatalog(t *testing.T) {
 				}
 				before := catalogSetupState(t, p)
 				status, body := call(t, &p, tc.method, tc.path, tc.body)
-				if status != http.StatusBadRequest || !strings.Contains(string(body), tc.reason) {
-					t.Fatalf("wrong validation refusal %d %s; want %s", status, body, tc.reason)
+				want, reason, message := http.StatusBadRequest, tc.reason, string(body)
+				if tc.path == "/api/models/routes" {
+					// The retired ladder writer refuses every body with 410, unread.
+					// Its JSON body escapes ">"; read the message as a client does.
+					want, reason = http.StatusGone, "Role ladders moved to Settings > Models"
+					var gone struct {
+						Error string `json:"error"`
+					}
+					if json.Unmarshal(body, &gone) == nil {
+						message = gone.Error
+					}
+				}
+				if status != want || !strings.Contains(message, reason) {
+					t.Fatalf("wrong validation refusal %d %s; want %d %s", status, body, want, reason)
 				}
 				if after := catalogSetupState(t, p); after != before {
 					t.Fatal("rejected request persisted setup")
