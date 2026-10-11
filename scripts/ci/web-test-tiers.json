@@ -992,6 +992,20 @@
     ,
     "browser:tests/role-picker-layout.spec.ts:touch and keyboard expose complete role names, descriptions and refusal reasons"
     ,
+    "browser:tests/routines-editor.spec.ts:an agent routine is created paused, then let run as the picked agent, with every control anchored"
+    ,
+    "browser:tests/routines-editor.spec.ts:closing after a failed consent says the routine is not paused, never “Kept paused”"
+    ,
+    "browser:tests/routines-editor.spec.ts:someone else’s routine says who decides, a stale save keeps unsaved text, and revocation closes the sheet"
+    ,
+    "browser:tests/routines-editor.spec.ts:the Routines box and editor render in dark at 1440px"
+    ,
+    "browser:tests/routines-editor.spec.ts:the Routines box and editor render in light at 390px"
+    ,
+    "browser:tests/routines-editor.spec.ts:the phone sheet scrolls under a pinned footer, and switching who moves nothing"
+    ,
+    "browser:tests/routines-editor.spec.ts:your routines need the right only in their own project, and losing it there closes the sheet"
+    ,
     "browser:tests/service-tier.spec.ts:1440: compact Default tier control keeps its box through confirmation and Undo"
     ,
     "browser:tests/service-tier.spec.ts:320: phone Change tier menu opens and restores its actual trigger"
@@ -1563,6 +1577,18 @@
     "vitest:tests/role-picker.unit.test.ts:modified Enter (metaKey) stays native"
     ,
     "vitest:tests/role-picker.unit.test.ts:modified Enter (shiftKey) stays native"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:routine wait reasons > derives one row state: never-consented waits, a consented pause stops, ticket-only stays scheduled"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:routine wait reasons > says every server wait reason in words, naming the owner and the project"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:save, then consent > consents to the revision the resume returned; personal routines run as their owner"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:save, then consent > saves an assignment the server accepts: consistent runtime and no ceilings when off"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:stale and late answers > applies an answer only to the open record at a revision at least the one shown"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:stale and late answers > names exactly the fields the server changed since the shown revision"
     ,
     "vitest:tests/row-store.unit.test.ts:RowStore: revisions only move forward > an authoritative GET clears withheld provenance even at the same revision and while editing"
     ,
@@ -11446,6 +11472,20 @@
     ,
     {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"touch and keyboard expose complete role names, descriptions and refusal reasons","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"an agent routine is created paused, then let run as the picked agent, with every control anchored","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"closing after a failed consent says the routine is not paused, never “Kept paused”","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"someone else’s routine says who decides, a stale save keeps unsaved text, and revocation closes the sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the Routines box and editor render in dark at 1440px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the Routines box and editor render in light at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the phone sheet scrolls under a pinned footer, and switching who moves nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"your routines need the right only in their own project, and losing it there closes the sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/row-actions.spec.ts","name":"PDF from the list opens the quote on its page and prints it once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/row-actions.spec.ts","name":"Shift+F10 and the context-menu key open the cursor row’s menu; Escape hands focus back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -17405,6 +17445,20 @@
     {"kind":"vitest","file":"tests/role-picker.unit.test.ts","name":"modified Enter (metaKey) stays native","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/role-picker.unit.test.ts","name":"modified Enter (shiftKey) stays native","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"routine wait reasons > derives one row state: never-consented waits, a consented pause stops, ticket-only stays scheduled","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"routine wait reasons > says every server wait reason in words, naming the owner and the project","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"save, then consent > consents to the revision the resume returned; personal routines run as their owner","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"save, then consent > saves an assignment the server accepts: consistent runtime and no ceilings when off","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"stale and late answers > applies an answer only to the open record at a revision at least the one shown","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"stale and late answers > names exactly the fields the server changed since the shown revision","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"today’s route > reads as the Models page does: registry name and harness label, never a model or profile id","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/row-actions.unit.test.ts","name":"customer row actions > offers open, a new quote, the number and archive","tier":"GATED-FULL"}
     ,
