@@ -310,6 +310,74 @@ func TestTerminalPolicyAndBranchFence(t *testing.T) {
 	}
 }
 
+// Risk: linked worktrees need their own index/HEAD and common objects/branch
+// refs, while another checkout and its private Git metadata stay inaccessible.
+func TestTerminalStagesAndCommitsLinkedWorktree(t *testing.T) {
+	root, _, git := routineGitFixture(t)
+	workspace, sibling := filepath.Join(root, "owned"), filepath.Join(root, "sibling")
+	git("worktree", "add", "-b", "routine/owned", workspace, "HEAD")
+	git("worktree", "add", "-b", "routine/sibling", sibling, "HEAD")
+	if err := os.WriteFile(filepath.Join(workspace, "safe.go"), []byte("package safe\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "darwin" {
+		if _, err := runTerminal(t.Context(), workspace, "routine/owned", terminalArgs{Command: "git", Args: []string{"add", "--", "safe.go"}}); err == nil || !strings.Contains(err.Error(), "macOS sandbox") {
+			t.Fatal("unsupported sandbox did not refuse", err)
+		}
+		return
+	}
+	before := git("rev-parse", "routine/sibling")
+	for _, args := range [][]string{{"add", "--", "safe.go"}, {"commit", "-m", "retained routine work"}} {
+		if out, err := runTerminal(t.Context(), workspace, "routine/owned", terminalArgs{Command: "git", Args: args}); err != nil {
+			t.Fatalf("linked-worktree %s: %v\n%s", args[0], err, out)
+		}
+	}
+	if git("rev-parse", "routine/owned") == before || git("rev-parse", "routine/sibling") != before {
+		t.Fatal("commit changed the wrong branch")
+	}
+	if _, err := runTerminal(t.Context(), workspace, "routine/owned", terminalArgs{Command: "git", Args: []string{"add", "--", "../sibling/tracked.txt"}}); err == nil || !strings.Contains(err.Error(), "path denied") {
+		t.Fatal("sibling staging was not refused", err)
+	}
+	// Exercise the OS fence itself, not just the terminal argument allowlist.
+	// The same Git filter can query the owned tree, then fails when pointed at
+	// the sibling. A successful control rejects failures caused by its shell or
+	// executable being unavailable rather than denied sibling access.
+	if err := os.WriteFile(filepath.Join(workspace, ".gitattributes"), []byte("safe.go filter=scopecheck\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git("config", "filter.scopecheck.required", "true")
+	for i, target := range []string{workspace, sibling} {
+		git("config", "filter.scopecheck.clean", "git -C "+target+" rev-parse HEAD")
+		if err := os.WriteFile(filepath.Join(workspace, "safe.go"), []byte(fmt.Sprintf("package safe\n// scope check %d\n", i)), 0600); err != nil {
+			t.Fatal(err)
+		}
+		out, err := runTerminal(t.Context(), workspace, "routine/owned", terminalArgs{Command: "git", Args: []string{"add", "--", "safe.go"}})
+		if i == 0 && err != nil {
+			t.Fatal("owned filter control failed", err, out)
+		}
+		if i == 1 && (err == nil || !strings.Contains(out, "Operation not permitted")) {
+			t.Fatal("sibling read did not fail at the sandbox", err, out)
+		}
+	}
+	// A forged .git pointer must not grant the other worktree's metadata. The
+	// reverse Git-dir binding, rather than a caller-selected metadata path, owns it.
+	ownedPointer, err := os.ReadFile(filepath.Join(workspace, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	siblingPointer, err := os.ReadFile(filepath.Join(sibling, ".git"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".git"), siblingPointer, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.WriteFile(filepath.Join(workspace, ".git"), ownedPointer, 0600) })
+	if _, err := runTerminal(t.Context(), workspace, "routine/sibling", terminalArgs{Command: "git", Args: []string{"add", "--", "safe.go"}}); err == nil || !strings.Contains(err.Error(), "metadata") {
+		t.Fatal("forged sibling metadata pointer was not refused", err)
+	}
+}
+
 func TestTerminalSandboxesTestProcessNetwork(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("macOS sandbox")

@@ -7,6 +7,7 @@ import ts from 'typescript'
 import * as Vue from 'vue'
 import * as settings from '../src/lib/settings'
 import * as footerProviders from '../src/lib/footerProviders'
+import * as accountsNeeds from '../src/lib/accountsNeeds'
 import * as footerSummary from '../src/lib/footerSummary'
 import * as preferences from '../src/lib/preferences'
 import { displayLanguage } from '../src/lib/displayLanguage'
@@ -48,7 +49,7 @@ function component() {
   const { content } = compileScript(descriptor, { id: 'settings-owner', inlineTemplate: true, templateOptions: { compilerOptions: { hoistStatic: false } } })
   const modules: Record<string, unknown> = {
     vue: Vue, 'vue-router': { useRoute: () => route, useRouter: () => ({ push: async () => {} }) }, '../lib/settings': settings,
-    '../lib/footerProviders': footerProviders, '../lib/footerSummary': footerSummary, '../lib/preferences': preferences, '../lib/identityScope': { scopeOwner },
+    '../lib/footerProviders': footerProviders, '../lib/accountsNeeds': accountsNeeds, '../lib/footerSummary': footerSummary, '../lib/preferences': preferences, '../lib/identityScope': { scopeOwner },
     '../stores/session': { useSession: () => session }, '../lib/doctrineInbox': { doctrineInbox: {} },
     '../stores/profile': { useProfile: () => ({ profile: null }) }, '../lib/workKindsCopy': { textForKinds }, '../lib/displayLanguage': { displayLanguage },
     '../lib/authz': { can: (permission: string) => !grants.revoked && (permission === 'settings.manage' ? grants.admin : grants.access), permissionsKnown: () => true, permissionsRevoked: () => grants.revoked, refreshPermissions: async () => {} },

@@ -47,6 +47,7 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
+	RoutineLaunchID           *string         `json:"routine_launch_id,omitempty"`
 	ReservationsSettled       *bool           `json:"reservations_settled,omitempty"`
 	Trace                     json.RawMessage `json:"trace,omitempty"`
 	RecoveryBrief             string          `json:"recovery_brief,omitempty"`
@@ -252,7 +253,10 @@ type API interface {
 }
 
 type StartRequest struct {
-	ServiceTier string
+	// ResourceEnvironment comes from AEON-1089's owned lease. Qualified
+	// routine adapters replace these variables in every native child/fixture.
+	ResourceEnvironment []string
+	ServiceTier         string
 	// Lifetime is the accepted run budget rooted in the supervisor lifetime.
 	// The Start call's context only covers dispatch/startup and may end as soon
 	// as polling finishes. Adapters without a supervisor use the caller context.
