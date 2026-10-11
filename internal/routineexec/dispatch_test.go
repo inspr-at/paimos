@@ -79,6 +79,11 @@ func (f *fixture) call(method, path string, in, out any) {
 }
 func setup(t *testing.T, mode string, paid bool) *fixture {
 	t.Helper()
+	return setupWithActions(t, mode, paid, []string{"work.create"}, "personal")
+}
+
+func setupWithActions(t *testing.T, mode string, paid bool, actions []string, scopeKind string) *fixture {
+	t.Helper()
 	f := &fixture{t: t, d: dbtest.Open(t), mux: http.NewServeMux(), owner: tenant.Principal{Kind: tenant.Person, BrowserSession: true}, agent: tenant.Principal{Kind: tenant.Agent, Scopes: []string{"run.claim", "run.telemetry"}}}
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('routine-budget','Budget') RETURNING id::text`).Scan(&f.owner.TenantID))
 	f.agent.TenantID = f.owner.TenantID
@@ -124,7 +129,11 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	if mode == "money" || mode == "both" {
 		budget.MoneyCeilingMicroUSD = &n
 	}
-	in := recurrences.Input{ProjectID: f.project, ParentID: f.parent, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one", Template: recurrences.Template{Title: "Budget work", Description: "Assigned workspace", Criteria: []string{"Validate"}, EstimateHours: 1, Priority: "high", Type: "ticket"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "UTC"}, Definition: &recurrences.Definition{Scope: recurrences.DefinitionScope{Kind: "personal"}, OwnerPrincipalID: f.owner.ID, Assignment: &recurrences.Assignment{Goal: "Bounded fixture", Sources: []recurrences.SourceReference{}, Role: "build", WorkKindID: kind, AllowedActions: []string{"work.create"}, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: budget}}}
+	scope := recurrences.DefinitionScope{Kind: scopeKind}
+	if scopeKind == "project" {
+		scope.ProjectID = f.project
+	}
+	in := recurrences.Input{ProjectID: f.project, ParentID: f.parent, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one", Template: recurrences.Template{Title: "Budget work", Description: "Assigned workspace", Criteria: []string{"Validate"}, EstimateHours: 1, Priority: "high", Type: "ticket"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "UTC"}, Definition: &recurrences.Definition{Scope: scope, OwnerPrincipalID: f.owner.ID, Assignment: &recurrences.Assignment{Goal: "Bounded fixture", Sources: []recurrences.SourceReference{}, Role: "build", WorkKindID: kind, AllowedActions: actions, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: budget}}}
 	f.call("POST", "/api/recurrences", in, &f.routine)
 	must(t, f.tx(func(tx pgx.Tx) error {
 		var err error

@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "ticket": "AEON-1225",
+  "qualification": "controlled-only",
+  "integratedFixture": "internal/routineexec:TestRoutineControlledQualification",
+  "observations": {
+    "real": [
+      "owned test-binary children and Wait receipts",
+      "temporary Git commits and preserved worker checkout",
+      "recurrence consent and reservations",
+      "assignment/claim/telemetry replay",
+      "action authority and PR reconciliation",
+      "review/fix continuation",
+      "person approval and authenticated merge-to-Done writer"
+    ],
+    "synthetic": [
+      "adopted lead session binding",
+      "vendor model/usage observations",
+      "pre-recorded independent evaluation verdict seam",
+      "read-only PR/CI/artifact/merge observations"
+    ]
+  },
+  "excluded": [
+    "native production provider/tool/browser isolation",
+    "OPS attestation or person-owned enablement",
+    "paid model calls, deployment and product merge"
+  ],
+  "command": "go test ./internal/recurrences ./internal/routineexec ./internal/routineactions ./internal/routinebudget ./internal/routineguard ./internal/agentruns ./internal/harness ./internal/agentd ./internal/agentpairing ./internal/crossreview ./internal/delivery ./internal/reportercontract ./internal/agentaccounts",
+  "risks": [
+    {
+      "id": "reply-replay",
+      "risk": "Duplicate/lost assignment, claim, launch, PR and telemetry replies",
+      "tests": [
+        "internal/routineexec:TestRoutineControlledQualification",
+        "internal/agentruns:TestRoutineLaunchClaimReplayAndCurrentAuthority",
+        "internal/agentd:TestClaimResponseLossSettlesNeverLaunchedExactlyOnce",
+        "internal/agentd:TestWorkerAssignmentClaimResponseLossUsesJournalProof"
+      ]
+    },
+    {
+      "id": "durable-restart",
+      "risk": "Server and daemon reconstruction at persisted phases; uncertain launch stays pending",
+      "tests": [
+        "internal/routineexec:TestRoutineControlledQualification",
+        "internal/routineexec:TestLeadRuntimeClaimReplayAndAbandon",
+        "internal/agentd:TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit",
+        "internal/agentd:TestRestartRecoversOnlyDurablyUnlaunchedClaim",
+        "internal/agentd:TestUncertainRestartDoesNotRelaunchVerification",
+        "internal/agentd:TestRoutineSupervisorReplaysInterruptedRouting"
+      ]
+    },
+    {
+      "id": "old-daemon",
+      "risk": "Legacy daemon cannot claim bound work or review",
+      "tests": [
+        "internal/routineexec:TestRoutineDispatchRaceRecoveryAndAdmission",
+        "internal/crossreview:TestLegacyDaemonCannotSeeOrClaimAReview"
+      ]
+    },
+    {
+      "id": "admission",
+      "risk": "Concurrent slots, tokens, paid cost, hours and recovery ceilings",
+      "tests": [
+        "internal/routinebudget:TestRoutineBudgetConcurrentCeilingsAndSettlement",
+        "internal/routinebudget:TestRoutineBudgetCheckedArithmeticAndModes",
+        "internal/routineexec:TestRoutineDispatchReservedAccountAdmission",
+        "internal/agentd:TestRoutineProviderBudgetBeforeCallsAndSettlement",
+        "internal/agentd:TestRoutineProviderBudgetRefusesNativeBeforeLaunch"
+      ]
+    },
+    {
+      "id": "revocation",
+      "risk": "Live owner authority at save, reservation, claim, action and approval",
+      "tests": [
+        "internal/recurrences:TestRoutineConsentRechecksOwnerBehindAccessFence",
+        "internal/recurrences:TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner",
+        "internal/routinebudget:TestRoutineBudgetAdmissionAndOwnership",
+        "internal/agentruns:TestRoutineLaunchClaimReplayAndCurrentAuthority",
+        "internal/routineactions:TestRoutinePRResponseLossAndFinalAuthority",
+        "internal/routineactions:TestRoutineMergeObservationKeepsDoneRevisionAndApproval",
+        "internal/routineexec:TestRoutineRecoveryRevocationReceiptsAndPendingNotice"
+      ]
+    },
+    {
+      "id": "stale-evidence",
+      "risk": "Exact model identity, changed head, review lineage, CI/artifact and person decision",
+      "tests": [
+        "internal/routineexec:TestRoutineControlledQualification",
+        "internal/routineexec:TestRoutineReviewFixLineageAndFiniteEscalation",
+        "internal/routineguard:TestIndependentEvaluationBindsEvidenceAndCannotBootstrap",
+        "internal/routineguard:TestEvaluationAuthorMatchesPersistedActionAttempt",
+        "internal/routineactions:TestRoutinePipelineRecoversMergeFixAndTargetEdits",
+        "internal/delivery:TestRoutinePipelineRefreshesQueueProofAndObservesDone"
+      ]
+    },
+    {
+      "id": "isolation",
+      "risk": "Cross-tenant grants and private personal run history",
+      "tests": [
+        "internal/recurrences:TestRoutineDefinitionScopeAuthorityAndInertRoundTrip",
+        "internal/recurrences:TestRoutineRunHistoryPrivacyUsageAndPagination",
+        "internal/routinebudget:TestRoutineBudgetAdmissionAndOwnership",
+        "internal/routinebudget:TestRoutineBudgetDaemonSettlementKeepsLedgerPrivate",
+        "internal/crossreview:TestReviewPolicyExplicitAgentGrantAndTenantIsolation"
+      ]
+    },
+    {
+      "id": "calendar",
+      "risk": "Window end, overnight owner schedule and DST boundaries",
+      "tests": [
+        "internal/recurrences:TestCalendarEdges",
+        "internal/recurrences:TestEventMorningFollowsLocalDateAcrossDST",
+        "internal/agentaccounts:TestBUnknownScheduleDSTNightsAndRunNow",
+        "internal/agentaccounts:TestAdmissionScheduleClockAndRunNowFences"
+      ]
+    },
+    {
+      "id": "readings",
+      "risk": "Missing, stale or future mandatory account/host/admission evidence",
+      "tests": [
+        "internal/routineexec:TestRoutineDispatchRaceRecoveryAndAdmission",
+        "internal/routinebudget:TestRoutineBudgetAdmissionAndOwnership",
+        "internal/harness:TestProjectLeadAdmissionIsFreshAndFailClosed",
+        "internal/agentaccounts:TestDailyAdmissionIncompleteFactsFailClosed"
+      ]
+    },
+    {
+      "id": "unknown-usage-exit",
+      "risk": "Unknown paid cost or uncertain process exit holds capacity and budget",
+      "tests": [
+        "internal/routinebudget:TestRoutineBudgetUnknownRetainsSlotAndChildBinding",
+        "internal/routineexec:TestRoutineRecoveryRevocationReceiptsAndPendingNotice",
+        "internal/agentd:TestLaunchErrorCannotProveNoFork",
+        "internal/agentd:TestOutagePreservesProcessAndPersistsExactSettlement",
+        "internal/agentd:TestRoutineCooperativeStopExactIdentityAndUncertainReplay"
+      ]
+    },
+    {
+      "id": "finite-escalation",
+      "risk": "Fix and recovery exhaustion escalates without further launch",
+      "tests": [
+        "internal/routineexec:TestRoutineReviewFixLineageAndFiniteEscalation",
+        "internal/routineexec:TestRoutineRecoveryRevocationReceiptsAndPendingNotice"
+      ]
+    },
+    {
+      "id": "single-effects",
+      "risk": "One writer, applicable PR/settlement and merge Done event; retained checkout",
+      "tests": [
+        "internal/routineexec:TestRoutineControlledQualification",
+        "internal/agentd:TestRoutineWorkspacesSeparateAndRetainWriters",
+        "internal/agentd:TestRoutineContinuationRetainsOriginalCheckout",
+        "internal/delivery:TestMergeDoneRecordedWebhookReplay"
+      ]
+    },
+    {
+      "id": "source-publications",
+      "risk": "Consume each ordered source release once with live source authority",
+      "tests": [
+        "internal/recurrences:TestReleaseSubscriptionOrderedReplayAndSourceAuthority"
+      ]
+    },
+    {
+      "id": "fail-closed-enablement",
+      "risk": "Person consent/exact qualification required; unqualified native capabilities never launch",
+      "tests": [
+        "internal/recurrences:TestRoutineConsentBindsQualificationAndScopedIdentity",
+        "internal/harness:TestRoutineExecutionSettingsRequirePersonAndExactQualification",
+        "internal/harness:TestLeadRuntimeConsentAndAdoptionRemainLaunchBarriers",
+        "internal/agentd:TestRoutineToolsRefuseUnqualifiedNativeStartup"
+      ]
+    }
+  ]
+}

@@ -8936,6 +8936,8 @@
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestLeadRuntimeClaimReplayAndAbandon","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineControlledQualification","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchRaceRecoveryAndAdmission","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchReservedAccountAdmission","tier":"ESSENTIAL"}
