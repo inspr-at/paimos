@@ -294,7 +294,8 @@ function modeKeys(event: KeyboardEvent, key: string) {
 .cd-live.idle .dotm { background: var(--st-backlog); }
 .cd-live.failed .dotm { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); }
 .load-state { display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 28px; margin: 0; padding: 0 8px 0 2px; color: var(--ink-3); font-size: 13px; white-space: nowrap; }
-.cd-sk { display: inline-block; width: 280px; max-width: 46vw; height: 12px; }
+/* About the loaded control's width with three harnesses (the design's 470 px), so the chip beside it barely moves. */
+.cd-sk { display: inline-block; width: 420px; max-width: 46vw; height: 12px; }
 .cd-break, .cd-live-sk { display: none; }
 /* A narrow row (phones): the control takes the full width and its units wrap; the live state ends the last line. */
 @container cap (max-width: 640px) {

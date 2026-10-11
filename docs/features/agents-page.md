@@ -23,11 +23,12 @@ or a More item for it.
   unfolded dial opens as a card under the row (see
   [agents-daily-plan.md](agents-daily-plan.md)).
 - The accounts chip names the accounts and computers and flags what needs a
-  person (sign-ins first). Its popover keeps the status line, Away with Back
-  now, and the first thing that blocks agents with its one fix command and
-  Verify again where the person may verify. Three tiles open Settings ›
-  Accounts, Computers and Capacity, each with its own state words. The Needs-you
-  list and the sign-ins table live in those Settings parts.
+  person (sign-ins first). Its popover opens with three tiles into Settings ›
+  Accounts, Computers and Capacity, each with its own state words; below them,
+  where text may grow without moving a control, come Away with Back now, the
+  first thing that blocks agents with its one fix command and Verify again
+  where the person may verify, and the status line. The Needs-you list and the
+  sign-ins table live in those Settings parts.
 
 **Sessions card head.** The card's head carries the list's own tools: the
 title with the count of sessions on show, Search sessions (it filters this list;
