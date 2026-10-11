@@ -134,7 +134,10 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 			v := byID[tickets[i].ID]
 			// Models has picks, not matrix modes: the person's own row is not "pinned".
 			if v == nil || v.Route == nil || v.Route.Profile != "gemini-pref-high" || v.Route.SetBy != "person" || v.Route.Pinned || v.Route.Effort != "high" || v.Tokens.Calibration.TokensPerHour != 1_000_000 || *v.Tokens.Estimated != 2_000_000 || *v.Cost.ListEstimated != "2.000000" {
-				t.Fatalf("canonical You preview %d on %s: %+v", i, order, v)
+				if v == nil || v.Route == nil {
+					t.Fatalf("canonical You preview %d on %s: %+v", i, order, v)
+				}
+				t.Fatalf("canonical You preview %d on %s: route %+v calibration %+v estimated %v cost %+v", i, order, *v.Route, v.Tokens.Calibration, v.Tokens.Estimated, v.Cost)
 			}
 			if !reflect.DeepEqual(v, byID[tickets[4].ID]) {
 				t.Fatalf("assignee fallback differs from canonical assignment %d", i)
