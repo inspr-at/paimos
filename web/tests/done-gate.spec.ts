@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdirSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors, type Call } from './work-fixtures'
 
-const shots = '/private/tmp/claude-501/-Users-markus-Code-aeon/a4527da9-f872-45f5-a2f2-48dde0ce2ce5/scratchpad/shots/aeon-303/iter1'
 const benefits = {
   pill_en: 'Clear release notes',
   pill_de: 'Verständliche Release Notes',
@@ -42,7 +40,7 @@ async function expectLayout(page: Page, width: number) {
 
 for (const theme of ['light', 'dark'] as const) {
   for (const width of [1600, 390] as const) {
-    test(`one ticket asks before Done (${width} ${theme})`, async ({ page }) => {
+    test(`one ticket asks before Done (${width} ${theme})`, async ({ page }, testInfo) => {
       const errors = watchErrors(page)
       await scene(page, theme, width)
       const calls = await mockWork(page, fixtures())
@@ -56,8 +54,7 @@ for (const theme of ['light', 'dark'] as const) {
       await dialog.getByLabel('Pill · English').fill('Hosts')
       await expect(dialog.locator('.count.off')).toHaveText('1 word of 2–4')
       await expectLayout(page, width)
-      mkdirSync(shots, { recursive: true })
-      await page.screenshot({ path: `${shots}/dialog-${width}-${theme}.png`, fullPage: false })
+      await page.screenshot({ path: testInfo.outputPath(`dialog-${width}-${theme}.png`), fullPage: false })
       await dialog.getByRole('button', { name: 'Mark done' }).click()
       await expect(dialog).toBeVisible()
       await expect(dialog.getByLabel('Pill · English')).toHaveAttribute('aria-invalid', 'true')
@@ -98,7 +95,7 @@ for (const theme of ['light', 'dark'] as const) {
       await page.keyboard.press('Shift+J')
       await page.keyboard.press('Shift+J')
       await page.keyboard.press('s')
-      await page.keyboard.press('8')
+      await page.keyboard.press('7')
       const dialog = gate(page)
       await expect(dialog).toBeVisible()
       await expect(dialog.getByText('PHAROS-11', { exact: true })).toBeVisible()
@@ -124,9 +121,9 @@ for (const theme of ['light', 'dark'] as const) {
       await page.goto('/p/PHAROS')
       await expect(grid(page).locator('tr.ticket-row:not(.ghost)')).toHaveCount(5)
       await page.keyboard.press('j')
-      await expect(row(page, 'PHAROS-11')).toHaveAttribute('aria-selected', 'true')
+      await expect(row(page, 'PHAROS-11')).toHaveClass(/cursor/)
       await page.keyboard.press('s')
-      await page.keyboard.press('8')
+      await page.keyboard.press('7')
       const dialog = gate(page)
       await expect(dialog).toBeVisible()
       await expect(dialog.getByText('PHAROS-11', { exact: true })).toBeVisible()
@@ -234,7 +231,7 @@ for (const width of [1600, 390] as const) {
     await page.keyboard.press('j')
     await page.keyboard.press('x')
     await page.keyboard.press('s')
-    await page.keyboard.press('8')
+    await page.keyboard.press('7')
     const dialog = gate(page)
     await expect(dialog.getByText('1 of 2')).toBeVisible()
     await expect(dialog.getByText('PHAROS-11', { exact: true })).toBeVisible()

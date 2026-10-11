@@ -168,7 +168,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
       if (phone) await root.getByRole('button', { name: 'All releases', exact: true }).click()
       await expect(rows(page)).toHaveCount(history.releases.length)
       await expect(root.locator('.filters .filter-label')).toHaveText('Show')
-      await expect(root.locator('.list-pane .result-count')).toHaveCount(0)
+      // AEON-635 retains the count as a screen-reader announcement.
+      await expect(root.locator('.list-pane .result-count')).toHaveClass(/sr/)
+      await expect(root.locator('.list-pane .result-count')).toHaveText(`${history.releases.filter(r => r.state === 'published').length} published · ${history.releases.filter(r => r.state === 'reserved').length} reserved`)
       await expect(root.locator('.listbox .keys')).toHaveCount(0)
       await expect(row(page, first.version).locator('.current-tag')).toHaveText('Live')
       await expect(row(page, second.version).locator('.rollback-tag')).toHaveText('Rollback')

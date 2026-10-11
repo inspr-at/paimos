@@ -136,7 +136,7 @@ export function fixtures(options: MockOptions = {}) {
   // U22 saved views and bulk batches (their before and after, for undo).
   const views: MockView[] = []
   const batches: { id: number; before: MockNode[]; after: MockNode[]; undone: boolean }[] = []
-  const people: { id: string; name: string; has_avatar?: boolean }[] = [me, mira]
+  const people: { id: string; name: string; has_avatar?: boolean }[] = [{ ...me }, { ...mira }]
   // Agents working right now (AEON-184): GET /api/harness-sessions/live items.
   const live: LiveAgentMock[] = []
   return { projects, nodes, people, activity, relations, attachments, preferences, events, views, batches, live, counter: { next: 100 } }
