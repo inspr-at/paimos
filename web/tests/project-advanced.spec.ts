@@ -126,6 +126,7 @@ test('AEON-1235: Advanced writes preserve revisions, bounds and honest repair re
   expect(world.writes.at(-1)?.body).toMatchObject({ release_set: ['pharos-ready'], held_slugs: ['pharos-held'], held_pull_requests: [511], revision: 6 })
   await advanced(page).getByRole('button', { name: 'Edit…', exact: true }).click()
   const queueSheet = page.getByRole('dialog', { name: 'Delivery queue', exact: true }), save = queueSheet.getByRole('button', { name: /^Save queue/ })
+  await expect(queueSheet).toBeVisible().catch(async error => { throw new Error(`${error}\n${await page.locator('.details').textContent().catch(() => world.errors.join('\n'))}`) })
   const queueStable = await controlStability(page, { queueSheet, save, release: queueSheet.getByLabel('Release set'), holds: queueSheet.getByLabel('Held branch slugs'), pulls: queueSheet.getByLabel('Held pull request numbers') })
   const writesBefore = world.writes.length
   await queueStable.check(() => queueSheet.getByLabel('Held pull request numbers').fill('1,1'))
