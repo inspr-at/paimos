@@ -3,12 +3,14 @@ package delivery
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -74,22 +76,38 @@ func TestWebhookBodyTimeoutDoesNotPoisonKeepAliveConnection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = io.Copy(io.Discard, first.Body)
+	if _, err := io.Copy(io.Discard, first.Body); err != nil {
+		t.Fatal(err)
+	}
 	_ = first.Body.Close()
 	if first.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("late webhook body: status %d, want 413 from the body read deadline", first.StatusCode)
 	}
 
 	// A reverse proxy reuses the upstream connection unless it was closed.
-	if _, err := io.WriteString(conn, "GET /probe HTTP/1.1\r\nHost: aeon.test\r\n\r\n"); err != nil {
-		return // closed: safe
-	}
+	_, _ = io.WriteString(conn, "GET /probe HTTP/1.1\r\nHost: aeon.test\r\n\r\n")
 	next, err := http.ReadResponse(responses, nil)
 	if err != nil {
-		return // closed: safe
+		if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, syscall.ECONNRESET) {
+			t.Fatalf("reused connection failed for a reason other than closure: %v", err)
+		}
+		client := server.Client()
+		client.Timeout = 15 * time.Second // hang guard only
+		fresh, err := client.Get(server.URL + "/probe")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer fresh.Body.Close()
+		if fresh.StatusCode != http.StatusOK {
+			t.Fatalf("fresh connection: status %d", fresh.StatusCode)
+		}
+		return
 	}
-	got, _ := io.ReadAll(next.Body)
+	got, err := io.ReadAll(next.Body)
 	_ = next.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if next.StatusCode != http.StatusOK {
 		t.Fatalf("next request on the reused keep-alive connection: %d %q (first response Connection=%q)", next.StatusCode, strings.TrimSpace(string(got)), first.Header.Get("Connection"))
 	}
