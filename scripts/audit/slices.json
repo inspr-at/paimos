@@ -169,7 +169,8 @@
         "internal/agentruns/queue_notifications_test.go",
         "internal/runisolation/**",
         "internal/agentd/routine_tools.go",
-        "internal/agentd/routine_tools_test.go"
+        "internal/agentd/routine_tools_test.go",
+        "internal/modelregistry/routine_reads.go"
       ]
     },
     {
@@ -277,6 +278,10 @@
         "internal/recurrences/runs.go",
         "internal/recurrences/runs_test.go",
         "internal/routinebudget/**",
+        "internal/recurrences/reads.go",
+        "internal/recurrences/consent_reads.go",
+        "internal/recurrences/reads_test.go",
+        "internal/decisiondesk/routine_consent_test.go",
         "internal/recurrences/run_history.go",
         "internal/recurrences/run_history_test.go"
       ]

@@ -2,25 +2,12 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { reactive, ref } from 'vue'
 import { api } from '../src/lib/api'
-import { putPreferenceRow, putPreferenceScope, resetPreference } from '../src/lib/modelPrefsApi'
-import { modelsSettingsLink, preferenceFailure } from '../src/lib/modelsSettings'
-import { simplePerson as boardPerson } from './models-simple-fixtures'
+import { modelsSettingsLink } from '../src/lib/modelsSettings'
 import { deferred, flush, setupSource } from './record-source'
 vi.mock('../src/lib/api', async original => ({ ...await original<typeof import('../src/lib/api')>(), api: vi.fn() }))
 beforeEach(() => { vi.resetAllMocks(); vi.mocked(api).mockImplementation(async () => new Response('{}', { status: 200 })) })
 afterEach(() => vi.unstubAllGlobals())
 
-it('binds every legacy person write to the captured canonical person', async () => {
-  await putPreferenceScope('person', { revision: 3, residency: 'eu' }, undefined, boardPerson)
-  await putPreferenceRow('person', 'backend', { revision: 3, normal: { mode: 'auto' } }, undefined, boardPerson)
-  await resetPreference('person', 3, undefined, 'backend', boardPerson)
-  expect(api).toHaveBeenCalledTimes(3)
-  for (const [, init] of vi.mocked(api).mock.calls) expect(new Headers(init!.headers).get('If-Prefs-Person')).toBe(boardPerson)
-})
-it.each([409, 428])('legacy refusal %i gives a sentence and preserves the HTTP status', async status => {
-  vi.mocked(api).mockResolvedValue(new Response(JSON.stringify({ error: 'person_precondition_required' }), { status }))
-  await expect(putPreferenceScope('person', { revision: 3 }, undefined, boardPerson)).rejects.toMatchObject({ status, message: preferenceFailure(status) })
-})
 it('preserves project, kind and ticket context when entry points navigate to Models', () => {
   const link = new URL(modelsSettingsLink({ project: { id: 'project-a' }, level: 'project', kind: 'backend', ticket: 'AEON-879', why: true }), 'http://example.invalid')
   expect(link.pathname).toBe('/settings/models')

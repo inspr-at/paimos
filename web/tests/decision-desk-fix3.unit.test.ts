@@ -74,3 +74,18 @@ it('turns an account_matrix projection row into a settings link-out without a so
   expect(html).not.toContain('item=u')
   expect(html).not.toContain('undefined')
 })
+
+// Risk: consent links must use their own identity and exactly the approved
+// settings destinations; arbitrary paths and extra query parameters stay inert.
+it('allows routine consent link-outs only for the three approved settings paths', () => {
+  const id = 'a1b2c3d4-0000-4000-8000-000000000001'
+  const row = { id, kind: 'routine_consent' as const, href: '' }
+  expect(deskItemID(row)).toBe(`c:${id}`)
+  for (const path of ['/p/WEB/settings', '/settings/personal', '/settings/routines']) {
+    const href = `${path}?recurrence=${id}&consent=1`
+    expect(deskLinkOut({ ...row, href })).toBe(href)
+  }
+  for (const href of ['//evil.example/settings', 'https://evil.example/', `/settings/accounts?recurrence=${id}&consent=1`, `/p/WEB/settings?recurrence=${id}&consent=1&redirect=evil`, `/settings/personal?recurrence=bad&consent=1`, `/p/WEB/../settings?recurrence=${id}&consent=1`, `/settings/routines?consent=1&recurrence=${id}`]) {
+    expect(deskLinkOut({ ...row, href })).toBe('')
+  }
+})
