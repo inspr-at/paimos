@@ -42,6 +42,10 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 }
 
 func admissionSnapshot(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time.Time, slots int, run runRow, claiming bool, snapshot *waitSnapshot) ([]Window, *CapacityWait, error) {
+	return admissionInputs(ctx, tx, a, all, now, slots, run, claiming, snapshot, "")
+}
+
+func admissionInputs(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time.Time, slots int, run runRow, claiming bool, snapshot *waitSnapshot, exceptReservations string) ([]Window, *CapacityWait, error) {
 	// Projections with no run ID retain their existing capacity advice. Every
 	// real managed reservation and claim re-reads daily policy under its fence.
 	if run.Purpose == "managed" && run.ID != "" {
@@ -124,6 +128,9 @@ func admissionSnapshot(ctx context.Context, tx pgx.Tx, a Account, all []Window, 
 		return nil, nil, err
 	}
 	regular = append(regular, measuredFacts...)
+	if err := excludeWindowReservations(ctx, tx, regular, exceptReservations); err != nil {
+		return nil, nil, err
+	}
 	active := activeWindows(regular, now)
 	if len(active) == 0 {
 		for _, w := range regular {
@@ -238,7 +245,7 @@ func admissionSnapshot(ctx context.Context, tx pgx.Tx, a Account, all []Window, 
 	}
 	// The Advanced sentence caps on top, like a window set by hand. A percent
 	// rule lowers the returned windows' budgets in place, so fits agrees.
-	if wait, err := limitWait(ctx, tx, a, active, now, run, claiming, s); err != nil || wait != nil {
+	if wait, err := limitWait(ctx, tx, a, active, now, run, claiming, s, exceptReservations); err != nil || wait != nil {
 		return nil, wait, err
 	}
 	// The schedule is account-wide, Keep for you per window: a run waits for the

@@ -324,7 +324,7 @@ func (e *Executor) DispatchTx(ctx context.Context, tx pgx.Tx, tenantID, id, sess
 	if err != nil {
 		return out, err
 	}
-	out, err = e.dispatch(ctx, step, tenantID, r, session, generation)
+	out, err = e.dispatch(ctx, step, tenantID, r, session, generation, false)
 	if err != nil || !out.Routed && out.WaitReason != "lead_demand_pending" {
 		if rollbackErr := step.Rollback(ctx); rollbackErr != nil {
 			return out, rollbackErr
@@ -361,7 +361,7 @@ func (e *Executor) DispatchTx(ctx context.Context, tx pgx.Tx, tenantID, id, sess
 	return out, err
 }
 
-func (e *Executor) dispatch(ctx context.Context, tx pgx.Tx, tenantID string, r intent, expectedSession string, expectedGeneration int64) (agentruns.RoutineQueueResult, error) {
+func (e *Executor) dispatch(ctx context.Context, tx pgx.Tx, tenantID string, r intent, expectedSession string, expectedGeneration int64, probe bool) (agentruns.RoutineQueueResult, error) {
 	out := agentruns.RoutineQueueResult{RunID: r.run}
 	principal, err := recurrences.RequireExecutionConsentTx(ctx, tx, tenantID, r.recurrence, r.revision, e.options.Runtime)
 	if err != nil {
@@ -413,6 +413,10 @@ func (e *Executor) dispatch(ctx context.Context, tx pgx.Tx, tenantID string, r i
 		return out, workorders.Fail(409, "stale_lead_generation")
 	}
 	if session == nil && state == "waiting_for_room" {
+		if probe {
+			out.WaitReason = "lead_demand_pending"
+			return out, nil
+		}
 		return e.leadDemand(ctx, tx, owner, r, generation)
 	}
 	if session == nil || state != "working" {
@@ -442,9 +446,57 @@ func (e *Executor) dispatch(ctx context.Context, tx pgx.Tx, tenantID string, r i
 		}
 	}
 	lead, _ := json.Marshal(map[string]any{"session_id": *session, "generation": generation})
+	opts := agentruns.RoutineQueueOptions{Probe: probe}
+	if !probe {
+		opts.EarlierReady = func(ctx context.Context, tx pgx.Tx, id string) (bool, error) {
+			return e.earlierRoutineReady(ctx, tx, tenantID, id, *session, generation)
+		}
+	}
 	return agentruns.RouteRoutineQueueTx(ctx, tx, p, r.run, a.Role, lead, e.options.LeadAdmission, func(ctx context.Context, tx pgx.Tx, run agentruns.Run, target workqueue.RouteTarget) ([]events.Change, error) {
 		return e.finish(ctx, tx, owner, r, a, run, target)
-	})
+	}, opts)
+}
+
+// An earlier routine retains its place only when the same complete dispatch
+// would succeed. Check once per earlier entry (no recursive order scan), under
+// the existing fences, and roll back every provisional write. Probe never
+// appends events or advances a turn. Unknown operational errors remain errors.
+func (e *Executor) earlierRoutineReady(ctx context.Context, tx pgx.Tx, tenantID, id, session string, generation int64) (bool, error) {
+	step, err := tx.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = step.Rollback(ctx) }()
+	r, err := loadIntent(ctx, step, id)
+	if err == nil {
+		var hasIntent bool
+		err = step.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_effect_outbox WHERE run_id=$1 AND effect_key='execute' AND kind='routine.execute')`, id).Scan(&hasIntent)
+		if err == nil && !hasIntent {
+			return false, nil
+		}
+	}
+	var out agentruns.RoutineQueueResult
+	if err == nil {
+		out, err = e.dispatch(ctx, step, tenantID, r, session, generation, true)
+	}
+	if rollbackErr := step.Rollback(ctx); rollbackErr != nil {
+		return false, rollbackErr
+	}
+	if err != nil {
+		var refusal *workorders.Error
+		var pairingRefusal *agentpairing.Error
+		var useRefusal *accountuse.Error
+		switch {
+		case errors.As(err, &refusal) && refusal.Status == 409,
+			errors.As(err, &pairingRefusal) && (pairingRefusal.Status == 409 || pairingRefusal.Status == 410),
+			errors.As(err, &useRefusal) && useRefusal.Status == 409,
+			errors.Is(err, authz.ErrForbidden), errors.Is(err, db.ErrKeyAuthorityChanged):
+			return false, nil
+		default:
+			return false, err
+		}
+	}
+	return out.Routed, nil
 }
 
 // Lead demand references the person's existing project_leads intent and S04

@@ -278,7 +278,7 @@ func (m *Module) admit(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 
-func (m *Module) evaluate(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Request, project string, wip int, wipErr error, wipAt, now time.Time) (string, *time.Time, error) {
+func (m *Module) evaluate(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Request, project string, wip int, wipErr error, wipAt, now time.Time, routineRun ...string) (string, *time.Time, error) {
 	if in.Harness == "" {
 		return "harness_required", nil, nil
 	}
@@ -310,7 +310,12 @@ func (m *Module) evaluate(ctx context.Context, tx pgx.Tx, p tenant.Principal, in
 			return "wip_limit", nil, nil
 		}
 	}
-	capacity, err := agentaccounts.EngineCapacityTx(ctx, tx, p, plan.PrincipalID, in.Harness, in.Estimate, now, project)
+	var capacity agentaccounts.EngineCapacity
+	if len(routineRun) > 0 {
+		capacity, err = agentaccounts.EngineRunCapacityTx(ctx, tx, p, plan.PrincipalID, in.Harness, in.Estimate, now, project, routineRun[0])
+	} else {
+		capacity, err = agentaccounts.EngineCapacityTx(ctx, tx, p, plan.PrincipalID, in.Harness, in.Estimate, now, project)
+	}
 	if err != nil {
 		return "", nil, err
 	}

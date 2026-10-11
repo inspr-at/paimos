@@ -68,6 +68,12 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			ordered = append(ordered, e)
 		}
 	}
+	firstWait := ""
+	rememberWait := func(reason string) {
+		if firstWait == "" {
+			firstWait = reason
+		}
+	}
 	for _, e := range ordered {
 		if leadProject != "" && (e.ProjectID == nil || *e.ProjectID != leadProject) {
 			continue
@@ -135,10 +141,12 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		routine := routineTrace.RunID
 		if routine != "" {
 			if !e.Queued.Targeted && (in.Agent != "" || in.Profile != "" || in.Account != nil) {
-				return map[string]any{"entry": nil, "wait_reason": "routine_registry_route_required"}, nil
+				rememberWait("routine_registry_route_required")
+				continue
 			}
 			if m.routineQueue == nil {
-				return map[string]any{"entry": nil, "wait_reason": "routine_executor_unavailable"}, nil
+				rememberWait("routine_executor_unavailable")
+				continue
 			}
 			generation, _ := strconv.ParseInt(r.Header.Get("X-Aeon-Lead-Generation"), 10, 64)
 			out, err := m.routineQueue(r.Context(), tx, p.TenantID, routine, r.Header.Get("X-Aeon-Lead-Session"), generation)
@@ -146,7 +154,8 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 				return nil, err
 			}
 			if !out.Routed {
-				return map[string]any{"entry": nil, "wait_reason": out.WaitReason}, nil
+				rememberWait(out.WaitReason)
+				continue
 			}
 			entry, err := m.queueEntryFor(r.Context(), tx, e.NodeID, leadProject, true)
 			return map[string]any{"entry": entry}, err
@@ -209,6 +218,9 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			}
 		}
 	}
+	if firstWait != "" {
+		return map[string]any{"entry": nil, "wait_reason": firstWait}, nil
+	}
 	return map[string]any{"entry": nil}, nil
 }
 func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, v Run, target queueTarget, placement, lead json.RawMessage) (bool, error) {
@@ -218,7 +230,7 @@ func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTi
 // The callback completes routine admission, reservations and the durable launch
 // intent in the SAME savepoint, before the turn and audit event. Every refusal
 // rolls back the provisional worker/handoff; ordinary pickup has no callback.
-func queueTryRouteWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, v Run, target queueTarget, placement, lead json.RawMessage, finish RoutineRouteFinish) (bool, error) {
+func queueTryRouteWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, v Run, target queueTarget, placement, lead json.RawMessage, finish RoutineRouteFinish, probe ...bool) (bool, error) {
 	project := ""
 	if t.ProjectID != nil {
 		project = *t.ProjectID
@@ -261,6 +273,11 @@ func queueTryRouteWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, t que
 		if pending, err = finish(ctx, attempt, v, target); err != nil {
 			return false, err
 		}
+	}
+	if len(probe) > 0 && probe[0] {
+		// The caller's rollback-only eligibility probe has checked all final
+		// predicates. Leave turns and the event counter untouched.
+		return true, nil
 	}
 	_, err = attempt.Exec(ctx, `UPDATE agent_runs SET queue_routed_at=clock_timestamp() WHERE id=$1`, v.ID)
 	if err != nil {
@@ -326,6 +343,14 @@ type RoutineQueueResult struct {
 }
 type RoutineRouteFinish func(context.Context, pgx.Tx, Run, workqueue.RouteTarget) ([]events.Change, error)
 
+// EarlierReady is a rollback-only check of an earlier routine's full dispatch
+// predicates. Probe avoids recursion, queue-turn writes and audit events; it
+// never commits an assignment, hold or launch.
+type RoutineQueueOptions struct {
+	EarlierReady func(context.Context, pgx.Tx, string) (bool, error)
+	Probe        bool
+}
+
 func BindRoutineQueue(boundary httpapi.Module, dispatch RoutineQueueDispatcher) error {
 	m, ok := boundary.(*module)
 	if !ok || dispatch == nil {
@@ -339,7 +364,11 @@ func BindRoutineQueue(boundary httpapi.Module, dispatch RoutineQueueDispatcher) 
 // current lead authority. It shares readiness, manual/target order, fairness,
 // frozen handoff and queueTryRouteWith with human/coordinator pickup. The finish
 // callback supplies holds and outbox before any audit append. No launch occurs.
-func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID, role string, lead json.RawMessage, admission harness.LeadAdmission, finish RoutineRouteFinish) (RoutineQueueResult, error) {
+func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID, role string, lead json.RawMessage, admission harness.LeadAdmission, finish RoutineRouteFinish, options ...RoutineQueueOptions) (RoutineQueueResult, error) {
+	var opts RoutineQueueOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
 	out := RoutineQueueResult{RunID: runID}
 	if finish == nil {
 		return out, workorders.Fail(409, "routine_executor_unavailable")
@@ -443,6 +472,31 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 			found = true
 			break
 		}
+		if opts.Probe {
+			continue
+		}
+		var routine struct {
+			RunID string `json:"routine_run_id"`
+		}
+		if err := json.Unmarshal(e.Run.Trace, &routine); len(e.Run.Trace) > 0 && err != nil {
+			return out, err
+		}
+		if routine.RunID != "" {
+			// Route-readiness alone cannot establish routine consent, CI or
+			// budget authority. Only a complete rollback-only probe can keep
+			// this entry's turn ahead of later work.
+			if opts.EarlierReady == nil {
+				return out, workorders.Fail(409, "routine_executor_unavailable")
+			}
+			ready, err := opts.EarlierReady(ctx, tx, routine.RunID)
+			if err != nil {
+				return out, err
+			}
+			if ready {
+				return out, workorders.Fail(409, "queue_order_wait")
+			}
+			continue
+		}
 		earlier, err := queueLoadTicket(ctx, tx, e.NodeID, false)
 		if err != nil {
 			return out, err
@@ -513,7 +567,7 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 			out.WaitReason = host.Reason
 			continue
 		}
-		picked, err := queueTryRouteWith(ctx, tx, p, t, v, candidate, placement, lead, finish)
+		picked, err := queueTryRouteWith(ctx, tx, p, t, v, candidate, placement, lead, finish, opts.Probe)
 		if err != nil {
 			// The shared registry may list another person's account first.
 			// Its rolled-back refusal must not hide a later owned route. Global

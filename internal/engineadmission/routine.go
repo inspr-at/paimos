@@ -82,7 +82,7 @@ func RequireRoutineTx(ctx context.Context, tx pgx.Tx, owner tenant.Principal, ro
 		return workorders.Fail(409, "admission_inputs_unreadable")
 	}
 	m := Module{}
-	reason, _, err := m.evaluate(ctx, tx, owner, in, project, *facts.WorkPRs, nil, facts.ObservedAt, now)
+	reason, _, err := m.evaluate(ctx, tx, owner, in, project, *facts.WorkPRs, nil, facts.ObservedAt, now, run)
 	if err != nil {
 		return err
 	}

@@ -454,6 +454,20 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 	f.exec(`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source)
  SELECT tenant_id,$2,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source FROM account_allowance_windows WHERE account_id=$1 AND unit='percent'`, f.account, spare)
 	f.exec(`INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,principal_id,scope,$2::uuid::text,$2,schedule FROM account_capacity_schedules WHERE account_id=$1`, f.account, spare)
+	// A sibling sharing the quota still consumes the one paired slot. Exclude
+	// only this run, never all work on the selected account or quota pool.
+	f.exec(`UPDATE agent_accounts SET quota_pool_fingerprint=repeat('e',64) WHERE id=$1`, spare)
+	var sibling string
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,account_id,status) SELECT tenant_id,work_order_id,agent_principal_id,model_profile_id,$2,'queued' FROM agent_runs WHERE id=$1 RETURNING id::text`, d.agentRun, spare).Scan(&sibling))
+	err := f.tx(func(tx pgx.Tx) error {
+		return engineadmission.RequireRoutineTx(t.Context(), tx, f.owner, f.run, d.agentRun, "codex", 1, d.options.Facts)
+	})
+	var refusal *workorders.Error
+	if !errors.As(err, &refusal) || refusal.Status != 409 || refusal.Message != "account_capacity" {
+		t.Fatalf("sibling quota occupancy omitted: %v", err)
+	}
+	f.exec(`UPDATE agent_runs SET status='cancelled' WHERE id=$1`, sibling)
+	f.exec(`UPDATE agent_accounts SET quota_pool_fingerprint='' WHERE id=$1`, spare)
 	f.exec(`UPDATE agent_accounts SET state='unavailable' WHERE id=$1`, f.account)
 	must(t, f.tx(func(tx pgx.Tx) error {
 		var now time.Time
@@ -469,10 +483,9 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 		}
 		return nil
 	}))
-	err := f.tx(func(tx pgx.Tx) error {
+	err = f.tx(func(tx pgx.Tx) error {
 		return engineadmission.RequireRoutineTx(t.Context(), tx, f.owner, f.run, d.agentRun, "codex", 1, d.options.Facts)
 	})
-	var refusal *workorders.Error
 	if !errors.As(err, &refusal) || refusal.Status != 409 || refusal.Message != "account_state" {
 		t.Fatalf("spare account admitted selected unavailable account: %v", err)
 	}
