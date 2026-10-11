@@ -8,10 +8,13 @@ package authz
 // workspace grant, and project definitions a grant in their scope project.
 func init() {
 	registerRoutes("recurrences", map[string]string{
-		"POST /api/routine-runs/{runId}/actions":         "nodes.write|knowledge.write",
-		"GET /api/recurrences/{recurrenceId}/guardrails": "nodes.read|recurrences.manage",
-		"PUT /api/recurrences/{recurrenceId}/guardrails": "recurrences.manage",
-		"DELETE /api/recurrences/{recurrenceId}":         "recurrences.manage",
+		"GET /api/recurrences/templates":                                         "nodes.read|recurrences.manage",
+		"POST /api/recurrences/templates/{templateId}/{templateVersion}/preview": "recurrences.manage",
+		"POST /api/recurrences/templates/{templateId}/{templateVersion}/apply":   "recurrences.manage",
+		"POST /api/routine-runs/{runId}/actions":                                 "nodes.write|knowledge.write",
+		"GET /api/recurrences/{recurrenceId}/guardrails":                         "nodes.read|recurrences.manage",
+		"PUT /api/recurrences/{recurrenceId}/guardrails":                         "recurrences.manage",
+		"DELETE /api/recurrences/{recurrenceId}":                                 "recurrences.manage",
 		// Read-only people enter with nodes.read. Recurrence handlers still require
 		// recurrences.manage for agents, including their explicit role and key scope.
 		"GET /api/recurrences":                                  "nodes.read|recurrences.manage",
@@ -29,11 +32,14 @@ func init() {
 		"PUT /api/recurrences/{recurrenceId}/execution-consent": "recurrences.manage",
 	})
 	registerDeclarations("recurrences", "project_filtered", ProjectFilteredRoutes, map[string]bool{
-		"GET /api/recurrences": true,
+		"GET /api/recurrences":           true,
+		"GET /api/recurrences/templates": true,
 	})
 	registerDeclarations("recurrences", "project_decided", ProjectDecidedRoutes, map[string]bool{
-		"POST /api/recurrences":                  true,
-		"POST /api/routine-runs/{runId}/actions": true,
-		"POST /api/recurrences/preview":          true,
+		"POST /api/recurrences":                                                  true,
+		"POST /api/routine-runs/{runId}/actions":                                 true,
+		"POST /api/recurrences/preview":                                          true,
+		"POST /api/recurrences/templates/{templateId}/{templateVersion}/preview": true,
+		"POST /api/recurrences/templates/{templateId}/{templateVersion}/apply":   true,
 	})
 }
