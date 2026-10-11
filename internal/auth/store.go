@@ -1091,3 +1091,23 @@ func displayPrincipal(ctx context.Context, tx pgx.Tx, tenantID, id string) (tena
 		WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid AND p.status='active'
 	`, tenantID, id))
 }
+
+// ProbeAuthentication checks shared session lookup and bootstrap-tenant key
+// reads through the same transaction admission as authentication. No session or
+// key is created, renewed or read into memory. It needs no synthetic secret.
+func (m *Module) ProbeAuthentication(ctx context.Context) error {
+	if err := m.inTenant(ctx, m.pool, tenantbootstrap.LookupTenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "SELECT id FROM sessions LIMIT 0")
+		return err
+	}); err != nil {
+		return err
+	}
+	id, err := m.tenantBySlug(ctx, m.cfg.BootstrapTenantSlug)
+	if err != nil {
+		return err
+	}
+	return m.inTenant(ctx, m.pool, id, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "SELECT id FROM agent_keys LIMIT 0")
+		return err
+	})
+}

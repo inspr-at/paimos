@@ -154,12 +154,11 @@ func (m *Module) retry(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	// Context cancellation alone cannot interrupt a blocked network Body.Read.
-	// Bound both decodes at the transport before taking any mutation fences.
-	controller := http.NewResponseController(w)
-	deadline, _ := ctx.Deadline()
-	_ = controller.SetReadDeadline(deadline)
-	defer controller.SetReadDeadline(time.Time{})
+	r = r.WithContext(ctx)
+	if err := httpapi.BufferRequestBodyTimeout(w, r, 4096, 5*time.Second); err != nil {
+		fail(w, fault{400, "expected generation and revision required"})
+		return
+	}
 	var in struct {
 		Generation string    `json:"expected_generation"`
 		Revision   time.Time `json:"expected_revision"`

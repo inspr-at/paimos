@@ -5518,6 +5518,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestPairingReportAudienceMigrationBoundsLockWait","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestPoolAcquireErrorCounters","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestPoolRecycleDefaultsAndExplicitOverrides","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestPoolSizingAndRetainedSessionAdmission","tier":"ESSENTIAL"}
@@ -6756,11 +6758,23 @@
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestAttachmentFramePolicyComposesWithAithema","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/httpapi","name":"TestAuthenticationReadinessHysteresis","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestAuthenticationReadinessIgnoresCancelledAndSparseProbes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestBodyBoundsAndGuardWithLiveContext","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestBodyCancellationWithoutTransportJoinsReader","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestBodyDeadlineSetupAndEarlierContext","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/httpapi","name":"TestCancelledConnectionContextClosesConnection","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestCapabilityAndPanicDetailsNeverEnterRequestLogs","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestClassicAPIPathsAreGone","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestHTTPReadDeadlineOwnership","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestHandlerFailureLoggingIsContentFree","tier":"ESSENTIAL"}
     ,
@@ -6779,6 +6793,12 @@
     {"kind":"go","package":"internal/httpapi","name":"TestRequestLogRoutes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestRequestOnCancelledConnectionClosesIt","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestSlowBodyRouteClassesCloseConnection","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestTransportCountersAndConnectionLog","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestTransportCountersConcurrentAndBounded","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/identity","name":"TestFromEnvDefaultAndCredentialFile","tier":"GATED-FULL"}
     ,
