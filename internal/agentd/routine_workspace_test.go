@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -29,13 +30,21 @@ type routineLeaseFixture struct {
 	environment []string
 	finished    []bool
 	finishErr   error
+	closed      bool
 }
 
 func (l *routineLeaseFixture) Environment() []string { return l.environment }
 func (*routineLeaseFixture) HandoffPorts()           {}
 func (*routineLeaseFixture) Running(int) error       { return nil }
+
+// Like runisolation.Lease, the first Finish closes the lease whatever its save
+// returns, so a retried Finish can never confirm the release.
 func (l *routineLeaseFixture) Finish(confirmed bool) error {
 	l.finished = append(l.finished, confirmed)
+	if l.closed {
+		return errors.New("run lease already closed")
+	}
+	l.closed = true
 	return l.finishErr
 }
 
@@ -433,8 +442,9 @@ func TestRoutineSupervisorReplaysInterruptedRouting(t *testing.T) {
 
 // Risk: a refused, never-launched routine keeps its slot and lease forever,
 // while treating our own queued binding or a foreign run as obsolete loses
-// durable ownership. Independent run state must prove release; cleanup errors
-// must remain visible and retryable without deleting the allocation's anchor.
+// durable ownership. Independent run state must prove release. A cleanup
+// failure must stay visible and hold only its own durable owners, never block
+// reconciliation or other runs, and never delete the allocation's anchor.
 func TestRoutineSupervisorReleasesObsoleteRouting(t *testing.T) {
 	for _, observed := range []Run{
 		{Status: "cancelled"}, {Status: "failed"}, {Status: "completed"},
@@ -523,31 +533,81 @@ func TestRoutineSupervisorReleasesObsoleteRouting(t *testing.T) {
 			}
 		})
 	}
-	t.Run("cleanup failure retries from terminal anchor", func(t *testing.T) {
-		s, api, _, _, _ := routineSupervisorFixture(t)
-		api.lost = true
-		if err := s.StartRun(t.Context(), api.run); err == nil || !strings.Contains(err.Error(), "lost routine route response") {
-			t.Fatal("missing interrupted routine route", err)
-		}
-		lease := s.routineResources[api.run.ID].(*routineLeaseFixture)
-		cleanupErr := errors.New("fixture resource cleanup failed")
-		lease.finishErr = cleanupErr
-		api.run.Status = "cancelled"
-		api.refusal = &client.StatusError{Status: 409}
-		if err := s.reconcileLedgerLocked(t.Context()); !errors.Is(err, cleanupErr) {
-			t.Fatal("resource cleanup failure was not reported", err)
-		}
-		if s.routineResources[api.run.ID] != lease || s.routineCheckouts[api.run.ID] == nil || s.journal.Snapshot()[0].State != "cancelled" {
-			t.Fatal("failed cleanup lost its lease, checkout or terminal anchor")
-		}
-		lease.finishErr = nil
-		if err := s.reconcileLedgerLocked(t.Context()); err != nil {
-			t.Fatal("terminal routine cleanup did not retry", err)
-		}
-		if len(api.pickups) != 2 || !reflect.DeepEqual(lease.finished, []bool{true, true}) || s.routineResources[api.run.ID] != nil || s.routineCheckouts[api.run.ID] != nil {
-			t.Fatal("cleanup retry rerouted or retained obsolete ownership", api.pickups, lease.finished)
-		}
-	})
+	// The real lease closes on its first Finish and a removed checkout refuses
+	// every write, so neither cleanup can be retried into success.
+	for _, failure := range []string{"resource release fails", "checkout removed"} {
+		t.Run(failure, func(t *testing.T) {
+			s, api, _, _, _ := routineSupervisorFixture(t)
+			var reasons []string
+			s.pollDiagnostic = func(reason string) { reasons = append(reasons, reason) }
+			api.lost = true
+			if err := s.StartRun(t.Context(), api.run); err == nil || !strings.Contains(err.Error(), "lost routine route response") {
+				t.Fatal("missing interrupted routine route", err)
+			}
+			intent := s.journal.Snapshot()[0]
+			lease := s.routineResources[api.run.ID].(*routineLeaseFixture)
+			owner := filepath.Join(intent.Workspace, ".aeon-agentd", "owner.json")
+			held, err := os.ReadFile(owner)
+			if err != nil || string(held) == "[]" {
+				t.Fatal("lost route did not record its checkout owner", string(held), err)
+			}
+			if failure == "resource release fails" {
+				lease.finishErr = errors.New("fixture resource record save failed")
+			} else if err := os.RemoveAll(intent.Workspace); err != nil {
+				t.Fatal(err)
+			}
+			first := api.run
+			first.Status = "cancelled"
+			api.runsByID = map[string]Run{first.ID: first}
+			api.refusal = &client.StatusError{Status: 409, Message: "fixture cancelled routine route"}
+			if err := s.reconcileLedgerLocked(t.Context()); err != nil {
+				t.Fatal("one routine cleanup failure blocked ledger reconciliation", err)
+			}
+			data, _, err := s.ledger.Snapshot()
+			if err != nil || len(data.Groups) != 0 {
+				t.Fatal("cleanup failure retained the released ledger hold", data, err)
+			}
+			want := intent
+			want.State, want.LedgerGroup, want.LedgerGeneration, want.RouteCandidates = "cancelled", "", "", nil
+			if records := s.journal.Snapshot(); !reflect.DeepEqual(records, []Record{want}) {
+				t.Fatal("cleanup failure lost the terminal allocation anchor", records)
+			}
+			if !reflect.DeepEqual(lease.finished, []bool{true}) || s.routineResources[first.ID] != nil || s.routineCheckouts[first.ID] != nil {
+				t.Fatal("cleanup kept a closed lease or checkout handle for a retry", lease.finished)
+			}
+			if !s.ledgerRouteUnconfirmed || !slices.Equal(reasons, []string{"routine_cleanup_failed", "ledger_route_unconfirmed"}) {
+				t.Fatal("cleanup failure was not reported", reasons)
+			}
+			// Fail closed: an unstopped resource record keeps the checkout owned.
+			if failure == "resource release fails" {
+				if raw, err := os.ReadFile(owner); err != nil || string(raw) != string(held) {
+					t.Fatal("checkout owner released before its resources stopped", string(raw), err)
+				}
+			}
+			if err := s.reconcileLedgerLocked(t.Context()); err != nil || len(lease.finished) != 1 || len(api.pickups) != 2 {
+				t.Fatal("reconciliation retried a closed lease or rerouted the obsolete run", err, lease.finished, api.pickups)
+			}
+			if failure == "resource release fails" {
+				if raw, err := os.ReadFile(owner); err != nil || string(raw) != string(held) {
+					t.Fatal("a later reconcile released the held checkout owner", string(raw), err)
+				}
+			}
+			nextGrant := api.grant
+			nextGrant.LaunchID, nextGrant.AgentRunID = routineTestGrant("22").LaunchID, routineTestGrant("22").AgentRunID
+			api.grant, api.refusal = nextGrant, nil
+			next := first
+			next.ID, next.WorkOrderID, next.Status, next.AccountID = nextGrant.AgentRunID, "order-2", "queued", ""
+			next.RoutineLaunchID = &api.grant.LaunchID
+			next.Trace, _ = json.Marshal(map[string]any{"routine_launch": nextGrant, "routine_run_id": nextGrant.RoutineRunID})
+			api.run = next
+			if err := s.StartRun(t.Context(), next); err != nil {
+				t.Fatal("one routine cleanup failure blocked an unrelated run", err)
+			}
+			if requests := s.adapters[Codex].(*routineQualifiedFixture).requests; len(requests) != 1 || requests[0].Workspace == intent.Workspace || len(api.claims) != 1 {
+				t.Fatal("unrelated run did not start in its own checkout", requests, api.claims)
+			}
+		})
+	}
 }
 
 // Risk: capacity continuation must retain committed and uncommitted work and
