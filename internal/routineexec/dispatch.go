@@ -640,7 +640,8 @@ func (e *Executor) finish(ctx context.Context, tx pgx.Tx, owner tenant.Principal
 // LaunchChecks repeats all mandatory predicates at daemon claim; the outbox's
 // previous dispatch result is not a start grant. Unknown exit/usage keeps holds.
 func (e *Executor) LaunchChecks() agentruns.RoutineLaunchChecks {
-	return agentruns.RoutineLaunchChecks{Runtime: e.options.Runtime, Admission: func(ctx context.Context, tx pgx.Tx, p tenant.Principal, g agentsetup.RoutineGrant) error {
+	starts := routinebudget.Broker{Runtime: e.options.Runtime, Gates: e.options.Gates}
+	return agentruns.RoutineLaunchChecks{Runtime: e.options.Runtime, Start: starts.StartCheck, Admission: func(ctx context.Context, tx pgx.Tx, p tenant.Principal, g agentsetup.RoutineGrant) error {
 		worker := tenant.Principal{ID: g.PrincipalID, TenantID: p.TenantID, Kind: tenant.Agent, Scopes: []string{"run.claim"}}
 		var bound bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_budget_grants WHERE id=$1 AND run_id=$2 AND agent_run_id=$3 AND account_id=$4 AND parent_id IS NULL AND state='held' AND ($5::bigint IS NULL OR maximum_tokens=$5) AND ($6::bigint IS NULL OR maximum_microusd=$6))`, g.BudgetGrantID, g.RoutineRunID, g.AgentRunID, g.AccountID, g.RemainingTokens, g.RemainingCostMicros).Scan(&bound); err != nil {

@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -24,9 +25,12 @@ import (
 // mandatory dial/quota/window facts and the S13 generation/guardrail decision.
 // It is bounded transactional work, with no external effects or event append.
 // Nil checks refuse routines without changing ordinary/manual runs.
+// Start rechecks a budget-held launch's grant for the claiming daemon when
+// its reserved capacity is validated; without it such claims keep waiting.
 type RoutineLaunchChecks struct {
 	Runtime   modelregistry.ExecutionRuntimeReader
 	Admission func(context.Context, pgx.Tx, tenant.Principal, agentsetup.RoutineGrant) error
+	Start     func(tenant.Principal) agentaccounts.RoutineStartCheck
 }
 
 // BindRoutineLaunch connects internal executor collaborators. It is not a
