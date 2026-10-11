@@ -205,14 +205,20 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			var body struct {
-				Rank     []string          `json:"rank"`
-				Not      json.RawMessage   `json:"not"`
-				Revision *int64            `json:"revision"`
-				Efforts  map[string]string `json:"efforts"`
-				End      *string           `json:"end"`
+				Rank     []string        `json:"rank"`
+				Not      json.RawMessage `json:"not"`
+				Revision *int64          `json:"revision"`
+				Efforts  json.RawMessage `json:"efforts"`
+				End      json.RawMessage `json:"end"`
 			}
 			err = decodeJSON(w, r, &body)
-			in.Rank, in.Revision, in.Efforts, in.End = body.Rank, body.Revision, body.Efforts, body.End
+			in.Rank, in.Revision = body.Rank, body.Revision
+			if err == nil && len(body.Efforts) > 0 && (json.Unmarshal(body.Efforts, &in.Efforts) != nil || in.Efforts == nil) {
+				err = prefFail(422, "invalid_effort")
+			}
+			if err == nil && len(body.End) > 0 && (json.Unmarshal(body.End, &in.End) != nil || in.End == nil) {
+				err = prefFail(422, "invalid_end")
+			}
 			if err == nil && len(body.Not) > 0 {
 				if json.Unmarshal(body.Not, &in.Not) != nil || in.Not == nil {
 					err = prefFail(422, "rank_and_not_required")
@@ -349,6 +355,7 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 			if !thinking {
 				if in.Efforts != nil {
 					o.Efforts = in.Efforts
+					o.Effort, o.EffortLevel = nil, nil
 				}
 				if in.End != nil {
 					o.End = *in.End

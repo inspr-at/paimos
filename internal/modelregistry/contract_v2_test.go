@@ -113,12 +113,15 @@ func TestModelsV2PageContractWritesAndReads(t *testing.T) {
 	if locked.Lock == nil || locked.Mine || locked.Lock.By == nil || *locked.Lock.By != admin.ID || locked.Line == nil || *locked.Line != "anthropic:opus" {
 		t.Fatalf("workspace lock lost: %+v", locked)
 	}
-	for _, bad := range []map[string]any{
-		{"rank": rank, "efforts": map[string]string{"openai:sol": "invented"}, "end": "wait", "revision": revision},
-		{"rank": rank, "efforts": map[string]string{"openai:luna": "high"}, "end": "wait", "revision": revision},
-		{"rank": rank, "end": "row", "revision": revision},
+	for _, bad := range []struct {
+		body map[string]any
+		code string
+	}{
+		{map[string]any{"rank": rank, "efforts": map[string]string{"openai:sol": "invented"}, "end": "wait", "revision": revision}, "effort_not_registered"},
+		{map[string]any{"rank": rank, "efforts": map[string]string{"openai:luna": "high"}, "end": "wait", "revision": revision}, "invalid_effort"},
+		{map[string]any{"rank": rank, "end": "row", "revision": revision}, "invalid_end"},
 	} {
-		boardDecode[map[string]any](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first?for=default", bad, ""), 422)
+		boardError(t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first?for=default", bad.body, ""), 422, bad.code)
 		if read(true).Revision != revision {
 			t.Fatal("failed order advanced its revision")
 		}
@@ -287,6 +290,64 @@ func TestModelsV2OutdatedCountsVisiblePins(t *testing.T) {
 		}
 		if !found {
 			t.Fatal("older registered version missing")
+		}
+	}
+}
+
+// Risk: native thinking and ranked order edits erase one another, an empty
+// v2 map retains a hidden legacy override, or reset still reports "yours".
+func TestModelsV2OrderNativeEffortCompatibility(t *testing.T) {
+	admin, member := boardFixture(t)
+	path := "/api/model-preferences/orders/backend/first?for=default"
+	rank := []string{"openai:sol", "anthropic:opus"}
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", path, map[string]any{"rank": rank, "efforts": map[string]string{"openai:sol": "xhigh", "anthropic:opus": "xhigh"}, "end": "default", "revision": 0}, ""), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/thinking/backend/first?for=default", map[string]any{"effort": "high", "revision": 1}, ""), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", path, map[string]any{"rank": rank, "revision": 2}, ""), 200)
+	readOrder := func(person *string) modelprefs.BoardOrder {
+		t.Helper()
+		var result modelprefs.BoardOrder
+		inRegistry(t, admin, func(tx pgx.Tx) error {
+			s, err := modelprefs.LoadBoard(t.Context(), tx, person, "")
+			if err != nil {
+				return err
+			}
+			profile := s.Workspace.ID
+			if person != nil && s.Person != nil {
+				profile = s.Person.ID
+			}
+			for _, o := range s.Orders {
+				if o.ProfileID == profile && o.Column == "backend" && o.Situation == "first" {
+					result = o
+					return nil
+				}
+			}
+			t.Fatal("saved order missing")
+			return nil
+		})
+		return result
+	}
+	if o := readOrder(nil); o.Efforts["openai:sol"] != "high" || o.Efforts["anthropic:opus"] != "xhigh" || o.End != "default" {
+		t.Fatalf("rewrite lost native settings: %+v", o)
+	}
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", path, map[string]any{"rank": rank, "efforts": map[string]string{}, "revision": 3}, ""), 200)
+	if o := readOrder(nil); len(o.Efforts) != 0 || o.Effort != nil || o.EffortLevel != nil {
+		t.Fatalf("automatic native level kept a legacy override: %+v", o)
+	}
+	for field, code := range map[string]string{"efforts": "invalid_effort", "end": "invalid_end"} {
+		boardError(t, boardCall(t, admin, "PUT", path, map[string]any{"rank": rank, "revision": 4, field: nil}, ""), 422, code)
+	}
+	boardError(t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/small?for=default", map[string]any{"rank": rank, "end": "default", "revision": 4}, ""), 422, "invalid_end")
+	personal := "/api/model-preferences/orders/backend/first?for=me"
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", personal, map[string]any{"rank": rank, "end": "wait", "revision": 0}, member.ID), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/thinking/backend/first?for=me", map[string]any{"thinking": "deep", "effort": "high", "revision": 1}, member.ID), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, member, "DELETE", personal+"&revision=2", nil, member.ID), 200)
+	if o := readOrder(&member.ID); o.Thinking == nil || *o.Thinking != "deep" || o.Rank != nil || o.Effort != nil || o.End != "" || len(o.Efforts) != 0 {
+		t.Fatalf("rank reset altered thinking or retained a chain: %+v", o)
+	}
+	doc := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple", nil, ""), 200)
+	for _, row := range doc.Exceptions {
+		if row.Column == "backend" && row.Mine {
+			t.Fatal("thinking-only row still reports a personal order")
 		}
 	}
 }

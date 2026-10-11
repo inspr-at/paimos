@@ -24,7 +24,7 @@ func validateModelsOrder(c boardCatalog, o modelprefs.BoardOrder) error {
 	}
 	if o.End != "" && o.End != "wait" && o.End != "default" && o.End != "row" && o.End != "auto" ||
 		o.Situation == "first" && (o.End == "row" || o.End == "auto" || o.Column == "other" && o.End == "default") ||
-		o.Situation == "review" && o.End == "row" || o.Situation != "review" && o.End == "auto" {
+		o.Situation != "first" && o.End == "default" || o.Situation == "review" && o.End == "row" || o.Situation != "review" && o.End == "auto" {
 		return prefFail(422, "invalid_end")
 	}
 	for line, effort := range o.Efforts {
