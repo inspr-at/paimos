@@ -377,8 +377,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p v-if="stale" class="freshness" role="status" :data-tip="freshnessTip"><span class="live-mark" aria-hidden="true" />Update delayed</p>
       </HeadCounts>
       <div class="head-side">
-        <!-- Wind down is a head control (AEON-783): ghost button, then a teal chip while it runs. -->
-        <!-- Wind down · More · New, with New last (AEON-1209). -->
+        <!-- Wind down · More · New, New last (AEON-1209). Wind down is a ghost button, then a teal chip while it runs (AEON-783). -->
         <WindDownControl v-if="agents.loaded" ref="windDown" />
         <button type="button" class="icon-btn flat more-agent" aria-label="More agent actions" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'more'" @click="headerAction('more', $event)"><AppIcon name="more" /></button>
         <button v-if="showNew" type="button" class="btn primary add-agent" aria-label="New: start a lead, attach a session or connect a machine" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'add'" @click="headerAction('add', $event)"><AppIcon name="plus" :size="17" /></button>
@@ -480,10 +479,10 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .agents-page { overflow-anchor: none; }
 /* A column, not a grid: a folding card's negative margin can take the gap with it (AEON-505). */
 .main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-/* The capacity row (AEON-1209): what may run, left-aligned, scrolling with the page. Its width
-   decides how the dial's units open (a container query in the dial). */
-/* A tight row's − and + float over the neighbours; at the row's right edge they never widen the
-   page (clipped 4 px out, where focus rings still fit; the padding and margin cancel out in layout). */
+/* The capacity row (AEON-1209): what may run, left-aligned, scrolling with the page. Its width decides
+   how the dial's units open (a container query in the dial). A tight row's − and + float over the
+   neighbours; at the row's right edge they never widen the page (clipped 4 px out, where focus rings
+   still fit; the padding and margin cancel out in layout). */
 .cap-row { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-start; gap: 8px; min-height: var(--ctl-h); margin-inline: -4px; padding-inline: 4px; container: cap / inline-size; overflow-x: clip; }
 /* The unfolded dial's body lands here, under the capacity row; empty, it takes no room. */
 .dial-host:empty { display: none; }

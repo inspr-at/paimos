@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { api } from '../../lib/api'
 import { can } from '../../lib/authz'
@@ -38,7 +38,7 @@ function close(restore: boolean) {
   open.value = false
   if (restore) chip.value?.focus({ preventScroll: true })
 }
-watch(identityKey, () => { open.value = false })
+watch(identityKey, () => { open.value = false; linked = '' })
 
 // ---------- What the page knows ----------
 const computers = computed(() => props.permissions.canListComputers ? capacity.computers.filter(c => c.computer_id && !c.archived_at) : [])
@@ -81,12 +81,14 @@ const tiles = computed(() => glanceTiles({
 const ICON: Record<GlancePart, IconName> = { accounts: 'key', computers: 'monitor', capacity: 'gauge' }
 async function retry() { await Promise.all([agents.refreshAccounts(), capacity.load()]) }
 
-// An approval link (?verify_account=…) opens the popover once, at the sign-in it names.
-watch(requested, async id => {
-  if (!id) return
-  await nextTick()
-  if (chip.value) open.value = true
-}, { immediate: true })
+// An approval link (?verify_account=…) opens the popover once, at the sign-in it names, as soon
+// as the chip is there (the first read may still be in flight); closing it is the person's choice.
+let linked = ''
+watch([requested, chip], ([id, button]) => {
+  if (!id || !button || linked === id) return
+  linked = id
+  open.value = true
+}, { immediate: true, flush: 'post' })
 
 // ---------- Low-quota thresholds: read once per person, again when the window returns ----------
 let generation = 0
@@ -102,10 +104,7 @@ async function readThresholds() {
 }
 watch(identityKey, () => { thresholds.value = { ...DEFAULT_QUOTA_THRESHOLDS }; busy.value = false; void readThresholds() }, { immediate: true })
 const poller = usePoller(readThresholds, 120_000)
-onMounted(() => {
-  poller.start(false); window.addEventListener('focus', readThresholds)
-  if (requested.value && chip.value) open.value = true
-})
+onMounted(() => { poller.start(false); window.addEventListener('focus', readThresholds) })
 onBeforeUnmount(() => { generation++; poller.stop(); window.removeEventListener('focus', readThresholds) })
 
 // ---------- Verify again, bound to the sign-in on screen ----------

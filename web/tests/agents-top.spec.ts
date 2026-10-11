@@ -40,11 +40,13 @@ async function setup(page: Page, options: Setup = {}) {
   })
   return { data, capacity, calls }
 }
-const cap = (page: Page) => page.getByRole('region', { name: 'Accounts and computers' })
+// AEON-1209: Accounts and computers is the accounts chip in the capacity row; its popover holds the line.
+const chip = (page: Page) => page.locator('.cap-row .acc-chip')
+const cap = (page: Page) => page.getByRole('dialog', { name: 'Accounts and computers' })
 async function open(page: Page) {
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-  await expect(cap(page).locator('.fs-sum')).not.toContainText('Reading')
+  await expect(chip(page)).toBeVisible()
 }
 const noScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)
 
@@ -56,10 +58,10 @@ test('nothing waits: no chores, a compact live line, and Accounts and computers 
   await expect(page.getByRole('heading', { name: 'Live now' })).toHaveCount(0)
   const line = page.getByRole('group', { name: 'Show sessions by state' })
   await expect(line.getByRole('button', { name: /^\d+ working/ })).toBeVisible()
-  await expect(cap(page).locator('.fs-sum')).toContainText(/\d+ of 6 ready/)
+  await chip(page).click()
+  await expect(cap(page).locator('.acc-state')).toContainText(/\d+ of 6 ready/)
   // No coloured edge accents anywhere in the new top (AGENTS.md rule 11).
-  await cap(page).getByRole('button', { name: 'Accounts and computers', exact: true }).click()
-  const edges = await page.locator('.acc-section, .acc-section *, .head-counts, .head-counts *').evaluateAll(els => els.filter(el => { const s = getComputedStyle(el); return ['Left', 'Top'].some(side => parseFloat(s[`border${side}Width` as 'borderLeftWidth']) >= 3 && s[`border${side}Style` as 'borderLeftStyle'] !== 'none') }).length)
+  const edges = await page.locator('.cap-row, .cap-row *, .floating, .floating *, .head-counts, .head-counts *').evaluateAll(els => els.filter(el => { const s = getComputedStyle(el); return ['Left', 'Top'].some(side => parseFloat(s[`border${side}Width` as 'borderLeftWidth']) >= 3 && s[`border${side}Style` as 'borderLeftStyle'] !== 'none') }).length)
   expect(edges).toBe(0)
   expect(await noScroll(page)).toBe(true)
   expect(errors).toEqual([])
@@ -87,10 +89,11 @@ test('sign-in prompts only for a confirmed sign-out of that account', async ({ p
   await expect(page.getByRole('region', { name: 'Sign-ins and connections' })).toHaveCount(0)
 })
 
-test('Manage opens Settings / Accounts', async ({ page }) => {
+test('the Accounts tile opens Settings / Accounts', async ({ page }) => {
   await setup(page, { stale: true })
   await open(page)
-  await cap(page).getByRole('link', { name: /Manage/ }).click()
+  await chip(page).click()
+  await cap(page).locator('.tile[data-part="accounts"]').click()
   await expect(page).toHaveURL('/settings/accounts')
   await expect(page.locator('#agent-accounts')).toContainText('Spare')
 })

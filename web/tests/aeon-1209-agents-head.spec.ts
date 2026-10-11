@@ -228,6 +228,70 @@ for (const width of [1440, 1024, 390]) test(`${width}: the head, the capacity ro
   })
 })
 
+// The design's own gate (AEON-1196 check.mjs), on the real page for this package's parts: no coloured edge accents,
+// SVG icons only, English only, no sideways scroll; screenshots of each state for the evidence.
+const PROBES = () => {
+  const parts = () => [...document.querySelectorAll('.agents-page .page-head, .cap-row, .dial-card, .sessions [data-stick], .floating')]
+  const all = () => parts().flatMap(root => [root, ...root.querySelectorAll('*')])
+  const edge: string[] = []
+  for (const el of all()) {
+    const cs = getComputedStyle(el)
+    const bw = (side: string) => parseFloat(cs.getPropertyValue(`border-${side}-width`)) || 0
+    const opaque = (side: string) => { const c = cs.getPropertyValue(`border-${side}-color`); return !!c && !/rgba\(.*,\s*0\)$/.test(c) && c !== 'transparent' }
+    for (const [a, b] of [['left', 'right'], ['top', 'bottom']]) for (const [x, y] of [[a, b], [b, a]]) if (bw(x!) >= 2 && bw(x!) - bw(y!) >= 1 && opaque(x!)) edge.push(`${el.className} border-${x}`)
+    for (const part of cs.boxShadow === 'none' ? [] : cs.boxShadow.split(/,(?![^(]*\))/)) {
+      if (!/inset/.test(part)) continue
+      const [x = 0, y = 0, blur = 0] = (part.replace(/rgba?\([^)]*\)|inset/g, '').match(/-?[\d.]+px/g) || []).map(parseFloat)
+      if ((Math.abs(x) >= 2 || Math.abs(y) >= 2) && blur === 0) edge.push(`${el.className} inset ${part.trim()}`)
+    }
+    for (const pseudo of ['::before', '::after']) {
+      const ps = getComputedStyle(el, pseudo)
+      if (ps.content === 'none' || ps.position !== 'absolute') continue
+      const w = parseFloat(ps.width) || 0, h = parseFloat(ps.height) || 0, bg = ps.backgroundColor
+      if (w >= 2 && w <= 6 && h >= 16 && bg && !/rgba\(.*,\s*0\)$/.test(bg) && bg !== 'transparent') edge.push(`${el.className} ${pseudo} bar`)
+    }
+  }
+  const glyphs: string[] = [], re = /[←→↑↓↵⏎✓✔✕✖×▾▸▴▲▼◂▶◀★☆●○◉⚠✗✘➜➔⟶]/
+  const walk = (n: Node) => { for (const c of n.childNodes) { if (c.nodeType === 3 && re.test(c.textContent ?? '')) glyphs.push((c.textContent ?? '').trim().slice(0, 40)); else if (c.nodeType === 1 && !['SCRIPT', 'STYLE'].includes((c as Element).tagName)) walk(c) } }
+  parts().forEach(walk)
+  const text = parts().map(p => (p as HTMLElement).innerText).join(' ')
+  const german = text.match(/[äöüÄÖÜß]|\b(und|der|die|das|nicht|mit|für|oder|ist|Sitzung|Agenten|Projekt|Fehler|Einstellungen|bitte)\b/g) ?? []
+  const main = document.querySelector('main')!
+  return { edge, glyphs, german, hscroll: Math.max(document.documentElement.scrollWidth - innerWidth, main.scrollWidth - main.clientWidth) }
+}
+for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
+  test(`design gate at ${width} ${theme}: no edge accents, SVG icons only, English only, no sideways scroll, through every state`, async ({ page }, info) => {
+    test.setTimeout(90_000)
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    await setup(page)
+    await page.goto('/agents')
+    await expect(page.locator('.sessions .row[data-row]').nth(5)).toBeAttached()
+    const gate = async (state: string) => {
+      const r = await page.evaluate(PROBES)
+      expect(r.edge, `${state}: edge accents`).toEqual([])
+      expect(r.glyphs, `${state}: text glyphs`).toEqual([])
+      expect(r.german, `${state}: German words`).toEqual([])
+      expect(r.hscroll, `${state}: sideways scroll`).toBeLessThanOrEqual(0.5)
+      await page.screenshot({ path: info.outputPath(`${width}-${theme}-${state}.png`) })
+    }
+    await gate('top')
+    await page.locator('.cdial .fs-tog').click(); await expect(page.locator('.dial-card')).toBeVisible()
+    await gate('dial-open')
+    await page.locator('.cdial .fs-tog').click(); await expect(page.locator('.dial-card')).toHaveCount(0)
+    await unit(page, 'claude').locator('.du-mark').hover(); await gate('unit-hover'); await page.mouse.move(2, 990)
+    await capRow(page).locator('.acc-chip').click(); await expect(page.getByRole('dialog', { name: 'Accounts and computers' })).toBeVisible()
+    await gate('accounts'); await page.keyboard.press('Escape')
+    await stick(page).getByRole('button', { name: 'Filter', exact: true }).click(); await expect(page.getByRole('menu', { name: 'Filter sessions by state' })).toBeVisible()
+    await gate('filter'); await page.getByRole('menuitemradio', { name: /Working/ }).click()
+    await expect(page.locator('.sessions .pills-row')).toBeVisible(); await gate('pill')
+    await stick(page).getByRole('button', { name: /^Display: / }).click(); await expect(page.getByRole('dialog', { name: 'Display' })).toBeVisible()
+    await gate('display'); await page.keyboard.press('Escape')
+    await page.locator('main').evaluate(el => { el.scrollTop = el.scrollHeight }); await expect(stick(page)).toHaveClass(/stuck/)
+    await gate('sticky')
+  })
+}
+
 test.describe('phone', () => {
   test.use({ viewport: { width: 390, height: 900 }, hasTouch: true, isMobile: true })
   for (const theme of ['light', 'dark'] as const) test(`${theme} 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head`, async ({ page }, info) => {

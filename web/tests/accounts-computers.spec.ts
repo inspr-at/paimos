@@ -169,7 +169,15 @@ test('Away shows on the chip; Back now in the popover ends it with one click', a
 test('an approval link opens the popover once and offers that account\'s check', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1100 })
   const { work } = await setup(page)
-  await open(page, `/agents?verify_account=${ACCOUNTS.claude}`)
+  // Barrier: the first capacity read lands after the page is up, so the chip appears late, as on a fresh load.
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/agent-accounts/capacity', async route => { if (route.request().method() === 'GET') await held; await route.fallback() })
+  await page.goto(`/agents?verify_account=${ACCOUNTS.claude}`)
+  await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
+  await expect(page.locator('.cap-row .acc-sk')).toBeVisible()
+  release()
+  await expect(chip(page)).toBeVisible()
   await expect(pop(page)).toBeVisible()
   await expect(pop(page).locator('.acc-fix')).toContainText('Verify Claude on build-7')
   await expect(pop(page).locator('.acc-fix')).toContainText('An approval link asked for a fresh check.')

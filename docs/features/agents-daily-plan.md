@@ -66,14 +66,18 @@ admission and delivery. Coordinator review and release gates remain separate.
 ## The dial (AEON-1036)
 
 The Agents page dial shows and edits these limits (approved AEON-1030 draft 6).
-Folded, it is one row as high as the other folded cards: the sentence, one chip
-per harness (mark, stepper and, only when needed, a gold flag for over pace or
-a red flag for today's limit) and `● N running (M waiting) ▾`. Everything else
-about a chip, such as `Codex · at most 6 · ≤ 68 % used today · on pace`, is
-hover and keyboard-focus text. A flag, or on a phone a chip's icon with its
-count, opens the dial at that harness. The toggle opens one info area with three
-tiles: running and waiting against the dial, the accounts per harness with the
-existing Verify action, and the checks before every start.
+Folded, it is one light control in the Agents page's capacity row (AEON-1209,
+design AEON-1196; see [agents-page.md](agents-page.md)): the total, then one unit
+per harness (mark, number and, only when needed, a flag after the number for over
+pace or today's limit, with no fill) and `● N running (M in line) ▾`. A unit's −
+and + keep their room and show on hover or focus; in a tight row a unit lifts onto
+a plate above its neighbours. Everything else about a unit, such as
+`Codex · at most 6 · ≤ 68 % used today · on pace`, is hover and keyboard-focus
+text. Unfolded, the dial opens at what needs attention. The toggle opens one info
+area with three tiles: running and waiting against the dial, the accounts per
+harness with the existing Verify action, and the checks before every start. A
+save that fails turns the toggle's dot red, says why in its tooltip and status,
+and shows a toast; the toggle's words keep their width.
 
 Open, the dial is master and detail. Fixed 88 px rows on the left carry the usage
 lines and the pace state; the detail on the right reads week used and left,
@@ -95,5 +99,7 @@ says so. The selected harness (the last pick, else one over pace or at its limit
 else the first with a daily limit), the info area and the open folds are
 remembered per person in the preference `ui.agents.dial`. Resets, the Resets
 card, the posture control in Settings and the default pace editor belong to other
-packages; the dial links to Settings › Accounts and computers for them.
+packages. The dial's Pace links to Settings › Capacity at that harness
+(`#pace-<harness>`) and Per-account settings opens the account in use
+(`/settings/accounts?account=<id>`).
 

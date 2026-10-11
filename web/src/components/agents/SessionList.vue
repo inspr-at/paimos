@@ -810,6 +810,8 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .tool-btn[aria-disabled="true"] { opacity: .55; cursor: default; }
 .grow { flex: 1 1 0; min-width: 0; }
 .head-tools { display: inline-flex; align-items: center; gap: 2px; margin-right: -4px; }
+/* One control height across the head (AEON-1209). */
+.head-tools .btn { height: var(--ctl-h, 36px); padding: 0 12px; font-size: 13px; }
 .tool-label { white-space: nowrap; }
 /* Applied filters, under the head: the state filter is the head count's (AEON-780); × or Esc clears it. */
 .pills-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 10px 8px; }

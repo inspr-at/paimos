@@ -181,6 +181,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
           <span :id="`${infoId}-tip-${row.key}`" class="sr-only">{{ tipOf(row) }}</span>
         </template>
       </span>
+      <span class="cd-break" aria-hidden="true" />
       <button type="button" class="f-live cd-live wh-tog" :class="{ idle: run === 0 && !waitingN, full: !!waitingN, failed: error }" :aria-expanded="infoOpen" :aria-controls="infoId" :data-tip="error || `${status} Your sessions across projects, including sessions started outside PAIMOS. Other people's sessions appear in the live count above.`" @click="toggleInfo">
         <span class="dotm" aria-hidden="true" />
         <!-- The words stay the running state, so a failure never widens the control and moves the chip beside it
@@ -190,7 +191,11 @@ function modeKeys(event: KeyboardEvent, key: string) {
       </button>
       <span class="sr-only f-status" role="status">{{ error || `${live} · your agents${saving ? ' · Saving' : ''}` }}</span>
     </template>
-    <p v-else class="load-state" role="status"><template v-if="error">{{ error }} <button type="button" class="link-btn" @click="control.refresh">Try again</button></template><template v-else><span class="skeleton cd-sk" aria-hidden="true" /><span class="sr-only">Reading the total…</span></template></p>
+    <template v-else>
+      <p class="load-state" role="status"><template v-if="error">{{ error }} <button type="button" class="link-btn" @click="control.refresh">Try again</button></template><template v-else><span class="skeleton cd-sk" aria-hidden="true" /><span class="sr-only">Reading the total…</span></template></p>
+      <!-- A narrow row keeps the loaded control's second line (the live state) while it reads, so nothing below moves. -->
+      <span class="cd-break" aria-hidden="true" /><span class="cd-live-sk" aria-hidden="true"><span class="skeleton" /></span>
+    </template>
   </div>
   <Teleport defer :to="bodyTarget || 'body'" :disabled="!bodyTarget">
     <section v-if="!folded && plan && snapshot" :id="bodyId" class="dial-card glass-card" :aria-labelledby="`${bodyId}-h`">
@@ -288,15 +293,21 @@ function modeKeys(event: KeyboardEvent, key: string) {
 .cd-live.full .dotm { background: var(--gold); }
 .cd-live.idle .dotm { background: var(--st-backlog); }
 .cd-live.failed .dotm { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 18%, transparent); }
-.load-state { display: inline-flex; align-items: center; gap: 8px; min-width: 0; margin: 0; padding: 0 8px 0 2px; color: var(--ink-3); font-size: 13px; white-space: nowrap; }
+.load-state { display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 28px; margin: 0; padding: 0 8px 0 2px; color: var(--ink-3); font-size: 13px; white-space: nowrap; }
 .cd-sk { display: inline-block; width: 280px; max-width: 46vw; height: 12px; }
+.cd-break, .cd-live-sk { display: none; }
 /* A narrow row (phones): the control takes the full width and its units wrap; the live state ends the last line. */
 @container cap (max-width: 640px) {
   .cdial { flex: 1 1 100%; flex-wrap: wrap; justify-content: flex-start; row-gap: 4px; height: auto; min-height: var(--ctl-h, 36px); padding: 4px 6px; border-radius: 22px; }
+  /* The live state always ends a second line on the right, loading or loaded. */
+  .cd-break { display: block; flex: 0 0 100%; height: 0; }
   .cd-live { margin-left: auto; }
+  .cd-live-sk { display: flex; align-items: center; justify-content: flex-end; flex: 1 1 auto; height: 28px; }
+  .cd-live-sk .skeleton { width: 150px; }
 }
 @media (pointer: coarse) {
   .cdf::after { content: ''; position: absolute; inset: -10px; }
+  .load-state, .cd-live-sk { min-height: 36px; }
   .cd-live { height: 36px; }
   .cd-live::after { content: ''; position: absolute; inset: -4px 0; }
 }

@@ -19,11 +19,12 @@ for (const width of [1440, 1024, 390]) {
       interactions: [{ name: 'open merged navigation', run: async () => {
         await more.click()
         const menu = page.getByRole('menu')
-        // AEON-780/783: "…" keeps five items; Pause all, Resume all and Wind down live in the Wind down popover, History in the Sessions head.
-        await expect(menu.getByRole('menuitem')).toHaveText([/^Model preferences/, /^Usage/, /^Decision Desk/, /^Agent keys/, /^Agent settings/])
+        // AEON-780/783: Pause all, Resume all and Wind down live in the Wind down popover, History in the Sessions head.
+        // AEON-1209: "…" keeps four items; the Decision Desk is the app header's place.
+        await expect(menu.getByRole('menuitem')).toHaveText([/^Model preferences/, /^Usage/, /^Agent keys/, /^Agent settings/])
         await expect(header.getByRole('button', { name: 'Wind down', exact: true })).toBeVisible()
         await expect(page.locator('.sessions .head-tools').getByRole('button', { name: /^Show history/ })).toBeVisible()
-        await expect(menu.getByRole('menuitem', { name: 'Decision Desk', exact: true })).toHaveAttribute('href', '/decision-desk')
+        await expect(page.locator('.places').getByRole('link', { name: /^Decision Desk/ })).toHaveAttribute('href', '/decision-desk')
       } }],
     })
   })
@@ -65,11 +66,10 @@ for (const width of [1440, 1024, 390]) {
 
   test(`approval choices, typing and failure keep the decision controls put at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
-    await setup(page, true)
-    await page.goto('/agents')
-    const data = await page.locator('.desk-panel .desk-item').first().getAttribute('href')
-    expect(data).toMatch(/^\/decision-desk\?item=a:/)
-    await page.locator('.desk-panel .desk-item').first().click()
+    const world = await setup(page, true)
+    // AEON-1209: the Agents page has no Desk panel; the approval opens on the Desk directly.
+    const approval = world.approvals.find(a => !a.decision)!
+    await page.goto(`/decision-desk?item=a:${approval.id}`)
     const memo = page.getByRole('dialog', { name: 'Decision Desk memo' })
     const submit = page.getByTestId('desk-decide')
     const reason = memo.getByRole('textbox', { name: 'Reason', exact: true })
@@ -123,7 +123,8 @@ for (const width of [1440, 1024, 390]) {
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     await setup(page)
     await page.goto('/agents')
-    const dial = page.getByRole('region', { name: 'Agents at once' })
+    // AEON-1209: the total lives in the capacity row's light control; the rows in the dial's body card.
+    const dial = page.locator(':is(.cdial, .dial-card)'), body = page.locator('.dial-card')
     const more = dial.getByRole('button', { name: 'One agent more at once' })
     const fewer = dial.getByRole('button', { name: 'One agent fewer at once' })
     const row = dial.locator('[data-key="codex"]')
@@ -143,7 +144,7 @@ for (const width of [1440, 1024, 390]) {
       expect(height).toBeGreaterThan(0)
       expect(Math.abs(height - rowHeights[0]!)).toBeLessThanOrEqual(.5)
     }
-    await expectDialRowsFitContent(dial)
+    await expectDialRowsFitContent(body)
     await expectStableControls({
       controls: { more, fewer, selector: row.getByRole('radiogroup'), row, rowMore, rowFewer },
       scrollAreas: { rows: dial.locator('.rows') },
@@ -159,7 +160,7 @@ for (const width of [1440, 1024, 390]) {
         ...[rowMore, rowFewer].map((button, i) => ({ name: `${i ? 'fewer' : 'more'} on Codex`, run: async () => { await expect(button).toHaveAccessibleName(/^Codex:/); await button.click() } })),
       ],
     })
-    await expectDialRowsFitContent(dial)
+    await expectDialRowsFitContent(body)
   })
 
   test(`Agents working harness modes stay put at ${width}`, async ({ page }) => {
@@ -167,7 +168,7 @@ for (const width of [1440, 1024, 390]) {
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     await setup(page)
     await page.goto('/agents')
-    const dial = page.getByRole('region', { name: 'Agents at once' })
+    const dial = page.locator(':is(.cdial, .dial-card)')
     const more = dial.getByRole('button', { name: 'One agent more at once' })
     const fewer = dial.getByRole('button', { name: 'One agent fewer at once' })
     const row = dial.locator('[data-key="codex"]')
@@ -179,25 +180,25 @@ for (const width of [1440, 1024, 390]) {
     })
   })
 
-  // AEON-784: folding a parent, walking the tree with ← and →, toggling History
-  // and folding the Sessions section never move a control. A parent's line stays
-  // when it folds, so its row keeps its height and actions.
-  test(`Sessions tree and section folds keep their controls put at ${width}`, async ({ page }) => {
+  // AEON-784: folding a parent, walking the tree with ← and →, and toggling History never move a
+  // control. A parent's line stays when it folds, so its row keeps its height and actions. The Sessions
+  // card itself no longer folds (AEON-1209): its head carries the list's tools.
+  test(`Sessions tree folds and History keep their controls put at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     const data = await setup(page)
     Object.assign(data.sessions[1]!, { parent_harness_session_id: data.sessions[0]!.id })
     await page.goto('/agents')
-    const sessions = page.getByRole('region', { name: 'Sessions', exact: true })
+    const sessions = page.locator('.sessions')
     const lead = sessions.locator(`[data-row="s:${data.sessions[0]!.id}"]`)
     const worker = sessions.locator(`[data-row="s:${data.sessions[1]!.id}"]`)
     const fold = lead.locator('.tree-fold')
-    // Its name says Fold or Unfold; the same button is measured either way.
-    const sectionFold = sessions.locator('.fs-head > .fs-tog')
-    const history = sessions.getByRole('button', { name: 'Show history: every ended or removed session' })
+    // Its name says Show history or Back to sessions; the same button is measured either way.
+    const history = sessions.locator('.head-tools button[aria-pressed]')
+    const search = sessions.getByRole('searchbox', { name: 'Search sessions in this list' })
     await expect(worker).toBeVisible()
     await expectStableControls({
-      controls: { fold, more: lead.getByRole('button', { name: /^Actions for / }), glyph: lead.locator('.bot'), history, sectionFold },
+      controls: { fold, more: lead.getByRole('button', { name: /^Actions for / }), glyph: lead.locator('.bot'), history, search },
       interactions: [
         { name: 'hover fold', run: () => fold.hover() },
         { name: 'fold the lead', run: async () => { await fold.click(); await expect(worker).toHaveCount(0); await expect(lead.locator('.kid-count')).toHaveText('1 sub-agent') } },
@@ -206,15 +207,13 @@ for (const width of [1440, 1024, 390]) {
         { name: '→ unfolds', run: async () => { await page.keyboard.press('ArrowRight'); await expect(worker).toBeVisible() } },
       ],
     })
-    // The title's words change with History; its fold chevron stays put.
-    const title = sessions.locator('.fs-title')
+    // The title's words change with History; the card head's tools stay put.
+    const title = sessions.locator('#sessions-title')
     await expectStableControls({
-      controls: { sectionFold },
+      controls: { history, search, filter: sessions.getByRole('button', { name: 'Filter', exact: true }) },
       interactions: [
-        { name: 'history on', run: async () => { await history.click(); await expect(title).toContainText('History') } },
-        { name: 'history off', run: async () => { await sessions.getByRole('button', { name: 'Back to sessions' }).click(); await expect(title).toContainText('Sessions') } },
-        { name: 'fold the section', run: async () => { await sectionFold.click(); await expect(sessions.locator('.fs-sum')).toContainText('live on') } },
-        { name: 'unfold the section', run: async () => { await sessions.getByRole('button', { name: 'Sessions: unfold' }).click(); await expect(lead).toBeVisible() } },
+        { name: 'history on', run: async () => { await history.click(); await expect(title).toHaveText('History') } },
+        { name: 'history off', run: async () => { await sessions.getByRole('button', { name: 'Back to sessions' }).click(); await expect(title).toHaveText('Sessions') } },
       ],
     })
   })
