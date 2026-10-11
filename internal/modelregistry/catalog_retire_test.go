@@ -63,7 +63,7 @@ func TestCatalogOutdatedSourcedAliasIsNotSuccessor(t *testing.T) {
 	})
 	preview := outdatedPreview(t, admin)
 	old := requireOutdated(t, preview, "anthropic:claude-opus-5")
-	if old.Successor == nil || *old.Successor != "anthropic:claude-opus-5.5" {
+	if old.State == nil || *old.State != "superseded" || old.Successor == nil || *old.Successor != "anthropic:claude-opus-5.5" || old.Source != "aeon_model_line/aeon_model_version_newer" {
 		t.Fatalf("numbered successor replaced by alias: %+v", old)
 	}
 	for _, version := range preview.Versions {
