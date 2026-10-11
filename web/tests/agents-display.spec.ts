@@ -13,6 +13,7 @@ const row = (page: Page, n: number) => page.locator(`[data-row="s:${id(n)}"]`)
 const familyFold = (page: Page, n: number) => row(page, n).locator('[data-fold="family"]')
 const dial = (page: Page) => page.getByRole('region', { name: 'Agents at once' })
 const liveCount = (page: Page) => page.locator('.sessions .group-row.live .mono')
+const headCount = (page: Page, filter: string) => page.locator(`.agents-page .page-head .count[data-filter="${filter}"]`)
 const shots = process.env.AEON691_SHOTS
 
 async function setup(page: Page, theme: 'light' | 'dark' = 'light', unrelated = false, endedCount = 696) {
@@ -64,7 +65,8 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', unrelated = 
 test('live families count all external workers, hide hundreds of ended siblings and retain counts when folded', async ({ page }) => {
   await setup(page)
   await page.goto('/agents')
-  await expect(page.locator('.live-total')).toHaveText('4 live')
+  // The head's counts replaced the live line (AEON-780): all four live sessions, each started outside PAIMOS.
+  await expect(headCount(page, 'working')).toContainText('4')
   await expect(liveCount(page)).toHaveText('4')
   await expect(page.locator('.sessions .row')).toHaveCount(4)
   await expect(row(page, 1).locator('.history-toggle')).toHaveText('696 stopped')
@@ -99,7 +101,8 @@ test('another person’s visible account never becomes your full account or your
   await setup(page, 'light', true)
   await page.route('**/api/agents/plan', route => route.fulfill({ json: { total: 20, limits: {}, principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: null } }))
   await page.goto('/agents')
-  await expect(page.locator('.live-total')).toHaveText('4 live')
+  // Everyone's live sessions show in the head's count (AEON-780); the dial counts only yours.
+  await expect(headCount(page, 'working')).toContainText('4')
   await expect(dial(page).locator('.f-status')).toContainText('0 running · account room not measured yet · your agents')
   await expect(dial(page).locator('.f-live')).not.toContainText('accounts full')
 })
@@ -235,11 +238,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await row(page, 2).locator('.agent-link').click()
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('.now-eta .report-source')).toBeVisible()
+    // The Messages tab is Chat since AEON-977.
     await expectStableControls({
-      controls: { overview: panel.getByRole('tab', { name: 'Overview' }), messages: panel.getByRole('tab', { name: 'Messages' }), tabs: panel.getByRole('tablist'), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel },
+      controls: { overview: panel.getByRole('tab', { name: 'Overview' }), chat: panel.getByRole('tab', { name: 'Chat' }), tabs: panel.getByRole('tablist'), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel },
       scrollAreas: { panel },
       interactions: [
-        { name: 'show messages', run: async () => { await panel.getByRole('tab', { name: 'Messages' }).click(); await expect(panel.getByRole('tab', { name: 'Messages' })).toHaveAttribute('aria-selected', 'true') } },
+        { name: 'show the chat', run: async () => { await panel.getByRole('tab', { name: 'Chat' }).click(); await expect(panel.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true') } },
         { name: 'return to reported progress', run: async () => { await panel.getByRole('tab', { name: 'Overview' }).click(); await expect(panel.locator('.now-eta .report-source')).toBeVisible() } },
       ],
     })
