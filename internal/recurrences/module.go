@@ -24,6 +24,7 @@ import (
 type Module struct {
 	pool             *pgxpool.Pool
 	executionRuntime ExecutionRuntimeReader
+	actionEvaluator  ActionEvaluatorTx
 	// now is an injected database-clock substitute for deterministic tests only.
 	now     func(context.Context, pgx.Tx) (time.Time, error)
 	history []Publication
@@ -56,6 +57,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/recurrences/preview", m.previewDraft)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}", m.get)
 	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}", m.update)
+	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/execution-principals", m.listExecutionPrincipals)
 	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}/execution-consent", m.writeExecutionConsent)
 	mux.HandleFunc("DELETE /api/recurrences/{recurrenceId}", m.remove)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/history", m.listHistory)

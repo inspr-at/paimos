@@ -8,6 +8,67 @@ import * as statusAutopilot from '../src/lib/statusAutopilot'
 import * as identityScope from '../src/lib/identityScope'
 import { mountView, settle, textOf } from './webcore-view-harness'
 import { displayLanguage } from '../src/lib/displayLanguage'
+import { projectRouteKey, ticketPath } from '../src/lib/work'
+
+// AEON-1148: imported project node keys must never replace their route keys;
+// both table actions must use the same canonical address as the rendered link.
+it('builds canonical ticket links for imported, native and escaped project keys', () => {
+ for (const [project, fields, key, expected] of [
+  ['PRJ-6', { classic: { key: 'PAI' } }, 'PAI-185', '/p/PAI/PAI-185'],
+  ['AEON', {}, 'AEON-1148', '/p/AEON/AEON-1148'],
+  ['PRJ-26', {}, 'WORK-42', '/p/PRJ-26/WORK-42'],
+  ['PRJ-7', { classic: { key: 'A/B ü' } }, 'TASK #1?', '/p/A%2FB%20%C3%BC/TASK%20%231%3F'],
+ ] as const) expect(ticketPath(projectRouteKey(project, fields), key)).toBe(expected)
+})
+
+it('opens attention rows in the same tab and a new tab with their canonical project route key', async () => {
+ const push = vi.fn(), open = vi.fn()
+ const fixtures = [
+  { project_id: 'imported', groupKey: 'PRJ-6', routeKey: 'PAI', key: 'PAI-185', path: '/p/PAI/PAI-185' },
+  { project_id: 'native', groupKey: 'AEON', routeKey: 'AEON', key: 'AEON-1148', path: '/p/AEON/AEON-1148' },
+  { project_id: 'escaped', groupKey: 'PRJ-7', routeKey: 'A/B ü', key: 'TASK #1?', path: '/p/A%2FB%20%C3%BC/TASK%20%231%3F' },
+ ]
+ const items = fixtures.map((f, index) => ({ ...fallbackItem(index + 1), project_id: f.project_id, key: f.key }))
+ vi.stubGlobal('window', { open, addEventListener() {}, removeEventListener() {}, innerHeight: 800 })
+ vi.stubGlobal('document', { documentElement: { lang: 'en' }, getElementById: () => null, querySelector: () => null })
+ vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'test' })
+ const view = mountView('../src/views/NeedsAttentionView.vue', {
+  'vue-router': { useRoute: () => ({ query: {}, fullPath: '/tickets' }), useRouter: () => ({ replace() {}, push }) },
+  '../lib/statusAutopilot': statusAutopilot,
+  '../lib/attention': { ...attention,
+   listAttentionGroups: async () => ({ total: items.length, truncated: false, groups: fixtures.map(f => ({ id: f.project_id, project_id: f.project_id, key: f.groupKey, title: f.groupKey, total: 1, counts: { triage: 1 }, applicable: 1, editable: 1, can_manage: false })) }),
+   listAttention: async (filters: AttentionFilters) => ({ ...emptyFallbackPage, items: items.filter(item => item.project_id === filters.project_id), total: 1 }),
+  },
+  '../lib/identityScope': identityScope,
+  '../lib/displayLanguage': { displayLanguage },
+  '../lib/preferences': { usePreference: () => ({ value: ref(null), ready: Promise.resolve(), save() {} }) },
+  '../lib/ticketList': { filtersFromQuery: () => ({}) },
+  '../lib/toast': { toast: () => 1, dismiss() {}, toastBottomClearance: ref(0) },
+  '../lib/work': { ticketPath, absoluteTime: (value: string) => value, relativeTime: () => '1d', statusMeta: (state: string) => ({ label: state }) },
+  '../stores/session': { useSession: () => reactive({ identity: { tenant: { id: 't1' }, principal: { id: 'ada' } } }) },
+  '../stores/projects': { useProjects: () => ({ load() {}, byId: (id: string) => fixtures.find(f => f.project_id === id) }) },
+  '../directives/clipTip': { vClipTip: { mounted() {}, updated() {} } },
+  '../components/work/TicketTable.vue': { __esModule: true, default: {
+   props: ['groups'], setup(props: { groups: { rows: { key: string; project_key: string }[] }[] }, { emit }: { emit: (name: string, row: unknown) => void }) {
+    return () => h('div', props.groups.flatMap(group => group.rows.map(row => h('button', {
+     'data-key': row.key, 'data-project': row.project_key,
+     onClick: () => emit('open', row), onAuxclick: () => emit('new-tab', row),
+    }, row.key))))
+   },
+  } },
+ })
+ try {
+  await settle(); await settle()
+  for (const f of fixtures) {
+   const button = view.find(el => el.props['data-key'] === f.key)
+   expect(button).toBeDefined(); expect(button.props['data-project']).toBe(f.routeKey)
+   ;(button.props.onClick as () => void)()
+   expect(push).toHaveBeenLastCalledWith(f.path)
+   ;(button.props.onAuxclick as () => void)()
+   expect(open).toHaveBeenLastCalledWith(f.path, '_blank', 'noopener')
+  }
+ } finally { view.app.unmount(); vi.unstubAllGlobals() }
+})
 
 const identity = (event_id: number, extra: Partial<AttentionIdentity> = {}): AttentionIdentity => ({ event_id, node_id: `node-${event_id}`, revision: '2026-10-05T08:00:00Z', release_id: 'release', release_revision: 7, release_project_revision: 4, ...extra })
 const receipt: AttentionResult = { event_id: 1, ok: true, release_id: 'release', previous_release_revision: 7, release_revision: 8, previous_release_project_revision: 4, release_project_revision: 5 }
