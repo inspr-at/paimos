@@ -4,8 +4,7 @@ import { computed, ref, watch } from 'vue'
 import { getProjects, listNodes, updateNode, type ProjectPerson, type ProjectSummary, type WorkNode } from '../lib/api'
 import { projectProgressPercent } from '../lib/projectColumns'
 import { compareRevision } from '../lib/liveUpdates'
-import { scopeOwner } from '../lib/identityScope'
-import { useSession } from './session'
+import { preferenceOwner } from '../lib/preferences'
 import { projectDescription, projectRouteKey } from '../lib/work'
 
 export interface Project extends ProjectSummary {
@@ -24,7 +23,7 @@ export interface Project extends ProjectSummary {
 // project nodes (for classic keys and descriptions), cached for the session and
 // refreshed in the background when a page asks again after a minute.
 export const useProjects = defineStore('projects', () => {
-  const session = useSession(), owner = computed(() => scopeOwner(session.identity))
+  const owner = preferenceOwner
   const summaries = ref<ProjectSummary[]>([])
   const details = ref(new Map<string, { routeKey: string; description: string; updatedAt: string }>())
   const loaded = ref(false)
