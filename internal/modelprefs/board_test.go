@@ -253,6 +253,38 @@ func TestRankedBoardOmittedKindsFollowDefault(t *testing.T) {
 
 // Risk: situation fallback or a person's row bypasses the workspace lock or
 // never lines, or a closed order acquires an unlisted model after exhaustion.
+func TestModelsV2ExceptionDefaultContinuation(t *testing.T) {
+	// Risk: stored exceptions have no End field and silently stop at Wait,
+	// including after a situation returns to its row.
+	for _, tc := range []struct {
+		name, end, situation string
+		want                 []string
+	}{
+		{"stored exception", "", "first", []string{"anthropic:opus", "openai:astra"}},
+		{"stored situation", "", "fix", []string{"anthropic:sonnet", "anthropic:opus", "openai:astra"}},
+		{"explicit wait", "wait", "first", []string{"anthropic:opus"}},
+		{"situation then wait", "wait", "fix", []string{"anthropic:sonnet", "anthropic:opus"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := rankedFixture()
+			s.Person = nil
+			s.Orders = []BoardOrder{
+				{ProfileID: "workspace", Column: "other", Situation: "first", Rank: []string{"openai:astra"}},
+				{ProfileID: "workspace", Column: "backend", Situation: "first", Rank: []string{"anthropic:opus"}, End: tc.end},
+				{ProfileID: "workspace", Column: "backend", Situation: "fix", Rank: []string{"anthropic:sonnet"}},
+			}
+			got := ResolveModelsBoard(s, BoardQuery{Column: "backend", Situation: tc.situation})
+			if !reflect.DeepEqual(got.Rank, tc.want) {
+				t.Fatalf("exception continuation: %+v; want %v", got, tc.want)
+			}
+			def := ResolveModelsBoard(s, BoardQuery{Column: "other", Situation: "first"})
+			if !reflect.DeepEqual(def.Rank, []string{"openai:astra"}) || len(def.Steps) != 1 {
+				t.Fatalf("Default acquired an implicit continuation: %+v", def)
+			}
+		})
+	}
+}
+
 func TestModelsV2RowOwnershipAndSituations(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

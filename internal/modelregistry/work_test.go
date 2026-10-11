@@ -37,6 +37,41 @@ func prefsFixture(t *testing.T, fn func(pgx.Tx, tenant.Principal) error) {
 		t.Fatal(err)
 	}
 }
+
+// Risk: opening an unadopted Models board silently discards a saved ladder
+// before S2 has migrated it into an order.
+func TestModelsV2UnadoptedSavedLadder(t *testing.T) {
+	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+		ctx := t.Context()
+		var opus string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&opus); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE model_role_routes SET priority=0 WHERE role='build' AND profile_id=$1`, opus); err != nil {
+			return err
+		}
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		for _, initialized := range []bool{false, true} {
+			if initialized {
+				if _, err := tx.Exec(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,revision) VALUES($1,'workspace',0)`, p.TenantID); err != nil {
+					return err
+				}
+			}
+			got, err := ResolveWork(ctx, tx, p, WorkQuery{Role: "build"}, now)
+			if err != nil {
+				return err
+			}
+			if got.Profile == nil || got.Profile.ID != opus || got.OwnerRequired {
+				t.Fatalf("initialized=%v discarded saved build ladder: %+v", initialized, got)
+			}
+		}
+		return nil
+	})
+}
+
 func TestResolveWorkEmptyMatrixEquivalence(t *testing.T) {
 	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
 		now := time.Now()

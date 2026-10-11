@@ -7014,6 +7014,8 @@
     ,
     {"kind":"go","package":"internal/modelprefs","name":"TestCellPrecedenceAndLockBounds","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelprefs","name":"TestModelsV2ExceptionDefaultContinuation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelprefs","name":"TestModelsV2RowOwnershipAndSituations","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelprefs","name":"TestPlacementDecodesJSONTokens","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -7234,9 +7236,13 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelWaitReasonsRespectCurrentAccountSharing","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2EscalationAdmissionWait","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NativeLevelsPerRoute","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RolesRoutesAndWait","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2UnadoptedSavedLadder","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestNewHarnessProfileValidation","tier":"GATED-FULL"}
     ,
