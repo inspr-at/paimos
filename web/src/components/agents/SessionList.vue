@@ -73,6 +73,10 @@ const lineageName = (id: string) => [...current.value, ...(props.history ?? [])]
 type Branch = SessionBranch<SessionView>
 // Families in the viewer's order (AEON-468): state, then start time, unless they chose a column.
 const sort = ref<SessionSort | null>(null)
+const agents = useAgents()
+// Models are named as Settings › Models names them, never by their raw ids (AEON-1211). Declared
+// before the forest, which the selected path's immediate watcher reads during setup.
+const names = computed(() => modelNames(agents.models))
 
 // ---------- Calm enter and leave (AEON-1211, design AEON-1196 §3.2; the UI half of AEON-1195) ----------
 // A state change is a state: the row stays and its badge, line 2 and time change. An ended
@@ -377,9 +381,6 @@ function pickTier() {
   serviceTiers.open(selected.view.session, selected.view.name, selected.anchor)
 }
 const tierRequestLabel = (view: SessionView) => view.session.service_tier_request ? `asks for ${TIER_NAME[view.session.service_tier_request]}` : ''
-const agents = useAgents()
-// Models are named as Settings › Models names them, never by their raw ids (AEON-1211).
-const names = computed(() => modelNames(agents.models))
 const pause = useAgentPause()
 const moving = ref(false)
 const dragged = ref<SessionView | null>(null)
