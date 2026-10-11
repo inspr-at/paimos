@@ -223,6 +223,11 @@ func TestRoutinePRResponseLossAndFinalAuthority(t *testing.T) {
 	}
 	// Block a read after its receipt was loaded. The owner revocation commits
 	// while no network transaction holds the tenant/tree fence.
+	var backupOwner string
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Backup tenant owner') RETURNING id::text`, f.person.TenantID).Scan(&backupOwner)
+	})
+	dbtest.BindRole(t, f.d, f.person.TenantID, backupOwner, "owner")
 	entered, release := make(chan struct{}), make(chan struct{})
 	p.afterFind = func() { close(entered); <-release }
 	result := make(chan error, 1)
