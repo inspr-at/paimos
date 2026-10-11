@@ -97,7 +97,7 @@ func TestEditorConcurrentConditionalLegacyAndRevocationFence(t *testing.T) {
 			if err := <-fenced; err != nil {
 				t.Fatal(err)
 			}
-			if w.Code != http.StatusGone || w.Header().Get("Deprecation") != "true" || !strings.Contains(w.Body.String(), "Settings > Models") {
+			if w.Code != http.StatusGone || w.Header().Get("Deprecation") != "true" || !strings.Contains(errorText(w.Body.Bytes()), "Settings > Models") {
 				t.Fatalf("retired writer answered %d: %s", w.Code, w.Body.String())
 			}
 			if clocked.Load() != 0 {

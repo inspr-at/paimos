@@ -217,7 +217,9 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 	}
 	baseOwned := owned
 	exact, hasExact := boardOrder(owned, owner, column, q.Situation)
-	if !hasExact && row.Source == "follows" {
+	// A kind without a saved row is the Default, whether the Default is saved
+	// ("follows") or still its template: both use the Default's situations.
+	if !hasExact && (row.Source == "follows" || row.Source == "template") {
 		exact, hasExact = boardOrder(owned, owner, "other", q.Situation)
 	}
 	hasExact = hasExact && exact.Rank != nil

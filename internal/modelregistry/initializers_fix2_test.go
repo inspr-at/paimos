@@ -79,7 +79,7 @@ func TestInvalidInitializerStructureDoesNotPrepareCatalog(t *testing.T) {
 					// The retired ladder writer refuses every body with 410, unread.
 					want, reason = http.StatusGone, "Role ladders moved to Settings > Models"
 				}
-				if status != want || !strings.Contains(string(body), reason) {
+				if status != want || !strings.Contains(errorText(body), reason) {
 					t.Fatalf("wrong validation refusal %d %s; want %d %s", status, body, want, reason)
 				}
 				if after := catalogSetupState(t, p); after != before {

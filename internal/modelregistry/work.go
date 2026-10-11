@@ -18,7 +18,10 @@ import (
 type WorkQuery struct {
 	// routineEval applies the mandatory family floor to board routing
 	// only for the internal routine resolver; ordinary routes retain their API.
-	routineEval      bool
+	routineEval bool
+	// preview shares an editor preview's bounded catalog with every Models
+	// walk of that preview; nil reads the live catalog for each walk.
+	preview          *preferencePreviewCatalog
 	Escalation       bool
 	ReviewPolicies   []reviewgate.FamilyPolicy
 	TicketID         string
@@ -166,6 +169,7 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		if q.PersonID == nil {
 			q.WorkspaceOnly = true
 		}
+		q.preview = catalog
 	}
 	if q.TicketID != "" {
 		var fields []byte

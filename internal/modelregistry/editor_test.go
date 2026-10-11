@@ -184,6 +184,18 @@ func retiredLadderWrite(t *testing.T, h *editorHTTP, p tenant.Principal, path, b
 	}
 }
 
+// errorText is a refusal's decoded message. JSON escapes ">" in "Settings >
+// Models", so a raw body never contains the words a client reads.
+func errorText(raw []byte) string {
+	var out struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.Error == "" {
+		return string(raw)
+	}
+	return out.Error
+}
+
 // modelsState is everything Models routing reads, plus the retained ladder
 // tables, route events and the tenant's event counter.
 func modelsState(t *testing.T, p tenant.Principal) string {
