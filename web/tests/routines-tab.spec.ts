@@ -254,6 +254,25 @@ test('a person switch clears the open logbook, filters and the previous personâ€
   expect(errors).toEqual([])
 })
 
+// Fix round 3: the place a routine was made reads as words; its separator is an SVG, never a text glyph.
+test('Open where it was made names the place in words with an icon between them', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { errors } = await setup(page)
+  const homes = [[NOTES, 'Release notes check', 'Settings, Personal', `/settings/personal?recurrence=${NOTES}`], [CLEANUP, 'Weekly cleanup', 'Settings, Routines', `/settings/routines?recurrence=${CLEANUP}`]] as const
+  for (const [rid, name, place, href] of homes) {
+    await page.goto(`/agents/routines?routine=${rid}`)
+    await expect(logbook(page).getByRole('heading', { level: 2 })).toHaveText(name)
+    await logbook(page).getByRole('button', { name: `More for ${name}`, exact: true }).click()
+    const home = page.getByRole('menuitem', { name: /^Open where it was made/ })
+    await expect(home).toHaveAccessibleName(`Open where it was made: ${place}`)
+    await expect(home).toHaveAttribute('href', href)
+    await expect(home.locator('small svg')).toHaveCount(1)
+    await expect(home.locator('small')).not.toContainText('\u203a')
+    await page.getByRole('menu').screenshot({ path: info.outputPath(`routines-home-${rid}.png`) })
+  }
+  expect(errors).toEqual([])
+})
+
 test('a person who reads only projects sees their routines; without any read access the list says so', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const { errors } = await setup(page)

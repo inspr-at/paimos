@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getRecurrence, listRoutines, pauseRecurrence, runRecurrence } from '../lib/api'
 import { getMembers } from '../lib/access'
-import { can, myWorkspaceRole, onAccessChange, permissionsRevoked } from '../lib/authz'
+import { can, myWorkspaceRole, onAccessRevalidate, permissionsRevoked } from '../lib/authz'
 import type { After } from '../lib/identityScope'
 import { ROUTINE_STATE_WORDS, reasonWords, recurrenceName, recurrenceZone, routineState, when, type Recurrence, type RecurrenceResult } from '../lib/recurrences'
 import { SCOPE_FILTERS, STATE_FILTERS, STATE_LOOK, countWords, matchesScope, parseScope, parseState, scopeOf, stateCounts, type ScopeFilter } from '../lib/routineRuns'
@@ -221,7 +221,7 @@ watch(() => identity.owner.value, owner => {
 }, { immediate: true, flush: 'sync' })
 // A permission reset (another person or workspace, a new session) drops every read in flight
 // with the scope: start from nothing and read again. The scope's own listener runs first.
-const stopAccess = onAccessChange(change => { if (change === 'reset' && !permissionsRevoked()) { clear(); if (identity.owner.value) { load(); loadNames() } } })
+const stopAccess = onAccessRevalidate({ reset: () => { if (!permissionsRevoked()) { clear(); if (identity.owner.value) { load(); loadNames() } } } })
 // The poll refreshes whatever pages are loaded, and the routine on screen even when no page lists it.
 const poller = usePoller(() => {
   if (busy.value.length || editor.value || runPrompt.value || menu.value) return
@@ -297,10 +297,10 @@ const lostRight = computed(() => !!editor.value && !mayManageItem(editor.value.i
 watch(lostRight, lost => { if (lost) { if (editor.value) revoked.value = true; editor.value = null; runPrompt.value = null; menu.value = null } })
 function homeOf(item: Recurrence) {
   const scope = scopeOf(item), id = encodeURIComponent(item.id)
-  if (scope === 'personal') return { to: `/settings/personal?recurrence=${id}`, words: 'Settings › Personal' }
-  if (scope === 'workspace') return { to: `/settings/routines?recurrence=${id}`, words: 'Settings › Routines' }
+  if (scope === 'personal') return { to: `/settings/personal?recurrence=${id}`, place: ['Settings', 'Personal'] }
+  if (scope === 'workspace') return { to: `/settings/routines?recurrence=${id}`, place: ['Settings', 'Routines'] }
   const key = projectKeyOf(item)
-  return key ? { to: `/p/${encodeURIComponent(key)}/settings?recurrence=${id}`, words: `${key} › Settings` } : null
+  return key ? { to: `/p/${encodeURIComponent(key)}/settings?recurrence=${id}`, place: [key, 'Settings'] } : null
 }
 function copyCLI(item: Recurrence) {
   closeMenu(); const owner = identity.owner.value
@@ -382,7 +382,7 @@ const stateIcon = (state: RoutineState) => STATE_LOOK[state].icon as IconName | 
         </template>
       </div>
       <div v-else-if="menu.item" role="menu" class="menu" @keydown="menuKeys">
-        <RouterLink v-if="homeOf(menu.item)" role="menuitem" class="mi" :to="homeOf(menu.item)!.to" @click="menu = null"><AppIcon name="external" :size="14" /><span>Open where it was made<small>{{ homeOf(menu.item)!.words }}</small></span></RouterLink>
+        <RouterLink v-if="homeOf(menu.item)" role="menuitem" class="mi" :to="homeOf(menu.item)!.to" :aria-label="`Open where it was made: ${homeOf(menu.item)!.place.join(', ')}`" @click="menu = null"><AppIcon name="external" :size="14" /><span>Open where it was made<small class="place"><template v-for="(part, i) in homeOf(menu.item)!.place" :key="i"><AppIcon v-if="i" name="chevron-right" :size="10" />{{ part }}</template></small></span></RouterLink>
         <button type="button" role="menuitem" class="mi" @click="copyCLI(menu.item)"><AppIcon name="terminal" :size="14" /><span>Copy CLI command<small>aeon recur get …</small></span></button>
       </div>
     </FloatingPanel>
@@ -445,6 +445,7 @@ const stateIcon = (state: RoutineState) => STATE_LOOK[state].icon as IconName | 
 .mi > svg { flex: none; color: var(--ink-2); }
 .mi > span { display: grid; gap: 3px; min-width: 0; }
 .mi small { font-size: 11px; color: var(--ink-3); overflow-wrap: anywhere; }
+.mi small.place { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
 .menu-sep { height: 1px; margin: 4px 8px; background: var(--line); }
 .menu-eyebrow { margin: 0; padding: 8px 10px 2px; }
 .pulse { position: relative; display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--teal); }

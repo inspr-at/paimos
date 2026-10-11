@@ -1030,6 +1030,8 @@
     ,
     "browser:tests/routines-editor.spec.ts:your routines need the right only in their own project, and losing it there closes the sheet"
     ,
+    "browser:tests/routines-tab.spec.ts:Open where it was made names the place in words with an icon between them"
+    ,
     "browser:tests/routines-tab.spec.ts:a late page for another routine cannot alter the logbook on screen"
     ,
     "browser:tests/routines-tab.spec.ts:a link to an older run opens that run, keeps it through Show older, and follows the link"
@@ -11585,6 +11587,8 @@
     {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the phone sheet scrolls under a pinned footer, and switching who moves nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"your routines need the right only in their own project, and losing it there closes the sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"Open where it was made names the place in words with an icon between them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"a late page for another routine cannot alter the logbook on screen","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
