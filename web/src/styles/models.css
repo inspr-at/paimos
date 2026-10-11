@@ -243,7 +243,7 @@
 .mdl-pop .sxp-it { display: grid; grid-template-columns: 16px minmax(0, max-content) minmax(0, 1fr) 28px; align-items: center; column-gap: 8px; min-height: 44px; padding: 2px 4px; border-radius: 9px; }
 .mdl-pop .sxp-it + .sxp-it { box-shadow: 0 -1px 0 var(--line); }
 .mdl-pop .sxp-n { font: 500 11px/1 var(--mono); color: var(--ink-3); text-align: center; }
-.mdl-pop .sxp-pick { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.mdl-pop .sxp-pick { display: inline-flex; align-items: center; gap: 8px; min-width: 0; padding: 0 8px 0 4px; font-size: 13px; font-weight: 600; color: var(--ink); }
 .mdl-pop .sxp-pick .hg { width: 20px; height: 20px; border-radius: 6px; }
 .mdl-pop .sxp-pick .pn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mdl-pop .sxp-pick .pe { font-weight: 500; color: var(--ink-2); }

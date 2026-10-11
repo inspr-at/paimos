@@ -28,6 +28,18 @@ const small = (scope: Locator, min: number) => scope.locator('button, [role="opt
   .filter(element => { const rect = element.getBoundingClientRect(), style = getComputedStyle(element); return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' })
   .filter(element => { const rect = element.getBoundingClientRect(); return rect.width < size - 0.5 || rect.height < size - 0.5 })
   .map(element => `${element.className} ${(element.textContent ?? '').trim().slice(0, 20)} ${Math.round(element.getBoundingClientRect().width)}x${Math.round(element.getBoundingClientRect().height)}`), min)
+/** Coloured edge accents (design check): a thick one-sided border, or a hard one-sided inset shadow. */
+const accents = (page: Page, selector: string) => page.locator(selector).evaluateAll(roots => roots.flatMap(root => [root, ...root.querySelectorAll('*')]).flatMap(element => {
+  const style = getComputedStyle(element), rect = element.getBoundingClientRect(), out: string[] = []
+  if (!rect.width || !rect.height || style.visibility === 'hidden') return out
+  const width = (side: string) => parseFloat(style.getPropertyValue(`border-${side}-width`)) || 0, colour = (side: string) => style.getPropertyValue(`border-${side}-color`), clear = (value: string) => /rgba\(.*,\s*0\)$|transparent/.test(value)
+  for (const [a, b] of [['left', 'right'], ['top', 'bottom'], ['right', 'left'], ['bottom', 'top']] as const) if (width(a) >= 2 && !clear(colour(a)) && (width(b) < width(a) || colour(b) !== colour(a))) out.push(`${element.className} border-${a}`)
+  for (const match of style.boxShadow.matchAll(/inset\s+(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px|(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px(?:\s+-?[\d.]+px)?\s+inset/g)) {
+    const x = +(match[1] ?? match[4]), y = +(match[2] ?? match[5]), blur = +(match[3] ?? match[6])
+    if ((Math.abs(x) >= 2 || Math.abs(y) >= 2) && blur <= 1) out.push(`${element.className} inset ${x}/${y}`)
+  }
+  return out
+}))
 
 test('members read Quick jobs and its Why, and never see the situation fold', async ({ page }) => {
   const state = await open(page, { member: true, situations: true })
@@ -73,6 +85,7 @@ test('For everyone edits a cell in a popover that stays on screen and moves noth
   await guard.check(async () => { await fix.click(); await expect(page.getByRole('dialog', { name: 'Fix rounds · UI design' })).toBeVisible() })
   const popover = page.getByRole('dialog', { name: 'Fix rounds · UI design' })
   expect(await inView(popover)).toBe(true); expect(await tops(page)).toEqual(before); expect(await small(popover, 24)).toEqual([])
+  expect(await accents(page, '[data-quick], [data-situations], .mdl-pop')).toEqual([])
   await expect(popover).toContainText('Same as the row: its pick, then its fallback.'); await expect(popover.locator('[data-sx-clear]')).toHaveCount(0)
   await expect(popover.getByRole('button', { name: 'Use another order' })).toBeFocused()
   await guard.check(async () => { await page.keyboard.press('Escape'); await expect(popover).toHaveCount(0) })
@@ -126,6 +139,7 @@ test.describe('on a phone', () => {
       await cell(page, key).click()
       const popover = page.locator('.mdl-pop'); await expect(popover).toBeVisible()
       expect(await inView(popover)).toBe(true); expect(await tops(page)).toEqual(before); expect(await small(popover, 44)).toEqual([])
+      expect(await accents(page, '[data-situations], .mdl-pop')).toEqual([])
       await page.keyboard.press('Escape'); await expect(popover).toHaveCount(0)
     }
     await page.locator('[data-quick-why]').scrollIntoViewIfNeeded(); await page.locator('[data-quick-why]').click()
