@@ -28,6 +28,9 @@ func ResolveEscalation(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Wor
 	}
 	q.Situation = "stuck"
 	q.Escalation = true
+	if q.TicketRole == "" {
+		q.TicketRole = q.Role
+	}
 	if len(excluded) > 0 && q.PreviousFamily == "" {
 		if err := tx.QueryRow(ctx, `SELECT family FROM model_profiles WHERE id=$1`, excluded[0]).Scan(&q.PreviousFamily); err != nil {
 			return out, err

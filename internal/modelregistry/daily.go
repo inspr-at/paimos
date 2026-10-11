@@ -292,7 +292,7 @@ func (d *modelsDailyAdmission) filter(ctx context.Context, tx pgx.Tx, profile Pr
 		}
 		// Until S2 carries saved Wait settings into order ends, exhaust this
 		// model's sibling routes but do not advance to another model at a cap.
-		if reason == "daily_limit" && snapshot.Daily[profile.Harness].AtLimit == "wait" {
+		if reason == "daily_limit_unknown" || reason == "daily_limit" && snapshot.Daily[profile.Harness].AtLimit == "wait" {
 			d.wait = true
 		}
 		if firstCause == "" {

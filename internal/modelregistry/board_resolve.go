@@ -101,13 +101,21 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		q.Situation = "stuck"
 	}
 	query := modelprefs.BoardQuery{Column: q.Column, Area: q.Area, Labels: q.Labels, Situation: q.Situation, Review: review, Concept: q.Concept, AuthorFamily: q.AuthorFamily, EstimateHours: q.EstimateHours, FixRound: q.FixRound}
+	if review && !boardDispatchAdopted(s) {
+		// Closed-board placement previews retain their public review column.
+		query.Column = "review:" + q.AuthorFamily
+	}
 	d := modelprefs.ResolveModelsBoard(s, query)
 	chain, err := modelprefs.LoadChain(ctx, tx, q.PersonID, q.ProjectID)
 	if err != nil {
 		return nil, err
 	}
 	lockedProfiles := map[string]bool{}
-	cell := modelprefs.ResolveCell(chain, d.Column, modelprefs.BucketOf(q.Complexity, q.Role))
+	placementRole := q.TicketRole
+	if placementRole == "" {
+		placementRole = q.Role
+	}
+	cell := modelprefs.ResolveCell(chain, d.Column, modelprefs.BucketOf(q.Complexity, placementRole))
 	lockedEscalation := q.Escalation && cell.LockedBy != "" && cell.Cell != nil && cell.Cell.Mode != "auto"
 	if lockedEscalation {
 		profiles := []Profile{}
@@ -119,7 +127,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		}
 	}
 	out := WorkResolution{Resolution: Resolution{Role: roleName, AuthorFamily: q.AuthorFamily, Source: "aeon", Ladder: []Candidate{}, OwnerRequired: true}, Residency: requirement}
-	out.Trace = PreferenceTrace{PersonID: q.PersonID, Kind: d.Column, KindSource: "ticket", Complexity: q.Complexity, ComplexitySource: q.ComplexitySource, Bucket: modelprefs.BucketOf(q.Complexity, q.Role), SetBy: "default", Mode: "auto", QualifyingAccountIDs: []string{}}
+	out.Trace = PreferenceTrace{PersonID: q.PersonID, Kind: d.Column, KindSource: "ticket", Complexity: q.Complexity, ComplexitySource: q.ComplexitySource, Bucket: modelprefs.BucketOf(q.Complexity, placementRole), SetBy: "default", Mode: "auto", QualifyingAccountIDs: []string{}}
 	health, err := agentaccounts.HarnessHealthAt(ctx, tx, now, q.ProjectID)
 	if err != nil {
 		return nil, err
@@ -298,6 +306,9 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		if roleName == "review-gate-security" {
 			out.Trace.Blocked = "no qualified security review profile/account"
 			out.Trace.Hard = []string{"security_review"}
+		}
+		if waitCode == "daily_limit_unknown" {
+			out.Trace.Blocked = waitCode
 		}
 		if q.Escalation && admissionWait {
 			out.Trace.Blocked = "admission_wait"

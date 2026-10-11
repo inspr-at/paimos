@@ -50,7 +50,7 @@ func TestModelsV2UnadoptedSavedLadder(t *testing.T) {
 		if _, err := tx.Exec(ctx, `UPDATE model_role_routes SET priority=priority+100 WHERE role='build'`); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE model_role_routes SET priority=1 WHERE role='build' AND profile_id=$1`, opus); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2) ON CONFLICT(tenant_id,role,profile_id) DO UPDATE SET priority=EXCLUDED.priority`, p.TenantID, opus); err != nil {
 			return err
 		}
 		now, err := dbNow(ctx, tx)
