@@ -1,7 +1,9 @@
 # Shared shortcut runtime
 
 The Agents keyboard entries and the migrated header shortcuts are defined in
-`web/src/lib/shortcuts.ts`. AppHeader installs one capture dispatcher. Components
+`web/src/lib/shortcuts.ts`. AppHeader installs the dispatcher in capture for app
+keys and sequences, and in bubble for page single keys. Chat and focused controls
+can consume page keys first; the dispatcher respects `defaultPrevented`. Components
 attach a handler with `onAction(id, handler, { enabled, when })` and dispose it
 on unmount. A handler returns `false` when the action does not apply; its key then
 continues to the focused control. Capture the selected record when acting, and

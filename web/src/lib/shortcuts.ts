@@ -4,8 +4,9 @@
  * `onAction(id, event => { ...; return false if inapplicable }, { enabled, when })`
  * and dispose the returned function on unmount. `enabled` gates both execution
  * and hints; `when(event)` narrows the entry's scope to the relevant focus/record.
- * AppHeader installs the single capture dispatcher. Sequence prefixes pass on
- * to existing page controls; a completed sequence consumes its final key.
+ * AppHeader installs one dispatcher in two phases: app keys and sequences in
+ * capture, page single keys in bubble after chat and focused controls. Sequence
+ * prefixes pass on to page controls; a completed sequence consumes its final key.
  * `shortcutKeys`, `shortcutHint` and `shortcutHelp` expose the same resolved
  * bindings. Entries without a handler have no hint. Person overrides are
  * intentionally absent in release 130; AEON-1202 owns persistence and editing.
@@ -101,20 +102,24 @@ export function createShortcutRegistry(context = browserContext, now = () => Dat
     event.preventDefault(); event.stopImmediatePropagation()
     return true
   }
-  function dispatch(event: KeyboardEvent) {
-    if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.key === 'Process' || event.key === 'Dead' || event.altKey) { cancelSequence(); return }
+  function dispatch(event: KeyboardEvent, phase?: 'capture' | 'bubble') {
+    const capture = phase !== 'bubble'
+    if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.key === 'Process' || event.key === 'Dead' || event.altKey) { if (capture) cancelSequence(); return }
     const current = context(event), time = now()
-    if (pending && time - pending.started > SEQUENCE_MS) cancelSequence()
-    const sequence = pending
+    if (capture && pending && time - pending.started > SEQUENCE_MS) cancelSequence()
+    // Only capture advances sequences; bubble must not process the prefix twice
+    // or cancel it when the prefix has opened its existing release menu.
+    const sequence = capture ? pending : null
     // The only modifier exception is the app's existing Cmd/Ctrl+K palette.
     if (event.metaKey || event.ctrlKey) {
+      if (!capture) return
       cancelSequence()
       const palette = registrations.get('app.palette')
       if (palette && available(palette, event) && matches('Mod+K', event)) invoke(palette, event)
       return
     }
     const releaseLayer = sequence && sequence.candidates.every(candidate => candidate.registration.entry.id.startsWith('places.')) && releaseChordOpen(current.layers, sequence.started, time)
-    if (current.editing || (current.layers.length > 0 && !releaseLayer)) { cancelSequence(); return }
+    if (current.editing || (current.layers.length > 0 && !releaseLayer)) { if (capture) cancelSequence(); return }
     if (sequence) {
       if (event.repeat) return
       cancelSequence()
@@ -130,8 +135,12 @@ export function createShortcutRegistry(context = browserContext, now = () => Dat
       for (const binding of registration.entry.keys) {
         const keys = steps(binding)
         if (!matches(keys[0], event)) continue
-        if (keys.length === 1) { if (invoke(registration, event)) return }
-        else if (!sequence && !event.repeat && !current.layers.length) candidates.push({ registration, keys })
+        if (keys.length === 1) {
+          const pageKey = !registration.entry.scope.startsWith('app')
+          if ((phase === 'capture' && pageKey) || (phase === 'bubble' && !pageKey)) continue
+          if (invoke(registration, event)) return
+        }
+        else if (capture && !sequence && !event.repeat && !current.layers.length) candidates.push({ registration, keys })
       }
     }
     if (candidates.length) pending = { started: time, index: 1, candidates }
@@ -148,17 +157,21 @@ export function createShortcutRegistry(context = browserContext, now = () => Dat
     cancelSequence()
   }
   const focus = (event: FocusEvent) => { if (shortcutTyping(event.target)) cancelSequence() }
+  const captureKey = (event: KeyboardEvent) => dispatch(event, 'capture')
+  const bubbleKey = (event: KeyboardEvent) => dispatch(event, 'bubble')
   let installed = false
   function install() {
     if (installed) throw new Error('Shortcut dispatcher already installed')
     installed = true
-    window.addEventListener('keydown', dispatch, true)
+    window.addEventListener('keydown', captureKey, true)
+    window.addEventListener('keydown', bubbleKey)
     window.addEventListener('pointerdown', pointer, true)
     window.addEventListener('focusin', focus, true)
     window.addEventListener('blur', cancelSequence)
     return () => {
       installed = false; cancelSequence()
-      window.removeEventListener('keydown', dispatch, true)
+      window.removeEventListener('keydown', captureKey, true)
+      window.removeEventListener('keydown', bubbleKey)
       window.removeEventListener('pointerdown', pointer, true)
       window.removeEventListener('focusin', focus, true)
       window.removeEventListener('blur', cancelSequence)

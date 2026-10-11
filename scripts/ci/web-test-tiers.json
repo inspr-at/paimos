@@ -18038,6 +18038,10 @@
     ,
     {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"dispatches only attached eligible actions, preserves native/input/IME keys, and cancels stale sequences","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"installed dispatcher respects chat Escape ownership and app capture priority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"installed dispatcher respects stepper arrows ownership and app capture priority","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"rejects shared keys in overlapping scopes and permits disjoint row/divider bindings","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > queries canonical leaves on every page and excludes parents and unknown shapes from mixed results","tier":"ESSENTIAL"}

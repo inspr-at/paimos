@@ -79,3 +79,76 @@ it('dispatches only attached eligible actions, preserves native/input/IME keys, 
   expect(send('f').preventDefault).not.toHaveBeenCalled()
   expect(search).toHaveBeenCalledTimes(4)
 })
+
+it.each(['chat Escape', 'stepper arrows'])('installed dispatcher respects %s ownership and app capture priority', owner => {
+  // Model the event path through window capture, the focused control, and
+  // window bubble. Use real cancellable events to preserve defaultPrevented.
+  const listeners: { type: string; listener: EventListener; capture: boolean }[] = []
+  vi.stubGlobal('window', {
+    addEventListener(type: string, listener: EventListener, capture = false) { listeners.push({ type, listener, capture }) },
+    removeEventListener(type: string, listener: EventListener, capture = false) {
+      const index = listeners.findIndex(row => row.type === type && row.listener === listener && row.capture === capture)
+      if (index !== -1) listeners.splice(index, 1)
+    },
+  })
+  const registry = createShortcutRegistry(() => ({ editing: false, layers: [] }), () => 0)
+  const previous = vi.fn(), next = vi.fn(), close = vi.fn(), palette = vi.fn(), sheet = vi.fn(), desk = vi.fn()
+  registry.onAction('agents.row.prev', previous)
+  registry.onAction('agents.row.next', next)
+  registry.onAction('agents.details.close', close)
+  registry.onAction('app.palette', palette)
+  registry.onAction('app.shortcuts', sheet)
+  registry.onAction('places.desk', desk)
+  const uninstall = registry.install()
+  const interrupt = vi.fn((event: Event) => { event.preventDefault(); event.stopPropagation() })
+  const chatKeys: EventListener = event => { if ((event as KeyboardEvent).key === 'Escape') interrupt(event) }
+  // Chat mounts after AppHeader installed the registry, as on /agents/:id.
+  window.addEventListener('keydown', chatKeys, true)
+  const send = (key: string, control?: (event: KeyboardEvent) => void, extra: Partial<KeyboardEvent> = {}) => {
+    const event = Object.assign(new Event('keydown', { cancelable: true }), { key, code: '', metaKey: false, ctrlKey: false, altKey: false, shiftKey: false, repeat: false, isComposing: false, keyCode: 0, ...extra }) as KeyboardEvent
+    const stopped = vi.spyOn(event, 'stopImmediatePropagation')
+    for (const row of listeners.filter(row => row.type === 'keydown' && row.capture)) {
+      row.listener(event)
+      if (stopped.mock.calls.length) break
+    }
+    if (!event.cancelBubble) control?.(event)
+    if (!event.cancelBubble) for (const row of listeners.filter(row => row.type === 'keydown' && !row.capture)) {
+      row.listener(event)
+      if (stopped.mock.calls.length) break
+    }
+    return event
+  }
+  try {
+    if (owner === 'chat Escape') {
+      send('Escape')
+      expect(interrupt).toHaveBeenCalledOnce()
+      expect(close).not.toHaveBeenCalled()
+    } else {
+      const step = vi.fn((event: KeyboardEvent) => { event.preventDefault() })
+      send('ArrowUp', step)
+      send('ArrowDown', step)
+      expect(step).toHaveBeenCalledTimes(2)
+      expect(previous).not.toHaveBeenCalled()
+      expect(next).not.toHaveBeenCalled()
+    }
+    window.removeEventListener('keydown', chatKeys, true)
+    send('Escape'); send('ArrowUp'); send('ArrowDown')
+    expect(close).toHaveBeenCalledOnce()
+    expect(previous).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledOnce()
+    const local = vi.fn((event: KeyboardEvent) => { event.preventDefault() })
+    send('k', local, { ctrlKey: true }); send('?', local)
+    send('g'); send('d', local)
+    expect(palette).toHaveBeenCalledOnce()
+    expect(sheet).toHaveBeenCalledOnce()
+    expect(desk).toHaveBeenCalledOnce()
+    expect(local).not.toHaveBeenCalled()
+    uninstall()
+    expect(listeners).toEqual([])
+    expect(send('ArrowUp').defaultPrevented).toBe(false)
+    expect(previous).toHaveBeenCalledOnce()
+  } finally {
+    uninstall()
+    vi.unstubAllGlobals()
+  }
+})

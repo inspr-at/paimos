@@ -293,8 +293,8 @@ const actionScope = {
   enabled: () => !!session.identity,
   when: (event: KeyboardEvent) => {
     if (event.target instanceof Node && document.querySelector('.ticket-peek-host')?.contains(event.target)) return false
-    // Capture precedes local controls; their arrows remain theirs (e.g. the
-    // capacity mode selector), just as before the page's old bubble listener.
+    // Local controls get first refusal through the bubble dispatcher; these
+    // role guards also keep navigation inside controls such as the mode selector.
     return !(event.target instanceof HTMLElement && event.target.closest('[role="radiogroup"], [role="tablist"], [role="slider"], [role="spinbutton"], [role="listbox"], [role="separator"]'))
   },
 }
