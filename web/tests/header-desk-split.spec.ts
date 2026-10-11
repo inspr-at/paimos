@@ -300,11 +300,13 @@ const trailFit = (page: Page) => page.locator('.app-header').evaluate(header => 
   if (!parts.some(part => part.matches('.crumb'))) cut.push('a trail without a crumb')
   return { parts: parts.map(label), cut }
 })
+// The trail element itself: once nothing in it fits whole it steps aside, and leaves the accessibility tree with it.
+const trailOf = (page: Page) => page.locator('.app-header .crumbs')
 const settle = (page: Page) => page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
 const TRAILS = [
   { slug: 'tickets', path: '/p/PHAROS/tickets', ready: (page: Page) => expect(page.locator('.app-header .app-density')).toBeVisible() },
-  { slug: 'ticket', path: '/p/PHAROS/PHAROS-11?view=full', ready: (page: Page) => expect(page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')).toHaveText('PHAROS-11') },
-  { slug: 'profiles', path: '/settings/business/profiles', ready: (page: Page) => expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Document profiles') },
+  { slug: 'ticket', path: '/p/PHAROS/PHAROS-11?view=full', ready: (page: Page) => expect(trailOf(page).locator('.crumb.current')).toHaveText('PHAROS-11') },
+  { slug: 'profiles', path: '/settings/business/profiles', ready: (page: Page) => expect(trailOf(page)).toContainText('Document profiles') },
 ]
 for (const width of [601, 640, 721]) for (const theme of ['light', 'dark'] as const) {
   test(`at ${width} ${theme} the trail drops whole segments and never cuts a chip`, async ({ page }, testInfo) => {
@@ -315,7 +317,7 @@ for (const width of [601, 640, 721]) for (const theme of ['light', 'dark'] as co
     for (const trail of TRAILS) {
       await page.goto(trail.path)
       await trail.ready(page)
-      await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText(trail.slug === 'profiles' ? 'Settings' : 'Pharos')
+      await expect(trailOf(page)).toContainText(trail.slug === 'profiles' ? 'Settings' : 'Pharos')
       await expect(chevron(page)).toBeVisible()
       await page.evaluate(() => document.fonts.ready.then(() => undefined))
       await settle(page)
@@ -337,7 +339,7 @@ test('from 601 to 1180 px the trail never cuts a chip and returns whole when the
     await page.setViewportSize({ width: 1180, height: 900 })
     await page.goto(trail.path)
     await trail.ready(page)
-    await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Pharos')
+    await expect(trailOf(page)).toContainText('Pharos')
     await page.evaluate(() => document.fonts.ready.then(() => undefined))
     const seen: string[] = []
     for (let width = 1180; width >= 601; width -= 7) {
