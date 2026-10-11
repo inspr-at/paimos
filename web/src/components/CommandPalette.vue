@@ -16,7 +16,7 @@ import { useSession } from '../stores/session'
 import { recents } from '../lib/recents'
 import { dark, toggleTheme } from '../lib/theme'
 import { toast } from '../lib/toast'
-import { highlight, statusMeta } from '../lib/work'
+import { highlight, statusMeta, ticketPath } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import AppIcon, { type IconName } from './AppIcon.vue'
 import KeyCap from './KeyCap.vue'
@@ -191,7 +191,7 @@ function open() {
 function close() { controller?.abort(); dialog.value?.close(); opener?.focus({ preventScroll: true }) }
 function hrefOf(result: Result): string | null {
   if (result.type === 'project') return `/p/${encodeURIComponent(result.key)}`
-  if (result.type === 'ticket' && result.projectKey) return `/p/${encodeURIComponent(result.projectKey)}/${encodeURIComponent(result.key)}`
+  if (result.type === 'ticket' && result.projectKey) return ticketPath(result.projectKey, result.key)
   // Wide screens show the entry docked beside its project's list; narrower ones its own page.
   if (result.type === 'knowledge' && result.projectKey) return window.matchMedia(DOCK_MEDIA).matches ? dockPath(result.projectKey, result.kind, result.slug) : entryPath(result.projectKey, result.kind, result.slug)
   return null

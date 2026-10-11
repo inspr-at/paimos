@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -37,8 +38,8 @@ type TicketRoute struct {
 	CommandTemplate string
 }
 
-// ResolveTicketRoute reads the role ladder. The ladder is keyed by role;
-// area must be a known planning area and does not select a different profile.
+// ResolveTicketRoute uses the same Models row and walk as dispatch.
+// The area must be a known planning area.
 // A blank or unknown value, review-gate (the ticket stores no author family),
 // or a ladder with nothing selected returns nil. Database errors are returned.
 // This does not seed the catalog and does not write.
@@ -52,7 +53,8 @@ func ResolveTicketRoute(ctx context.Context, tx pgx.Tx, role, area string, now t
 	if err != nil || !known {
 		return nil, err
 	}
-	res, err := resolveRole(ctx, tx, resolveQuery{Role: role}, now)
+	p, _ := tenant.PrincipalFrom(ctx)
+	res, err := ResolveWork(ctx, tx, p, WorkQuery{Role: role, Area: area}, now)
 	if err != nil {
 		return nil, err
 	}

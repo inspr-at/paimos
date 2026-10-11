@@ -142,6 +142,18 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 			if got.Profile != nil || got.Trace.Blocked != "daily_limit" {
 				t.Fatalf("wait became successor: %+v", got)
 			}
+			if board {
+				// Risk: preserving a private owner's Wait choice leaks its cap
+				// code/reset to a workspace preview without usage visibility.
+				preview := tenant.Principal{TenantID: p.TenantID, Kind: tenant.Agent}
+				private, err := ResolveWork(ctx, tx, preview, WorkQuery{Role: "build", Area: "other", Situation: "first", WorkspaceOnly: true}, now)
+				if err != nil {
+					return err
+				}
+				if private.Profile != nil || private.Trace.Blocked != "Codex account cannot take new work right now" || len(private.Ladder) == 0 || !slices.Equal(private.Ladder[0].SkipReasons, []string{"Codex account cannot take new work right now"}) {
+					t.Fatalf("private Wait leaked metrics or selected a successor: %+v", private)
+				}
+			}
 		}
 		settings.AtLimit = "ladder"
 		if err := save(); err != nil {
