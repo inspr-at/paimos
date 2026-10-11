@@ -131,7 +131,7 @@ test('For everyone edits a cell in a popover that stays on screen and moves noth
   await review.getByRole('button', { name: 'Use another order' }).click(); await page.getByRole('combobox').fill('sol'); await page.keyboard.press('Enter')
   await expect(cell(page, 'design:review')).toContainText('GPT-6.1 Sol')
   expect(state.writes.at(-1)).toMatchObject({ method: 'PUT', path: '/model-preferences/orders/design/review', body: { rank: ['openai:sol'], efforts: {}, end: 'auto' } })
-  await expect(cell(page, 'design:review').locator('.sr-only')).toHaveText('UI design, Review: GPT-6.1 Sol · xhigh')
+  await expect(cell(page, 'design:review')).toHaveAttribute('aria-label', 'UI design, Review: GPT-6.1 Sol · xhigh. Change')
   // A lower level clicked for a model whose highest is above it still writes no level, so the server cannot refuse it.
   await cell(page, 'design:review').click(); await review.getByRole('button', { name: 'Add to this order' }).click()
   await option(page, 'anthropic:opus').locator('.lvc[data-eff="xhigh"]').click()
