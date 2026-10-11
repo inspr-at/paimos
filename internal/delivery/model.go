@@ -6,9 +6,10 @@ package delivery
 import (
 	"crypto/sha256"
 	"fmt"
-	"github.com/inspr-at/paimos/internal/routineactions/evidence"
 	"slices"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/routineactions/evidence"
 )
 
 type State string
