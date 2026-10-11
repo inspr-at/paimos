@@ -68,33 +68,41 @@ const ruleOf = (r: AgentAccount) => capacity.value.byAccount.get(r.id)?.limit
 const ruleKey = (r: AgentAccount) => `${r.id}:${ruleOf(r)?.id ?? ''}`
 // A removed rule or an ended Hold keeps its row, saying so, until the panel shows another
 // account or closes: "Agents may use it" and everything below stay put after the write
-// (AEON-541). Each row holds the height of its tallest state and its action slot the width
+// (AEON-541). The row is kept from the moment the person confirms, as it was, because a
+// read can land before the write answers (the capacity read after it lands before the
+// others). Each row holds the height of its tallest state and its action slot the width
 // of its widest, so asking, confirming and the result never move a neighbour either.
 interface Words { title: string; text: string }
 // Removing an older rule asks in place, without Undo: the server refuses to create one again.
 // Focus moves to Keep (the safe choice) and back to Remove when the question closes.
 const confirmRule = ref(''), useBusy = ref('')
-const removed = ref(new Map<string, string>()), ended = ref<(Words & { key: string; done: Words }) | null>(null)
+const removed = ref(new Map<string, { words: string; done: boolean }>()), ended = ref<(Words & { key: string; done: Words; settled: boolean }) | null>(null)
 const RULE_TEXT = { ask: 'An older limit on this account only. It still applies until you remove it; the daily limit does this for every account now.', confirm: 'Remove it for good? This kind of limit can’t be set again; the daily limit paces every account.', done: 'Removed for good. The daily limit paces this account now.' }
 function ruleRow(r: AgentAccount) {
-  // A removal the server confirmed shows at once, before the next read drops the rule.
-  const rule = ruleOf(r), gone = removed.value.get(r.id), words = gone ?? (rule ? ruleWords(rule) : '')
+  // A removal under way stays as confirmed; one the server confirmed shows at once, before the next read drops the rule.
+  const rule = ruleOf(r), gone = removed.value.get(r.id), words = gone?.words ?? (rule ? ruleWords(rule) : '')
   if (!words) return null
-  const state = gone ? 'done' as const : confirmRule.value === ruleKey(r) ? 'confirm' as const : 'ask' as const
+  const state = gone?.done ? 'done' as const : gone || confirmRule.value === ruleKey(r) ? 'confirm' as const : 'ask' as const
   return { state, title: `Set by you · ${words}`, text: RULE_TEXT[state], sizers: Object.values(RULE_TEXT).filter(t => t !== RULE_TEXT[state]) }
 }
 const limitRows = computed(() => account.value?.records.map(record => ({ record, rule: ruleRow(record) })) ?? [])
 const heldRow = computed(() => {
   const live = held.value, gone = ended.value
-  // The hold that ended shows as ended; a different one in force since shows as it is.
-  if (gone && (!live || live.key === gone.key)) return { state: 'done' as const, ...gone.done, sizers: [{ title: gone.title, text: gone.text }] }
+  // The hold being ended shows as it was, then as ended; a different one in force since shows as it is.
+  if (gone && (!live || live.key === gone.key)) return gone.settled ? { state: 'done' as const, ...gone.done, sizers: [{ title: gone.title, text: gone.text }] } : { state: 'held' as const, title: gone.title, text: gone.text, sizers: [gone.done] }
   return live ? { state: 'held' as const, title: live.title, text: live.text, sizers: [heldDone(live.kind)] } : null
 })
 function heldDone(kind: string): Words { return kind === 'sprint' ? { title: 'Sprint ended', text: 'The daily limit paces it again.' } : { title: 'Hold ended', text: 'Agents may use it again.' } }
 async function endHold(a: OverviewAccount) {
   const h = held.value, screen = selectedKey.value
-  if (!h) return
-  if (await endHeld.value(a, h.key) && screen === selectedKey.value) ended.value = { key: h.key, title: h.title, text: h.text, done: heldDone(h.kind) }
+  if (!h || busy.value) return
+  const ending = { key: h.key, title: h.title, text: h.text, done: heldDone(h.kind), settled: false }
+  ended.value = ending
+  const ok = await endHeld.value(a, h.key)
+  if (screen !== selectedKey.value) return
+  // A failure says so in its toast and the row shows the hold as it is now.
+  if (ok) ended.value = { ...ending, settled: true }
+  else if (ended.value?.key === h.key && !ended.value.settled) ended.value = null
 }
 function forget() { confirmRule.value = ''; useBusy.value = ''; removed.value = new Map(); ended.value = null }
 watch(selectedKey, forget)
@@ -109,13 +117,20 @@ async function removeRule(r: AgentAccount, seen: string) {
   if (!manage.value || busy.value) return
   if (!rule || ruleKey(r) !== seen) { confirmRule.value = ''; toast('This limit changed. The panel shows it as it is now.', { tone: 'error' }); return }
   busy.value = true
+  const words = ruleWords(rule)
+  removed.value = new Map(removed.value).set(r.id, { words, done: false })
   try {
     await removeLimit(r.id)
     if (identity !== owner.value || screen !== selectedKey.value) return
-    confirmRule.value = ''; removed.value = new Map(removed.value).set(r.id, ruleWords(rule))
+    confirmRule.value = ''; removed.value = new Map(removed.value).set(r.id, { words, done: true })
     toast(`Removed the older limit on ${accountName(r)}. The daily limit paces it now.`)
     await agents.value.afterWrite()
-  } catch (error) { if (identity === owner.value && screen === selectedKey.value) toast(error instanceof Error ? error.message : 'The limit was not removed. Please try again.', { tone: 'error' }) }
+  } catch (error) {
+    if (identity !== owner.value || screen !== selectedKey.value) return
+    // Not removed: the row shows the rule as it is now, and the toast says why.
+    if (removed.value.get(r.id)?.done === false) { const next = new Map(removed.value); next.delete(r.id); removed.value = next }
+    toast(error instanceof Error ? error.message : 'The limit was not removed. Please try again.', { tone: 'error' })
+  }
   finally { if (identity === owner.value) busy.value = false }
 }
 // The switch shows the saved state until the write is confirmed; turning it off asks first (Drain).

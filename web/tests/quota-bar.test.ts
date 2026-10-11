@@ -4,12 +4,13 @@
 // the stop that binds and the room before it.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DAILY_FRESH_MS, quotaBar, quotaCaption, quotaInput, quotaLabel, quotaSegments, quotaSentence, ruleLeft, widestSentences, type Said } from '../src/lib/quotaBar.ts'
-import type { DailyAccount } from '../src/lib/dailyLimits.ts'
+import { DAILY_FRESH_MS, nextStale, quotaBar, quotaCaption, quotaInput, quotaLabel, quotaSegments, quotaSentence, ruleLeft, widestSentences, type Said } from '../src/lib/quotaBar.ts'
+import type { DailyAccount, DailyPlanFields } from '../src/lib/dailyLimits.ts'
 import type { CapacityWindow } from '../src/lib/capacity.ts'
 import type { LimitUse } from '../src/lib/accountLimits.ts'
 
 const NOW = Date.parse('2026-10-11T13:10:00Z')
+const iso = (t: number) => new Date(t).toISOString()
 const said = (parts: Said[]) => parts.map(p => (p.strong ? `**${p.text}**` : p.text)).join('')
 const door = (over: Partial<DailyAccount> = {}): DailyAccount => ({
   account_id: 'a1', label: 'markus', order: 1, used_pct: 47, left_pct: 53, start_of_day_used_pct: 40, limit_used_pct: 50, floor_pct: 10,
@@ -152,8 +153,9 @@ test('a used-up older limit stops agents in any unit, runs, tokens or money as m
 // AEON-1172 fix round 2: a plan read that fails keeps the last plan. Its doors were
 // fresh when it arrived; the server trusts a reading for two minutes, so the bar
 // stops promising room then, at the door's reset, or when the plan's day ends.
+// Here the reading was taken as the plan was asked for (fix round 3 measures from it).
 test('a plan that could not refresh goes stale on time and claims no room', () => {
-  const arrived = NOW, source = { daily: door(), window: window(53), planAt: arrived, dayEnds: '2026-10-11T22:00:00Z' }
+  const arrived = NOW, source = { daily: door({ read_at: iso(arrived) }), window: window(53), clock: { asked: arrived }, dayEnds: '2026-10-11T22:00:00Z' }
   const at = (now: number, over: Partial<typeof source> = {}) => quotaBar(quotaInput({ ...source, ...over, now }))
   assert.deepEqual(((b) => [b.stale, b.room])(at(arrived + DAILY_FRESH_MS - 1)), [false, 3])
   const old = at(arrived + DAILY_FRESH_MS)
@@ -163,7 +165,43 @@ test('a plan that could not refresh goes stale on time and claims no room', () =
   // The door's reset or the end of the plan's day comes first.
   assert.equal(at(Date.parse('2026-10-11T13:11:00Z'), { daily: door({ resets_at: '2026-10-11T13:11:00Z' }) }).stale, true)
   assert.equal(at(Date.parse('2026-10-11T13:11:00Z'), { dayEnds: '2026-10-11T13:11:00Z' }).stale, true)
-  // A fresh arrival is fresh again; without a clock the server's word stands.
-  assert.equal(at(arrived + 3 * DAILY_FRESH_MS, { planAt: arrived + 2 * DAILY_FRESH_MS + 1 }).stale, false)
+  // A new plan with a new reading is fresh again; without a clock the server's word stands.
+  const later = arrived + 2 * DAILY_FRESH_MS + 1
+  assert.equal(at(arrived + 3 * DAILY_FRESH_MS, { clock: { asked: later }, daily: door({ read_at: iso(later) }) }).stale, false)
   assert.equal(quotaBar(quotaInput({ daily: door(), window: window(53) })).stale, false)
+})
+
+// AEON-1172 fix round 3: the server trusts a reading for two minutes from when it was
+// taken (read_at), not from when the plan reached this browser. A reading nearly two
+// minutes old on arrival must stop promising room when admission stops trusting it,
+// even while every refresh fails. The clock is injected; nothing waits on real time.
+test('a reading nearly two minutes old goes stale when the server stops trusting it, not two minutes after the plan arrived', () => {
+  const read = NOW - 119_000, source = { daily: door({ read_at: iso(read) }), window: window(53), clock: { asked: NOW }, dayEnds: '2026-10-11T22:00:00Z' }
+  const at = (now: number, over: Partial<typeof source> = {}) => quotaBar(quotaInput({ ...source, ...over, now }))
+  assert.deepEqual(((b) => [b.stale, b.room])(at(read + DAILY_FRESH_MS - 1)), [false, 3])
+  // The refresh after it fails: no new plan, so the same clock; the reading's own age decides.
+  for (const now of [read + DAILY_FRESH_MS, NOW + 2_000, NOW + DAILY_FRESH_MS - 1]) {
+    const old = at(now)
+    assert.deepEqual([old.stale, old.room], [true, null], `at ${now - NOW} ms`)
+    assert.equal(said(quotaSentence(old, { vendor: 'Codex' })), '**The last reading is out of date.** Agents wait for a fresh one before they use more.')
+  }
+  // The server's clock in its answer places the reading, so this browser's own clock running
+  // a minute behind or ahead stretches nothing: read 100 s before the server answered, 19 s
+  // remain (one second kept back because the Date header counts whole seconds).
+  const server = Date.parse('2026-10-11T13:10:00Z')
+  for (const skew of [-60_000, 0, 60_000]) {
+    const asked = server + skew - 200, clock = { asked, server }, daily = door({ read_at: iso(server - 100_000) })
+    assert.deepEqual(((b) => [b.stale, b.room])(at(asked + 19_000 - 1, { clock, daily })), [false, 3], `skew ${skew}`)
+    assert.equal(at(asked + 19_000, { clock, daily }).stale, true, `skew ${skew}`)
+  }
+  // A reading time ahead of the server's clock, or none at all, is no fresh reading.
+  assert.equal(at(NOW, { clock: { asked: NOW, server }, daily: door({ read_at: iso(server + 1_500) }) }).stale, true)
+  assert.equal(at(NOW, { daily: door({ read_at: null }) }).stale, true)
+  // The page moves its clock at the next door to go stale, not only at the next read.
+  const plan = (accounts: DailyAccount[]): DailyPlanFields => ({ daily_until: '2026-10-11T22:00:00Z', daily_state: { codex: { state: 'on_pace', limit_used_pct: 50, today_points_used: 0, today_points_allowed: 10, over_pace_points: 0, active_account_id: 'a1', next_on_ladder: null, accounts } } })
+  const doors = [door({ read_at: iso(NOW - 30_000) }), door({ account_id: 'a2', read_at: iso(read) }), door({ account_id: 'a3', freshness: 'stale', read_at: iso(NOW - 200_000) }), door({ account_id: 'a4', details_redacted: true })]
+  assert.equal(nextStale(plan(doors), { asked: NOW }, NOW), read + DAILY_FRESH_MS)
+  assert.equal(nextStale(plan(doors), { asked: NOW }, read + DAILY_FRESH_MS), NOW + 90_000)
+  assert.equal(nextStale(plan(doors), { asked: NOW }, NOW + 90_000), null)
+  assert.equal(nextStale(plan(doors), null, NOW), null)
 })

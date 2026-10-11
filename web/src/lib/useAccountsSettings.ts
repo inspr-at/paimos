@@ -21,7 +21,7 @@ import { PERMISSION as USE_PERMISSION, readMatrix } from './accountUse'
 import { hostCapacityReason } from './hostCapacity'
 import { daysSummary, HARNESS_NAME, ownOverride, poolOfRow, reserveLevel, timeLabel, when, type CapacityWindow } from './capacity'
 import { DEFAULT_DAILY_POINTS, type DailyPlanFields } from './dailyLimits'
-import { pct, periodWords, quotaBar, quotaCaption, quotaInput, quotaLabel } from './quotaBar'
+import { nextStale, pct, periodWords, quotaBar, quotaCaption, quotaInput, quotaLabel, type PlanClock } from './quotaBar'
 import { validQuotaThresholds, type QuotaWarningSettings } from './quotaWarnings'
 import { toast } from './toast'
 import { usePoller } from './usePolledData'
@@ -63,7 +63,7 @@ export function useAccountsSettings(part: AccountsPart) {
   let root: HTMLElement | null = null
   const bindRoot = (element: unknown) => { root = element instanceof HTMLElement ? element : null }
   let generation = 0
-  function reset() { generation++; selected.value = null; open.value = false; add.value = false; menuOpen.value = false; renameOpen.value = false; busy.value = false; focusSignIn.value = ''; thresholds.value = { ...DEFAULT_QUOTA_THRESHOLDS }; facts.value = NO_MATRIX_FACTS; plan.value = null; planAt.value = null; planFailed.value = false; void readThresholds(); void readFacts(); void readPlan() }
+  function reset() { generation++; selected.value = null; open.value = false; add.value = false; menuOpen.value = false; renameOpen.value = false; busy.value = false; focusSignIn.value = ''; thresholds.value = { ...DEFAULT_QUOTA_THRESHOLDS }; facts.value = NO_MATRIX_FACTS; plan.value = null; planClock.value = null; planFailed.value = false; void readThresholds(); void readFacts(); void readPlan() }
   watch(owner, reset)
   watch(manage, allowed => { if (!allowed) { menuOpen.value = false; add.value = false } })
   watch(selectedKey, () => { menuOpen.value = false; renameOpen.value = false; busy.value = false })
@@ -104,22 +104,27 @@ export function useAccountsSettings(part: AccountsPart) {
   // Today's limit, the floor and Boost come with the viewer's own plan (GET /agents/plan,
   // daily_state); accounts outside it show their reading only, never a guessed limit.
   // A failed read keeps the last plan but says so, and its doors go stale on time
-  // (freshUntil): the bars never promise room the server would refuse.
-  const plan = ref<DailyPlanFields | null>(null), planAt = ref<number | null>(null), planFailed = ref(false)
+  // (freshUntil, from each reading's own age): the bars never promise room the server would refuse.
+  const plan = ref<DailyPlanFields | null>(null), planClock = ref<PlanClock | null>(null), planFailed = ref(false)
   let planRead: AbortController | null = null
   async function readPlan() {
     planRead?.abort()
     const identity = owner.value
-    if (session.identity?.principal.kind !== 'person') { plan.value = null; planAt.value = null; planFailed.value = false; return }
+    if (session.identity?.principal.kind !== 'person') { plan.value = null; planClock.value = null; planFailed.value = false; return }
     const controller = new AbortController(); planRead = controller
     try {
+      const asked = Date.now()
       const response = await api('/agents/plan', { signal: controller.signal })
       if (!response.ok) throw new Error('plan')
       const body = await response.json() as DailyPlanFields
-      if (planRead === controller && identity === owner.value) { plan.value = body; planAt.value = Date.now(); planFailed.value = false }
+      if (planRead === controller && identity === owner.value) { plan.value = body; planClock.value = { asked, server: Date.parse(response.headers.get('Date') ?? '') }; planFailed.value = false }
     } catch { if (planRead === controller && !controller.signal.aborted && identity === owner.value) planFailed.value = true }
     finally { if (planRead === controller) planRead = null }
   }
+  // The clock moves when the first fresh door goes stale too, not only with the next read.
+  let staleTimer: ReturnType<typeof setTimeout> | undefined
+  watch(() => nextStale(plan.value, planClock.value, agents.now), at => { clearTimeout(staleTimer); if (at !== null) staleTimer = setTimeout(() => agents.tick(), Math.max(0, at - Date.now())) }, { immediate: true })
+  onBeforeUnmount(() => clearTimeout(staleTimer))
   /** The long window is the daily one; a 5-hour reading alone still beats "not reported". An estimate is no reading. */
   function longWindow(a: OverviewAccount) {
     const read = a.windows.filter(w => w.reading.source !== 'estimate')
@@ -132,7 +137,7 @@ export function useAccountsSettings(part: AccountsPart) {
     const window = longWindow(a), record = a.records.find(r => r.id === daily?.account_id) ?? a.records[0]
     const settings = plan.value?.daily?.[a.harness]
     const boost = !!settings?.boost_today && Date.parse(settings.boost_today.until) > agents.now
-    const bar = quotaBar(quotaInput({ daily, window, boost, rule: record ? capacity.byAccount.get(record.id)?.limit : null, override: poolOf(a)?.override ?? '', off: !a.records.some(allowed), now: agents.now, planAt: planAt.value, dayEnds: plan.value?.daily_until }))
+    const bar = quotaBar(quotaInput({ daily, window, boost, rule: record ? capacity.byAccount.get(record.id)?.limit : null, override: poolOf(a)?.override ?? '', off: !a.records.some(allowed), now: agents.now, clock: planClock.value, dayEnds: plan.value?.daily_until }))
     const period = periodWords(window)
     const low = a.windows.some(w => quotaWindowWarns(w, thresholds.value, agents.now))
     const problem = problemSignins.value.find(p => p.account.id === a.id && isProblemSignin(p.signin))

@@ -8,7 +8,7 @@
 // date claims no room (the server waits for a fresh one before it starts more).
 // An older limit set by hand that is used up stops agents in any unit, runs,
 // tokens or money as much as percent (AEON-384 rules still bind until removed).
-import type { DailyAccount } from './dailyLimits.ts'
+import type { DailyAccount, DailyPlanFields } from './dailyLimits.ts'
 import type { LimitUse } from './accountLimits.ts'
 import { when, type CapacityWindow } from './capacity.ts'
 
@@ -86,14 +86,29 @@ export function ruleSpent(rule: LimitUse | null | undefined): boolean {
 
 /** The server trusts a reading for two minutes (agentplan.DailyFreshness); then agents wait for a new one. */
 export const DAILY_FRESH_MS = 2 * 60_000
+/** When the plan was asked for, on this browser's clock, and the server's clock in its answer (its Date header), when it said. */
+export interface PlanClock { asked: number; server?: number | null }
 /**
- * Until when a door the plan called fresh may still be trusted: two minutes after the
- * plan arrived at most, never past the door's reset or the end of the plan's day. A
- * refresh that fails never extends it. The two minutes run from the arrival on this
- * browser's clock, so a clock that runs fast or slow does not stretch them.
+ * Until when a door the plan called fresh may still be trusted, on this browser's clock:
+ * two minutes after its reading was taken (read_at, as the server measures it), never past
+ * the door's reset or the end of the plan's day. A refresh that fails never extends it.
+ * The server's own clock places them: its Date header counts whole seconds, so it had
+ * passed that by up to one more, and this browser asked no later than the server answered.
+ * A clock here that runs fast or slow therefore stretches nothing. Without that header
+ * this browser's clock measures, never longer than two minutes from asking. A door
+ * without a reading time, or with one ahead of the server's clock, is trusted no longer.
  */
-export function freshUntil(door: Pick<DailyAccount, 'resets_at'>, arrived: number, dayEnds?: string | null): number {
-  return Math.min(arrived + DAILY_FRESH_MS, ...[door.resets_at, dayEnds].map(at => Date.parse(at ?? '')).filter(Number.isFinite))
+export function freshUntil(door: Pick<DailyAccount, 'resets_at' | 'read_at'>, clock: PlanClock, dayEnds?: string | null): number {
+  const read = Date.parse(door.read_at ?? ''), server = finite(clock.server) ? clock.server + 1000 : null
+  if (!Number.isFinite(read) || (server !== null && read > server)) return -Infinity
+  const ends = Math.min(read + DAILY_FRESH_MS, ...[door.resets_at, dayEnds].map(at => Date.parse(at ?? '')).filter(Number.isFinite))
+  return server === null ? Math.min(ends, clock.asked + DAILY_FRESH_MS) : ends - server + clock.asked
+}
+/** The next moment after now that a door the plan called fresh goes stale; null when none will. */
+export function nextStale(plan: DailyPlanFields | null | undefined, clock: PlanClock | null | undefined, now: number): number | null {
+  if (!plan || !clock) return null
+  const at = Object.values(plan.daily_state ?? {}).flatMap(s => s.accounts ?? []).filter(d => d.freshness === 'fresh' && !d.details_redacted).map(d => freshUntil(d, clock, plan.daily_until)).filter(t => t > now)
+  return at.length ? Math.min(...at) : null
 }
 
 export interface QuotaSource {
@@ -106,15 +121,15 @@ export interface QuotaSource {
   /** Sprint and Away leave nothing kept for you; a Hold or the switch leaves the account alone. */
   override?: '' | 'sprint' | 'hold' | 'away'
   off?: boolean
-  /** The clock, when the plan arrived and when its day ends: a door the plan called fresh goes stale on time ({@link freshUntil}). */
+  /** The clock, when the plan was asked for and when its day ends: a door the plan called fresh goes stale on time ({@link freshUntil}). */
   now?: number
-  planAt?: number | null
+  clock?: PlanClock | null
   dayEnds?: string | null
 }
 /** The bar's input from the plan, the capacity reading and the account's own state. */
 export function quotaInput(s: QuotaSource): QuotaBarInput {
   const d = s.daily && !s.daily.details_redacted && finite(s.daily.used_pct) ? s.daily : null
-  const expired = !!d && finite(s.now) && finite(s.planAt) && s.now >= freshUntil(d, s.planAt, s.dayEnds)
+  const expired = !!d && finite(s.now) && !!s.clock && s.now >= freshUntil(d, s.clock, s.dayEnds)
   const w = s.window ?? null
   const used = d ? d.used_pct : w ? 100 - w.remaining_percent : null
   const free = s.override === 'sprint' || s.override === 'away'

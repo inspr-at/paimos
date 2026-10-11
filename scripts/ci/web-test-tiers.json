@@ -118,7 +118,11 @@
     ,
     "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: the design's checks hold on the built page"
     ,
+    "browser:tests/accounts-quota-bar.spec.ts:End now and Remove keep their rows while the reads after them are still out"
+    ,
     "browser:tests/accounts-quota-bar.spec.ts:a plan that could not refresh says so, and its bars stop promising room after two minutes"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:a reading nearly two minutes old stops promising room when the server stops trusting it"
     ,
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
@@ -4988,7 +4992,11 @@
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"End now and Remove keep their rows while the reads after them are still out","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"a plan that could not refresh says so, and its bars stop promising room after two minutes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"a reading nearly two minutes old stops promising room when the server stops trusting it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/activity-history.spec.ts","name":"automatic history is Aeon, and a person named System stays a person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14521,6 +14529,8 @@
     {"kind":"node","file":"tests/quota-bar.test.ts","name":"a Hold from before or the switch off leaves the account alone","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/quota-bar.test.ts","name":"a plan that could not refresh goes stale on time and claims no room","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"a reading nearly two minutes old goes stale when the server stops trusting it, not two minutes after the plan arrived","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/quota-bar.test.ts","name":"a used-up older limit stops agents in any unit, runs, tokens or money as much as percent","tier":"ESSENTIAL"}
     ,
