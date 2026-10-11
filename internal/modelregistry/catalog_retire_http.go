@@ -422,14 +422,14 @@ func (m *Module) undoOutdated(w http.ResponseWriter, r *http.Request) {
 		if undone {
 			return fail(409, "retirement already undone")
 		}
-		for _, table := range []string{"model_pref_orders", "model_pref_situation_orders", "model_rules", "model_row_constraints", "model_pref_cells"} {
+		for _, table := range []string{"model_pref_orders", "model_pref_situation_orders", "model_rules", "model_row_constraints", "model_pauses", "model_pref_cells"} {
 			if len(before[table])+len(after.Snapshot[table]) > 0 {
 				if err := authz.RequireTx(ctx, tx, p, "model_prefs.manage", authz.Scope{}); err != nil {
 					return err
 				}
 			}
 		}
-		for _, raw := range append(append(append([]json.RawMessage{}, before["model_rules"]...), before["model_row_constraints"]...), before["model_pref_scopes"]...) {
+		for _, raw := range append(append(append(append([]json.RawMessage{}, before["model_rules"]...), before["model_row_constraints"]...), before["model_pref_profiles"]...), before["model_pref_scopes"]...) {
 			project := rowString(rowFields(raw), "project_id")
 			if project != "" {
 				if err := authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{ProjectID: project}); err != nil {
