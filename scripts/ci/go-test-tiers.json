@@ -1696,6 +1696,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestMutationSubmoduleDiffCannotExposeSensitiveContent","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeBrowserCaptureBrokerBoundsAndReceipts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestNewAgentdAgainstServerWithoutRelayKeepsRunsAndLogsOnce","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNonTerminalControlCompletionBlocksQueue","tier":"GATED-FULL"}

@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -28,9 +29,10 @@ import (
 // Start rechecks a budget-held launch's grant for the claiming daemon when
 // its reserved capacity is validated; without it such claims keep waiting.
 type RoutineLaunchChecks struct {
-	Runtime   modelregistry.ExecutionRuntimeReader
-	Admission func(context.Context, pgx.Tx, tenant.Principal, agentsetup.RoutineGrant) error
-	Start     func(tenant.Principal) agentaccounts.RoutineStartCheck
+	Runtime        modelregistry.ExecutionRuntimeReader
+	Admission      func(context.Context, pgx.Tx, tenant.Principal, agentsetup.RoutineGrant) error
+	Start          func(tenant.Principal) agentaccounts.RoutineStartCheck
+	BrowserRuntime workqueue.NativeBrowserRuntimeReader
 }
 
 // BindRoutineLaunch connects internal executor collaborators. It is not a
@@ -148,9 +150,14 @@ func validateRoutineGrantTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
  AND c.revision=r.definition_revision AND r.consent_revision=r.definition_revision AND c.retired_at IS NULL AND NOT c.paused
  AND d.consent_qualification_id=$8::uuid AND r.work_order_id=$9::uuid
  AND r.assignment->'budget'->>'mode'=$10 AND r.execution_principal_id=$11::uuid
+ AND r.assignment->'runtime_requirements'->>'needs_native_host'='true'
+ AND (($12='routine_native_browser_v1' AND r.assignment->'runtime_requirements'->>'needs_browser'='true'
+       AND r.assignment->'runtime_requirements'->>'runtime_class'='native_browser')
+   OR ($12='routine_native_coding_v1' AND r.assignment->'runtime_requirements'->>'needs_browser'='false'
+       AND r.assignment->'runtime_requirements'->>'runtime_class'='native_coding'))
 , r.recurrence_id::text
  FROM routine_runs r JOIN recurrence_definitions d ON d.tenant_id=r.tenant_id AND d.recurrence_id=r.recurrence_id
- JOIN recurrences c ON c.tenant_id=d.tenant_id AND c.id=d.recurrence_id WHERE r.id=$1`, g.RoutineRunID, g.OwnerID, g.ProjectID, g.AgentRunID, g.AssignmentDigest, g.DefinitionRevision, g.ConsentRevision, g.QualificationID, o.NodeID, g.BudgetMode, g.ExecutionPrincipalID).Scan(&matches, &recurrenceID)
+ JOIN recurrences c ON c.tenant_id=d.tenant_id AND c.id=d.recurrence_id WHERE r.id=$1`, g.RoutineRunID, g.OwnerID, g.ProjectID, g.AgentRunID, g.AssignmentDigest, g.DefinitionRevision, g.ConsentRevision, g.QualificationID, o.NodeID, g.BudgetMode, g.ExecutionPrincipalID, g.RuntimeCapability).Scan(&matches, &recurrenceID)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !matches {
 		return workorders.Fail(409, "routine_assignment_changed")
 	}
@@ -189,6 +196,9 @@ func validateRoutineGrantTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		return workorders.Fail(409, "routine_capability_changed")
 	}
 	if err := agentpairing.RequireRoutineAccountTx(ctx, tx, g); err != nil {
+		return err
+	}
+	if err := workqueue.RequireNativeBrowserRouteTx(ctx, tx, g, checks.BrowserRuntime); err != nil {
 		return err
 	}
 	return checks.Admission(ctx, tx, p, g)
