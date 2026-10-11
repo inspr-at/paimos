@@ -196,7 +196,8 @@ func requireWriterFree(ctx context.Context, tx pgx.Tx, ticket, exclude string) e
 	var busy bool
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN nodes o ON o.id=r.work_order_id
 	 WHERE (r.queue_node_id=$1 OR o.parent_id=$1) AND r.id::text<>$2
-	 AND (r.status IN ('starting','running','waiting') OR r.trace->'worker_assignment'->>'state' IN ('launch_unknown','launched')))
+	 AND (r.status IN ('starting','running','waiting') OR r.trace->'worker_assignment'->>'state' IN ('launch_unknown','launched')
+   OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))
 	 OR EXISTS(SELECT 1 FROM harness_sessions s WHERE (s.ticket_node_id=$1 OR s.work_order_id IN(SELECT id FROM nodes WHERE parent_id=$1)
 	 OR s.run_id IN(SELECT id FROM agent_runs WHERE queue_node_id=$1)) AND NOT aeon_work_session_stopped(s.stopped_at,s.stop_reason))`, ticket, exclude).Scan(&busy)
 	if err != nil {
@@ -210,8 +211,11 @@ func requireWriterFree(ctx context.Context, tx pgx.Tx, ticket, exclude string) e
 
 func reportHandoff(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, t Telemetry, status string) error {
 	h, err := runHandoff(v)
-	if err != nil || h == nil {
+	if err != nil {
 		return err
+	}
+	if h == nil {
+		return confirmStaleWorkHold(ctx, tx, v, t, status)
 	}
 	if err = authz.RequireTx(ctx, tx, p, "run.telemetry", authz.Scope{ProjectID: h.ProjectID}); err != nil {
 		return err
@@ -237,7 +241,10 @@ func reportHandoff(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, t 
 	} else if t.Kind == "started" && h.LaunchedAt == nil {
 		h.State, h.LaunchedAt = "launched", &now
 	}
-	return storeHandoff(ctx, tx, v.ID, h)
+	if err = storeHandoff(ctx, tx, v.ID, h); err != nil {
+		return err
+	}
+	return confirmStaleWorkHold(ctx, tx, v, t, status)
 }
 
 func (m *module) getHandoff(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
@@ -256,4 +263,32 @@ func (m *module) getHandoff(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 		return nil, err
 	}
 	return h, nil
+}
+
+// A stale lifecycle release clears a ticket hold, never the writer fence.
+// This also covers runs created before durable worker assignments existed.
+func staleWorkHoldUnconfirmed(v Run) (bool, error) {
+	var trace struct {
+		Release *struct {
+			Unconfirmed bool `json:"exit_unconfirmed"`
+		} `json:"work_lifecycle_release"`
+	}
+	if len(v.Trace) > 0 {
+		if err := json.Unmarshal(v.Trace, &trace); err != nil {
+			return false, err
+		}
+	}
+	return trace.Release != nil && trace.Release.Unconfirmed, nil
+}
+
+// telemetryAuthority has checked the exact agent/account/daemon generation in
+// this transaction. A confirmed finished report is the only way to clear this
+// marker; age, terminal labels and stale account probes never clear it.
+func confirmStaleWorkHold(ctx context.Context, tx pgx.Tx, v Run, t Telemetry, status string) error {
+	held, err := staleWorkHoldUnconfirmed(v)
+	if err != nil || !held || !terminal(status) || t.Kind != "finished" || t.ProcessState != "exited" {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE agent_runs SET trace=jsonb_set(trace,'{work_lifecycle_release,exit_unconfirmed}','false'::jsonb) WHERE id=$1`, v.ID)
+	return err
 }
