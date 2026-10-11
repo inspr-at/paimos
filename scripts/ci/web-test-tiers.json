@@ -11652,9 +11652,9 @@
     ,
     {"kind":"browser","file":"tests/scope-codes.spec.ts","name":"scope proposals fit 390px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/service-tier.spec.ts","name":"1280: panel-open session table fits and keeps Host and overflow controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/service-tier.spec.ts","name":"1280: panel-open session table fits and keeps Tier and overflow controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/service-tier.spec.ts","name":"1366: panel-open session table fits and keeps Host and overflow controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/service-tier.spec.ts","name":"1366: panel-open session table fits and keeps Tier and overflow controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/service-tier.spec.ts","name":"1440 dark: delayed vendor evidence keeps picker and panel actions put","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -11670,7 +11670,7 @@
     ,
     {"kind":"browser","file":"tests/service-tier.spec.ts","name":"1440: compact Default tier control keeps its box through confirmation and Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/service-tier.spec.ts","name":"1440: panel-open session table fits and keeps Host and overflow controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/service-tier.spec.ts","name":"1440: panel-open session table fits and keeps Tier and overflow controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/service-tier.spec.ts","name":"1440: the panel request points to stable desk actions for approval","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
