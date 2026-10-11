@@ -288,7 +288,8 @@ defineExpose({ reveal })
 .rib { margin: 2px 0 14px; padding: 14px 16px 10px; border-radius: 14px; background: var(--surface-sunken); }
 .rib-days { display: flex; gap: 4px; margin-bottom: 10px; }
 .rib-days span { display: grid; place-items: center; min-width: 34px; height: 20px; padding: 0 4px; font: 500 11px/1 var(--mono); color: var(--ink-3); opacity: .6; }
-.rib-days span.on { color: var(--teal-ink); font-weight: 600; opacity: 1; box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--teal) 45%, transparent); }
+/* A working day takes the day band's full tint, never an underline (Rule 11). */
+.rib-days span.on { border-radius: 6px; background: color-mix(in srgb, var(--teal) 14%, transparent); color: var(--teal-ink); font-weight: 600; opacity: 1; }
 .rib-bar { position: relative; display: flex; height: 30px; border-radius: 8px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--line); }
 .rib-bar > span { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 0 10px; font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; }
 .rib-bar .night { background: color-mix(in srgb, var(--ink) 9%, transparent); color: var(--ink-2); }
