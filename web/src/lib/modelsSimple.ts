@@ -86,7 +86,7 @@ export interface ModelEntry {
   replacedBy?: string
 }
 const harnessRank = (harness: string) => { const index = HARNESS_ORDER.indexOf(harness); return index < 0 ? HARNESS_ORDER.length : index }
-const providerRank = (provider: string) => { const index = PROVIDER_ORDER.indexOf(provider); return index < 0 ? PROVIDER_ORDER.length - 1 : index }
+export const providerRank = (provider: string) => { const index = PROVIDER_ORDER.indexOf(provider); return index < 0 ? PROVIDER_ORDER.length - 1 : index }
 const levelValue = (effort: EffortName) => effort.level ?? NAMED_LEVEL[effort.name] ?? 2
 /** "GPT-6.1 Sol", "Opus 5.5": the model's own name and version, never a harness or a profile revision. */
 export function fullName(profile: RegistryProfile): string {
@@ -95,6 +95,14 @@ export function fullName(profile: RegistryProfile): string {
     if (gpt) return `GPT-${gpt[1]} ${gpt[2]!.charAt(0).toUpperCase()}${gpt[2]!.slice(1)}`
   }
   return `${profile.short_name || profile.display_name || profile.model} ${profile.model_version ?? ''}`.trim()
+}
+/** The line a model version belongs to, without its version ("GPT Sol", "Claude Opus"), from the same fields as fullName. */
+export function registryLineName(profile: RegistryProfile): string {
+  if (profile.harness === 'codex') {
+    const gpt = /^gpt-([0-9]+(?:\.[0-9]+)*)-(.+)$/.exec(profile.model)
+    if (gpt) return `GPT ${gpt[2]!.charAt(0).toUpperCase()}${gpt[2]!.slice(1)}`
+  }
+  return profile.display_name || profile.short_name || profile.model
 }
 
 /**

@@ -260,7 +260,9 @@ test('an admin takes a step a workspace pin holds last out with its pin; Undo se
 test('folds grow in place: the controls above a fold, and the fold’s own controls, never move (AEON-541)', async ({ page }) => {
   await open(page)
   await page.getByRole('button', { name: 'For everyone' }).click()
-  const top = { scope: page.locator('[data-scope-group]'), catalog: page.locator('[data-catalog-fold]'), defaultPick: page.locator('[data-pick="all"]'), defaultFold: fold(page, 'all') }
+  // AEON-1163 moved catalog discovery into the registry below this card. Measure the active scope buttons above
+  // the folds instead of the retired catalog toggle, keeping every interaction and the ±0.5 px guard intact.
+  const top = { scope: page.locator('[data-scope-group]'), forEveryone: page.locator('[data-scope="default"]'), justMe: page.locator('[data-scope="me"]'), defaultPick: page.locator('[data-pick="all"]'), defaultFold: fold(page, 'all') }
   const first = await controlStability(page, top)
   await first.check(async () => { await openFold(page, 'all') })
   await first.check(async () => { await fold(page, 'all').click(); await expect(page.locator('#fb-all .ch-wrap')).toHaveCount(0) }); first.done()

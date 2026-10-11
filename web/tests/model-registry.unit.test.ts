@@ -12,7 +12,9 @@ vi.mock('../src/lib/api.ts', () => ({
   },
 }))
 import { StaleScopeError } from '../src/lib/identityScope'
-import { RegistryError, addLine, getRefreshStatus, listProfiles, buildLines, changeOf, checkReport, cooldownLabel, draftOf, emptyDraft, familyOf, intervalLabel, lastChecked, lineWriteOf, metaParts, modelSlug, removalText, removeLine, restoreLine, routeOf, routesFor, shortDate, splitLevels, takenText, useText, validateDraft, checkNow, lifecycleSource, outdatedBatch, outdatedEntries, outdatedTray, outdatedUseText, outdatedWhy, readOutdated, readOutdatedBatch, refused, retireOutdated, undoOutdated, OUTDATED_LIMIT, OUTDATED_PAGES, type LineDraft, type LineUsage, type OutdatedDocument, type OutdatedVersion, type RegistryProfile, type WriteScope } from '../src/lib/modelRegistry'
+import { buildEntries } from '../src/lib/modelsSimple'
+import { LEVEL, manyRoutes } from './fixtures/registry-many'
+import { RegistryError, addLine, getRefreshStatus, listProfiles, buildLines, changeOf, checkReport, cooldownLabel, draftOf, emptyDraft, familyOf, intervalLabel, lastChecked, lineWriteOf, profileSource, modelSlug, removalText, removeLine, restoreLine, routeOf, routesFor, shortDate, splitLevels, takenText, useText, validateDraft, checkNow, lifecycleSource, outdatedBatch, outdatedEntries, outdatedTray, outdatedUseText, outdatedWhy, readOutdated, readOutdatedBatch, refused, retireOutdated, undoOutdated, OUTDATED_LIMIT, OUTDATED_PAGES, type LineDraft, type LineUsage, type OutdatedDocument, type OutdatedVersion, type RegistryProfile, type WriteScope, buildRegistry, registryCount, pauseUntil, pauseOptions, untilText, pauseTag, pauseModel, undoPause, previewRemoval, atLevel, lifecycleText, olderWhy, pauseTargets, PAUSED_REASON, type RegistryModel } from '../src/lib/modelRegistry'
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } })
 let counter = 0
@@ -26,7 +28,7 @@ describe('registry lines', () => {
   it('groups profiles into one line per model, levels in the model\'s own order, retired profiles left out', () => {
     const lines = buildLines([sol('xhigh', 4), sol('low', 1), sol('high', 3), profile({ harness: 'codex', model: 'gpt-6.1-sol', effort: 'medium', effort_level: 2, retired: true }), sol('medium', 2)])
     expect(lines).toHaveLength(1)
-    expect(lines[0]).toMatchObject({ name: 'GPT Sol 6.1', displayName: 'GPT Sol', efforts: ['low', 'medium', 'high', 'xhigh'], route: 'openai', source: 'auto', isNew: false })
+    expect(lines[0]).toMatchObject({ name: 'GPT-6.1 Sol', displayName: 'GPT Sol', efforts: ['low', 'medium', 'high', 'xhigh'], route: 'openai', source: 'auto', isNew: false })
   })
   it('names a level whose effort level is unknown after those that have one, and a missing display name falls back to the model id', () => {
     const [line] = buildLines([profile({ harness: 'cursor', model: 'composer-2.5', effort: 'default', family: 'cursor' }), profile({ harness: 'cursor', model: 'composer-2.5', effort: 'fast', effort_level: 1, family: 'cursor' })])
@@ -50,21 +52,14 @@ describe('registry lines', () => {
     const lines = buildLines([make('claude', 'claude-opus-5-5', 'Opus'), make('codex', 'gpt-6-luna', 'Luna'), make('codex', 'gpt-6.1-sol', 'Sol'), make('codex', 'gpt-6-astra', 'Astra')])
     expect(lines.map(line => line.model)).toEqual(['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna', 'claude-opus-5-5'])
   })
-  it('describes a line as harness, route (when it adds something), id, source and what was taken on', () => {
-    const [codex, cursor] = [buildLines([sol('high', 3, { origin: 'harness' })])[0]!, buildLines([profile({ harness: 'cursor', model: 'composer-2.5', effort: 'default', family: 'cursor', origin: 'harness' })])[0]!]
-    expect(metaParts(codex)).toEqual(['Codex', 'OpenAI', 'gpt-6.1-sol', 'From harness'])
-    expect(metaParts(cursor)).toEqual(['Cursor', 'composer-2.5', 'From harness'])
-    expect(metaParts({ ...codex, origin: 'shipped' }).at(-1)).toBe('Shipped')
-    expect(metaParts({ ...codex, origin: 'provider' }).at(-1)).toBe('From provider')
-  })
-  it('keeps legacy auto provenance generic until the server names its origin', () => {
+  // AEON-1163. Risk: a source is guessed ("Auto-discovered") where the server named none.
+  it('names a source only when the server does: legacy auto stays unknown, a hand-added line says so', () => {
     const line = buildLines([sol('high', 3)])[0]!
     expect(line.origin).toBeUndefined()
-    expect(metaParts(line)).toEqual(['Codex', 'OpenAI', 'gpt-6.1-sol', 'Auto-discovered'])
-    expect(metaParts({ ...line, source: 'manual' }).at(-1)).toBe('Added by hand')
-    expect(metaParts({ ...line, origin: 'shipped' }).at(-1)).toBe('Shipped')
-    expect(metaParts({ ...line, origin: 'provider' }).at(-1)).toBe('From provider')
-    expect(metaParts({ ...line, origin: 'harness' }).at(-1)).toBe('From harness')
+    expect(profileSource(line)).toBeNull()
+    expect(profileSource({ ...line, origin: '' })).toBeNull()
+    expect(profileSource({ ...line, source: 'manual' })).toBe('manual')
+    for (const origin of ['shipped', 'provider', 'harness', 'manual'] as const) expect(profileSource({ ...line, origin })).toBe(origin)
   })
 })
 
@@ -289,6 +284,10 @@ describe('copy', () => {
     expect(useText({ column: 'backend', layer: 'person', person: 'me', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('Backend build (yours)')
     expect(useText({ column: 'docs', layer: 'person', person: 'someone', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('docs (another person)')
     expect(useText({ column: 'review:openai', layer: 'workspace', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('Reviews (for everyone)')
+    // A situation is named as the outdated sheet names it (AEON-1163); the first build is the row itself.
+    expect(useText({ column: 'other', layer: 'default', situation: 'review', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('Review · Default (for everyone)')
+    expect(useText({ column: 'backend', layer: 'person', person: 'me', situation: 'small', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('First build · Backend build (yours)')
+    expect(useText({ column: 'backend', layer: 'default', situation: 'first', replacement: { line: null, effort: null } }, kinds, 'me')).toBe('Backend build (for everyone)')
   })
 })
 
@@ -406,7 +405,7 @@ describe('old versions', () => {
       old({ version: 'openai:gpt-6.1-sol', successor: null }),
     ]), registry, new Date('2026-10-11T12:00:00Z'))
     expect(entries.map(entry => entry.version)).toEqual(['openai:gpt-6-sol', 'anthropic:claude-opus-5'])
-    expect(entries[0]).toMatchObject({ name: 'GPT Sol 6', successorName: 'GPT Sol 6.1', harness: 'codex', routes: ['Codex · gpt-6-sol'], source: 'harness', why: 'Its source names GPT Sol 6.1 as the next version' })
+    expect(entries[0]).toMatchObject({ name: 'GPT-6 Sol', successorName: 'GPT-6.1 Sol', harness: 'codex', routes: ['Codex · gpt-6-sol'], source: 'harness', why: 'Its source names GPT-6.1 Sol as the next version' })
     expect(entries[1]).toMatchObject({ name: 'Claude Opus 5', successorName: 'Claude Opus 5.5', routes: ['pi · anthropic/claude-opus-5'], source: 'provider', why: 'Deprecated since 1 Sep' })
   })
   it('says why a version is old in words, with a badge only for a named source', () => {
@@ -448,5 +447,176 @@ describe('old versions', () => {
     expect(words('fallback · build')).toEqual({ title: 'Older fallback list · build', who: 'for everyone' })
     expect(words('pinned · complex')).toEqual({ title: 'Pinned pick · complex', who: 'for everyone' })
     expect(words('something new · x')).toEqual({ title: 'something new · x', who: 'for everyone' })
+  })
+})
+
+// AEON-1163 · W4: the registry grouped provider → line → version, routes as sub-rows.
+// Risks: ~35 routes read as ~35 rows again; Cursor's per-level ids show as separate models; the registry, the picker,
+// the tray and the sheet call one model by different names; a route or fact claims a source nobody reported;
+// a pause or its Undo touches the wrong ids or reports a partial change as done.
+describe('the grouped registry', () => {
+  const NOW = new Date('2026-10-11T12:00:00Z')
+  const many = (): RegistryProfile[] => manyRoutes().flatMap(route => route.efforts.map(effort => profile({
+    harness: route.harness, model: route.model, family: route.family, provider: route.family, effort, effort_level: LEVEL[effort] ?? null,
+    display_name: route.display_name, short_name: route.short_name, model_version: route.model_version, origin: route.origin, source: route.source ?? 'auto',
+    enabled: route.enabled ?? true, note: route.note, identity: route.identity, lifecycle: route.lifecycle ?? null, pause: route.pause ?? null,
+  })))
+  const rowOf = (registry: ReturnType<typeof buildRegistry>, key: string) => registry.groups.flatMap(group => group.rows).find(row => row.key === key)!
+
+  it('shows about 35 routes as at most 20 rows, providers in order, with the count above the list', () => {
+    const profiles = many(), ids = new Set(profiles.map(item => `${item.harness}/${item.model}`))
+    expect(ids.size).toBe(36)
+    const registry = buildRegistry(profiles, NOW)
+    expect(registry.rows).toBeLessThanOrEqual(20)
+    expect(registry.groups.map(group => group.label)).toEqual(['OpenAI', 'Anthropic', 'xAI', 'Google', 'Cursor', 'Local', 'Unknown provider'])
+    expect(registry.groups.find(group => group.provider === 'openai')!.rows.map(row => row.model.name)).toEqual(['GPT-6.1 Sol', 'GPT-6.1 Astra', 'GPT-6 Luna', 'GPT-6 Terra'])
+    expect(registryCount(registry)).toBe(`${registry.models} models · ${registry.routes} routes · ${registry.rows} lines`)
+    expect(registry.routes).toBeLessThan(ids.size)
+  })
+  it('folds Cursor\'s per-level ids into one route: Grok 4.7 runs through Grok and Cursor, its fast variant is its own line', () => {
+    const registry = buildRegistry(many(), NOW)
+    const grok = rowOf(registry, 'xai:grok')
+    expect(grok.model).toMatchObject({ name: 'Grok 4.7', lineName: 'Grok', versionLabel: '4.7' })
+    expect(grok.model.routes.map(route => [route.harness, route.id, route.efforts, route.models.length])).toEqual([
+      ['grok', 'grok-4.7', ['low', 'medium', 'high', 'xhigh'], 1],
+      ['cursor', 'grok-4.7-‹level›', ['low', 'medium', 'high', 'xhigh'], 4],
+    ])
+    expect(grok.older.map(version => version.name)).toEqual(['Grok 4.6', 'Grok 4.5'])
+    expect(rowOf(registry, 'xai:grok-fast').model.routes).toMatchObject([{ harness: 'cursor', id: 'grok-4.7-‹level›-fast', models: ['grok-4.7-low-fast', 'grok-4.7-medium-fast', 'grok-4.7-high-fast', 'grok-4.7-xhigh-fast'] }])
+  })
+  it('is one model per version across harnesses: Opus 5.5 through Claude Code, Cursor and pi, the alias as one more route, Opus 5 folded', () => {
+    const opus = rowOf(buildRegistry(many(), NOW), 'anthropic:opus')
+    expect(opus.model).toMatchObject({ name: 'Opus 5.5', lineName: 'Claude Opus', versionLabel: '5.5', source: 'provider', note: 'best for design and concepts' })
+    expect(opus.model.routes.map(route => `${route.harness} ${route.id}`)).toEqual(['claude claude-opus-5-5', 'claude opus', 'cursor claude-opus-5.5', 'pi anthropic/claude-opus-5-5'])
+    expect(opus.model.routes.find(route => route.harness === 'pi')).toMatchObject({ via: 'Anthropic', source: 'harness', hand: false })
+    expect(opus.older).toHaveLength(1)
+    expect(opus.older[0]).toMatchObject({ name: 'Opus 5', old: true })
+    expect(olderWhy(opus.older[0]!, opus.model.name, NOW)).toBe('Deprecated from 15 Jan 2027')
+    expect(opus.older[0]!.routes[0]!.efforts).toEqual(['high', 'xhigh'])
+  })
+  it('keeps the version that runs on the row: a newer one that is off waits on a row of its own; the newest that is old moves into the fold', () => {
+    const registry = buildRegistry([
+      profile({ harness: 'codex', model: 'gpt-6.2-sol', effort: 'high', display_name: 'GPT Sol', model_version: '6.2', enabled: false, origin: 'provider' }),
+      profile({ harness: 'codex', model: 'gpt-6.1-sol', effort: 'high', display_name: 'GPT Sol', model_version: '6.1' }),
+      profile({ harness: 'codex', model: 'gpt-6-sol', effort: 'high', display_name: 'GPT Sol', model_version: '6' }),
+    ], NOW)
+    const rows = registry.groups[0]!.rows
+    expect(rows.map(row => [row.model.name, row.model.isNew, row.older.map(version => version.name)])).toEqual([['GPT-6.2 Sol', true, []], ['GPT-6.1 Sol', false, ['GPT-6 Sol']]])
+  })
+  it('says where each fact came from, and "unknown" (null) when nobody reported it; only hand-added routes are editable', () => {
+    const registry = buildRegistry(many(), NOW)
+    const qwen = rowOf(registry, 'unknown:openrouter/qwen/qwen3-coder')
+    expect(qwen.model.routes).toMatchObject([{ harness: 'pi', via: 'OpenRouter', source: 'manual', hand: true }])
+    expect(registry.groups.flatMap(group => group.rows).filter(row => row.model.routes.some(route => route.hand)).map(row => row.key)).toEqual(['unknown:openrouter/qwen/qwen3-coder'])
+    const legacy = buildRegistry([profile({ harness: 'codex', model: 'gpt-6-luna', effort: 'high' })], NOW).groups[0]!.rows[0]!.model
+    expect(legacy.source).toBeNull()
+    expect(legacy.routes[0]!.source).toBeNull()
+    expect(legacy.lifecycle).toBeNull()
+    expect(lifecycleText(legacy.lifecycle, NOW)).toBeNull()
+    const luna = rowOf(registry, 'openai:luna').model
+    expect(luna.retireAt).toBe('2026-10-31T12:00:00Z')
+    expect(lifecycleText(luna.lifecycle, NOW)).toBe('Retiring 31 Oct')
+    expect(lifecycleText(rowOf(registry, 'openai:sol').model.lifecycle, NOW)).toBe('Active')
+  })
+  it('says token budgets once and names a level as the sheet does', () => {
+    const pro = rowOf(buildRegistry(many(), NOW), 'google:gemini-pro').model
+    expect(pro.routes.map(route => [route.harness, route.efforts, route.budget])).toEqual([['gemini', ['1024', '8192', '24576', '32768'], true], ['opencode', ['default'], false]])
+    expect(atLevel('Opus 5', 'xhigh')).toBe('Opus 5 · xhigh')
+    expect(atLevel('Gemini 2.5 Pro', '32k')).toBe('Gemini 2.5 Pro · 32k budget')
+    expect(atLevel('Opus 5', null)).toBe('Opus 5')
+  })
+  // Tick (W5 review, 2026-10-11): one naming function across picker, registry rows, outdated tray and sheet.
+  it('calls a model by one name in the picker, the registry row, the tray and the sheet', () => {
+    const profiles = [
+      profile({ harness: 'codex', model: 'gpt-6-sol', effort: 'high', display_name: 'GPT Sol', short_name: 'Sol', model_version: '6', identity: 'openai:gpt-6-sol' }),
+      profile({ harness: 'codex', model: 'gpt-6.1-sol', effort: 'high', display_name: 'GPT Sol', short_name: 'Sol', model_version: '6.1', identity: 'openai:gpt-6.1-sol' }),
+      profile({ harness: 'claude', model: 'claude-opus-5', effort: 'high', family: 'anthropic', display_name: 'Claude Opus', short_name: 'Opus', model_version: '5', identity: 'anthropic:claude-opus-5' }),
+      profile({ harness: 'claude', model: 'claude-opus-5-5', effort: 'high', family: 'anthropic', display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5', identity: 'anthropic:claude-opus-5-5' }),
+    ]
+    const rows = buildRegistry(profiles, NOW).groups.flatMap(group => group.rows)
+    const picker = buildEntries(profiles)
+    const entries = outdatedEntries({ versions: [
+      { version: 'openai:gpt-6-sol', line: 'openai:sol', state: 'superseded', date: null, successor: 'openai:gpt-6.1-sol', reason: '', source: '', uses: [], incomplete: false },
+      { version: 'anthropic:claude-opus-5', line: 'anthropic:opus', state: 'superseded', date: null, successor: 'anthropic:claude-opus-5-5', reason: '', source: '', uses: [], incomplete: false },
+    ], revision: 'a'.repeat(64), next_cursor: '', incomplete: false }, profiles, NOW)
+    expect(rows.map(row => row.model.name)).toEqual(['GPT-6.1 Sol', 'Opus 5.5'])
+    expect(picker.map(entry => entry.name)).toEqual(['GPT-6.1 Sol', 'Opus 5.5'])
+    expect(entries.map(entry => [entry.name, entry.successorName])).toEqual([['GPT-6 Sol', 'GPT-6.1 Sol'], ['Opus 5', 'Opus 5.5']])
+    expect(rows.map(row => row.older[0]!.name)).toEqual(['GPT-6 Sol', 'Opus 5'])
+    expect(outdatedTray(entries, false, false).named).toEqual([{ from: 'GPT-6 Sol', to: 'GPT-6.1 Sol' }, { from: 'Opus 5', to: 'Opus 5.5' }])
+  })
+  it('names how long a pause lasts and what the menu offers', () => {
+    const now = new Date(2026, 9, 11, 15, 30)
+    expect(new Date(pauseUntil('tomorrow', now)!)).toEqual(new Date(2026, 9, 12, 4, 0))
+    expect(Date.parse(pauseUntil('week', now)!) - now.getTime()).toBe(7 * 86_400_000)
+    expect(pauseUntil('open', now)).toBeNull()
+    expect(pauseOptions(false, now).map(option => option.label)).toEqual(['Until tomorrow, 04:00', 'For a week', 'Until I resume it'])
+    expect(pauseOptions(true, now).map(option => option.choice)).toEqual(['resume', 'tomorrow', 'week', 'open'])
+    expect(pauseOptions(false, now)[1]!.detail).toBe('Until 18 Oct')
+    expect(untilText(new Date(2026, 9, 11, 22, 0).toISOString(), now)).toBe('until 22:00')
+    expect(untilText(new Date(2026, 9, 12, 4, 0).toISOString(), now)).toBe('until tomorrow, 04:00')
+    expect(untilText(new Date(2026, 9, 18, 15, 30).toISOString(), now)).toBe('until 18 Oct')
+    expect(untilText(null, now)).toBe('until resumed')
+  })
+  it('tags a pause on the row: every route, one named route, or part of a route', () => {
+    const at = '2026-10-10T12:00:00Z'
+    const paused = (until: string | null) => ({ until, reason: PAUSED_REASON, by: null, at })
+    const flash = buildRegistry(many(), NOW).groups.flatMap(group => group.rows).find(row => row.key === 'google:gemini-flash')!.model
+    expect(pauseTag(flash, NOW)).toBe('Paused until 14 Oct')
+    const opusProfiles = (pauses: Record<string, ReturnType<typeof paused> | null>) => buildRegistry(many().map(item => item.model in pauses ? { ...item, pause: pauses[item.model] } : item), NOW).groups.flatMap(group => group.rows).find(row => row.key === 'anthropic:opus')!.model
+    expect(pauseTag(opusProfiles({ 'claude-opus-5.5': paused(null) }), NOW)).toBe('Cursor paused')
+    expect(pauseTag(opusProfiles({ 'claude-opus-5.5': paused(null), 'anthropic/claude-opus-5-5': paused(null) }), NOW)).toBe('2 routes paused')
+    expect(pauseTag(opusProfiles({ 'claude-opus-5-5': paused('2026-10-20T12:00:00Z'), opus: paused(null), 'claude-opus-5.5': paused(null), 'anthropic/claude-opus-5-5': paused('2026-10-15T12:00:00Z') }), NOW)).toBe('Paused until 15 Oct')
+    const grok = buildRegistry(many().map(item => item.model === 'grok-4.7-low' ? { ...item, pause: paused(null) } : item), NOW).groups.flatMap(group => group.rows).find(row => row.key === 'xai:grok')!.model
+    expect(pauseTag(grok, NOW)).toBe('Partly paused')
+    expect(grok.routes[1]).toMatchObject({ harness: 'cursor', pause: null, partlyPaused: true })
+  })
+  it('pauses every route of a version, Cursor\'s Grok levels through one id, stops at the first refusal and undoes exactly what it changed', async () => {
+    const grok = buildRegistry(many(), NOW).groups.flatMap(group => group.rows).find(row => row.key === 'xai:grok')!.model
+    let refuse = ''
+    http.handle = (_method, path) => path.includes(refuse) && refuse ? json({ error: 'model_pause_limit' }, 413) : json({ harness: 'x', model: 'y', pause: null })
+    const done = await pauseModel(grok, grok.family, { until: '2026-10-12T02:00:00.000Z' })
+    expect(done.error).toBeNull()
+    expect(http.calls.map(call => `${call.method} ${call.path}`)).toEqual(['PUT /models/lines/grok/grok-4.7/pause', 'PUT /models/lines/cursor/grok-4.7-low/pause'])
+    expect(http.calls[0]!.body).toEqual({ until: '2026-10-12T02:00:00.000Z', reason: PAUSED_REASON })
+    // Every other route is written one by one; a refusal stops the rest and says how far it got.
+    http.calls.length = 0; refuse = 'cursor/claude-opus-5.5'
+    const opus: RegistryModel = buildRegistry(many(), NOW).groups.flatMap(group => group.rows).find(row => row.key === 'anthropic:opus')!.model
+    const partial = await pauseModel(opus, opus.family, 'resume')
+    expect(http.calls.map(call => `${call.method} ${call.path}`)).toEqual([
+      'DELETE /models/lines/claude/claude-opus-5-5/pause', 'DELETE /models/lines/claude/opus/pause', 'DELETE /models/lines/cursor/claude-opus-5.5/pause',
+    ])
+    expect(partial).toMatchObject({ error: 'model_pause_limit' })
+    expect(partial.done.map(step => step.model)).toEqual(['claude-opus-5-5', 'opus'])
+    // Only Cursor's Grok ids are one group on the server (pause.go); any other per-level ids are each written.
+    const route = { ...opus.routes[2]!, models: ['x-high', 'x-max'] }
+    expect(pauseTargets(route, 'anthropic')).toEqual(['x-high', 'x-max'])
+    expect(pauseTargets(route, 'xai')).toEqual(['x-high'])
+    // Undo writes back what each step found: an earlier pause that still lies ahead, otherwise none.
+    http.calls.length = 0; refuse = ''
+    const flash = buildRegistry(many(), NOW).groups.flatMap(group => group.rows).find(row => row.key === 'google:gemini-flash')!.model
+    const steps = (await pauseModel(flash, flash.family, { until: null })).done
+    http.calls.length = 0
+    expect(await undoPause(steps, NOW)).toBeNull()
+    expect(http.calls).toEqual([{ method: 'PUT', path: '/models/lines/gemini/gemini-2.5-flash/pause', body: { until: '2026-10-14T12:00:00Z', reason: 'Paused in Settings › Models' } }])
+    http.calls.length = 0
+    expect(await undoPause(steps, new Date('2026-10-15T00:00:00Z'))).toBeNull()
+    expect(http.calls).toEqual([{ method: 'DELETE', path: '/models/lines/gemini/gemini-2.5-flash/pause', body: undefined }])
+    // A person or workspace gone mid-run stops the next request.
+    http.calls.length = 0
+    let live = true
+    http.handle = () => { live = false; return json({ harness: 'x', model: 'y', pause: null }) }
+    await expect(pauseModel(grok, grok.family, 'resume', { live: () => live })).rejects.toBeInstanceOf(StaleScopeError)
+    expect(http.calls).toHaveLength(1)
+  })
+  // AEON-1163 risk: one read per route excludes only that route, so a sibling route removed in the same step is named as the fallback.
+  it('reads one remove question for a whole version: every profile it removes goes with that one read', async () => {
+    http.handle = () => json({ used_by: [], replacement: { line: null, effort: null }, revision: 'r1', incomplete: false })
+    await previewRemoval('pi', 'anthropic/claude-opus-5-5', undefined, ['claude-high', 'pi high'])
+    await previewRemoval('codex', 'gpt-6.1-sol')
+    expect(http.calls.map(call => `${call.method} ${call.path}`)).toEqual([
+      'GET /models/lines/pi/anthropic%2Fclaude-opus-5-5/usage?profile=claude-high&profile=pi%20high',
+      'GET /models/lines/codex/gpt-6.1-sol/usage',
+    ])
   })
 })

@@ -8,7 +8,6 @@ import ModelChain from './models/ModelChain.vue'
 import ModelPicker from './models/ModelPicker.vue'
 import KindMenu from './models/KindMenu.vue'
 import ModelsPopover from './models/ModelsPopover.vue'
-import ModelRefreshSettings from './ModelRefreshSettings.vue'
 import ModelRegistryCard from './models/ModelRegistryCard.vue'
 import { useModelsSimple } from '../../lib/useModelsSimple'
 import { cantSentence, entryFor, lockTip, neverWho, orderLines, stepStates, type ChainEnd, type ModelEntry, type RowView, type SimpleNever, type WhyView } from '../../lib/modelsSimple'
@@ -17,13 +16,12 @@ import { cantSentence, entryFor, lockTip, neverWho, orderLines, stepStates, type
 // themselves, and one line on what runs next. The stored board, rules and situations keep working underneath.
 const route = useRoute()
 const model = useModelsSimple()
-const { scope, doc, rows, entries, routes, next, news, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey } = model
+const { scope, doc, rows, entries, routes, next, news, busy, error, failed, announcement, draft, admin, editable, readable, actionKey } = model
 const defaultRow = computed(() => rows.value[0])
 const exceptions = computed(() => rows.value.slice(1))
 const shown = computed(() => !!doc.value)
 const fresh = computed(() => new Set((doc.value?.new_lines ?? []).map(item => item.line)))
 const person = computed(() => doc.value?.person_id ?? null)
-const catalog = ref(route.hash === '#model-refresh')
 
 // ----- menus ------------------------------------------------------------------------------------------------
 const picker = ref<{ key: string; anchor: HTMLElement } | null>(null)
@@ -169,22 +167,16 @@ watch(() => [route.query.why, route.query.ticket, shown.value, !!next.value.why]
   const anchor = document.querySelector<HTMLElement>('[data-next-line]')
   if (anchor && still()) { closeMenus(); ticketWhy.value = { view, anchor } }
 }, { immediate: true })
-// #model-refresh opens the catalog fold and scrolls to the model registry card under the models card.
+// #model-refresh scrolls to the model registry card under the models card.
 watch(() => [route.hash, shown.value], async () => {
   if (route.hash !== '#model-refresh' || !shown.value) return
-  catalog.value = true
   await nextTick(); document.getElementById('model-refresh')?.scrollIntoView({ block: 'start' })
 }, { immediate: true })
 </script>
 <template>
   <div v-if="readable" class="models-section" data-models-section :data-models-ready="shown ? 'true' : 'false'">
-    <!-- The catalog toggle stays above the models card, so a refusal, a new row or a skeleton below never moves it (AEON-541).
-         The model registry card (AEON-1012) sits under that card and is the #model-refresh target. Catalog refresh settings
-         stay one fold away and do not take that anchor. -->
-    <div class="m-fold">
-      <button type="button" class="fold" data-catalog-fold :aria-expanded="catalog" aria-controls="catalog-body" @click="catalog = !catalog"><AppIcon name="chevron-right" :size="14" :class="{ open: catalog }" /><b>Model catalog</b><span>How new models are found</span></button>
-      <div v-if="catalog" id="catalog-body"><ModelRefreshSettings :key="owner" /></div>
-    </div>
+    <!-- The model registry card (AEON-1012) sits under the models card and is the #model-refresh target. How new models
+         are found lives inside it, so auto-update has one writer (AEON-1138, AEON-1148). -->
     <section class="glass-card m-card" aria-labelledby="m-title" :aria-busy="busy || undefined">
       <div class="m-head">
         <div class="titles"><h2 id="m-title">Models</h2><p class="lead">One default for all work, overrides only where you care.</p></div>

@@ -806,6 +806,8 @@
     ,
     "browser:tests/models-outdated.spec.ts:on a phone › the sheet fills the screen with its actions pinned at the bottom, Keep them left of Remove, and every target is at least 44 px"
     ,
+    "browser:tests/models-outdated.spec.ts:on a phone › the tray puts Review… on its own line under the sentence, which keeps the full width"
+    ,
     "browser:tests/models-outdated.spec.ts:screenshots of the tray and the sheet at 1440, 1024 and 390 px, light and dark"
     ,
     "browser:tests/models-outdated.spec.ts:the review sheet overlays the page: inside the viewport, nothing on the page moves, focus stays in it and Esc closes it without a write"
@@ -816,7 +818,7 @@
     ,
     "browser:tests/models-outdated.spec.ts:with auto-update on the uses already moved, so the tray says nothing uses them and Remove only removes"
     ,
-    "browser:tests/models-registry.spec.ts:screenshots of the card at 1440 and 400 px, light and dark"
+    "browser:tests/models-registry-shots.spec.ts:screenshots of the registry at 1440, 1024 and 390 px, light and dark"
     ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
     ,
@@ -9750,6 +9752,8 @@
     ,
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"on a phone › the sheet fills the screen with its actions pinned at the bottom, Keep them left of Remove, and every target is at least 44 px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"on a phone › the tray puts Review… on its own line under the sentence, which keeps the full width","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"screenshots of the tray and the sheet at 1440, 1024 and 390 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"the review sheet overlays the page: inside the viewport, nothing on the page moves, focus stays in it and Esc closes it without a write","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -9759,6 +9763,12 @@
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"unticking versions changes what moves and the button label while the actions and boxes stay put (±0.5 px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"with auto-update on the uses already moved, so the tray says nothing uses them and Remove only removes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-registry-shots.spec.ts","name":"on a phone, the design check › passes on the built registry at 400 px with 44 px targets, light and dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry-shots.spec.ts","name":"screenshots of the registry at 1440, 1024 and 390 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-registry-shots.spec.ts","name":"the design check passes on the built registry at 1440 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Add model with several levels registers them in order, and a failure after the first level is never reported as saved","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9776,21 +9786,27 @@
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit binds the revision to the line read with it when that line changed before the revision was captured","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit creates a new version with only the changed fields; an auto-discovered entry keeps harness, route and slug","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit of a hand-added entry can change its slug and route, and a server refusal is shown in the form","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit of a hand-added route can change its slug and route, and a server refusal is shown in the form","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit sends the revision captured with the form, Undo sends the revision the edit returned, and a conflict reloads","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Esc leaves a field, then closes the remove question, then the editor and returns focus to its Edit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Esc in the editor leaves a field, then closes it and returns focus to its Edit; Esc in the remove question returns focus to Remove…","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"How new models are found: a quiet fold whose settings never touch auto-update, with vendor keys and models that wait","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Pause… offers tomorrow, a week or until resumed; every route pauses, the row says so, and Undo puts back what was there","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove cannot go ahead without its preview, and a partly failed removal says how far it got","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove names each use’s own replacement and effort, and says when there is no qualified fallback","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove of an unused hand-added entry says nothing uses it; other people’s uses are reported as not shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove of an unused hand-added line says nothing uses it; other people’s uses are reported as not shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove shows where the model is used and what takes over before anything is removed, and Undo restores every level","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove… asks where every route of the version is used before anything is removed, removes every level of every route, and Undo restores them","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"a line opens in place: its routes with their own levels and source, provider, lifecycle and note facts; nothing above it moves","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"a pause refused on one route says how far it got and never reports the version paused","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"a person who cannot read models sees who to ask instead of an empty list","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9802,15 +9818,21 @@
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"auto-update writes the whole settings object and a failed save puts the switch back","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"controls stay put: the strip, the entry that was used and its form buttons do not move (±0.5 px)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"controls stay put: the strip, an opened line's actions and the editor's buttons do not move (±0.5 px)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"many models stay calm: about 35 routes as at most 20 rows, Cursor's Grok levels as one route, older versions folded with their levels","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"models that cannot load say so in place and Try again recovers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"pausing, resuming and their Undo never move a line's row or actions (±0.5 px) at 1440 px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"pausing, resuming and their Undo never move a line's row or actions (±0.5 px) at 390 px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"people without models.manage read the registry and get no controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"screenshots of the card at 1440 and 400 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"provider and harness facts are read-only: only a route added by hand has Edit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"the registry lists every model with its note, source, levels and state, newest versions first","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"the registry groups lines by provider, folded by default, each with its source, levels and state, and never says Auto-discovered","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"thinking levels growing or shrinking do not move the input, note or actions at desktop or phone width","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9862,6 +9884,8 @@
     ,
     {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"why at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-simple.spec.ts","name":"#model-refresh lands on the registry card, and no catalog fold above the models card remains","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a 403 refusal says so, keeps what was shown and never offers Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a 409 refusal says so, keeps what was shown and never offers Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -9907,8 +9931,6 @@
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"the card and its picker have no accessibility violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"the card holds its layout on a phone","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-simple.spec.ts","name":"the catalog settings stay one fold away until the registry card replaces them","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"the default leads, overrides read as exceptions, reviews pick themselves and one line says what runs next","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -17234,9 +17256,21 @@
     ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses server review evidence, including newly qualified harnesses and per-model residency","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"AEON-1163: discovery drafts stay bound to their account and cannot be submitted after management access is lost","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"AEON-1163: discovery drafts survive access refresh but reset synchronously with the session and release their listener on unmount","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"How new models are found writes its settings with auto-update as the server holds it and never sends the matrix revision","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"Remove on a version asks one read about every level of every route it removes, then retires exactly those","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a pause refused on one route says how far it got, and its Undo puts back only the routes it changed","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a refusal the server answered still says nothing was removed","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a removal whose answer is lost after it committed is not called \"nothing removed\": it says the outcome is open and shows the list read again","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a remove question about a version that changed on screen closes, and Remove retires nothing it did not ask about","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a save that waited for a read and lost its editor writes nothing and does not call it a conflict","tier":"GATED-FULL"}
     ,
@@ -17274,15 +17308,13 @@
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"old versions > writes each use in words: the row, the person, and what a lock or rule does, never a server code","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > describes a line as harness, route (when it adds something), id, source and what was taken on","tier":"GATED-FULL"}
-    ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > groups profiles into one line per model, levels in the model's own order, retired profiles left out","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > keeps legacy auto provenance generic until the server names its origin","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > marks a discovered, disabled line New and shows a scheduled retirement, never both","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > names a level whose effort level is unknown after those that have one, and a missing display name falls back to the model id","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > names a source only when the server does: legacy auto stays unknown, a hand-added line says so","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > orders harnesses as the page does, newest version first and then by name","tier":"GATED-FULL"}
     ,
@@ -17291,6 +17323,28 @@
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"routes and families > derives the provider the server compares with the model's own namespace","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"routes and families > mirrors the server's family rule, so an unknown OpenRouter family is allowed for pi only through \"unknown\"","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > calls a model by one name in the picker, the registry row, the tray and the sheet","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > folds Cursor's per-level ids into one route: Grok 4.7 runs through Grok and Cursor, its fast variant is its own line","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > is one model per version across harnesses: Opus 5.5 through Claude Code, Cursor and pi, the alias as one more route, Opus 5 folded","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > keeps the version that runs on the row: a newer one that is off waits on a row of its own; the newest that is old moves into the fold","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > names how long a pause lasts and what the menu offers","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > pauses every route of a version, Cursor's Grok levels through one id, stops at the first refusal and undoes exactly what it changed","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > reads one remove question for a whole version: every profile it removes goes with that one read","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > says token budgets once and names a level as the sheet does","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > says where each fact came from, and \"unknown\" (null) when nobody reported it; only hand-added routes are editable","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > shows about 35 routes as at most 20 rows, providers in order, with the count above the list","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > tags a pause on the row: every route, one named route, or part of a route","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the inline form > accepts an OpenRouter slug with or without its prefix and a variant, and refuses what the server would","tier":"GATED-FULL"}
     ,
