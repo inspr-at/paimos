@@ -1,0 +1,142 @@
+{
+  "ticket": "AEON-1241",
+  "status": "blocked_migration",
+  "ready_for_merge": false,
+  "statement": "MIGRATION NEEDED: tenant-scoped durable verified webhook receipts with replayable payloads, independent per-step outcomes/checkpoints, attempts, next-attempt timestamps and bounded retry claiming. No migration number is assigned in this brief; no migration was written.",
+  "stop_authority": "aeon-1241-webhook502.md, Build 3: if you need a migration, write MIGRATION NEEDED in your evidence and stop before writing one.",
+  "ownership": {
+    "tracker": "PPM / INSPR",
+    "account_verified": true,
+    "worker_marker_verified": true,
+    "branch": "work/aeon-1241-webhook502",
+    "coordinator_owns": [
+      "migration reservation",
+      "review gates",
+      "release gates",
+      "ticket status",
+      "push",
+      "merge",
+      "deploy"
+    ]
+  },
+  "source_base": "928157260",
+  "changes": [
+    "Added TestDeliveryWebhookUnlinkedMetricSource in the existing metrics integration test file; no application changes.",
+    "Registered the regression as ESSENTIAL through the existing manifest classifier; no prior test was loosened, removed or skipped."
+  ],
+  "reproduction": {
+    "commit": "d4e122cc0",
+    "test": "TestDeliveryWebhookUnlinkedMetricSource",
+    "risk": "A repository with no linked metric source still makes an Actions suite API read; an upstream failure can reject an already authenticated and projected delivery.",
+    "fixture": "Real HTTP mux, HMAC verification, installation/repository binding, tenant DB transactions and projection ledger. No metric source is created. GitHub API responses are injected.",
+    "desired": "204, no metric API read, no metric fact, no failure log when metrics are not configured.",
+    "controls": [
+      "Available GitHub read returns a complete valid workflow run.",
+      "Unavailable GitHub read returns crossreview.ErrUnavailable.",
+      "Before accepting a 502 as the reproduced bug, require exactly the expected metric read, the committed authenticated projection ledger, and the existing structured audit/github_unavailable log."
+    ],
+    "result": "Not executed: all three remote attempts exited 3. First: both global remote test slots occupied. Second and third: remote host RED under the host-watch guard. The new test is expected to fail on unchanged main behavior; HTTP values are source-derived expectations, not runtime observations. No local Go fallback.",
+    "source_expected_observations": {
+      "read_available": {
+        "status": 204,
+        "metric_api_reads": 1,
+        "projection_ledger_rows": 1,
+        "metric_run_rows": 1
+      },
+      "read_unavailable": {
+        "status": 502,
+        "metric_api_reads": 1,
+        "projection_ledger_rows": 1,
+        "metric_run_rows": 0,
+        "logged_step": "audit",
+        "logged_class": "github_unavailable"
+      }
+    }
+  },
+  "storage_findings": [
+    {
+      "path": "internal/db/migrations/1267_delivery.sql",
+      "finding": "delivery_github_events has payload_sha256 and typed normalized observations, but no raw delivery, per-step checkpoints, attempt count, retry schedule or lease. processed_at is populated at the projection write, before the audit/metrics/flow/completion chain finishes."
+    },
+    {
+      "path": "internal/delivery/webhook.go",
+      "finding": "GitHub/network observation reads occur before recordTx. A failure there leaves no durable delivery receipt. workflow_run is accepted without a projection ledger entry."
+    },
+    {
+      "path": "internal/delivery/store.go",
+      "finding": "The projection record insert deduplicates on tenant_id/delivery_id. Inserting the current ledger row before reads would cause the duplicate path and ON CONFLICT to skip the unfinished projection. Rebuild decodes observations as []Observation."
+    },
+    {
+      "path": "internal/delivery/audit_store.go",
+      "finding": "audit_checks is consumed as check facts; observations are consumed with jsonb_array_elements. Repurposing either typed field to hold payload/retry state would change existing reader semantics."
+    },
+    {
+      "path": "internal/db/migrations/0200_agent_inbox.sql",
+      "finding": "inbox_messages requires sender/recipient principals and a message body of at most 65536 characters. inbox_wakes is an outbound wake-hint queue tied to an enabled principal webhook target, not an inbound service receipt. It cannot faithfully retain all allowed 2 MiB webhook bodies without repurposing user messaging."
+    },
+    {
+      "path": "internal/delivery/reconcile.go",
+      "finding": "Existing internal replay scans unfinished fanout_done only. It cannot replay audit, metrics, flow, completion or deliveries that failed before a ledger row was inserted."
+    },
+    {
+      "path": "internal/delivery/metrics_store.go",
+      "finding": "jobScope returns an empty workflow list for an unlinked repository, but metricsEvent still calls MetricsRead/suiteRuns for a completed GitHub Actions suite. Source absence itself is not an error; the unnecessary API read can fail."
+    },
+    {
+      "path": "internal/delivery/audit_webhook.go",
+      "finding": "Check audit, merge audit, metrics and flow share the audit error label. Later steps stop on any earlier error and depend on a fresh delivery for replay."
+    },
+    {
+      "path": "internal/delivery/merge_done.go",
+      "finding": "Merge completion is an additional downstream step after auditWebhook; a durable chain must include it to avoid regressions."
+    },
+    {
+      "path": "internal/dsar/inventory.json",
+      "finding": "The existing ledger classifies audit_checks as metadata and observations as review. A raw payload needs a deliberate inventory classification and tenant-scoped locator in the same authorized expansion."
+    }
+  ],
+  "continuation_requirements": [
+    "Coordinator assigns an expansion migration number above the released maximum; prefer a dedicated durable receipt table using the existing tenant-scoped ledger pattern, with DSAR inventory in the same change.",
+    "Commit a bounded, verified delivery receipt before network/step work; retain event, action, repository, installation binding, delivery id, payload hash and replayable verified payload without persisting signatures or credentials. Reject reuse of a delivery id with different authenticated content.",
+    "Use explicit recorded/not-configured/nothing-to-record/failed outcomes. Distinguish projection/fanout/check-audit/merge-audit/metrics/flow/completion in content-free failure logs.",
+    "Replay failed steps internally across restart/replicas with bounded claiming, timeouts, injected-clock backoff and idempotent effects. Do not discard pending facts on retry exhaustion or rely on GitHub redelivery.",
+    "Preserve tenant -> tree -> record -> sorted blob -> event-counter lock order and current-target authorization in final mutation transactions; no network I/O under those row locks.",
+    "Do not skip delivery flow facts merely because metrics are unconfigured. Delivery Flow here is independent of the retired Journey/stage system.",
+    "Keep the new regression assertions and add failure -> internal retry -> exactly-once effect tests for each step, plus restart/duplicate/concurrency/integrity checks. Do not report completion or release acceptance before they pass."
+  ],
+  "validation": [
+    {
+      "command": "git fetch origin main; git merge origin/main",
+      "result": "Already up to date."
+    },
+    {
+      "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+      "result": "PASS: 289 tests, no failures or skips; exit 0."
+    },
+    {
+      "command": "python3 -m unittest discover -s scripts/audit",
+      "result": "PASS: 33 tests; exit 0. No new Go/web source files were introduced."
+    },
+    {
+      "command": "node --test web/scripts/ci-web-shard.test.mjs",
+      "result": "FAILED prerequisite: native collection cannot find web dependencies (including vue); web/node_modules is absent. Not green. No UI files changed and npm ci was not run during this migration-stop handoff."
+    },
+    {
+      "command": "remote-test.sh <assigned-worktree> ./internal/delivery -run ^TestDeliveryWebhookUnlinkedMetricSource$ -count=1 -v",
+      "result": "INCOMPLETE: three refusals, all exit 3. First: two remote slots busy. Second and third: remote host RED. No Go execution or local fallback."
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS."
+    },
+    {
+      "command": "ci-static-remote.sh (approved runner for node scripts/ci-static.mjs --merge-main)",
+      "result": "INCOMPLETE: exit 3, remote host is not GREEN under the host-watch guard. No static run or local fallback; not green."
+    }
+  ],
+  "limits": [
+    "This is a diagnosis and failing regression handoff, not a delivered fix; do not merge or advertise no lost facts.",
+    "Production and GitHub delivery logs were not accessed; the actual production upstream error remains unverified.",
+    "No migrations, application/API/version changes, new secrets, origin push, deployment, review gates or other model CLIs."
+  ]
+}
