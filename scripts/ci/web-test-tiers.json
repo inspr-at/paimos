@@ -15424,6 +15424,14 @@
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > treats provisional windows as unknown and does not rank unmeasured zero as the greatest allowance","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the accounts chip and its tiles > names what there is, and flags sign-ins before anything else","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the accounts chip and its tiles > opens the three parts of Settings, each with its own state words","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the accounts chip and its tiles > puts a low quota on Accounts and a sign-in problem on Computers, both as warnings","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the accounts chip and its tiles > shows only Computers to someone who may not read accounts, and Away on Capacity","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not call a computer that stopped reporting broken, and does not ask for action while a repin settles","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not count a draining account or an account on Hold as ready","tier":"GATED-FULL"}
