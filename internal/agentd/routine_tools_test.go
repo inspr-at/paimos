@@ -117,9 +117,6 @@ func TestRoutineBuilderToolsConstrainEffects(t *testing.T) {
 	if err := os.WriteFile(foreign, []byte("foreign original"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(foreign, filepath.Join(workspace, "linked.txt")); err != nil {
-		t.Fatal(err)
-	}
 	g := routineTestGrant("21")
 	api := &fakeRunTools{}
 	active, done := true, false
@@ -163,7 +160,8 @@ func TestRoutineBuilderToolsConstrainEffects(t *testing.T) {
 		result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
 		if reason == "" {
 			if err != nil || result == nil || result.IsError {
-				t.Fatalf("%s failed: result=%v error=%v", name, result, err)
+				raw, _ := json.Marshal(result)
+				t.Fatalf("%s failed: result=%s error=%v", name, raw, err)
 			}
 			return
 		}
@@ -199,6 +197,11 @@ func TestRoutineBuilderToolsConstrainEffects(t *testing.T) {
 		if data, err := os.ReadFile(full); err != nil || string(data) != "protected original" {
 			t.Fatal("protected file changed", name)
 		}
+	}
+	// Recursive searches deliberately refuse a tree containing symlinks.
+	// Introduce the escape only after the ordinary read/search controls above.
+	if err := os.Symlink(foreign, filepath.Join(workspace, "linked.txt")); err != nil {
+		t.Fatal(err)
 	}
 	for _, path := range []string{"linked.txt", "../foreign.txt", foreign} {
 		call("aeon_write", map[string]any{"file_path": path, "content": "changed"}, "workspace file unavailable")
