@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelactivation"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Risk: stale/aggregated facts override native successors, or lack of lifecycle
@@ -44,6 +46,174 @@ func TestCatalogOutdatedLifecycleEvidence(t *testing.T) {
 	if got := resolveLifecycle(nil, "anthropic:unreported", at); got.State != nil || got.Successor != nil || got.Source != "" {
 		t.Fatal("invented unknown lifecycle", got)
 	}
+}
+
+// Risk: a sourced floating alias replaces concrete successors and puts the
+// newest numbered version in the outdated tray, moving immutable pins to it.
+func TestCatalogOutdatedSourcedAliasIsNotSuccessor(t *testing.T) {
+	admin, _, _ := retireFixture(t)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		return RecordCatalogFacts(t.Context(), tx, admin.TenantID, []CatalogFact{{
+			Provider: "anthropic", ModelID: "opus", Route: "claude/opus",
+			Fact: "context_window", Value: json.RawMessage(`200000`),
+			Source: "recorded-harness", SourceKind: "harness", FieldPath: "context_window",
+			FetchedAt: time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC),
+		}})
+	})
+	preview := outdatedPreview(t, admin)
+	old := requireOutdated(t, preview, "anthropic:claude-opus-5")
+	if old.Successor == nil || *old.Successor != "anthropic:claude-opus-5.5" {
+		t.Fatalf("numbered successor replaced by alias: %+v", old)
+	}
+	for _, version := range preview.Versions {
+		if version.Version == "anthropic:claude-opus-5.5" {
+			t.Fatalf("newest numbered model became outdated: %+v", version)
+		}
+	}
+}
+
+type lifecycleTestProfile struct {
+	Profile
+	Lifecycle *CatalogLifecycle `json:"lifecycle"`
+}
+
+// Risk: display metadata aborts dispatch reads due to the board's profile cap,
+// unrelated source identities, or an evidence budget instead of returning null.
+func TestCatalogProfileLifecycleBestEffort(t *testing.T) {
+	t.Run("retired profiles do not impose board cap", func(t *testing.T) {
+		admin, old, _ := retireFixture(t)
+		before := boardDecode[[]lifecycleTestProfile](t, boardCall(t, admin, "GET", "/api/models", nil, ""), 200)
+		inRegistry(t, admin, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `WITH added AS (
+				INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled)
+				SELECT $1,'retired-fixture-'||n,'1','claude','anthropic','claude-opus-4','high','strong',false
+				FROM generate_series(1,513) n RETURNING id
+			) INSERT INTO model_profile_retirements(tenant_id,profile_id,retired_by,reason)
+			SELECT $1,id,$2,'recorded retired fixture' FROM added`, admin.TenantID, admin.ID)
+			return err
+		})
+		profiles := boardDecode[[]lifecycleTestProfile](t, boardCall(t, admin, "GET", "/api/models", nil, ""), 200)
+		if len(profiles) != len(before)+513 {
+			t.Fatalf("profile list truncated: got %d, want %d", len(profiles), len(before)+513)
+		}
+		found := false
+		for _, profile := range profiles {
+			if profile.ID == old.ID {
+				found = true
+				if profile.Lifecycle == nil || profile.Lifecycle.Successor == nil || *profile.Lifecycle.Successor != "anthropic:claude-opus-5.5" {
+					t.Fatalf("board cap suppressed available lifecycle: %+v", profile)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("listed profile disappeared")
+		}
+	})
+	t.Run("unrelated identities do not consume lifecycle budget", func(t *testing.T) {
+		admin, old, _ := retireFixture(t)
+		inRegistry(t, admin, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO model_catalog_facts(tenant_id,provider,model_id,fact,value,source,source_kind,field_path,fetched_at)
+				SELECT $1,'anthropic','unrelated-'||n,'context_window','200000','recorded-harness','harness','context_window',now()
+				FROM generate_series(1,20001) n`, admin.TenantID)
+			return err
+		})
+		profiles := boardDecode[[]lifecycleTestProfile](t, boardCall(t, admin, "GET", "/api/models", nil, ""), 200)
+		found := false
+		for _, profile := range profiles {
+			if profile.ID == old.ID {
+				found = true
+				if profile.Lifecycle == nil || profile.Lifecycle.Successor == nil || *profile.Lifecycle.Successor != "anthropic:claude-opus-5.5" {
+					t.Fatalf("unrelated models suppressed available lifecycle: %+v", profile)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("listed profile disappeared")
+		}
+	})
+	t.Run("evidence overflow returns profiles with null lifecycle", func(t *testing.T) {
+		admin, _, _ := retireFixture(t)
+		before := boardDecode[[]lifecycleTestProfile](t, boardCall(t, admin, "GET", "/api/models", nil, ""), 200)
+		inRegistry(t, admin, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO model_catalog_facts(tenant_id,provider,model_id,route,fact,value,source,source_kind,field_path,fetched_at)
+				SELECT $1,'anthropic','claude-opus-5','claude/fixture-'||n,'present','true','recorded-harness','harness','present',now()
+				FROM generate_series(1,32001) n`, admin.TenantID)
+			return err
+		})
+		profiles := boardDecode[[]lifecycleTestProfile](t, boardCall(t, admin, "GET", "/api/models", nil, ""), 200)
+		if len(profiles) != len(before) {
+			t.Fatal("evidence overflow changed profile list")
+		}
+		for i, profile := range profiles {
+			if profile.ID != before[i].ID || profile.Lifecycle != nil {
+				t.Fatalf("overflow must preserve profiles and report null lifecycle: %+v", profile)
+			}
+		}
+	})
+}
+
+type lifecycleQueryBarrier struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *lifecycleQueryBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(data.SQL, "aeon_model_version_newer") {
+		b.once.Do(func() {
+			close(b.entered)
+			select {
+			case <-b.release:
+			case <-ctx.Done():
+			}
+		})
+	}
+	return ctx
+}
+func (*lifecycleQueryBarrier) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+// Risk: optional successor calculation holds the global tenant writer fence.
+// A query barrier proves overlap; NOWAIT rejects the specific lock conflict.
+func TestCatalogProfileLifecycleReleasesTenantFence(t *testing.T) {
+	admin, old, _ := retireFixture(t)
+	barrier := &lifecycleQueryBarrier{entered: make(chan struct{}), release: make(chan struct{})}
+	config := appPool.Config()
+	config.ConnConfig.Tracer = barrier
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	defer close(barrier.release)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		r := httptest.NewRequest("GET", "/api/models", nil).WithContext(tenant.WithPrincipal(t.Context(), admin))
+		w := httptest.NewRecorder()
+		(&Module{pool: pool}).list(w, r)
+		done <- w
+	}()
+	select {
+	case <-barrier.entered:
+	case w := <-done:
+		t.Fatalf("list finished without successor query: %d %s", w.Code, w.Body.String())
+	case <-time.After(10 * time.Second):
+		t.Fatal("successor query barrier was not reached")
+	}
+	err = db.InTenant(t.Context(), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, admin.TenantID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("lifecycle held tenant writer fence: %v", err)
+	}
+	barrier.release <- struct{}{}
+	profiles := boardDecode[[]lifecycleTestProfile](t, finishEditorRequest(t, done), 200)
+	for _, profile := range profiles {
+		if profile.ID == old.ID && profile.Lifecycle != nil && profile.Lifecycle.Successor != nil && *profile.Lifecycle.Successor == "anthropic:claude-opus-5.5" {
+			return
+		}
+	}
+	t.Fatal("successor query did not complete after fence check")
 }
 
 func retireFixture(t *testing.T) (tenant.Principal, Profile, Profile) {
