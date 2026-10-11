@@ -46,7 +46,7 @@ test('static CI commands are registered and every origin still exists', () => {
 })
 
 test('drift guard catches newly added commands in each full static job', () => {
-  for (const job of ['go-static', 'release-check-run', 'web-setup', 'migration-compat', 'web-unit']) for (const command of ['node --test scripts/new.test.mjs', 'bash scripts/new-check.sh', 'go run ./scripts/new', 'python3 scripts/new.py', './scripts/x.sh', 'FOO=1 node scripts/new.mjs']) {
+  for (const job of ['go-static', 'release-check-run', 'web-catalogue', 'web-setup', 'migration-compat', 'web-unit']) for (const command of ['node --test scripts/new.test.mjs', 'bash scripts/new-check.sh', 'go run ./scripts/new', 'python3 scripts/new.py', './scripts/x.sh', 'FOO=1 node scripts/new.mjs']) {
     const mutated = workflow.replace(`  ${job}:\n`, `  ${job}:\n    steps:\n      - name: New static check\n        run: ${command}\n`)
     assert.throws(() => validateRegistry(registry, parseWorkflow(mutated)), /Unregistered static CI command/)
   }

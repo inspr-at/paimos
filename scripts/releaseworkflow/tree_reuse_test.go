@@ -61,7 +61,7 @@ func TestQueuePushReuseRetainsMainStructureAndFallback(t *testing.T) {
 			}
 		}
 	}
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-catalogue", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
 		j := treeMap(jobs[id])
 		condition, _ := j["if"].(string)
 		if !strings.Contains(condition, "always()") || !strings.Contains(condition, "needs.ci-plan.result == 'success'") || !strings.Contains(condition, fullQueueFallback) || !containsNeed(j["needs"], "tree-reuse") {
@@ -134,7 +134,7 @@ func TestDirectPushCannotSkipWithoutQueueProof(t *testing.T) {
 		t.Fatalf("direct push proof: %v\n%s", err, out)
 	}
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-catalogue", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
 		condition, _ := treeMap(jobs[id])["if"].(string)
 		if !strings.Contains(condition, fullQueueFallback) || !strings.Contains(condition, "always()") {
 			t.Fatalf("%s must run full work after absent proof", id)
@@ -369,7 +369,7 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 	for id, name := range proof.ExecutionSteps {
 		reuseStep(t, treeMap(jobs[id]), name)
 	}
-	for _, id := range []string{"ci-plan", "go-static", "go-timing", "web-setup", "release-check-run", "e2e-run", "migration-compat"} {
+	for _, id := range []string{"ci-plan", "go-static", "go-timing", "web-catalogue", "web-setup", "release-check-run", "e2e-run", "migration-compat"} {
 		if proof.ExecutionSteps[id] == "" {
 			t.Fatalf("verifier lacks execution evidence for %s", id)
 		}
@@ -443,6 +443,7 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 	want := cloneStep(t, before)
 	want["steps"] = wantSteps
 	setup = cloneStep(t, setup)
+	normalizeWebCatalogueOverlap(t, jobs, setup)
 	if condition, _ := setup["if"].(string); !strings.Contains(condition, " && needs.tree-reuse.outputs.reuse != 'pull_request'") {
 		t.Fatal("missing PR tree skip")
 	} else {
@@ -454,6 +455,44 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 		t.Fatal("Parallel setup changed beyond moving units and their prerequisites/proofs")
 	}
 	return before
+}
+
+// Risk: moving native discovery off the runtime path could drop identities or
+// accept a partial catalogue. Prove the complete blocking check and its parallel
+// dependencies, then restore its old position for the immutable historical pin.
+func normalizeWebCatalogueOverlap(t *testing.T, jobs, setup map[string]any) {
+	t.Helper()
+	catalogue := treeMap(jobs["web-catalogue"])
+	check := reuseStep(t, catalogue, "Require every web case to be classified")
+	wantCheck := map[string]any{"name": "Require every web case to be classified", "run": "node scripts/test-tiers/cli.mjs check web --strict"}
+	if !reflect.DeepEqual(check, wantCheck) {
+		t.Fatal("strict full web discovery must remain unconditional and blocking")
+	}
+	steps := reuseSteps(setup)
+	inputAt := -1
+	for i, value := range steps {
+		if treeMap(value)["name"] == "Require every web case to be classified" {
+			t.Fatal("runtime preparation must not wait for strict catalogue discovery")
+		}
+		if treeMap(value)["name"] == "Check Docker web inputs without Docker" {
+			inputAt = i
+		}
+	}
+	if inputAt < 1 || treeMap(steps[inputAt-1])["name"] != "Install web dependencies" {
+		t.Fatal("catalogue discovery needs the same installed dependencies as runtime setup")
+	}
+	want := cloneStep(t, setup)
+	delete(want, "outputs")
+	want["steps"] = append(append([]any{}, steps[:inputAt]...), wantCheck)
+	if !reflect.DeepEqual(catalogue, want) || catalogue["runs-on"] != "ubuntu-latest" || !reflect.DeepEqual(catalogue["needs"], []any{"ci-plan", "tree-reuse", "tier-plan"}) {
+		t.Fatal("catalogue must run beside setup on hosted CI with the same lane/reuse guards and dependency installation")
+	}
+	web := treeMap(jobs["web"])
+	gate := reuseStep(t, web, "Require catalogue, setup, units and every web shard")
+	if web["if"] != "always()" || !containsNeed(web["needs"], "web-catalogue") || gate["if"] != nil || gate["continue-on-error"] != nil || treeMap(gate["env"])["WEB_CATALOGUE"] != "${{ needs.web-catalogue.result }}" {
+		t.Fatal("the required web aggregate must join the catalogue and reject failure")
+	}
+	setup["steps"] = append(append(append([]any{}, steps[:inputAt+1]...), cloneStep(t, check)), steps[inputAt+1:]...)
 }
 
 // Prove the newly required classification checks before projecting onto the

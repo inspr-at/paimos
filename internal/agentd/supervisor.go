@@ -167,6 +167,8 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	setup                  func(context.Context, agentsetup.SetupRequest) (agentsetup.Progress, error)
+	accountLogins          map[string]agentsetup.AccountLogin // Local status only; never in probe reports.
 	leads                  *leadRuntime
 	routineConfig          *RoutineWorkspaceConfig
 	browserCaptures        func(agentsetup.RoutineGrant) BrowserCaptureRequester
@@ -633,6 +635,7 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 		}
 	}
 	failures := []error{recoveryErr, settlementErr}
+	var probeFailures []error
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
 	adapters := map[string]Adapter{}
@@ -828,6 +831,13 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 			s.probeReasonDetails = map[string]string{}
 		}
 		delete(s.probeReasonDetails, account.ID)
+		if s.accountLogins == nil {
+			s.accountLogins = map[string]agentsetup.AccountLogin{}
+		}
+		delete(s.accountLogins, account.ID)
+		if status.ActiveIdentity != "" && hold == "" && dependencyErr == nil && probeErr == nil {
+			s.accountLogins[account.ID] = agentsetup.AccountLogin{ActiveIdentity: status.ActiveIdentity, Approved: strings.EqualFold(status.ActiveIdentity, account.VerifiedIdentity)}
+		}
 		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
 			reason := "probe_failed"
 			if status.Failure == ProbeAuthFailed {
@@ -858,13 +868,16 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 		s.mu.Unlock()
 		s.capacityProbeConnection(account.ID, err == nil && available)
 		if probeErr != nil {
-			failures = append(failures, errors.New("harness failed to start"))
+			probeFailures = append(probeFailures, errors.New("harness failed to start"))
 		}
 		// A harness that fails to start is a per-harness hold reported through
-		// Lifecycle, not a poll failure: siblings keep polling and dispatching.
+		// Lifecycle. It cannot fail a poll that can dispatch a ready sibling.
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
 		}
+	}
+	if !s.Lifecycle("").Ready {
+		failures = append(failures, probeFailures...)
 	}
 	for _, run := range runs {
 		if err := ctx.Err(); err != nil {
@@ -875,7 +888,9 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 			continue
 		}
 		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) && !errors.Is(err, ErrHostCapacity) {
-			failures = append(failures, err)
+			if !errors.Is(err, errAccountUnavailable) || !s.Lifecycle("").Ready {
+				failures = append(failures, err)
+			}
 		}
 	}
 	return errors.Join(failures...)
@@ -901,9 +916,10 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 	}
 	// Multiple accounts produce at most one line per readiness cause per poll.
 	failed, timedOut, unsettled := false, false, false
-	for _, detail := range s.lifecycleAt("", now).AccountStatuses {
-		failed = failed || detail.Reason == "probe_failed"
-		timedOut = timedOut || detail.Reason == "probe_timeout"
+	lifecycle := s.lifecycleAt("", now)
+	for _, detail := range lifecycle.AccountStatuses {
+		failed = failed || !lifecycle.Ready && detail.Reason == "probe_failed"
+		timedOut = timedOut || !lifecycle.Ready && detail.Reason == "probe_timeout"
 		unsettled = unsettled || detail.Reason == agentsetup.UnsettledPreviousRun
 	}
 	if failed {
@@ -939,6 +955,8 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 		s.pollDiagnostic(reason)
 	}
 }
+
+var errAccountUnavailable = errors.New("no local account enrollment for harness")
 
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if run.RoutineBudget != nil {
@@ -1067,6 +1085,17 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	if err := validQueuedExecutionMode(run, adapter); err != nil {
 		return err
+	}
+	// Defer only this run before allocating routine resources or acquiring a
+	// checkout. The route and final claim still recheck their current authority.
+	accountIDs := make([]string, 0, len(s.accounts))
+	for _, account := range s.accounts {
+		if account.Harness == profile.Harness && s.accountAvailable(account.ID) && (run.AccountID == "" || run.AccountID == account.ID) && (run.RequestedAccountID == "" || run.RequestedAccountID == account.ID) {
+			accountIDs = append(accountIDs, account.ID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		return errAccountUnavailable
 	}
 	budgetBroker, _ := s.api.(RoutineBudgetBroker)
 	routineBudget, err := newRoutineCallBudget(StartRequest{Run: run, Profile: profile,
@@ -1222,15 +1251,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	if len(s.estimates) == 0 {
 		return errors.New("allowance estimates required")
-	}
-	accountIDs := make([]string, 0, len(s.accounts))
-	for _, account := range s.accounts {
-		if account.Harness == profile.Harness && s.accountAvailable(account.ID) && (run.AccountID == "" || run.AccountID == account.ID) && (run.RequestedAccountID == "" || run.RequestedAccountID == account.ID) {
-			accountIDs = append(accountIDs, account.ID)
-		}
-	}
-	if len(accountIDs) == 0 {
-		return errors.New("no local account enrollment for harness")
 	}
 	var route Route
 	if entry != nil {
@@ -2240,6 +2260,9 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 		}
 		for index := 0; index < len(entry.pending); {
 			control := entry.pending[index]
+			if entry.record.RoutineWorkspace != nil && control.ExpectedGeneration != "" && control.ExpectedGeneration != entry.harness.ID {
+				return ErrGeneration
+			}
 			entry.mu.Lock()
 			queued := entry.queueInput && control.Kind == "steer"
 			busy := entry.harness.Activity == "busy"
@@ -2273,7 +2296,8 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 			}
 			_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
 				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: operation, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
-			if (entry.managedPolicy || control.Kind == "tier" || queued) && operation != "force_stop" {
+			routineStop := entry.record.RoutineWorkspace != nil && control.Kind == "stop"
+			if (entry.managedPolicy || control.Kind == "tier" || queued || routineStop) && operation != "force_stop" {
 				switch {
 				case errors.Is(err, ErrControlExpired):
 					outcome, reason, err = "rejected", "authorization_expired", nil
@@ -2588,10 +2612,10 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		return Receipt{}, errors.New("control replay capacity reached")
 	}
 	if req.Operation != "force_stop" && fromRecoveryQueue && (entry.managedPolicy || req.ExpectedOwnership != nil) {
-		if !entry.managedPolicy && req.Operation != "tier" {
+		if !entry.managedPolicy && req.Operation != "tier" && !(req.Operation == "stop" && entry.record.RoutineWorkspace != nil) {
 			return Receipt{}, ErrUnsupported
 		}
-		if entry.budgetStopReason() != "" {
+		if entry.budgetStopReason() != "" && !(req.Operation == "stop" && entry.record.RoutineWorkspace != nil) {
 			return Receipt{}, ErrBudgetExhausted
 		}
 		if req.ExpectedOwnership == nil || req.ExpiresAt == nil {
@@ -2610,6 +2634,9 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		}
 		current, e := recovery.Ownership()
 		if e != nil || current.ProcessID != expected.ProcessID || current.RootPID != expected.RootPID || current.GroupID != expected.GroupID || !current.StartedAt.Equal(expected.StartedAt) {
+			return Receipt{}, ErrNotOwned
+		}
+		if req.Operation == "stop" && entry.record.RoutineWorkspace != nil && (current.DaemonID != expected.DaemonID || current.Generation != expected.Generation) {
 			return Receipt{}, ErrNotOwned
 		}
 	}
@@ -2665,6 +2692,14 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		graceful, ok := entry.process.(GracefulProcess)
 		if !ok {
 			return Receipt{}, ErrUnsupported
+		}
+		if entry.record.RoutineWorkspace != nil {
+			// Persist uncertainty before touching this exact child. A lost
+			// cooperative-stop reply cannot signal the process a second time.
+			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true}
+			if err := s.journal.Put(entry.record); err != nil {
+				return Receipt{}, err
+			}
 		}
 		entry.stopRequested = true
 		entry.mu.Unlock()

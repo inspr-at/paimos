@@ -25,12 +25,15 @@ type retireTable struct {
 
 var retireTables = []retireTable{
 	{"model_pref_orders", []string{"profile_id", "column_key", "situation"}, false},
+	{"model_pref_situation_orders", []string{"profile_id", "column_key", "situation"}, false},
 	{"model_pref_profiles", []string{"id"}, true},
 	{"model_rules", []string{"scope", "project_id", "column_key", "line"}, false},
 	{"model_rule_revisions", []string{"scope", "scope_key"}, true},
-	{"model_role_routes", []string{"role", "priority"}, false},
-	{"model_security_role_routes", []string{"role", "priority"}, false},
+	{"model_row_constraints", []string{"scope", "project_id", "column_key", "line"}, false},
+	{"model_pauses", []string{"harness", "model"}, false},
 	{"model_pref_cells", []string{"scope_id", "kind_id", "bucket"}, false},
+	{"model_role_routes", []string{"role", "profile_id"}, false},
+	{"model_security_role_routes", []string{"role", "profile_id"}, false},
 	{"model_pref_scopes", []string{"id"}, true},
 	{"model_profile_retirements", []string{"profile_id"}, false},
 }
@@ -181,6 +184,8 @@ func retirementLines(model lifecycleModel, all []lifecycleModel) map[string]bool
 			continue
 		}
 		lines[boardLineID(p)] = true
+		line, _ := modelsLine(p)
+		lines[line] = true
 	}
 	// Stable line references already choose a newer active version automatically.
 	// They move only if the selected version is still the active line head.
@@ -189,8 +194,10 @@ func retirementLines(model lifecycleModel, all []lifecycleModel) map[string]bool
 			continue
 		}
 		for _, p := range next.Profiles {
-			if !p.Retired && p.Enabled && lines[boardLineID(p)] && compareCatalogVersions(next.Version, model.Version) > 0 {
+			line, _ := modelsLine(p)
+			if !p.Retired && p.Enabled && (lines[boardLineID(p)] || lines[line]) && compareCatalogVersions(next.Version, model.Version) > 0 {
 				delete(lines, boardLineID(p))
+				delete(lines, line)
 			}
 		}
 	}
@@ -222,7 +229,7 @@ func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel
 		}
 		out = append(out, retireUse{Label: label, Who: who, From: model.Identity, To: model.Lifecycle.Successor, project: project, personal: person})
 	}
-	for _, raw := range s["model_pref_orders"] {
+	for _, raw := range append(append([]json.RawMessage{}, s["model_pref_orders"]...), s["model_pref_situation_orders"]...) {
 		row := rowFields(raw)
 		pref := prefs[rowString(row, "profile_id")]
 		person := rowString(pref, "person_id")
@@ -242,19 +249,34 @@ func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel
 						label = "Except for"
 					}
 				}
-				add(label+" · "+rowString(row, "column_key")+" · "+rowString(row, "situation"), who, "", person)
+				add(label+" · "+rowString(row, "column_key")+" · "+rowString(row, "situation"), who, rowString(pref, "project_id"), person)
 			}
 		}
 		for _, line := range not {
 			if lines[line] {
-				add("never · "+rowString(row, "column_key"), who, "", person)
+				add("never · "+rowString(row, "column_key"), who, rowString(pref, "project_id"), person)
 			}
 		}
 	}
 	for _, raw := range s["model_rules"] {
 		row := rowFields(raw)
-		if lines[rowString(row, "line")] {
+		if lines[rowString(row, "line")] && string(row["moved_to_models"]) != "true" {
 			add("lock · "+rowString(row, "lock")+" · "+rowString(row, "column_key"), rowString(row, "set_by"), rowString(row, "project_id"), "")
+		}
+	}
+	for _, raw := range s["model_row_constraints"] {
+		row := rowFields(raw)
+		if lines[rowString(row, "line")] {
+			add("lock · "+rowString(row, "kind")+" · "+rowString(row, "column_key"), rowString(row, "set_by"), rowString(row, "project_id"), "")
+		}
+	}
+	for _, raw := range s["model_pauses"] {
+		row := rowFields(raw)
+		for _, profile := range model.Profiles {
+			if !profile.Retired && profile.Harness == rowString(row, "harness") && profile.Model == rowString(row, "model") {
+				add("pause · "+profile.Harness, rowString(row, "set_by"), "", "")
+				break
+			}
 		}
 	}
 	for _, table := range []string{"model_role_routes", "model_security_role_routes"} {
@@ -299,4 +321,33 @@ func visibleRetireUses(ctx context.Context, tx pgx.Tx, p tenant.Principal, uses 
 		out = append(out, use)
 	}
 	return out, incomplete, nil
+}
+
+// Retained ladders are historical retirement/Undo references, never dispatch authority.
+func transferRetiredLadderReferences(ctx context.Context, tx pgx.Tx, before, after []Profile) error {
+	for _, old := range before {
+		candidates := sameRouteProfiles(after, old)
+		if len(candidates) == 0 {
+			continue
+		}
+		replacement := nearestProfile(candidates, old.Effort, old.EffortLevel)
+		for _, table := range []string{"model_role_routes", "model_security_role_routes"} {
+			var incompatible bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+table+` a JOIN `+table+` b ON b.tenant_id=a.tenant_id AND b.role=a.role WHERE a.profile_id=$1 AND b.profile_id=$2 AND (a.state<>b.state OR a.reason<>b.reason OR a.valid_until IS DISTINCT FROM b.valid_until))`, old.ID, replacement.ID).Scan(&incompatible); err != nil {
+				return err
+			}
+			if incompatible {
+				return fail(409, "successor has a conflicting role hold")
+			}
+			// Equal policies collapse into their earliest priority. Differing
+			// pause/hold evidence rejects the transaction instead of dropping it.
+			if _, err := tx.Exec(ctx, `DELETE FROM `+table+` t USING `+table+` a,`+table+` b WHERE a.tenant_id=b.tenant_id AND a.role=b.role AND a.profile_id=$1 AND b.profile_id=$2 AND t.tenant_id=a.tenant_id AND t.role=a.role AND t.priority=greatest(a.priority,b.priority)`, old.ID, replacement.ID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `UPDATE `+table+` SET profile_id=$2 WHERE profile_id=$1 AND NOT EXISTS(SELECT 1 FROM `+table+` n WHERE n.tenant_id=`+table+`.tenant_id AND n.role=`+table+`.role AND n.profile_id=$2)`, old.ID, replacement.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }

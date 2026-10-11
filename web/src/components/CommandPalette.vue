@@ -20,6 +20,7 @@ import { highlight, statusMeta, ticketPath } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import AppIcon, { type IconName } from './AppIcon.vue'
 import KeyCap from './KeyCap.vue'
+import { shortcutCaps, shortcutKeys } from '../lib/shortcuts'
 import BizIcon, { type BizIconName } from './business/BizIcon.vue'
 import { useBusiness } from '../stores/business'
 import StatusIcon from './work/StatusIcon.vue'
@@ -71,20 +72,20 @@ const actions = computed<ActionResult[]>(() => {
     if (!inKnowledge) out.push({ type: 'action', id: 'go-knowledge', label: 'Go to Knowledge', hint: `${here.title}: runbooks, guidelines, memory`, icon: 'book' })
     if (props.canWrite) out.push({ type: 'action', id: 'new-knowledge', label: `New knowledge entry in ${here.routeKey}`, hint: 'Runbook, guideline, memory and more', icon: 'plus', searchOnly: !inKnowledge })
   }
-  if (route.path !== '/') out.push({ type: 'action', id: 'go-projects', label: 'Go to Projects', icon: 'folder', keys: ['g', 'p'] })
-  if (!route.path.startsWith('/agents')) out.push({ type: 'action', id: 'go-agents', label: 'Go to Agents', hint: 'Sessions, approvals and pacing', icon: 'agent', keys: ['g', 'a'] })
+  if (route.path !== '/') out.push({ type: 'action', id: 'go-projects', label: 'Go to Projects', icon: 'folder', keys: shortcutKeys('places.projects').flatMap(binding => shortcutCaps(binding).flat()) })
+  if (!route.path.startsWith('/agents')) out.push({ type: 'action', id: 'go-agents', label: 'Go to Agents', hint: 'Sessions, approvals and pacing', icon: 'agent', keys: shortcutKeys('places.agents').flatMap(binding => shortcutCaps(binding).flat()) })
   // Business: log time (on the open ticket, when one is open) and the overview.
   if (business.open.hours && business.staff) {
     const ticket = typeof route.params.ticketKey === 'string' ? route.params.ticketKey.toUpperCase() : ''
     out.push({ type: 'action', id: 'log-time', label: ticket ? `Log time on ${ticket}` : 'Log time', hint: 'Hours this week', icon: 'clock', keys: route.path.startsWith('/business/hours') ? ['l'] : undefined })
   }
-  if (business.anyOpen && route.path !== '/business') out.push({ type: 'action', id: 'go-business', label: 'Go to Business', hint: 'Customers, quotes, hours and rates', icon: 'briefcase', keys: ['g', 'b'] })
+  if (business.anyOpen && route.path !== '/business') out.push({ type: 'action', id: 'go-business', label: 'Go to Business', hint: 'Customers, quotes, hours and rates', icon: 'briefcase', keys: shortcutKeys('places.business').flatMap(binding => shortcutCaps(binding).flat()) })
   if (!route.path.startsWith('/settings')) out.push({ type: 'action', id: 'settings', label: 'Settings', hint: 'Theme, greeting and keys', icon: 'gear' })
   // Each settings section is found by name ("workspace settings", "agent keys").
   for (const section of visibleSections(business.admin, permission => can(permission))) out.push({ type: 'action', id: `settings-${section.id}`, label: `${section.label} settings`, hint: section.summary, icon: 'gear', searchOnly: true })
   out.push({ type: 'action', id: 'theme', label: dark.value ? 'Switch to light theme' : 'Switch to dark theme', icon: dark.value ? 'sun' : 'moon' })
   out.push({ type: 'action', id: 'releases', label: 'Release history', hint: 'What changed, release by release', icon: 'history' })
-  out.push({ type: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: ['?'] })
+  out.push({ type: 'action', id: 'shortcuts', label: 'Keyboard shortcuts', icon: 'keyboard', keys: [...shortcutKeys('app.shortcuts')] })
   // Knowledge in every project: a search when something is typed, the page otherwise.
   const typed = query.value
   // Only when knowledge matched: an empty search keeps its honest "Nothing matches".

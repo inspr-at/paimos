@@ -11,6 +11,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/crossreview"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/routinebudget"
@@ -30,10 +31,14 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	f := d.fixture
 	request := httptest.NewRequest(http.MethodGet, "/api/models", nil)
 	must(t, modelregistry.PrepareCatalog(t.Context(), f.d.App, f.owner, modelregistry.CatalogPreparation{Operation: modelregistry.CatalogRead, Request: request}))
-	f.exec(`DELETE FROM model_role_routes WHERE profile_id<>$1`, f.profile)
 	var reviewer, account string
-	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'routine-reviewer','fixture','claude','anthropic','review-model','xhigh','frontier') RETURNING id::text`, f.owner.TenantID).Scan(&reviewer))
-	f.exec(`INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state) VALUES($1,'review-gate',1,$2,'available')`, f.owner.TenantID, reviewer)
+	// A review-grade (xhigh, level 4) profile in the workspace's saved Models
+	// Review order, as migration 1333 converts a saved review ladder. Routine
+	// reviews resolve through the same Models walk as every other review.
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,'routine-reviewer','fixture','claude','anthropic','review-model','xhigh','frontier',4) RETURNING id::text`, f.owner.TenantID).Scan(&reviewer))
+	must(t, f.tx(func(tx pgx.Tx) error {
+		return dbtest.ModelsOrder(t.Context(), tx, f.owner.TenantID, "other", "review", "wait", reviewer)
+	}))
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,label,registered_by_principal_id,owner_person_id,capacity_owner,linked_at,last_probe_at,last_probe_ok,last_daemon_generation,billing_mode,max_parallel_runs) SELECT tenant_id,'review','claude',daemon_id,'Review',registered_by_principal_id,owner_person_id,capacity_owner,linked_at,clock_timestamp(),true,last_daemon_generation,billing_mode,1 FROM agent_accounts WHERE id=$1 RETURNING id::text`, f.account).Scan(&account))
 	f.exec(`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) SELECT tenant_id,$2,computer_id,request_id,$3,verification_expires_at,ongoing_approved_at FROM agent_pairing_enrollments WHERE account_id=$1`, f.account, account, reviewer)
 	f.exec(`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source) SELECT tenant_id,$2,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,'claude',capacity_source FROM account_allowance_windows WHERE account_id=$1`, f.account, account)
@@ -120,8 +125,12 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	}
 	wait := func(receipt, reason string) {
 		t.Helper()
-		if out := advance(receipt, false); out["wait_reason"] != reason {
+		out := advance(receipt, false)
+		if out["wait_reason"] != reason {
 			t.Fatalf("wait=%+v want %s", out, reason)
+		}
+		if (reason == "routine_review_proof_unavailable" || reason == "review_policy_changed" || reason == "review_head_changed" || reason == "fix_review_changed") && out["reevaluation_required"] != true {
+			t.Fatalf("stale review was not retained for reevaluation: %+v", out)
 		}
 	}
 	cr := reviewgate.CommitRange{Repository: "example/routine", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40)}
@@ -142,6 +151,11 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 		t.Fatalf("disabled continuation created grants: %d", provisional)
 	}
 	f.exec(`UPDATE project_routine_execution_settings SET automatic_launch_enabled=true WHERE project_id=$1`, f.project)
+	// Unknown external outcomes close final continuation even before the next
+	// recovery scan. Reconcile that original receipt before creating an actor.
+	f.exec(`INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,state,payload) VALUES($1,$2,'fixture:unknown','fixture.external','unknown','{}')`, f.owner.TenantID, f.run)
+	wait(finished, "routine_recovery_unconfirmed")
+	f.exec(`UPDATE routine_effect_outbox SET state='succeeded',result='{"original_outcome":"confirmed"}' WHERE run_id=$1 AND effect_key='fixture:unknown'`, f.run)
 	first := advance(finished, true)
 	reviewRun := first["agent_run_id"].(string)
 	reviewOrder := first["review_order_id"].(string)
@@ -150,6 +164,11 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM work_order_reviews WHERE ticket_node_id=$1`, f.work).Scan(&count))
 	if count != 1 {
 		t.Fatalf("duplicate review: %d", count)
+	}
+	var routedProfile, orderMode string
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT ar.model_profile_id::text,coalesce(v.trace->>'order_mode','') FROM work_order_reviews v JOIN agent_runs ar ON ar.id=$2 WHERE v.work_order_id=$1`, reviewOrder, reviewRun).Scan(&routedProfile, &orderMode))
+	if routedProfile != reviewer || orderMode != "saved" {
+		t.Fatalf("routine review bypassed the saved Models Review order: profile=%s order_mode=%q want %s saved", routedProfile, orderMode, reviewer)
 	}
 	var g agentsetup.RoutineGrant
 	must(t, f.tx(func(tx pgx.Tx) error { return loadActorGrant(t.Context(), tx, reviewRun, &g) }))

@@ -7,6 +7,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -51,15 +52,8 @@ func TestRegisteredPlacementUsesStarterAndFreezesAcrossReplay(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"area":"backend","complexity":"M","route_role":"build","assignee":"`+f.agent.ID+`"}' WHERE id=$1`, f.ticket); err != nil {
 			return err
 		}
-		scope, err := modelprefs.SaveScope(t.Context(), tx, f.person, modelprefs.Scope{Level: "person", PersonID: &f.person.ID})
-		if err != nil {
-			return err
-		}
-		kind, _, err := modelprefs.LookupKind(t.Context(), tx, "backend", f.project)
-		if err != nil {
-			return err
-		}
-		return modelprefs.PutRow(t.Context(), tx, f.person, scope, kind.ID, modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": {Mode: "pinned", ProfileID: profile}}})
+		// The person's own Models row for the kind (a pinned matrix cell before 1275).
+		return dbtest.PersonModelsOrder(t.Context(), tx, f.person.TenantID, f.person.ID, "backend", "first", "default", profile)
 	})
 	f.agent.KeyCreatorID = alias
 	base := "/api/projects/" + f.project + "/harness-sessions"
@@ -83,7 +77,7 @@ func TestRegisteredPlacementUsesStarterAndFreezesAcrossReplay(t *testing.T) {
 		t.Fatal("registered placement lost canonical starter", placement)
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_pref_cells SET mode='auto',profile_id=NULL WHERE mode='pinned'`)
+		_, err := tx.Exec(t.Context(), `DELETE FROM model_pref_orders WHERE profile_id IN (SELECT id FROM model_pref_profiles WHERE person_id=$1)`, f.person.ID)
 		return err
 	})
 	expect(t, f.call(f.agent, "POST", base, registration, ""), 201)
@@ -154,7 +148,7 @@ func TestManagedRegistrationCopiesDispatchPlacementAfterPreferencesChange(t *tes
 		t.Fatal("dispatch placement", trace.Placement)
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_pref_cells SET mode='auto',profile_id=NULL WHERE mode='pinned'`)
+		_, err := tx.Exec(t.Context(), `DELETE FROM model_pref_orders WHERE profile_id IN (SELECT id FROM model_pref_profiles WHERE person_id=$1)`, f.person.ID)
 		return err
 	})
 	// A different creator starts the daemon; the saved run decision must win.

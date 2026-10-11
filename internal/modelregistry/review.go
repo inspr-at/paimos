@@ -27,7 +27,7 @@ type ReviewRoute struct {
 	Trace         PreferenceTrace
 }
 
-var reviewFamilyRank = map[string]int{"openai": 0, "xai": 1, "anthropic": 2, "cursor": 3, "google": 4, "local": 5}
+var reviewFamilyRank = reviewgate.ReviewFamilyRanks()
 
 // ReviewFamilyRank exposes a copy of the built-in dispatch order. The Policies
 // read shares this source without allowing callers to change routing rules.
@@ -91,6 +91,9 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	q.ReviewPolicies = policies
 	q.Role = out.Role
 	q.AuthorFamily = author
+	if catalog != nil {
+		q.preview = catalog
+	}
 	var boardPolicies []reviewgate.FamilyPolicy
 	if q.routineEval {
 		boardPolicies = policies
