@@ -264,7 +264,7 @@ func occurSource(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recur
 		// Unknown states hold the publication rather than guessing completion.
 		if r.OverlapPolicy == "skip" && !(len(forceOverlap) > 0 && forceOverlap[0]) {
 			var open bool
-			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_runs WHERE recurrence_id=$1 AND state NOT IN ('succeeded','failed','cancelled','completed'))`, r.ID).Scan(&open); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_runs WHERE recurrence_id=$1 AND state NOT IN ('done','skipped','succeeded','failed','cancelled','completed'))`, r.ID).Scan(&open); err != nil {
 				return Occurrence{}, err
 			}
 			if open {
