@@ -267,8 +267,12 @@ func TestDeliveryWebhookRetryBudget(t *testing.T) {
 					return err
 				})
 				f.at = next
+				reads := g.reads
 				if err := restarted.retryWebhooks(t.Context()); err != nil {
 					t.Fatal(err)
+				}
+				if g.reads != reads {
+					t.Fatal("restart exceeded the reserved final attempt's read budget")
 				}
 			} else {
 				for attempt := int64(2); attempt <= webhookMaxAttempts; attempt++ {
