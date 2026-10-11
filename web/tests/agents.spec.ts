@@ -92,7 +92,7 @@ test('sessions are grouped by project, the lead heading its group, with ticket a
   await expect(page.locator('.sessions .grp').nth(1).locator('[role="row"]').first()).toHaveAttribute('data-row', `s:${camy}`)
   await expect(page.getByRole('button', { name: /^Ended\s*1/ })).toBeVisible()
   const lead = row(page, camy)
-  await expect(lead.getByRole('link', { name: /Claude camy, Working/ })).toBeVisible()
+  await expect(lead.getByRole('link', { name: /Claude Code camy, Working/ })).toBeVisible()
   await expect(lead).toContainText('camy')
   await expect(lead).toContainText('Lead')
   await expect(lead.getByRole('link', { name: 'PHAROS-11' })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
@@ -582,7 +582,7 @@ test('the ticket panel shows the bound agent’s attention state and links to it
   await page.goto('/p/PHAROS/PHAROS-11')
   const details = page.getByRole('complementary', { name: 'Ticket details' })
   // Its principal has an unbound approval; the ticket and Agents keep this session working.
-  const chip = details.getByRole('link', { name: 'Claude camy: Working. Open the session' })
+  const chip = details.getByRole('link', { name: 'Claude Code camy: Working. Open the session' })
   await expect(chip).toBeVisible()
   await chip.click()
   await expect(page).toHaveURL(`/agents/${camy}`)

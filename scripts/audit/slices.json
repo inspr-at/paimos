@@ -191,6 +191,10 @@
         "internal/agentd/lead_runtime.go",
         "internal/agentd/lead_runtime_test.go",
         "internal/modelregistry/routine_reads.go",
+        "internal/routineexec/recovery.go",
+        "internal/routineexec/recovery_test.go",
+        "internal/harness/routine_stop.go",
+        "internal/agentd/routine_stop_test.go",
         "internal/routineexec/landing.go",
         "internal/delivery/routine.go",
         "internal/delivery/routine_test.go",
@@ -215,7 +219,8 @@
         "internal/cli/hook_subagent.go",
         "internal/cli/hook_subagent_unix.go",
         "internal/cli/hook_subagent_other.go",
-        "internal/cli/hook_subagent_unix_test.go"
+        "internal/cli/hook_subagent_unix_test.go",
+        "internal/inbox/routine_notice.go"
       ]
     },
     {
@@ -311,6 +316,7 @@
         "internal/decisiondesk/routine_consent_test.go",
         "internal/recurrences/run_history.go",
         "internal/recurrences/run_history_test.go",
+        "internal/recurrences/owner_state.go",
         "internal/routineactions/pr.go",
         "internal/routineactions/evidence/evidence.go",
         "internal/routineactions/pipeline.go",
@@ -370,7 +376,8 @@
         "web/src/components/agents/AgentChores.vue",
         "web/src/components/agents/DecisionDeskPanel.vue",
         "web/src/components/lead/LeadContent.vue",
-        "web/src/components/agents/SessionQuestion.vue"
+        "web/src/components/agents/SessionQuestion.vue",
+        "web/src/components/settings/models/ModelOutdatedSheet.vue"
       ]
     },
     {
@@ -389,6 +396,7 @@
         "web/tests/lead-adoption.spec.ts",
         "web/tests/access-refresh-panels.unit.test.ts",
         "web/src/stores/decisionDesk.ts",
+        "web/tests/models-outdated.spec.ts",
         "web/src/lib/shortcuts.ts",
         "web/tests/shortcuts.unit.test.ts",
         "web/src/lib/leadPanel.ts",
