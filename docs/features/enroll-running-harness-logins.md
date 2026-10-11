@@ -9,8 +9,8 @@ request. An expired, denied or revoked request allows a fresh approval request;
 a completed request is enrolled before the next login is requested. If approval
 is still pending, the refusal names that login and its code and URL. Finish that
 approval before selecting another login. An older daemon without this route must
-be updated by its service owner before using the new CLI; an unavailable socket never triggers a competing
-offline enrollment after a request has been handed over.
+be updated by its service owner before using the new CLI; an unavailable socket
+never triggers a competing offline enrollment after a request has been handed over.
 
 Each Claude subscription is a separate enrollment with its own person approval.
 Several enrollments may share the same physical Claude profile when its normal
@@ -47,12 +47,14 @@ controller or takes over the service.
 If a command times out or loses its connection, keep that login selected and
 retry the same `add-harness` command. A matching pending enrollment resumes;
 selecting another login before the current approval finishes is refused with
-the pending login's code and URL. If that request has expired, been denied or
-been revoked, select the intended login and rerun `add-harness`: it polls the old
-request and asks for a fresh person approval. This also recovers after a Claude
-update changes the physical executable path. A failed poll preserves the old
-request; restore connectivity and retry. Keep the existing pairing state and
-service running throughout recovery.
+the pending login's code and URL. To enroll a different login after an old
+request has expired, been denied or been revoked, select it and rerun
+`add-harness`: it polls the old request and asks for a fresh person approval.
+This also recovers after a Claude update changes the physical executable path.
+If a matching retry reports that the original login's request has ended, rerun
+the same command once more to request its fresh approval code. A failed poll
+preserves the old request; restore connectivity and retry. Keep the existing
+pairing state and service running throughout recovery.
 
 After the service owner has activated the released daemon and matching CLI,
 run the following on the paired Mac. Keep the service running:
