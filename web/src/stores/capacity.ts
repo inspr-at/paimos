@@ -17,7 +17,7 @@ import { usePreference } from '../lib/preferences'
 import { buildComputerCards } from '../lib/computerAccounts'
 import { initialRefreshStatus, usePolledData } from '../lib/usePolledData'
 import { onReset } from '../lib/position'
-import { onAccessChange } from '../lib/authz'
+import { onAccessRevalidate } from '../lib/authz'
 import { useAgents } from './agents'
 
 const browserZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' } catch { return 'UTC' } }
@@ -60,7 +60,7 @@ export const useCapacity = defineStore('capacity', () => {
     for (const read of [capacityRead, schedulesRead, computersRead]) read.status.value = initialRefreshStatus()
   }
   onScopeDispose(onReset(reset))
-  onScopeDispose(onAccessChange(change => { if (change === 'reset') reset() }))
+  onScopeDispose(onAccessRevalidate({ reset, refresh: () => { void load() } }))
   // Every write on /agents drops these reads too and reads them again (AEON-402).
   onScopeDispose(agents.onWrite({ invalidate, refresh: load }))
 

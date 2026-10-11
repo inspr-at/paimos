@@ -52,7 +52,7 @@ function card(getRecurrence: (id: string) => Promise<Recurrence>, selectedId = '
   const state = setup<{ chosen: Vue.ComputedRef<Recurrence | undefined>; selected: Vue.Ref<string>; linkFailure?: Vue.Ref<string>; load: (older?: boolean) => void }>(source('components/recurrences/RecurringWorkCard.vue'), props, {
     vue: { ...Vue, onMounted: () => {}, onBeforeUnmount: () => {} },
     '../../lib/api': { getRecurrence: get, listRecurrences: async (_project: string, after?: string) => ({ items: after ? [definition()] : page, next_cursor: after ? null : 'second' }) },
-    '../../lib/authz': { can: () => true, onAccessChange: () => () => {} },
+    '../../lib/authz': { can: () => true, onAccessRevalidate: () => () => {} },
     '../../lib/confirm': { confirmAction: vi.fn() }, '../../lib/toast': { toast: vi.fn() },
     '../../lib/useIdentityScope': { useIdentityScope: identityScope },
     '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },

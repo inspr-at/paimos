@@ -76,11 +76,12 @@ export function createPoliciesReader(owner: () => string, read: PolicyRead = rea
   const state = ref<'loading' | 'loaded' | 'denied' | 'failed'>('loading')
   const ladder = ref<PolicyLadder | null>(null), registry = ref<Permission[]>([])
   function reset() { scope.reset(); ladder.value = null; registry.value = []; state.value = 'loading' }
-  async function load(tab: PolicyTab, role: PolicyRole, allowed: boolean) {
-    lane.cancel(); ladder.value = null; registry.value = []
+  async function load(tab: PolicyTab, role: PolicyRole, allowed: boolean, retain = false) {
+    lane.cancel()
+    if (!retain || !owner() || !allowed) { ladder.value = null; registry.value = [] }
     if (!owner() || !allowed) { state.value = 'denied'; return }
     if (tab === 'elsewhere') { state.value = 'loaded'; return }
-    state.value = 'loading'
+    if (!retain) state.value = 'loading'
     await lane.run(async ({ after, signal }) => {
       const path = tab === 'ladders' ? `/models/routes?role=${encodeURIComponent(role)}` : '/authz/permissions'
       await after(read(path, signal), answer => {

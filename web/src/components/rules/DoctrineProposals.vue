@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import { getDoctrineProposals, getDoctrineFindings, refreshDoctrineProposal, approveDoctrineProposal, doctrineMessage, proposalState, findingState, outcomeMetric, outcomeDelta, outcomePopulation, outcomeMetricName, type DoctrineProposal, type DoctrineFinding } from '../../lib/doctrine'
-import { onAccessChange } from '../../lib/authz'
+import { onAccessRevalidate } from '../../lib/authz'
 import BizIcon from '../business/BizIcon.vue'
 const props = defineProps<{ latest?: DoctrineProposal }>()
 const stored = ref<DoctrineProposal[]>([])
@@ -22,13 +22,14 @@ const canApprove = computed(() => session.identity?.principal.kind === 'person' 
 const canWrite = computed(() => can('rules.write'))
 async function update(p: DoctrineProposal, approve = false) {
   if (busy.value) return
+  const current = generation
   error.value = ''
   busy.value = p.id
   try {
     const next = approve ? await approveDoctrineProposal(p.id, p.head_sha) : await refreshDoctrineProposal(p.id)
-    upsert(next)
-  } catch (cause) { error.value = doctrineMessage(cause) }
-  finally { busy.value = '' }
+    if (current === generation) upsert(next)
+  } catch (cause) { if (current === generation) error.value = doctrineMessage(cause) }
+  finally { if (current === generation) busy.value = '' }
 }
 async function load() {
   const current = ++generation
@@ -42,7 +43,7 @@ async function load() {
     loaded.value = true
   } catch (cause) { if (current === generation) error.value = doctrineMessage(cause) }
 }
-const stopAccess = onAccessChange(() => { generation++; stored.value = []; findings.value = []; loaded.value = false; error.value = ''; void load() })
+const stopAccess = onAccessRevalidate({ reset: () => { generation++; stored.value = []; findings.value = []; loaded.value = false; error.value = ''; busy.value = '' }, refresh: () => { if (!busy.value) void load() } })
 onBeforeUnmount(() => { generation++; stopAccess() })
 onMounted(load)
 </script>

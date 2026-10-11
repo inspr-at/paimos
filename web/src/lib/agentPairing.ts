@@ -7,7 +7,7 @@
 import { parseHostCapacity, type HostCapacityView } from './hostCapacity.ts'
 import { parseJson } from './json.ts'
 import { api, resilientFetch } from './api.ts'
-import { onAccessChange } from './authz.ts'
+import { onAccessRevalidate } from './authz.ts'
 import { brand } from './brand.ts'
 
 function product(): string {
@@ -285,7 +285,7 @@ export function discardPairingReads(): void {
   personControllers.clear()
 }
 
-onAccessChange(change => { if (change === 'reset') discardPairingReads() })
+onAccessRevalidate({ reset: discardPairingReads })
 
 export function pairingPermissions(input: { permissions: readonly string[]; principalKind?: string }): PairingPermissions {
   const person = input.principalKind === undefined || input.principalKind === 'person'

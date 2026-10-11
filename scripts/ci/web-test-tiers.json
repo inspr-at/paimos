@@ -9036,6 +9036,8 @@
     ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"AEON-1195: focus cycles retain the same lead DOM rows, order and controls during delayed refresh","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -15135,6 +15137,10 @@
     {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"drops a stale key read and keeps the last keys when the newest read fails","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"refreshes the shared key cache when access settles after a key change","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/access-revalidate.unit.test.ts","name":"AEON-1195: access listeners use the shared boundary and cannot clear state in their refresh callback","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/access-revalidate.unit.test.ts","name":"AEON-1195: every audited store retains rows through refresh and fences delayed reads after sign-out, person switch and 401","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > accepts percent readings and structured first-run waits without inventing headroom","tier":"GATED-FULL"}
     ,

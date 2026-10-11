@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { listNodes, type ListItem } from '../../lib/api'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { EMPTY_FILTERS, WORK_KINDS } from '../../lib/ticketList'
 import { normalKey, resolveTicketKeys, ticketRef } from '../../lib/ticketLinks'
@@ -68,9 +68,9 @@ async function resolve() {
 watch(current, resolve, { immediate: true })
 // Another person, workspace or an ended session: whatever is shown or on its way
 // goes, and the ticket is resolved again as the new caller. The same person's
-// access asked again only restarts a resolution still on its way; a shown ticket
-// stays until the keys asked again say otherwise (below).
-const stopAccess = onAccessChange(change => { if (change === 'reset' || resolving.value) void resolve() })
+// refresh keeps the current resolution and ticket until revalidated keys say
+// otherwise (below).
+const stopAccess = onAccessRevalidate({ reset: () => { void resolve() } })
 onBeforeUnmount(stopAccess)
 // The key asked again answers differently (a lost project, a moved ticket).
 // Its own first answer (unknown to known) and a reset (handled above) do not count.

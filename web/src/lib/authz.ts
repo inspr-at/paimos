@@ -61,6 +61,14 @@ function ask(projectId?: string): Promise<void> {
 type AccessListener = (change: 'reset' | 'refresh') => void
 const accessListeners = new Set<AccessListener>()
 export function onAccessChange(listener: AccessListener): () => void { accessListeners.add(listener); return () => accessListeners.delete(listener) }
+// All consumers use this boundary: reset drops person-owned state synchronously;
+// refresh only revalidates in place, retaining data, drafts and pending writes.
+export function onAccessRevalidate(actions: { reset: () => void; refresh?: () => void }): () => void {
+  return onAccessChange(change => {
+    if (change === 'reset') actions.reset()
+    else actions.refresh?.()
+  })
+}
 function notifyAccess(change: 'reset' | 'refresh') { for (const listener of accessListeners) listener(change) }
 
 export function clearPermissions(): void { epoch++; revoked = false; cache.clear(); requests.clear(); asked.clear(); revision.value++; notifyAccess('reset') }

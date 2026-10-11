@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { deleteRecurrence, getRecurrence, listRecurrences, pauseRecurrence, runRecurrence } from '../../lib/api'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import { useIdentityScope } from '../../lib/useIdentityScope'
@@ -29,7 +29,7 @@ const chosen = computed(() => {
 const readOnlyReason = 'Needs the Manage recurring work permission'
 let epoch = 0, alive = true
 function clear() { scope.reset(); epoch++; items.value = []; cursor.value = null; selected.value = ''; menu.value = null; editor.value = null; runPrompt.value = null; failure.value = ''; busy.value = []; loading.value = false; linked.value = null; linkFailure.value = '' }
-const stopAccess = onAccessChange(change => { if (change === 'reset') clear() })
+const stopAccess = onAccessRevalidate({ reset: clear })
 function load(older = false) {
   if (!scope.owner.value || busy.value.length || editor.value || runPrompt.value || menu.value) return
   const projectId = props.project.id, afterCursor = older ? cursor.value || undefined : undefined
