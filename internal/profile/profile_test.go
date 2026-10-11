@@ -21,6 +21,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -391,6 +392,115 @@ func TestClassicProfileImportRequiresASCIIMailboxMatch(t *testing.T) {
 	}
 }
 
+// The default pace (AEON-1175) feeds every plan read: a stored value outside
+// 1–50 would make the person's plan unreadable, so the patch refuses it whole,
+// null follows the built-in default, and undo restores the value before.
+func TestDefaultPaceIsBoundedAndUndoable(t *testing.T) {
+	d := dbtest.Open(t)
+	a := person(t, d, "profile_pace", "pace@example.test")
+	h := mux(d, attachments.Store{FilesDir: t.TempDir()})
+	patch := func(s string) *httptest.ResponseRecorder {
+		return req(t, h, a, "PATCH", "/api/me/profile", "application/json", bytes.NewBufferString(s))
+	}
+	planPoints := func() int {
+		t.Helper()
+		var points int
+		err := db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
+			var err error
+			_, points, _, _, err = agentaccounts.DailyContextTx(t.Context(), tx, a.ID, time.Now())
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return points
+	}
+	if got := decodeProfile(t, req(t, h, a, "GET", "/api/me/profile", "", nil)); got.DailyPointsPerDay != nil || planPoints() != 10 {
+		t.Fatalf("fresh profile pace %v, plan %d", got.DailyPointsPerDay, planPoints())
+	}
+	set := decodeProfile(t, patch(`{"daily_points_per_day":14}`))
+	if set.DailyPointsPerDay == nil || *set.DailyPointsPerDay != 14 || planPoints() != 14 {
+		t.Fatalf("set pace %v, plan %d", set.DailyPointsPerDay, planPoints())
+	}
+	for _, body := range []string{`{"daily_points_per_day":0}`, `{"daily_points_per_day":51}`, `{"daily_points_per_day":-1}`, `{"daily_points_per_day":10.5}`, `{"daily_points_per_day":1e1}`, `{"daily_points_per_day":"12"}`, `{"daily_points_per_day":true}`, `{"first_name":"Refused","daily_points_per_day":0}`} {
+		got := patch(body)
+		var out struct{ Errors map[string]string }
+		if got.Code != 400 || json.Unmarshal(got.Body.Bytes(), &out) != nil || out.Errors["daily_points_per_day"] == "" {
+			t.Fatalf("%s: HTTP %d %s", body, got.Code, got.Body.String())
+		}
+	}
+	if kept := decodeProfile(t, req(t, h, a, "GET", "/api/me/profile", "", nil)); kept.FirstName != "" || kept.DailyPointsPerDay == nil || *kept.DailyPointsPerDay != 14 {
+		t.Fatalf("a refused patch changed the profile: %+v", kept)
+	}
+	if cleared := decodeProfile(t, patch(`{"daily_points_per_day":null}`)); cleared.DailyPointsPerDay != nil || planPoints() != 10 {
+		t.Fatalf("null pace %v, plan %d", cleared.DailyPointsPerDay, planPoints())
+	}
+	var eventID int64
+	err := db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT id FROM events WHERE tenant_id=$1 AND type='profile.updated' AND before->>'daily_points_per_day'='14' AND after->'daily_points_per_day'='null'::jsonb ORDER BY id DESC LIMIT 1`, a.TenantID).Scan(&eventID)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if undo := req(t, h, a, "POST", "/api/events/"+fmt.Sprint(eventID)+"/undo", "", nil); undo.Code != 201 {
+		t.Fatalf("undo HTTP %d: %s", undo.Code, undo.Body.String())
+	}
+	if restored := decodeProfile(t, req(t, h, a, "GET", "/api/me/profile", "", nil)); restored.DailyPointsPerDay == nil || *restored.DailyPointsPerDay != 14 || planPoints() != 14 {
+		t.Fatalf("undo pace %v, plan %d", restored.DailyPointsPerDay, planPoints())
+	}
+}
+
+// Undo of the default pace (AEON-1175) is guarded by the revision its own edit
+// left. Risk: Undo overwrites a change made since in another tab. A patch with
+// expected_revision applies only to the profile at that revision; otherwise it
+// is refused with 409 and nothing is written, and a malformed guard is refused.
+func TestProfilePatchGuardedByExpectedRevision(t *testing.T) {
+	d := dbtest.Open(t)
+	a := person(t, d, "profile_guard", "guard@example.test")
+	h := mux(d, attachments.Store{FilesDir: t.TempDir()})
+	patch := func(s string) *httptest.ResponseRecorder {
+		return req(t, h, a, "PATCH", "/api/me/profile", "application/json", bytes.NewBufferString(s))
+	}
+	updates := func() int {
+		t.Helper()
+		var n int
+		err := db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND type='profile.updated'`, a.TenantID).Scan(&n)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	edit := decodeProfile(t, patch(`{"daily_points_per_day":30,"expected_revision":0}`))
+	if edit.DailyPointsPerDay == nil || *edit.DailyPointsPerDay != 30 || edit.Revision != 1 {
+		t.Fatalf("guarded edit: %+v", edit)
+	}
+	// Another tab sets 35; Undo of the edit above still carries the revision the edit left.
+	if other := decodeProfile(t, patch(`{"daily_points_per_day":35}`)); other.Revision != 2 {
+		t.Fatalf("unguarded edit: %+v", other)
+	}
+	written := updates()
+	stale := patch(fmt.Sprintf(`{"daily_points_per_day":null,"expected_revision":%d}`, edit.Revision))
+	var refused struct{ Errors map[string]string }
+	if stale.Code != 409 || json.Unmarshal(stale.Body.Bytes(), &refused) != nil || refused.Errors["revision"] == "" {
+		t.Fatalf("stale undo: HTTP %d %s", stale.Code, stale.Body.String())
+	}
+	if kept := decodeProfile(t, req(t, h, a, "GET", "/api/me/profile", "", nil)); kept.DailyPointsPerDay == nil || *kept.DailyPointsPerDay != 35 || kept.Revision != 2 || updates() != written {
+		t.Fatalf("a refused undo wrote: %+v, %d events after %d", kept, updates(), written)
+	}
+	if undo := decodeProfile(t, patch(`{"daily_points_per_day":null,"expected_revision":2}`)); undo.DailyPointsPerDay != nil || undo.Revision != 3 {
+		t.Fatalf("current undo: %+v", undo)
+	}
+	for _, body := range []string{`{"expected_revision":3}`, `{"daily_points_per_day":12,"expected_revision":-1}`, `{"daily_points_per_day":12,"expected_revision":"3"}`, `{"daily_points_per_day":12,"expected_revision":1.5}`, `{"daily_points_per_day":12,"expected_revision":null}`} {
+		if got := patch(body); got.Code != 400 {
+			t.Fatalf("%s: HTTP %d %s", body, got.Code, got.Body.String())
+		}
+	}
+	if last := decodeProfile(t, req(t, h, a, "GET", "/api/me/profile", "", nil)); last.DailyPointsPerDay != nil || last.Revision != 3 {
+		t.Fatalf("a refused guard wrote: %+v", last)
+	}
+}
 func TestManifest(t *testing.T) {
 	if _, err := plugins.Builtin(Plugin); err != nil {
 		t.Fatal(err)

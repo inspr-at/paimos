@@ -11,8 +11,12 @@ import type { PairingView } from '../src/lib/agentPairing'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { mockDailyPlan, UNTIL, type DailyPlanOptions } from './agents-daily-fixtures'
+import { HARNESS_LABEL } from '../src/lib/agentState'
 
 const shots = process.env.AEON_1036_SHOTS ?? 'test-results/aeon-1036-capsdial'
+// The harness's name in the daily limit's words (AEON-1175): "Claude" until AEON-1160 names it "Claude Code";
+// both pass. The dial's row label stays the vendor's ("Open the dial at Claude").
+const CLAUDE = HARNESS_LABEL.claude!
 interface SetupOptions extends DailyPlanOptions { folded?: boolean; waiting?: number; dial?: Record<string, unknown>; room?: Record<string, number>; manage?: boolean; capacityEdit?: (capacity: ReturnType<typeof capacityWorld>) => void }
 async function setup(page: Page, options: SetupOptions = {}) {
   await page.clock.setSystemTime(NOW)
@@ -218,6 +222,8 @@ test('AEON-1036: unfolding opens at what needs attention, and a pick is remember
   await expect(card.locator('.fs-tog')).toHaveAttribute('aria-expanded', 'true')
   await expect(row(page, 'claude')).toHaveClass(/sel/)
   await expect(card.locator('.f-sel[data-sel="claude"]')).toHaveAttribute('aria-pressed', 'true')
+  await expect(card.locator('.f-sel[data-sel="claude"]')).toBeFocused()
+  await expect.poll(() => work.preferences['ui.agents.dial']).toMatchObject({ selected: 'claude' })
   await expect(detail(page, 'claude').getByRole('heading')).toHaveText('Claude · daily limit: up to 50 % used')
   // Another pick replaces it; a click on the row (not its controls) picks too, a click on its controls does not.
   await row(page, 'codex').locator('.sub').click()
@@ -254,7 +260,7 @@ test('AEON-1036: the detail reads week, today, the bar and the pace state, then 
   await setup(page, { example: 'over', dial: { selected: 'claude' } })
   await page.goto('/agents')
   const claude = detail(page, 'claude')
-  await expect(claude.getByRole('heading')).toHaveText('Claude · daily limit: up to 60 % used')
+  await expect(claude.getByRole('heading')).toHaveText(`${CLAUDE} · daily limit: up to 60 % used`)
   await expect(claude).toContainText('54 % used · 46 % left this week · resets Thu 1 Oct 21:02')
   await expect(claude).toContainText('Today: 14 of 20 percentage points used · 6 left today')
   await expect(claude.getByRole('img', { name: 'Today: 14 of 20 percentage points used; 10 is today’s share.' })).toBeVisible()

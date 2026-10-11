@@ -50,6 +50,7 @@ import { agentsFooter } from '../lib/footerProviders'
 import { countedLive, jumpTarget } from '../components/agents/sessionTree'
 import { useFooterSummary } from '../lib/footerSummary'
 import { clockTime, liveSession } from '../lib/agentPause'
+import { onAction, shortcutCaps, shortcutKeys, type ShortcutAction } from '../lib/shortcuts'
 
 // Markus's desk for agents (AEON-1209, design AEON-1196): the head line whose counts filter
 // Sessions; the capacity row (the dial and the accounts chip) that scrolls with the page;
@@ -338,38 +339,51 @@ function move(step: number) {
   if (sessionId.value && cursor.value.startsWith('s:')) void router.replace({ path: `/agents/${cursor.value.slice(2)}`, query: route.query })
 }
 const serviceTiers = useServiceTiers()
-function typing(target: EventTarget | null) {
-  return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+const actionScope = {
+  enabled: () => !!session.identity,
+  when: (event: KeyboardEvent) => {
+    if (event.target instanceof Node && document.querySelector('.ticket-peek-host')?.contains(event.target)) return false
+    // Local controls get first refusal through the bubble dispatcher; these
+    // role guards also keep navigation inside controls such as the mode selector.
+    return !(event.target instanceof HTMLElement && event.target.closest('[role="radiogroup"], [role="tablist"], [role="slider"], [role="spinbutton"], [role="listbox"], [role="separator"]'))
+  },
 }
-function keydown(event: KeyboardEvent) {
-  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
-  if (document.querySelector('dialog[open], .floating') || typing(event.target)) return
-  if (event.target instanceof Node && document.querySelector('.ticket-peek-host')?.contains(event.target)) return
-  const [kind, id] = [cursor.value.slice(0, 1), cursor.value.slice(2)]
-  // F or / searches this list; Shift F adds a filter (AEON-1209). Plain keys only, never in a field.
-  if ((event.key === 'f' || event.key === '/') && !event.shiftKey && sessionList.value?.focusSearch()) { event.preventDefault(); return }
-  if (event.key === 'F' && event.shiftKey && sessionList.value?.openFilter()) { event.preventDefault(); return }
-  switch (event.key) {
-    case 'j': case 'ArrowDown': event.preventDefault(); move(1); break
-    case 'k': case 'ArrowUp': event.preventDefault(); move(-1); break
-    case 'Enter': case 'o':
-      if ((event.target as HTMLElement).closest('a, button, summary')) return
-      if (kind === 's' && onScreen(cursor.value)) { event.preventDefault(); openSession(id) }
-      // A lead without a session on the list opens its lead panel (AEON-1210).
-      else if (kind === 'l' && onScreen(cursor.value)) { event.preventDefault(); openLeadPanel(id, document.querySelector<HTMLElement>(`.agents-page [data-row="l:${CSS.escape(id)}"]`)) }
-      break
-    case 'p': case 'r': {
-      const view = agents.views.find(v => v.session.id === id)
-      if (kind === 's' && view && onScreen(cursor.value) && pause.eligible(view.session, event.key === 'p' ? 'pause' : 'resume')) { event.preventDefault(); pause.open(event.key === 'p' ? 'pause' : 'resume', [view.session]) }
-      break
-    }
-    case 'Escape':
-      if (ticketPeekOpen.value) return
-      if (sessionId.value) { event.preventDefault(); void closePanel() }
-      else if (filter.value) { event.preventDefault(); filter.value = null }
-      break
-  }
+function pauseSelected(action: 'pause' | 'resume') {
+  const id = cursor.value.slice(2)
+  const view = agents.views.find(view => view.session.id === id)
+  if (!cursor.value.startsWith('s:') || !view || !onScreen(cursor.value) || !pause.eligible(view.session, action)) return false
+  pause.open(action, [view.session])
 }
+const shortcutDisposers = [
+  onAction('agents.search.focus', () => sessionList.value?.focusSearch() ?? false, actionScope),
+  onAction('agents.filter.add', () => sessionList.value?.openFilter() ?? false, actionScope),
+  onAction('agents.row.next', () => { move(1) }, actionScope),
+  onAction('agents.row.prev', () => { move(-1) }, actionScope),
+  onAction('agents.row.open', event => {
+    if (event.target instanceof HTMLElement && event.target.closest('a, button, summary')) return false
+    if (!onScreen(cursor.value)) return false
+    if (cursor.value.startsWith('s:')) openSession(cursor.value.slice(2))
+    else if (cursor.value.startsWith('l:')) openLeadPanel(cursor.value.slice(2), document.querySelector<HTMLElement>(`.agents-page [data-row="l:${CSS.escape(cursor.value.slice(2))}"]`))
+    else return false
+  }, actionScope),
+  onAction('agents.session.pause', () => pauseSelected('pause'), actionScope),
+  onAction('agents.session.resume', () => pauseSelected('resume'), actionScope),
+  onAction('agents.details.close', () => {
+    if (ticketPeekOpen.value) return false
+    if (sessionId.value) void closePanel()
+    else if (filter.value) filter.value = null
+    else return false
+  }, actionScope),
+]
+const hintGroups: { actions: ShortcutAction[]; label: string }[] = [
+  { actions: ['agents.row.next', 'agents.row.prev'], label: 'move' },
+  { actions: ['agents.group.fold', 'agents.group.unfold'], label: 'fold' },
+  { actions: ['agents.row.open'], label: 'open' },
+  { actions: ['agents.search.focus'], label: 'search' },
+  { actions: ['agents.session.pause'], label: 'pause' },
+  { actions: ['agents.session.resume'], label: 'resume' },
+]
+const activeHints = computed(() => hintGroups.map(group => ({ ...group, keys: group.actions.flatMap(id => shortcutKeys(id).slice(0, 1).flatMap(binding => shortcutCaps(binding).flat())) })).filter(group => group.keys.length))
 
 // ---------- Live ----------
 let stop: (() => void) | undefined
@@ -402,13 +416,12 @@ onMounted(() => {
   stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
   poller.start()
   clock = setInterval(() => agents.tick(), 1000)
-  window.addEventListener('keydown', keydown)
 })
 onBeforeUnmount(() => {
   evidenceRefresh.stop(); document.removeEventListener('visibilitychange', evidenceVisible)
   stopTierWatch?.()
   stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
-  window.removeEventListener('keydown', keydown)
+  shortcutDisposers.forEach(dispose => dispose())
 })
 watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true })
 </script>
@@ -481,7 +494,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
         <RunQueue v-if="agents.loaded" ref="runQueue" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
-          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <KeyCap k="left" /><KeyCap k="right" /> fold · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">F</kbd> or <kbd class="keycap">/</kbd> search · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume
+          <template v-for="(hint, index) in activeHints" :key="hint.label"><span v-if="index"> · </span><KeyCap v-for="key in hint.keys" :key="key" :k="key" /> {{ hint.label }}</template>
         </p>
       </div>
     </div>

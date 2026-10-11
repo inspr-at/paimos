@@ -44,10 +44,14 @@ func (m *Module) Mount(mux *http.ServeMux) {
 func (m *Module) mount(mux *http.ServeMux, legacy http.HandlerFunc) {
 	mux.HandleFunc("GET /api/model-preferences/simple", boundedPreferenceHandler(m.simple))
 	mux.HandleFunc("PUT /api/models/lines/{harness}/{model}", boundedPreferenceHandler(m.editLine))
+	mux.HandleFunc("PUT /api/models/lines/{harness}/{model}/pause", boundedPreferenceHandler(m.writeModelPause))
+	mux.HandleFunc("DELETE /api/models/lines/{harness}/{model}/pause", boundedPreferenceHandler(m.writeModelPause))
 	mux.HandleFunc("GET /api/models/lines/{harness}/{model}/usage", boundedPreferenceHandler(m.lineUsage))
 	mux.HandleFunc("GET /api/model-preferences/board", boundedPreferenceHandler(m.board))
 	mux.HandleFunc("PUT /api/model-preferences/orders/{column}/{situation}", boundedPreferenceHandler(m.writeBoardOrder))
 	mux.HandleFunc("DELETE /api/model-preferences/orders/{column}/{situation}", boundedPreferenceHandler(m.writeBoardOrder))
+	mux.HandleFunc("PUT /api/model-preferences/orders/{column}/first/never/{line}", boundedPreferenceHandler(m.writeNeverRule))
+	mux.HandleFunc("DELETE /api/model-preferences/orders/{column}/first/never/{line}", boundedPreferenceHandler(m.writeNeverRule))
 	mux.HandleFunc("PUT /api/model-preferences/orders/{column}/{situation}/thinking", boundedPreferenceHandler(m.writeBoardOrder))
 	mux.HandleFunc("PUT /api/model-preferences/profile", boundedPreferenceHandler(m.writeBoardProfile))
 	mux.HandleFunc("POST /api/model-preferences/tray/{line}/dismiss", boundedPreferenceHandler(m.dismissBoardLine))
@@ -335,6 +339,17 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 		}
 
 		query := WorkQuery{Role: q.Role, AuthorFamily: q.AuthorFamily, Harness: q.Harness, ProjectID: project, PersonID: modelprefs.PrefsPerson(r.Context(), tx, current)}
+		if query.Harness != "" {
+			// A harness filter must name one of the role's Models routes,
+			// as it named a ladder route before the retirement.
+			steps, err := routingRoleSteps(r.Context(), tx, query.PersonID, query.Role)
+			if err != nil {
+				return err
+			}
+			if !ladderHasHarness(steps, query.Harness) {
+				return fail(http.StatusBadRequest, "role and harness combination is unsupported")
+			}
+		}
 		resolved, err := resolveDailyWith(r.Context(), tx, current, query, now, func(query WorkQuery) (WorkResolution, error) {
 			boardQuery := query
 			boardQuery.Area, boardQuery.Situation = "other", "first"

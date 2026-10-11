@@ -138,46 +138,10 @@ func loadLadderLimit(ctx context.Context, tx pgx.Tx, role string, limit int) ([]
 	return steps, err
 }
 
-// Rows and ordering mode share one statement snapshot even under READ COMMITTED.
-// The anchor retains mode for an empty ladder without initializing metadata.
+// Deprecated ladder-shaped previews are derived from Models; dispatch uses
+// resolveBoardWork. No reader here accesses either retained ladder table.
 func loadLadderSnapshot(ctx context.Context, tx pgx.Tx, role string, limit int) ([]ladderStep, string, error) {
-	query := `SELECT COALESCE((SELECT ordinary_review_order_mode FROM model_review_order), 'legacy'), step.value
- FROM (SELECT 1) anchor LEFT JOIN LATERAL (
-  SELECT (to_jsonb(r) - 'tenant_id') || jsonb_build_object('profile',
-   (to_jsonb(p) - 'tenant_id') || jsonb_build_object(
-    'display_name', d.model_display->>'display_name', 'short_name', d.model_display->>'short_name',
-    'model_version', d.model_display->>'model_version', 'effort_level', coalesce(p.registered_effort_level,d.effort_level), 'provider', d.provider, 'source', coalesce(p.source,'auto'), 'origin', coalesce(p.display_overrides->>'origin',''), 'note', coalesce(p.note,''), 'retire_at', (SELECT x.retire_at FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id), 'retired', EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id AND (x.retire_at IS NULL OR x.retire_at<=now()))),
-   'suppressed_until', o.suppressed_until, 'retire_at', (SELECT x.retire_at FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id), 'retired', EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id AND x.retire_at IS NULL)) AS value,
-   r.priority, r.profile_id
-  FROM (` + agentaccounts.ModelRoleRoutesSQL + `) r
-  JOIN model_profiles p ON p.tenant_id=r.tenant_id AND p.id=r.profile_id
-  JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
-  LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
-  WHERE r.role = $1 ORDER BY r.priority,r.profile_id`
-	args := []any{role}
-	if limit > 0 {
-		query += ` LIMIT $2`
-		args = append(args, limit)
-	}
-	query += `) step ON true ORDER BY step.priority,step.profile_id`
-	rows, err := tx.Query(ctx, query, args...)
-	if err != nil {
-		return nil, "", err
-	}
-	defer rows.Close()
-	out, mode := []ladderStep{}, reviewOrderLegacy
-	for rows.Next() {
-		var step *ladderStep
-		if err := rows.Scan(&mode, &step); err != nil {
-			return nil, "", err
-		}
-		if step != nil {
-			step.Profile.Origin = profileOrigin(step.Profile, step.Profile.Origin)
-			step.Profile.Source = profileSource(step.Profile.Source)
-			out = append(out, *step)
-		}
-	}
-	return out, mode, rows.Err()
+	return derivedRoleSteps(ctx, tx, nil, role, limit)
 }
 
 func ladderHasHarness(steps []ladderStep, harness string) bool {
@@ -223,8 +187,12 @@ func skipReasons(step ladderStep, role roleDef, q resolveQuery, now time.Time, h
 	if !step.Profile.Enabled {
 		reasons = append(reasons, "policy")
 	}
-	if step.State != "available" && step.ValidUntil != nil && now.Before(*step.ValidUntil) {
-		reasons = append(reasons, fmt.Sprintf("%s until %s: %s", step.State, step.ValidUntil.UTC().Format(time.RFC3339), step.Reason))
+	if step.State != "available" && (step.ValidUntil == nil || now.Before(*step.ValidUntil)) {
+		if step.ValidUntil == nil {
+			reasons = append(reasons, "paused: "+step.Reason)
+		} else {
+			reasons = append(reasons, fmt.Sprintf("paused until %s: %s", step.ValidUntil.UTC().Format(time.RFC3339), step.Reason))
+		}
 	}
 	h := health[step.Profile.Harness]
 	if h.Accounts > 0 && h.ContextDenied == h.Accounts {

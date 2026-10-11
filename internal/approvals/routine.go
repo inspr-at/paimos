@@ -40,9 +40,16 @@ func routineApproval(a Approval) bool {
 // enlarging an API key. The caller holds tenant/tree and target/action locks,
 // checks the routine's current owner, and appends all events only after its
 // remaining writes. Replay is serialized by the caller's action row lock.
-func RequestRoutineHoldTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, target, permission, digest string, expires, now time.Time, pending *[]events.Change) (Approval, error) {
+func RequestRoutineHoldTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, target, permission, digest string, expires, now time.Time, pending *[]events.Change, detail ...string) (Approval, error) {
 	if p.Kind != tenant.Agent || !uuidPattern.MatchString(target) || RoutineScope(permission, digest) == "" || !expires.After(now) || expires.Sub(now) > 24*time.Hour || pending == nil {
 		return Approval{}, errors.New("invalid routine person hold")
+	}
+	if len(detail) > 1 || len(detail) == 1 && (len(detail[0]) > 4096 || strings.ContainsRune(detail[0], '\x00')) {
+		return Approval{}, errors.New("invalid routine hold context")
+	}
+	rationale := "Routine action needs an owner or administrator decision. Exact evaluation request: " + digest
+	if len(detail) == 1 {
+		rationale += "\n" + detail[0]
 	}
 	var project, kind string
 	if err := tx.QueryRow(ctx, `SELECT coalesce(n.project_id,n.id)::text,p.kind FROM nodes n JOIN principals p ON p.tenant_id=n.tenant_id AND p.id=$3 WHERE n.tenant_id=$1 AND n.id=$2 AND n.deleted_at IS NULL`, p.TenantID, target, p.ID).Scan(&project, &kind); err != nil {
@@ -64,7 +71,7 @@ func RequestRoutineHoldTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ta
 	}
 	// target/target_digest_sha256 are a paired deployment-only projection.
 	// The exact routine digest is immutable in this reserved permission scope.
-	err = tx.QueryRow(ctx, `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at) VALUES($1,$2,$2,$3,'node',$4,$5,$6) RETURNING id::text`, p.TenantID, p.ID, RoutineScope(permission, digest), target, "Routine action needs an owner or administrator decision. Exact evaluation request: "+digest, expires).Scan(&id)
+	err = tx.QueryRow(ctx, `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at) VALUES($1,$2,$2,$3,'node',$4,$5,$6) RETURNING id::text`, p.TenantID, p.ID, RoutineScope(permission, digest), target, rationale, expires).Scan(&id)
 	if err != nil {
 		return Approval{}, err
 	}

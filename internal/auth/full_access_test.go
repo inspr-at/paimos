@@ -14,10 +14,59 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risk: a full-access key is rejected by the person-read allowlist before
+// /simple, or retains access after its current workspace grants are removed.
+func TestFullAccessModelsV2SimpleRead(t *testing.T) {
+	m, owner := keyFixture(t)
+	key := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "models-reader", "full_access": true}))
+	ctx := dbtest.Seed(t.Context())
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)
+ SELECT $1,$2,id,'workspace' FROM roles WHERE tenant_id=$1 AND key='member' ON CONFLICT DO NOTHING`, owner.TenantID, key.PrincipalID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	modelregistry.New(m.pool).Mount(mux)
+	read := func() *httptest.ResponseRecorder {
+		r := httptest.NewRequest(http.MethodGet, "/api/model-preferences/simple", nil)
+		r.Header.Set("Authorization", "Bearer "+key.Token)
+		_, r.Pattern = mux.Handler(r)
+		w := httptest.NewRecorder()
+		m.Middleware(mux).ServeHTTP(w, r)
+		return w
+	}
+	w := read()
+	var document struct {
+		PersonID *string `json:"person_id"`
+		All      struct {
+			Chain []any  `json:"chain"`
+			Never []any  `json:"never"`
+			End   string `json:"end"`
+		} `json:"all"`
+		Quick    json.RawMessage `json:"quick"`
+		Outdated json.RawMessage `json:"outdated"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &document) != nil || document.PersonID == nil || *document.PersonID != owner.ID || document.All.Chain == nil || document.All.Never == nil || document.All.End == "" || len(document.Quick) == 0 || len(document.Outdated) == 0 {
+		t.Fatalf("full-access Models v2 read failed: status %d", w.Code)
+	}
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, key.PrincipalID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if w := read(); w.Code != http.StatusForbidden {
+		t.Fatalf("withdrawn grants retained Models read: %d", w.Code)
+	}
+}
 
 // Risk: a new permission must never strand a full-access key, or expand human
 // authority. Iterate the actual catalog through both single and bulk decisions.

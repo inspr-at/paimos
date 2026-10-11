@@ -4,6 +4,7 @@ import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentMockOptions, type AgentWorld } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { controlStability } from './control-stability'
 
 const world: AgentWorld = {
   me: me.id,
@@ -389,6 +390,87 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   await expect(row(page, order[2]!)).toBeFocused()
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(`/agents/${order[2]}`)
+})
+
+test('AEON-1219: registry navigation and hints respect menus, fields, IME and native keys', async ({ page }, testInfo) => {
+  const errors = watchErrors(page)
+  const { calls } = await setup(page)
+  await openAgents(page)
+  const search = page.getByRole('button', { name: 'Search everything', exact: true })
+  const more = page.getByRole('button', { name: 'More agent actions' })
+  const guard = await controlStability(page, { search, more })
+  await guard.check(async () => {
+    await more.click()
+    await page.keyboard.press('j')
+    await page.keyboard.press('p')
+    await expect(page.getByRole('dialog', { name: 'More agent actions' })).toBeVisible()
+    await expect(page).toHaveURL('/agents')
+    await page.keyboard.press('Escape')
+  })
+  guard.done()
+  await row(page, kite).focus()
+  for (const modifiers of ['Control', 'Meta']) for (const key of ['s', 'r', 'd', 'p', 'a']) {
+    await page.keyboard.press(`${modifiers}+${key}`)
+  }
+  await row(page, kite).dispatchEvent('keydown', { key: 'j', code: 'KeyJ', isComposing: true })
+  await expect(row(page, kite)).toBeFocused()
+  await page.keyboard.press('j')
+  await expect(row(page, nova)).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(`/agents/${nova}`)
+  await panel(page).focus()
+  await page.keyboard.press('Escape')
+  await expect(page).toHaveURL('/agents')
+  await expect(row(page, nova)).toBeFocused()
+  // The page's search/layout packages attach later: bare / must not open the
+  // global palette on the Agents list, even before a search handler exists.
+  await page.keyboard.press('/')
+  await expect(page.getByRole('dialog', { name: 'Search and commands' })).toHaveCount(0)
+  await page.keyboard.press('Control+k')
+  const palette = page.getByRole('dialog', { name: 'Search and commands' })
+  await expect(palette).toBeVisible()
+  const input = palette.getByRole('combobox')
+  await input.fill('jpr')
+  await input.press('j')
+  await expect(input).toHaveValue('jprj')
+  await page.keyboard.press('Escape')
+  await row(page, nova).focus()
+  await page.keyboard.press('?')
+  const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
+  await expect(sheet).toBeVisible()
+  const next = sheet.locator('.row').filter({ has: page.locator('dd', { hasText: /^Next \/ previous session$/ }) })
+  await expect(next).toContainText('J')
+  await expect(next).toContainText('Down arrow')
+  await expect(sheet.locator('dd', { hasText: /^Decision Desk$/ })).toBeVisible()
+  await expect(sheet.getByText('Search sessions (this list)', { exact: true })).toHaveCount(0)
+  await expect(sheet.locator('dd', { hasText: /^Jump the divider:/ })).toHaveCount(0)
+  const closeLabel = sheet.getByText('Close the details to List only', { exact: true })
+  await expect(closeLabel).toBeVisible()
+  await expect(closeLabel.locator('svg')).toHaveCount(1)
+  await expect(closeLabel).not.toContainText('→')
+  const close = sheet.getByRole('button', { name: 'Close shortcuts' })
+  const sheetGuard = await controlStability(page, { close })
+  await sheetGuard.check(async () => {
+    await page.keyboard.press('j')
+    await expect(close).toBeFocused()
+  })
+  sheetGuard.done()
+  await close.click()
+  expect(calls.some(call => call.method === 'POST' && /\/(pause|resume)$/.test(call.path))).toBe(false)
+  // Review evidence only: no screenshot equality or theme/width test matrix.
+  for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024, 390]) {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    await page.locator('main').focus()
+    await page.screenshot({ path: testInfo.outputPath(`agents-${width}-${theme}.png`), fullPage: true })
+    await page.keyboard.press('?')
+    await expect(sheet).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`shortcuts-${width}-${theme}.png`), fullPage: true })
+    await close.click()
+  }
+  await page.keyboard.press('g'); await page.keyboard.press('d')
+  await expect(page).toHaveURL('/decision-desk')
+  expect(errors).toEqual([])
 })
 
 test('closing a session panel goes back instead of adding history, like the ticket panel', async ({ page }) => {

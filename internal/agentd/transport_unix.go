@@ -114,6 +114,37 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 	hooks := hooknote.NewServer()
 	mux := http.NewServeMux()
 	mux.Handle("POST /v1/inbox-hook", hooks)
+	mux.HandleFunc("POST /v1/setup", func(w http.ResponseWriter, r *http.Request) {
+		if !authorized(r, token) {
+			http.Error(w, "unauthorized", 401)
+			return
+		}
+		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+		d := json.NewDecoder(r.Body)
+		d.DisallowUnknownFields()
+		var req agentsetup.SetupRequest
+		if d.Decode(&req) != nil || d.Decode(&struct{}{}) != io.EOF {
+			http.Error(w, "invalid local enrollment request", 400)
+			return
+		}
+		s.mu.Lock()
+		setup := s.setup
+		s.mu.Unlock()
+		if setup == nil {
+			http.Error(w, "running daemon cannot advance enrollment; update agentd through its service owner", 409)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		out, err := setup(ctx, req)
+		if err != nil {
+			http.Error(w, err.Error(), 409)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(w).Encode(out)
+	})
 	if s.stepUps != nil {
 		mux.HandleFunc("GET /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
 		mux.HandleFunc("POST /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
@@ -131,9 +162,11 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 			http.Error(w, "invalid account link", 400)
 			return
 		}
-		out, err := s.AccountLink(r.Context(), req)
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+		out, err := s.AccountLink(ctx, req)
 		if err != nil {
-			http.Error(w, "account linking unavailable", 409)
+			http.Error(w, err.Error(), 409)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -235,6 +268,9 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		}
 		w.Header().Set("Content-Type", "application/json")
 		status := s.Lifecycle(r.URL.Query().Get("account_id"))
+		if r.URL.Query().Get("include_logins") != "1" {
+			status.AccountLogins = nil
+		}
 		if r.URL.Query().Get("include_readiness") != "1" {
 			status.AccountStatuses, status.VerificationReasons = nil, nil
 		}
@@ -258,6 +294,7 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		}
 		status, err := s.Drain(req)
 		status.AccountStatuses, status.VerificationReasons = nil, nil
+		status.AccountLogins = nil
 		if err != nil {
 			http.Error(w, "drain rejected", http.StatusConflict)
 			return
@@ -354,6 +391,14 @@ func (l *LocalServer) SetHookPeer(src hooknote.NoteSource, grants *hooknote.Regi
 		return
 	}
 	l.hooks.Set(src, grants)
+}
+
+// SetSetupHandler is controller wiring, not enrollment authority. Every call
+// still validates the paired computer and obtains its person-gated approval.
+func (s *Supervisor) SetSetupHandler(setup func(context.Context, agentsetup.SetupRequest) (agentsetup.Progress, error)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setup = setup
 }
 
 func authorized(r *http.Request, token string) bool {

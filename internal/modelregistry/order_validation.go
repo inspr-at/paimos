@@ -1,0 +1,72 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package modelregistry
+
+import (
+	"encoding/json"
+	"slices"
+	"strings"
+
+	"github.com/inspr-at/paimos/internal/modelprefs"
+)
+
+func copyOrderEfforts(efforts map[string]string, rank []string) map[string]string {
+	out := map[string]string{}
+	for _, line := range rank {
+		if effort, ok := efforts[line]; ok {
+			out[line] = effort
+		}
+	}
+	return out
+}
+
+// New page writes use provider identities across harnesses. Retain the
+// harness-derived aliases that previous writers still send during cutover.
+func modelsWriteCatalog(c boardCatalog) boardCatalog {
+	out := modelsCatalog(c)
+	out.introduced = c.introduced
+	for _, line := range c.lines {
+		if _, exists := out.profiles[line.ID]; !exists {
+			out.profiles[line.ID] = c.profiles[line.ID]
+			out.lines = append(out.lines, line)
+		}
+	}
+	return out
+}
+
+func validateModelsOrder(c boardCatalog, o modelprefs.BoardOrder) error {
+	// Match the order reader's JSON bound, including PostgreSQL's whitespace.
+	encoded, err := json.Marshal(o.Efforts)
+	if err != nil || len(encoded)+2*len(o.Efforts) > 32768 {
+		return prefFail(413, "order_efforts_too_large")
+	}
+	if err := validateBoardLines(c, o.Rank, o.Not); err != nil {
+		return err
+	}
+	if o.End != "" && o.End != "wait" && o.End != "default" && o.End != "row" && o.End != "auto" ||
+		o.Situation == "first" && (o.End == "row" || o.End == "auto" || o.Column == "other" && o.End == "default") ||
+		o.Situation != "first" && o.End == "default" || o.Situation == "review" && o.End == "row" || o.Situation != "review" && o.End == "auto" {
+		return prefFail(422, "invalid_end")
+	}
+	for line, effort := range o.Efforts {
+		if !slices.Contains(o.Rank, line) || len(effort) > 32 || !effortRE.MatchString(effort) {
+			return prefFail(422, "invalid_effort")
+		}
+		if !slices.ContainsFunc(c.profiles[line], func(p Profile) bool { return p.Enabled && !p.Retired && p.Effort == effort }) {
+			return prefFail(422, "effort_not_registered")
+		}
+	}
+	if o.Situation == "review" || strings.HasPrefix(o.Column, "review:") {
+		for _, line := range o.Rank {
+			qualified := false
+			for _, profile := range modelsRouteCandidates(c.profiles[line], "", modelsReviewMinLevel, true) {
+				if profile.Enabled && !profile.Retired && qualifiedReviewProfile(profile) && (o.Efforts[line] == "" || o.Efforts[line] == profile.Effort) {
+					qualified = true
+				}
+			}
+			if !qualified {
+				return prefFail(422, "review_floor")
+			}
+		}
+	}
+	return nil
+}

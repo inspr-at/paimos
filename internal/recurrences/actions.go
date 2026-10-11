@@ -34,22 +34,12 @@ func (m *Module) WithActionEvaluator(evaluate ActionEvaluatorTx) *Module {
 
 func (m *Module) AuthorizeActionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b ActionBinding, c routineguard.Context) (tenant.Principal, routineguard.Decision, string, error) {
 	empty := tenant.Principal{}
-	identity, err := RequireExecutionConsentTx(ctx, tx, p.TenantID, b.RecurrenceID, b.DefinitionRevision, m.executionRuntime)
+	actor, current, err := m.authorizeActionBindingTx(ctx, tx, p, b)
 	if err != nil {
 		return empty, routineguard.Decision{}, "", err
-	}
-	current, err := load(ctx, tx, b.RecurrenceID, false)
-	if err != nil {
-		return empty, routineguard.Decision{}, "", err
-	}
-	var frozen Assignment
-	if json.Unmarshal(b.Assignment, &frozen) != nil || routineguard.Digest(&frozen) != b.AssignmentDigest {
-		return empty, routineguard.Decision{}, "", workorders.Fail(409, "routine_assignment_changed")
 	}
 	d := current.Definition
-	if identity != b.ExecutionPrincipalID || d == nil || d.Assignment == nil || d.OwnerPrincipalID != b.OwnerID || current.ProjectID != b.ProjectID || current.ParentID != b.ParentID || d.Scope.Kind != b.ScopeType || d.Scope.ProjectID != b.ScopeProjectID || routineguard.Digest(d.Assignment) != b.AssignmentDigest || b.ConsentRevision != current.Revision {
-		return empty, routineguard.Decision{}, "", workorders.Fail(409, "routine_grant_changed")
-	}
+
 	if !slices.Contains(d.Assignment.AllowedActions, c.Action) {
 		return empty, routineguard.Decision{}, "", authz.ErrForbidden
 	}
@@ -71,11 +61,40 @@ func (m *Module) AuthorizeActionTx(ctx context.Context, tx pgx.Tx, p tenant.Prin
 	if verified.PolicyDigest != decision.PolicyDigest || verified.ContextDigest != decision.ContextDigest || verified.HardVersion != decision.HardVersion || verified.PresetVersion != decision.PresetVersion || verified.DeterministicResult != routineguard.Allow || !verified.CanExecute() {
 		return empty, decision, "", workorders.Fail(409, "guardrail_evaluation_required")
 	}
+	return actor, verified, evaluationID, nil
+}
+func (m *Module) authorizeActionBindingTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b ActionBinding) (tenant.Principal, Recurrence, error) {
+	empty := tenant.Principal{}
+	identity, err := RequireExecutionConsentTx(ctx, tx, p.TenantID, b.RecurrenceID, b.DefinitionRevision, m.executionRuntime)
+	if err != nil {
+		return empty, Recurrence{}, err
+	}
+	current, err := load(ctx, tx, b.RecurrenceID, false)
+	if err != nil {
+		return empty, Recurrence{}, err
+	}
+	var frozen Assignment
+	if json.Unmarshal(b.Assignment, &frozen) != nil || routineguard.Digest(&frozen) != b.AssignmentDigest {
+		return empty, Recurrence{}, workorders.Fail(409, "routine_assignment_changed")
+	}
+	d := current.Definition
+	if identity != b.ExecutionPrincipalID || d == nil || d.Assignment == nil || d.OwnerPrincipalID != b.OwnerID || current.ProjectID != b.ProjectID || current.ParentID != b.ParentID || d.Scope.Kind != b.ScopeType || d.Scope.ProjectID != b.ScopeProjectID || routineguard.Digest(d.Assignment) != b.AssignmentDigest || b.ConsentRevision != current.Revision {
+		return empty, Recurrence{}, workorders.Fail(409, "routine_grant_changed")
+	}
+
 	actor := tenant.Principal{ID: identity, TenantID: p.TenantID, Scopes: executionPermissions(d.Assignment)}
 	var kind string
 	if err := tx.QueryRow(ctx, `SELECT kind FROM principals WHERE id=$1 AND status='active' AND linked_to IS NULL`, identity).Scan(&kind); err != nil {
-		return empty, decision, "", err
+		return empty, Recurrence{}, err
 	}
 	actor.Kind = tenant.PrincipalKind(kind)
-	return actor, verified, evaluationID, nil
+	return actor, current, nil
+}
+
+// AuthorizeObservationTx rechecks the current frozen assignment, owning person,
+// execution identity, consent and exact qualification for observing an already
+// committed merge-to-Done receipt. It grants no outward action authority.
+func (m *Module) AuthorizeObservationTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b ActionBinding) (tenant.Principal, error) {
+	actor, _, err := m.authorizeActionBindingTx(ctx, tx, p, b)
+	return actor, err
 }

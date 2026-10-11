@@ -46,15 +46,17 @@ type KnowledgeWrite struct {
 	Body  string `json:"body"`
 }
 type Request struct {
-	AttemptID        string          `json:"attempt_id"`
-	ActionKey        string          `json:"action_key"`
-	Kind             string          `json:"kind"`
-	ProjectID        string          `json:"project_id"`
-	TargetID         string          `json:"target_id"`
-	ExpectedRevision int64           `json:"expected_revision"`
-	WorkCreate       *WorkCreate     `json:"work_create,omitempty"`
-	WorkUpdate       *WorkUpdate     `json:"work_update,omitempty"`
-	KnowledgeWrite   *KnowledgeWrite `json:"knowledge_write,omitempty"`
+	AttemptID        string           `json:"attempt_id"`
+	ActionKey        string           `json:"action_key"`
+	Kind             string           `json:"kind"`
+	ProjectID        string           `json:"project_id"`
+	TargetID         string           `json:"target_id"`
+	ExpectedRevision int64            `json:"expected_revision"`
+	WorkCreate       *WorkCreate      `json:"work_create,omitempty"`
+	WorkUpdate       *WorkUpdate      `json:"work_update,omitempty"`
+	KnowledgeWrite   *KnowledgeWrite  `json:"knowledge_write,omitempty"`
+	PROpen           *PROpen          `json:"pr_open,omitempty"`
+	PipelineRequest  *PipelineRequest `json:"pipeline_request,omitempty"`
 }
 type Receipt struct {
 	ID            string `json:"id"`
@@ -65,6 +67,11 @@ type Receipt struct {
 	State         string `json:"state"`
 	NodeID        string `json:"node_id"`
 	Revision      int64  `json:"revision"`
+	OperationRef  string `json:"operation_ref,omitempty"`
+	PullRequest   int64  `json:"pull_request,omitempty"`
+	PullURL       string `json:"pull_url,omitempty"`
+	ApprovalID    string `json:"approval_id,omitempty"`
+	WaitReason    string `json:"wait_reason,omitempty"`
 }
 
 // Binding is loaded from persisted lineage, never from a client credential or
@@ -80,14 +87,19 @@ type Binding struct {
 // AuthorizeTx resolves current definition/qualification/consent and the fixed
 // evaluator in the same final transaction. No network/model work is permitted.
 type AuthorizeTx func(context.Context, pgx.Tx, tenant.Principal, Binding, routineguard.Context) (tenant.Principal, routineguard.Decision, string, error)
+type ObserveTx func(context.Context, pgx.Tx, tenant.Principal, Binding) (tenant.Principal, error)
 
 type Broker struct {
 	pool      *pgxpool.Pool
 	authorize AuthorizeTx
+	pr        PullRequests
+	pipeline  Pipeline
+	observe   ObserveTx
+	now       func() time.Time
 }
 
 func New(pool *pgxpool.Pool, authorize AuthorizeTx) *Broker {
-	return &Broker{pool: pool, authorize: authorize}
+	return &Broker{pool: pool, authorize: authorize, now: time.Now}
 }
 func (b *Broker) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/routine-runs/{runId}/actions", b.handle)
@@ -105,7 +117,7 @@ func (r Request) Validate() error {
 		return workorders.Fail(400, "invalid_action_binding")
 	}
 	count := 0
-	for _, has := range []bool{r.WorkCreate != nil, r.WorkUpdate != nil, r.KnowledgeWrite != nil} {
+	for _, has := range []bool{r.WorkCreate != nil, r.WorkUpdate != nil, r.KnowledgeWrite != nil, r.PROpen != nil, r.PipelineRequest != nil} {
 		if has {
 			count++
 		}
@@ -137,6 +149,14 @@ func (r Request) Validate() error {
 		v := r.KnowledgeWrite
 		if v == nil || !slices.Contains([]string{"runbook", "guideline", "memory", "external-system", "related-project"}, v.Type) || !knowledgeSlug.MatchString(v.Slug) || !bounded(v.Title, 500, true) || !bounded(v.Body, 32768, false) {
 			return workorders.Fail(400, "invalid_knowledge_write")
+		}
+	case "pr.open":
+		if r.PROpen == nil || !r.PROpen.Valid() {
+			return workorders.Fail(400, "invalid_pr_open")
+		}
+	case "pipeline.request":
+		if r.PipelineRequest == nil || !r.PipelineRequest.valid() {
+			return workorders.Fail(400, "invalid_pipeline_request")
 		}
 	default:
 		return workorders.Fail(400, "unknown_action_type")
@@ -218,55 +238,90 @@ func (b *Broker) Execute(ctx context.Context, p tenant.Principal, run string, in
 		if err := agentpairing.Lock(ctx, tx); err != nil {
 			return err
 		}
-		binding, err := loadBinding(ctx, tx, p, run, in.AttemptID)
+		binding, actor, decision, evaluationID, err := b.authorizedTx(ctx, tx, p, run, in, false)
 		if err != nil {
 			return err
 		}
-		if in.ProjectID != binding.ProjectID {
-			return workorders.Fail(409, "action_project_changed")
+		if in.PROpen != nil || in.PipelineRequest != nil {
+			out, err = prepareEffectTx(ctx, tx, p, binding, in, decision.PolicyDigest, evaluationID)
+		} else {
+			out, err = applyTx(ctx, tx, actor, binding, in, decision.PolicyDigest, evaluationID)
 		}
-		permission := "nodes.write"
-		if in.Kind == "knowledge.write" {
-			permission = "knowledge.write"
-		}
-		owner := tenant.Principal{ID: binding.OwnerID, TenantID: p.TenantID, Kind: tenant.Person}
-		for _, who := range []tenant.Principal{p, owner} {
-			if err := authz.RequireTx(ctx, tx, who, permission, authz.Scope{ProjectID: in.ProjectID}); err != nil {
-				return err
-			}
-		}
-		if b.authorize == nil {
-			return workorders.Fail(409, "routine_grant_unavailable")
-		}
-		actor, decision, evaluationID, err := b.authorize(ctx, tx, p, binding, in.GuardContext())
-		if err != nil {
-			return err
-		}
-		if actor.TenantID != p.TenantID || actor.ID != binding.ExecutionPrincipalID {
-			return authz.ErrForbidden
-		}
-		if !decision.CanExecute() || decision.ContextDigest != routineguard.Digest(in.GuardContext()) || !workorders.UUID(evaluationID) {
-			return workorders.Fail(409, "guardrail_evaluation_required")
-		}
-		if err := authz.RequireTx(ctx, tx, actor, permission, authz.Scope{ProjectID: in.ProjectID}); err != nil {
-			return err
-		}
-		var evidence bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_guard_evaluations WHERE id=$1 AND recurrence_id=$2 AND definition_revision=$3 AND checkpoint='action' AND result='allow' AND policy_digest=$4 AND context_digest=$5 AND hard_version=$6 AND preset_version=$7)`, evaluationID, binding.RecurrenceID, binding.DefinitionRevision, decision.PolicyDigest, decision.ContextDigest, decision.HardVersion, decision.PresetVersion).Scan(&evidence); err != nil {
-			return err
-		}
-		if !evidence {
-			return workorders.Fail(409, "guardrail_evidence_changed")
-		}
-		out, err = applyTx(ctx, tx, actor, binding, in, decision.PolicyDigest, evaluationID)
 		return err
 	})
 	if err != nil {
 		return Receipt{}, err
 	}
+	if in.PROpen != nil && out.State != "succeeded" {
+		return b.ReconcilePR(ctx, p.TenantID, out.ID)
+	}
 	return out, nil
 }
-func loadBinding(ctx context.Context, tx pgx.Tx, p tenant.Principal, run, attempt string) (Binding, error) {
+
+func (b *Broker) authorizedTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run string, in Request, reconcile bool) (Binding, tenant.Principal, routineguard.Decision, string, error) {
+	var actor tenant.Principal
+	var decision routineguard.Decision
+	var evaluationID string
+	check := func() (Binding, error) {
+		binding, err := loadBinding(ctx, tx, p, run, in.AttemptID, reconcile)
+		if err != nil {
+			return Binding{}, err
+		}
+		if in.ProjectID != binding.ProjectID {
+			return Binding{}, workorders.Fail(409, "action_project_changed")
+		}
+		permission := "nodes.write"
+		if in.Kind == "knowledge.write" {
+			permission = "knowledge.write"
+		}
+		if in.PROpen != nil || in.PipelineRequest != nil {
+			permission = "work_orders.write"
+		}
+		owner := tenant.Principal{ID: binding.OwnerID, TenantID: p.TenantID, Kind: tenant.Person}
+		if err := authz.RequireTx(ctx, tx, owner, permission, authz.Scope{ProjectID: in.ProjectID}); err != nil {
+			return Binding{}, err
+		}
+		if b.authorize == nil {
+			return Binding{}, workorders.Fail(409, "routine_grant_unavailable")
+		}
+		actor, decision, evaluationID, err = b.authorize(ctx, tx, p, binding, in.GuardContext())
+		if err != nil {
+			return Binding{}, err
+		}
+		if actor.TenantID != p.TenantID || actor.ID != binding.ExecutionPrincipalID {
+			return Binding{}, authz.ErrForbidden
+		}
+		// Background reconciliation uses the current consent seam's execution
+		// identity and scopes, never a persisted API-key ceiling. API calls still
+		// check the original authenticated caller and its live key authority.
+		if reconcile && p.KeyID == "" {
+			// The assigned daemon and execution identity may differ, including
+			// a personal routine executed under its owner's consent. Keep both
+			// identities and check the daemon's live role with this bounded ceiling.
+			p.Scopes = actor.Scopes
+		}
+		if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: in.ProjectID}); err != nil {
+			return Binding{}, err
+		}
+		if !decision.CanExecute() || decision.ContextDigest != routineguard.Digest(in.GuardContext()) || !workorders.UUID(evaluationID) {
+			return Binding{}, workorders.Fail(409, "guardrail_evaluation_required")
+		}
+		if err := authz.RequireTx(ctx, tx, actor, permission, authz.Scope{ProjectID: in.ProjectID}); err != nil {
+			return Binding{}, err
+		}
+		var evidence bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_guard_evaluations WHERE id=$1 AND recurrence_id=$2 AND definition_revision=$3 AND checkpoint='action' AND result='allow' AND policy_digest=$4 AND context_digest=$5 AND hard_version=$6 AND preset_version=$7)`, evaluationID, binding.RecurrenceID, binding.DefinitionRevision, decision.PolicyDigest, decision.ContextDigest, decision.HardVersion, decision.PresetVersion).Scan(&evidence); err != nil {
+			return Binding{}, err
+		}
+		if !evidence {
+			return Binding{}, workorders.Fail(409, "guardrail_evidence_changed")
+		}
+		return binding, nil
+	}
+	binding, err := check()
+	return binding, actor, decision, evaluationID, err
+}
+func loadBinding(ctx context.Context, tx pgx.Tx, p tenant.Principal, run, attempt string, reconcile ...bool) (Binding, error) {
 	var b Binding
 	var state, attemptState, attemptPrincipal, attemptDigest string
 	var consent bool
@@ -279,7 +334,11 @@ func loadBinding(ctx context.Context, tx pgx.Tx, p tenant.Principal, run, attemp
 	if err != nil {
 		return b, err
 	}
-	if state != "running" || attemptState != "running" || !consent || b.ExecutionPrincipalID == "" || attemptPrincipal != p.ID || attemptDigest != b.AssignmentDigest {
+	live := state == "running" && attemptState == "running"
+	if len(reconcile) == 1 && reconcile[0] {
+		live = (state == "running" || state == "awaiting_pipeline") && (attemptState == "running" || attemptState == "completed")
+	}
+	if !live || !consent || b.ExecutionPrincipalID == "" || attemptPrincipal != p.ID || attemptDigest != b.AssignmentDigest {
 		return b, workorders.Fail(403, "active_run_grant_required")
 	}
 	if len(b.Assignment) > 131072 {
@@ -376,6 +435,13 @@ func applyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Binding, in R
 	return out, nil
 }
 func requireTarget(ctx context.Context, tx pgx.Tx, b Binding, in Request) error {
+	return requireTargetState(ctx, tx, b, in, true)
+}
+
+// Reconciliation observes an immutable effect on the same live target; it
+// does not write the request-time node contents. New actions still require
+// the exact revision, while both paths retain project and ancestry checks.
+func requireTargetState(ctx context.Context, tx pgx.Tx, b Binding, in Request, exactRevision bool) error {
 	var project string
 	var revision time.Time
 	var inScope, withinLimits bool
@@ -392,7 +458,7 @@ func requireTarget(ctx context.Context, tx pgx.Tx, b Binding, in Request) error 
 	if project != in.ProjectID {
 		return workorders.Fail(409, "target_project_changed")
 	}
-	if revision.UnixMicro() != in.ExpectedRevision {
+	if exactRevision && revision.UnixMicro() != in.ExpectedRevision {
 		return workorders.Fail(409, "target_revision_changed")
 	}
 	if (in.Kind == "work.update" || in.Kind == "knowledge.write" && in.TargetID != in.ProjectID) && !withinLimits {
