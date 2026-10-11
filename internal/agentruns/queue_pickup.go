@@ -127,11 +127,16 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		if len(e.Run.Trace) > 262144 {
 			return nil, workorders.Fail(409, "routine_trace_unavailable")
 		}
-		if err = json.Unmarshal(e.Run.Trace, &routineTrace); err != nil {
-			return nil, err
+		if len(e.Run.Trace) > 0 {
+			if err = json.Unmarshal(e.Run.Trace, &routineTrace); err != nil {
+				return nil, err
+			}
 		}
 		routine := routineTrace.RunID
 		if routine != "" {
+			if !e.Queued.Targeted && (in.Agent != "" || in.Profile != "" || in.Account != nil) {
+				return map[string]any{"entry": nil, "wait_reason": "routine_registry_route_required"}, nil
+			}
 			if m.routineQueue == nil {
 				return map[string]any{"entry": nil, "wait_reason": "routine_executor_unavailable"}, nil
 			}
@@ -346,6 +351,13 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 	if !bound {
 		return out, workorders.Fail(409, "routine_intent_required")
 	}
+	var bounded bool
+	if err := tx.QueryRow(ctx, `SELECT coalesce(octet_length(trace::text),0)<=262144 FROM agent_runs WHERE id=$1`, runID).Scan(&bounded); err != nil {
+		return out, err
+	}
+	if !bounded {
+		return out, workorders.Fail(409, "routine_trace_unavailable")
+	}
 	v, err := load(ctx, tx, runID, false)
 	if err != nil {
 		return out, err
@@ -353,7 +365,6 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 	if v.QueueNodeID == nil || v.Status != "queued" {
 		return out, workorders.Fail(409, "routine_queue_unavailable")
 	}
-	var bounded bool
 	if err = tx.QueryRow(ctx, `SELECT octet_length(title)+octet_length(body)+octet_length(fields::text)<=65536 FROM nodes WHERE id=$1`, *v.QueueNodeID).Scan(&bounded); err != nil {
 		return out, err
 	}
@@ -401,6 +412,15 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 	}
 	// Load the same bounded project order as coordinator pickup. An eligible
 	// earlier leaf retains its turn even if it belongs to another routine.
+	if err = tx.QueryRow(ctx, workqueue.CTE+`SELECT coalesce(bool_and(octet_length(n.title)+octet_length(n.body)+octet_length(n.fields::text)<=65536 AND coalesce(octet_length(r.trace::text),0)<=262144),true)
+ FROM (SELECT id,queue_node_id FROM queue_ordered WHERE project_id=$1 ORDER BY queue_target_agent_id NULLS FIRST,queue_position LIMIT 201) q
+ JOIN nodes n ON n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=q.queue_node_id
+ JOIN agent_runs r ON r.tenant_id=n.tenant_id AND r.id=q.id`, *t.ProjectID).Scan(&bounded); err != nil {
+		return out, err
+	}
+	if !bounded {
+		return out, workorders.Fail(409, "queue_inputs_partial")
+	}
 	m := module{}
 	entries, err := m.queueEntriesFor(ctx, tx, *t.ProjectID, "", true)
 	if err != nil {
@@ -417,8 +437,10 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 			ordered = append(ordered, e)
 		}
 	}
+	found := false
 	for _, e := range ordered {
 		if e.Run.ID == v.ID {
+			found = true
 			break
 		}
 		earlier, err := queueLoadTicket(ctx, tx, e.NodeID, false)
@@ -433,8 +455,21 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 			return out, workorders.Fail(409, reason)
 		}
 		if readiness(earlier).Ready && workqueue.State(earlier.State) == "open" && reason == "" {
-			return out, workorders.Fail(409, "queue_order_wait")
+			fields, err := json.Marshal(earlier.Fields)
+			if err != nil {
+				return out, err
+			}
+			ready, err := workqueue.RunRouteReadyTx(ctx, tx, p.TenantID, *t.ProjectID, e.Run.ID, fields)
+			if err != nil {
+				return out, err
+			}
+			if ready {
+				return out, workorders.Fail(409, "queue_order_wait")
+			}
 		}
+	}
+	if !found {
+		return out, workorders.Fail(409, "routine_queue_unavailable")
 	}
 	wait, err = harness.LeadDispatchTurnTx(ctx, tx, p, *t.ProjectID, v.ID, admission)
 	if err != nil {
@@ -480,6 +515,14 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 		}
 		picked, err := queueTryRouteWith(ctx, tx, p, t, v, candidate, placement, lead, finish)
 		if err != nil {
+			// The shared registry may list another person's account first.
+			// Its rolled-back refusal must not hide a later owned route. Global
+			// consent, CI, budget and authority failures retain their reason.
+			var refusal *workorders.Error
+			if errors.As(err, &refusal) && refusal.Status == 409 && (refusal.Message == "routine_account_selection_required" || refusal.Message == "routine_account_unavailable" || refusal.Message == "own_account_required" || refusal.Message == "owner_policy_mismatch" || refusal.Message == "execution_account_unqualified") {
+				out.WaitReason = refusal.Message
+				continue
+			}
 			return out, err
 		}
 		if picked {

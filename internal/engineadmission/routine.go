@@ -38,10 +38,6 @@ func RequireRoutineTx(ctx context.Context, tx pgx.Tx, owner tenant.Principal, ro
 	if !bound {
 		return workorders.Fail(409, "routine_intent_required")
 	}
-	var now time.Time
-	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
-		return err
-	}
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT CASE WHEN octet_length(snapshot::text)<=65536 THEN snapshot END FROM delivery_work_settings WHERE project_id=$1`, project).Scan(&raw)
 	var policy struct {
@@ -63,6 +59,12 @@ func RequireRoutineTx(ctx context.Context, tx pgx.Tx, owner tenant.Principal, ro
 		return workorders.Fail(409, "ci_admission_unavailable")
 	}
 	facts, err := reader(ctx, tx, owner.TenantID, project)
+	// Sample after the local reader: an observation made inside this write is
+	// fresh, rather than incorrectly classified as a future reading.
+	var now time.Time
+	if clockErr := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); clockErr != nil {
+		return clockErr
+	}
 	if err != nil || facts.ProjectID != project || facts.PolicyRevision != policy.Revision || facts.ObservedAt.IsZero() || facts.ObservedAt.After(now) || now.Sub(facts.ObservedAt) > 30*time.Second || facts.MainGreen == nil || facts.CIAllowed == nil {
 		return workorders.Fail(409, "ci_admission_unavailable")
 	}

@@ -284,6 +284,13 @@ func (e *Executor) DispatchTx(ctx context.Context, tx pgx.Tx, tenantID, id, sess
 	if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
 		return out, err
 	}
+	var sameTenant bool
+	if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')=$1`, tenantID).Scan(&sameTenant); err != nil {
+		return out, err
+	}
+	if !sameTenant {
+		return out, authz.ErrForbidden
+	}
 	// Personal demand remains hidden from ordinary coordinator projections. This
 	// internal decision checks the exact owner's live rights and exposes no row.
 	var visibility, system string
@@ -324,9 +331,15 @@ func (e *Executor) DispatchTx(ctx context.Context, tx pgx.Tx, tenantID, id, sess
 		}
 		if err != nil {
 			var refusal *workorders.Error
+			var pairingRefusal *agentpairing.Error
+			var useRefusal *accountuse.Error
 			switch {
 			case errors.As(err, &refusal) && refusal.Status == 409:
 				out.WaitReason = refusal.Message
+			case errors.As(err, &pairingRefusal) && (pairingRefusal.Status == 409 || pairingRefusal.Status == 410):
+				out.WaitReason = pairingRefusal.Code
+			case errors.As(err, &useRefusal) && useRefusal.Status == 409:
+				out.WaitReason = useRefusal.Message
 			case errors.Is(err, authz.ErrForbidden), errors.Is(err, db.ErrKeyAuthorityChanged):
 				out.WaitReason = "owner_or_dispatch_authority_revoked"
 			default:
@@ -365,6 +378,23 @@ func (e *Executor) dispatch(ctx context.Context, tx pgx.Tx, tenantID string, r i
 	}
 	if r.run == "" {
 		return out, workorders.Fail(409, "routine_work_not_queued")
+	}
+	// Shared routing/fairness can materialize account windows. Enforce S09's
+	// exact input bounds before entering those helpers, rather than after work.
+	for _, bound := range []struct {
+		query string
+		limit int
+	}{
+		{`SELECT count(*) FROM (SELECT 1 FROM agent_accounts LIMIT 1025) x`, 1024},
+		{`SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows w WHERE w.removed_at IS NULL OR EXISTS(SELECT 1 FROM account_limit_rules l WHERE l.tenant_id=w.tenant_id AND l.from_window_id=w.id AND l.removed_at IS NULL) LIMIT 4097) x`, 4096},
+	} {
+		var count int
+		if err := tx.QueryRow(ctx, bound.query).Scan(&count); err != nil {
+			return out, err
+		}
+		if count > bound.limit {
+			return out, workorders.Fail(409, "account_inputs_unreadable")
+		}
 	}
 	var session *string
 	var generation int64
@@ -438,6 +468,9 @@ func (e *Executor) leadDemand(ctx context.Context, tx pgx.Tx, owner tenant.Princ
 		binding, _ := json.Marshal(map[string]any{"routine_run_id": r.id, "recurrence_id": r.recurrence, "definition_revision": r.revision, "consent_revision": r.consentRevision, "owner_principal_id": r.owner, "execution_principal_id": r.principal, "project_id": r.project, "execution_revision": settings.Revision, "qualification_id": *settings.QualificationID, "expected_lead_generation": generation})
 		_, err = tx.Exec(ctx, `INSERT INTO routine_launch_intents(tenant_id,id,routine_run_id,project_id,owner_principal_id,worker_principal_id,kind,lead_generation,binding) VALUES($1,gen_random_uuid(),$2,$3,$4,$5,'lead',$6,$7)`, owner.TenantID, r.id, r.project, r.owner, r.principal, generation, binding)
 		if err != nil {
+			return out, err
+		}
+		if _, err := events.Append(ctx, tx, owner, events.Change{NodeID: &r.project, Type: "routine.lead_demand_created", After: map[string]any{"routine_run_id": r.id, "lead_generation": generation}}); err != nil {
 			return out, err
 		}
 	}

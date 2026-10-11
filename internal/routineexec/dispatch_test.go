@@ -177,6 +177,14 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 // barrier proves scheduler and real coordinator pickup overlap on one intent.
 func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	f := setup(t, "off", false)
+	// Observe the committed turn writes from both independent connections;
+	// the queue event count alone cannot detect a replay advancing a turn.
+	f.exec(`CREATE TABLE routine_dispatch_turn_observations(tenant_id uuid,project_id uuid,at timestamptz)`)
+	f.exec(`GRANT SELECT,INSERT ON routine_dispatch_turn_observations TO PUBLIC`)
+	f.exec(`CREATE FUNCTION observe_routine_dispatch_turn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ INSERT INTO routine_dispatch_turn_observations VALUES(NEW.tenant_id,NEW.project_id,NEW.last_turn_at); RETURN NEW; END $$`)
+	f.exec(`CREATE TRIGGER observe_routine_dispatch_turn AFTER UPDATE OF last_turn_at ON project_leads
+ FOR EACH ROW WHEN (NEW.last_turn_at IS DISTINCT FROM OLD.last_turn_at) EXECUTE FUNCTION observe_routine_dispatch_turn()`)
 	var coordinator, session, key, agentRun string
 	lease := "dispatch-test-owned-worker-lease-000000000"
 	leaseDigest := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
@@ -226,6 +234,9 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 			if mode.Load() == 4 {
 				out.ObservedAt = out.ObservedAt.Add(-time.Minute)
 			}
+			if mode.Load() == 5 {
+				out.MainGreen = nil
+			}
 			return out, err
 		}}
 	e := New(f.d.App, options)
@@ -272,6 +283,12 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	}
 	wait("automatic_launch_disabled", "", 0)
 	f.exec(`UPDATE project_routine_execution_settings SET automatic_launch_enabled=true WHERE project_id=$1`, f.project)
+	f.exec(`UPDATE recurrence_definitions SET execute_consent=false WHERE recurrence_id=$1`, f.routine.ID)
+	wait("execution_consent_required", "", 0)
+	f.exec(`UPDATE recurrence_definitions SET execute_consent=true WHERE recurrence_id=$1`, f.routine.ID)
+	f.exec(`DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.owner.TenantID, f.owner.ID)
+	wait("owner_unavailable", "", 0)
+	dbtest.BindRole(t, f.d, f.owner.TenantID, f.owner.ID, "owner")
 	wait("stale_lead_generation", session, 2)
 	mode.Store(1)
 	wait("lead admission wait: host_unavailable", "", 0)
@@ -280,6 +297,8 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	mode.Store(3)
 	wait("ci_admission_wait", "", 0)
 	mode.Store(4)
+	wait("ci_admission_unavailable", "", 0)
+	mode.Store(5)
 	wait("ci_admission_unavailable", "", 0)
 	mode.Store(0)
 	f.exec(`INSERT INTO delivery_work_settings(tenant_id,project_id,snapshot) VALUES($1,$2,'{"freeze":true,"revision":1}')`, f.owner.TenantID, f.project)
@@ -302,6 +321,10 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	if demands != 1 {
 		t.Fatalf("duplicate lead demand: %d", demands)
 	}
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE node_id=$1 AND type='routine.lead_demand_created'`, f.project).Scan(&demands))
+	if demands != 1 {
+		t.Fatalf("duplicate/missing lead demand audit: %d", demands)
+	}
 	f.exec(`UPDATE project_leads SET session_id=$2,state='working' WHERE project_id=$1`, f.project, session)
 	// Refuse a nonroutine ID at the internal boundary.
 	_, err = dispatch(t.Context(), f.d.App, agentRun, "", 0)
@@ -323,7 +346,7 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		p := tenant.Principal{ID: coordinator, TenantID: f.owner.TenantID, Kind: tenant.Agent, Scopes: authz.CoordinatorKeyScopes}
+		p := tenant.Principal{ID: coordinator, TenantID: f.owner.TenantID, Kind: tenant.Agent, Scopes: authz.CoordinatorKeyScopes, KeyID: key, AuthKeyID: key, KeyCreatorID: f.owner.ID}
 		r := httptest.NewRequest("POST", "/api/queue/next", strings.NewReader(`{}`)).WithContext(tenant.WithPrincipal(ctx, p))
 		r.Header.Set("X-Aeon-Lead-Session", session)
 		r.Header.Set("X-Aeon-Lead-Generation", "1")
@@ -356,6 +379,7 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
  AND (SELECT count(*)=1 FROM routine_attempts WHERE run_id=$2)
  AND (SELECT count(*)=1 FROM routine_launch_intents WHERE routine_run_id=$2 AND kind='worker')
  AND (SELECT count(*)=1 FROM account_reservations WHERE run_id=$4)
+	AND (SELECT count(*)=1 FROM routine_dispatch_turn_observations WHERE project_id=$1)
  AND (SELECT count(*)=1 FROM events WHERE node_id=$5 AND type='queue.routed')`, f.project, f.run, turn, agentRun, f.work).Scan(&unchanged))
 	if !unchanged {
 		t.Fatal("replay duplicated or changed a dispatch receipt")
