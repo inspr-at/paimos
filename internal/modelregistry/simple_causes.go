@@ -49,6 +49,12 @@ func simpleCause(reason string) (string, *time.Time) {
 func simpleCausesFor(column, line string, chosen simplePick, resolved *WorkResolution, c boardCatalog) []simpleUnavailable {
 	out := []simpleUnavailable{}
 	seen := map[string]bool{}
+	// The harness that runs instead, so the page can tell "runs through Cursor instead" from another model.
+	var via *string
+	if chosen.Line != nil && chosen.Harness != "" {
+		harness := chosen.Harness
+		via = &harness
+	}
 	add := func(reason string, route *string) {
 		for _, part := range strings.Split(reason, ";") {
 			part = strings.TrimSpace(part)
@@ -60,7 +66,7 @@ func simpleCausesFor(column, line string, chosen simplePick, resolved *WorkResol
 				continue
 			}
 			seen[cause] = true
-			out = append(out, simpleUnavailable{Column: column, Line: line, RunsInstead: chosen.Line, Effort: chosen.Effort, Reason: part, Cause: cause, Until: until, Route: route, Waits: chosen.Line == nil})
+			out = append(out, simpleUnavailable{Column: column, Line: line, RunsInstead: chosen.Line, Effort: chosen.Effort, Reason: part, Cause: cause, Until: until, Route: route, RunsVia: via, Waits: chosen.Line == nil})
 		}
 	}
 	if resolved != nil {
