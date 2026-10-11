@@ -9,6 +9,7 @@ package authz
 func init() {
 	registerRoutes("recurrences", map[string]string{
 		"GET /api/routine-guardrails":                    "nodes.read|recurrences.manage",
+		"POST /api/routine-runs/{runId}/actions":         "nodes.write|knowledge.write",
 		"GET /api/recurrences/{recurrenceId}/guardrails": "nodes.read|recurrences.manage",
 		"PUT /api/recurrences/{recurrenceId}/guardrails": "recurrences.manage",
 		"DELETE /api/recurrences/{recurrenceId}":         "recurrences.manage",
@@ -34,7 +35,8 @@ func init() {
 		"GET /api/routine-guardrails": true,
 	})
 	registerDeclarations("recurrences", "project_decided", ProjectDecidedRoutes, map[string]bool{
-		"POST /api/recurrences":         true,
-		"POST /api/recurrences/preview": true,
+		"POST /api/recurrences":                  true,
+		"POST /api/routine-runs/{runId}/actions": true,
+		"POST /api/recurrences/preview":          true,
 	})
 }
