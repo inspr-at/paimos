@@ -110,7 +110,7 @@ func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
 		review := []string{}
 		if len(cold) == 0 || !cold[0] {
 			for _, row := range []struct{ id, harness, family string }{{testID(), "codex", "openai"}, {testID(), "cursor", "xai"}, {f.profile, "claude", "anthropic"}} {
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,$3,'test-version',$4,$5,'review-model','xhigh','frontier')`, tid, row.id, "review-"+row.id, row.harness, row.family); err != nil {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,$2,$3,'test-version',$4,$5,'review-model','xhigh','frontier',4)`, tid, row.id, "review-"+row.id, row.harness, row.family); err != nil {
 					return err
 				}
 				review = append(review, row.id)
