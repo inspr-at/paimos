@@ -5,6 +5,9 @@ ordered `chain`, continuation `end` (`wait` or `default`), and attributed
 `never` rules. `for=default` also returns explicit workspace `situations`,
 keyed by column and `small`, `fix`, `stuck`, or `review`. Missing situations
 follow the row; missing Review cells use automatic cross-family review.
+Kinds inheriting Default's saved exclusions stay out of `exceptions`.
+Explicitly owned rows and row-specific exclusions remain visible, including
+when their pick matches the workspace or personal Default.
 
 Order writes accept `rank: [pick, ...chain]`, `efforts: {line: nativeEffort}`,
 `end`, and the current profile `revision`. Existing `not` input remains

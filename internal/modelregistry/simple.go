@@ -327,7 +327,7 @@ func (m *Module) simple(w http.ResponseWriter, r *http.Request) {
 			row := simpleRowFor(s, c, k.Slug)
 			// An omitted kind follows Default. Show a row when this scope owns it, it is locked, or the pick
 			// actually differs from that default — never because a column template disagrees with itself.
-			if row.Lock != nil || row.Mine || !sameSimplePick(row.simplePick, out.All.simplePick) || !reflect.DeepEqual(row.Chain, out.All.Chain) || len(row.Never) > 0 || simpleOwnRow(s, k.Slug) {
+			if row.Lock != nil || row.Mine || !sameSimplePick(row.simplePick, out.All.simplePick) || !reflect.DeepEqual(row.Chain, out.All.Chain) || !reflect.DeepEqual(row.Never, out.All.Never) || simpleOwnRow(s, k.Slug) {
 				out.Exceptions = append(out.Exceptions, row)
 				columns = append(columns, k.Slug)
 			}
