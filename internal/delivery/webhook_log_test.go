@@ -130,17 +130,18 @@ func TestWebhookFailureAudit(t *testing.T) {
 	// refusal, or an unauthenticated action injects payload text into logs.
 	base := `"installation":{"id":456},"repository":{"full_name":"example/delivery"}`
 	for _, tc := range []struct {
-		name, raw, action, class string
-		status                   int
-		sign, fallback           bool
+		name, raw, action, class, step string
+		status                         int
+		sign, fallback                 bool
 	}{
-		{"signature", `{"action":"completed",` + base + `,"body":"` + webhookPrivateText + `"}`, "completed", "invalid_signature", 401, false, false},
-		{"fallback ingress", `{"action":"completed",` + base + `}`, "completed", "invalid_signature", 401, false, true},
-		{"invalid action", `{"action":"` + webhookPrivateText + `",` + base + `}`, "unknown", "invalid_envelope", 400, true, false},
-		{"malformed JSON", `{"action":"completed","body":"` + webhookPrivateText + `"`, "unknown", "invalid_envelope", 400, true, false},
-		{"installation", `{"action":"completed","installation":{"id":999},"repository":{"full_name":"example/delivery"}}`, "completed", "installation_mismatch", 404, true, false},
-		{"audit parse", `{"action":"completed",` + base + `,"pull_request":{"merged_at":"` + webhookPrivateText + `"}}`, "completed", "invalid_json", 400, true, false},
-		{"metrics error", `{"action":"completed",` + base + `,"created_at":"` + webhookPrivateText + `"}`, "completed", "observation_unavailable", 502, true, false},
+		{"signature", `{"action":"completed",` + base + `,"body":"` + webhookPrivateText + `"}`, "completed", "invalid_signature", "audit", 401, false, false},
+		{"fallback ingress", `{"action":"completed",` + base + `}`, "completed", "invalid_signature", "audit", 401, false, true},
+		{"invalid action", `{"action":"` + webhookPrivateText + `",` + base + `}`, "unknown", "invalid_envelope", "audit", 400, true, false},
+		{"malformed JSON", `{"action":"completed","body":"` + webhookPrivateText + `"`, "unknown", "invalid_envelope", "audit", 400, true, false},
+		{"installation", `{"action":"completed","installation":{"id":999},"repository":{"full_name":"example/delivery"}}`, "completed", "installation_mismatch", "audit", 404, true, false},
+		{"audit parse", `{"action":"completed",` + base + `,"pull_request":{"merged_at":"` + webhookPrivateText + `"}}`, "completed", "invalid_json", "audit", 400, true, false},
+		{"metrics error", `{"action":"completed",` + base + `,"created_at":"` + webhookPrivateText + `"}`, "completed", "observation_unavailable", "metrics", 502, true, false},
+		{"flow error", `{"action":"completed",` + base + `,"workflow_run":{"id":0}}`, "completed", "observation_unavailable", "flow", 502, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m, g, logs := webhookLogFixture()
@@ -156,7 +157,7 @@ func TestWebhookFailureAudit(t *testing.T) {
 			if w.Code != tc.status {
 				t.Fatalf("audit status: %d, want %d", w.Code, tc.status)
 			}
-			assertWebhookFailureLine(t, logs, "workflow_run", tc.action, "audit", tc.class, tc.status, nil)
+			assertWebhookFailureLine(t, logs, "workflow_run", tc.action, tc.step, tc.class, tc.status, nil)
 		})
 	}
 }

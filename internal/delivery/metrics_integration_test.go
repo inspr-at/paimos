@@ -88,19 +88,41 @@ func metricCounts(t *testing.T, f *fixture) (runs, pulls, marks int) {
 }
 
 func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
-	// Risk: an unconfigured metric consumer performs unnecessary GitHub reads,
-	// and a failed read rejects an otherwise valid, authenticated delivery.
-	// This regression intentionally remains red until AEON-1241's durable
-	// ingress expansion is assigned; the brief requires stopping for a migration.
-	for _, unavailable := range []bool{false, true} {
-		name := "read_available"
-		if unavailable {
-			name = "read_unavailable"
-		}
-		t.Run(name, func(t *testing.T) {
+	// Risk: an unconfigured metric consumer rejects an authenticated delivery
+	// on an unnecessary Actions read, or suppresses linked checks/queue facts.
+	for _, tc := range []struct {
+		name                                    string
+		linked, queue, suitePR, unrelated, fail bool
+	}{
+		{name: "read_available"},
+		{name: "read_unavailable", fail: true},
+		{name: "unrelated_linked_pull", linked: true, unrelated: true, fail: true},
+		{name: "linked_checks_empty_suite_pulls", linked: true},
+		{name: "linked_checks_explicit_suite_pull", linked: true, suitePR: true},
+		{name: "linked_queue_empty_suite_pulls", linked: true, queue: true},
+		{name: "linked_read_failure_then_redelivery", linked: true, fail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
-			head := strings.Repeat("d", 40)
 			g := &metricsFake{auditFake: &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}}
+			f.m.github = g
+			p := f.pull()
+			if tc.linked {
+				f.gh.pulls[7] = p
+				auditSend(t, f, "pull_request", "unconfigured-pr-open", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": f.at.Add(-2 * time.Hour), "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+				if item := f.item(t, 7); item.Ticket == nil || *item.Ticket != f.ticket {
+					t.Fatal("fixture pull is not linked to its ticket")
+				}
+			}
+			head, branch, event, stepKey := strings.Repeat("d", 40), "work/aeon-1241", "pull_request", "ci"
+			if tc.linked && !tc.unrelated {
+				head, branch = p.Head, p.Branch
+			}
+			if tc.queue {
+				head, branch, event, stepKey = strings.Repeat("c", 40), "gh-readonly-queue/main/pr-7-group", "merge_group", "queue"
+			}
+			needsFlow := tc.linked && !tc.unrelated
+			unavailable := tc.fail
 			g.respond = func(path string) (any, error) {
 				if path != "/actions/runs?check_suite_id=900&head_sha="+head+"&per_page=2" {
 					t.Fatalf("unexpected GitHub read: %s", path)
@@ -108,10 +130,12 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 				if unavailable {
 					return nil, crossreview.ErrUnavailable
 				}
-				run := githubRunBody(501, 1, defaultCIWorkflow, "pull_request", "work/aeon-1241", head, f.at.Add(-time.Hour), 10*time.Minute, "success", 900)
+				run := githubRunBody(501, 1, defaultCIWorkflow, event, branch, head, f.at.Add(-time.Hour), 10*time.Minute, "success", 900)
+				if needsFlow && !tc.queue {
+					run["pull_requests"] = []any{map[string]any{"number": 7}}
+				}
 				return map[string]any{"total_count": 1, "workflow_runs": []any{run}}, nil
 			}
-			f.m.github = g
 			var logs bytes.Buffer
 			f.m.webhookFailures.logger = slog.New(slog.NewJSONHandler(&logs, nil))
 			f.tx(t, func(tx pgx.Tx) error {
@@ -124,35 +148,80 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 				}
 				return nil
 			})
+			pulls := []any{}
+			if tc.suitePR {
+				pulls = append(pulls, map[string]any{"number": 7})
+			}
 			body := map[string]any{
 				"action":       "completed",
 				"installation": map[string]any{"id": 456},
 				"repository":   map[string]any{"full_name": f.m.config.Repository, "default_branch": "main"},
-				"check_suite":  map[string]any{"id": 900, "head_sha": head, "status": "completed", "app": map[string]any{"slug": "github-actions"}, "pull_requests": []any{}},
+				"check_suite":  map[string]any{"id": 900, "head_sha": head, "head_branch": branch, "status": "completed", "app": map[string]any{"slug": "github-actions"}, "pull_requests": pulls},
 			}
 			raw, err := json.Marshal(body)
 			if err != nil {
 				t.Fatal(err)
 			}
-			r := webhookLogRequest("check_suite", string(raw))
-			r.Header.Set("X-Hub-Signature-256", signed(raw, f.m.secret))
-			w := httptest.NewRecorder()
-			f.mux.ServeHTTP(w, r)
+			send := func() *httptest.ResponseRecorder {
+				r := webhookLogRequest("check_suite", string(raw))
+				r.Header.Set("X-Hub-Signature-256", signed(raw, f.m.secret))
+				w := httptest.NewRecorder()
+				f.mux.ServeHTTP(w, r)
+				return w
+			}
+			w := send()
 			var ledger int
 			f.tx(t, func(tx pgx.Tx) error {
 				return tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_github_events WHERE delivery_id='delivery-log-test' AND event='check_suite'`).Scan(&ledger)
 			})
-			runs, pulls, marks := metricCounts(t, f)
-			t.Logf("status=%d sources=0 upstream_reads=%d projection_ledger=%d metric_runs=%d", w.Code, len(g.calls), ledger, runs)
-			if w.Code != 204 {
-				if !unavailable || len(g.calls) != 1 || ledger != 1 {
-					t.Fatal("rejected for a reason other than the unlinked metrics API read")
-				}
-				assertWebhookFailureLine(t, &logs, "check_suite", "completed", "audit", "github_unavailable", 502, nil)
-				t.Fatalf("unlinked metric source: status %d, want 204 without a metric read", w.Code)
+			if ledger != 1 {
+				t.Fatalf("authenticated projection ledger: %d, want 1", ledger)
 			}
-			if len(g.calls) != 0 || runs+pulls+marks != 0 || logs.Len() != 0 {
-				t.Fatalf("unlinked metrics must be a no-op: reads=%d facts=%d logs=%d", len(g.calls), runs+pulls+marks, logs.Len())
+			if needsFlow && unavailable {
+				if w.Code != 502 || len(g.calls) != 1 || flowEventCount(t, f) != 0 {
+					t.Fatalf("required flow read failure: status=%d reads=%d flow events=%d", w.Code, len(g.calls), flowEventCount(t, f))
+				}
+				assertWebhookFailureLine(t, &logs, "check_suite", "completed", "flow", "github_unavailable", 502, nil)
+				// This is an explicit redelivery, not an internal retry. Durable
+				// retries remain blocked on the assigned ingress expansion.
+				unavailable = false
+				logs.Reset()
+				g.calls = nil
+				w = send()
+			}
+			if w.Code != 204 {
+				t.Fatalf("unlinked metric source: status %d, want 204", w.Code)
+			}
+			runs, metricPulls, marks := metricCounts(t, f)
+			if runs+metricPulls+marks != 0 || logs.Len() != 0 {
+				t.Fatalf("unlinked metrics must be a no-op: facts=%d logs=%d", runs+metricPulls+marks, logs.Len())
+			}
+			if !needsFlow {
+				if len(g.calls) != 0 || flowEventCount(t, f) != 0 {
+					t.Fatalf("no consumer: reads=%d flow events=%d", len(g.calls), flowEventCount(t, f))
+				}
+				return
+			}
+			if len(g.calls) != 1 {
+				t.Fatalf("linked flow Actions reads: %d, want 1", len(g.calls))
+			}
+			if key, ended, outcome := flowStepRow(t, f, "github_app", "run/501/1"); key != stepKey || ended == nil || outcome == nil || *outcome != "green" {
+				t.Fatalf("linked flow step: %s %v %v", key, ended, outcome)
+			}
+			if tc.queue {
+				if key, ended, _ := flowStepRow(t, f, "github_app", "run/501/1/queued"); key != "queue" || ended == nil {
+					t.Fatalf("queue wait: %s %v", key, ended)
+				}
+			}
+			before := flowEventCount(t, f)
+			if before == 0 {
+				t.Fatal("linked flow wrote no events")
+			}
+			if w = send(); w.Code != 204 || flowEventCount(t, f) != before {
+				t.Fatalf("redelivery changed flow: status=%d events=%d -> %d", w.Code, before, flowEventCount(t, f))
+			}
+			if runs, pulls, marks := metricCounts(t, f); runs+pulls+marks != 0 {
+				t.Fatal("redelivery wrote unconfigured metrics")
 			}
 		})
 	}
