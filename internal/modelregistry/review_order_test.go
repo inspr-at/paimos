@@ -223,7 +223,11 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 					if tc.name == "adapter" {
 						harness, family, model = "codex", "openai", "gpt-6-ordertest"
 					}
-					if err := sub.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled) VALUES($1,$2,'1',$6,$7,$8,$3,$4,$5) RETURNING id::text`, p.TenantID, "unqualified-"+tc.name, effort, tier, tc.name != "disabled", harness, family, model).Scan(&target); err != nil {
+					level := 4
+					if tc.name == "effort" {
+						level = 3
+					}
+					if err := sub.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled,registered_effort_level) VALUES($1,$2,'1',$6,$7,$8,$3,$4,$5,$9) RETURNING id::text`, p.TenantID, "unqualified-"+tc.name, effort, tier, tc.name != "disabled", harness, family, model, level).Scan(&target); err != nil {
 						t.Fatal(err)
 					}
 					if err := reviewOrderSave(t, sub, p, target, strong.ID); err != nil {
