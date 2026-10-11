@@ -135,7 +135,7 @@ test('an agent routine is created paused, then let run as the picked agent, with
   for (const part of ['.route', '.pv-grid']) for (const raw of ['claude-opus-5-5', '57000000-']) await expect(editor(page).locator(part)).not.toContainText(raw)
   // Settings paths (Models, Capacity, Computers) draw an SVG chevron, never ›, and each reads on one line.
   await expect(editor(page).locator('.route a')).toHaveAccessibleName('Settings, Models')
-  expect(await editor(page).locator('.settings-place').evaluateAll(places => places.map(place => [place.textContent, place.getClientRects().length]))).toEqual([['Settings, Models', 1], ['Settings, Capacity', 1], ['Settings, Computers', 1], ['Settings, Computers', 1]])
+  expect(await editor(page).locator('.settings-place').evaluateAll(places => places.map(place => [place.querySelector('.sr-only')?.textContent, place.querySelector('.drawn')?.getClientRects().length]))).toEqual([['Settings, Models', 1], ['Settings, Capacity', 1], ['Settings, Computers', 1], ['Settings, Computers', 1]])
   await shot(page, info, 'editor-agent-1440-light')
   await create.click()
   // Saving starts nothing: paused, unconsented, and the same sheet asks.
