@@ -334,7 +334,7 @@ func (b *Broker) observeMerge(ctx context.Context, tid, id string) (Receipt, boo
 }
 
 func completePipelineTx(ctx context.Context, tx pgx.Tx, run, id string) error {
-	if _, err := tx.Exec(ctx, `UPDATE routine_effect_outbox SET state='succeeded',result='{"pipeline_complete":true}',updated_at=clock_timestamp() WHERE action_id=$1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE routine_effect_outbox SET state='succeeded',result=coalesce(result,'{}'::jsonb)||'{"pipeline_complete":true}'::jsonb,updated_at=clock_timestamp() WHERE action_id=$1`, id); err != nil {
 		return err
 	}
 	_, err := tx.Exec(ctx, `UPDATE routine_runs SET state='completed',updated_at=clock_timestamp() WHERE id=$1 AND state='awaiting_pipeline'`, run)
