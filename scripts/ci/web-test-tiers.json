@@ -17932,6 +17932,14 @@
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-b\"},\"principal\":{\"id\":\"person-a\"}})","tags":[],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from a control rings and takes focus: false","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from nowhere rings and takes focus: true","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from the main landmark rings and takes focus: true","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from the page rings and takes focus: true","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a new owner without Access cannot resurrect the previous owner’s shown section on expiry","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a section opened in the same frame also keeps its draft on expiry","tags":[],"tier":"GATED-FULL"}
