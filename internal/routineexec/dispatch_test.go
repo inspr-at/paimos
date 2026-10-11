@@ -24,6 +24,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/engineadmission"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/recurrences"
@@ -527,7 +528,9 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 		t.Fatalf("spare account admitted selected unavailable account: %v", err)
 	}
 	f.exec(`UPDATE agent_accounts SET state='available' WHERE id=$1`, f.account)
-	module := agentruns.NewWithLeadAdmission(f.d.App, d.options.LeadAdmission)
+	module := agentruns.NewWithLeadAdmission(f.d.App, d.options.LeadAdmission, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry, pending *[]events.Change) error {
+		return agentaccounts.SettleDeferred(ctx, tx, p, run.ID, pending)
+	})
 	must(t, d.e.Bind(module))
 	mux := http.NewServeMux()
 	module.Mount(mux)
@@ -582,12 +585,12 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 	}
 	telemetry(`{"sequence":1,"kind":"started"}`)
 	telemetry(`{"sequence":2,"kind":"finished","status":"failed","process_state":"exited"}`)
-	var exited bool
-	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT (SELECT state='exit_observed' AND exit_observed_at IS NOT NULL FROM routine_launch_intents WHERE agent_run_id=$1)
- AND (SELECT count(*)=2 FROM routine_launch_evidence e JOIN routine_launch_intents l ON l.id=e.launch_id WHERE l.agent_run_id=$1 AND e.kind IN ('launched','exit_observed'))
- AND NOT EXISTS(SELECT 1 FROM account_reservations WHERE run_id=$1 AND state='active')`, d.agentRun).Scan(&exited))
-	if !exited {
-		t.Fatal("personal routine exit evidence or hold release was lost")
+	var exited, evidence, settled bool
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT (SELECT state='exit_observed' AND exit_observed_at IS NOT NULL FROM routine_launch_intents WHERE agent_run_id=$1),
+ (SELECT count(*)=2 FROM routine_launch_evidence e JOIN routine_launch_intents l ON l.id=e.launch_id WHERE l.agent_run_id=$1 AND e.kind IN ('launched','exit_observed')),
+ NOT EXISTS(SELECT 1 FROM account_reservations WHERE run_id=$1 AND state='active')`, d.agentRun).Scan(&exited, &evidence, &settled))
+	if !exited || !evidence || !settled {
+		t.Fatalf("personal routine exit observed=%v evidence=%v settled=%v", exited, evidence, settled)
 	}
 }
 
