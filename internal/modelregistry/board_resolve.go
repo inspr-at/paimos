@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -36,7 +37,7 @@ func boardInitialized(s modelprefs.BoardState) bool {
 	return s.Workspace.ID != "" || s.Person != nil && s.Person.ID != ""
 }
 
-func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, excluded []string) (*WorkResolution, error) {
+func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, excluded []string, policies ...reviewgate.FamilyPolicy) (*WorkResolution, error) {
 	if q.Role == "scout" || q.Role == "mechanical" {
 		return nil, nil
 	}
@@ -115,6 +116,11 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				return false, "policy unavailable"
 			}
 			skipped := skipReasons(step, role, resolveQuery{Role: roleName, AuthorFamily: q.AuthorFamily, Harness: q.Harness}, now, health)
+			for _, policy := range policies {
+				if allowed, reason := policy.Decision(q.AuthorFamily, profile.Family); !allowed {
+					skipped = append(skipped, reason)
+				}
+			}
 			if profile.Family == "xai" && !review && !q.Concept {
 				skipped = append(skipped, "No tools in PAIMOS")
 			}
