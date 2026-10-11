@@ -14,6 +14,77 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Risk: saved Default exclusions turn every inheriting kind into an exception,
+// while filtering them could also hide an owned row or a row-specific rule.
+func TestModelsV2InheritedDefaultExclusionsAreNotExceptions(t *testing.T) {
+	for _, tc := range []struct {
+		name, writeTarget, readTarget string
+	}{
+		{"workspace", "default", "default"},
+		{"inherited_workspace", "default", "me"},
+		{"personal", "me", "me"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			admin, member := boardFixture(t)
+			writer, person := admin, ""
+			excluded := "anthropic:opus"
+			if tc.writeTarget == "me" {
+				// Keep different workspace and personal exclusions so the read
+				// must compare with the Default for the requested scope.
+				boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"openai:sol"}, "not": []string{excluded}, "revision": 0}, ""), 200)
+				writer, person, excluded = member, member.ID, "anthropic:sonnet"
+			}
+			body := map[string]any{"rank": []string{"openai:sol"}, "not": []string{}, "efforts": map[string]string{"openai:sol": "xhigh"}, "end": "wait", "revision": 0}
+			write := func(column string) boardWriteResult {
+				t.Helper()
+				return boardDecode[boardWriteResult](t, boardCall(t, writer, "PUT", "/api/model-preferences/orders/"+column+"/first?for="+tc.writeTarget, body, person), 200)
+			}
+			read := func() simpleDocument {
+				t.Helper()
+				return boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple?for="+tc.readTarget, nil, ""), 200)
+			}
+			saved := write("other")
+			baseline := read()
+			if baseline.All.Line == nil || *baseline.All.Line != "openai:sol" || len(baseline.All.Never) != 0 || len(baseline.Exceptions) != 0 {
+				t.Fatalf("unexpected Default without exclusions: %+v", baseline)
+			}
+			body["not"], body["revision"] = []string{excluded}, saved.Revision
+			saved = write("other")
+			assertInherited := func() {
+				t.Helper()
+				doc := read()
+				if len(doc.All.Never) != 1 || doc.All.Never[0].Line != excluded || doc.All.Never[0].Why != "Saved exclusion" {
+					t.Fatalf("Default exclusion lost or from the wrong scope: %+v", doc.All.Never)
+				}
+				if len(doc.Exceptions) != 0 {
+					t.Fatalf("kinds inheriting Default became exceptions: %+v", doc.Exceptions)
+				}
+			}
+			assertInherited()
+			// Current page writes omit the legacy not field and preserve it.
+			delete(body, "not")
+			body["revision"] = saved.Revision
+			saved = write("other")
+			assertInherited()
+			boardDecode[rulesDocument](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first/never/openai:astra", map[string]any{"why": "Backend exclusion", "revision": 0}, ""), 200)
+			doc := read()
+			if len(doc.Exceptions) != 1 || doc.Exceptions[0].Column != "backend" || !sameSimplePick(doc.Exceptions[0].simplePick, doc.All.simplePick) || !slices.ContainsFunc(doc.Exceptions[0].Never, func(n simpleNever) bool { return n.Line == "openai:astra" && n.Why == "Backend exclusion" }) || !slices.ContainsFunc(doc.Exceptions[0].Never, func(n simpleNever) bool { return n.Line == excluded }) {
+				t.Fatalf("row-specific exclusion or inherited Default lost: %+v", doc.Exceptions)
+			}
+			// An explicitly owned row stays visible even when its effective
+			// pick, chain and exclusions exactly match Default.
+			body["not"], body["revision"] = []string{excluded}, saved.Revision
+			write("frontend")
+			doc = read()
+			if len(doc.Exceptions) != 2 || !slices.ContainsFunc(doc.Exceptions, func(row simpleRow) bool {
+				return row.Column == "frontend" && row.Mine == (tc.writeTarget == "me") && sameSimplePick(row.simplePick, doc.All.simplePick) && reflect.DeepEqual(row.Chain, doc.All.Chain) && reflect.DeepEqual(row.Never, doc.All.Never)
+			}) {
+				t.Fatalf("explicit row matching Default was hidden: %+v", doc.Exceptions)
+			}
+		})
+	}
+}
+
 // Risk: the page saves a chain or native level that dispatch does not read,
 // personal writes alter workspace policy, or failed writes emit success/audit.
 func TestModelsV2PageContractWritesAndReads(t *testing.T) {

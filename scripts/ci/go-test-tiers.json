@@ -7288,6 +7288,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2EscalationAdmissionWait","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2InheritedDefaultExclusionsAreNotExceptions","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigrationGolden","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NativeLevelsPerRoute","tier":"ESSENTIAL"}
