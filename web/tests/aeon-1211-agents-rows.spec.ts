@@ -97,7 +97,7 @@ for (const theme of ['light', 'dark'] as const) {
       const data = await setup(page, theme)
       await page.goto('/agents')
       await expect(row(page, data.sessions[0]!.id)).toBeVisible()
-      await expect(page.locator('.sessions .thead [role="columnheader"]')).toHaveText(['Name', 'Time', 'Ticket', 'Execution', 'Tier', 'Host', 'Heartbeat', 'Actions'])
+      await expect(page.locator('.sessions .thead [role="columnheader"]')).toHaveText(['Session', 'Time', 'Execution', 'Computer', 'Beat', 'Actions'])
       const lead = row(page, data.sessions[0]!.id)
       await expect(lead.locator('.ava')).toHaveAttribute('aria-label', /^Lead .+: Working$/)
       await expect(lead.locator('.c-time')).toHaveText('1 h 12 min')

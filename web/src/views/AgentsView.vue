@@ -172,10 +172,10 @@ let drag: { pointer: number; x: number; width: number; person: string } | null =
 function rememberHandle(width: number) {
   const owner = person.value, write = ++layoutWrite, next = clampHandle(width)
   pendingHandle.value = next
-  // Folded groups share this object. A handle chosen before the first read
-  // completes must merge that read, rather than replace another package's fields.
-  void layoutPref.ready.then(() => {
-    if (owner !== person.value || write !== layoutWrite) return
+  // Folded groups share this object. Keep the handle local through failed reads;
+  // only a successful read (including an empty preference) permits merging.
+  void layoutPref.ensureLoaded().then(loaded => {
+    if (!loaded || owner !== person.value || write !== layoutWrite) return
     layoutPref.save({ ...(layoutPref.value.value ?? {}), handle: next })
     pendingHandle.value = null
   })

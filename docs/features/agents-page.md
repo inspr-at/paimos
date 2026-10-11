@@ -59,7 +59,9 @@ below 560 px, table rows from 560 px. Releasing with less than 380 px left for
 details closes them and retains the last valid handle. The handle is stored in
 the person's `agents:layout.handle` preference; other fields in that preference
 are preserved, including when the first preference read is still pending. A
-person change closes details and cancels the old person's drag
+failed read keeps the chosen handle local; the next change retries the read
+and saves only after shared fields can be merged. A person change closes
+details and cancels the old person's drag
 and queued preference write. A failed save says the layout lasts for this visit.
 
 One sticky button stays at the work area's top-right corner. Both heads reserve
@@ -99,8 +101,14 @@ change changes the badge, line 2 and the time, never the row's height.
 runs ("1 h 12 min"), how long ago it ended ("12 min ago"), or since when it is
 paused ("since 09:58"). Sorting by Time orders by what the column shows.
 
+**Columns.** Session, Time, Execution, Computer and Beat. The ticket key is
+part of the session name in every form; Display still offers sorting by Ticket.
+Service tier and its keyboard controls live in the details panel, with Change
+tier also available through the row menu. A running ticket's estimate shares
+the second line without changing the row height.
+
 **The list's width decides its form.** From 880 px the full table; from 560 px
-a table without Host and the account line, with the ticket key before the name
+a table without Computer and the account line, with the ticket key before the name
 (the details name and rename the computer); under 560 px (phones) compact rows.
 A compact row opens line 1 with a 12 px harness mark whose tooltip and name say
 the model, effort, harness and account ("gpt-6.1-sol · xhigh · Codex · ChatGPT

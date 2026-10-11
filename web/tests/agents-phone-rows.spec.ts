@@ -96,9 +96,9 @@ for (const theme of ['light', 'dark'] as const) for (const width of [375, 390, 4
       // Line 2 sits under it, inside the identity block.
       expect(line2.y).toBeGreaterThanOrEqual(title.y + title.height - 1)
       expect(line2.y + line2.height).toBeLessThanOrEqual(who.y + who.height + 1)
-      // No execution, tier or ticket lines: they live in the details and the row menu.
+      // Execution and tier live in details; the ticket key stays in the name.
       await expect(r.locator('.c-exec')).toBeHidden()
-      await expect(r.locator('.c-ticket')).toBeHidden()
+      await expect(r.locator('.c-ticket')).toHaveCount(0)
     }
     // Long titles use the full width up to the time, which sits right before the actions.
     const leadTime = await box(row(page, 1).locator('.t-inline'))

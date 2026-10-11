@@ -81,21 +81,22 @@ test('clicking Ticket orders rows by ticket, stays put on refresh, is remembered
   const { liveRefresh } = await setup(page)
   await page.goto('/agents')
   await expect.poll(() => rowOrder(page)).toEqual([sid(3), sid(1), sid(2), sid(4)])
-  const ticket = page.getByRole('columnheader', { name: 'Ticket' })
-  await ticket.getByRole('button').click()
+  await page.locator('.sessions .sort-tool').click()
+  const ticket = page.getByRole('group', { name: 'Sort sessions' })
+  await ticket.getByRole('combobox', { name: 'Sort' }).selectOption('ticket')
   const byTicket = [sid(2), sid(3), sid(1), sid(4)] // PHAROS-4, -12, -30, -100
   await expect.poll(() => rowOrder(page)).toEqual(byTicket)
-  await expect(ticket).toHaveAttribute('aria-sort', 'ascending')
+  await expect(ticket.getByRole('button', { name: /Order ascending/ })).toBeVisible()
   await expect(page.locator('.sessions .sort-tool')).toHaveAccessibleName('Display: sort sessions by Ticket, ascending')
   await liveRefresh()
   await liveRefresh()
   expect(await rowOrder(page)).toEqual(byTicket)
 
-  // Keyboard: the header is a button; Enter reverses the order.
-  await ticket.getByRole('button').focus()
+  // Keyboard: the direction is a button; Enter reverses the order.
+  await ticket.getByRole('button', { name: /Order ascending/ }).focus()
   await page.keyboard.press('Enter')
   await expect.poll(() => rowOrder(page)).toEqual([...byTicket].reverse())
-  await expect(ticket).toHaveAttribute('aria-sort', 'descending')
+  await expect(ticket.getByRole('button', { name: /Order descending/ })).toBeVisible()
 
   // Remembered for this viewer across a reload.
   expect(await page.evaluate(key => localStorage.getItem(key), storageKey)).toBe(JSON.stringify({ key: 'ticket', dir: 'desc' }))
@@ -134,7 +135,7 @@ test('the Heartbeat sort explains that fresh beats tie, for screen readers too',
   await page.goto('/agents')
   await expect.poll(() => rowOrder(page)).toHaveLength(4)
   const help = 'Beats under 3 minutes old count as equal; start time and id then decide their order.'
-  const beat = page.getByRole('columnheader', { name: 'Heartbeat' }).getByRole('button')
+  const beat = page.getByRole('columnheader', { name: 'Beat' }).getByRole('button')
   await expect(beat).toHaveAccessibleDescription(help)
   await expect(beat).toHaveAttribute('data-tip', new RegExp(help.slice(0, 30)))
 })
@@ -173,7 +174,7 @@ test('at 390 px the compact sort control orders by Ticket, reverses, and restore
 
   await page.keyboard.press('Escape')
   await expect(bar).toHaveCount(0)
-  await expect(tool).toHaveAccessibleName(/^Display: sort sessions by Heartbeat, ascending/)
+  await expect(tool).toHaveAccessibleName(/^Display: sort sessions by Beat, ascending/)
   await tool.click()
   await page.getByRole('button', { name: 'Default order' }).click()
   await expect.poll(() => rowOrder(page)).toEqual(start)
