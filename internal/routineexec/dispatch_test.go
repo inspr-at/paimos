@@ -264,6 +264,9 @@ func setupDispatchOn(t *testing.T, f *fixture) *dispatchFixture {
 		if mode.Load() == 1 {
 			checks.Host.CheckedAt = at.Add(-time.Minute)
 		}
+		if mode.Load() == 7 {
+			checks.Dial.CheckedAt = at.Add(time.Minute)
+		}
 		return checks, err
 	}
 	options := Options{Runtime: f.broker.Runtime, Gates: f.broker.Gates, LeadAdmission: admission,
@@ -276,6 +279,9 @@ func setupDispatchOn(t *testing.T, f *fixture) *dispatchFixture {
 			err := tx.QueryRow(ctx, `SELECT clock_timestamp(),coalesce((SELECT (snapshot->>'revision')::bigint FROM delivery_work_settings WHERE project_id=$1),0)`, project).Scan(&out.ObservedAt, &out.PolicyRevision)
 			if mode.Load() == 4 {
 				out.ObservedAt = out.ObservedAt.Add(-time.Minute)
+			}
+			if mode.Load() == 6 {
+				out.ObservedAt = out.ObservedAt.Add(time.Minute)
 			}
 			if mode.Load() == 5 {
 				out.MainGreen = nil
@@ -375,6 +381,12 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	wait("ci_admission_unavailable", "", 0)
 	mode.Store(5)
 	wait("ci_admission_unavailable", "", 0)
+	// A future reading is not fresh evidence. These missing clock boundaries
+	// retain the same no-route/no-hold/no-turn assertions as stale readings.
+	mode.Store(6)
+	wait("ci_admission_unavailable", "", 0)
+	mode.Store(7)
+	wait("lead admission wait: dial_unavailable", "", 0)
 	mode.Store(0)
 	f.exec(`INSERT INTO delivery_work_settings(tenant_id,project_id,snapshot) VALUES($1,$2,'{"freeze":true,"revision":1}')`, f.owner.TenantID, f.project)
 	wait("release_freeze", "", 0)

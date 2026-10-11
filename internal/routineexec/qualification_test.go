@@ -477,7 +477,7 @@ func TestRoutineControlledQualification(t *testing.T) {
 					return decision, "", err
 				}
 				var id string
-				err = tx.QueryRow(ctx, `SELECT id::text FROM routine_guard_evaluations WHERE recurrence_id=$1 AND context_digest=$2 LIMIT 1`, r.ID, decision.ContextDigest).Scan(&id)
+				err = tx.QueryRow(ctx, `SELECT id::text FROM routine_guard_evaluations WHERE recurrence_id=$1 AND context_digest=$2 AND result='allow' LIMIT 1`, r.ID, decision.ContextDigest).Scan(&id)
 				if errors.Is(err, pgx.ErrNoRows) {
 					raw, _ := json.Marshal(verified)
 					err = tx.QueryRow(ctx, `INSERT INTO routine_guard_evaluations(tenant_id,recurrence_id,scope_kind,scope_project_id,owner_principal_id,output_project_id,definition_revision,checkpoint,policy_digest,context_digest,hard_version,preset_version,result,required_evaluation,decision) VALUES($1,$2,'project',$4,$3,$4,$5,'action',$6,$7,$8,$9,'allow',true,$10) RETURNING id::text`, owner.TenantID, r.ID, owner.ID, f.project, r.Revision, decision.PolicyDigest, decision.ContextDigest, decision.HardVersion, decision.PresetVersion, raw).Scan(&id)
