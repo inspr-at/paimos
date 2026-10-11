@@ -1020,7 +1020,7 @@
         ,
         {"file":"tests/routines-editor.spec.ts","listedTests":5,"weightSeconds":40,"weightSource":"AEON-1182 estimate: five mocked routine editor flows, one worker"}
         ,
-        {"file":"tests/routines-tab.spec.ts","listedTests":6,"weightSeconds":12,"weightSource":"AEON-1192 measured locally: six mocked Routines page flows in 10 s, one worker"}
+        {"file":"tests/routines-tab.spec.ts","listedTests":7,"weightSeconds":14,"weightSource":"AEON-1192 measured locally: seven mocked Routines page flows in 12 s, one worker"}
         ,
         {"file":"tests/row-actions.spec.ts","listedTests":12,"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
         ,

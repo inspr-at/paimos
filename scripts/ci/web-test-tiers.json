@@ -996,6 +996,8 @@
     ,
     "browser:tests/routines-tab.spec.ts:a person switch clears the open logbook, filters and the previous person’s routines"
     ,
+    "browser:tests/routines-tab.spec.ts:at tablet width the list and one logbook take turns, and the logbook keeps its controls"
+    ,
     "browser:tests/routines-tab.spec.ts:one row per routine; filters per kind; failed never green; created is not finished; controls stay put"
     ,
     "browser:tests/routines-tab.spec.ts:phone › the list, then one logbook with a way back, in dark"
@@ -11493,6 +11495,8 @@
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"a late page for another routine cannot alter the logbook on screen","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"a person switch clears the open logbook, filters and the previous person’s routines","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"at tablet width the list and one logbook take turns, and the logbook keeps its controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"one row per routine; filters per kind; failed never green; created is not finished; controls stay put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

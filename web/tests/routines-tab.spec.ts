@@ -277,6 +277,26 @@ test.describe('phone', () => {
   })
 })
 
+test('at tablet width the list and one logbook take turns, and the logbook keeps its controls', async ({ page }, info) => {
+  await page.setViewportSize({ width: 1024, height: 900 })
+  const { errors } = await setup(page)
+  await page.goto('/agents/routines')
+  await expect(list(page).locator('[data-routine]')).toHaveCount(5)
+  await expect(logbook(page)).toHaveCount(0)
+  await shot(page, info, 'routines-1024-light-list')
+  await row(page, DEPS).click()
+  await expect(list(page)).toBeHidden()
+  await expect(logbook(page).getByRole('heading', { level: 2 })).toHaveText('Weekly dependency update')
+  await expectStableControls({
+    controls: { back: logbook(page).getByRole('button', { name: 'All routines' }), pause: logbook(page).getByRole('button', { name: 'Pause', exact: true }), runs: logbook(page).locator('[data-lf="runs"]'), first: runButton(page, 15) },
+    interactions: [{ name: 'Run #14 opens', run: async () => { await runButton(page, 14).click(); await expect(runButton(page, 14)).toHaveAttribute('aria-expanded', 'true') } }],
+  })
+  await shot(page, info, 'routines-1024-light-logbook')
+  await logbook(page).getByRole('button', { name: 'All routines' }).click()
+  await expect(row(page, DEPS)).toBeFocused()
+  expect(errors).toEqual([])
+})
+
 test('the Agents page offers Routines in More, and one Routines line only while something waits or failed', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   const { errors } = await setup(page)
