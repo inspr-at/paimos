@@ -19,6 +19,20 @@ func copyOrderEfforts(efforts map[string]string, rank []string) map[string]strin
 	return out
 }
 
+// New page writes use provider identities across harnesses. Retain the
+// harness-derived aliases that previous writers still send during cutover.
+func modelsWriteCatalog(c boardCatalog) boardCatalog {
+	out := modelsCatalog(c)
+	out.introduced = c.introduced
+	for _, line := range c.lines {
+		if _, exists := out.profiles[line.ID]; !exists {
+			out.profiles[line.ID] = c.profiles[line.ID]
+			out.lines = append(out.lines, line)
+		}
+	}
+	return out
+}
+
 func validateModelsOrder(c boardCatalog, o modelprefs.BoardOrder) error {
 	// Match the order reader's JSON bound, including PostgreSQL's whitespace.
 	encoded, err := json.Marshal(o.Efforts)

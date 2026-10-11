@@ -20,10 +20,12 @@ PUT requires `why` and the current workspace `rules_revision`; DELETE uses
 the `revision` query parameter. These writes preserve other rules and record
 the current person, timestamp, and explanation.
 
-People with `models.manage` can pause all native levels of a harness/model
+People with `models.manage` can pause registered native levels of a harness/model
 route with `PUT /api/models/lines/{harness}/{model}/pause`, using `until`
 (a future timestamp or null) and `reason`. DELETE resumes the route. Active
 pauses appear on model profiles and dispatch reads the same pause storage.
+Cursor's effort suffixes are handled together for the same line and version;
+the separate fast route and other versions retain their own pause state.
 Authorization is rechecked in the final transaction under the tenant fence;
 successful writes append their audit event after the mutation.
 

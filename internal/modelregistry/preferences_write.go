@@ -551,6 +551,7 @@ func (m *Module) writeNeverRule(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
+			c = modelsWriteCatalog(c)
 			if _, ok := c.profiles[line]; !ok {
 				return prefFail(422, "unknown_line")
 			}

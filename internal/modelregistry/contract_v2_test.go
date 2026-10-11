@@ -401,3 +401,82 @@ func TestModelsV2ResidencyCauseMatchesEvidence(t *testing.T) {
 	})
 	read("no_account")
 }
+
+// Risk: canonical page line ids or a sibling harness's native effort are
+// rejected by writes that still validate only the legacy harness grouping.
+func TestModelsV2CrossHarnessNativeWrites(t *testing.T) {
+	admin, _ := boardFixture(t)
+	decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"cursor-sol-ultra-contract","version":"1","harness":"cursor","family":"openai","model":"gpt-6.1-sol","effort":"ultra","tier":"strong"}`, 201)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first?for=default", map[string]any{"rank": []string{"openai:sol"}, "efforts": map[string]string{"openai:sol": "ultra"}, "revision": 0}, ""), 200)
+	decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"cursor-nova-contract","version":"1","harness":"cursor","family":"openai","model":"gpt-7-nova","effort":"xhigh","tier":"strong"}`, 201)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/frontend/first?for=default", map[string]any{"rank": []string{"openai:nova"}, "efforts": map[string]string{"openai:nova": "xhigh"}, "revision": 1}, ""), 200)
+	boardDecode[rulesDocument](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first/never/openai:nova", map[string]any{"why": "Canonical identity", "revision": 0}, ""), 200)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		s, err := modelprefs.LoadBoard(t.Context(), tx, nil, "")
+		if err != nil {
+			return err
+		}
+		if !slices.ContainsFunc(s.Orders, func(o modelprefs.BoardOrder) bool { return o.Column == "backend" && o.Efforts["openai:sol"] == "ultra" }) || !slices.ContainsFunc(s.Orders, func(o modelprefs.BoardOrder) bool {
+			return o.Column == "frontend" && slices.Equal(o.Rank, []string{"openai:nova"})
+		}) || !slices.ContainsFunc(s.Rules, func(rule modelprefs.Rule) bool {
+			return rule.Column == "backend" && rule.Line == "openai:nova" && rule.Lock == "not"
+		}) {
+			t.Fatal("canonical write lost its native effort, order or rule")
+		}
+		return nil
+	})
+}
+
+// Risk: pausing one Cursor native id leaves sibling levels running, or expands
+// the pause into a different version/fast route.
+func TestModelsV2CursorPauseCoversNativeIDs(t *testing.T) {
+	admin, _ := boardFixture(t)
+	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	profile := profileBySlug(profiles, "cursor-grok-4-7-high")
+	path := "/api/models/lines/cursor/" + profile.Model + "/pause"
+	boardDecode[modelPauseResult](t, boardCall(t, admin, "PUT", path, map[string]any{"until": nil, "reason": "Native route maintenance"}, ""), 200)
+	check := func(paused bool) {
+		t.Helper()
+		got := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+		matched, separate := 0, 0
+		for _, p := range got {
+			line, version := modelsLine(p)
+			if p.Harness != "cursor" || p.Family != "xai" || version != "4.7" {
+				continue
+			}
+			if line == "xai:grok" {
+				matched++
+				if (p.Pause != nil) != paused {
+					t.Fatalf("native level pause differs: %+v", p)
+				}
+			} else if line == "xai:grok-fast" {
+				separate++
+				if p.Pause != nil {
+					t.Fatal("pause crossed into the fast route")
+				}
+			}
+		}
+		if matched < 2 || separate < 1 {
+			t.Fatal("fixture lacks native levels or separate route")
+		}
+		inRegistry(t, admin, func(tx pgx.Tx) error {
+			for _, p := range got {
+				line, version := modelsLine(p)
+				if p.Harness != "cursor" || line != "xai:grok" || version != "4.7" {
+					continue
+				}
+				step, err := preferenceStep(t.Context(), tx, p, "build")
+				if err != nil {
+					return err
+				}
+				if (step.State != "available") != paused {
+					t.Fatalf("dispatch differs from pause read: %+v", step)
+				}
+			}
+			return nil
+		})
+	}
+	check(true)
+	boardDecode[modelPauseResult](t, boardCall(t, admin, "DELETE", path, nil, ""), 200)
+	check(false)
+}

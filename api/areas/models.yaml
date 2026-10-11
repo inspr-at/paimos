@@ -8,7 +8,7 @@ paths:
     put:
       operationId: putModelPause
       security: [{session: []}]
-      description: 'Person-only models.manage, rechecked under the tenant and catalog fences. Pauses all native levels of this harness/model route. until null means until resumed; a timestamp must be in the future. Appends model.pause_changed after the mutation.'
+      description: 'Person-only models.manage, rechecked under the tenant and catalog fences. Pauses all registered native levels of this harness/model route, including Cursor effort suffixes (up to 32 model ids). until null means until resumed; a timestamp must be in the future. Appends model.pause_changed after the mutation.'
       requestBody:
         required: true
         content:

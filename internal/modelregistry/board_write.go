@@ -269,6 +269,7 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		c = modelsWriteCatalog(c)
 		if !thinking && r.Method != http.MethodDelete {
 			if err := validateBoardLines(c, in.Rank, in.Not); err != nil {
 				return err
