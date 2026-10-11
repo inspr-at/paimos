@@ -44,7 +44,7 @@ import { useServiceTiers } from '../../stores/serviceTiers'
 import { TIER_NAME } from '../../lib/serviceTier'
 import { FILTER_LABEL, matchesFilter, type HeadFilter } from './headCounts'
 import { vClipTip } from '../../directives/clipTip'
-import { canLaunchLead, leadBand, leadLaunchReason, type ProjectLead } from '../../lib/lead'
+import { leadActionAvailable, leadActionReason, leadBand, type ProjectLead } from '../../lib/lead'
 import { openLeadPanel, openStartLead } from '../../lib/leadOverlay'
 import { useAgentsLayout } from '../../lib/agentsLayout'
 import { useRoute, useRouter } from 'vue-router'
@@ -829,8 +829,8 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         <div v-if="section.line?.kind === 'none' && section.project" class="row nolead" role="row" :data-project="section.project.key">
           <span role="gridcell" class="nl-in">
             <span class="nl-ic" aria-hidden="true"><AppIcon name="folder" :size="15" /></span><b class="mono nl-key">{{ section.project.key }}</b><span class="nl-t">{{ qWord(section.line.queued) }} queued · no {{ LEAD_WORDS.l }}</span>
-            <button v-if="projects?.mayStart && canLaunchLead(section.line.lead)" type="button" class="btn sm nl-btn" :aria-label="`Start a ${LEAD_WORDS.l} for ${section.project.key}`" @click="openStartLead([section.project.id], $event.currentTarget as HTMLElement, true)"><AppIcon name="play" :size="13" />Start a {{ LEAD_WORDS.l }}</button>
-            <span v-else class="nl-note">{{ !canLaunchLead(section.line.lead) ? leadLaunchReason(section.line.lead) : `A project admin starts its ${LEAD_WORDS.l}` }}</span>
+            <button v-if="leadActionAvailable(section.line.lead, 'start')" type="button" class="btn sm nl-btn" :aria-label="`Start a ${LEAD_WORDS.l} for ${section.project.key}`" @click="openStartLead([section.project.id], $event.currentTarget as HTMLElement, true)"><AppIcon name="play" :size="13" />Start a {{ LEAD_WORDS.l }}</button>
+            <span v-else class="nl-note">{{ leadActionReason(section.line.lead, 'start') }}</span>
           </span>
         </div>
         <!-- A lead without a running session on this list (starting, waiting for room, paused, can't start) still heads its group. -->
