@@ -13,7 +13,7 @@ paths:
           description: 'Redacted current execution settings'
           content:
             application/json:
-              schema: {$ref: '#/components/schemas/RoutineExecutionSettings'}
+              schema: {$ref: '#/components/schemas/RoutineExecutionSettingsRead'}
         '403': {$ref: '#/components/responses/Forbidden'}
         '404': {$ref: '#/components/responses/NotFound'}
     put:
@@ -45,6 +45,28 @@ paths:
         '409': {description: 'Stale revision or missing, changed or unavailable qualification, policy or runtime.'}
 components:
   schemas:
+    RoutineExecutionSettingsRead:
+      type: object
+      additionalProperties: false
+      required: [revision, automatic_launch_enabled, consent_enabled, qualification_id, wait_reason, latest_qualification]
+      properties:
+        revision: {type: integer, minimum: 0}
+        automatic_launch_enabled: {type: boolean, default: false}
+        consent_enabled: {type: boolean, default: false}
+        qualification_id: {type: [string, 'null'], format: uuid}
+        wait_reason: {type: string}
+        latest_qualification: {$ref: '#/components/schemas/RoutineQualificationSummary'}
+    RoutineQualificationSummary:
+      type: [object, 'null']
+      additionalProperties: false
+      required: [id, accepted_at, host_label, capabilities, budget_modes]
+      description: 'Latest non-revoked accepted qualification, independently of saved consent. accepted_at is the controlled recording time of coordinator acceptance and OPS attestation. Historical acceptance grants no execution; PUT still checks current policy and runtime. Host label is null unless a single named allowed computer can be established from the matching owner policy. No account, host identifier, artifact or evidence details are returned.'
+      properties:
+        id: {type: string, format: uuid}
+        accepted_at: {type: string, format: date-time}
+        host_label: {type: [string, 'null'], maxLength: 128}
+        capabilities: {type: array, maxItems: 2, items: {type: string, enum: [routine_native_coding_v1, routine_native_browser_v1]}}
+        budget_modes: {type: array, maxItems: 4, items: {type: string, enum: [off, tokens, money, both]}}
     RoutineExecutionSettings:
       type: object
       additionalProperties: false

@@ -109,6 +109,10 @@ func results(ctx context.Context, tx pgx.Tx, items []Recurrence, apply func([]Re
 	if err = rows.Err(); err != nil {
 		return err
 	}
+	rows.Close()
+	if err = lastRuns(ctx, tx, items); err != nil {
+		return err
+	}
 	apply(items)
 	return nil
 }

@@ -15708,6 +15708,8 @@
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"uses server permission reasons and refuses doctrine without a confirmed mapping","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"allows routine consent link-outs only for the three approved settings paths","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"hydrates and approves a first tier request with native revision zero","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"hydrates and declines a first tier request with native revision zero","tier":"ESSENTIAL"}
