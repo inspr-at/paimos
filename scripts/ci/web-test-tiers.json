@@ -5606,6 +5606,10 @@
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 400 light Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: a manual tab choice cancels automatic opening while questions are still being read","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: an overlapping refresh cannot finish the opening on discarded question evidence","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 1024 dark long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 1024 light long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -15881,6 +15885,12 @@
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"bindings > bind workers by their real parent, at any depth, and survive a cycle","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"bindings > map each named event to what it wakes; no event rereads everything","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > AEON-1212: a loaded Agents bundle does not prove that its session tree was read successfully","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > AEON-1212: failed or stale live reads cannot prove an empty worker inventory; truncated live reads are lower bounds","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > AEON-1212: overlapping opening refreshes await the same authoritative question read","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > a failed read is said: queue counts become unknown, questions keep what was shown as incomplete","tier":"ESSENTIAL"}
     ,

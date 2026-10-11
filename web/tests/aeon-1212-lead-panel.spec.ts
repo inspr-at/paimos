@@ -87,6 +87,68 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
 const panel = (page: Page) => page.getByRole('complementary', { name: 'Session details', exact: true })
 const question = (page: Page) => panel(page).locator('.session-question')
 const tab = (page: Page, name: string) => panel(page).getByRole('tab', { name: new RegExp(`^${name}`) })
+const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r }); return { promise, resolve } }
+
+test('AEON-1212 fix2: an overlapping refresh cannot finish the opening on discarded question evidence', async ({ page }) => {
+  const world = await setup(page, { question: false, pinned: 'session' })
+  await page.goto('/agents')
+  await expect(page.locator(`[data-row="s:${LEAD_SESSION}"]`)).toBeVisible()
+  await expect.poll(() => page.evaluate(async () => (await import('/src/stores/agentProjection.ts' /* @vite-ignore */)).useAgentProjection().questions.state)).toBe('ready')
+  const started = deferred(), openingAnswer = deferred(), laterAnswer = deferred()
+  let reads = 0
+  await page.route('**/api/decision-desk?*', async route => {
+    const first = ++reads === 1
+    if (first) started.resolve()
+    await (first ? openingAnswer.promise : laterAnswer.promise)
+    await route.fulfill({ json: { items: [world.state.question], has_more: false } })
+  })
+  const opening = page.evaluate(async () => {
+    const projection = (await import('/src/stores/agentProjection.ts' /* @vite-ignore */)).useAgentProjection()
+    const opening = projection.refresh(), overlapping = projection.refresh()
+    Object.assign(window, { overlappingQuestionRead: overlapping })
+    await opening
+    return projection.asksOf('aaaaaaaa-0000-4000-8000-000000000001').map(item => item.id)
+  })
+  try {
+    await started.promise
+    openingAnswer.resolve()
+    expect(await opening).toEqual([Q])
+    expect(reads).toBe(1)
+    await page.locator(`[data-row="s:${LEAD_SESSION}"] .agent-link`).click()
+    laterAnswer.resolve()
+    await expect(tab(page, 'Chat')).toHaveAttribute('aria-selected', 'true')
+    await expect(panel(page).locator('.why')).toContainText('it asks you something')
+  } finally {
+    openingAnswer.resolve(); laterAnswer.resolve()
+    await opening
+    await page.evaluate(() => (window as unknown as { overlappingQuestionRead: Promise<unknown> }).overlappingQuestionRead)
+  }
+})
+
+test('AEON-1212 fix2: a manual tab choice cancels automatic opening while questions are still being read', async ({ page }) => {
+  await setup(page, { pinned: 'lead' })
+  const started = deferred(), answer = deferred()
+  await page.route('**/api/decision-desk?*', async route => {
+    started.resolve()
+    await answer.promise
+    await route.fallback()
+  })
+  try {
+    await page.goto(`/agents/${LEAD_SESSION}`)
+    await started.promise
+    await expect(tab(page, 'Session')).toBeVisible()
+    await expectStableControls({ controls: { header: panel(page).locator('.pane-bar'), tabs: panel(page).getByRole('tablist'), selected: tab(page, 'Session') }, interactions: [{ name: 'manual Session choice before the opening read finishes', run: async () => {
+      await tab(page, 'Session').click()
+      answer.resolve()
+      await page.evaluate(async () => {
+        await (await import('/src/stores/agentProjection.ts' /* @vite-ignore */)).useAgentProjection().refresh()
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+      })
+      await expect(tab(page, 'Session')).toHaveAttribute('aria-selected', 'true')
+      await expect(panel(page).locator('#session-panel-overview')).toBeVisible()
+    } }] })
+  } finally { answer.resolve() }
+})
 
 // Same observable probes as check.mjs, scoped to this package's changed panel.
 async function checkPanel(page: Page, phone: boolean) {
