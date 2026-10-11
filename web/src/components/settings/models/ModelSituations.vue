@@ -109,7 +109,7 @@ const addRow = computed<RowView | null>(() => {
   const target = adding.value, row = rowOf(target)
   if (!target || !row) return null
   // Reviews start at the highest level; the other situations at the row's level.
-  return { key: id(target.column, target.key), column: target.column, label: row.label, isDefault: row.isDefault, line: null, effort: target.key === 'review' ? 'max' : row.effort, entry: row.entry, mine: false, reset: false, remove: false, editable: true, lock: null, unavailable: null }
+  return { key: id(target.column, target.key), column: target.column, label: row.label, isDefault: row.isDefault, line: null, effort: target.key === 'review' ? 'max' : row.effort, entry: row.entry, mine: false, reset: false, remove: false, editable: true, lock: null, unavailable: null, chain: [], end: row.isDefault ? 'wait' : 'default', never: [] }
 })
 const addCant = (line: string) => {
   const target = adding.value
