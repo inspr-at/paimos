@@ -260,6 +260,12 @@
     ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:phone › dark 390: the lead line, the queue chip and every row target reach 44 px"
     ,
+    "browser:tests/aeon-1212-lead-panel.spec.ts:AEON-1212 fix2: a manual tab choice cancels automatic opening while questions are still being read"
+    ,
+    "browser:tests/aeon-1212-lead-panel.spec.ts:AEON-1212 fix2: an overlapping refresh cannot finish the opening on discarded question evidence"
+    ,
+    "browser:tests/aeon-1212-lead-panel.spec.ts:AEON-1212 fix2: unreadable and truncated live worker reads never render a complete empty inventory"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -5606,11 +5612,11 @@
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 400 light Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: a manual tab choice cancels automatic opening while questions are still being read","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: a manual tab choice cancels automatic opening while questions are still being read","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: an overlapping refresh cannot finish the opening on discarded question evidence","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: an overlapping refresh cannot finish the opening on discarded question evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: unreadable and truncated live worker reads never render a complete empty inventory","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: unreadable and truncated live worker reads never render a complete empty inventory","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 1024 dark long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
