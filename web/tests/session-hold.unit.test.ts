@@ -147,6 +147,53 @@ describe('holding while the person points', () => {
   })
 })
 
+describe('a filter match is part of a row\'s place', () => {
+  // Risk (gate on 49f7335a): the hold keeps a row's group and parent but the list judges its filter
+  // match on the newest model names, so a rename in the registry adds or removes a row under the pointer.
+  function setup() {
+    const names = ref<Record<string, string>>({ a: 'Opus', b: 'Sol', c: 'Fable' })
+    const query = ref('opus')
+    const filtered: Structure<Row> = { ...structure, match: row => names.value[row.id]!.toLowerCase().includes(query.value) }
+    const live = ref<Row[]>([{ id: 'a', group: 'working' }, { id: 'b', group: 'working' }, { id: 'c', group: 'idle' }])
+    const pointing = ref(false), timers = manualTimers()
+    const hold = effectScope().run(() => useSessionHold(() => live.value, filtered, () => pointing.value, timers))!
+    const matched = () => ['a', 'b', 'c'].map(id => hold.matched(id))
+    return { names, query, pointing, timers, hold, matched }
+  }
+
+  it('keeps the match each row froze with through a rename, until the release', async () => {
+    const { names, pointing, timers, hold, matched } = setup()
+    expect(matched(), 'nothing holds: the list judges the newest names').toEqual([undefined, undefined, undefined])
+    pointing.value = true; await nextTick()
+    // The registry renames two models while the person points: a stops matching, c starts.
+    names.value = { a: 'Lyra', b: 'Sol', c: 'Opus' }
+    expect(matched()).toEqual([true, false, false])
+    expect(ids(hold.views.value)).toEqual(['a', 'b', 'c'])
+    expect(hold.pending.value, 'both new matches wait').toBe(2)
+    pointing.value = false; await nextTick()
+    timers.advance(RELEASE_MS)
+    expect(matched()).toEqual([undefined, undefined, undefined])
+    expect(hold.pending.value).toBe(0)
+  })
+
+  it('freezes the newest matches on Show now, the person\'s own search, and lets a followed row through', async () => {
+    const { names, query, pointing, hold, matched } = setup()
+    pointing.value = true; await nextTick()
+    names.value = { a: 'Lyra', b: 'Sol', c: 'Opus' }
+    hold.showNow()
+    expect(matched()).toEqual([false, false, true])
+    expect(hold.pending.value).toBe(0)
+    // The list calls Show now when the person changes the search (SessionList.vue).
+    query.value = 'sol'
+    expect(matched(), 'the frame keeps what it froze until Show now').toEqual([false, false, true])
+    expect(hold.pending.value).toBe(2)
+    hold.showNow()
+    expect(matched()).toEqual([false, true, false])
+    hold.follow(['b'])
+    expect(hold.matched('b'), 'the person\'s own change follows the newest copy').toBeUndefined()
+  })
+})
+
 describe('ended sessions keep their place for 10 minutes', () => {
   const now = Date.parse('2026-10-11T10:00:00Z')
   const endedAgo = (ms: number) => ({ stopped_at: new Date(now - ms).toISOString(), archived_at: null })

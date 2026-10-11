@@ -93,7 +93,7 @@ computer.
 
 **Rows enter and leave calmly.** New sessions, rows leaving the list, rows
 moving to another group or parent, rows that start or stop matching the filter
-or search, and new orders wait while the pointer is on the list, a row has
+or search (a model renamed in Settings › Models included), and new orders wait while the pointer is on the list, a row has
 keyboard focus or one of the list's menus is open; the last row stays even when
 the live list empties. Badges, line 2, the counts and times keep updating
 meanwhile. The card head then says "2 changes wait while you point here · Show

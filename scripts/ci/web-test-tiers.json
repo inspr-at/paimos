@@ -5426,6 +5426,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a held move shows the newest line 2: a working row that starts asking says its request","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a model renamed in the registry while the pointer rests never adds or removes a searched row","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a nested ended worker stays under the pointer past its 10 minutes, then joins its lead's stopped count","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a refresh never adds, moves or removes a row under the pointer; the changes wait, then apply","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -17981,6 +17983,10 @@
     {"kind":"vitest","file":"tests/session-confirm.unit.test.ts","name":"AEON-584: refreshing the same identity keeps confirmation of the captured delete","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-confirm.unit.test.ts","name":"AEON-584: sign-out cancels an open confirm before the logout response","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"a filter match is part of a row's place > freezes the newest matches on Show now, the person's own search, and lets a followed row through","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"a filter match is part of a row's place > keeps the match each row froze with through a rename, until the release","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"ended sessions keep their place for 10 minutes > lingers under 10 minutes, never once removed","tier":"GATED-FULL"}
     ,

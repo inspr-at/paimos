@@ -10,6 +10,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
+import { controlStability } from './control-stability'
 
 const NOW = Date.parse('2026-10-11T10:00:00Z')
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString()
@@ -51,14 +52,14 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
 const rows = (page: Page) => page.locator('.sessions .row[data-row]')
 const row = (page: Page, id: string) => page.locator(`.sessions [data-row="s:${id}"]`)
 const note = (page: Page) => page.locator('.sessions [data-held-note]')
-// A box in document coordinates (main scrolls), so a scroll is never mistaken for a move.
-const docBox = (locator: ReturnType<Page['locator']>) => locator.evaluate(el => { const r = el.getBoundingClientRect(), top = document.querySelector('main')!.scrollTop; return [Math.round(r.x), Math.round(r.y + top), Math.round(r.width), Math.round(r.height)] })
 const showList = (page: Page) => page.locator('.sessions').evaluate(el => el.scrollIntoView({ block: 'start' }))
-// Layout boxes of every row (document coordinates: main's scroll added back).
-const boxes = (page: Page) => page.locator('.sessions .row[data-row]').evaluateAll(els => {
-  const main = document.querySelector('main')!
-  return els.map(el => { const r = el.getBoundingClientRect(); return [el.getAttribute('data-row'), Math.round(r.x), Math.round(r.y + main.scrollTop), Math.round(r.width), Math.round(r.height)] })
-})
+const rowIds = (page: Page) => rows(page).evaluateAll(els => els.map(el => el.getAttribute('data-row')))
+// Every row on screen and the held note under the shared stability guard: fractional boxes in
+// scroll-container coordinates, ±0.5 px (docs/ui-conventions.md).
+async function rowGuard(page: Page) {
+  const ids = (await rowIds(page)).map(String)
+  return controlStability(page, { note: note(page), ...Object.fromEntries(ids.map(id => [id, page.locator(`.sessions [data-row="${id}"]`)])) })
+}
 
 // The design check's probes (design/ag-approved/check.mjs), limited to the Sessions card.
 async function probe(page: Page) {
@@ -243,19 +244,21 @@ test('a refresh never adds, moves or removes a row under the pointer; the change
   await expect(first).toBeVisible()
   await expect(note(page)).toContainText('Live · updated')
   await showList(page)
-  const noteBox = await docBox(note(page))
-  // The pointer rests on a row; a new worker arrives and a working one leaves the list.
+  // The pointer rests on a row; a new worker arrives and a working one leaves the list. Every row
+  // and the note keep their boxes, whichever text the note shows (AEON-541).
   await first.locator('.l2').hover()
-  const before = await boxes(page)
+  const before = await rowIds(page)
+  const guard = await rowGuard(page)
   const gone = data.sessions.splice(2, 1)[0]!
-  data.sessions.push({ ...data.sessions[1]!, id: '5e000000-0000-4000-8000-000000000032', display_label: 'Fresh worker', created_at: new Date(NOW + 1000).toISOString(), heartbeat_at: new Date(NOW + 1000).toISOString() })
-  await page.clock.runFor(21_000)
-  await expect(note(page)).toContainText('2 changes wait while you point here')
+  await guard.check(async () => {
+    data.sessions.push({ ...data.sessions[1]!, id: '5e000000-0000-4000-8000-000000000032', display_label: 'Fresh worker', created_at: new Date(NOW + 1000).toISOString(), heartbeat_at: new Date(NOW + 1000).toISOString() })
+    await page.clock.runFor(21_000)
+    await expect(note(page)).toContainText('2 changes wait while you point here')
+  })
+  guard.done()
   await expect(note(page).getByRole('button', { name: /Show now$/ })).toBeVisible()
-  expect(await boxes(page), 'nothing moved, arrived or left under the pointer').toEqual(before)
+  expect(await rowIds(page), 'nothing arrived or left under the pointer').toEqual(before)
   await expect(row(page, gone.id)).toBeVisible()
-  // The note keeps its box whichever text it shows (AEON-541).
-  expect(await docBox(note(page))).toEqual(noteBox)
   await page.screenshot({ path: info.outputPath('held-1440-light.png') })
   // The pointer leaves: still held for 1.5 s, then the list follows.
   await page.mouse.move(700, 8)
@@ -320,7 +323,6 @@ const APPROVAL = { kind: 'approval', scope: 'session', actor: 'person', count: 1
 type Data = Awaited<ReturnType<typeof setup>>
 // A working worker under the lead, without a run, so its own fields decide its state.
 const worker = (data: Data, n: number, fields: Record<string, unknown>) => ({ ...data.sessions[0]!, id: WORKER(n), role: 'worker', run_id: null, ticket_node_id: null, ticket: null, parent_harness_session_id: data.sessions[0]!.id, heartbeat_at: ago(0.1), ...fields })
-const rowIds = (page: Page) => rows(page).evaluateAll(els => els.map(el => el.getAttribute('data-row')))
 const childIds = (page: Page, parent: string) => page.locator(`.sessions .row[data-parent="${parent}"]`).evaluateAll(els => els.map(el => el.getAttribute('data-row')!.slice(2)))
 
 test('a nested ended worker stays under the pointer past its 10 minutes, then joins its lead\'s stopped count', async ({ page }) => {
@@ -467,4 +469,43 @@ test('the search finds a row by the model name it shows, and still by its raw id
   await search('claude-opus-5-5', [lead, DONE])
   await search('gpt-6.1-sol', [worker])
   await search('codex-astra-xhigh', [worker])
+})
+
+// Fix round 5 (gate on 49f7335a). Risk: the hold keeps each row's place but judges its search match on
+// the newest registry names, so a model renamed in Settings › Models adds or removes a row under the pointer.
+test('a model renamed in the registry while the pointer rests never adds or removes a searched row', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const data = await setup(page)
+  // A custom registry name that no raw id carries, so only the name a row shows can match it.
+  const named = (renames: Record<string, string>) => REGISTRY.map(m => renames[m.id] ? { ...m, display_name: renames[m.id]!, short_name: renames[m.id]! } : m)
+  let registry = named({ 'm-opus': 'Zephyr' })
+  await page.route('**/api/models', route => route.request().method() === 'GET' ? route.fulfill({ json: registry }) : route.fallback())
+  await page.goto('/agents')
+  const lead = String(data.sessions[0]!.id), cursor = String(data.sessions[3]!.id)
+  await page.getByRole('searchbox', { name: 'Search sessions in this list' }).fill('zephyr')
+  const matched = page.locator('.sessions .row[data-row]:not(.context-only)')
+  const matchedIds = () => matched.evaluateAll(els => els.map(el => el.getAttribute('data-row')!.slice(2)).sort())
+  await expect.poll(matchedIds).toEqual([lead, DONE].sort())
+  await expect(row(page, lead).locator('.exec-model')).toHaveText('Zephyr 5.5 · xhigh')
+  await showList(page)
+  await row(page, lead).locator('.l2').hover()
+  const before = await rowIds(page)
+  const guard = await rowGuard(page)
+  // Zephyr becomes Lyra and Composer fast becomes Zephyr: on the newest names the search would drop
+  // both Zephyr rows and add the Cursor one.
+  await guard.check(async () => {
+    registry = named({ 'm-opus': 'Lyra', 'm-composer': 'Zephyr' })
+    await page.clock.runFor(21_000)
+    await expect(row(page, lead).locator('.exec-model'), 'the new name reached the row').toHaveText('Lyra 5.5 · xhigh')
+    await expect(note(page)).toContainText('3 changes wait')
+  })
+  guard.done()
+  expect(await rowIds(page), 'no row arrived or left under the pointer').toEqual(before)
+  expect(await matchedIds()).toEqual([lead, DONE].sort())
+  // The pointer leaves: 1.5 s later the search follows the new names.
+  await page.mouse.move(700, 8)
+  await page.clock.runFor(1600)
+  await expect.poll(matchedIds).toEqual([cursor])
+  await expect(row(page, cursor).locator('.exec-model')).toHaveText('Zephyr 2.5')
 })
