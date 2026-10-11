@@ -43,7 +43,11 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     // AEON-313: shared-inbox obligations stay outside the session thread, in
     // Chat as well as in Now. AEON-977 (2c33f633d) renamed the tab and its panel.
     await panel.getByRole('tab', { name: /Chat/ }).click()
-    await expect(panel.getByRole('tabpanel', { name: /Chat/ }).getByRole('region', { name: 'Conversation' })).toBeVisible()
+    const chat = panel.getByRole('tabpanel', { name: /Chat/ })
+    // The same change gives an empty session thread its own Chat empty state.
+    await expect(chat.getByRole('heading', { name: 'Chat with Backlog worker 1', exact: true })).toBeVisible()
+    await expect(chat.getByRole('region', { name: 'Conversation' })).toHaveCount(0)
+    await expect(chat.getByRole('textbox', { name: 'Message to Backlog worker 1', exact: true })).toBeVisible()
     await expect(inbox).toHaveCount(0)
     await expect(panel).not.toContainText('Shared inbox')
     await expect(panel.locator('.now-block')).not.toContainText('Shared inbox')

@@ -124,7 +124,7 @@ for (const { width, coarse } of [
   { width: 768, coarse: false }, { width: 768, coarse: true }, { width: 1024, coarse: true }, { width: 1440, coarse: false },
 ]) for (const theme of ['light', 'dark'] as const) for (const density of ['comfortable', 'compact'] as const) {
   test.describe(`${width}px ${coarse ? 'coarse' : 'fine'} ${theme} ${density}`, () => {
-    test.use({ viewport: { width, height: 1100 }, hasTouch: coarse })
+    test.use({ viewport: { width, height: 1100 }, hasTouch: coarse, screenshot: 'only-on-failure' })
     test('ticket and tier controls keep their visuals, reach and position', async ({ page }) => {
       const expanded = width <= 720 || coarse
       const phone = width <= 720
