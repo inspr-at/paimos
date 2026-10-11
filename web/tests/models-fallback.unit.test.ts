@@ -147,9 +147,11 @@ describe('chain writes', () => {
   })
   it('an own order edited back to the workspace’s follows it again; Undo brings the own order back as it was', async () => {
     const shared = doc(), mine = doc({ exceptions: [shared.exceptions[0]!, row('concept', FABLE, 'max', { end: 'default', mine: true })] })
-    vi.mocked(getSimple).mockImplementation(async scope => scope === 'me' ? mine : shared); vi.mocked(getTail).mockResolvedValue(tail(['concept'], { concept: 'max' }))
+    // The own order stores the Default ending it shows.
+    const board = (): TailBoard => { const base = tail(['concept'], { concept: 'max' }); return { ...base, columns: base.columns.map(column => column.column === 'concept' ? { ...column, stored: { ...column.stored!, end: 'default' } } : column) } }
+    vi.mocked(getSimple).mockImplementation(async scope => scope === 'me' ? mine : shared); vi.mocked(getTail).mockResolvedValue(board())
     const model = await page()
-    after(4, tail(['concept'], { concept: 'max' }))
+    after(4, board())
     expect(await model.editChain(find(model, 'concept'), { kind: 'end', end: 'wait' })).toBe(true)
     expect(putChain).not.toHaveBeenCalled(); expect(resetOrder).toHaveBeenCalledWith('me', 'concept', 3, simplePerson)
     toasts.at(-1)!.actions[0]!.run(); await settle()
@@ -207,6 +209,37 @@ describe('chain writes', () => {
     toasts.at(-1)!.actions[0]!.run(); await settle()
     expect(putOrder).toHaveBeenCalledWith('me', 'concept', { rank: [FABLE, SONNET, OPUS], not: [GROK], efforts: { [FABLE]: 'max', [SONNET]: 'high', [OPUS]: 'xhigh' }, end: 'wait' }, 4, simplePerson)
     expect(putEffort).toHaveBeenLastCalledWith('me', 'concept', 'max', 5, simplePerson)
+  })
+  // A personal order that stores Wait owns its tail: the resolver then drops the workspace's pinned steps. A migrated
+  // order stores no ending, so its Undo must not write the Wait the row shows.
+  it('Reset Undo writes back a migrated order that stored no ending without one, so the pinned tail still runs', async () => {
+    vi.mocked(getTail).mockResolvedValue(pinned()); vi.mocked(getSimple).mockResolvedValue(pinnedDoc({ all: { ...pinnedDoc().all, mine: true } }))
+    const model = await page()
+    expect(find(model, 'all').end).toBe('wait')
+    after(4, pinned())
+    expect(await model.clear(find(model, 'all'))).toBe(true)
+    expect(resetOrder).toHaveBeenCalledWith('me', 'other', 3, simplePerson)
+    toasts.at(-1)!.actions[0]!.run(); await settle()
+    expect(putOrder).toHaveBeenCalledWith('me', 'other', { rank: [SOL, OPUS], not: [], efforts: {}, end: '' }, 4, simplePerson)
+    expect(putEffort).not.toHaveBeenCalled()
+  })
+  it('Undo of an ending change, or of an edit back to the workspace’s order, writes back no ending where the order stored none', async () => {
+    const shared = doc({ all: row('other', SOL, 'xhigh', { chain: [{ line: FABLE, effort: 'high' }] }) })
+    const mine = pinnedDoc({ all: { ...pinnedDoc().all, mine: true }, exceptions: [shared.exceptions[0]!, row('concept', FABLE, 'max', { mine: true, chain: [{ line: SONNET, effort: 'high' }] })] })
+    const board = (): TailBoard => { const base = pinned(); return { ...base, columns: base.columns.map(column => column.column === 'concept' ? { ...column, source: 'own' as const, stored: { rank: [FABLE, SONNET], not: [] }, stored_effort: null } : column) } }
+    vi.mocked(getSimple).mockImplementation(async scope => scope === 'me' ? mine : shared); vi.mocked(getTail).mockResolvedValue(board())
+    const model = await page()
+    after(4, board())
+    expect(await model.editChain(find(model, 'concept'), { kind: 'end', end: 'wait' })).toBe(true)
+    expect(putChain).toHaveBeenCalledWith('me', 'concept', { rank: [FABLE, SONNET], end: 'wait' }, 3, simplePerson)
+    toasts.at(-1)!.actions[0]!.run(); await settle()
+    expect(putChain).toHaveBeenLastCalledWith('me', 'concept', { rank: [FABLE, SONNET], end: '' }, 4, simplePerson)
+    // Taking Opus out leaves the workspace's order: the row follows it again, and Undo writes the own order back.
+    vi.mocked(putChain).mockClear(); after(5, board())
+    expect(await model.editChain(find(model, 'all'), { kind: 'remove', index: 0 })).toBe(true)
+    expect(resetOrder).toHaveBeenCalledWith('me', 'other', 4, simplePerson); expect(putChain).not.toHaveBeenCalled()
+    toasts.at(-1)!.actions[0]!.run(); await settle()
+    expect(putChain).toHaveBeenLastCalledWith('me', 'other', { rank: [SOL, OPUS, FABLE], efforts: { [SOL]: 'xhigh', [OPUS]: 'max', [FABLE]: 'high' }, end: '' }, 5, simplePerson)
   })
   it('Remove of a row without an order of its own lifts its lock; Undo sets the lock again and invents no order', async () => {
     vi.mocked(getWorkspaceRules).mockResolvedValue({ revision: 2, rules: [{ scope: 'workspace', project_id: null, column: 'design', line: OPUS, lock: 'top', position: 0, why: 'Design stays on Opus.', set_by: simplePerson, set_at: '2026-10-02T09:00:00Z' }] })

@@ -7394,6 +7394,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2PauseLifecycleAndAuthority","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2ResetUndoKeepsMigratedOrderWithoutEnding","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2ResidencyCauseMatchesEvidence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RolesRoutesAndWait","tier":"ESSENTIAL"}

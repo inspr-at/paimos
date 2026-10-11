@@ -31,9 +31,10 @@ export const dismissLine = (scope: Scope, line: string, revision: number, person
 export const putDismissed = (scope: Scope, lines: string[], revision: number, person: string | null) => request<WriteResult>(`/model-preferences/profile?for=${scope}`, 'PUT', { dismissed_lines: lines, revision }, who(scope, person))
 /**
  * A row's order (AEON-1161): rank is the pick and its fallback. Omitted efforts, end and not keep what is stored;
- * a personal write on a workspace row creates the person's own order.
+ * a personal write on a workspace row creates the person's own order. An empty end stores none: the order then ends
+ * as its column does without one.
  */
-export interface ChainBody { rank: string[]; efforts?: Record<string, string>; end?: ChainEnd; not?: string[] }
+export interface ChainBody { rank: string[]; efforts?: Record<string, string>; end?: ChainEnd | ''; not?: string[] }
 export const putChain = (scope: Scope, column: string, body: ChainBody, revision: number, person: string | null) => request<WriteResult>(`${first(column)}?for=${scope}`, 'PUT', { ...body, revision }, who(scope, person))
 // Never rules are workspace rules: admins only, written against the rules revision.
 const never = (column: string, line: string) => first(column, `/never/${encodeURIComponent(line)}`)

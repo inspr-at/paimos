@@ -16832,7 +16832,11 @@
     ,
     {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > Remove of a row without an order of its own lifts its lock; Undo sets the lock again and invents no order","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > Reset Undo writes back a migrated order that stored no ending without one, so the pinned tail still runs","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > Reset Undo writes the own order back whole: rank, exclusions, its Wait ending and each fallback’s level, then its own level","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > Undo of an ending change, or of an edit back to the workspace’s order, writes back no ending where the order stored none","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > a member’s edit of a workspace row writes their own order with their person; Undo resets it","tier":"ESSENTIAL"}
     ,

@@ -227,13 +227,14 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
         const rank = before?.rank ?? inherited(target, column).rank
         orders.set(column, { ...before, rank, not: before?.not ?? [], effort, efforts: { ...before?.efforts, ...(rank?.[0] && effort ? { [rank[0]]: effort } : {}) } })
       } else {
-        const input = body as { rank: string[]; not?: string[]; efforts?: Record<string, string>; end?: 'wait' | 'default' }, item = line(input.rank[0])
+        const input = body as { rank: string[]; not?: string[]; efforts?: Record<string, string>; end?: 'wait' | 'default' | '' }, item = line(input.rank[0])
         // Omitted not, efforts and end keep what is stored; a first personal order copies the workspace's ending and levels.
+        // An empty end stores none, as the server does.
         const source = before ?? (target === 'mine' ? inherited('default', column) : undefined)
         const kept = Object.fromEntries(Object.entries(source?.efforts ?? {}).filter(([id]) => input.rank.includes(id)))
         if (input.efforts && Object.entries(input.efforts).some(([id, effort]) => !input.rank.includes(id) || !line(id)?.efforts.includes(effort))) return route.fulfill({ status: 422, json: { error: 'invalid_effort' } })
         // A new first line keeps the order's effort name, or the nearest level of the new line.
-        orders.set(column, { rank: input.rank, not: input.not ?? before?.not ?? [], effort: input.efforts ? null : before?.effort && item ? nearest(item, before.effort) : null, efforts: input.efforts ?? kept, end: input.end ?? source?.end })
+        orders.set(column, { rank: input.rank, not: input.not ?? before?.not ?? [], effort: input.efforts ? null : before?.effort && item ? nearest(item, before.effort) : null, efforts: input.efforts ?? kept, end: input.end === '' ? undefined : input.end ?? source?.end })
       }
       revision[target]++
       return route.fulfill({ json: { person_id: simplePerson, revision: revision[target], profile: tail(target).profile, dry_run: false, moved: [] } })

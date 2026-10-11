@@ -13,6 +13,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -52,6 +53,88 @@ func TestModelsV2BoardStoredOrderCarriesEndingAndLevels(t *testing.T) {
 	boardDecode[boardWriteResult](t, boardCall(t, member, "DELETE", "/api/model-preferences/orders/backend/first?for=me&revision="+strconv.FormatInt(saved.Revision, 10), nil, member.ID), 200)
 	if reset := boardColumnOf(t, member, "mine", "backend"); reset.Stored.End != "" || reset.Stored.Efforts != nil {
 		t.Fatalf("a reset order still reports an ending or levels: %+v", reset.Stored)
+	}
+}
+
+// Risk: the page's Undo of a reset writes back a migrated personal order that
+// stored no ending as one that stores Wait. A personal Wait order owns its
+// tail, so the workspace's migrated pin-to-bottom step leaves the dispatched
+// chain. Omitting the ending is no fix either: a person's first own order
+// copies the workspace Default's Wait. The empty ending stores none (AEON-1161).
+func TestModelsV2ResetUndoKeepsMigratedOrderWithoutEnding(t *testing.T) {
+	admin, member := boardFixture(t)
+	// The workspace Default stores Wait, as migration 1333 leaves it.
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"openai:sol", "anthropic:opus"}, "end": "wait", "revision": 0}, ""), 200)
+	personal := "/api/model-preferences/orders/other/first?for=me"
+	saved := boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", personal, map[string]any{"rank": []string{"openai:sol", "anthropic:opus"}, "revision": 0}, member.ID), 200)
+	// A personal order from before the migration stores no ending or levels, and
+	// a migrated pin-to-bottom keeps Fable last for everyone.
+	set := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE model_pref_orders o SET end_mode=NULL,efforts=NULL FROM model_pref_profiles own WHERE own.id=o.profile_id AND own.scope='person' AND own.person_id=$1 AND o.column_key='other' AND o.situation='first'`, member.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_rules(tenant_id,scope,column_key,line,lock,position,why,set_by,set_at,moved_to_models) VALUES($1,'workspace','other','anthropic:fable','bottom',0,'Last resort',$2,$3,true)`, admin.TenantID, admin.ID, set); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_row_constraints(tenant_id,scope,column_key,line,kind,position,why,set_by,set_at) VALUES($1,'workspace','other','anthropic:fable','chain',0,'Last resort',$2,$3)`, admin.TenantID, admin.ID, set)
+		return err
+	})
+	// The chain dispatch walks for the member, loaded as resolveBoardWork loads it.
+	dispatched := func() []modelprefs.BoardStep {
+		t.Helper()
+		var steps []modelprefs.BoardStep
+		inRegistry(t, member, func(tx pgx.Tx) error {
+			ctx := t.Context()
+			person, err := modelprefs.CanonicalPerson(ctx, tx, member.ID)
+			if err != nil {
+				return err
+			}
+			s, err := modelprefs.LoadBoardRouting(ctx, tx, person, "")
+			if err != nil {
+				return err
+			}
+			c, err := loadBoardCatalog(ctx, tx, true)
+			if err != nil {
+				return err
+			}
+			s = modelsBoardIdentities(s, c)
+			c = modelsCatalog(c)
+			s.Lines = c.lines
+			steps = modelsBoardDecision(s, modelprefs.BoardQuery{Column: "other", Situation: "first"}).Steps
+			return nil
+		})
+		return steps
+	}
+	lines := func(steps []modelprefs.BoardStep) []string {
+		out := []string{}
+		for _, step := range steps {
+			out = append(out, step.Line)
+		}
+		return out
+	}
+	before := dispatched()
+	if got := lines(before); !slices.Equal(got, []string{"openai:sol", "anthropic:opus", "anthropic:fable"}) {
+		t.Fatalf("fixture lost the migrated tail before the reset: %v", got)
+	}
+	stored := boardColumnOf(t, member, "mine", "other").Stored
+	if stored.End != "" || len(stored.Efforts) != 0 || !slices.Equal(stored.Rank, []string{"openai:sol", "anthropic:opus"}) {
+		t.Fatalf("fixture is not a migrated order without an ending: %+v", stored)
+	}
+	// Reset, then Undo as the page writes it: the stored rank and exclusions, the
+	// stored levels (none) and the stored ending (none).
+	reset := boardDecode[boardWriteResult](t, boardCall(t, member, "DELETE", personal+"&revision="+strconv.FormatInt(saved.Revision, 10), nil, member.ID), 200)
+	undone := boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", personal, map[string]any{"rank": stored.Rank, "not": stored.Not, "efforts": map[string]string{}, "end": "", "revision": reset.Revision}, member.ID), 200)
+	if after := dispatched(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("Undo changed the dispatched chain: %+v, was %+v", after, before)
+	}
+	if again := boardColumnOf(t, member, "mine", "other").Stored; again.End != "" || !slices.Equal(again.Rank, stored.Rank) {
+		t.Fatalf("Undo stored another order: %+v", again)
+	}
+	// The Wait the row shows would own the tail: the fixture tells the two apart.
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", personal, map[string]any{"rank": stored.Rank, "end": "wait", "revision": undone.Revision}, member.ID), 200)
+	if got := lines(dispatched()); !slices.Equal(got, []string{"openai:sol", "anthropic:opus"}) {
+		t.Fatalf("a stored Wait kept the pinned tail, so this test cannot see the defect: %v", got)
 	}
 }
 

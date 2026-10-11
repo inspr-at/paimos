@@ -167,14 +167,18 @@ export function useModelsSimple() {
   /** The native effort the column's own order stored; null (or absent) means the order inherits one. Undo restores this, never the effort on screen: that one may only be inherited from Default. */
   const storedEffort = (column: TailColumn) => column.stored_effort ?? null
   /**
-   * A column's own order as stored: rank, exclusions, ending and every native level, then the order's own level. A
-   * reset deletes all of them, so its Undo writes this back (AEON-1161). An ending the order never stored is the row's.
+   * The ending the column's own order stored, or '' for none. Undo writes this back, never the row's ending on screen:
+   * that one may only be the column's, and a personal order that stores Wait drops the workspace's pinned tail.
    */
-  const restore = (target: Scope, person: string | null, column: TailColumn, row: RowView): Step[] => {
-    const body = orderBody(column), stored = column.stored, level = storedEffort(column)
-    const end: ChainEnd = stored?.end === 'wait' || stored?.end === 'default' ? stored.end : row.end
-    const efforts = Object.fromEntries(Object.entries(stored?.efforts ?? {}).filter(([line]) => body.rank.includes(line)))
-    return [order(target, person, column.column, { ...body, efforts, end }), ...(level ? [effortStep(target, person, column.column, level)] : [])]
+  const storedEnd = (column: TailColumn): ChainEnd | '' => column.stored?.end === 'wait' || column.stored?.end === 'default' ? column.stored.end : ''
+  /**
+   * A column's own order as stored: rank, exclusions, ending (or none) and every native level, then the order's own
+   * level. A reset deletes all of them, so its Undo writes this back (AEON-1161).
+   */
+  const restore = (target: Scope, person: string | null, column: TailColumn): Step[] => {
+    const body = orderBody(column), level = storedEffort(column)
+    const efforts = Object.fromEntries(Object.entries(column.stored?.efforts ?? {}).filter(([line]) => body.rank.includes(line)))
+    return [order(target, person, column.column, { ...body, efforts, end: storedEnd(column) }), ...(level ? [effortStep(target, person, column.column, level)] : [])]
   }
 
   /** Pick a model (and optionally its level) for a row; a draft row or a row without an order of its own gets one. */
@@ -221,7 +225,7 @@ export function useModelsSimple() {
     const forward: Step[] = [reset(target, who, row.column)]
     // A reset deletes the whole order; Undo writes it back as stored, an inherited level stays inherited. A row without
     // an order of its own has none to bring back.
-    const backward: Step[] = storedOrder(column) ? restore(target, who, column, row) : []
+    const backward: Step[] = storedOrder(column) ? restore(target, who, column) : []
     let rules = false
     if (target === 'default' && row.lock && row.line) {
       try {
@@ -334,8 +338,8 @@ export function useModelsSimple() {
     // back right after it, so a chain edit never changes what the rest of the page follows.
     const write = (body: ChainBody): Step[] => [chainStep(target, who, row.column, body), ...(body.efforts && level ? [effortStep(target, who, row.column, level)] : [])]
     const forward: Step[] = followsAgain ? [reset(target, who, row.column)] : write({ rank: rank(chain), ...(levels ? { efforts: efforts(chain) } : {}), ...(change.kind === 'end' ? { end } : {}) })
-    // Undo writes back what the row showed: a level a removal or a reset dropped, and the ending it had.
-    const previous: ChainBody = { rank: rank(row.chain), ...(levels || change.kind === 'remove' || followsAgain ? { efforts: efforts(row.chain) } : {}), ...(change.kind === 'end' || followsAgain ? { end: row.end } : {}) }
+    // Undo writes back what the row showed: a level a removal or a reset dropped, and the ending its order stored (or none).
+    const previous: ChainBody = { rank: rank(row.chain), ...(levels || change.kind === 'remove' || followsAgain ? { efforts: efforts(row.chain) } : {}), ...(change.kind === 'end' || followsAgain ? { end: storedEnd(column) } : {}) }
     const backward: Step[] = had ? write(previous) : [reset(target, who, row.column)]
     return commit({ forward: [...pins.forward, ...forward], backward: [...pins.backward, ...backward], rules: lift.length > 0, announce })
   }
