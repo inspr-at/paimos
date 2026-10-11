@@ -1022,6 +1022,8 @@
         ,
         {"file":"tests/resilient-polling.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/routines-editor.spec.ts","listedTests":5,"weightSeconds":40,"weightSource":"AEON-1182 estimate: five mocked routine editor flows, one worker"}
+        ,
         {"file":"tests/row-actions.spec.ts","listedTests":12,"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/run-kinds.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}

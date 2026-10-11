@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import { brand } from '../../lib/brand'
 import type { EtaMode } from '../../lib/eta'
 import { usePreference } from '../../lib/preferences'
@@ -19,6 +20,8 @@ import SessionWatchingSettings from './SessionWatchingSettings.vue'
 import PhoneApprovalSettings from './PhoneApprovalSettings.vue'
 import { useSession } from '../../stores/session'
 import { can } from '../../lib/authz'
+// AEON-1182: your own routines live here (#routines), loaded with the section only.
+const RecurringWorkCard = defineAsyncComponent(() => import('../recurrences/RecurringWorkCard.vue'))
 
 // Everyone's own settings: the profile (photo, names, handle, time zone, language),
 // the theme, the greeting, and the keys.
@@ -30,6 +33,7 @@ const etaModes: { value: EtaMode; label: string }[] = [
 const etaMode = computed(() => etaChoice.value?.mode === 'clock' || etaChoice.value?.mode === 'both' ? etaChoice.value.mode : 'relative')
 function setEtaMode(mode: EtaMode) { saveEta({ mode }, 0) }
 const session = useSession()
+const route = useRoute()
 
 const themes: { value: ThemeChoice; label: string; icon: 'sun' | 'moon' | 'monitor' }[] = [
   { value: 'light', label: 'Light', icon: 'sun' }, { value: 'dark', label: 'Dark', icon: 'moon' }, { value: 'system', label: 'System', icon: 'monitor' },
@@ -134,10 +138,13 @@ const KEYS: { keys: string[][]; label: string }[] = [
         </div>
       </dl>
     </SettingsCard>
+
+    <RecurringWorkCard v-if="session.identity?.principal.kind === 'person'" class="routines-box" scope="personal" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" :consent="route.query.consent === '1'" />
   </div>
 </template>
 
 <style scoped>
+.routines-box { padding: 0; }
 .section { display: grid; gap: 14px; }
 .eta-display { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 16px; }
 .eta-display > span { font-size: 13px; color: var(--ink-2); }

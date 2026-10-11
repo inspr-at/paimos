@@ -83,6 +83,7 @@ import (
 	"github.com/inspr-at/paimos/internal/releases"
 	"github.com/inspr-at/paimos/internal/requirements"
 	"github.com/inspr-at/paimos/internal/routineactions"
+	"github.com/inspr-at/paimos/internal/routineexec"
 	"github.com/inspr-at/paimos/internal/routineguard"
 	"github.com/inspr-at/paimos/internal/rules"
 	"github.com/inspr-at/paimos/internal/rules/doctrine"
@@ -396,6 +397,14 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	reviewMod.ConfigureWebhook(cfg.ReviewWebhookSecret)
 	startWorker(func() { reviewMod.RunStatusReporter(workerCtx) })
 	deliveryMod := delivery.New(pool, reviewApp.Config, cfg.ReviewWebhookSecret, delivery.AppReader{App: reviewApp}, reviewMod.HandlePullChange)
+	// Exact runtime/gate/CI readers remain unavailable until OPS qualification.
+	// The executor is inert on default-off projects and never enables a setting.
+	routineExecutor := routineexec.New(pool, routineexec.Options{})
+	runMod := agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun, reviewMod.PrepareForRun)
+	if err := routineExecutor.Bind(runMod); err != nil {
+		return err
+	}
+	startWorker(func() { routineExecutor.Run(workerCtx) })
 	startWorker(func() { deliveryMod.Run(workerCtx) })
 	startWorker(func() { deliveryMod.RunAlerts(workerCtx) })
 	startWorker(func() { deliveryMod.RunFlow(workerCtx) })
@@ -449,7 +458,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			reviewMod,
 			deliveryMod,
 			engineadmission.New(pool, engineadmission.AppReader{App: reviewApp}),
-			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun, reviewMod.PrepareForRun),
+			runMod,
 			approvals.New(pool),
 			phoneMod,
 			stepupMod,
