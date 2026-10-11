@@ -36,6 +36,7 @@ import (
 
 type Config struct {
 	RoutineWorkspaces *RoutineWorkspaceConfig
+	LeadRuntime       *LeadRuntimeConfig
 	Power             Power
 	UsageProbes       usageprobe.Probe
 	StepUps           *StepUpManager
@@ -163,6 +164,7 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	leads                  *leadRuntime
 	routineConfig          *RoutineWorkspaceConfig
 	routineCheckouts       map[string]*agentsetup.Store
 	routineResources       map[string]RoutineResourceLease
@@ -391,6 +393,9 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			_ = lock.Close()
 		}
 	}()
+	if err := checkRetainedLeads(state); err != nil {
+		return nil, err
+	}
 	for _, suffix := range []string{".journal", ".checkpoint.json"} {
 		if _, e := state.Read("aeon-agentd-"+c.DaemonID+suffix, 4<<20); e != nil && !errors.Is(e, os.ErrNotExist) {
 			return nil, e
@@ -424,7 +429,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if c.Power == nil {
 		c.Power = systemPower{}
 	}
-	s := &Supervisor{queueWake: make(chan struct{}, 1), usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{leads: &leadRuntime{config: c.LeadRuntime, leads: map[string]*localLead{}}, queueWake: make(chan struct{}, 1), usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		power:             c.Power,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic, verificationDiagnostic: c.VerificationDiagnostic}
@@ -432,6 +437,14 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		s.ledgerRequired = true
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
+	}
+	if c.LeadRuntime != nil {
+		if len(c.LeadRuntime.Repositories) > 32 {
+			return nil, ErrRoutineUnavailable
+		}
+		copy := *c.LeadRuntime
+		copy.Repositories = append([]RoutineRepository(nil), c.LeadRuntime.Repositories...)
+		s.leads.config = &copy
 	}
 	s.capacityNow = c.Now
 	if c.RoutineWorkspaces != nil {
@@ -2655,6 +2668,13 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 func (s *Supervisor) Close(ctx context.Context) error {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
+	if s.leads != nil {
+		s.leads.mu.Lock()
+		defer s.leads.mu.Unlock()
+	}
+	if err := checkRetainedLeads(s.state); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	s.closing = true
 	capturing := s.capacityCapturing

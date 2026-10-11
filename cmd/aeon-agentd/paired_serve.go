@@ -345,6 +345,9 @@ func pairedPollIteration(ctx context.Context, s *agentd.Supervisor, root string,
 	if err != nil {
 		diagnostics.report(s, agentsetup.PairingRuntimeUnavailable, err)
 	}
+	if err == nil {
+		err = s.PollLeadRuntime(ctx)
+	}
 	return current, err
 }
 

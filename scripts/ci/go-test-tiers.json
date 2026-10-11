@@ -1592,6 +1592,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestLaunchErrorCannotProveNoFork","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit","reason":"AEON-1190: lead consent, duplicate native launch and unknown process ownership boundary","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestLifecycleBoundsProbeAndCapacityWaits","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestLifecycleReadinessIsPerHarness","tier":"GATED-FULL"}
@@ -6169,6 +6171,8 @@
     {"kind":"go","package":"internal/harness","name":"TestLeadFairTurnsAndUnavailableContender","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLeadIdleYieldCountsUntilConfirmedExit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestLeadRuntimeConsentAndAdoptionRemainLaunchBarriers","reason":"AEON-1190: lead consent, duplicate native launch and unknown process ownership boundary","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLeadSchedulingBoundAndDependencies","tier":"ESSENTIAL"}
     ,
