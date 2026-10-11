@@ -19,7 +19,9 @@ project turns. Consent, rights, work eligibility, dial, daily quota, account,
 host and CI facts are rechecked inside the final fenced write. Release freeze
 closes this path; main red or unavailable current CI admission also means wait.
 An unreachable Mac or one requiring login receives the existing explicit
-unattended-readiness reason and receives no reservation or turn.
+unattended-readiness reason and receives no reservation or turn. A Mac whose
+daemon has not enrolled in the tenant ledger waits the same way, with its own
+reason.
 
 The transaction takes tenant, tree and pairing/account-use fences, then locks
 the definition, lead, work/run, account, budget and launch records. It persists

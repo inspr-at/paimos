@@ -160,7 +160,7 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	var request, key string
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,created_by_principal_id) VALUES($1,$2,'Fixture',gen_random_uuid()::text,'fixture-not-a-credential',$3) RETURNING id::text`, f.owner.TenantID, f.agent.ID, f.owner.ID).Scan(&key))
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,gen_random_uuid(),'887887887',repeat('a',64),repeat('b',64),repeat('c',64),'{"platform":"darwin","arch":"arm64"}','fixture','redeemed',$2) RETURNING id::text`, f.owner.TenantID, f.owner.ID).Scan(&request))
-	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,capacity_signals,capacity_reported_at) VALUES($1,gen_random_uuid(),$2,$3,$4,'budget-daemon',repeat('c',64),'{"load":5,"cores":18,"memory_pressure":"normal","power":"plugged_in","thermal":"normal","unattended":{"login_session":"ready","idle_sleep":"disabled","filevault":"on"}}',clock_timestamp()) RETURNING id::text`, f.owner.TenantID, request, f.agent.ID, key).Scan(&f.computer))
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,capacity_signals,capacity_reported_at,ledger_generation,ledger_enrolled_at) VALUES($1,gen_random_uuid(),$2,$3,$4,'budget-daemon',repeat('c',64),'{"load":5,"cores":18,"memory_pressure":"normal","power":"plugged_in","thermal":"normal","unattended":{"login_session":"ready","idle_sleep":"disabled","filevault":"on"}}',clock_timestamp(),gen_random_uuid()::text,clock_timestamp()) RETURNING id::text`, f.owner.TenantID, request, f.agent.ID, key).Scan(&f.computer))
 	f.exec(`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) VALUES($1,$2,$3,$4,$5,clock_timestamp()+interval '1 hour',clock_timestamp())`, f.owner.TenantID, f.account, f.computer, request, f.profile)
 	f.exec(`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source) VALUES($1,$2,clock_timestamp()-interval '1 minute',clock_timestamp()+interval '7 days','percent',100,20,'unrestricted',clock_timestamp(),true,'weekly','codex','harness')`, f.owner.TenantID, f.account)
 	f.exec(`INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','codex',10080,20,clock_timestamp()+interval '7 days',clock_timestamp(),'harness')`, f.owner.TenantID, f.account)
@@ -343,6 +343,13 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	f.exec(`UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE id=$1`, key)
 	wait("owner_or_dispatch_authority_revoked", "", 0)
 	f.exec(`UPDATE agent_keys SET revoked_at=NULL WHERE id=$1`, key)
+	// A daemon without ledger enrolment cannot satisfy the launch binding; the
+	// pass waits with that reason instead of failing on the missing generation.
+	var ledger string
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT ledger_generation FROM agent_pairing_computers WHERE id=$1`, f.computer).Scan(&ledger))
+	f.exec(`UPDATE agent_pairing_computers SET ledger_generation=NULL,ledger_enrolled_at=NULL WHERE id=$1`, f.computer)
+	wait("routine_ledger_enrollment_required", "", 0)
+	f.exec(`UPDATE agent_pairing_computers SET ledger_generation=$2,ledger_enrolled_at=clock_timestamp() WHERE id=$1`, f.computer, ledger)
 	// An absent lead keeps one generation-bound demand and never a worker hold.
 	f.exec(`UPDATE project_leads SET session_id=NULL,state='waiting_for_room' WHERE project_id=$1`, f.project)
 	wait("lead_demand_pending", "", 0)
