@@ -121,14 +121,14 @@ for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','d
     await expect(question(page)).toContainText('Asks you')
     const stable = { frame: panel(page), header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist'), pin: panel(page).getByRole('button', { name: 'Make this your default tab' }), close: panel(page).getByRole('button', { name: 'Close session details' }) }
     await expectStableControls({ controls: stable, scrollAreas: { panel: panel(page) }, interactions: [
-      { name: 'Lead', run: async () => { await tab(page, 'Lead').click(); await expect(panel(page).locator('#lp-checks')).toHaveText('Before every start'); await expect(panel(page).locator('.admission-caption')).toContainText('All passed at the last start'); await expect(panel(page).locator('[data-check]')).toHaveCount(4); await checkPanel(page, width <= 400); await panel(page).screenshot({ path: info.outputPath(`AEON-1212/${width === 1000 ? "1000-sheet" : "lead-sheet"}-${width}-${look}.png`) }) } },
-      { name: 'Session', run: async () => { await tab(page, 'Session').click(); await expect(panel(page).locator('#session-panel-overview')).toBeVisible(); await checkPanel(page, width <= 400); await panel(page).screenshot({ path: info.outputPath(`AEON-1212/session-${width}-${look}.png`) }) } },
-      { name: 'Chat', run: async () => { await tab(page, 'Chat').click(); await expect(question(page)).toBeVisible(); await checkPanel(page, width <= 400); await panel(page).screenshot({ path: info.outputPath(`AEON-1212/lead-chat-${width}-${look}.png`) }) } },
+      { name: 'Lead', run: async () => { await tab(page, 'Lead').click(); await expect(panel(page).locator('#lp-checks')).toHaveText('Before every start'); await expect(panel(page).locator('.admission-caption')).toContainText('All passed at the last start'); await expect(panel(page).locator('[data-check]')).toHaveCount(4); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/${width === 1000 ? "1000-sheet" : "lead-sheet"}-${width}-${look}.png`) }) } },
+      { name: 'Session', run: async () => { await tab(page, 'Session').click(); await expect(panel(page).locator('#session-panel-overview')).toBeVisible(); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/session-${width}-${look}.png`) }) } },
+      { name: 'Chat', run: async () => { await tab(page, 'Chat').click(); await expect(question(page)).toBeVisible(); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-chat-${width}-${look}.png`) }) } },
     ] })
     world.hold()
     await expectStableControls({ controls: { ...stable, card: question(page), answerArea: question(page).locator('.answer-slot'), composer: panel(page).locator('.composer') }, scrollAreas: { thread: panel(page).locator('.thread-scroll') }, interactions: [
       { name: 'Pending', run: async () => { await expectStableControls({ controls: { options: question(page).locator('.question-options'), pressed: question(page).locator('.question-options button').first(), other: question(page).locator('.question-options button').last() }, interactions: [{ name: 'choose', run: async () => { await question(page).getByRole('button', { name: 'Yes, merge now' }).click(); await world.started(); await expect(question(page).getByRole('button', { name: 'Recording…' })).toBeDisabled() } }] }) } },
-      { name: 'Recorded', run: async () => { world.release(); await expect(question(page)).toContainText('Answered: Yes, merge now'); await expect(question(page)).toContainText('by you'); await expect(question(page).getByRole('button')).toHaveCount(0); await panel(page).screenshot({ path: info.outputPath(`AEON-1212/recorded-${width}-${look}.png`) }) } },
+      { name: 'Recorded', run: async () => { world.release(); await expect(question(page)).toContainText('Answered: Yes, merge now'); await expect(question(page)).toContainText('by you'); await expect(question(page).getByRole('button')).toHaveCount(0); await page.screenshot({ path: info.outputPath(`AEON-1212/recorded-${width}-${look}.png`) }) } },
     ] })
     expect(world.state.calls).toHaveLength(1)
     expect(world.state.calls[0]).toMatchObject({ expected_revision: 1, option_id: 'yes', outcome: 'once' })
@@ -184,16 +184,16 @@ for (const width of [1440, 1024, 390]) for (const look of ['light', 'dark'] as c
     await expect(question(page)).toBeVisible()
     await expect(question(page).locator('.primary')).toHaveCount(0)
     const controls = { frame: panel(page), header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), composer: panel(page).locator('.composer'), card: question(page), answerArea: question(page).locator('.answer-slot') }
-    await panel(page).screenshot({ path: info.outputPath(`AEON-1212/long-text-chat-${width}-${look}.png`) })
+    await page.screenshot({ path: info.outputPath(`AEON-1212/long-text-chat-${width}-${look}.png`) })
     world.hold()
     await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.thread-scroll') }, interactions: [
       { name: 'record long option', run: async () => { await expectStableControls({ controls: { options: question(page).locator('.question-options'), pressed: question(page).locator('.question-options button').first() }, interactions: [{ name: 'choose', run: async () => { await question(page).getByRole('button', { name: world.state.question.input.options[0]!.title, exact: true }).click(); await world.started(); await expect(question(page).getByRole('button', { name: 'Recording…', exact: true })).toBeDisabled() } }] }) } },
       { name: 'recorded long answer', run: async () => { world.release(); await expect(question(page)).toContainText(`Answered: ${world.state.question.input.options[0]!.title}`) } },
     ] })
-    await panel(page).screenshot({ path: info.outputPath(`AEON-1212/long-text-recorded-${width}-${look}.png`) })
+    await page.screenshot({ path: info.outputPath(`AEON-1212/long-text-recorded-${width}-${look}.png`) })
     await tab(page, 'Lead').click()
     await expect(panel(page).locator('.queued-item')).toContainText('Agenten-Dial')
-    await panel(page).screenshot({ path: info.outputPath(`AEON-1212/long-text-lead-${width}-${look}.png`) })
+    await page.screenshot({ path: info.outputPath(`AEON-1212/long-text-lead-${width}-${look}.png`) })
   })
 }
 
