@@ -15,7 +15,8 @@ import (
 )
 
 // Risk C1: the first DailyStart counts denied headroom or unknown readings;
-// an all-denied harness obeys a daily wait instead of skipping context denial.
+// an all-denied harness obeys a daily wait instead of skipping context denial;
+// a per-harness Wait saved before the dial followed Models still stops the walk.
 func TestResolverProjectDailyCapsAndContextLadder(t *testing.T) {
 	for _, tc := range []struct {
 		name                               string
@@ -23,7 +24,7 @@ func TestResolverProjectDailyCapsAndContextLadder(t *testing.T) {
 		atLimit, pinned, want              string
 	}{
 		{"a denied headroom ladder", false, false, false, "ladder", "", "claude"},
-		{"a denied headroom wait", false, false, false, "wait", "", "daily_limit"},
+		{"a denied headroom old wait ignored", false, false, false, "wait", "", "claude"},
 		{"b denied unknown", true, false, false, "ladder", "", "claude"},
 		{"c all denied ignores wait", false, true, false, "wait", "", "claude"},
 		{"c all denied pinned", false, true, false, "wait", "codex", "context"},
