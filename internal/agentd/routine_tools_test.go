@@ -155,7 +155,7 @@ func TestRoutineBuilderToolsConstrainEffects(t *testing.T) {
 		names = append(names, tool.Name)
 	}
 	slices.Sort(names)
-	if !slices.Equal(names, []string{"aeon_edit", "aeon_glob", "aeon_grep", "aeon_read", "aeon_terminal", "aeon_write"}) {
+	if !slices.Equal(names, []string{"aeon_browser_capture", "aeon_edit", "aeon_glob", "aeon_grep", "aeon_read", "aeon_terminal", "aeon_write"}) {
 		t.Fatalf("routine builder inventory changed: %v", names)
 	}
 	call := func(name string, args map[string]any, reason string) {
@@ -214,6 +214,7 @@ func TestRoutineBuilderToolsConstrainEffects(t *testing.T) {
 	call("aeon_terminal", map[string]any{"command": "sh", "args": []string{"-c", "mutation"}}, "terminal command denied")
 	call("aeon_terminal", map[string]any{"command": "go", "args": []string{"test", "./..."}}, ErrRoutineToolsUnavailable.Error())
 	call("aeon_terminal", map[string]any{"command": "git", "args": []string{"commit", "-m", "local"}}, ErrRoutineToolsUnavailable.Error())
+	call("aeon_browser_capture", map[string]any{"url": "https://example.invalid/", "viewport": "desktop", "output_id": g.LaunchID}, ErrBrowserCaptureUnavailable.Error())
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, host.tools.URL+"/api/nodes/order/comments", strings.NewReader(`{"body_markdown":"bypass"}`))
 	if err != nil {
 		t.Fatal(err)
