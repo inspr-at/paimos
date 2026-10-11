@@ -102,6 +102,16 @@ func (s *Supervisor) writeLead(record leadRecord, exclusive bool) error {
 // PollLeadRuntime is called after workers, retaining their pickup priority.
 // Nil local configuration makes no API calls and never changes legacy work.
 func (s *Supervisor) PollLeadRuntime(ctx context.Context) error {
+	return s.pollLeadRuntime(ctx, true)
+}
+
+// ReconcileLeadRuntime services retained owners without discovering new demand.
+// Worker pickup failures and shutdown never become fresh lead launch authority.
+func (s *Supervisor) ReconcileLeadRuntime(ctx context.Context) error {
+	return s.pollLeadRuntime(ctx, false)
+}
+
+func (s *Supervisor) pollLeadRuntime(ctx context.Context, discover bool) error {
 	if s.leads == nil || s.leads.config == nil {
 		return nil
 	}
@@ -115,6 +125,39 @@ func (s *Supervisor) PollLeadRuntime(ctx context.Context) error {
 	}
 	s.leads.mu.Lock()
 	defer s.leads.mu.Unlock()
+	if err := s.reconcileLeadReceiptsLocked(ctx, api, true); err != nil {
+		return err
+	}
+	if !discover {
+		return nil
+	}
+	if !s.dispatchAllowed("") {
+		return ErrDraining
+	}
+	if len(s.leads.config.Repositories) > 32 {
+		return ErrRoutineUnavailable
+	}
+	for _, repository := range s.leads.config.Repositories {
+		demand, e := api.LeadDemand(ctx, repository.ProjectID)
+		if e != nil {
+			return e
+		}
+		if demand == nil {
+			continue
+		}
+		if demand.ProjectID != repository.ProjectID || demand.OwnerID != repository.OwnerID || repository.TenantID != s.tenantID {
+			return ErrScope
+		}
+		if e = s.startLead(ctx, api, *demand, repository); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+// Caller holds dispatchMu followed by leads.mu. service=false never delivers
+// a control during Close; it only reconciles independently observed exits.
+func (s *Supervisor) reconcileLeadReceiptsLocked(ctx context.Context, api leadRuntimeAPI, service bool) error {
 	// Reconcile retained receipts before discovering fresh work. The local files
 	// are exact-generation authority; a daemon restart never resumes a process.
 	names, err := s.state.Names(4096)
@@ -180,6 +223,9 @@ func (s *Supervisor) PollLeadRuntime(ctx context.Context) error {
 			}
 			delete(s.leads.leads, r.Pickup.Demand.ID)
 		} else if r.Attempted {
+			if !service {
+				return ErrDraining
+			}
 			if r.Ownership == nil {
 				return ErrProcessesUnconfirmed
 			}
@@ -204,27 +250,6 @@ func (s *Supervisor) PollLeadRuntime(ctx context.Context) error {
 			if e = local.adapter.ServiceLead(ctx, local.process, pause); e != nil {
 				return e
 			}
-		}
-	}
-	if !s.dispatchAllowed("") {
-		return ErrDraining
-	}
-	if len(s.leads.config.Repositories) > 32 {
-		return ErrRoutineUnavailable
-	}
-	for _, repository := range s.leads.config.Repositories {
-		demand, e := api.LeadDemand(ctx, repository.ProjectID)
-		if e != nil {
-			return e
-		}
-		if demand == nil {
-			continue
-		}
-		if demand.ProjectID != repository.ProjectID || demand.OwnerID != repository.OwnerID || repository.TenantID != s.tenantID {
-			return ErrScope
-		}
-		if e = s.startLead(ctx, api, *demand, repository); e != nil {
-			return e
 		}
 	}
 	return nil

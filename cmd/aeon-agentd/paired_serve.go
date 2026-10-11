@@ -347,6 +347,8 @@ func pairedPollIteration(ctx context.Context, s *agentd.Supervisor, root string,
 	}
 	if err == nil {
 		err = s.PollLeadRuntime(ctx)
+	} else {
+		err = errors.Join(err, s.ReconcileLeadRuntime(ctx))
 	}
 	return current, err
 }

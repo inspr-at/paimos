@@ -2672,15 +2672,26 @@ func (s *Supervisor) Close(ctx context.Context) error {
 		s.leads.mu.Lock()
 		defer s.leads.mu.Unlock()
 	}
-	if err := checkRetainedLeads(s.state); err != nil {
-		return err
-	}
 	s.mu.Lock()
 	s.closing = true
 	capturing := s.capacityCapturing
 	s.mu.Unlock()
 	if capturing {
 		return ErrDraining
+	}
+	if s.leads != nil {
+		if s.leads.config != nil {
+			api, ok := s.api.(leadRuntimeAPI)
+			if !ok || s.ledger == nil {
+				return ErrProcessesUnconfirmed
+			}
+			if err := s.reconcileLeadReceiptsLocked(ctx, api, false); err != nil {
+				return err
+			}
+		}
+		if err := checkRetainedLeads(s.state); err != nil {
+			return err
+		}
 	}
 	status := s.Lifecycle("")
 	if len(status.ActiveRunIDs) > 0 {

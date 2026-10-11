@@ -4,7 +4,7 @@ paths:
   /projects/{projectId}/lead-runtime:
     get:
       summary: Poll the project's authorized lead demand
-      description: 'Agent-only harness.read. Returns one bounded demand after explicit person lead consent and project qualification. Existing or adoption-selected leads are reused without launching a replacement. Missing consent, qualified executor or runtime facts returns a visible wait. No queue presence grants start authority.'
+      description: 'Agent-only harness.worker. Returns one bounded demand after explicit person lead consent and project qualification. Existing or adoption-selected leads are reused without launching a replacement. Missing consent, qualified executor or runtime facts returns a visible wait. No queue presence grants start authority.'
       parameters:
         - $ref: '#/components/parameters/projectId'
       responses:

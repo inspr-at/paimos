@@ -127,7 +127,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		status         int
 		fn             func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 	}{
-		{"GET /api/projects/{projectId}/lead-runtime", "harness.read", true, 200, m.readLeadRuntime},
+		{"GET /api/projects/{projectId}/lead-runtime", "harness.worker", true, 200, m.readLeadRuntime},
 		{"POST /api/projects/{projectId}/lead-runtime/claim", "harness.worker", true, 200, m.claimLeadRuntime},
 		{"POST /api/projects/{projectId}/lead-runtime/report", "harness.worker", true, 200, m.reportLeadRuntime},
 		{"GET /api/projects/{projectId}/lead", "harness.read", false, 200, m.readLead},

@@ -173,22 +173,29 @@ func TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit(t *testing.T
 					t.Fatal("restart accepted unknown exit", err)
 				}
 				local := s.leads.leads[g.LaunchID]
+				if err := s.Close(t.Context()); !errors.Is(err, ErrDraining) {
+					t.Fatal("shutdown accepted an active native lead", err)
+				}
 				closeOnce.Do(func() { close(adapter.exit) })
 				select {
 				case <-local.done:
 				case <-t.Context().Done():
 					t.Fatal("native Wait did not finish")
 				}
-				api.demand = agentsetup.LeadDemand{} // no new demand after the reserved attempt
-				s.leads.config.Repositories = nil
-				if err := s.PollLeadRuntime(t.Context()); err != nil {
+				// Shutdown reconciles exit without discovery or another native start.
+				if err := s.Close(t.Context()); err != nil {
 					t.Fatal(err)
 				}
 				data, _, err = s.ledger.Snapshot()
 				if err != nil || len(data.Groups) != 0 || len(lease.finished) != 1 || !lease.finished[0] {
 					t.Fatal("confirmed exit did not release exact slot", data, lease.finished, err)
 				}
-				if err := checkRetainedLeads(s.state); err != nil {
+				store, err := agentsetup.OpenStore(s.state.Path(), false)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer store.Close()
+				if err := checkRetainedLeads(store); err != nil {
 					t.Fatal(err)
 				}
 			} else {
