@@ -98,28 +98,27 @@ onBeforeUnmount(() => { scope.dispose(); unsubscribe() })
 <template>
   <div class="usage-policy" data-account-usage :aria-busy="busy">
     <p v-if="who" class="who">{{ who }}</p>
-    <template v-if="policy">
-      <div class="lim" data-limit="floor">
-        <span class="lbl"><b :id="floorId">{{ text('Floor', 'Untergrenze') }}</b><small>{{ text(`Agents never use the last ${policy.floor_percent} % of this account, not even with Use everything or Boost today.`, `Agenten nutzen die letzten ${policy.floor_percent} % dieses Kontos nie, auch nicht mit „Alles nutzen“ oder Boost heute.`) }}</small></span>
-        <span v-if="mayFloor" class="pct"><input v-model.number="floor" class="field n" type="number" min="0" max="80" step="1" inputmode="numeric" :aria-labelledby="floorId" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :readonly="busy" @change="commitFloor" @keydown="floorKey" />%</span>
-        <span v-else class="pct"><b>{{ policy.floor_percent }} %</b></span>
-      </div>
-      <div v-if="pace" class="lim" data-limit="daily">
-        <span class="lbl"><b>{{ text('Daily limit', 'Tageslimit') }}</b><small>{{ pace }}</small></span>
-        <RouterLink class="go" to="/settings/capacity" :aria-label="text('Daily limit, in Capacity', 'Tageslimit, unter Kapazität')">{{ text('Capacity', 'Kapazität') }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
-      </div>
-      <slot />
-      <AccountResetsCard v-if="resets" class="rs" :account-id="policy.account_id" :harness="resets.harness" :provider="resets.provider" :credits="resets.credits" :policy="resets.policy" :plan="resets.plan" :now="readAt" :can-set="mayResets" :busy="busy" @set="setResets" />
-    </template>
+    <div v-if="policy" class="lim" data-limit="floor">
+      <span class="lbl"><b :id="floorId">{{ text('Floor', 'Untergrenze') }}</b><small>{{ text(`Agents never use the last ${policy.floor_percent} % of this account, not even with Use everything or Boost today.`, `Agenten nutzen die letzten ${policy.floor_percent} % dieses Kontos nie, auch nicht mit „Alles nutzen“ oder Boost heute.`) }}</small></span>
+      <span v-if="mayFloor" class="pct"><input v-model.number="floor" class="field n" type="number" min="0" max="80" step="1" inputmode="numeric" :aria-labelledby="floorId" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :readonly="busy" @change="commitFloor" @keydown="floorKey" />%</span>
+      <span v-else class="pct"><b>{{ policy.floor_percent }} %</b></span>
+    </div>
     <p v-else-if="error" class="policy-feedback" role="alert">{{ error }} <button type="button" class="btn sm" @click="load">{{ text('Reload', 'Neu laden') }}</button></p>
     <p v-else class="policy-feedback quiet" role="status">{{ busy ? text('Loading usage settings…', 'Nutzungseinstellungen werden geladen…') : text('Usage settings are private.', 'Nutzungseinstellungen sind privat.') }}</p>
+    <!-- The pace belongs to the harness, not to this account's usage settings: it shows even while those are private. -->
+    <div v-if="pace" class="lim" data-limit="daily">
+      <span class="lbl"><b>{{ text('Daily limit', 'Tageslimit') }}</b><small>{{ pace }}</small></span>
+      <RouterLink class="go" to="/settings/capacity" :aria-label="text('Daily limit, in Capacity', 'Tageslimit, unter Kapazität')">{{ text('Capacity', 'Kapazität') }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
+    </div>
+    <slot />
+    <AccountResetsCard v-if="policy && resets" class="rs" :account-id="policy.account_id" :harness="resets.harness" :provider="resets.provider" :credits="resets.credits" :policy="resets.policy" :plan="resets.plan" :now="readAt" :can-set="mayResets" :busy="busy" @set="setResets" />
   </div>
 </template>
 <style scoped>
 .usage-policy { display: grid; container: usage / inline-size; }
 .who { margin: 4px 0 2px; font-size: 12px; font-weight: 600; color: var(--ink-2); overflow-wrap: anywhere; }
 .lim { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 16px; min-height: 60px; padding: 8px 0; }
-.lim + .lim { border-top: 1px solid var(--line); }
+.lim + .lim, .policy-feedback + .lim { border-top: 1px solid var(--line); }
 .lbl { display: grid; gap: 2px; min-width: 0; }
 .lbl b { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .lbl small { font-size: 12.5px; line-height: 1.45; color: var(--ink-3); }
