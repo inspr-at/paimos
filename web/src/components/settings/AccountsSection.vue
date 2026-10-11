@@ -21,8 +21,8 @@ import QuotaWarningCard from './QuotaWarningCard.vue'
 
 const ctx = useAccountsSettings('accounts')
 const { capacity, accounts, machines, manage, add, open, account, thresholds, needs, allReady, show, actAttention, quota } = toRefs(ctx)
-// The legend names Keep for you only while it keeps something on some account.
-const keeps = computed(() => accounts.value.some(a => quota.value(a).bar.keepAt !== null))
+// The legend names Keep for you whenever the person keeps something (the same in the panel).
+const keeps = computed(() => capacity.value.schedule.reserve !== 'off')
 </script>
 
 <template>

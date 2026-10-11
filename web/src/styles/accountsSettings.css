@@ -28,6 +28,9 @@
   .ar-q .cap { white-space: normal; overflow: visible; }
 }
 .q-legend { margin-top: 12px; }
+.p-say-slot { display: grid; margin-top: 12px; }
+.p-say-slot > .p-say { grid-area: 1/1; margin: 0; }
+.p-say.sizer { visibility: hidden; }
 .p-say { margin-top: 12px; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
 .p-say b { color: var(--ink); font-weight: 600; }
 .p-win { display: grid; gap: 6px; margin: 12px 0 0; }

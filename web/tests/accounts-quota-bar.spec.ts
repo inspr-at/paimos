@@ -158,12 +158,12 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
       // A change saves on leaving the field.
       await guard.check(async () => {
         await floor.fill('15'); await floor.press('Tab')
-        await expect(limits.locator('[data-limit="floor"] small')).toContainText('the last 15 %')
         await expect(page.locator('.toast').filter({ hasText: 'Floor saved: 15 %.' })).toBeVisible()
+        await expect(floor).toHaveValue('15')
       })
       await guard.check(async () => {
         await page.locator('.toast').filter({ hasText: 'Floor saved: 15 %.' }).getByRole('button', { name: 'Undo' }).click()
-        await expect(limits.locator('[data-limit="floor"] small')).toContainText('the last 10 %')
+        await expect(page.locator('.toast').filter({ hasText: 'Floor restored: 10 %.' })).toBeVisible()
         await expect(floor).toHaveValue('10')
       })
       guard.done()

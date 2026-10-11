@@ -115,7 +115,7 @@ test('failed capacity apply stays unsaved and reports the actual failure',async(
   await expect(pane.getByRole('button',{name:/^Apply/})).toBeEnabled()
 })
 test('members see account and computer details without mutation controls',async({page}) => {
-  await setup(page,false,false,false,ACCOUNTS);await expect(page.locator('.quota-line')).toContainText('early 10 %, urgent 3 %')
+  await setup(page,false,false,false,ACCOUNTS);await expect(page.locator('.quota-line')).toContainText('at 10 % left, urgently at 3 %')
   await expect(page.locator('.quota-line').getByRole('button',{name:'Change'})).toHaveCount(0)
   await page.goto(COMPUTERS)
   const pane = await computer(page)
@@ -129,10 +129,10 @@ test('quota warning popover submits with platform modifier and Undo restores its
   await form.getByRole('spinbutton',{name:'Early notice (%)'}).fill('20');await form.getByRole('spinbutton',{name:'Urgent notice (%)'}).fill('5')
   const mac = await page.evaluate(()=>/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
   await form.getByRole('spinbutton',{name:'Urgent notice (%)'}).press(mac?'Meta+Enter':'Control+Enter')
-  await expect(page.locator('.quota-line')).toContainText('early 20 %, urgent 5 %')
+  await expect(page.locator('.quota-line')).toContainText('at 20 % left, urgently at 5 %')
   expect(s.writes[0]).toMatchObject({expected_early_percent:10,expected_urgent_percent:3})
   await page.getByRole('button',{name:'Undo',exact:true}).click()
-  await expect(page.locator('.quota-line')).toContainText('early 10 %, urgent 3 %')
+  await expect(page.locator('.quota-line')).toContainText('at 10 % left, urgently at 3 %')
 })
 
 test('Needs you verifies the expired sign-in once and reports a failed request honestly',async({page}) => {

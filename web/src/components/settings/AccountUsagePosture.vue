@@ -99,7 +99,7 @@ onBeforeUnmount(() => { scope.dispose(); unsubscribe() })
   <div class="usage-policy" data-account-usage :aria-busy="busy">
     <p v-if="who" class="who">{{ who }}</p>
     <div v-if="policy" class="lim" data-limit="floor">
-      <span class="lbl"><b :id="floorId">{{ text('Floor', 'Untergrenze') }}</b><small>{{ text(`Agents never use the last ${policy.floor_percent} % of this account, not even with Use everything or Boost today.`, `Agenten nutzen die letzten ${policy.floor_percent} % dieses Kontos nie, auch nicht mit „Alles nutzen“ oder Boost heute.`) }}</small></span>
+      <span class="lbl"><b :id="floorId">{{ text('Floor', 'Untergrenze') }}</b><small>{{ text('Agents never use this last part of the account, not even with Use everything or Boost today.', 'Agenten nutzen diesen letzten Teil des Kontos nie, auch nicht mit „Alles nutzen“ oder Boost heute.') }}</small></span>
       <span v-if="mayFloor" class="pct"><input v-model.number="floor" class="field n" type="number" min="0" max="80" step="1" inputmode="numeric" :aria-labelledby="floorId" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :readonly="busy" @change="commitFloor" @keydown="floorKey" />%</span>
       <span v-else class="pct"><b>{{ policy.floor_percent }} %</b></span>
     </div>

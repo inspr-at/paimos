@@ -61,8 +61,8 @@ for (const width of [400, 1024, 1440]) for (const theme of ['light', 'dark']) te
     await input.fill('25'); await input.press('Enter'); expect(writes).toHaveLength(2)
     await input.press('Escape'); await expect(input).toHaveValue('10'); await expect(input).not.toBeFocused(); expect(writes).toHaveLength(2)
     await input.fill('25'); await input.press(await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) ? 'Meta+Enter' : 'Control+Enter')
-    await expect(usage.locator('[data-limit="floor"] small')).toContainText('the last 25 % of this account')
     await expect(page.locator('.toast').filter({ hasText: 'Floor saved: 25 %.' }).getByRole('button', { name: 'Undo' })).toBeVisible()
+    await expect(input).toHaveValue('25')
     await dismiss()
   })
   fail = true

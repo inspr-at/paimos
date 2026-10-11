@@ -165,3 +165,15 @@ export function quotaSentence(bar: QuotaBar, o: { vendor: string; atLimit?: 'lad
   if (bar.by === 'today') return [{ text: 'At today’s limit until midnight.', strong: true }, { text: o.atLimit === 'wait' ? ` New ${o.vendor} work waits until then.` : ` New ${o.vendor} work follows the model ladder meanwhile.` }]
   return [{ text: 'Agents have stopped using it.', strong: true }, { text: bar.by === 'keep' ? ' The rest is kept for you while you work.' : bar.by === 'rule' ? ' The limit set by you is used up for now.' : ' Only the floor is left.' }]
 }
+/**
+ * The longest sentence of every state the panel's own controls can reach (the switch,
+ * End now, Remove, a floor). The panel reserves the tallest of them, so a change in
+ * Limits never moves the controls below the sentence (AEON-541).
+ */
+export function widestSentences(vendor: string): Said[][] {
+  return [
+    quotaBar({ used: 10.5, limit: 99, keep: 22.5 }), quotaBar({ used: 10.5, limit: 77.5, boost: true }), quotaBar({ used: 10.5, limit: 100 }),
+    quotaBar({ used: 50.5, limit: 50.5 }), quotaBar({ used: 50.5, limit: 60.5, ruleLeft: 0 }), quotaBar({ used: 50.5, limit: 60.5, paused: 'off' }),
+    quotaBar({ used: 50.5, limit: 60.5, paused: 'held' }), quotaBar({ used: 50.5, limit: 60.5, stale: true }), quotaBar({ used: 50.5 }),
+  ].map(bar => quotaSentence(bar, { vendor, atLimit: 'ladder' }))
+}
