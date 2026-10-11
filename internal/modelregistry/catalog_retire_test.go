@@ -298,7 +298,7 @@ func retireFixture(t *testing.T) (tenant.Principal, Profile, Profile) {
 		if err := RecordCatalogFacts(t.Context(), tx, admin.TenantID, append(recorded.Facts, future...)); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by,set_at) VALUES($1,'claude',$2,'Fixture pause',$3,'2026-10-11T00:00:00Z')`, admin.TenantID, old.Model, admin.ID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, admin.TenantID, old.ID); err != nil {
 			return err
 		}
 		return flushCatalogChanges(t.Context(), tx, admin, pending)
@@ -336,8 +336,13 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by,set_at) VALUES($1,'claude',$2,'Fixture pause',$3,'2026-10-11T00:00:00Z')`, admin.TenantID, older.Model, admin.ID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',2,$2)`, admin.TenantID, older.ID); err != nil {
 			return err
+		}
+		for _, model := range []string{old.Model, older.Model} {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by,set_at) VALUES($1,'claude',$2,'Fixture pause',$3,'2026-10-11T00:00:00Z')`, admin.TenantID, model, admin.ID); err != nil {
+				return err
+			}
 		}
 		var scope, kind string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO work_kinds(tenant_id,slug,label) VALUES($1,'retire-kind','Retire kind') RETURNING id::text`, admin.TenantID).Scan(&kind); err != nil {
@@ -355,16 +360,29 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 	before := retireState(t, admin)
 	preview := outdatedPreview(t, admin)
 	version := requireOutdated(t, preview, "anthropic:claude-opus-5")
-	if version.State == nil || *version.State != "superseded" || version.Successor == nil || *version.Successor != "anthropic:claude-opus-5.5" || version.Source != "aeon_model_line/aeon_model_version_newer" || len(version.Uses) != 2 {
+	if version.State == nil || *version.State != "superseded" || version.Successor == nil || *version.Successor != "anthropic:claude-opus-5.5" || version.Source != "aeon_model_line/aeon_model_version_newer" || len(version.Uses) != 3 {
 		t.Fatal(version)
 	}
 	result := boardDecode[retireResult](t, boardCall(t, admin, "POST", "/api/models/outdated/retire", retireWrite{Versions: []string{version.Version, "anthropic:claude-opus-4"}, Revision: preview.Revision}, ""), 200)
-	if len(result.Removed) != 2 || len(result.Moved) != 3 || result.UndoToken == "" || eventCount(t, admin, "model.outdated_retired") != 1 {
+	if len(result.Removed) != 2 || len(result.Moved) != 5 || result.UndoToken == "" || eventCount(t, admin, "model.outdated_retired") != 1 {
 		t.Fatal(result)
 	}
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		var pin string
 		var granted, eligible bool
+		if err := tx.QueryRow(t.Context(), `SELECT profile_id::text FROM model_role_routes WHERE role='build' AND priority=1`).Scan(&pin); err != nil {
+			return err
+		}
+		if pin != next.ID {
+			t.Fatal("role reference did not move", pin)
+		}
+		var routes int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_role_routes WHERE role='build'`).Scan(&routes); err != nil {
+			return err
+		}
+		if routes != 1 {
+			t.Fatal("compatible successor routes were not deduplicated", routes)
+		}
 		var pauses int
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_pauses WHERE harness='claude' AND model=$1 AND reason='Fixture pause' AND set_by=$2 AND until_at IS NULL AND set_at='2026-10-11T00:00:00Z'`, next.Model, admin.ID).Scan(&pauses); err != nil {
 			return err
@@ -428,6 +446,22 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 	}
 	if !reflect.DeepEqual(edited, retireState(t, admin)) {
 		t.Fatal("stale Undo wrote partial restoration")
+	}
+	// Check the legacy role fence independently of the pause edit.
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE model_pauses SET reason='Fixture pause' WHERE model='claude-opus-5.5'`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET reason='Later edit' WHERE role='build'`)
+		return err
+	})
+	edited = retireState(t, admin)
+	rejected = boardCall(t, admin, "POST", "/api/models/outdated/undo", map[string]any{"undo_token": second.UndoToken}, "")
+	if rejected.Code != 409 || !strings.Contains(rejected.Body.String(), "references changed") {
+		t.Fatal("wrong stale role Undo result", rejected.Body.String())
+	}
+	if !reflect.DeepEqual(edited, retireState(t, admin)) {
+		t.Fatal("stale role Undo wrote partial restoration")
 	}
 }
 
