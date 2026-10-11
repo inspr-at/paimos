@@ -305,6 +305,9 @@ func (d *modelsDailyAdmission) filter(ctx context.Context, tx pgx.Tx, profile Pr
 				wait = &agentaccounts.CapacityWait{}
 			}
 			firstCause = agentaccounts.ModelWaitReason(profile.Harness, wait)
+			if !visible[a.id] {
+				d.blocked = firstCause
+			}
 		}
 	}
 	if len(kept) > 0 {
