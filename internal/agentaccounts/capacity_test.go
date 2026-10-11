@@ -691,6 +691,7 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	}
 	check("UTC", "")
 	// An explicitly saved owner remains authoritative even with multiple creators.
+	user.Override = ""
 	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, &user, false, ""}), 204, nil)
 	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, nil, false, ""}), 204, nil)
 	check("America/New_York", "")
