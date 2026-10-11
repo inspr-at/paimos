@@ -384,6 +384,8 @@
     ,
     "browser:tests/agents-harness-status.spec.ts:the specific pin_missing command is the row's fix at 390 light"
     ,
+    "browser:tests/agents-head.spec.ts:\"…\" keeps six items; moved actions have their home on the page"
+    ,
     "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 1600px"
     ,
     "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 1600px with reported metadata"
@@ -990,6 +992,18 @@
     ,
     "browser:tests/routines-editor.spec.ts:your routines need the right only in their own project, and losing it there closes the sheet"
     ,
+    "browser:tests/routines-tab.spec.ts:a late page for another routine cannot alter the logbook on screen"
+    ,
+    "browser:tests/routines-tab.spec.ts:a person switch clears the open logbook, filters and the previous person’s routines"
+    ,
+    "browser:tests/routines-tab.spec.ts:one row per routine; filters per kind; failed never green; created is not finished; controls stay put"
+    ,
+    "browser:tests/routines-tab.spec.ts:phone › the list, then one logbook with a way back, in dark"
+    ,
+    "browser:tests/routines-tab.spec.ts:phone › the list, then one logbook with a way back, in light"
+    ,
+    "browser:tests/routines-tab.spec.ts:the Agents page offers Routines in More, and one Routines line only while something waits or failed"
+    ,
     "browser:tests/service-tier.spec.ts:1440: compact Default tier control keeps its box through confirmation and Undo"
     ,
     "browser:tests/service-tier.spec.ts:320: phone Change tier menu opens and restores its actual trigger"
@@ -1573,6 +1587,28 @@
     "vitest:tests/routines-editor.unit.test.ts:stale and late answers > applies an answer only to the open record at a revision at least the one shown"
     ,
     "vitest:tests/routines-editor.unit.test.ts:stale and late answers > names exactly the fields the server changed since the shown revision"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:routine rows > counts states, and the Agents line appears only while something waits or failed"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:routine rows > names triggers briefly"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:routine rows > says the reason in words for every state; created is never called done"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:run states > a created ticket says it is not a finished run; running says how long so far"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:run states > a run page that is not one is a read failure, never an empty logbook"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:run states > only Done uses the Done tint; created never shows a check and failed is danger"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:the run chain > a confirmed clean exit is a neutral check; an unconfirmed exit is unknown; checks and people say what they decided"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:the run chain > a failed run: error exit and failed effect are danger, nothing reads as filed"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:the run chain > no actions recorded says so; a created run stops after the agent"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:usage words > never shows unknown or partial usage as zero or complete"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:usage words > settles in measured facts: paid, the API list price and what stays reserved"
     ,
     "vitest:tests/row-store.unit.test.ts:RowStore: revisions only move forward > an authoritative GET clears withheld provenance even at the same revision and while editing"
     ,
@@ -6004,7 +6040,7 @@
     ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific pin_missing command is the row's fix at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-head.spec.ts","name":"\"…\" keeps five items; moved actions have their home on the page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-head.spec.ts","name":"\"…\" keeps six items; moved actions have their home on the page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-head.spec.ts","name":"one head line; a count filters Sessions, keeps ancestors as context and clears with × or Esc at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11453,6 +11489,18 @@
     {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the phone sheet scrolls under a pinned footer, and switching who moves nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"your routines need the right only in their own project, and losing it there closes the sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"a late page for another routine cannot alter the logbook on screen","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"a person switch clears the open logbook, filters and the previous person’s routines","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"one row per routine; filters per kind; failed never green; created is not finished; controls stay put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"phone › the list, then one logbook with a way back, in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"phone › the list, then one logbook with a way back, in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"the Agents page offers Routines in More, and one Routines line only while something waits or failed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/row-actions.spec.ts","name":"PDF from the list opens the quote on its page and prints it once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -17423,6 +17471,28 @@
     {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"stale and late answers > names exactly the fields the server changed since the shown revision","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"today’s route > reads as the Models page does: registry name and harness label, never a model or profile id","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"routine rows > counts states, and the Agents line appears only while something waits or failed","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"routine rows > names triggers briefly","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"routine rows > says the reason in words for every state; created is never called done","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"run states > a created ticket says it is not a finished run; running says how long so far","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"run states > a run page that is not one is a read failure, never an empty logbook","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"run states > only Done uses the Done tint; created never shows a check and failed is danger","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"the run chain > a confirmed clean exit is a neutral check; an unconfirmed exit is unknown; checks and people say what they decided","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"the run chain > a failed run: error exit and failed effect are danger, nothing reads as filed","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"the run chain > no actions recorded says so; a created run stops after the agent","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"usage words > never shows unknown or partial usage as zero or complete","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"usage words > settles in measured facts: paid, the API list price and what stays reserved","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/row-actions.unit.test.ts","name":"customer row actions > offers open, a new quote, the number and archive","tier":"GATED-FULL"}
     ,

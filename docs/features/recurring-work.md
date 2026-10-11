@@ -50,6 +50,36 @@ run routines there; an owner or admin can turn it off, and turning it on waits
 for OPS qualification. Rows show the derived state (Scheduled, Waiting for a
 person, Held, Stopped; Running and Failed once runs are reported).
 
+### Agents › Routines and the logbook (AEON-1192)
+
+**Agents › Routines** (`/agents/routines`, in the Agents page's More menu)
+lists every routine the signed-in person can see once, whichever box made it.
+Scope (All, Projects, Yours, Workspace), project and state filters live in the
+query (`?scope=&project=&state=&routine=&run=`), so a link reopens the same
+view. Counts cover the loaded pages and read "N+" while more pages remain;
+**More routines** appends the next 100 once per definition. The Agents page
+shows one **Routines** line while a routine waits for a person or failed.
+Each project, personal and workspace box links to the page, and
+`/settings/routines` opens Settings → Routines directly.
+
+The selected routine's logbook opens beside the list; on narrow screens the
+list gives way to one logbook with **All routines** to go back. It is
+RecurrenceHistory extended: the same head with Pause/Resume, Run now and Edit…,
+then facts (Who with today's route, May, Budget, Runs on, Owner, Upcoming), a
+band when it waits for consent or is held (with the wait code), and the
+logbook. Agent routines list their S21 runs (`GET /api/recurrences/{id}/runs`,
+20 a page) and Changes; ticket-only routines keep All, Created, Skipped and
+Changes from the history (50 a page). A run opens into its chain from
+`GET /api/recurrences/{id}/runs/{runId}`: ticket, agent attempts, actions,
+checks, the person's decision (with a Decision Desk link) and the settled
+usage. Only Done uses the Done tint; a created ticket says it is not a
+finished run; unknown or partial usage is never shown as zero or complete,
+and paid, API-list-price and reserved amounts are kept apart. A failed older
+page says so and keeps what is shown. Each routine and filter has its own
+read lane, so a late page for another routine or person never alters the
+logbook on screen; a person switch clears the list, filters, open logbook and
+draft. In a project box, an agent routine's history is the same logbook.
+
 The additive UI contract stores the optional recurrence `name` in `template`.
 `GET /api/recurrences/{id}/history` pages 50 events with a `before` cursor and
 `all|created|skipped|changes` filter. `GET /api/recurrences/{id}/releases` lists
