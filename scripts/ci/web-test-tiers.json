@@ -6250,6 +6250,8 @@
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"worker tree fits 390px in light, passes axe, and captures coordinator evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"AEON-1219: registry navigation and hints respect menus, fields, IME and native keys","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"Enter opens a session, j and k move the panel along, Escape closes it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"SC2 ticket detail uses the available width at 1600 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -18033,6 +18035,10 @@
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #ticket-types opens vocabulary","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #work-vocabulary opens vocabulary","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"dispatches only attached eligible actions, preserves native/input/IME keys, and cancels stale sequences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"rejects shared keys in overlapping scopes and permits disjoint row/divider bindings","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > queries canonical leaves on every page and excludes parents and unknown shapes from mixed results","tier":"ESSENTIAL"}
     ,

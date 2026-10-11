@@ -365,7 +365,9 @@
         "web/tests/lead-adoption.unit.test.ts",
         "web/tests/lead-adoption.spec.ts",
         "web/tests/access-refresh-panels.unit.test.ts",
-        "web/src/stores/decisionDesk.ts"
+        "web/src/stores/decisionDesk.ts",
+        "web/src/lib/shortcuts.ts",
+        "web/tests/shortcuts.unit.test.ts"
       ],
       "exclude": [
         "web/src/views/**",
