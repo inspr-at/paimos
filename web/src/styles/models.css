@@ -53,10 +53,11 @@
 .models-section .lock:hover, .models-section .lock:focus-visible { background: var(--row-hover); outline: none; }
 .models-section .x { width: 32px; height: 32px; color: var(--ink-3); }
 
-/* Can't run: icon plus words, never colour alone. */
+/* Can't run: icon plus one sentence from one cause, never colour alone, never a code (Models v2). */
 .models-section .na { grid-area: n; display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
-.models-section .na svg { flex: none; margin-top: 2px; color: var(--warn-ink); }
-.models-section .na b { color: var(--ink); font-weight: 600; }
+.models-section .na > svg { flex: none; margin-top: 2px; color: var(--warn-ink); }
+/* The gap around the arrow is margin, not text, so the sentence reads with single spaces ("…, so …"). */
+.models-section .na .ar { display: inline-block; vertical-align: -1px; margin: 0 5px; color: var(--ink-3); }
 
 .models-section .addrow { padding: 10px 16px 10px 30px; }
 .models-section .add { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; margin-left: -10px; padding: 0 12px 0 10px; border: 0; border-radius: 10px; background: transparent; color: var(--teal-ink); font-size: 13.5px; font-weight: 600; }
@@ -105,12 +106,14 @@
 .models-section .m-fold .fold svg.open { transform: rotate(90deg); }
 .models-section .m-fold .fold:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 8px; }
 
-/* Menus: one popover. Model menu = filter field, harness groups, each model with its own thinking levels. */
+/* Menus: one popover. Model menu = filter field, providers, model lines (newest first) with their own levels; older
+   versions fold per provider behind one quiet line. */
 .mdl-pop { position: fixed; z-index: 80; display: flex; flex-direction: column; overflow: hidden; padding: 0; border-radius: 12px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); overscroll-behavior: contain; width: var(--pm-w, 320px); max-width: calc(100vw - 24px); }
 .mdl-pop:focus-visible { outline: none; }
-.mdl-pop .pm-q { display: block; width: 100%; height: 42px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--ink); font-size: 13.5px; box-shadow: none; }
+.mdl-pop .pm-q { display: block; flex: none; width: 100%; height: 42px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--ink); font-size: 13.5px; box-shadow: none; }
 .mdl-pop .pm-q::placeholder { color: var(--ink-3); }
 .mdl-pop .pm-q:focus-visible { outline: none; }
+/* Only the list gives way when a menu has less room; the field, notes and the lock row keep their size. */
 .mdl-pop .pm-l { flex: 1 1 auto; min-height: 0; padding: 6px; overflow: auto; max-height: 460px; }
 .mdl-pop .opt { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 16px; align-items: center; column-gap: 10px; width: 100%; min-height: 48px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
 .mdl-pop .ot { display: grid; min-width: 0; }
@@ -130,13 +133,21 @@
 .mdl-pop .lvc:hover { color: var(--ink); background: var(--surface-sunken); }
 .mdl-pop .lvc[data-on] { color: var(--ink-2); background: var(--surface-sunken); }
 .mdl-pop .opt.on .lvc[data-on], .mdl-pop .opt[aria-selected="true"] .lvc[data-on] { color: var(--teal-ink); background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); font-weight: 600; }
-.mdl-pop .pm-sep { height: 1px; margin: 5px 8px; background: var(--line); }
-.mdl-pop .pm-why { display: flex; gap: 8px; padding: 10px 14px 12px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.45; color: var(--ink-3); }
+.mdl-pop .pm-g + .pm-g { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--line); }
+.mdl-pop .pm-gh, .mdl-pop .pm-oh { padding: 6px 10px 2px; font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+.mdl-pop .pm-oh { padding-top: 8px; font-size: 11px; letter-spacing: .06em; text-transform: none; }
+/* An older version is shown for what it is: its line always runs the newest version, so it is never picked. */
+.mdl-pop .opt.is-old { cursor: default; }
+.mdl-pop .opt.is-old .t { color: var(--ink-2); }
+.mdl-pop .opt.more { grid-template-columns: 22px minmax(0, 1fr) 16px; min-height: 36px; color: var(--ink-2); }
+.mdl-pop .opt.more .t { font-size: 12.5px; font-weight: 500; color: var(--ink-2); }
+.mdl-pop .opt.more svg { color: var(--ink-3); }
+.mdl-pop .pm-why { display: flex; flex: none; gap: 8px; padding: 10px 14px 12px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.45; color: var(--ink-3); }
 .mdl-pop .pm-why svg { flex: none; margin-top: 1px; }
 .mdl-pop .pm-none { padding: 12px 10px; font-size: 12.5px; color: var(--ink-3); }
-.mdl-pop .pm-lock { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); }
+.mdl-pop .pm-lock { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); }
 .mdl-pop .pm-lock .switch { min-height: 40px; }
-.mdl-pop .pm-foot { padding: 8px 14px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+.mdl-pop .pm-foot { flex: none; padding: 8px 14px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
 .mdl-pop.why { width: min(380px, calc(100vw - 24px)); padding: 16px 18px 14px; overflow: auto; }
 .mdl-pop.why h3 { font-size: 13.5px; }
 .mdl-pop.why ol { display: grid; gap: 7px; margin-top: 10px; padding-left: 18px; list-style: decimal; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
@@ -262,7 +273,7 @@
 /* Touch: every target at least 44 px; inline links grow their hit area without moving the text. */
 @media (pointer: coarse) {
   .models-section .link-btn::before, .mdl-pop .link-btn::before { inset: -14px -8px; }
-  .mdl-pop .pm-q, .mdl-pop .opt.plain, .mdl-pop .pm-lock .switch, .models-section .lock, .models-section .x, .models-section .seg.scope button, .models-section .pick, .models-section .add { min-height: 44px; }
+  .mdl-pop .pm-q, .mdl-pop .opt.plain, .mdl-pop .opt.more, .mdl-pop .pm-lock .switch, .models-section .lock, .models-section .x, .models-section .seg.scope button, .models-section .pick, .models-section .add { min-height: 44px; }
   .models-section .lock, .models-section .x { min-width: 44px; }
   .models-section .grip, .models-section .ch-pick, .models-section .fb-sum, .models-section .add.sm, .models-section .seg.sm button { min-height: 44px; }
   .models-section .grip, .models-section .icon-btn.x.sm { min-width: 44px; min-height: 44px; }

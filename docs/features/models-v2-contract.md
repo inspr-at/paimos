@@ -47,7 +47,10 @@ The page includes Quick jobs' resolved pick, harness and trace. Each
 `unavailable` entry represents one distinct cause for that row:
 `daily_cap`, `paused`, `no_tools`, `no_account`, `retired`, or `residency`,
 with the skipped route, visible reset/expiry time, replacement, and `waits`.
-The compatibility `reason` remains deprecated. Private account evidence
+`runs_via` (AEON-1160, additive) names the harness of the route that runs
+instead, or null when the row waits; with `runs_instead` equal to `line` the
+same model runs through another route. The compatibility `reason` remains
+deprecated. Private account evidence
 retains the resolver's generic explanation and exposes no reset metrics.
 
 The `outdated` summary groups non-retired older numeric versions across

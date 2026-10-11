@@ -8,10 +8,10 @@ import { toast } from './toast'
 import { getMembers } from './access'
 import { preferenceFailure } from './modelsSettings'
 import { useSession } from '../stores/session'
-import { deleteNever, dismissLine, getRegistry, getSimple, getTail, getWorkspaceRules, putChain, putDismissed, putEffort, putNever, putOrder, putWorkspaceRules, resetOrder, type ChainBody } from './modelsSimpleApi'
+import { deleteNever, dismissLine, getRegistry, getSimple, getTail, getTicketResolution, getWorkspaceRules, putChain, putDismissed, putEffort, putNever, putOrder, putWorkspaceRules, resetOrder, type ChainBody } from './modelsSimpleApi'
 import {
-  ALL_COLUMN, buildEntries, buildRows, chainEfforts, effortLevel, entryFor, lineName, lineRoutes, lockReason, moveItem, movePin, nearestEffort, nextView, orderBody, orderLines, orderWithFirst, pinFirst, pinnedLast, pinnedSteps, rulesBody, sameOrder, unpin,
-  type ChainEnd, type ModelEntry, type RegistryProfile, type RowView, type RulesBody, type Scope, type SimpleDocument, type SimpleNever, type SimpleStep, type TailBoard, type TailColumn,
+  ALL_COLUMN, buildEntries, buildRows, chainEfforts, effortLevel, entryFor, lineName, lineRoutes, lockReason, moveItem, movePin, nearestEffort, nextView, orderBody, orderLines, orderWithFirst, pinFirst, pinnedLast, pinnedSteps, rulesBody, sameOrder, ticketWhy, unpin,
+  type ChainEnd, type ModelEntry, type RegistryProfile, type RowView, type RulesBody, type Scope, type SimpleDocument, type SimpleNever, type SimpleStep, type TailBoard, type TailColumn, type WhyView,
 } from './modelsSimple'
 
 interface Revs { prefs: number; rules: number }
@@ -382,6 +382,20 @@ export function useModelsSimple() {
     if (draft.value === column) draft.value = null
     return done
   }
+  /** Why the ticket a person clicked runs where it does: its own resolution, read for the identity on screen. A caller
+   *  whose link can change passes `still`, so an answer or a failure for a ticket that is no longer asked about is dropped. */
+  async function explain(ticket: string, still: () => boolean = () => true): Promise<WhyView | null> {
+    const identity = capture(), current = () => identity() && still()
+    try {
+      const resolution = await getTicketResolution(ticket)
+      if (!current()) return null
+      if (!resolution || !Array.isArray(resolution.ladder)) throw new Error('invalid resolution')
+      return ticketWhy({ ticket, resolution, profiles: profiles.value, entries: entries.value })
+    } catch {
+      if (current()) error.value = `Couldn’t load why ${ticket} runs on its model. Open it again from the ticket.`
+      return null
+    }
+  }
   function startException(column: string) { if (editable.value && columnOf(column)) draft.value = column }
   function discardException() { draft.value = null }
   function setScope(value: Scope) { if (value === 'default' && !can('model_prefs.manage')) return; scope.value = value }
@@ -399,5 +413,5 @@ export function useModelsSimple() {
   watch(() => can('models.read'), allowed => { if (allowed && !doc.value && !loading.value && owner.value) void load() })
   onBeforeUnmount(() => { alive = false; generation++; epoch.value++; abort?.abort(); unsubscribe() })
 
-  return { scope, doc, rows, names, entries, routes, labels, kinds, freeKinds, next, news, tail, loading, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey, cantReason, load, pick, use, clear, lock, dismiss, editChain, fixedSteps, canAllow, allowAgain, startException, discardException, setScope, dropError }
+  return { scope, doc, rows, names, entries, routes, labels, kinds, freeKinds, next, news, tail, loading, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey, cantReason, load, pick, use, clear, lock, dismiss, editChain, fixedSteps, canAllow, allowAgain, explain, startException, discardException, setScope, dropError }
 }

@@ -566,6 +566,7 @@ components:
               cause: {type: string, enum: [daily_cap, paused, no_tools, no_account, retired, residency]}
               until: {type: [string, 'null'], format: date-time}
               route: {type: [string, 'null'], description: 'Harness of the skipped route, absent when no registered route exists.'}
+              runs_via: {type: [string, 'null'], description: 'Harness of the route that runs instead; null when the row waits. With runs_instead equal to line, the same model runs through another route.'}
               waits: {type: boolean, description: 'No model in this row order can run now.'}
               reason: {type: string, deprecated: true, description: 'Compatibility explanation for this cause. New clients use cause, until and route.'}
               ticket: {type: [string, 'null']}

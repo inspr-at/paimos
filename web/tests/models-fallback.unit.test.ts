@@ -69,7 +69,7 @@ describe('the fallback in words', () => {
     ]
     const routes = lineRoutes([...registry(), ...extra])
     expect(routes.get(OPUS)).toEqual(['claude', 'cursor', 'pi']); expect(routes.get(SONNET)).toEqual(['claude']); expect(routes.get(SOL)).toEqual(['codex'])
-    expect(routeNote(routes.get(OPUS))).toBe('Claude, then 2 more'); expect(routeNote(routes.get(OPUS), 'cursor')).toBe('Cursor, then 2 more'); expect(routeNote(routes.get(SOL))).toBe('Codex'); expect(routeNote(undefined)).toBe('')
+    expect(routeNote(routes.get(OPUS))).toBe('Claude Code, then 2 more'); expect(routeNote(routes.get(OPUS), 'cursor')).toBe('Cursor, then 2 more'); expect(routeNote(routes.get(SOL))).toBe('Codex'); expect(routeNote(undefined)).toBe('')
   })
   it('says one cause per step in words, with its time, and never guesses about steps without evidence', () => {
     const now = Date.parse('2026-10-11T08:00:00Z')
@@ -79,7 +79,7 @@ describe('the fallback in words', () => {
     const design = views(doc())[1]!
     const capped = { column: 'design', line: OPUS, runs_instead: SONNET, effort: 'xhigh', reason: 'x', ticket: null, cause: 'daily_cap' as const, until: '2026-10-20T00:00:00Z', route: 'claude', waits: false }
     expect([...stepStates(design, [capped], now)]).toEqual([[OPUS, { text: 'daily cap until 20 Oct', runs: false }], [SONNET, { text: 'runs now', runs: true }]])
-    expect([...stepStates(design, [{ ...capped, runs_instead: OPUS }], now)]).toEqual([[OPUS, { text: 'runs now, not through Claude', runs: true }]])
+    expect([...stepStates(design, [{ ...capped, runs_instead: OPUS }], now)]).toEqual([[OPUS, { text: 'runs now, not through Claude Code', runs: true }]])
     expect(stepStates(design, [{ ...capped, column: 'concept' }], now).size).toBe(0)
   })
   it('stores step levels, keeps an inherited pick level inherited and leaves unknown lines automatic', () => {

@@ -8,7 +8,7 @@ import type { ModelRule, RegistryProfile, SimpleDocument, SimpleRow, SimpleTrace
 export const simplePerson = '11111111-1111-4111-8111-111111111111'
 export const otherPerson = '22222222-2222-4222-8222-222222222222'
 const LEVEL: Record<string, number> = { off: 0, default: 0, low: 1, medium: 2, high: 3, xhigh: 4, max: 5 }
-type Line = { id: string; harness: string; family: string; model: string; efforts: string[]; display: string; short: string; version: string; note?: string; retireAt?: string; source?: 'auto' | 'manual'; tools?: boolean }
+type Line = { id: string; harness: string; family: string; model: string; efforts: string[]; display: string; short: string; version: string; note?: string; retireAt?: string; source?: 'auto' | 'manual'; tools?: boolean; lifecycle?: RegistryProfile['lifecycle'] }
 export const LINES: Line[] = [
   { id: 'openai:sol', harness: 'codex', family: 'openai', model: 'gpt-6.1-sol', efforts: ['low', 'medium', 'high', 'xhigh'], display: 'Codex Sol', short: 'Sol', version: '6.1', note: 'strongest for building' },
   { id: 'openai:astra', harness: 'codex', family: 'openai', model: 'gpt-6-astra', efforts: ['low', 'medium', 'high', 'xhigh'], display: 'Codex Astra', short: 'Astra', version: '6', note: 'deepest reasoning, slower' },
@@ -20,6 +20,33 @@ export const LINES: Line[] = [
   { id: 'cursor:composer', harness: 'cursor', family: 'cursor', model: 'composer-2.5', efforts: ['default'], display: 'Composer', short: 'Composer', version: '2.5', note: 'quick edits in the editor' },
   { id: 'unknown:openrouter/qwen/qwen3-coder', harness: 'pi', family: 'unknown', model: 'openrouter/qwen/qwen3-coder', efforts: ['off'], display: 'Qwen3 Coder', short: 'Qwen3 Coder', version: '', note: 'trial for small scripts (AEON-1003)', source: 'manual' },
 ]
+// Opus 5.5 also runs through Cursor: one model, two routes. When the Claude account is capped, Cursor runs it.
+export const OPUS_CURSOR: Line = { id: 'anthropic:opus', harness: 'cursor', family: 'anthropic', model: 'claude-opus-5.5', efforts: ['high', 'max'], display: 'Cursor claude-opus-5.5', short: 'claude-opus-5.5', version: '' }
+const old = (successor: string, reason: string) => ({ state: 'superseded', date: null, successor, reason, source: 'harness' })
+// Many models (approved Models v2 state "many"): the live registry's spread with older versions of most lines and
+// several routes per model. Older versions fold in the picker; one row per line stays calm.
+export const MANY: Line[] = [
+  { id: 'openai:sol@6', harness: 'codex', family: 'openai', model: 'gpt-6-sol', efforts: ['medium', 'high', 'xhigh'], display: 'Codex Sol', short: 'Sol', version: '6', lifecycle: old('openai:gpt-6.1-sol', 'Codex’s model list says “upgrade to gpt-6.1-sol”') },
+  { id: 'openai:astra@6.1', harness: 'codex', family: 'openai', model: 'gpt-6.1-astra', efforts: ['low', 'medium', 'high', 'xhigh'], display: 'Codex Astra', short: 'Astra', version: '6.1', note: 'deepest reasoning, slower' },
+  { id: 'openai:luna@6.1', harness: 'codex', family: 'openai', model: 'gpt-6.1-luna', efforts: ['low', 'medium', 'high', 'xhigh'], display: 'Codex Luna', short: 'Luna', version: '6.1', note: 'fast and light' },
+  { id: 'openai:terra', harness: 'codex', family: 'openai', model: 'gpt-6.1-terra', efforts: ['medium', 'high', 'xhigh'], display: 'Codex Terra', short: 'Terra', version: '6.1', note: 'balanced, cheaper than Sol' },
+  { id: 'openai:terra@6', harness: 'codex', family: 'openai', model: 'gpt-6-terra', efforts: ['medium', 'high', 'xhigh'], display: 'Codex Terra', short: 'Terra', version: '6' },
+  { id: 'anthropic:opus@4.8', harness: 'claude', family: 'anthropic', model: 'claude-opus-4-8', efforts: ['low', 'medium', 'high', 'max'], display: 'Claude Opus', short: 'Opus', version: '4.8', lifecycle: { state: 'retiring', date: '2099-11-04T00:00:00Z', successor: 'anthropic:claude-opus-5-5', reason: 'Anthropic retires it on 4 Nov', source: 'provider' } },
+  { id: 'anthropic:sonnet@5', harness: 'pi', family: 'anthropic', model: 'anthropic/claude-sonnet-5', efforts: ['high'], display: 'Claude Sonnet', short: 'Sonnet', version: '5' },
+  { id: 'anthropic:sonnet/opencode', harness: 'opencode', family: 'anthropic', model: 'anthropic/claude-sonnet-5-5', efforts: ['default'], display: 'Claude Sonnet', short: 'Sonnet', version: '5.5' },
+  { id: 'anthropic:fable@5', harness: 'claude', family: 'anthropic', model: 'claude-fable-5', efforts: ['high', 'xhigh', 'max'], display: 'Claude Fable', short: 'Fable', version: '5' },
+  { id: 'anthropic:haiku', harness: 'claude', family: 'anthropic', model: 'claude-haiku-4-5', efforts: ['low', 'medium', 'high'], display: 'Claude Haiku', short: 'Haiku', version: '4.5', note: 'quick, cheap reads' },
+  { id: 'anthropic:haiku/cursor', harness: 'cursor', family: 'anthropic', model: 'claude-haiku-4.5', efforts: ['default'], display: 'Cursor claude-haiku-4.5', short: 'claude-haiku-4.5', version: '' },
+  { id: 'xai:grok/cursor', harness: 'cursor', family: 'xai', model: 'grok-4.7-high', efforts: ['high'], display: 'Grok', short: 'Grok', version: '4.7' },
+  { id: 'xai:grok@4.6', harness: 'grok', family: 'xai', model: 'grok-4.6', efforts: ['high', 'xhigh'], display: 'Grok', short: 'Grok', version: '4.6', tools: false },
+  { id: 'xai:grok@4.5', harness: 'grok', family: 'xai', model: 'grok-4.5', efforts: ['high'], display: 'Grok', short: 'Grok', version: '4.5', tools: false },
+  { id: 'google:gemini-pro', harness: 'gemini', family: 'google', model: 'gemini-3-pro', efforts: ['low', 'high'], display: 'Gemini Pro', short: 'Gemini Pro', version: '3', note: 'long context' },
+  { id: 'google:gemini-pro@2.5', harness: 'gemini', family: 'google', model: 'gemini-2.5-pro', efforts: ['1024', '4096', '16384', '32768'], display: 'Gemini Pro', short: 'Gemini Pro', version: '2.5' },
+  { id: 'google:gemini-flash', harness: 'gemini', family: 'google', model: 'gemini-3-flash', efforts: ['minimal', 'low', 'high'], display: 'Gemini Flash', short: 'Gemini Flash', version: '3' },
+  { id: 'google:gemini-flash@2.5', harness: 'gemini', family: 'google', model: 'gemini-2.5-flash', efforts: ['0', '1024', '4096'], display: 'Gemini Flash', short: 'Gemini Flash', version: '2.5' },
+  { id: 'cursor:composer-fast', harness: 'cursor', family: 'cursor', model: 'composer-2.5-fast', efforts: ['default'], display: 'Cursor Composer fast', short: 'Composer fast', version: '2.5' },
+]
+const FEW = ['openai:sol', 'anthropic:opus', 'anthropic:fable', 'anthropic:opus@4.8', 'anthropic:fable@5']
 export const NEW_LINE: Line = { id: 'xai:grok-preview', harness: 'grok', family: 'xai', model: 'grok-4.8-preview', efforts: ['medium', 'high', 'xhigh'], display: 'Grok 4.8 preview', short: 'Grok 4.8 preview', version: '', note: 'reviews and concepts', tools: false }
 export const KINDS: [string, string][] = [['design', 'UI design'], ['frontend', 'Frontend build'], ['backend', 'Backend build'], ['infra', 'Infrastructure'], ['docs', 'Docs and copy'], ['security', 'Security'], ['concept', 'Concepts']]
 const REVIEWS = ['review:openai', 'review:anthropic', 'review:xai']
@@ -28,7 +55,7 @@ export function registry(extra: Line[] = []): RegistryProfile[] {
   return [...LINES, ...extra].flatMap(line => line.efforts.map((effort, index): RegistryProfile => ({
     id: `${line.model}/${effort}`, slug: line.id, version: '', created_at: '2026-01-01T00:00:00Z', harness: line.harness, family: line.family, model: line.model, effort, tier: 'strong', enabled: true,
     display_name: line.display, short_name: line.short, model_version: line.version, provider: line.family, effort_level: LEVEL[effort] ?? index, note: line.note ?? '',
-    source: line.source ?? 'auto', retire_at: line.retireAt ?? null, retired: false,
+    source: line.source ?? 'auto', retire_at: line.retireAt ?? null, retired: false, ...(line.lifecycle ? { lifecycle: line.lifecycle } : {}),
   })))
 }
 const nearest = (line: Line, want: string) => line.efforts.includes(want) ? want : [...line.efforts].sort((a, b) => Math.abs((LEVEL[a] ?? 2) - (LEVEL[want] ?? 2)) - Math.abs((LEVEL[b] ?? 2) - (LEVEL[want] ?? 2)) || (LEVEL[b] ?? 0) - (LEVEL[a] ?? 0))[0]!
@@ -36,8 +63,12 @@ const nearest = (line: Line, want: string) => line.efforts.includes(want) ? want
 export interface MockOptions {
   /** The caller may set the workspace default, locks and rules. */
   manage?: boolean
-  /** A pick whose account cannot run it: the Claude account is tied to another profile. */
+  /** The Claude account is at its daily cap: Opus runs through Cursor, Fable (Concepts) waits, Sonnet falls back. */
   down?: boolean
+  /** The live registry's spread: older versions of most lines and several routes per model. */
+  many?: boolean
+  /** A short menu: Sol, Opus and Fable, with two older Anthropic versions behind the fold. */
+  few?: boolean
   /** Announce a new model. */
   fresh?: boolean
   /** No overrides anywhere. */
@@ -60,24 +91,26 @@ export interface MockOptions {
 }
 interface Order { rank: string[] | null; not: string[]; effort: string | null; efforts?: Record<string, string>; end?: 'wait' | 'default' }
 const TEMPLATE = ['openai:sol', 'anthropic:opus', 'anthropic:sonnet', 'anthropic:fable', 'openai:astra', 'xai:grok', 'openai:luna', 'cursor:composer', 'unknown:openrouter/qwen/qwen3-coder']
-const REASON_DOWN = 'the Claude account is tied to another profile (AEON-1000)'
-/** A reset far enough ahead to read as a date in any time zone. */
-export const CAP_UNTIL = '2099-10-12T04:00:00Z'
+// Six hours ahead, so the page names a time of day ("until 04:00") rather than a date.
+const CAP_UNTIL = new Date(Date.now() + 6 * 3_600_000).toISOString()
+const REASON_DOWN = `Claude account is at its daily cap until ${CAP_UNTIL}`
+const CLAUDE_ONLY = ['anthropic:sonnet', 'anthropic:fable']
 
 export async function mockModels(page: Page, options: MockOptions = {}) {
-  const profiles = registry(options.fresh ? [NEW_LINE] : [])
+  const profiles = registry([...(options.fresh ? [NEW_LINE] : []), ...(options.down || options.many ? [OPUS_CURSOR] : []), ...(options.many || options.few ? MANY : [])])
+    .filter(profile => !options.few || FEW.includes(profile.slug))
   const line = (id: string | null | undefined) => [...LINES, NEW_LINE].find(item => item.id === id)
   const layers = { mine: new Map<string, Order>(), default: new Map<string, Order>() }
   const revision = { mine: 3, default: 5 }
   const dismissed = { mine: [] as string[], default: [] as string[] }
   let rules: ModelRule[] = [], rulesRevision = 2
   const writes: { method: string; path: string; search: string; body: Record<string, unknown> | null; person?: string }[] = []
-  let fail = options.fail, hold: (() => Promise<void>) | undefined, queued = !options.noQueue
+  let fail = options.fail, hold: (() => Promise<void>) | undefined, holdRead: (() => Promise<void>) | undefined, queued = !options.noQueue
   const state = { calls: [] as string[] }
   if (!options.bare) {
     layers.default.set('other', { rank: TEMPLATE, not: [], effort: 'xhigh' })
     layers.default.set('design', { rank: ['anthropic:opus', 'anthropic:sonnet', 'openai:sol'], not: [], effort: 'xhigh' })
-    layers.default.set('concept', { rank: ['anthropic:opus', 'openai:sol'], not: [], effort: 'high' })
+    layers.default.set('concept', options.down ? { rank: ['anthropic:fable'], not: [], effort: 'max' } : { rank: ['anthropic:opus', 'openai:sol'], not: [], effort: 'high' })
     rules = [{ scope: 'workspace', project_id: null, column: 'design', line: 'anthropic:opus', lock: 'top', position: 0, why: 'Design mocks stay on Opus while the design gate is tuned (AEON-912).', set_by: options.lockedByOther ? otherPerson : simplePerson, set_at: '2026-10-02T09:00:00Z' }]
   } else layers.default.set('other', { rank: TEMPLATE, not: [], effort: 'xhigh' })
   if (options.member) {
@@ -132,9 +165,16 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     ]
     return { column, line: id, effort, harness: item.harness, model: item.model, mine: layer === 'mine' && !lock && !!layers.mine.get(column)?.rank, lock: lock ? { by: lock.set_by, at: lock.set_at, reason: lock.why } : null, chain, end: order.end ?? (column === 'other' ? 'wait' : 'default'), never }
   }
-  const unavailableFor = (rows: SimpleRow[]): SimpleUnavailable[] => rows.flatMap((row): SimpleUnavailable[] => {
-    if (options.down && row.line === 'anthropic:opus') return [{ column: row.column, line: row.line!, runs_instead: 'anthropic:sonnet', effort: nearest(line('anthropic:sonnet')!, row.effort ?? 'high'), reason: REASON_DOWN, ticket: null, cause: 'daily_cap', until: CAP_UNTIL, route: 'claude', waits: false }]
-    if (row.line === 'xai:grok' && row.column !== 'concept' && row.column !== 'other') return [{ column: row.column, line: row.line, runs_instead: 'openai:sol', effort: 'high', reason: 'no tools in PAIMOS', ticket: null, cause: 'no_tools', until: null, route: 'grok', waits: false }]
+  // One entry per cause, as the server sends them (AEON-1159): Opus takes its Cursor route, a Claude-only model falls
+  // to the next line of its order that isn't, and an order with nothing else waits until the cap resets.
+  const unavailableFor = (layer: 'mine' | 'default', rows: SimpleRow[]): SimpleUnavailable[] => rows.flatMap((row): SimpleUnavailable[] => {
+    const capped = { cause: 'daily_cap' as const, until: CAP_UNTIL, route: 'claude', reason: REASON_DOWN, ticket: null }
+    if (options.down && row.line === 'anthropic:opus') return [{ ...capped, column: row.column, line: row.line, runs_instead: row.line, effort: nearest(OPUS_CURSOR, row.effort ?? 'high'), waits: false, runs_via: 'cursor' }]
+    if (options.down && CLAUDE_ONLY.includes(row.line ?? '')) {
+      const instead = inherited(layer, row.column).rank!.find(id => !CLAUDE_ONLY.includes(id) && id !== 'anthropic:opus') ?? null
+      return [{ ...capped, column: row.column, line: row.line!, runs_instead: instead, effort: instead ? nearest(line(instead)!, row.effort ?? 'high') : null, waits: !instead, runs_via: instead ? line(instead)!.harness : null }]
+    }
+    if (row.line === 'xai:grok' && row.column !== 'concept' && row.column !== 'other') return [{ column: row.column, line: row.line, runs_instead: 'openai:sol', effort: 'high', reason: 'no tools in PAIMOS', ticket: null, cause: 'no_tools', until: null, route: 'grok', waits: false, runs_via: 'codex' }]
     return []
   })
   function simple(layer: 'mine' | 'default'): SimpleDocument {
@@ -148,14 +188,14 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     const down = !!options.down
     const design = { line: 'anthropic:opus', effort: 'xhigh' }
     const next = !queued ? null : down
-      ? { column: 'design', line: 'anthropic:sonnet', effort: 'xhigh', ticket: 'AEON-1011', reviewer: { line: 'openai:sol', effort: 'xhigh' }, trace: [
-        { role: 'build', line: design.line, stage: 'column', reason: REASON_DOWN, selected: false }, { role: 'build', line: 'anthropic:sonnet', stage: 'column', reason: '', selected: true },
+      ? { column: 'design', line: design.line, effort: nearest(OPUS_CURSOR, design.effort), ticket: 'AEON-1011', reviewer: { line: 'openai:sol', effort: 'xhigh' }, trace: [
+        { role: 'build', line: design.line, stage: 'column', reason: REASON_DOWN, selected: false }, { role: 'build', line: design.line, stage: 'column', reason: '', selected: true },
         { role: 'review-gate', line: 'openai:sol', stage: 'role', reason: '', selected: true }] satisfies SimpleTrace[] }
       : { column: 'backend', line: first(layer, 'backend').id, effort: first(layer, 'backend').effort, ticket: 'AEON-1011', reviewer: { line: 'xai:grok', effort: 'xhigh' }, trace: [
         { role: 'build', line: first(layer, 'backend').id, stage: 'default', reason: '', selected: true }, { role: 'review-gate', line: 'xai:grok', stage: 'role', reason: '', selected: true }] satisfies SimpleTrace[] }
     const dis = dismissed[layer]
     return {
-      all, exceptions, reviews: { mode: 'cross_family' }, next, unavailable: unavailableFor(rows),
+      all, exceptions, reviews: { mode: 'cross_family' }, next, unavailable: unavailableFor(layer, rows),
       // A line is new until someone places it in an order or says "not now".
       new_lines: options.fresh && !dis.includes(NEW_LINE.id) && ![...layers.mine.values(), ...layers.default.values()].some(order => order.rank?.includes(NEW_LINE.id)) ? [{ line: NEW_LINE.id, can_do: ['concept'] }] : [],
       revision: revision[layer], rules_revision: rulesRevision, person_id: simplePerson,
@@ -175,13 +215,20 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
   const permissions = ['models.read', 'members.read', ...(options.manage === false || options.member ? [] : ['model_prefs.manage', 'models.manage'])]
   await page.route('**/api/**', async route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname.replace(/^\/api/, ''), method = request.method()
-    const known = path === '/me/permissions' || path === '/members' || path === '/models' || path.startsWith('/model-preferences') || path.startsWith('/model-rules')
+    const known = path === '/me/permissions' || path === '/members' || path === '/models' || path === '/models/resolve' || path.startsWith('/model-preferences') || path.startsWith('/model-rules')
     if (options.fallback && !known) return route.fallback()
     state.calls.push(`${method} ${path}${url.search}`)
     if (path === '/me/permissions') return route.fulfill({ json: { workspace: { id: 'board-tenant', role: 'member', permissions }, project: null } })
     if (path === '/projects') return route.fulfill({ json: { items: [], next_cursor: null } })
     if (path === '/members' && method === 'GET') return route.fulfill({ json: { people: [{ principal_id: simplePerson, name: 'Markus' }, { principal_id: otherPerson, name: 'Ada Admin' }], agents: [], invites: [], imported: [], owner_count: 1 } })
     if (path === '/models' && method === 'GET') return route.fulfill({ json: profiles })
+    // A ticket resolves on its own: Sonnet was skipped for this ticket, Opus at xhigh runs it.
+    if (path === '/models/resolve' && method === 'GET') {
+      const wait = holdRead; holdRead = undefined
+      if (wait) await wait()
+      const runs = profiles.find(profile => profile.model === 'claude-opus-5-5' && profile.effort === 'xhigh')!, skipped = profiles.find(profile => profile.model === 'claude-sonnet-5-5' && profile.effort === 'high')!
+      return route.fulfill({ json: { role: 'build', source: 'aeon', owner_required: false, profile: runs, ladder: [{ stage: 'column', profile_id: skipped.id, selected: false, skip_reasons: ['daily_limit'] }, { stage: 'column', profile_id: runs.id, selected: true, skip_reasons: [] }] } })
+    }
     if (path === '/models/refresh' && method === 'GET') return route.fulfill({ json: { settings: { agent_reports_enabled: true, auto_add_profiles: true, api_enabled: false, interval_minutes: 1440 }, last_run_at: null, last_result: { sources: [] }, sources: [], observations: [] } })
     if (path === '/model-rules' && method === 'GET') return route.fulfill({ json: { revision: rulesRevision, rules } })
     const layer = url.searchParams.get('for') === 'default' || url.searchParams.get('layer') === 'default' ? 'default' as const : 'mine' as const
@@ -256,5 +303,7 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
   return {
     writes, calls: state.calls, orders: layers, get rules() { return rules }, revision, setFail: (status?: number) => { fail = status }, setQueued: (value: boolean) => { queued = value },
     holdNext: () => { let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve }); hold = () => barrier; return () => { hold = undefined; release() } },
+    /** Holds the next ticket resolution read until the returned release runs. */
+    holdResolve: () => { let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve }); holdRead = () => barrier; return release },
   }
 }

@@ -7444,6 +7444,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigratedTailFoldsThroughRulesAndKeepsStamps","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigrationCursorHoldCoversNativeLevels","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigrationGolden","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigrationWaitPreservesInheritedRows","tier":"ESSENTIAL"}
@@ -7461,6 +7463,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2PageContractWritesAndReads","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2PauseLifecycleAndAuthority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2PauseRechecksGrantRevokedUnderFence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2ResetUndoKeepsMigratedOrderWithoutEnding","tier":"ESSENTIAL"}
     ,

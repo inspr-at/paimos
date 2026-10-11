@@ -277,7 +277,7 @@ test('folds grow in place: the controls above a fold, and the fold’s own contr
 test('the folds and their menus have no accessibility violations in light and dark', async ({ page }) => {
   await open(page, { down: true })
   await page.getByRole('button', { name: 'For everyone' }).click(); await openFold(page, 'all'); await openFold(page, 'design')
-  await expect(page.locator('#fb-design .ch-st').first()).toContainText('daily cap until')
+  await expect(page.locator('#fb-design .ch-st').first()).toHaveText('runs now, not through Claude Code')
   for (const theme of ['light', 'dark']) {
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     const results = await new AxeBuilder({ page }).include('[data-models-section]').analyze()

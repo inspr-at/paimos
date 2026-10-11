@@ -918,6 +918,8 @@
         ,
         {"file":"tests/models-fallback.spec.ts","listedTests":13,"weightSeconds":14,"weightSource":"AEON-1161 mbp2606 single worker: with models-simple and its shots (20s weight) the three specs ran in 30.1s; plus margin"}
         ,
+        {"file":"tests/models-outdated.spec.ts","listedTests":9,"weightSeconds":10,"weightSource":"AEON-1164 local-single-worker-7.5s-plus-margin"}
+        ,
         {"file":"tests/multiple-account-pairing.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":1.722,"median":1.5945,"min":1.491},"seconds":9.596,"selectedTests":6},"weightSeconds":13.317072,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/nav.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}

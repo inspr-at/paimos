@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api'
 import { policyJSON } from './policyEditor'
-import type { ChainEnd, OrderBody, RegistryProfile, RulesBody, RulesDocument, Scope, SimpleDocument, TailBoard, WriteResult } from './modelsSimple'
+import type { ChainEnd, OrderBody, RegistryProfile, RulesBody, RulesDocument, Scope, SimpleDocument, TailBoard, TicketResolution, WriteResult } from './modelsSimple'
 
 async function request<T>(path: string, method = 'GET', body?: unknown, person?: string | null, signal?: AbortSignal): Promise<T> {
   const response = await api(path, { method, signal, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(person ? { 'If-Prefs-Person': person } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
@@ -40,3 +40,5 @@ export const putChain = (scope: Scope, column: string, body: ChainBody, revision
 const never = (column: string, line: string) => first(column, `/never/${encodeURIComponent(line)}`)
 export const putNever = (column: string, line: string, why: string, revision: number) => request<RulesDocument>(never(column, line), 'PUT', { why, revision })
 export const deleteNever = (column: string, line: string, revision: number) => request<RulesDocument>(`${never(column, line)}?revision=${revision}`, 'DELETE')
+/** How one ticket resolves, for the "Why this model?" link on a ticket row. */
+export const getTicketResolution = (ticket: string, signal?: AbortSignal) => request<TicketResolution>(`/models/resolve?${new URLSearchParams({ ticket })}`, 'GET', undefined, undefined, signal)
