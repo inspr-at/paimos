@@ -480,6 +480,31 @@ const handleControlLine = (line) => {
       fail();
       return;
     }
+    // Catalog reads reuse this already-owned SDK Query. They never submit a
+    // prompt, change settings or create an idle Claude process.
+    if (request?.method === "aeon/catalog" && Number.isSafeInteger(request.id)) {
+      try {
+        if (!sessionStarted || typeof queryHandle.supportedModels !== "function") throw new Error("unavailable");
+        const models = await queryHandle.supportedModels();
+        if (!Array.isArray(models) || models.length > 500) throw new Error("bound");
+        const projected = models.map(model => {
+          if (!validDispatchValue(model.value)) throw new Error("model");
+          const result = { value: model.value };
+          if (typeof model.displayName === "string" && model.displayName.length <= 256) result.displayName = model.displayName;
+          if (typeof model.supportsEffort === "boolean") result.supportsEffort = model.supportsEffort;
+          if (Array.isArray(model.supportedEffortLevels)) {
+            if (model.supportedEffortLevels.length > 32 || !model.supportedEffortLevels.every(level => validDispatchValue(level, 32))) throw new Error("levels");
+            result.supportedEffortLevels = model.supportedEffortLevels;
+          }
+          return result;
+        });
+        if (Buffer.byteLength(JSON.stringify(projected)) > 1024 * 1024) throw new Error("bound");
+        emit({ jsonrpc: "2.0", id: request.id, result: projected });
+      } catch {
+        emit({ jsonrpc: "2.0", id: request.id, error: { code: -32601, message: "catalog unavailable" } });
+      }
+      return;
+    }
     const correlationID = request?.correlation_id;
     if (!validID(correlationID, 128)) {
       fail();

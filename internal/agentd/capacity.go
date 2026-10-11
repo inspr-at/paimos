@@ -337,6 +337,7 @@ func (s *Supervisor) runCapacityCaptureTick(ctx context.Context) {
 	} else {
 		s.captureIdleCapacity(ctx, now)
 	}
+	s.captureModelCatalogs(ctx)
 }
 func (s *Supervisor) captureIdleCapacity(ctx context.Context, now time.Time) {
 	api, ok := s.api.(capacityAPI)
