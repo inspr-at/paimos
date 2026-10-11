@@ -251,8 +251,8 @@ watch([paceHash, harnesses], async ([harness]) => {
 .pick-s .pe { font-weight: 500; color: var(--ink-3); }
 .pick-s svg { flex: none; color: var(--ink-3); }
 .pick-s.ro { background: transparent; box-shadow: inset 0 0 0 1px var(--line); cursor: default; }
-/* The shown label and the widest one share a cell: the picker never changes width. */
-.pick-w { display: inline-grid; justify-items: end; }
+/* The shown label and the widest one share a cell: the picker never changes width; it reads like a select. */
+.pick-w { display: inline-grid; justify-items: start; }
 .pick-w > .pick-t { grid-area: 1 / 1; }
 .pick-t.sizer { visibility: hidden; }
 .hz-acc { display: grid; gap: 4px; margin: 10px 0 0 36px; }
@@ -281,7 +281,6 @@ watch([paceHash, harnesses], async ([harness]) => {
   .dl-def { grid-template-columns: minmax(0, 1fr); row-gap: 10px; }
   .hz-h { grid-template-columns: 24px minmax(0, 1fr); row-gap: 10px; }
   .hz-h > .pick-s { grid-column: 2; justify-self: start; }
-  .pick-w { justify-items: start; }
   .hz-acc, .hz-none, .boost { margin-left: 0; }
   .cap-line { align-items: flex-start; flex-wrap: wrap; }
   .cap-line > svg { margin-top: 3px; }
@@ -297,9 +296,9 @@ watch([paceHash, harnesses], async ([harness]) => {
 .pp-pop { display: grid; }
 .pp-pop h3 { margin: 0; padding: 8px 10px 4px; font-size: 13px; font-weight: 650; color: var(--ink); }
 .ch-o, .ch-b { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 2px 10px; width: 100%; padding: 10px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); text-align: left; }
-.ch-o.own { padding: 0 0 10px; }
+.ch-o.own { display: block; padding: 0 0 10px; }
 .ch-o.own .ch-b { padding-bottom: 2px; }
-.ch-o.own > .d { padding: 0 10px; margin-left: 28px; }
+.ch-o.own > .d { margin: 0 10px 0 38px; }
 @media (hover: hover) { button.ch-o:hover, .ch-b:hover { background: var(--row-hover); } }
 .ch-o[aria-checked="true"], .ch-o.own.on { background: var(--row-selected); }
 .ch-o:focus-visible, .ch-b:focus-visible { outline: none; box-shadow: var(--focus-ring); }

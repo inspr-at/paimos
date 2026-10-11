@@ -175,7 +175,14 @@ async function capacityPage(page: Page, options: { manage?: boolean } = {}) {
 }
 const overflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
 async function shot(page: Page, info: TestInfo, name: string, full = true) {
-  if (process.env.AEON1175_SHOTS) await page.screenshot({ path: info.outputPath(`${name}.png`), fullPage: full })
+  if (!process.env.AEON1175_SHOTS) return
+  if (!full) { await page.screenshot({ path: info.outputPath(`${name}.png`) }); return }
+  // Settings scrolls in its own body: the shot takes a viewport as tall as that body, then restores it.
+  const size = page.viewportSize()!
+  const tallest = await page.evaluate(() => Math.max(innerHeight, ...[...document.querySelectorAll('*')].filter(e => /auto|scroll/.test(getComputedStyle(e).overflowY) && e.scrollHeight > e.clientHeight + 4).map(e => e.scrollHeight - e.clientHeight + innerHeight)))
+  await page.setViewportSize({ width: size.width, height: Math.min(6000, Math.ceil(tallest)) })
+  await page.screenshot({ path: info.outputPath(`${name}.png`) })
+  await page.setViewportSize(size)
 }
 
 test('the default pace saves on Enter with Undo; harnesses that follow it follow along, the others keep their own', async ({ page }) => {

@@ -6552,11 +6552,11 @@
     ,
     {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"390 light › capacity 390 light: named controls, no sideways scroll, 44 px targets, one-line labels stay on one line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"a number equal to the default follows the default in Capacity too, and Undo writes the value before","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"a number equal to the default follows the default in Capacity too, and Undo writes the value before","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"a pace changed elsewhere meanwhile is read again and said; nothing is overwritten","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"a pace changed elsewhere meanwhile is read again and said; nothing is overwritten","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"one value, two editors: the dial’s pace shows in Capacity, Capacity’s on the dial, both through the same guarded write","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"one value, two editors: the dial’s pace shows in Capacity, Capacity’s on the dial, both through the same guarded write","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/capacity-pace.spec.ts","name":"the bars, Boost today and what happens at the limit say what the plan says","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
