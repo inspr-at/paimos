@@ -19,7 +19,7 @@ import {
   intervalLabel, lastChecked, lineWriteOf, listProfiles, mergeUsage, modelSlug, outdatedBatch, outdatedTray, pauseModel, pauseOptions, pauseUntil, previewRemoval, putDiscoveryKey, putRefreshSettings, readOutdated,
   readOutdatedBatch, refused, registryCount, removalText, removeLine, restoreLine, retireOutdated, snapshotFromUsage, splitLevels, undoOutdated, undoPause, untilText, validateDraft,
   type DraftErrors, type LineDraft, type LinePick, type LineSnapshot, type Observation, type OutdatedDocument, type PauseChoice, type RefreshSettings, type RefreshStatus, type RegistryLine, type RegistryProfile,
-  type RegistryRoute, type RegistryRow, type WriteScope,
+  type RegistryModel, type RegistryRoute, type RegistryRow, type WriteScope,
 } from '../../../lib/modelRegistry'
 
 // Settings › Models › Model registry (AEON-1012, grouped in AEON-1163). Admins manage, everyone else reads.
@@ -53,10 +53,12 @@ const stripError = ref(''), autoBusy = ref(false)
 const opened = ref(new Set<string>())
 const editing = ref<'new' | string | null>(null)   // 'new' or a line key
 const draft = ref<LineDraft>(emptyDraft()), errors = ref<DraftErrors>({}), saving = ref(false), formError = ref('')
-// The remove question of one row: the usage of every route it removes, read before anything is removed.
-interface Question { key: string; state: 'loading' | 'ready' | 'error'; text?: string; failed?: string; removing?: boolean }
+// The remove question of one row: the usage of every route it removes, read before anything is removed. The version
+// is the one on screen when Remove… was pressed: Remove retires exactly the levels that were asked about (AEON-574 rule 4).
+interface Question { key: string; model: RegistryModel; state: 'loading' | 'ready' | 'error'; text?: string; failed?: string; removing?: boolean }
 const question = ref<Question | null>(null)
-const pauseMenu = ref<{ key: string; anchor: HTMLElement; at: number } | null>(null), pausing = ref<string | null>(null)
+// The Pause… menu remembers the version it was opened on; a later read never changes what it pauses.
+const pauseMenu = ref<{ key: string; model: RegistryModel; anchor: HTMLElement; at: number } | null>(null), pausing = ref<string | null>(null)
 // What the editor was opened on: one usage read, whose revision and line fields stay together. editorTurn moves on with every open, close and switch of the editor, so a read or save of an earlier editor can never touch the current one.
 let revisionWait: Promise<LineSnapshot> | null = null
 let editorTurn = 0
@@ -330,25 +332,25 @@ function askRemove(row: RegistryRow, trigger: HTMLElement | null) {
   closeQuestion()
   questionOpener = trigger
   const turn = ++questionTurn, model = row.model
-  question.value = { key: row.key, state: 'loading' }
+  question.value = { key: row.key, model, state: 'loading' }
   const routes = model.routes.filter(route => route.models[0])
   void previewLane.run(({ after, signal }) => after(Promise.all([Promise.all(routes.map(route => previewRemoval(route.harness, route.models[0]!, signal))), kindLabels(signal)]), ([answers, kinds]) => {
     if (turn !== questionTurn || question.value?.key !== row.key) return
     const source = model.routes.every(route => route.hand) ? 'manual' : 'auto'
-    question.value = { key: row.key, state: 'ready', text: removalText(model.name, source, mergeUsage(answers), kinds, session.identity?.principal.id ?? '', replacementName) }
-  }), { failed: () => { if (turn === questionTurn) question.value = { key: row.key, state: 'error' } } })
+    question.value = { key: row.key, model, state: 'ready', text: removalText(model.name, source, mergeUsage(answers), kinds, session.identity?.principal.id ?? '', replacementName) }
+  }), { failed: () => { if (turn === questionTurn) question.value = { key: row.key, model, state: 'error' } } })
 }
 function retryRemove() { const row = rowOf(question.value?.key ?? null), back = questionOpener; if (!row) return; closeQuestion(); askRemove(row, back) }
 function remove() {
-  const current = question.value, row = rowOf(current?.key ?? null)
-  if (!row || current?.state !== 'ready' || current.removing || !manageable.value) return
-  const turn = questionTurn, model = row.model
+  const current = question.value
+  if (!current || current.state !== 'ready' || current.removing || !manageable.value) return
+  const turn = questionTurn, model = current.model
   question.value = { ...current, removing: true, failed: undefined }
   void scope.run(({ after, signal }) => after(removeLine(model.profileIds, REMOVED_REASON, writeScope(signal)), result => after(reload(), () => {
     if (result.error) {
       const partly = `Only ${result.done.length} of ${model.profileIds.length} levels of ${model.name} were removed: ${result.error}. Remove it again to finish.`
-      // The person may have moved on to another form meanwhile; the outcome is still said.
-      if (turn === questionTurn && question.value) question.value = { ...question.value, removing: false, failed: partly }
+      // The person may have moved on to another form meanwhile; the outcome is still said. Removing again finishes the levels that are left.
+      if (turn === questionTurn && question.value) question.value = { ...question.value, model: rowOf(current.key)?.model ?? model, removing: false, failed: partly }
       else toast(partly, { tone: 'error' })
       return
     }
@@ -365,13 +367,12 @@ function questionKeys(event: KeyboardEvent) {
 }
 
 // ---------- pause a version ----------
-const pauseRow = computed(() => rowOf(pauseMenu.value?.key ?? null))
 // The menu's dates are those of the moment it opened ("For a week · Until 18 Oct").
-const pauseChoices = computed(() => pauseRow.value && pauseMenu.value ? pauseOptions(pauseRow.value.model.routes.some(route => route.pause || route.partlyPaused), new Date(pauseMenu.value.at)) : [])
+const pauseChoices = computed(() => pauseMenu.value ? pauseOptions(pauseMenu.value.model.routes.some(route => route.pause || route.partlyPaused), new Date(pauseMenu.value.at)) : [])
 function openPause(row: RegistryRow, anchor: HTMLElement) {
   if (!manageable.value || pausing.value) return
   if (pauseMenu.value?.key === row.key) { pauseMenu.value = null; return }
-  pauseMenu.value = { key: row.key, anchor, at: Date.now() }
+  pauseMenu.value = { key: row.key, model: row.model, anchor, at: Date.now() }
 }
 function pauseKeys(event: KeyboardEvent) {
   const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLElement>('[role="menuitem"]')]
@@ -383,11 +384,11 @@ function pauseKeys(event: KeyboardEvent) {
   else if (event.key === 'End') go(items.length - 1)
 }
 function choosePause(choice: PauseChoice | 'resume') {
-  const open = pauseMenu.value, row = rowOf(open?.key ?? null)
+  const open = pauseMenu.value
   pauseMenu.value = null
-  if (!row || !open || pausing.value || !manageable.value) return
-  const model = row.model, anchor = open.anchor, until = choice === 'resume' ? null : pauseUntil(choice, new Date())
-  pausing.value = row.key
+  if (!open || pausing.value || !manageable.value) return
+  const model = open.model, anchor = open.anchor, until = choice === 'resume' ? null : pauseUntil(choice, new Date())
+  pausing.value = open.key
   void scope.run(({ after, signal }) => after(pauseModel(model, model.family, choice === 'resume' ? 'resume' : { until }, writeScope(signal)), result => after(reload(), () => {
     const back = result.done
     const undoAction = back.length ? { action: { label: 'Undo', run: () => undo(scope => undoPause(back, new Date(), scope).then(failed => { if (failed) throw new Error(failed) })) } } : {}
@@ -461,9 +462,13 @@ function retireOld(versions: string[]) {
 
 // An entry that disappears under an open editor (another person removed it) closes it; so does a gone row's question or menu.
 watch(lines, () => { if (editing.value && editing.value !== 'new' && !lineOf(editing.value)) closeEditor(false) })
+// A question or menu asked about a version that has changed since (another admin added or removed a route) no longer
+// says what would happen, so it closes; the person asks again about what is on screen now.
+const sameVersion = (model: RegistryModel, key: string) => { const now = rowOf(key)?.model; return !!now && now.profileIds.length === model.profileIds.length && now.profileIds.every(id => model.profileIds.includes(id)) }
 watch(rows, () => {
-  if (question.value && !rowOf(question.value.key) && !question.value.removing) closeQuestion()
-  if (pauseMenu.value && !rowOf(pauseMenu.value.key)) pauseMenu.value = null
+  const asked = question.value
+  if (asked && !asked.removing && !asked.failed && !sameVersion(asked.model, asked.key)) closeQuestion()
+  if (pauseMenu.value && !pausing.value && !sameVersion(pauseMenu.value.model, pauseMenu.value.key)) pauseMenu.value = null
 })
 function reset() {
   scope.reset(); closeEditor(false); closeQuestion(); stopTicker(); profiles.value = []; status.value = null; stripError.value = ''; autoBusy.value = false; checking.value = false; cooldownUntil.value = 0; saving.value = false
@@ -552,8 +557,8 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
     </div>
     <ModelOutdatedSheet v-if="sheetOpen && entries.length" :entries="entries" :auto-on="autoOn" :incomplete="outdated?.incomplete === true" :more="more" :busy="removingOld"
       @close="sheetOpen = false" @remove="retireOld" />
-    <ModelsPopover v-if="pauseMenu && pauseRow" :open="true" :anchor="pauseMenu.anchor" :label="`Pause ${pauseRow.model.name}`" role="presentation" :width="280" @update:open="value => { if (!value) pauseMenu = null }">
-      <div class="reg-menu" role="menu" :aria-label="`Pause ${pauseRow.model.name}`" data-reg-pause-menu @keydown="pauseKeys">
+    <ModelsPopover v-if="pauseMenu" :open="true" :anchor="pauseMenu.anchor" :label="`Pause ${pauseMenu.model.name}`" role="presentation" :width="280" @update:open="value => { if (!value) pauseMenu = null }">
+      <div class="reg-menu" role="menu" :aria-label="`Pause ${pauseMenu.model.name}`" data-reg-pause-menu @keydown="pauseKeys">
         <button v-for="(option, index) in pauseChoices" :key="option.choice" type="button" class="mi" role="menuitem" :data-autofocus="index === 0 ? '' : undefined" :data-reg-pause-choice="option.choice" @click="choosePause(option.choice)">
           <AppIcon :name="option.choice === 'resume' ? 'play' : 'pause'" :size="14" /><span class="t">{{ option.label }}</span><span class="d">{{ option.detail }}</span>
         </button>
@@ -632,7 +637,7 @@ h2 { font: 600 18px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); 
   .reg-review { grid-column: 2; justify-self: start; }
   .reg-count, .pg-h { padding-left: 12px; padding-right: 12px; }
 }
-@media (pointer: coarse) { .mi { min-height: 52px; } }
+@media (pointer: coarse) { .mi { min-height: 52px; } .reg-switch { min-height: 44px; } }
 </style>
 <style scoped src="../../../styles/settingsButtons.css"></style>
 <style src="../../../styles/models.css"></style>

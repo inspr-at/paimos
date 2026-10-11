@@ -119,6 +119,8 @@ const checked = (event: Event) => (event.target as HTMLInputElement).checked
 .disc-l b { font-weight: 600; color: var(--ink); }
 .disc-l span { font-size: 12.5px; line-height: 1.45; color: var(--ink-3); }
 .disc-select { width: auto; min-width: 120px; height: 36px; padding-right: 28px; }
+/* The switch's whole box is its target: 44 px wide and 40 px tall, 44 px on touch screens. */
+.disc-row .switch { flex: none; justify-content: center; min-width: 44px; min-height: 40px; }
 .disc-h { margin: 14px 0 6px; font-size: 12.5px; font-weight: 600; color: var(--ink); }
 .disc-key { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .disc-key .field { height: 36px; flex: 1 1 180px; min-width: 0; }
@@ -138,6 +140,6 @@ const checked = (event: Event) => (event.target as HTMLInputElement).checked
   .disc-fold { padding: 6px 12px; }
   .disc-body { padding: 4px 12px 12px; }
 }
-@media (pointer: coarse) { .disc-fold { min-height: 44px; } }
+@media (pointer: coarse) { .disc-fold, .disc-row .switch { min-height: 44px; } }
 </style>
 <style scoped src="../../../styles/settingsButtons.css"></style>

@@ -382,3 +382,22 @@ it('How new models are found writes its settings with auto-update as the server 
   expect(state.settings).toEqual([{ agent_reports_enabled: true, auto_add_profiles: true, api_enabled: false, interval_minutes: 720 }])
   expect(card.discoveryError.value).toBe('')
 })
+
+// AEON-574 rule 4: an action is bound to the record on screen. Risk: another admin adds a route between the remove
+// question and the click, and Remove retires a level nobody was asked about.
+it('a remove question about a version that changed on screen closes, and Remove retires nothing it did not ask about', async () => {
+  const state = groupedServer()
+  const card = await mountGrouped() as GroupedCard & { reload(): Promise<unknown> }
+  const row = card.rows.value[0]!
+  card.askRemove(row, null)
+  await settle()
+  expect(card.question.value).toMatchObject({ key: row.key, state: 'ready' })
+  server.profiles.push(...opus('cursor', 'claude-opus-5.5', ['high']))
+  void card.reload()
+  await settle()
+  expect(card.rows.value[0]!.model.routes.map(route => route.harness)).toEqual(['claude', 'cursor', 'pi'])
+  expect(card.question.value).toBeNull()
+  card.remove()
+  await settle()
+  expect(state.retired).toEqual([])
+})
