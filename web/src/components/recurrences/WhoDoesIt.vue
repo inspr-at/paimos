@@ -3,7 +3,6 @@
 import { computed, ref, watch } from 'vue'
 import { getNode, listNodes } from '../../lib/api'
 import { getKnowledge, listKnowledge } from '../../lib/knowledge'
-import { HARNESS_LABEL } from '../../lib/agentState'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { ROUTINE_EFFORTS, effortVerb, effortWord, type RoutineDraft, type RoutineExecutionPolicy, type RoutineGuardEntry } from '../../lib/recurrences'
 import type { WorkKind } from '../../lib/workKinds'
@@ -15,7 +14,7 @@ import RoutineFolds from './RoutineFolds.vue'
 // Agent-only rows sit below the switch, so switching moves nothing above it.
 const agent = defineModel<boolean>('agent', { required: true })
 const draft = defineModel<RoutineDraft>('draft', { required: true })
-const props = defineProps<{ projectId: string; project: string; unavailable: string; kinds: WorkKind[]; kindsState: 'loading' | 'ready' | 'failed'; route: { model: string; harness: string } | null; routeState: 'loading' | 'ready' | 'failed' | 'none'; policy: RoutineExecutionPolicy | null; rules: RoutineGuardEntry[] | null; rulesState: 'unsaved' | 'loading' | 'ready' | 'failed'; owner: string; mine: boolean; fresh: boolean; idPrefix: string }>()
+const props = defineProps<{ projectId: string; project: string; unavailable: string; kinds: WorkKind[]; kindsState: 'loading' | 'ready' | 'failed'; route: string | null; routeState: 'loading' | 'ready' | 'failed' | 'none'; policy: RoutineExecutionPolicy | null; rules: RoutineGuardEntry[] | null; rulesState: 'unsaved' | 'loading' | 'ready' | 'failed'; owner: string; mine: boolean; fresh: boolean; idPrefix: string }>()
 const id = (name: string) => `${props.idPrefix}-${name}`
 // Reads first: up to 32 tickets or knowledge entries of the output project, read before each run.
 const labels = ref(new Map<string, string>()), picker = ref<HTMLElement | null>(null), term = ref(''), hits = ref<{ kind: 'node' | 'knowledge'; id: string; label: string }[]>([]), searching = ref(false), searchFailed = ref('')
@@ -64,7 +63,7 @@ const efforts = computed(() => ROUTINE_EFFORTS.some(([role]) => role === draft.v
           <button type="button" class="btn sm ghost" :disabled="draft.sources.length >= 32" aria-haspopup="dialog" :aria-expanded="!!picker" @click="openPicker"><AppIcon name="plus" :size="12" />Add a ticket or knowledge…</button>
           <span class="hint">Up to 32. Read before each run; nothing is fetched from outside.</span>
         </div></div>
-        <p class="route"><AppIcon name="agent" :size="14" /><span class="rt-txt"><template v-if="routeState === 'ready' && route">Today <b>{{ route.model }} via {{ HARNESS_LABEL[route.harness] ?? route.harness }}</b> {{ effortVerb(draft.role) }}; a model of another family checks each action.</template><template v-else-if="routeState === 'loading'">Finding the model for {{ effortWord(draft.role) }}…</template><template v-else>No model is set for {{ effortWord(draft.role) }} yet{{ routeState === 'failed' ? ' (the route couldn’t be read)' : '' }}; Settings › Models decides.</template></span><a href="/settings/models" target="_blank" rel="noopener" class="go">Settings › Models<AppIcon name="chevron-right" :size="12" /></a></p>
+        <p class="route"><AppIcon name="agent" :size="14" /><span class="rt-txt"><template v-if="routeState === 'ready' && route">Today <b>{{ route }}</b> {{ effortVerb(draft.role) }}; a model of another family checks each action.</template><template v-else-if="routeState === 'loading'">Finding the model for {{ effortWord(draft.role) }}…</template><template v-else>No model is set for {{ effortWord(draft.role) }} yet{{ routeState === 'failed' ? ' (the route couldn’t be read)' : '' }}; Settings › Models decides.</template></span><a href="/settings/models" target="_blank" rel="noopener" class="go">Settings › Models<AppIcon name="chevron-right" :size="12" /></a></p>
         <p class="hint pad">It follows the ticket’s description and criteria as its instructions.</p>
       </template>
     </div>

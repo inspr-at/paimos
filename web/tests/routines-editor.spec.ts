@@ -30,7 +30,7 @@ async function setup(page: Page, role: 'admin' | 'member', options: { items?: Re
     return route.fulfill({ json: effective })
   })
   await page.route('**/api/work-kinds**', route => route.fulfill({ json: { items: [{ id: 'k-maint', slug: 'maintenance', label: 'Maintenance', hint: '', position: 1, examples: [], labels: [], ticket_count: 0 }, { id: 'k-docs', slug: 'docs', label: 'Docs', hint: '', position: 2, examples: [], labels: [], ticket_count: 0 }], next_cursor: null } }))
-  await page.route('**/api/models/resolve**', route => route.fulfill({ json: { role: new URL(route.request().url()).searchParams.get('role'), profile: { id: 'm1', harness: 'claude', family: 'anthropic', model: 'claude-opus-5-5' }, owner_required: false } }))
+  await page.route('**/api/models/resolve**', route => route.fulfill({ json: { role: new URL(route.request().url()).searchParams.get('role'), profile: { id: '57000000-0000-4000-8000-000000000001', slug: 'opus', version: '1', harness: 'claude', family: 'anthropic', model: 'claude-opus-5-5', effort: 'xhigh', tier: 'frontier', enabled: true, created_at: dates[0], display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5' }, owner_required: false } }))
   await page.route('**/api/projects/p-pharos/members', route => route.fulfill({ json: [{ principal_id: me.id, name: me.name, avatar_url: null, has_avatar: false, kind: 'person', via: 'workspace', role: { id: 'r', key: 'admin', name: 'Admin' }, workspace_role: null }] }))
   await page.route('**/api/projects/p-pharos/routine-execution-settings', route => route.fulfill({ json: { revision: 2, automatic_launch_enabled: true, consent_enabled: true, qualification_id: '59000000-0000-4000-8000-000000000001', wait_reason: '' } }))
   let staleOnce = !!options.staleOnce
@@ -73,6 +73,12 @@ async function setup(page: Page, role: 'admin' | 'member', options: { items?: Re
 const editor = (page: Page) => page.getByRole('dialog', { name: /Repeat|New routine|Edit routine|Let agents run it/ })
 const radio = (page: Page, name: string) => editor(page).getByRole('radio', { name, exact: true })
 async function shot(page: Page, info: TestInfo, name: string) { await page.screenshot({ path: info.outputPath(`${name}.png`) }) }
+// The consent step's fold row draws its chevron and edit icon, never an empty box.
+async function expectFoldIcons(page: Page) {
+  const icons = editor(page).getByRole('button', { name: /^The routine itself/ }).locator('svg')
+  await expect(icons).toHaveCount(2)
+  for (const icon of await icons.all()) await expect(icon).toBeVisible()
+}
 async function draftAgentRoutine(page: Page) {
   await page.goto('/p/PHAROS/settings')
   await page.getByRole('button', { name: 'New routine…', exact: true }).click()
@@ -103,7 +109,7 @@ test('an agent routine is created paused, then let run as the picked agent, with
   await expectStableControls({
     controls: { scout: radio(page, 'Look around'), build: radio(page, 'Build'), hard: radio(page, 'Hard build'), kind: editor(page).getByRole('combobox', { name: 'Kind of work' }), rules: editor(page).getByRole('button', { name: /^What it may do/ }), sentence: editor(page).locator('.ed-sentence'), create },
     scrollAreas: body,
-    interactions: ['Hard build', 'Look around', 'Build'].map(name => ({ name: `Effort: ${name}`, run: async () => { await radio(page, name).click(); await expect(editor(page).locator('.route')).toContainText('claude-opus-5-5') } })),
+    interactions: ['Hard build', 'Look around', 'Build'].map(name => ({ name: `Effort: ${name}`, run: async () => { await radio(page, name).click(); await expect(editor(page).locator('.route')).toContainText('Today Opus 5.5 via Claude') } })),
   })
   await expectStableControls({
     controls: { off: radio(page, 'No limit'), money: radio(page, 'Money'), both: radio(page, 'Both'), where: editor(page).getByRole('button', { name: /^Where it runs/ }), create },
@@ -124,6 +130,9 @@ test('an agent routine is created paused, then let run as the picked agent, with
       { name: 'Needs a browser off', run: async () => { await browser.click(); await expect(editor(page).locator('.ok-line')).toBeVisible() } },
     ],
   })
+  // Route line and WHO say the registry name and harness label, never a model or profile id.
+  await expect(editor(page).locator('.pv-grid')).toContainText('Opus 5.5 via Claude builds it')
+  for (const part of ['.route', '.pv-grid']) for (const raw of ['claude-opus-5-5', '57000000-']) await expect(editor(page).locator(part)).not.toContainText(raw)
   await shot(page, info, 'editor-agent-1440-light')
   await create.click()
   // Saving starts nothing: paused, unconsented, and the same sheet asks.
@@ -154,6 +163,9 @@ test('an agent routine is created paused, then let run as the picked agent, with
     scrollAreas: body,
     interactions: [{ name: 'The routine itself opens', run: async () => { await editor(page).getByRole('button', { name: /^The routine itself/ }).click(); await expect(editor(page).getByRole('textbox', { name: 'Name', exact: true })).toBeVisible() } }],
   })
+  // The fold row draws its icons; the owner's hint names the shortcut.
+  await expectFoldIcons(page)
+  await expect(editor(page).locator('.editor-hint')).toContainText('let agents run it · esc leaves a field, then closes')
   await shot(page, info, 'consent-1440-light')
   await letRun.click()
   await expect(editor(page)).toHaveCount(0)
@@ -196,6 +208,9 @@ test('someone else’s routine says who decides, a stale save keeps unsaved text
   await expect(editor(page)).toHaveAccessibleName('Let agents run it')
   await expect(editor(page).locator('#consent')).toContainText('A PHAROS admin decides.')
   await expect(editor(page).getByRole('button', { name: /^Let agents run it/ })).toHaveCount(0)
+  // No primary, so no ⌘↵ hint: only Esc.
+  await expect(editor(page).locator('.editor-hint')).toHaveText('esc leaves a field, then closes')
+  await expect(editor(page).locator('.editor-hint kbd')).toHaveCount(1)
   await shot(page, info, 'consent-member-1440-light')
   await editor(page).getByRole('button', { name: /^Close/ }).click()
   await expect(editor(page)).toHaveCount(0)
@@ -282,11 +297,18 @@ for (const [width, theme] of [[1440, 'dark'], [390, 'light']] as const) {
     await page.goto('/p/PHAROS/settings')
     await expect(page.getByRole('row', { name: 'Weekly dependency update', exact: true })).toContainText('Waiting for a person')
     await expect(page.getByText('Agents may run routines in PHAROS')).toBeVisible()
+    // The history card agrees with the box: a routine.
+    await expect(page.locator('.history-head .eyebrow')).toHaveText('Routine')
     await shot(page, info, `box-${width}-${theme}`)
     await draftAgentRoutine(page)
     await radio(page, 'An agent works on it').click()
     await expect(editor(page).getByRole('combobox', { name: 'Kind of work' })).toHaveValue('k-maint')
     await shot(page, info, `editor-agent-${width}-${theme}`)
+    await editor(page).getByRole('textbox', { name: 'Description', exact: true }).fill('Update npm and Go dependencies; open one pull request.')
+    await editor(page).getByRole('button', { name: /^Create/ }).click()
+    await expect(editor(page)).toHaveAccessibleName('Let agents run it')
+    await expectFoldIcons(page)
+    await shot(page, info, `consent-${width}-${theme}`)
     expect(errors).toEqual([])
   })
 }

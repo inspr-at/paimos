@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest'
-import { acceptsRecord, assignmentFrom, budgetFrom, consentRequest, routineDraft, routineState, staleFields, waitReasonWords, type Recurrence } from '../src/lib/recurrences'
+import { acceptsRecord, assignmentFrom, budgetFrom, consentRequest, routeWords, routineDraft, routineState, staleFields, waitReasonWords, type Recurrence } from '../src/lib/recurrences'
+import { harnessLabel } from '../src/lib/agentState'
+import { buildEntries, type RegistryProfile } from '../src/lib/modelsSimple'
 
 // Risk: a routine says the wrong thing about why it waits, consents to a revision it
 // no longer shows, or a late answer overwrites the record on screen (AEON-1182).
@@ -69,5 +71,23 @@ describe('stale and late answers', () => {
     const both = record({ revision: 6, template: { ...shown.template, description: 'Only npm.' }, definition: { ...shown.definition!, assignment: { ...shown.definition!.assignment!, role: 'scout' } } })
     expect(staleFields(shown, both)).toEqual(['description', 'assignment'])
     expect(staleFields(shown, record({ revision: 7 }))).toEqual([])
+  })
+})
+
+describe('today’s route', () => {
+  it('reads as the Models page does: registry name and harness label, never a model or profile id', () => {
+    const opus: RegistryProfile = { id: '57000000-0000-4000-8000-000000000001', harness: 'claude', family: 'anthropic', model: 'claude-opus-5-5', effort: 'xhigh', tier: 'frontier', enabled: true, display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5' }
+    expect(routeWords(opus)).toBe('Opus 5.5 via Claude')
+    // The name the Models page lists for this line, with its harness label.
+    expect(routeWords(opus)).toBe(`${buildEntries([opus])[0]!.name} via ${harnessLabel('claude')}`)
+    const sol: RegistryProfile = { id: '57000000-0000-4000-8000-000000000002', harness: 'codex', family: 'openai', model: 'gpt-6.1-sol', effort: 'xhigh', tier: 'frontier', enabled: true }
+    expect(routeWords(sol)).toBe('GPT-6.1 Sol via Codex')
+    // A profile the registry has no name for still reads as one.
+    const bare: RegistryProfile = { ...opus, display_name: undefined, short_name: undefined }
+    expect(routeWords(bare)).toBe('Claude Opus 5 5 via Claude')
+    for (const profile of [opus, sol, bare]) {
+      expect(routeWords(profile)).not.toContain(profile.model)
+      expect(routeWords(profile)).not.toContain(profile.id)
+    }
   })
 })

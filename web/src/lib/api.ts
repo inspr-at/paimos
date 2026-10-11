@@ -48,7 +48,7 @@ export const getRoutineExecutionSettings = (projectId: string, signal?: AbortSig
 export const putRoutineExecutionSettings = (projectId: string, body: { expected_revision: number; automatic_launch_enabled: boolean; qualification_id: string | null }, signal?: AbortSignal) => json<RoutineExecutionSettings>(`/projects/${encodeURIComponent(projectId)}/routine-execution-settings`, 'PUT', body, {}, signal)
 // Kind of work for a routine's output project (one bounded page) and the route its effort resolves to today.
 export const listRoutineWorkKinds = (projectId: string, lang: string, signal?: AbortSignal) => json<Page<import('./workKinds').WorkKind>>(`/work-kinds${query({ project_id: projectId, limit: 100, lang })}`, 'GET', undefined, {}, signal)
-export const resolveRoutineRoute = (role: string, projectId: string, signal?: AbortSignal) => json<{ role: string; profile: { id: string; harness: string; family: string; model: string } | null; owner_required: boolean }>(`/models/resolve${query({ role, project_id: projectId })}`, 'GET', undefined, {}, signal)
+export const resolveRoutineRoute = (role: string, projectId: string, signal?: AbortSignal) => json<{ role: string; profile: import('./modelsSimple').RegistryProfile | null; owner_required: boolean }>(`/models/resolve${query({ role, project_id: projectId })}`, 'GET', undefined, {}, signal)
 
 export class StaleRequestError extends Error {}
 export class RequestFailure extends Error {

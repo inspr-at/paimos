@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ListItem } from './api'
 import { parseEstimate } from './estimates'
+import { harnessLabel } from './agentState'
+import { fullName, lineFallback, type RegistryProfile } from './modelsSimple'
 
 export interface RecurrenceTrigger {
   kind: 'time' | 'event'; rrule?: string; time_of_day?: string; timezone?: string; start_date?: string
@@ -137,6 +139,12 @@ export const routineScope = (item: Pick<RecurrenceInput, 'definition'>): Routine
 export const ROUTINE_EFFORTS = [['scout', 'Look around'], ['build', 'Build'], ['build-hard', 'Hard build']] as const
 export const effortWord = (role: string) => ({ scout: 'Look around', mechanical: 'Small change', build: 'Build', 'build-hard': 'Hard build' } as Record<string, string>)[role] ?? role
 export const effortVerb = (role: string) => role === 'scout' ? 'looks around' : role === 'mechanical' ? 'makes it' : 'builds it'
+// Today's route in the Models page's own words, "Opus 5.5 via Claude": its model name and
+// harness label, never a model or profile id; a profile without a name reads as one.
+export function routeWords(profile: RegistryProfile): string {
+  const name = fullName(profile)
+  return `${name.includes(profile.model) ? lineFallback(profile.model) : name} via ${harnessLabel(profile.harness)}`
+}
 // The closed outward action set; everything else stays inside the agent's own copy.
 export const ROUTINE_ACTIONS: readonly { action: RoutineAction; title: string; detail: string; reach: boolean }[] = [
   { action: 'work.create', title: 'Create tickets', detail: 'New tickets under its parent.', reach: false },
