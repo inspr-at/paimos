@@ -211,8 +211,8 @@ test('someone else’s routine says who decides, a stale save keeps unsaved text
   // 409: the record as it is now; the changed time takes the server value with a tint, the typed text stays.
   await expect(editor(page).getByRole('status').filter({ hasText: 'Changed elsewhere; shown as it is now.' })).toContainText('Markus Barta changed it')
   await expect(description).toHaveValue('Only npm this time; open one pull request.')
-  await expect(editor(page).getByLabel('At')).toHaveValue('09:00')
-  await expect(editor(page).getByLabel('At')).toHaveClass(/changed/)
+  await expect(editor(page).getByLabel('At', { exact: true })).toHaveValue('09:00')
+  await expect(editor(page).getByLabel('At', { exact: true })).toHaveClass(/changed/)
   await expect(editor(page).getByRole('button', { name: /^Save/ })).toBeEnabled()
   expect(calls.filter(call => call.method === 'PUT').map(call => call.body.expected_revision)).toEqual([3])
   await shot(page, info, 'stale-1440-light')

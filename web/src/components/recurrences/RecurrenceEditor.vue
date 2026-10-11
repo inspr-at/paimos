@@ -30,7 +30,7 @@ import type { RunsAsState } from './RunsAsPicker.vue'
 const props = defineProps<{ project?: { id: string; routeKey: string; title?: string } | null; source?: ListItem | null; recurrence?: Recurrence; scope?: RoutineScopeKind; consent?: boolean }>()
 const emit = defineEmits<{ close: []; saved: [item: Recurrence, outcome: 'saved' | 'consented' | 'kept' | 'waiting']; changed: [item: Recurrence]; revoked: [saved: boolean] }>()
 const vocabulary = useWorkVocabulary(), session = useSession(), projects = useProjects()
-const uid = useId(), dialog = ref<HTMLDialogElement>(), body = ref<HTMLElement>(), nameField = ref<HTMLInputElement>()
+const uid = useId(), dialog = ref<HTMLDialogElement>(), body = ref<HTMLElement>()
 const initial = props.recurrence, source = props.source
 // The saved record shown: the prop, then each write's answer. Revision, parent and output are bound to it.
 const base = ref<Recurrence | undefined>(initial)
@@ -284,7 +284,8 @@ const runState = computed(() => {
   return { icon: 'info' as const, text: 'Saving starts nothing. After saving you decide whether agents may run it.' }
 })
 onMounted(() => {
-  dialog.value?.showModal(); void nextTick(() => nameField.value?.focus())
+  // By id: the form sits in the v-for that orders form and preview, where a template ref is an array.
+  dialog.value?.showModal(); void nextTick(() => document.getElementById(`${uid}-name`)?.focus())
   if (scopeKind !== 'project') void projects.load()
   if (parent.value && parent.value !== outputProject.value && !recurrenceSourceIsParent(source)) void scope.run(({ after }) => after(getNode(parent.value), node => { parentLabel.value = `${node.key} · ${node.title}` }), { failed: () => { parentLabel.value = 'Parent unavailable' } })
   if (props.consent && initial?.definition?.assignment) enterConsent()
@@ -317,7 +318,7 @@ onBeforeUnmount(() => { clearTimeout(timer); dialog.value?.close() })
             <button v-if="step === 'consent'" :id="`${uid}-f-form`" type="button" class="fold-row" :aria-expanded="formOpen" :aria-controls="`${uid}-fb-form`" @click="formOpen = !formOpen"><AppIcon name="chevron-right" :size="13" /><span class="fr-ic"><AppIcon name="edit" :size="15" /></span><span class="fr-t">The routine itself</span><span class="fr-s">What, where, when and who · editing asks again</span></button>
             <div :id="`${uid}-fb-form`" class="fold" :class="{ open: step !== 'consent' || formOpen }" :inert="step === 'consent' && !formOpen"><div class="fold-in"><div class="form">
               <section :id="`${uid}-what-section`" class="editor-section" :aria-labelledby="`${uid}-what`"><p :id="`${uid}-what`" class="eyebrow">What</p>
-                <div class="field-row"><label :for="`${uid}-name`">Name</label><input :id="`${uid}-name`" ref="nameField" v-model="template.name" class="field" :class="{ changed: changed.has('name') }" maxlength="80" placeholder="e.g. Weekly tool sweep" /></div>
+                <div class="field-row"><label :for="`${uid}-name`">Name</label><input :id="`${uid}-name`" v-model="template.name" class="field" :class="{ changed: changed.has('name') }" maxlength="80" placeholder="e.g. Weekly tool sweep" /></div>
                 <div class="field-row top"><span :id="`${uid}-title`" class="field-label">Title</span><TemplateTitle v-model="template.title" :class="{ changed: changed.has('title') }" :event="schedule.kind === 'event' && input.trigger.event === 'release.published'" :label-id="`${uid}-title`" /></div>
                 <div class="field-row"><span class="field-label">{{ vocabulary.leaf.name }}</span><div class="field-line"><select v-model="template.priority" class="field priority" :class="{ changed: changed.has('priority') }" aria-label="Priority"><option v-for="value in ['critical', 'high', 'medium', 'low']" :key="value" :value="value">{{ value[0]!.toUpperCase() + value.slice(1) }}</option></select><input v-model="estimate" class="field estimate" :class="{ changed: changed.has('estimate') }" aria-label="Estimate" placeholder="Estimate" /></div></div>
                 <div class="field-row top"><label :for="`${uid}-description`">Description</label><textarea :id="`${uid}-description`" v-model="template.description" class="field" :class="{ changed: changed.has('description') }" rows="3" maxlength="65536" :placeholder="agent ? 'What the agent does each time, in plain words' : 'What each run is about'" /></div>
