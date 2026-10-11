@@ -6,7 +6,7 @@ export const ATTENTION_KINDS = [
   { id: 'triage', label: 'Triage list', labelDe: 'Triage-Liste', one: 'Triage list', oneDe: 'Triage-Liste', icon: 'list' },
   { id: 'cancel', label: 'Cancel suggested', labelDe: 'Abbruch vorgeschlagen', one: 'Cancel suggested', oneDe: 'Abbruch vorgeschlagen', icon: 'cancelled' },
   { id: 'blocked', label: 'Blocked reminders', labelDe: 'Blockiert-Erinnerungen', one: 'Blocked reminder', oneDe: 'Blockiert-Erinnerung', icon: 'clock' },
-  { id: 'missed', label: 'Missed releases', labelDe: 'Verpasste Releases', one: 'Missed release', oneDe: 'Verpasstes Release', icon: 'alert' },
+  { id: 'missed', label: 'Done, but in no release', labelDe: 'Erledigt, aber in keinem Release', one: 'Done, but in no release', oneDe: 'Erledigt, aber in keinem Release', icon: 'alert' },
 ] as const
 export type AttentionKind = typeof ATTENTION_KINDS[number]['id']
 export interface AttentionIdentity { event_id: number; node_id: string; revision: string; resolution_event_id?: number; release_id?: string; release_revision?: number; release_project_revision?: number }

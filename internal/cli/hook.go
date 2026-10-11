@@ -30,13 +30,24 @@ const hookBudget = 2500 * time.Millisecond
 
 func inboxHookEvents() []string { return []string{"PostToolUse", "UserPromptSubmit", "Stop"} }
 
+func harnessHookEvents(harness string) []string {
+	events := inboxHookEvents()
+	if harness == "claude" {
+		events = append(events, "SubagentStart", "SubagentStop")
+	}
+	return events
+}
+
 type harnessHookInput struct {
-	Event      string          `json:"hook_event_name"`
-	Session    string          `json:"session_id"`
-	AgentID    *string         `json:"agent_id"`
-	StopActive bool            `json:"stop_hook_active"`
-	ToolName   string          `json:"tool_name"`
-	ToolInput  json.RawMessage `json:"tool_input"`
+	Event       string          `json:"hook_event_name"`
+	Session     string          `json:"session_id"`
+	AgentID     *string         `json:"agent_id"`
+	AgentType   string          `json:"agent_type"`
+	Description string          `json:"description"`
+	Model       string          `json:"model"`
+	StopActive  bool            `json:"stop_hook_active"`
+	ToolName    string          `json:"tool_name"`
+	ToolInput   json.RawMessage `json:"tool_input"`
 }
 
 func (rt *runtime) cmdHook() *Command {
@@ -44,12 +55,16 @@ func (rt *runtime) cmdHook() *Command {
 	for _, harness := range []string{"claude", "codex"} {
 		var paired bool
 		var socket, daemonPeer, setupRoot string
-		root.subs = append(root.subs, &Command{Name: harness, Short: "Pull inbox at a harness turn boundary", Use: "hook " + harness + " <PostToolUse|UserPromptSubmit|Stop>", minArgs: 1, maxArgs: 1, addFlags: func(fs *flagSet) {
+		root.subs = append(root.subs, &Command{Name: harness, Short: "Pull inbox or report Claude subagent lifecycle", Use: "hook " + harness + " <" + strings.Join(harnessHookEvents(harness), "|") + ">", minArgs: 1, maxArgs: 1, addFlags: func(fs *flagSet) {
 			fs.bool(&paired, "paired", 0, "credential-free attached-session delivery")
 			fs.string(&socket, "socket", 0, "paired agentd socket; default is the paired state root")
 			fs.string(&daemonPeer, "daemon-peer", 0, "public daemon process pin; default is the paired state root")
 			fs.string(&setupRoot, "setup-root", 0, "paired state root; default is the account's paired directory")
 		}, run: func(args []string) error {
+			if paired && subagentHookEvent(args[0]) {
+				// Paired hooks retain their credential-free, consent-bound path.
+				return nil
+			}
 			// Qualification is decided before stdin, config, or a socket token.
 			// The 391 installer passes only --paired. Explicit socket and pin
 			// flags remain optional overrides.
@@ -78,6 +93,10 @@ func (rt *runtime) cmdHook() *Command {
 			defer cancel()
 			done := make(chan error, 1)
 			go func() {
+				if harness == "claude" && subagentHookEvent(args[0]) {
+					done <- rt.runSubagentHook(ctx, args[0])
+					return
+				}
 				if paired {
 					done <- rt.runPairedHook(ctx, args[0], socket, daemonPeer)
 					return
