@@ -7690,8 +7690,6 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlanningLearningSnapshotSpeedReproducesFrozenTokens","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/nodes","name":"TestPlanningLearningTruncationKeepsRouteEstimates","tier":"GATED-FULL"}
-    ,
     {"kind":"go","package":"internal/nodes","name":"TestPlanningLinkedViewerAndCanonicalAssignee","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlanningListCost","tags":["delete-candidate"],"tier":"GATED-FULL"}

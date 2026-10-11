@@ -9864,7 +9864,7 @@
     ,
     {"kind":"browser","file":"tests/planning-columns.spec.ts","name":"planning hovers match effort, running usage and pre-session calibration","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/planning-columns.spec.ts","name":"real capped planner response displays legacy estimates and the truncation basis","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/planning-columns.spec.ts","name":"real capped registry response displays independent estimates and the registry gap","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/planning-columns.spec.ts","name":"server list response preserves exact usage-less and mixed-session hovers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14266,7 +14266,7 @@
     ,
     {"kind":"node","file":"tests/planning.test.ts","name":"presence and sort values follow the list API","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/planning.test.ts","name":"real capped planner list response keeps legacy figures and explicit history text","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/planning.test.ts","name":"real capped registry list response keeps independent estimates and names the registry gap","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/playwright-policy.test.ts","name":"browser policy uses bundled headless Chromium with GPU disabled","tier":"GATED-FULL"}
     ,

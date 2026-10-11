@@ -150,7 +150,15 @@ func seedLegacyRouteHistory(t *testing.T, w planningWorld) {
 	}
 }
 
+// Two separate truncations keep the independent legacy estimates: the
+// registry beyond Models' bounds (the shared UI fixture) and model learning
+// at its own profile cap.
 func TestPlanningTruncatedHistoryListFixture(t *testing.T) {
+	t.Run("registry cap", testPlanningRegistryCapListFixture)
+	t.Run("learning cap", testPlanningLearningCapKeepsRouteEstimates)
+}
+
+func testPlanningRegistryCapListFixture(t *testing.T) {
 	w := planningSetup(t)
 	// A registry beyond Models' bounds resolves no route, so learning has no
 	// target cell and reads nothing. Independent legacy history is measured and
@@ -218,7 +226,7 @@ func (tx learningCapTx) Query(ctx context.Context, sql string, args ...any) (pgx
 
 // Risk: truncated model learning discards the routed legacy estimate or hides
 // the truncation from the basis.
-func TestPlanningLearningTruncationKeepsRouteEstimates(t *testing.T) {
+func testPlanningLearningCapKeepsRouteEstimates(t *testing.T) {
 	w := planningSetup(t)
 	seedLegacyRouteHistory(t, w)
 	target := placementNode(t, w, "LEARNCAP-1", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
