@@ -793,8 +793,9 @@ function sessionLinkClick(event: MouseEvent, id: string) {
       <div v-for="section in sections" :key="section.id" class="grp" :class="{ ended: section.id === 'ended' }" role="rowgroup" :aria-label="section.project ? `${section.project.key}${section.project.title ? ` · ${section.project.title}` : ''}` : section.label">
         <div v-if="section.header === 'toggle'" class="group-row ended-head" role="row">
           <span role="rowheader" class="group-label">
-            <button type="button" class="group-toggle" :aria-expanded="sectionOpen(section)" @click="showStopped = !showStopped">
-              <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: sectionOpen(section) }" />{{ section.label }}<span class="mono">{{ section.count }}</span>
+            <!-- Open when asked (or while a filter shows every match); a link may show its one ended row without opening it. -->
+            <button type="button" class="group-toggle" :aria-expanded="showStopped || !!filtering" @click="showStopped = !showStopped">
+              <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showStopped || !!filtering }" />{{ section.label }}<span class="mono">{{ section.count }}</span>
             </button>
             <span v-if="section.note" class="eh-note">{{ section.note }}</span>
           </span>
