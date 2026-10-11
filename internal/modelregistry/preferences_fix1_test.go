@@ -26,7 +26,7 @@ type reviewLookupFailure struct {
 
 func (f *reviewLookupFailure) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
 	query := strings.Join(strings.Fields(sql), " ")
-	if f.profiles && strings.Contains(query, "FROM model_profiles p JOIN model_profile_display d") && strings.HasSuffix(query, "ORDER BY p.slug, p.version, p.id") {
+	if f.profiles && strings.Contains(query, "FROM model_profiles p JOIN model_profile_display d") && strings.Contains(query, "ORDER BY p.slug, p.version, p.id") {
 		return nil, f.err
 	}
 	if !f.profiles && strings.HasPrefix(query, "SELECT id::text, account_key, harness, daemon_id") {
@@ -81,12 +81,27 @@ func TestResolveWorkPropagatesLateReviewLookupErrors(t *testing.T) {
 				if err := modelprefs.PutRow(t.Context(), tx, p, scope, kindID, modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": {Mode: "latest", Family: "anthropic", Line: "opus", Effort: "xhigh"}}}); err != nil {
 					return err
 				}
+				// A one-line saved Review order makes the chosen reviewer's
+				// account lookup the walk's second one.
+				var opus string
+				if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh' ORDER BY version DESC LIMIT 1`).Scan(&opus); err != nil {
+					return err
+				}
+				if err := dbtest.SetModelOrder(t.Context(), tx, p.TenantID, "", "other", "review", opus); err != nil {
+					return err
+				}
 				q := WorkQuery{Role: "review-gate", AuthorFamily: "openai", Harness: "claude"}
 				now := time.Now()
 				injected := errors.New("review lookup unavailable")
 				failing := &reviewLookupFailure{Tx: tx, profiles: profiles, err: injected}
 				partial, err := ResolveReviewFor(t.Context(), failing, p, q, now)
-				if partial.Profile == nil || !errors.Is(err, injected) {
+				if profiles {
+					// Models reads its catalog before the walk: the fault
+					// aborts resolution before any reviewer is chosen.
+					if partial.Profile != nil || !errors.Is(err, injected) {
+						t.Fatalf("catalog fault must abort before a choice: profile=%v error=%v", partial.Profile, err)
+					}
+				} else if partial.Profile == nil || !errors.Is(err, injected) {
 					t.Fatalf("fault must follow a chosen profile: profile=%v error=%v", partial.Profile, err)
 				}
 				failing.accounts = 0

@@ -283,8 +283,8 @@ func TestMinimalSimpleReadPreservesFirstAndFallback(t *testing.T) {
 	}
 }
 
-// Risk: a queued scout or mechanical ticket is shown as blocked because the
-// board does not apply. Dispatch keeps the role ladder; the page must too.
+// Risk: a queued scout or mechanical ticket is shown as blocked or on a
+// different line than dispatch picks. Models routes them through Quick jobs.
 func TestMinimalQueuedScoutUsesRoleLadderWhenBoardDoesNotApply(t *testing.T) {
 	admin, member := boardFixture(t)
 	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
@@ -319,34 +319,35 @@ func TestMinimalQueuedScoutUsesRoleLadderWhenBoardDoesNotApply(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if board != nil {
-			t.Fatal("scout unexpectedly used the board; this no longer proves the ladder fallback")
+		if board == nil || board.Profile == nil || board.Trace.Prefs != "quick jobs" {
+			t.Fatalf("scout did not route through Models Quick jobs: %+v", board)
 		}
 		mechanical, err := resolveBoardWork(t.Context(), tx, member, WorkQuery{Role: "mechanical", TicketID: ticket, Area: "backend", ExplicitBoard: true}, now, nil)
 		if err != nil {
 			return err
 		}
-		if mechanical != nil {
-			t.Fatal("mechanical unexpectedly used the board")
+		if mechanical == nil {
+			t.Fatal("mechanical left Models routing")
 		}
 		resolved, err := ResolveWork(t.Context(), tx, member, q, now)
 		if err != nil {
 			return err
 		}
-		if resolved.Profile == nil {
-			t.Fatal("scout ladder itself has nothing runnable")
+		if resolved.Profile == nil || resolved.Profile.ID != board.Profile.ID {
+			t.Fatalf("dispatch and the Models walk disagree: %+v vs %+v", resolved.Profile, board.Profile)
 		}
 		want = boardLineID(*resolved.Profile)
 		return nil
 	})
 	doc := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple", nil, ""), 200)
 	if doc.Next == nil || doc.Next.Ticket != "SCOUT-1" || doc.Next.Column != "backend" || doc.Next.Line == nil || *doc.Next.Line != want {
-		t.Fatalf("queued scout role was reported blocked or left the ladder: next=%+v want=%s", doc.Next, want)
+		t.Fatalf("queued scout was reported blocked or on another line: next=%+v want=%s", doc.Next, want)
 	}
 }
 
-// Risk: fallback stops at a failed column/default or borrows the wrong
-// account. Every skip must explain the actual selected replacement.
+// Risk: fallback stops at a failed column before its default, borrows the
+// wrong account, or runs a model outside the orders (the retired role-ladder
+// tail). Every skip explains itself and the default ends in Wait.
 func TestMinimalFallbackColumnDefaultRoleAndSkipReasons(t *testing.T) {
 	admin, _ := boardFixture(t)
 	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
@@ -363,8 +364,13 @@ func TestMinimalFallbackColumnDefaultRoleAndSkipReasons(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if resolved == nil || resolved.Profile == nil || resolved.Profile.ID != sol.ID {
-			t.Fatal("role fallback failed", resolved)
+		if resolved == nil || resolved.Profile != nil || !resolved.OwnerRequired {
+			t.Fatal("a model outside the orders ran", resolved)
+		}
+		for _, candidate := range resolved.Ladder {
+			if candidate.ProfileID == sol.ID {
+				t.Fatal("hidden role-ladder tail walked", resolved.Ladder)
+			}
 		}
 		c, err := loadBoardCatalog(t.Context(), tx)
 		if err != nil {

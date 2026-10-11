@@ -80,13 +80,9 @@ func TestPoliciesLadderBoundsSetupPermissionsAndTenantIsolation(t *testing.T) {
 	if foreign.Setup || len(foreign.Steps) != 0 {
 		t.Fatal("ladder crossed tenants")
 	}
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) SELECT tenant_id,id,'Fifty-first fixture line',$1 FROM model_profiles WHERE slug='display-51'`, p.ID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	fifty := decode[routesRead](t, &p, "GET", "/api/models/routes?role=review-gate", "", 200)
+	exact := makePrincipal(t, "policies-fifty", "person", "Fifty owner", []string{"admin"})
+	displayRoutesFixture(t, exact, 50)
+	fifty := decode[routesRead](t, &exact, "GET", "/api/models/routes?role=review-gate", "", 200)
 	if fifty.Truncated || len(fifty.Steps) != 50 {
 		t.Fatal("exactly 50 must be complete")
 	}
@@ -239,15 +235,7 @@ func TestPoliciesLadderStatementTimeout503NoPartialAnswer(t *testing.T) {
 func TestPoliciesLadderReplaceReadConsistentSnapshotBarrier(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "snapshot", "person", "Owner", []string{"admin"})
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		if err := ensureCatalog(t.Context(), tx, p); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes`)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
+	// Only the two display lines feed the derived review read.
 	displayRoutesFixture(t, p, 2)
 	old := decode[routesRead](t, &p, "GET", "/api/models/routes?role=review-gate", "", 200)
 	if len(old.Steps) != 2 {

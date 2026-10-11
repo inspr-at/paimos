@@ -278,7 +278,8 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 	grantModelReporter(t, owner, agent)
 	agent.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
 	enrollEvidenceHarness(t, owner, agent, "grok") // null allowlist
-	before := decode[[]Route](t, &owner, "PUT", "/api/models/routes", "[]", 200)
+	// Routing is derived from Models; the retired ladder writer cannot reset it.
+	before := registryRoutes(t, owner)
 	o := Observation{ReportID: EvidenceID("observed-disabled"), Harness: "grok", Model: "grok-next", Effort: "xhigh", Status: "advertised"}
 	if result := reportEvidence(t, agent, []Observation{o}, 200); result.Added != 1 {
 		t.Fatal(result)

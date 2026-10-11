@@ -57,13 +57,21 @@ func TestRevisionFollowsRoutes(t *testing.T) {
 	if !regexp.MustCompile(`^[0-9a-f]{8}$`).MatchString(seeded) || revision() != seeded {
 		t.Fatalf("seeded revision %q", seeded)
 	}
-	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes WHERE role='scout' AND priority=1`)
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
+	exec := func(sql string) {
+		t.Helper()
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), sql, p.ID)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
+	// Retained ladder rows are history: Models inputs alone define routing.
+	exec(`DELETE FROM model_role_routes WHERE role='scout' AND priority=1 AND $1::uuid IS NOT NULL`)
+	if unchanged := revision(); unchanged != seeded {
+		t.Fatalf("retired ladder history changed the routing revision: %q → %q", seeded, unchanged)
+	}
+	exec(`INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by) SELECT tenant_id,harness,model,'Revision fixture',$1 FROM model_profiles WHERE slug='codex-luna-medium' ORDER BY version DESC LIMIT 1`)
 	if changed := revision(); changed == seeded || changed == "" {
 		t.Fatalf("revision did not follow the routes: %q → %q", seeded, changed)
 	}

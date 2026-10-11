@@ -263,7 +263,7 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	// Models review dispatches only to verified no-tools harnesses; for an
 	// Anthropic author that is native Grok, never Codex.
 	grok := profileBySlug(profiles, "grok-4-7-xhigh")
-	minimalAccount(t, admin, grok)
+	reviewAccount(t, admin, "grok")
 	gate := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=anthropic", "", http.StatusOK)
 	wantCommand, err := commandTemplate(grok.Harness, grok.Model, grok.Effort, true)
 	if err != nil {

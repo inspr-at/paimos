@@ -200,11 +200,11 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 			{"effort", "", "review requires strong or frontier at the highest native level", q},
 			{"tier", "", "review requires strong or frontier at the highest native level", q},
 			{"disabled", "", notRoute, q},
-			{"retired", `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($2,$1,'order-test',$3)`, notRoute, q},
+			{"retired", `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($2,$1,'order-test',$3)`, "retired", q},
 			{"author", "", "author family", WorkQuery{AuthorFamily: "anthropic"}},
 			{"adapter", "", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", WorkQuery{AuthorFamily: "xai"}},
 			{"harness", "", "harness filter", WorkQuery{AuthorFamily: "openai", Harness: "codex"}},
-			{"account", `UPDATE agent_accounts SET last_probe_ok=false`, "Claude account has no recent successful sign-in check", q},
+			{"account", `UPDATE agent_accounts SET last_probe_ok=false`, "Claude account cannot take new work right now", q},
 			{"residency", "", "not allowed: eu", WorkQuery{AuthorFamily: "openai", TicketResidency: "eu"}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
