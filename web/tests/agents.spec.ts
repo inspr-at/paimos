@@ -531,14 +531,21 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.getByRole('button', { name: 'Actions for nova' }).click()
     await page.getByRole('menuitem', { name: /^Interrupt/ }).click()
     await expect.poll(() => calls.some(path => path.endsWith(`/harness-sessions/${nova}/controls/interrupt`))).toBe(true)
+    // The Decision Desk is a place in the app header; Usage and Agent keys moved into the head's More menu (AEON-780, AEON-1209).
     await expectStableControls({ controls: {
-      desk: page.locator('.head-links').getByRole('link', { name: 'Decision Desk', exact: true }),
-      usage: page.locator('.head-links').getByRole('link', { name: 'Usage', exact: true }),
-      keys: page.locator('.head-links').getByRole('link', { name: 'Agent keys', exact: true }),
+      desk: page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Decision Desk, 4 open', exact: true }),
+      more: page.locator('.page-head').getByRole('button', { name: 'More agent actions' }),
+      add: page.locator('.page-head').getByRole('button', { name: /^New:/ }),
     }, interactions: [
       { name: 'open a full-height session', run: async () => { await row(page, camy).locator('.c-agent a').click(); await expect(panel(page)).toBeVisible(); expect(await panel(page).boundingBox()).toEqual({ x: 0, y: 0, width: 390, height: 844 }) } },
       { name: 'return to the phone overview', run: async () => { await page.keyboard.press('Escape'); await expect(panel(page)).toHaveCount(0) } },
     ] })
+    // Nothing is lost on a phone: Usage and Agent keys sit in More.
+    await page.locator('.page-head').getByRole('button', { name: 'More agent actions' }).click()
+    await expect(page.getByRole('menuitem', { name: /^Usage/ })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: /^Agent keys/ })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('menuitem', { name: /^Usage/ })).toHaveCount(0)
     expect(errors).toEqual([])
   })
 }
