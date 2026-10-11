@@ -292,6 +292,8 @@ async function checkPanel(page: Page, phone: boolean) {
 // Copy/reply must remain reachable without leaving an empty action row or
 // moving the message, its neighbours, the question, or the pinned composer.
 async function checkChatSpacing(page: Page, output: string) {
+  const thread = panel(page).locator('.thread-scroll')
+  const scrollTop = await thread.evaluate(element => element.scrollTop)
   const messages = panel(page).locator('.thread > .msg')
   await expect(messages).toHaveCount(4)
   const first = messages.first(), copy = first.getByRole('button', { name: 'Copy', exact: true })
@@ -320,6 +322,9 @@ async function checkChatSpacing(page: Page, output: string) {
   console.log(`AEON-1212 chat spacing: ${spacing.slice(1).map(item => item.gap).join(', ')} px; action hover/focus shift ≤ 0.5 px`)
   await copy.blur()
   await panel(page).locator('.pane-bar').hover()
+  // Hover/focus can intentionally scroll to an older post. Capture the same
+  // latest-message viewport as the approved lead-chat reference afterward.
+  await thread.evaluate((element, top) => { element.scrollTop = top }, scrollTop)
 }
 
 for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','dark'] as const) {
