@@ -19,7 +19,7 @@ pending pipeline handoff, with no merge, deployment or Done authority.
 Fixes use the current fix route and keep the previous writer’s account, order
 and checkout identity. Changed ownership or missing local process/resource exit
 proof refuses continuation. The approved fix-round and shared recovery limits
-remain finite. Exhausted attempts create one Decision Desk question. A failed
+remain finite. A cap reached before another fix creates one Decision Desk question. A failed
 fix also parks immediately because its artifact has not been verified; its
 completion cannot start an immediate retry loop.
 
