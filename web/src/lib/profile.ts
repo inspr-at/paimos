@@ -8,8 +8,10 @@ export interface Profile {
   principal_id: string; email: string | null; first_name: string; last_name: string; preferred_name: string; short_name: string
   initials: string; timezone: string; locale: string; greeting_enabled: boolean; avatar_color: string
   avatar_hashes: Record<string, string>; week_start: number; revision: number
+  /** The default pace (AEON-1175): percentage points a day, 1–50; null follows the built-in 10. */
+  daily_points_per_day?: number | null
 }
-export type ProfileField = 'first_name' | 'last_name' | 'preferred_name' | 'short_name' | 'initials' | 'timezone' | 'locale' | 'greeting_enabled'
+export type ProfileField = 'first_name' | 'last_name' | 'preferred_name' | 'short_name' | 'initials' | 'timezone' | 'locale' | 'greeting_enabled' | 'daily_points_per_day'
 export type ProfilePatch = Partial<Pick<Profile, ProfileField>> & { initials?: string }
 
 // A refused change: the server's messages keyed by field (400), or the taken short name (409).
@@ -42,6 +44,7 @@ const FIELD_WORDS: Record<string, (message: string) => string> = {
   first_name: () => 'Use up to 100 characters, without spaces at either end.',
   last_name: () => 'Use up to 100 characters, without spaces at either end.',
   preferred_name: () => 'Use up to 100 characters, without spaces at either end.',
+  daily_points_per_day: () => 'Use a whole number from 1 to 50.',
 }
 export const fieldMessage = (field: string, message: string) => FIELD_WORDS[field]?.(message) ?? message
 

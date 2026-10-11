@@ -4,6 +4,7 @@
 // server decides who may start. This only words it, never invents headroom:
 // a missing or stale reading is "not measured", never an on-pace claim, and
 // never the red "at today's limit".
+import { api } from './api.ts'
 import { HARNESS_NAME, whenFull } from './capacity.ts'
 
 export const DEFAULT_DAILY_POINTS = 10
@@ -180,6 +181,61 @@ export function typedPercent(input: string): number | undefined {
 export function typedPoints(input: string): number | undefined {
   const n = typedPercent(input)
   return n !== undefined && n >= 1 && n <= 50 ? n : undefined
+}
+
+// ---------- Pace: one stored value, two editors (AEON-1175, design AEON-1149) ----------
+// agents.working.daily.<harness>.pace is edited in Settings › Capacity (its home) and inline
+// on the Agents dial. Both go through these: the same rule for what is stored and the
+// same guarded write, so neither editor can store the value differently or overwrite
+// a change made elsewhere.
+export type DailyPace = DailySettings['pace']
+/** What a person picked: follow the default, a number of percentage points a day, or everything. */
+export type PaceChoice = { mode: 'default' } | { mode: 'own'; points: number } | { mode: 'everything' }
+/**
+ * The pace as stored. A number equal to the person's default follows the default (null),
+ * so a later change of the default carries it along; "use everything" keeps the number
+ * it had, so switching back to pace restores it.
+ */
+export function storedPace(current: DailyPace, choice: PaceChoice, defaultPoints: number): DailyPace {
+  if (choice.mode === 'everything') return { mode: 'everything', points_per_day: current.points_per_day }
+  if (choice.mode === 'default') return { mode: 'pace', points_per_day: null }
+  return { mode: 'pace', points_per_day: choice.points === defaultPoints ? null : choice.points }
+}
+/** The choice a stored pace shows as. */
+export const paceChoice = (pace: DailyPace): PaceChoice => pace.mode === 'everything' ? { mode: 'everything' } : pace.points_per_day === null ? { mode: 'default' } : { mode: 'own', points: pace.points_per_day }
+/** The daily map with one harness's settings replaced and every other harness as it was. */
+export function withDaily(daily: DailyMap | undefined, harness: string, settings: DailySettings): DailyMap {
+  const next = cloneDaily(daily)
+  next[harness] = { pace: { ...settings.pace }, boost_today: settings.boost_today && { ...settings.boost_today }, at_limit: settings.at_limit }
+  return next
+}
+
+/** The stored plan as PUT /preferences/agents.working takes it; the server replaces it as a whole. */
+export interface AgentsPlanValue { total: number; limits: Record<string, unknown>; daily?: DailyMap }
+/** The plan changed since it was read (409): read again, never overwrite. */
+export class PlanChanged extends Error { constructor() { super('Changed elsewhere; shown as it is now.') } }
+/**
+ * The one write of the agents plan, guarded by the updated_at the editor read. Resolves to
+ * the new updated_at; a 409 throws {@link PlanChanged}, any other failure an Error to say.
+ */
+export async function putAgentsPlan(value: AgentsPlanValue, expectedUpdatedAt: string | null, init: { keepalive?: boolean; failure?: string } = {}): Promise<string> {
+  const response = await api('/preferences/agents.working', { method: 'PUT', keepalive: init.keepalive, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value, expected_updated_at: expectedUpdatedAt }) })
+  if (response.status === 409) throw new PlanChanged()
+  if (!response.ok) throw new Error(init.failure ?? 'Couldn’t save the daily limit. Please try again.')
+  const stored = await response.json().catch(() => ({})) as { updated_at?: unknown }
+  if (typeof stored.updated_at !== 'string' || !Number.isFinite(Date.parse(stored.updated_at))) throw new Error('Couldn’t confirm the save. Please try again.')
+  return stored.updated_at
+}
+/** A plan as GET /agents/plan reads it: enough to write one harness's pace back. */
+export interface PlanRead extends DailyPlanFields { total: number; limits: Record<string, unknown>; updated_at: string | null }
+/**
+ * Settings › Capacity's pace write: the plan as read, with one harness's pace changed and
+ * the total, the limits and every other daily setting carried unchanged.
+ */
+export function writePace(plan: PlanRead, harness: string, choice: PaceChoice): Promise<string> {
+  const settings = dailyOf(plan.daily, harness)
+  const pace = storedPace(settings.pace, choice, plan.daily_default_points ?? DEFAULT_DAILY_POINTS)
+  return putAgentsPlan({ total: plan.total, limits: { ...plan.limits }, daily: withDaily(plan.daily, harness, { ...settings, pace }) }, plan.updated_at)
 }
 
 /** Vendor-reported resets only; anything else shows nothing. */
