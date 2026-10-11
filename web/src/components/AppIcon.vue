@@ -229,7 +229,6 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'calendar-check'"><path d="M5.33 1.33v2M10.67 1.33v2M2 6h12M6 10l1.33 1.33 2.67-2.67" /><rect x="2" y="2" width="12" height="12" rx="1.33" /></template>
     <template v-else-if="name === 'timer'"><path d="M6.67 1.33L9.33 1.33M8 9.33L10 7.33" /><circle cx="8" cy="9.33" r="5.33" /></template>
     <path v-else-if="name === 'hourglass'" d="M3.33 14.67h9.33M3.33 1.33h9.33M11.33 14.67v-2.78a1.33 1.33 0 0 0-.39-.94L8 8l-2.94 2.94A1.33 1.33 0 0 0 4.67 11.89V14.67M4.67 1.33v2.78a1.33 1.33 0 0 0 .39 .94L8 8l2.94-2.94A1.33 1.33 0 0 0 11.33 4.11V1.33" />
-    <template v-else-if="name === 'wait'"><circle cx="8" cy="8" r="5.7" /><path d="M6.7 6v4M9.3 6v4" /></template>
     <path v-else-if="name === 'trending-up'" d="M10.67 4.67h4v4M14.67 4.67l-5.67 5.67-3.33-3.33L1.33 11.33" />
     <path v-else-if="name === 'sprout'" d="M9.33 6.36V4.67a2.67 2.67 0 0 1 2.67-2.67h1a.33 .33 0 0 1 .33 .33V3.33a2.67 2.67 0 0 1-2.67 2.67 2.67 2.67 0 0 0-2.67 2.67c0 1.33 .67 2 .67 3.33a3.33 3.33 0 0 1-.67 2M2.67 6a3.33 3.33 0 0 1 5.33 2.67 3.33 3.33 0 0 1-5.33-2.67M3.33 14h9.33" />
     <template v-else><circle cx="8" cy="8" r="6.2" /><path d="M10.6 5.4 9.2 9.2l-3.8 1.4 1.4-3.8Z" /></template>
