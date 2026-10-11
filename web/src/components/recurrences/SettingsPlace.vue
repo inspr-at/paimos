@@ -8,10 +8,10 @@ defineProps<{ page: string }>()
 </script>
 
 <template>
-  <span class="place">Settings<span class="sr-only">, </span><AppIcon name="chevron-right" :size="12" class="sep" />{{ page }}</span>
+  <span class="settings-place">Settings<span class="sr-only">, </span><AppIcon name="chevron-right" :size="12" class="sep" />{{ page }}</span>
 </template>
 
 <style scoped>
-.place { white-space: nowrap; }
-.sep { margin: 0 1px; vertical-align: -1px; }
+.settings-place { white-space: nowrap; }
+.sep { display: inline-block; margin: 0 1px; vertical-align: -1px; }
 </style>
