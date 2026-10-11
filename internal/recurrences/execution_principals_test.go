@@ -2,17 +2,74 @@
 package recurrences
 
 import (
+	"context"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+// Risk: opening the read-only picker could queue behind tenant writers or
+// serialize unrelated writes while scanning principals. Hold each writer
+// fence until the GET completes; the database wait graph detects contention
+// without relying on response timing or releasing the fence to let it pass.
+func TestRoutineExecutionPrincipalPickerDoesNotWaitForWriterFences(t *testing.T) {
+	f, in, _, _ := consentFixture(t)
+	item := f.create(in)
+	for _, fence := range []string{"tenant", "tree"} {
+		t.Run(fence, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+			defer cancel()
+			writer, err := f.d.Admin.Begin(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer writer.Rollback(context.Background())
+			if fence == "tenant" {
+				err = db.LockTenant(ctx, writer, f.p.TenantID)
+			} else {
+				_, err = writer.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))`, f.p.TenantID)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodGet, "/api/recurrences/"+item.ID+"/execution-principals", nil)
+			req = req.WithContext(tenant.WithPrincipal(ctx, f.p))
+			out := httptest.NewRecorder()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				f.handler.ServeHTTP(out, req)
+			}()
+			defer func() {
+				cancel()
+				_ = writer.Rollback(context.Background())
+				<-done
+			}()
+			if blocked := dbtest.BlockedOrDone(t, ctx, f.d.Admin, writer.Conn().PgConn().PID(), done); blocked != "" {
+				t.Fatalf("read-only picker waited for %s writer fence (%s lock)", fence, blocked)
+			}
+			if out.Code != http.StatusOK {
+				t.Fatalf("picker under %s writer fence = %d %s", fence, out.Code, out.Body.String())
+			}
+			var page executionPrincipalPage
+			if err := json.Unmarshal(out.Body.Bytes(), &page); err != nil {
+				t.Fatal(err)
+			}
+			if len(page.Items) != 1 || page.Items[0].ID != f.p.ID || page.Items[0].Kind != "person" || page.Items[0].Label != f.p.Name || page.NextCursor != nil {
+				t.Fatalf("picker lost eligible owner while %s writer fence was held: %+v", fence, page)
+			}
+		})
+	}
+}
 
 // Risk: a picker could leak other tenants/owners, advertise identities refused
 // by consent, omit eligible identities after sparse pages, or retain a revoked
