@@ -359,7 +359,7 @@ func TestRoutineControlledQualification(t *testing.T) {
 		headers := map[string]string{"Authorization": "Bearer " + f.token, agentpairing.LedgerGenerationHeader: g.LedgerGeneration, reviewgate.PolicyHeader: reviewgate.Policy}
 		call(f.agent, "POST", "/api/runs/"+run+"/claim", body, headers, 200)
 		restart() // A lost claim reply must retain the original committed recipe.
-		raw, err := json.Marshal(body)
+		raw, err = json.Marshal(body)
 		must(t, err)
 		retry := httptest.NewRequest("POST", "/api/runs/"+run+"/claim", strings.NewReader(string(raw))).WithContext(tenant.WithPrincipal(ctx, f.agent))
 		for key, value := range headers {
