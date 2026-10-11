@@ -290,7 +290,7 @@
       "specs": [
         {"file":"tests/start-agent.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":4.493,"median":1.901,"min":1.441},"seconds":49.726457,"selectedTests":21},"weightSeconds":36.078431,"weightSource":"web-11"}
         ,
-        {"file":"tests/ticket-panel.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":102.533,"median":2.1055,"min":1.652},"seconds":153.073566,"selectedTests":22},"weightSeconds":34.509803565,"weightSource":"web-11"}
+        {"file":"tests/ticket-panel.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":102.533,"median":2.1055,"min":1.652},"seconds":153.073566,"selectedTests":22},"weightSeconds":34.509803565,"weightSource":"web-11"}
         ,
         {"file":"tests/ticket-workers.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":11.485,"median":2.098,"min":1.213},"seconds":40.719097,"selectedTests":11},"weightSeconds":19.843137,"weightSource":"web-11"}
       ]

@@ -300,6 +300,44 @@ test('unsaved edits are guarded when moving to another ticket', async ({ page })
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-13')
 })
 
+test('the first edit shows Unsaved in place, and the editing header fits the dock', async ({ page }) => {
+  // Risk (AEON-1198 CI, Linux fonts at 1024): Unsaved appeared with the first
+  // change and pushed Save past a tight dock header that folding could not
+  // absorb. Font widths move that band, so sweep the dock width as well.
+  const errors = watchErrors(page)
+  await mockWork(page, fixtures())
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto('/p/PHAROS/PHAROS-12')
+  const ws = panel(page)
+  await ws.getByRole('button', { name: 'Edit', exact: true }).click()
+  const title = ws.getByRole('form', { name: 'Edit PHAROS-12' }).getByLabel('Title')
+  const original = await title.inputValue()
+  const header = ws.locator('.panel-bar-main')
+  const unsaved = header.getByText('Unsaved', { exact: true })
+  const controls = { cancel: header.getByRole('button', { name: 'Cancel', exact: true }), save: header.getByRole('button', { name: 'Save', exact: true }) }
+  const firstChange = (name: string) => ({ name, run: async () => {
+    await title.fill(`${original} again`)
+    await expect(unsaved).toBeVisible()
+  } })
+  const reset = async () => {
+    await title.fill(original)
+    await expect(unsaved).toBeHidden()
+  }
+  for (let width = 380; width <= 640; width += 4) {
+    await page.evaluate(width => document.documentElement.style.setProperty('--panel-user-w', `${width}px`), width)
+    await reset()
+    await expectStableControls({ controls, interactions: [firstChange(`first change in a ${width}px dock`)] })
+  }
+  // The default docks must also fit their editing header with Unsaved shown.
+  await page.evaluate(() => document.documentElement.style.removeProperty('--panel-user-w'))
+  for (const width of [1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    await reset()
+    await expectStableControls({ controls, scrollAreas: { header }, interactions: [firstChange(`first change in the default ${width} dock`)] })
+  }
+  expect(errors).toEqual([])
+})
+
 test('the panel counts the whole list and next loads the following page', async ({ page }) => {
   await mockWork(page, fixtures({ bigProject: 450 }))
   await page.goto('/p/AEON/AEON-298')
