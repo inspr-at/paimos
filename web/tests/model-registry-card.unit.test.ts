@@ -42,6 +42,7 @@ beforeEach(() => {
     const method = init.method ?? 'GET'
     if (path === '/models' && method === 'GET') { server.lists++; return answer(server.profiles) }
     if (path === '/models/refresh' && method === 'GET') return answer({ settings: { agent_reports_enabled: true, auto_add_profiles: true, api_enabled: true, interval_minutes: 360 }, last_run_at: null })
+    if (path.startsWith('/models/outdated?') && method === 'GET') return answer({ versions: [], revision: '0'.repeat(64), next_cursor: '', incomplete: false })
     if (path === '/models/lines/codex/gpt-6.1-sol/usage') {
       const read = server.reads++
       const snapshot = { used_by: [], incomplete: false, replacement: { line: null, effort: null }, revision: revision(), line_profiles: structuredClone(server.profiles) }
@@ -66,7 +67,7 @@ afterEach(() => { for (const s of scopes.splice(0)) s.stop() })
 const session = Vue.reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'admin', kind: 'person' } }, authenticationCurrent: () => true })
 const modules: Record<string, unknown> = {
   vue: { ...Vue, onBeforeUnmount: () => {} },
-  '../../AppIcon.vue': {}, '../../agents/HarnessMark.vue': {}, './ModelRegistryEditor.vue': {},
+  '../../AppIcon.vue': {}, '../../agents/HarnessMark.vue': {}, './ModelRegistryEditor.vue': {}, './ModelOutdatedSheet.vue': {},
   '../../../lib/authz': { can: () => true, onAccessChange: () => () => {} },
   '../../../lib/identityScope': identityScope,
   '../../../lib/toast': { toast: (message: string, options?: Toasted['options']) => { toasts.push({ message, options }) } },
