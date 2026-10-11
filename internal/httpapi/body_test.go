@@ -230,6 +230,19 @@ func TestBodyDeadlineSetupAndEarlierContext(t *testing.T) {
 	if !w.deadlines[0].Equal(deadline) {
 		t.Fatalf("extended caller deadline: %v", w.deadlines)
 	}
+	// Reusing a buffered body must not re-arm a socket deadline while
+	// net/http has already resumed its background keep-alive reader.
+	buffered := httptest.NewRequest("POST", "/", strings.NewReader("abcd"))
+	bufferedWriter := &bodyDeadlineWriter{ResponseWriter: httptest.NewRecorder()}
+	for i := 0; i < 2; i++ {
+		if err := BufferRequestBody(bufferedWriter, buffered, 4); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := io.ReadAll(buffered.Body)
+	if err != nil || string(raw) != "abcd" || len(bufferedWriter.deadlines) != 2 {
+		t.Fatalf("buffered reuse changed body/deadlines: %q, %v, %v", raw, err, bufferedWriter.deadlines)
+	}
 	r = httptest.NewRequest("POST", "/", nil)
 	r.Body = failingBody{}
 	denied := &deadlineFailureWriter{ResponseRecorder: httptest.NewRecorder()}

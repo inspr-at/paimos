@@ -3516,6 +3516,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestAttach","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestAuthenticationCanaryUsesAuthAdmissionWithoutRenewal","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestBootstrapAdminRequiresASCIIMailboxMatch","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestBootstrapCallbackRequiresVerifiedEmail","tier":"GATED-FULL"}

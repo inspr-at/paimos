@@ -21,10 +21,14 @@ func BufferRequestBody(w http.ResponseWriter, r *http.Request, limit int64) erro
 func BufferRequestBodyTimeout(w http.ResponseWriter, r *http.Request, limit int64, timeout time.Duration) error {
 	raw, err := ReadRequestBody(w, r, limit, timeout)
 	if err == nil {
-		r.Body = io.NopCloser(bytes.NewReader(raw))
+		r.Body = &bufferedRequestBody{bytes.NewReader(raw)}
 	}
 	return err
 }
+
+type bufferedRequestBody struct{ *bytes.Reader }
+
+func (*bufferedRequestBody) Close() error { return nil }
 
 var ErrBodyDeadlineUnavailable = errors.New("request body deadline unavailable")
 
@@ -56,6 +60,16 @@ func ReadRequestBody(w http.ResponseWriter, r *http.Request, limit int64, timeou
 	if err := ctx.Err(); err != nil {
 		closeBodyConnection(w, r)
 		return nil, err
+	}
+	if _, buffered := r.Body.(*bufferedRequestBody); buffered {
+		raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, limit))
+		if ctx.Err() != nil {
+			err = ctx.Err()
+		}
+		if err != nil {
+			closeBodyConnection(w, r)
+		}
+		return raw, err
 	}
 	controller := http.NewResponseController(w)
 	deadline, _ := ctx.Deadline()
