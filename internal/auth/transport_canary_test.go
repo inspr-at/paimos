@@ -58,7 +58,14 @@ func TestAuthenticationCanaryUsesAuthAdmissionWithoutRenewal(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if calls != 6 {
+	callerGuard := db.WithTenantGuard(t.Context(), func(context.Context, pgx.Tx, string) error {
+		t.Error("shared authentication canary used a tenant caller's authorization guard")
+		return errors.New("tenant-specific revocation")
+	})
+	if err := m.ProbeAuthentication(callerGuard); err != nil {
+		t.Fatalf("tenant caller changed global canary: %v", err)
+	}
+	if calls != 8 {
 		t.Fatalf("session and key admission not both exercised: %d calls", calls)
 	}
 	for _, stage := range []string{tenantbootstrap.LookupTenantID, p.TenantID} {
