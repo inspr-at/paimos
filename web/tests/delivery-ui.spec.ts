@@ -4,7 +4,6 @@ import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
-import { policyLadder } from './policies-fixtures'
 import { controlStability } from './control-stability'
 import type { DeliveryItem, DeliveryPage, DeliveryState } from '../src/lib/delivery'
 import type { ReviewPolicy, ReviewPolicySettings } from '../src/lib/reviewPolicy'
@@ -23,13 +22,12 @@ async function setup(page:Page, theme:'light'|'dark'='light', lang:'en'|'de'='en
   answer.workspace.permissions.push(...grants);answer.project?.permissions.push(...grants)
   return route.fulfill({json:answer})
  })
- await page.route('**/api/models/routes*',route => route.fulfill({json:policyLadder('review-gate')}))
  await page.route('**/api/settings/work-vocabulary',route => route.fulfill({json:{revision:0,leaf:{name:'',icon:''},levels:[],lead:{singular:'Dirigent',plural:'Dirigenten'}}}))
  const delivery:DeliveryPage={available:true,next_cursor:null,items:['held','queue_failed','pushed','built','reviewed','ci_green','in_queue','merged'].map((state,i) => row(state as DeliveryState,i))}
  let failRead=false, failWrite=false, policyRevision=1
  const writes:{path:string;body:unknown;revision:string|undefined}[]=[]
  const workspace:ReviewPolicy={mode:'other_family',allowed_families:[]}, overrides=new Map<string,ReviewPolicy>()
- const answer=(id:string):ReviewPolicySettings => ({project_id:id||null,policy:id?overrides.get(id)??null:{...workspace},effective:id?overrides.get(id)??{...workspace}:{...workspace},workspace:{...workspace},source:id&&overrides.has(id)?'project':'tenant',updated_by:!id||overrides.has(id)?'editor':null,updated_at:!id||overrides.has(id)?`2026-10-07T05:00:${String(policyRevision).padStart(2,'0')}Z`:null,valid_families:['openai','anthropic','xai','cursor','google','local']})
+ const answer=(id:string):ReviewPolicySettings => ({project_id:id||null,policy:id?overrides.get(id)??null:{...workspace},effective:id?overrides.get(id)??{...workspace}:{...workspace},workspace:{...workspace},source:id&&overrides.has(id)?'project':'tenant',updated_by:!id||overrides.has(id)?'editor':null,updated_at:!id||overrides.has(id)?`2026-10-07T05:00:${String(policyRevision).padStart(2,'0')}Z`:null,valid_families:['openai','anthropic','xai','cursor','google','local'],family_order:['openai','xai','anthropic','cursor','google','local'],floor:{tiers:['strong','frontier'],min_effort_level:4},security_excludes:['anthropic']})
  await page.route('**/api/projects/*/delivery-queue?*',route => route.fulfill({json:{items:[],settings:{mode:'off',freeze:false},next_cursor:null}}))
  await page.route('**/api/nodes/*/delivery*',route => failRead?route.fulfill({status:503,json:{error:'Delivery read failed'}}):route.fulfill({json:delivery}))
  await page.route('**/api/delivery/*/hold',route => {
