@@ -215,6 +215,13 @@ func TestModelsV2MigrationGolden(t *testing.T) {
 		}
 		return nil
 	})
+	// A retained board editor must be able to lift a migrated never rule. A
+	// stale copied rule would keep denying work despite a successful response.
+	lifted := boardDecode[rulesDocument](t, boardCall(t, admin, "PUT", "/api/model-rules/workspace/other", map[string]any{"top": []any{}, "bottom": []any{}, "not": map[string]string{}, "revision": 0}, ""), 200)
+	if len(lifted.Rules) != 1 || lifted.Rules[0].Column != "backend" || lifted.Rules[0].Why != "Last resort" {
+		t.Fatalf("lifting a migrated rule retained stale constraints: %+v", lifted)
+	}
+
 }
 
 // Risk: a forgotten runtime reader can silently reintroduce retired ladders.
