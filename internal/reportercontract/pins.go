@@ -49,6 +49,7 @@ var surfaces = map[string]surface{
 		{"/projects/{projectId}/harness-sessions/{sessionId}", "get", "200"},
 		{"/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "post", "200"},
 	}},
+	"project-lead": {ProjectLead, "ProjectLeadContract", []operation{{"/projects/{projectId}/lead", "get", "200"}}},
 }
 
 // Current derives each pin from the OpenAPI response schema, recursively

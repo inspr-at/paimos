@@ -218,6 +218,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		handler := workorders.Endpoint(m.pool, route.scope, route.agent, route.status, route.fn)
 		if route.pattern == "GET /api/projects/{projectId}/harness-sessions/{sessionId}" || route.pattern == "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat" {
 			handler = reportercontract.WithHeader(reportercontract.HarnessSession, handler)
+		} else if route.pattern == "GET /api/projects/{projectId}/lead" {
+			handler = reportercontract.WithHeader(reportercontract.ProjectLead, handler)
 		}
 		mux.HandleFunc(route.pattern, handler)
 	}
