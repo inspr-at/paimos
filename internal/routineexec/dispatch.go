@@ -40,6 +40,7 @@ const recoveryInterval = 30 * time.Second
 // runtime, qualified gate ages or CI readings means WAIT. No HTTP setting can
 // replace a collaborator or turn an advisory verdict into authority.
 type Options struct {
+	LeadRuntime   harness.LeadRuntimeChecks
 	Runtime       modelregistry.ExecutionRuntimeReader
 	Gates         routinebudget.GateReader
 	LeadAdmission harness.LeadAdmission
@@ -67,6 +68,15 @@ func (e *Executor) Bind(module httpapi.Module) error {
 		}
 	}
 	return agentruns.BindRoutineLaunch(module, checks)
+}
+
+// BindHarness keeps daemon pickup under the same executor/qualification owners.
+// An absent qualified actor reserver remains an explicit runtime wait. This
+// seam never enables projects or treats worker launch checks as lead authority.
+func (e *Executor) BindHarness(module *harness.Module) {
+	checks := e.options.LeadRuntime
+	checks.Consent = recurrences.RequireExecutionConsentTx
+	module.WithRoutineExecutionRuntime(e.options.Runtime).WithLeadAdmission(e.options.LeadAdmission).WithLeadRuntime(checks)
 }
 
 // Pass reports partial work explicitly; a capped pass is never a complete scan.

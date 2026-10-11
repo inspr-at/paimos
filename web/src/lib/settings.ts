@@ -3,7 +3,7 @@
 import { api } from './api.ts'
 import { sessionGone } from './authz.ts'
 
-export type SectionId = 'personal' | 'theme' | 'developer' | 'policies' | 'models' | 'workspace' | 'vocabulary' | 'kinds' | 'access' | 'agents' | 'agent-rules' | 'accounts' | 'computers' | 'capacity' | 'autopilot' | 'business' | 'portal'
+export type SectionId = 'personal' | 'theme' | 'developer' | 'policies' | 'models' | 'routines' | 'workspace' | 'vocabulary' | 'kinds' | 'access' | 'agents' | 'agent-rules' | 'accounts' | 'computers' | 'capacity' | 'autopilot' | 'business' | 'portal'
 export const SETTINGS_GROUPS = ['You', 'Workspace', 'Agents and automation', 'Business'] as const
 export type SettingsGroup = typeof SETTINGS_GROUPS[number]
 // Explicit grants keep Access, rules and accounts independent of admin role. An
@@ -12,7 +12,7 @@ export type SettingsGroup = typeof SETTINGS_GROUPS[number]
 export interface SettingsSection { id: SectionId; group: SettingsGroup; label: string; summary: string; who: string; admin: boolean; permission?: string | string[]; alsoFor?: string; deniedTitle?: string; denied?: string; fresh?: boolean }
 export const anyOf = (permission: string | string[], allowed: (permission: string) => boolean) => (Array.isArray(permission) ? permission : [permission]).some(allowed)
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
-  { id: 'personal', group: 'You', label: 'Personal', summary: 'Mode, greeting and keys', who: 'Everyone has this section. Changes apply only to you.', admin: false },
+  { id: 'personal', group: 'You', label: 'Personal', summary: 'Mode, greeting, keys, routines', who: 'Everyone has this section. Changes apply only to you.', admin: false },
   { id: 'theme', group: 'You', label: 'Theme', summary: 'Colours, agent looks', who: 'Everyone picks a theme and can make their own. Only admins change the workspace themes and the default.', admin: false },
   { id: 'developer', group: 'You', label: 'Developer', summary: 'For people working on Paimos itself', who: 'Everyone has this section. Changes apply only to you.', admin: false },
   { id: 'workspace', group: 'Workspace', label: 'Workspace', summary: 'Name, brand and in-app AI', who: 'Admins only see and change this section.', admin: true },
@@ -21,6 +21,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'access', group: 'Workspace', label: 'Access', summary: 'People, roles and agents', who: 'People with See members or Read access log permission see this section. Only people with the corresponding manage permission change roles and invites.', admin: true, permission: ['members.read', 'audit.read'] },
   { id: 'policies', group: 'Agents and automation', label: 'Policies', summary: 'Who may do what, when', who: 'Everyone can read policies. Changes need the corresponding policy permission.', admin: false },
   { id: 'models', group: 'Agents and automation', label: 'Models', summary: 'Which model does what', who: 'Everyone picks their own models here. Admins also set the default for everyone and can lock a choice.', admin: false, permission: 'models.read', deniedTitle: 'Models need permission to read them', denied: 'An admin can give permission to see models.', fresh: true },
+  // AEON-1182: workspace routines and the rules every routine follows (read-only here).
+  { id: 'routines', group: 'Agents and automation', label: 'Routines', summary: 'Workspace routines and rules', who: 'Everyone sees workspace routines and the rules every routine follows. Only admins change workspace routines.', admin: false, fresh: true },
   { id: 'agents', group: 'Agents and automation', label: 'Agents', summary: 'Activity, estimates, models', who: 'Admins only change this section. It applies to every project.', admin: true },
   { id: 'agent-rules', group: 'Agents and automation', label: 'Agent rules', summary: 'Rules for every agent', who: 'People who may read agent rules see this section. Changes need permission to manage rules.', admin: false, permission: 'rules.read', deniedTitle: 'Agent rules need permission to read them', denied: 'Reading agent rules needs the rules read permission. Project membership alone does not open this page.' },
   // AEON-1171: one question each (AEON-1149); all three read the same accounts and computers.

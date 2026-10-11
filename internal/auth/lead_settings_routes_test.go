@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -156,4 +157,77 @@ func TestLeadSettingsProductionMiddleware(t *testing.T) {
 	if settings != 2 || changes != 4 {
 		t.Fatalf("denied requests changed settings/history: rows=%d events=%d", settings, changes)
 	}
+}
+
+// Risk: a daemon route works on a bare mux but production auth rejects every key.
+func TestLeadRuntimeProductionMiddleware(t *testing.T) {
+	t.Run("route_ceiling", func(t *testing.T) {
+		// The outer ceiling admits only the declared daemon routes and preserves
+		// malformed-id, unknown-subpath and method denials.
+		base := "/api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/lead-runtime"
+		for _, route := range []struct{ method, path, scope string }{
+			{"GET", base, "harness.worker"}, {"HEAD", base, "harness.worker"},
+			{"POST", base + "/claim", "harness.worker"}, {"POST", base + "/report", "harness.worker"},
+			{"POST", base, ""}, {"PUT", base, ""}, {"DELETE", base, ""},
+			{"GET", base + "/claim", ""}, {"GET", base + "/report", ""},
+			{"PUT", base + "/claim", ""}, {"DELETE", base + "/report", ""},
+			{"POST", base + "/claim/extra", ""}, {"POST", base + "/extra", ""},
+			{"GET", "/api/projects/bad/lead-runtime", ""},
+			{"POST", "/api/projects/bad/lead-runtime/claim", ""},
+			{"POST", "/api/projects/bad/lead-runtime/report", ""},
+		} {
+			scope, allowed := coreAgentScope(httptest.NewRequest(route.method, route.path, nil))
+			if scope != route.scope || allowed != (route.scope != "") {
+				t.Fatalf("%s %s: scope %q allowed %v; want %q", route.method, route.path, scope, allowed, route.scope)
+			}
+		}
+	})
+	t.Run("middleware", func(t *testing.T) {
+		reset(t)
+		m := newMod(t, Config{})
+		handler := (&httpapi.Server{Pool: appPool, Modules: []httpapi.Module{m, harness.New(appPool)}, Middleware: []func(http.Handler) http.Handler{m.Middleware}}).Handler()
+		tid := insertTenant(t, "lead-runtime-middleware", "Lead runtime")
+		owner, _ := signinPerson(t, tid, "runtime-owner", "runtime-owner", "runtime@example.com", "runtime@example.com", "admin")
+		dbtest.BindRole(t, testDB, tid, owner, "admin")
+		creator := tenant.Principal{TenantID: tid, ID: owner, Kind: tenant.Person}
+		key, err := m.createAgentKey(t.Context(), creator, "runtime-daemon", "", []string{"harness.worker"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader, err := m.createAgentKey(t.Context(), creator, "runtime-reader", "", []string{"nodes.read"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var project string
+		if err := testInTenant(t.Context(), appPool, tid, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,'RUNTIME-1','Runtime','active' FROM node_kinds WHERE slug='project' RETURNING id::text`, tid).Scan(&project)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		path := "/api/projects/" + project + "/lead-runtime"
+		for _, route := range []struct {
+			method, suffix string
+			want           int
+		}{
+			{"GET", "", 200}, {"POST", "/claim", 400}, {"POST", "/report", 400},
+		} {
+			for _, caller := range []struct {
+				token string
+				want  int
+			}{{key.Token, route.want}, {reader.Token, 403}, {"", 401}} {
+				r := httptest.NewRequest(route.method, path+route.suffix, strings.NewReader(`{}`))
+				if caller.token != "" {
+					r.Header.Set("Authorization", "Bearer "+caller.token)
+				}
+				w := httptest.NewRecorder()
+				handler.ServeHTTP(w, r)
+				if w.Code != caller.want {
+					t.Fatalf("%s %s: got %d want %d: %s", route.method, route.suffix, w.Code, caller.want, w.Body.String())
+				}
+				if w.Code == 200 && !strings.Contains(w.Body.String(), `"reason":"lead_consent_missing"`) {
+					t.Fatal(w.Body.String())
+				}
+			}
+		}
+	})
 }

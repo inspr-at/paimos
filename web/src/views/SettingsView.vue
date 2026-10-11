@@ -35,6 +35,7 @@ const ComputersSection = defineAsyncComponent(() => import('../components/settin
 const CapacitySection = defineAsyncComponent(() => import('../components/settings/CapacitySection.vue'))
 const PoliciesSection = defineAsyncComponent(() => import('../components/settings/PoliciesSection.vue'))
 const ModelsSection = defineAsyncComponent(() => import('../components/settings/ModelsSection.vue'))
+const RoutinesSection = defineAsyncComponent(() => import('../components/settings/RoutinesSection.vue'))
 
 // Settings groups share one frame; explicit grants gate Access, rules and accounts.
 // /settings/<section>#<target> deep-links to a card or field, ringed on arrival.
@@ -94,8 +95,8 @@ const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so
 // the nav never re-flows under the pointer (usually a few milliseconds).
 void refreshPermissions()
-const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, models: ModelsSection, workspace: WorkspaceSection, vocabulary: VocabularySection, kinds: KindsOfWorkSection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, computers: ComputersSection, capacity: CapacitySection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
-const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', models: 'columns', workspace: 'building', vocabulary: 'tag', kinds: 'list', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'key', computers: 'monitor', capacity: 'gauge', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
+const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, models: ModelsSection, routines: RoutinesSection, workspace: WorkspaceSection, vocabulary: VocabularySection, kinds: KindsOfWorkSection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, computers: ComputersSection, capacity: CapacitySection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
+const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', models: 'columns', routines: 'repeat', workspace: 'building', vocabulary: 'tag', kinds: 'list', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'key', computers: 'monitor', capacity: 'gauge', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
 // While Accounts, Computers or Capacity is open, the nav says how many things need you in each (AEON-1171).
 const navNeeds = (id: SectionId) => isAccountsPart(id) && isAccountsPart(current.value) ? accountsNeeds.value?.[id] ?? 0 : 0
 const groups = computed(() => SETTINGS_GROUPS.map(label => ({ label, sections: sections.value.filter(section => section.group === label) })).filter(group => group.sections.length))
