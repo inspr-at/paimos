@@ -212,7 +212,7 @@ func ReserveRoutineAccountTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	}
 	var bound bool
 	var project string
-	if err := tx.QueryRow(ctx, `SELECT r.output_project_id::text,r.execute_consent AND r.consent_revision=r.definition_revision AND r.state='pending' AND ar.agent_principal_id=$3
+	if err := tx.QueryRow(ctx, `SELECT r.output_project_id::text,r.execute_consent AND r.consent_revision=r.definition_revision AND r.state IN ('created','pending') AND ar.agent_principal_id=$3
  FROM routine_runs r JOIN agent_runs ar ON ar.tenant_id=r.tenant_id AND ar.id=r.agent_run_id WHERE r.id=$1 AND r.agent_run_id=$2`, routine, runID, p.ID).Scan(&project, &bound); err != nil {
 		return RouteResult{}, events.Change{}, err
 	}
