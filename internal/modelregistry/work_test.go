@@ -47,7 +47,10 @@ func TestModelsV2UnadoptedSavedLadder(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&opus); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE model_role_routes SET priority=0 WHERE role='build' AND profile_id=$1`, opus); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE model_role_routes SET priority=priority+100 WHERE role='build'`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE model_role_routes SET priority=1 WHERE role='build' AND profile_id=$1`, opus); err != nil {
 			return err
 		}
 		now, err := dbNow(ctx, tx)
