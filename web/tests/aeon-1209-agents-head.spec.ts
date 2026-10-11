@@ -506,7 +506,8 @@ test.describe('touch targets', () => {
 test('AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart', async ({ page }, info) => {
   test.setTimeout(180_000)
   await page.setViewportSize({ width: 1440, height: 1000 })
-  const { data } = await setup(page)
+  const { data, capacity } = await setup(page)
+  for (const computer of capacity.computers as { computer_name: string }[]) computer.computer_name = 'Entwicklungscomputer mit einem sehr langen Namen'
   const paths = { accounts: '/api/agent-accounts', computers: '/api/agent-pairing/computers', capacity: '/api/agent-accounts/capacity', schedules: '/api/agent-accounts/capacity/schedule' }
   const failures: Partial<Record<keyof typeof paths, number>> = {}
   let empty = false, release!: () => void
@@ -521,7 +522,7 @@ test('AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forb
   })
   failures.accounts = 500
   await page.goto('/agents')
-  await expect(page.locator('.acc-slot .acc-sk')).toBeVisible()
+  await expect(capRow(page).locator('.acc-sk')).toBeVisible()
   await expect(capRow(page)).not.toContainText('No accounts yet')
   waiting = false; release()
   const chip = capRow(page).locator('.acc-chip')

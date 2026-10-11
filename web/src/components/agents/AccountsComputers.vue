@@ -243,6 +243,7 @@ async function endAway() {
 .schip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .schip > svg { flex: none; }
 .sc-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); font-weight: 550; text-align: left; }
+.schip.warn > svg:first-child { color: var(--warn-ink); }
 .schip.warn .sc-t { color: var(--warn-ink); }
 .schip.stale .flag { background: none; box-shadow: none; color: var(--ink-3); }
 .chip-age { display: inline-flex; align-items: center; gap: 4px; flex: none; color: var(--ink-3); font-size: 11.5px; }
