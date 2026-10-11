@@ -123,23 +123,28 @@ for (const theme of ['light', 'dark'] as const) test(`ended and lost-contact pho
       await expect(row.locator('.result')).toHaveText('Ship')
       await expect(menu).toBeVisible()
       if (width <= 390) {
-        // Compact rows (AEON-1211, design AEON-1196): only the menu beside the two lines; Remove is in it and
-        // the computer is named and renamed in the details. The opener mark names the command.
+        // Compact rows (AEON-1211, design AEON-1196): the bin and the menu beside the two lines; the computer is
+        // named and renamed in the details. The opener mark names the command.
         await expect(host).toBeHidden()
-        await expect(remove).toBeHidden()
         await expect(row.locator('.op-mark')).toHaveAttribute('aria-label', 'Terminal · ffmpeg')
-        const menuBox = (await menu.boundingBox())!
-        expect(menuBox.width).toBeGreaterThanOrEqual(44)
-        expect(menuBox.height).toBeGreaterThanOrEqual(44)
-        await expectStableControls({ controls: { row, menu }, scrollAreas: { row }, interactions: [
+        for (const action of [remove, menu]) {
+          const actionBox = (await action.boundingBox())!
+          expect(actionBox.width).toBeGreaterThanOrEqual(44)
+          expect(actionBox.height).toBeGreaterThanOrEqual(44)
+        }
+        await expectStableControls({ controls: { row, remove, menu }, scrollAreas: { row }, interactions: [
           { name: 'open row Actions', run: async () => {
             await menu.click()
             await expect(menu).toHaveAttribute('aria-expanded', 'true')
             await expect(page.getByRole('menu', { name: `Actions for ${session.display_label}` })).toBeVisible()
           } },
-          { name: 'Remove from the menu and report its failure', run: async () => {
+          { name: 'close row Actions', run: async () => {
+            await page.keyboard.press('Escape')
+            await expect(menu).toHaveAttribute('aria-expanded', 'false')
+          } },
+          { name: 'click Remove and report its failure', run: async () => {
             const count = removed.length
-            await page.getByRole('menu', { name: `Actions for ${session.display_label}` }).getByRole('menuitem', { name: 'Remove', exact: true }).click()
+            await remove.click()
             await expect.poll(() => removed.length).toBe(count + 1)
             expect(removed.at(-1)).toBe(session.id)
             await expect(page.getByText('Removal unavailable in layout fixture', { exact: true }).last()).toBeVisible()

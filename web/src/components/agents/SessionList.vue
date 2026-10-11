@@ -1125,10 +1125,10 @@ function sessionLinkClick(event: MouseEvent, id: string) {
   .lineage { grid-column: 2 / -1; padding: 4px 0 0; min-height: 24px; }
   .worker-tools { grid-column: 2 / -1; grid-row: 2; flex-wrap: nowrap; white-space: nowrap; min-height: 44px; margin: 0 0 0 -4px; padding: 0; }
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
-  /* Beside the two lines sits ⋯, centred on them: Pause, Resume and Remove are in its menu.
-     A row without a menu keeps its bin. */
+  /* Beside the two lines sit ⋯ and, on an ended or silent row, its one-tap bin (AEON-291), centred
+     on them. Pause, Resume and Change tier are in the menu. */
   .row > .c-actions { grid-column: 4; grid-row: 1; flex-direction: row; gap: 0; margin-top: calc(var(--tree-joint) - 10px - 22px); padding: 0; }
-  .act, .c-actions > .pause-controls, .c-actions:has(> .more) > .bin { display: none; }
+  .act, .c-actions > .pause-controls { display: none; }
   .c-actions .icon-btn:is(.more, .bin) { width: 44px; height: 44px; opacity: 1; }
 }
 @media (pointer: coarse), (max-width: 720px) {

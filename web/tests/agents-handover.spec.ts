@@ -22,7 +22,8 @@ async function setup(page: Page, theme = 'light', rights = true, extraLead = fal
   const base = { ...data.sessions[0]!, run_id: null, ticket_node_id: null, ticket: null, model: 'gpt-6', brief: null, agent: { id: data.sessions[0]!.agent_principal_id, name: 'coordinator' }, parent_harness_session_id: null, phase: 'working', stopped_at: null, heartbeat_at: new Date(now - 1000).toISOString(), can_reparent: rights }
   const session = (n: number, label: string, extra: Record<string, unknown> = {}) => ({ ...base, id: id(n), display_label: label, role: 'coordinator', ...extra }) as unknown as typeof data.sessions[number]
   data.sessions.splice(0, data.sessions.length,
-    session(1, 'Original lead', { phase: 'stopped', stopped_at: new Date(now - 50000).toISOString(), handed_over_to_id: id(2), can_reparent: false }),
+    // Ended eleven minutes ago, past the 10 minutes an ended row keeps its place (AEON-1211).
+    session(1, 'Original lead', { phase: 'stopped', stopped_at: new Date(now - 660_000).toISOString(), handed_over_to_id: id(2), can_reparent: false }),
     session(2, 'Resumed lead'), session(3, 'Release lead'),
     session(4, 'Permission checks', { role: 'worker', parent_harness_session_id: id(2), adopted_from_id: id(1) }),
     session(5, 'Foreign lead', { can_reparent: false }),

@@ -35,7 +35,8 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', unrelated = 
     phase: stopped ? 'stopped' : 'working', activity: 'busy',
     created_at: new Date(NOW - (1000 + n) * 1000).toISOString(),
     heartbeat_at: new Date(NOW - 1000).toISOString(),
-    stopped_at: stopped ? new Date(NOW - 60_000).toISOString() : null,
+    // Ended eleven minutes ago, past the 10 minutes an ended row keeps its place (AEON-1211).
+    stopped_at: stopped ? new Date(NOW - 660_000).toISOString() : null,
     eta_ready_at: new Date(NOW + 5 * 60_000).toISOString(), eta_reported_at: new Date(NOW).toISOString(), progress_pct: 80,
   }) as unknown as typeof data.sessions[number]
   data.sessions = [...Array.from({ length: 4 }, (_, i) => session(i + 1)), ...Array.from({ length: endedCount }, (_, i) => session(i + 10, true))]
