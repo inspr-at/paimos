@@ -379,7 +379,8 @@
         "web/src/components/agents/HarnessOpener.vue",
         "web/src/components/agents/SessionsHeld.vue",
         "web/src/components/agents/sessionHold.ts",
-        "web/src/components/agents/sessionTime.ts"
+        "web/src/components/agents/sessionTime.ts",
+        "web/src/components/settings/models/ModelOutdatedSheet.vue"
       ]
     },
     {
@@ -398,6 +399,7 @@
         "web/tests/lead-adoption.spec.ts",
         "web/tests/access-refresh-panels.unit.test.ts",
         "web/src/stores/decisionDesk.ts",
+        "web/tests/models-outdated.spec.ts",
         "web/src/lib/shortcuts.ts",
         "web/tests/shortcuts.unit.test.ts"
       ],

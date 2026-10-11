@@ -10,7 +10,8 @@ import type { DeepReadonly } from './ledger.ts'
 import { DEFAULT_AGENT_STATE, assessAgentState, type StateReason, type AgentState, type AgentStatePreference } from './agentSignals.ts'
 
 export const HEARTBEAT_STALE_MS = 3 * 60_000
-export const HARNESS_LABEL: Record<string, string> = { codex: 'Codex', claude: 'Claude', pi: 'Pi', cursor: 'Cursor', grok: 'Grok', gemini: 'Gemini CLI', opencode: 'OpenCode' }
+// The harness by its product name: Claude Code runs Claude models (Tick, AEON-1160); accounts keep the vendor's name.
+export const HARNESS_LABEL: Record<string, string> = { codex: 'Codex', claude: 'Claude Code', pi: 'Pi', cursor: 'Cursor', grok: 'Grok', gemini: 'Gemini CLI', opencode: 'OpenCode' }
 export const harnessLabel = (harness: string) => HARNESS_LABEL[harness] ?? harness.charAt(0).toUpperCase() + harness.slice(1)
 
 export type SessionGroup = 'pausing' | 'paused' | 'needs' | 'awaiting' | 'working' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stopped'
