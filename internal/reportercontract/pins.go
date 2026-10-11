@@ -48,6 +48,7 @@ var surfaces = map[string]surface{
 	"harness-session": {HarnessSession, "HarnessSessionContract", []operation{
 		{"/projects/{projectId}/harness-sessions/{sessionId}", "get", "200"},
 		{"/projects/{projectId}/harness-sessions/{sessionId}/heartbeat", "post", "200"},
+		{"/projects/{projectId}/lead", "get", "200"},
 	}},
 }
 

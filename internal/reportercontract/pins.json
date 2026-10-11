@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/3.0",
-    "sha256": "35eb883983ff67171444690719cfb330db512124048a58954a06c8d02ddd835b",
+    "version": "harness-session/3.1",
+    "sha256": "4b576e5c635059787c8f21fedd0f2fafb06c0cf4a51665fc57dadd498154e357",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -2034,6 +2034,175 @@
           "revision",
           "created_at",
           "finished"
+        ],
+        "type": "object"
+      },
+      "GET /projects/{projectId}/lead 200": {
+        "properties": {
+          "actions": {
+            "properties": {
+              "adopt": {
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "blocked_reason": {
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "readOnly": true,
+                "required": [
+                  "available",
+                  "blocked_reason"
+                ],
+                "type": "object"
+              },
+              "cancel_adoption": {
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "blocked_reason": {
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "readOnly": true,
+                "required": [
+                  "available",
+                  "blocked_reason"
+                ],
+                "type": "object"
+              },
+              "pause": {
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "blocked_reason": {
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "readOnly": true,
+                "required": [
+                  "available",
+                  "blocked_reason"
+                ],
+                "type": "object"
+              },
+              "remove": {
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "blocked_reason": {
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "readOnly": true,
+                "required": [
+                  "available",
+                  "blocked_reason"
+                ],
+                "type": "object"
+              },
+              "resume": {
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "blocked_reason": {
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "readOnly": true,
+                "required": [
+                  "available",
+                  "blocked_reason"
+                ],
+                "type": "object"
+              },
+              "start": {
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "blocked_reason": {
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "readOnly": true,
+                "required": [
+                  "available",
+                  "blocked_reason"
+                ],
+                "type": "object"
+              }
+            },
+            "readOnly": true,
+            "required": [
+              "start",
+              "resume",
+              "pause",
+              "adopt",
+              "cancel_adoption",
+              "remove"
+            ],
+            "type": "object"
+          },
+          "automatic_launch_enabled": {
+            "default": false,
+            "type": "boolean"
+          },
+          "generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "process_active": {
+            "type": "boolean"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "enum": [
+              "none",
+              "starting",
+              "working",
+              "waiting_for_room",
+              "paused",
+              "cannot_start"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "revision",
+          "generation",
+          "state",
+          "reason",
+          "process_active"
         ],
         "type": "object"
       },

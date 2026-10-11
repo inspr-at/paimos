@@ -216,7 +216,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/force-stop", "harness.force_stop", false, 201, m.forceStop},
 	} {
 		handler := workorders.Endpoint(m.pool, route.scope, route.agent, route.status, route.fn)
-		if route.pattern == "GET /api/projects/{projectId}/harness-sessions/{sessionId}" || route.pattern == "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat" {
+		if route.pattern == "GET /api/projects/{projectId}/harness-sessions/{sessionId}" || route.pattern == "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat" || route.pattern == "GET /api/projects/{projectId}/lead" {
 			handler = reportercontract.WithHeader(reportercontract.HarnessSession, handler)
 		}
 		mux.HandleFunc(route.pattern, handler)

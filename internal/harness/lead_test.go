@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/views"
 	"github.com/jackc/pgx/v5"
@@ -516,6 +517,14 @@ func TestProjectLeadOpenAPIContract(t *testing.T) {
 		if len(properties["state"].(map[string]any)["enum"].([]any)) != 6 {
 			t.Fatal("lead lifecycle states missing")
 		}
+		if properties["automatic_launch_enabled"].(map[string]any)["type"] != "boolean" || properties["actions"].(map[string]any)["$ref"] != "#/components/schemas/ProjectLeadActions" {
+			t.Fatal("lead action or automatic launch contract missing")
+		}
+		schemas := doc["components"].(map[string]any)["schemas"].(map[string]any)
+		actions := schemas["ProjectLeadActions"].(map[string]any)
+		if actions["readOnly"] != true || len(actions["properties"].(map[string]any)) != 6 {
+			t.Fatal("lead actions must be read-only and describe every offered action")
+		}
 		for _, private := range []string{"worker_lease", "account_id", "owner_principal_id"} {
 			if _, ok := properties[private]; ok {
 				t.Fatal("public lead contract exposes private identity or proof")
@@ -1010,6 +1019,205 @@ func TestProjectLeadUnclaimedAdoptionRejectsPauseAndCancelClearsSelection(t *tes
 		expect(t, w, 200)
 		if decode(t, w)["state"] != "paused" {
 			t.Fatal("a claimed generation could not pause")
+		}
+	})
+}
+
+// Risk: project grants or an agent lease are mistaken for canonical person
+// ownership, or action availability survives a changed generation/unconfirmed
+// exit. Reads must leave lead state, events and private proofs untouched.
+func TestProjectLeadActionsTrackCurrentPersonAndGeneration(t *testing.T) {
+	f := projectLeadFixture(t, readyLeadChecks)
+	f.person.BrowserSession = true
+	path := "/api/projects/" + f.project + "/lead"
+	other := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	alias := tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Other person')`, other.TenantID, other.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name,linked_to) VALUES($1,$2,'person','Linked person',$3)`, alias.TenantID, alias.ID, f.person.ID)
+		return err
+	})
+	dbtest.BindRole(t, f.db, other.TenantID, other.ID, "admin")
+	read := func(t *testing.T, p tenant.Principal, lease string) map[string]any {
+		t.Helper()
+		w := f.call(p, "GET", path, nil, lease)
+		expect(t, w, 200)
+		for _, private := range []string{"owner_principal_id", "dispatch_key", "worker_lease", "harness_session_ref", f.person.ID, f.agent.AuthKeyID} {
+			if strings.Contains(w.Body.String(), private) {
+				t.Fatalf("lead read exposed private field or value: %s", private)
+			}
+		}
+		return decode(t, w)
+	}
+	check := func(t *testing.T, view map[string]any, name, reason string) {
+		t.Helper()
+		actions, ok := view["actions"].(map[string]any)
+		if !ok || len(actions) != 6 {
+			t.Fatalf("missing lead actions: %v", view)
+		}
+		action, ok := actions[name].(map[string]any)
+		if !ok || len(action) != 2 || action["available"] != (reason == "") || action["blocked_reason"] != reason {
+			t.Fatalf("%s: got %v, want reason %q", name, action, reason)
+		}
+	}
+	t.Run("launch_policy_and_no_session_intent", func(t *testing.T) {
+		empty := read(t, f.person, "")
+		check(t, empty, "start", "automatic_launch_disabled")
+		check(t, empty, "resume", "lead_not_paused")
+		check(t, empty, "pause", "lead_required")
+		check(t, empty, "adopt", "no_eligible_session")
+		check(t, empty, "remove", "lead_not_removable")
+	})
+	// Enable launch through the existing qualified person consent path. A
+	// ready admission fixture alone must never make Start available.
+	runtime := modelregistry.ExecutionRuntime{ServerDigest: strings.Repeat("a", 64), DaemonDigest: strings.Repeat("b", 64), CapabilityDigest: strings.Repeat("c", 64), Capabilities: []string{"routine_native_coding_v1"}, HostMappingDigest: strings.Repeat("d", 64), BudgetModes: []string{"off"}}
+	reader := func(ctx context.Context, tx pgx.Tx, _ string) (modelregistry.ExecutionRuntime, error) {
+		out := runtime
+		err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&out.ObservedAt)
+		return out, err
+	}
+	f.mux = http.NewServeMux()
+	harness.NewWithLeadAdmission(f.db.App, readyLeadChecks).(*harness.Module).WithRoutineExecutionRuntime(reader).Mount(f.mux)
+	q := modelregistry.Qualification{ID: uid(), ProjectID: f.project, Runtime: runtime, CoordinatorAcceptance: strings.Repeat("e", 64), OPSAttestation: strings.Repeat("f", 64)}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO project_lead_settings(tenant_id,project_id,owner_person_id,overrides,updated_by) VALUES($1,$2,$3,'{}',$3)`, f.person.TenantID, f.project, f.person.ID); err != nil {
+			return err
+		}
+		var err error
+		q.OwnerPersonID, q.PolicyDigest, err = modelregistry.QualificationPolicyTx(t.Context(), tx, f.person.TenantID, f.project)
+		return err
+	})
+	f.tx(t, f.person, func(tx pgx.Tx) error { return modelregistry.RecordQualificationTx(t.Context(), tx, f.person, q) })
+	w := f.call(f.person, "PUT", "/api/projects/"+f.project+"/routine-execution-settings", map[string]any{"expected_revision": 0, "automatic_launch_enabled": true, "qualification_id": q.ID}, "")
+	expect(t, w, 200)
+	// Both people have identical grants in this project, rather than workspace
+	// authority. The linked identity inherits the owner's canonical binding.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET scope_type='project',scope_id=$3 WHERE principal_id IN ($1,$2)`, f.person.ID, other.ID, f.project)
+		return err
+	})
+	check(t, read(t, f.person, ""), "start", "")
+	intent := startLead(t, f, 0)
+	t.Run("owner_and_peer_with_identical_grants", func(t *testing.T) {
+		for _, person := range []tenant.Principal{f.person, alias} {
+			view := read(t, person, "")
+			if view["session_id"] != nil || view["generation"] != float64(0) || view["revision"] != intent["revision"] {
+				t.Fatal("unbound intent lost snapshot identity", view)
+			}
+			check(t, view, "start", "")
+			check(t, view, "pause", "")
+		}
+		peer := read(t, other, "")
+		for _, action := range []string{"start", "resume", "pause", "adopt", "cancel_adoption"} {
+			check(t, peer, action, "lead_owner_required")
+		}
+		check(t, peer, "remove", "") // existing removal permission has no owner rule
+		leadStatus(t, f.call(other, "POST", path, map[string]any{"expected_revision": intent["revision"]}, ""), 403, "lead owner required; explicit ownership handoff required")
+		leadStatus(t, f.call(other, "POST", path+"/pause", map[string]any{"expected_revision": intent["revision"], "generation": 0}, ""), 403, "lead owner required")
+	})
+	session, lease, _ := leadCandidate(t, f)
+	check(t, read(t, f.person, ""), "adopt", "")
+	w = f.call(f.person, "POST", path+"/adopt", map[string]any{"expected_revision": intent["revision"], "session_id": session}, "")
+	expect(t, w, 200)
+	pending := decode(t, w)
+	t.Run("explicit_adoption_without_launch", func(t *testing.T) {
+		view := read(t, f.person, "")
+		check(t, view, "cancel_adoption", "")
+		check(t, view, "pause", "adoption_pending")
+		check(t, view, "start", "process_exit_unconfirmed")
+		check(t, view, "adopt", "ordinary_succession_required")
+		check(t, view, "remove", "lead_not_removable")
+		check(t, read(t, other, ""), "cancel_adoption", "lead_owner_required")
+	})
+	bound := claimLead(t, f, session, lease, pending["revision"])
+	t.Run("agent_lease_does_not_offer_person_actions", func(t *testing.T) {
+		agent := f.agent
+		agent.Scopes = []string{"harness.read", "harness.worker"}
+		view := read(t, agent, lease)
+		for _, action := range []string{"start", "resume", "pause", "adopt", "cancel_adoption", "remove"} {
+			check(t, view, action, "person_required")
+		}
+		// The current agent lease still has its existing worker pause path.
+		w = f.call(f.agent, "POST", path+"/pause", map[string]any{"expected_revision": bound["revision"], "generation": bound["generation"]}, lease)
+		expect(t, w, 200)
+	})
+	paused := decode(t, w)
+	check(t, read(t, f.person, ""), "resume", "process_exit_unconfirmed")
+	var control string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT pause_record->>'control_id' FROM harness_sessions WHERE id=$1`, session).Scan(&control)
+	})
+	finishPaused(t, f, "/api/projects/"+f.project+"/harness-sessions/"+session, lease, control)
+	check(t, read(t, f.person, ""), "resume", "")
+	intent = startLead(t, f, int(paused["revision"].(float64)))
+	next, nextLease, _ := leadCandidate(t, f)
+	bound = claimLead(t, f, next, nextLease, intent["revision"])
+	t.Run("changed_generation_and_old_proof", func(t *testing.T) {
+		view := read(t, f.person, "")
+		if view["generation"] != float64(2) || view["session_id"] != next || view["revision"] != bound["revision"] {
+			t.Fatal("availability retained the former generation", view)
+		}
+		check(t, view, "pause", "")
+		check(t, view, "start", "process_exit_unconfirmed")
+		check(t, view, "resume", "lead_not_paused")
+		check(t, view, "cancel_adoption", "unclaimed_adoption_required")
+		leadStatus(t, f.call(f.agent, "POST", path+"/pause", map[string]any{"expected_revision": bound["revision"], "generation": 1}, lease), 409, "lead revision or generation conflict")
+		leadStatus(t, f.call(f.agent, "POST", path+"/pause", map[string]any{"expected_revision": bound["revision"], "generation": 2}, lease), 403, "current lead worker proof required")
+		// Lost reporting and administrative closure never make Start available.
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=clock_timestamp(),stop_reason='heartbeat_lost',phase='stopped' WHERE id=$1`, next)
+			return err
+		})
+		view = read(t, f.person, "")
+		check(t, view, "start", "process_exit_unconfirmed")
+		if view["process_active"] != true {
+			t.Fatal("action projection invented process exit")
+		}
+	})
+	t.Run("reads_leave_state_and_audit_untouched", func(t *testing.T) {
+		snapshot := func() string {
+			t.Helper()
+			var value string
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT row_to_json(l)::text || (SELECT count(*)::text FROM events) || (SELECT count(*)::text FROM harness_controls) FROM project_leads l WHERE project_id=$1`, f.project).Scan(&value)
+			})
+			return value
+		}
+		before := snapshot()
+		read(t, f.person, "")
+		read(t, other, "")
+		if after := snapshot(); after != before {
+			t.Fatal("action availability changed lead intent, controls or audit")
+		}
+	})
+	t.Run("project_grants_are_rechecked_per_action", func(t *testing.T) {
+		var role string
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'lead_actions_limited','Lead actions limited') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+				return err
+			}
+			for _, permission := range []string{"harness.read", "harness.control"} {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, f.person.TenantID, role, permission); err != nil {
+					return err
+				}
+			}
+			_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, f.person.ID, role)
+			return err
+		})
+		view := read(t, f.person, "")
+		for _, action := range []string{"start", "resume", "adopt", "cancel_adoption"} {
+			check(t, view, action, "run_create_required")
+		}
+		check(t, view, "pause", "") // the owner can still close dispatch
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `DELETE FROM role_permissions WHERE role_id=$1 AND permission='harness.control'`, role)
+			return err
+		})
+		view = read(t, f.person, "")
+		for _, action := range []string{"start", "resume", "pause", "adopt", "cancel_adoption", "remove"} {
+			check(t, view, action, "harness_control_required")
 		}
 	})
 }
