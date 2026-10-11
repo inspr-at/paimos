@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { deleteRecurrence, getRecurrence, getRoutineExecutionSettings, listRoutines, pauseRecurrence, putRoutineExecutionSettings, runRecurrence } from '../../lib/api'
-import { can, myProjectRole, myWorkspaceRole, onAccessChange } from '../../lib/authz'
+import { can, myProjectRole, myWorkspaceRole, onAccessRevalidate } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
 import { toast } from '../../lib/toast'
 import { useIdentityScope } from '../../lib/useIdentityScope'
@@ -61,7 +61,7 @@ function readSwitch() {
 watch(showSwitch, value => { if (value && !settings.value) readSwitch() })
 let epoch = 0, alive = true
 function clear() { identity.reset(); epoch++; items.value = []; cursor.value = null; selected.value = ''; menu.value = null; editor.value = null; runPrompt.value = null; failure.value = ''; busy.value = []; loading.value = false; linked.value = null; linkFailure.value = ''; settings.value = null }
-const stopAccess = onAccessChange(change => { if (change === 'reset') clear() })
+const stopAccess = onAccessRevalidate({ reset: clear })
 function load(older = false) {
   if (!identity.owner.value || busy.value.length || editor.value || runPrompt.value || menu.value) return
   const filter = { projectId: kind.value === 'project' ? projectId.value : undefined, scope: kind.value, after: older ? cursor.value || undefined : undefined }

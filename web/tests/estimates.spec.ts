@@ -20,7 +20,8 @@ const row = (page: Page, key: string) => page.locator('tr.ticket-row:not(.ghost)
 // phone layout. Exercise both policies through the real column controls.
 async function automaticPhoneColumns(page: Page) {
   await page.getByRole('button', { name: 'Filters', exact: true }).click()
-  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+  await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
   await sheet.getByRole('button', { name: 'Automatic', exact: true }).click()
   await sheet.locator('footer button').click()
 }

@@ -9,7 +9,7 @@ import { ticketPath } from '../src/lib/work'
 
 const mocks = vi.hoisted(() => ({ lookup: vi.fn(), access: (_change: 'reset' | 'refresh') => {} }))
 vi.mock('../src/lib/api.ts', () => ({ lookupNodeKeys: mocks.lookup }))
-vi.mock('../src/lib/authz.ts', () => ({ onAccessChange: (callback: typeof mocks.access) => { mocks.access = callback } }))
+vi.mock('../src/lib/authz.ts', () => ({ onAccessRevalidate: (actions: { reset: () => void; refresh: () => void }) => { mocks.access = change => change === 'reset' ? actions.reset() : actions.refresh(); return () => {} } }))
 
 type Node = { tag: string; text: string; props: Record<string, unknown>; children: Node[]; parent: Node | null }
 const node = (tag: string): Node => ({ tag, text: '', props: {}, children: [], parent: null })

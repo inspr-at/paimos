@@ -6,12 +6,78 @@ import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { expectStableControls } from './helpers/stable'
 import { HOST_A, mockLeadFlow } from './lead-flow-fixtures'
+import { controlStability } from './control-stability'
 
 const band = (page: Page) => page.locator('section.lead')
 const panel = (page: Page) => page.getByRole('complementary', { name: 'PHAROS lead' })
 const mac = process.platform === 'darwin'
 const submit = mac ? 'Meta+Enter' : 'Control+Enter'
 async function theme(page: Page, value: 'light' | 'dark') { await page.evaluate(choice => { document.documentElement.dataset.theme = choice }, value) }
+
+test('AEON-1195: focus cycles retain the same lead DOM rows, order and controls during delayed refresh', async ({ page }, info) => {
+  const { data } = await mockLeadFlow(page, { lead: 'paused', aeon: 'paused', queue: [] })
+  // Equal states exercise the project tie breaker, independent of server order.
+  data.projects.reverse()
+  await page.goto('/agents')
+  const rows = page.locator('.lead-row')
+  await expect(rows).toHaveCount(2)
+  expect(await rows.evaluateAll(list => list.map(row => row.getAttribute('data-project')))).toEqual(['AEON', 'PHAROS'])
+  await page.evaluate(() => {
+    const section = document.getElementById('leads-title')!.closest('section')!
+    const original = [...section.querySelectorAll('.lead-row')]
+    const removed: Node[] = []
+    const observer = new MutationObserver(records => { for (const record of records) removed.push(...record.removedNodes) })
+    observer.observe(document.body, { childList: true, subtree: true })
+    Object.assign(window, { focusEvidence: { section, original, removed, observer } })
+  })
+  for (const width of [390, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 1100 })
+    const guard = await controlStability(page, { aeon: rows.nth(0), pharos: rows.nth(1) })
+    for (const look of ['light', 'dark'] as const) {
+      await theme(page, look)
+      let release!: () => void, started!: () => void
+      const held = new Promise<void>(resolve => { release = resolve })
+      const arrived = new Promise<void>(resolve => { started = resolve })
+      const barrier = async (route: import('@playwright/test').Route) => { started(); await held; await route.fallback() }
+      await page.route('**/api/projects/*/lead', barrier)
+      await guard.check(async () => {
+        await page.evaluate(() => { window.dispatchEvent(new Event('blur')); window.dispatchEvent(new Event('focus')) })
+        await arrived
+        await expect(rows).toHaveCount(2)
+        expect(await page.evaluate(() => {
+          const evidence = (window as unknown as { focusEvidence: { section: Element; original: Element[]; removed: Node[] } }).focusEvidence
+          return evidence.section.isConnected && evidence.original.every((row, index) => row === document.querySelectorAll('.lead-row')[index]) && !evidence.removed.some(node => node === evidence.section || evidence.original.some(row => node === row || node.contains(row)))
+        })).toBe(true)
+      })
+      await page.locator('section.zone').filter({ has: page.locator('#leads-title') }).screenshot({ path: info.outputPath(`aeon-1195-focus-${width}-${look}.png`) })
+      await guard.check(async () => {
+        const responses = Promise.all(['p-aeon', 'p-pharos'].map(id => page.waitForResponse(response => new URL(response.url()).pathname === `/api/projects/${id}/lead`)))
+        release()
+        await Promise.all((await responses).map(response => response.finished()))
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+        await expect(rows).toHaveCount(2)
+        expect(await rows.evaluateAll(list => list.map(row => row.getAttribute('data-project')))).toEqual(['AEON', 'PHAROS'])
+      })
+      await page.unroute('**/api/projects/*/lead', barrier)
+      data.projects.reverse()
+      await guard.check(async () => {
+        await page.evaluate(async () => {
+          // The dev server serves the real store; reread the same project set
+          // in the opposite HTTP order without navigating or replacing the view.
+          const { useProjects } = await import('/src/stores/projects.ts' /* @vite-ignore */)
+          await useProjects().load(true)
+        })
+        expect(await rows.evaluateAll(list => list.map(row => row.getAttribute('data-project')))).toEqual(['AEON', 'PHAROS'])
+      })
+    }
+    guard.done()
+  }
+  expect(await page.evaluate(() => {
+    const evidence = (window as unknown as { focusEvidence: { section: Element; original: Element[]; removed: Node[]; observer: MutationObserver } }).focusEvidence
+    evidence.observer.disconnect()
+    return evidence.section.isConnected && evidence.original.every((row, index) => row === document.querySelectorAll('.lead-row')[index]) && !evidence.removed.some(node => node === evidence.section || evidence.original.some(row => node === row || node.contains(row)))
+  })).toBe(true)
+})
 
 for (const width of [1440, 390]) for (const look of ['light', 'dark'] as const) {
   test(`no lead: the band offers Start lead and the sheet requests one at ${width} ${look}`, async ({ page }, info) => {

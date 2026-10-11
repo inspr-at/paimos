@@ -248,6 +248,10 @@ func (a *routineQualifiedFixture) Start(ctx context.Context, request StartReques
 
 func (*routineQualifiedFixture) RoutineExecutionSupported(agentsetup.RoutineGrant) bool { return true }
 
+// This synthetic allocator/lifetime fixture never runs workspace code or a
+// vendor. Its qualification does not establish a production native boundary.
+func (*routineQualifiedFixture) RoutineToolsSupported(agentsetup.RoutineGrant) bool { return true }
+
 func routineGitFixture(t *testing.T) (string, string, func(...string) string) {
 	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
