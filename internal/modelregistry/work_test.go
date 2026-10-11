@@ -374,6 +374,7 @@ func TestPreferenceStoreCanonicalPeopleAndGuards(t *testing.T) {
 // while the Models migration is pending, or bypass an explicit order or lock.
 func TestModelsV2RoundRoutingCompatibility(t *testing.T) {
 	admin, _ := boardFixture(t)
+	boardDecode[boardDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/board", nil, ""), 200)
 	runner := addPrincipal(t, admin.TenantID, "agent", "Round runner", []string{"admin"})
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		ctx := tenant.WithPrincipal(t.Context(), admin)
