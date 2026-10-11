@@ -5,6 +5,7 @@ package nodes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -616,6 +618,35 @@ func mustNode(t *testing.T, p tenant.Principal, body string) nodeJSON {
 	return decode[nodeJSON](t, status, raw, http.StatusCreated)
 }
 
+func TestNodeAuthorizationErrorsPreserveHTTPFailures(t *testing.T) {
+	// Risk: transaction authorization denials become 500s, or their mapping
+	// hides unrelated typed, resource-limit or internal failures.
+	for _, tc := range []struct {
+		name          string
+		err           error
+		status        int
+		message, code string
+	}{
+		{"forbidden", authz.ErrForbidden, 403, "permission denied", "forbidden"},
+		{"wrapped forbidden", fmt.Errorf("project admin: %w", authz.ErrForbidden), 403, "permission denied", "forbidden"},
+		{"typed conflict", conflictCoded("reload first", "stale_revision"), 409, "reload first", "stale_revision"},
+		{"resource limit", context.DeadlineExceeded, 503, "Work aggregates exceeded a resource limit; narrow the scope or retry.", ""},
+		{"internal", errors.New("unexpected database failure"), 500, "internal", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			writeErr(w, tc.err)
+			var body errorBody
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != tc.status || body.Error != tc.message || body.Code != tc.code || w.Header().Get("Cache-Control") != "no-store" {
+				t.Fatalf("wrong error response: status=%d body=%s headers=%v", w.Code, w.Body.String(), w.Header())
+			}
+		})
+	}
+}
+
 func TestProjectKeyConflictNamesHolderAndDeleteRequiresAdmin(t *testing.T) {
 	// Risk: duplicate ticket prefixes are created concurrently, deletion permits
 	// ordinary editors, or reserved keys leak across tenant boundaries.
@@ -639,7 +670,11 @@ func TestProjectKeyConflictNamesHolderAndDeleteRequiresAdmin(t *testing.T) {
 		t.Fatalf("member edit: %d %s", status, raw)
 	}
 	status, raw = callAs(t, mod, &p, "DELETE", "/api/nodes/"+first.ID, "")
-	if status != 403 {
+	var refusal errorBody
+	if err := json.Unmarshal(raw, &refusal); err != nil {
+		t.Fatal(err)
+	}
+	if status != 403 || refusal.Code != "forbidden" {
 		t.Fatalf("member deleted project: %d %s", status, raw)
 	}
 	if _, err := testDB.Admin.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='admin') WHERE tenant_id=$1 AND principal_id=$2`, p.TenantID, p.ID); err != nil {

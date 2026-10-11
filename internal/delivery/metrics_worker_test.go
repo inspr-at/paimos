@@ -36,6 +36,82 @@ func historySource(t *testing.T, f *fixture) *MetricSource {
 	return out.Source
 }
 
+func TestDeliveryHistoryFirstReadFailurePreservesSelectedWindow(t *testing.T) {
+	// Risk: no cursor is committed on the first failed automatic read, so a
+	// manual retry or continuation silently replaces the link's 90-day window.
+	for _, action := range []string{"check-again", "backfill"} {
+		t.Run(action, func(t *testing.T) {
+			f, g := newMetricsFixture(t)
+			path := "/api/projects/" + f.project + "/delivery/metrics"
+			f.call(t, f.person, "PUT", path+"/source", map[string]any{"repository": f.m.config.Repository, "days": 90}, 200, nil)
+			g.respond = func(string) (any, error) {
+				return nil, &crossreview.GitHubHTTPError{StatusCode: 403, ActionsReadRequired: true}
+			}
+			fresh := New(f.d.App, f.m.config, f.m.secret, g, nil)
+			fresh.now = f.m.now
+			fresh.sweepMetrics(t.Context())
+			f.tx(t, func(tx pgx.Tx) error {
+				var days int
+				var cursorMissing bool
+				if err := tx.QueryRow(t.Context(), `SELECT backfill_days,backfill_cursor IS NULL FROM delivery_metric_sources WHERE project_id=$1`, f.project).Scan(&days, &cursorMissing); err != nil {
+					return err
+				}
+				if days != 90 || !cursorMissing {
+					t.Fatalf("first-read failure did not retain the window without a cursor: days=%d cursorMissing=%t", days, cursorMissing)
+				}
+				return nil
+			})
+			if source := historySource(t, f); source.LastReadError == nil || source.LastReadError.Reason != "actions_read_missing" || source.RetryAt == nil || !source.RetryAt.Equal(f.at.Add(30*time.Minute)) || len(g.calls) != 1 {
+				t.Fatalf("first automatic read did not fail as expected: %+v calls=%v", source, g.calls)
+			}
+			// Ordinary continuation waits for retry_at; Check again clears it.
+			if action == "backfill" {
+				f.at = f.at.Add(30 * time.Minute)
+			}
+			wantSince := dayStart(f.at.AddDate(0, 0, -90))
+			f.call(t, f.person, "POST", path+"/"+action, map[string]any{}, 502, nil)
+			f.tx(t, func(tx pgx.Tx) error {
+				var days int
+				if err := tx.QueryRow(t.Context(), `SELECT backfill_days FROM delivery_metric_sources WHERE project_id=$1`, f.project).Scan(&days); err != nil {
+					return err
+				}
+				if days != 90 {
+					t.Fatalf("%s changed the durable window to %d days", action, days)
+				}
+				return nil
+			})
+			if source := historySource(t, f); source.BackfillSince == nil || !source.BackfillSince.Equal(wantSince) || source.LastReadError == nil || source.LastReadError.Reason != "actions_read_missing" || len(g.calls) != 2 {
+				t.Fatalf("%s lost the selected window or did not retry: %+v calls=%v", action, source, g.calls)
+			}
+			// Once a cursor exists, continuation must retain its days even if a
+			// caller supplies another window without explicitly restarting.
+			g.respond = emptyHistory(f.m.config.Repository)
+			f.at = f.at.Add(30 * time.Minute)
+			var out BackfillResult
+			f.call(t, f.person, "POST", path+"/backfill", map[string]any{"days": 7}, 200, &out)
+			if !out.Since.Equal(wantSince) {
+				t.Fatalf("continuation moved the cursor: %+v", out)
+			}
+			f.tx(t, func(tx pgx.Tx) error {
+				var days int
+				if err := tx.QueryRow(t.Context(), `SELECT backfill_days FROM delivery_metric_sources WHERE project_id=$1`, f.project).Scan(&days); err != nil {
+					return err
+				}
+				if days != 90 {
+					t.Fatalf("continuation overwrote the durable window with %d days", days)
+				}
+				return nil
+			})
+			for i := 0; i < 10 && historySource(t, f).Backfill != "done"; i++ {
+				fresh.sweepMetrics(t.Context())
+			}
+			if source := historySource(t, f); source.Backfill != "done" || source.BackfillSince == nil || !source.BackfillSince.Equal(wantSince) || source.LastReadError != nil || source.RetryAt != nil {
+				t.Fatalf("server continuation did not finish the selected window: %+v", source)
+			}
+		})
+	}
+}
+
 func TestDeliveryHistoryPermissionRetryCheckAgainAndTenantIsolation(t *testing.T) {
 	// Risk: a 403 is lost, a worker hot-loops before retry_at, or a tenant can
 	// inspect/change another tenant's diagnostic and webhook timestamps.

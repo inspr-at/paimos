@@ -389,5 +389,11 @@ func TestDeliveryQueueProjectLifecycleClosesStarts(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='frozen' WHERE id=$1`, f.project)
 		return err
 	})
-	f.call(t, f.person, "POST", path+"/"+round.ID+"/progress", map[string]any{"expected_revision": round.Revision, "state": "running"}, 409, nil)
+	var refusal struct {
+		Error string `json:"error"`
+	}
+	f.call(t, f.person, "POST", path+"/"+round.ID+"/progress", map[string]any{"revision": round.Revision, "state": "running"}, 409, &refusal)
+	if refusal.Error != "project_frozen" {
+		t.Fatalf("round start refused for the wrong reason: %+v", refusal)
+	}
 }
