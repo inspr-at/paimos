@@ -366,8 +366,8 @@ watch([() => props.selected, () => props.history?.length, () => current.value.le
 }, { immediate: true })
 
 // A row offers only what works for its session (AEON-291). Ended and silent
-// sessions get a bin right in the row: one click, then an undo toast. The
-// overflow holds the rest; it is hidden when the bin already says it all.
+// sessions get a bin in table rows: one click, then an undo toast. Compact
+// rows keep removal in their one reserved overflow slot, leaving names room.
 const live = (view: SessionView) => view.session.phase !== 'stopped' && !view.session.archived_at
 const menuOf = (view: SessionView): SessionMenu => sessionMenu(view, { grant: grant.value, canRemove: removal.canRemove(view.session), pending: props.controls[view.session.id], product: brand.value.short_name, now: props.now })
 const bin = (view: SessionView) => removal.canRemove(view.session) && quickRemoval(view)
@@ -377,9 +377,9 @@ const hasMenu = (view: SessionView) => { const m = menuOf(view); return m.contro
 // session no longer speaks for the ticket.
 const etaOf = (view: SessionView) => sessionEtaEligible(view) ? etaFromSession(view.session) : null
 const working = (view: SessionView) => sessionEtaEligible(view) && view.session.phase === 'working'
-const menu = ref<{ view: SessionView; anchor: HTMLElement } | null>(null)
+const menu = ref<{ view: SessionView; anchor: HTMLElement; compact: boolean } | null>(null)
 const menuItems = computed(() => menu.value ? menuOf(menu.value.view) : null)
-function openMenu(view: SessionView, event: MouseEvent) { menu.value = menu.value?.view.session.id === view.session.id ? null : { view, anchor: event.currentTarget as HTMLElement } }
+function openMenu(view: SessionView, event: MouseEvent) { menu.value = menu.value?.view.session.id === view.session.id ? null : { view, anchor: event.currentTarget as HTMLElement, compact: !!table.value && getComputedStyle(table.value).display === 'block' } }
 function pickTier() {
   const selected = menu.value
   if (!selected) return
@@ -825,7 +825,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         <button v-if="pause.eligible(menu.view.session, 'stop')" type="button" role="menuitem" class="menu-item danger" @click="pause.open('stop', [menu.view.session], menu.anchor); menu = null"><AppIcon name="halt" /><span class="mi-text">Stop now…</span></button>
         <template v-if="menuItems.remove">
           <button type="button" role="menuitem" class="menu-item" @click="pickRemove">
-            <AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quickRemoval(menu.view) ? 'Remove' : 'Remove…' }}</span></span>
+            <AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quickRemoval(menu.view) ? (menu.compact ? 'Remove stale session' : 'Remove') : 'Remove…' }}</span></span>
           </button>
         </template>
         <p v-if="menu.view.session.agent_recovery" class="menu-note">{{ menu.view.session.agent_recovery.detail }}</p>
@@ -872,7 +872,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 <style scoped>
 .row.drop-over { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--ink-2); }
 .move-lead .mi-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lineage { flex-basis: 100%; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 3px 70px; font-size: 11px; color: var(--ink-2); }
+.lineage { grid-column: 2; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 3px 38px; font-size: 11px; color: var(--ink-2); }
 .lineage a, .lineage.adopted { color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lineage a:hover, .lineage.adopted:hover { text-decoration: underline; }
 .lineage .history-toggle { flex-shrink: 0; }
@@ -998,7 +998,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .tree-guide.elbow::after { content: ''; position: absolute; top: calc(var(--tree-joint) - 4px); left: 0; width: var(--tree-step); height: 5px; border: solid currentColor; border-width: 0 0 1px 1px; border-radius: 0 0 0 5px; }
 .tree-stem { top: calc(var(--tree-joint) + 13px); bottom: 0; width: 1px; background: currentColor; }
 /* Every row keeps the fold slot, so names stay on one edge when a parent appears. */
-.tree-fold, .tree-fold-space { flex: none; width: 24px; height: 24px; margin-top: 8px; }
+.tree-fold, .tree-fold-space { grid-column: 1; grid-row: 1; flex: none; width: 24px; height: 24px; margin-top: 8px; }
 .tree-fold { display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); cursor: pointer; }
 @media (hover: hover) { .tree-fold:hover { background: var(--row-hover); color: var(--teal-ink); } }
 .tree-fold:focus-visible { outline: none; box-shadow: var(--focus-ring); }
@@ -1010,7 +1010,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .worker-tools > :not(.roll) { flex: none; }
 .roll.problem { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }
 .roll.ask { background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); color: var(--queue-wait-ink); }
-.worker-tools { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 6px; flex-basis: 100%; min-width: 0; min-height: 28px; padding: 0 0 6px 70px; color: var(--ink-2); font-size: 11.5px; }
+.worker-tools { grid-column: 2; display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 6px; min-width: 0; min-height: 28px; padding: 0 0 6px 38px; color: var(--ink-2); font-size: 11.5px; }
 .worker-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 28px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-weight: 550; white-space: nowrap; }
 .worker-toggle:hover:not(:disabled) { background: var(--row-hover); }
 .worker-toggle:disabled { cursor: default; }
@@ -1022,8 +1022,10 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 /* A filter's context rows (ancestors of a match) stay present and quiet. */
 .row.context-only > :not(.c-agent), .row.context-only .who,
 .row.filter-context > :not(.c-agent), .row.filter-context .who { opacity: .55; }
-.row > .c-agent { align-self: start; display: inline-flex; align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; min-width: 0; padding-block: 10px; }
-.agent-link { display: inline-flex; flex: 1 1 0; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
+/* The family summary is its own intrinsic row, so it contributes to the
+   table's height instead of overflowing into the first worker below it. */
+.row > .c-agent { align-self: start; display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 4px 8px; min-width: 0; padding-block: 10px; }
+.agent-link { grid-column: 2; grid-row: 1; display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
 .agent-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 6px; }
 /* Line 1 names the session (its result, then its own name, which gives way first); line 2 says what it
    works on, asks or how it ended. Two fixed lines: a state change never changes the row's height. */
@@ -1108,7 +1110,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
    the details and the row menu. 16 px per tree level (AEON-784). */
 @container sessions (max-width: 559px) {
   /* A 44 px fold column on touch and phones; 28 px beside a fine pointer. */
-  .table { --tree-step: 16px; --fold: 28px; display: block; }
+  .table { --tree-step: 16px; --fold: 28px; --row-action: 28px; display: block; }
   .thead, .row > :is(.c-time, .execution-host, .c-beat), .row-eta { display: none; }
   /* Flex, not an inline line box: the Ended toggle is a button and its baseline
      made that header ~20px taller than the text headers, so the row jumped
@@ -1116,7 +1118,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
   .group-row { display: flex; align-items: center; height: 26px; margin: 12px 8px 2px; padding: 0 8px; }
   /* Two 20 + 18 px lines (gap 2) beside the 30 px avatar put its centre, the fold's and the tree's
      joint 29 px below the row's top. */
-  .row { --tree-joint: 29px; display: grid; grid-template-columns: var(--fold) 30px minmax(0, 1fr) auto; column-gap: 8px; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
+  .row { --tree-joint: 29px; display: grid; grid-template-columns: var(--fold) 30px minmax(0, 1fr) var(--row-action); column-gap: 8px; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span { padding: 0; }
   .row > .c-agent { grid-column: 1 / 4; display: grid; grid-template-columns: subgrid; align-items: start; row-gap: 0; padding-block: 0; }
   .row.worker .c-agent { padding-left: 0; }
@@ -1140,14 +1142,16 @@ function sessionLinkClick(event: MouseEvent, id: string) {
   .lineage { grid-column: 2 / -1; padding: 4px 0 0; min-height: 24px; }
   .worker-tools { grid-column: 2 / -1; grid-row: 2; flex-wrap: nowrap; white-space: nowrap; min-height: 44px; margin: 0 0 0 -4px; padding: 0; }
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
-  /* Beside the two lines sit ⋯ and, on an ended or silent row, its one-tap bin (AEON-291), centred
-     on them. Pause, Resume and Change tier are in the menu. */
-  .row > .c-actions { grid-column: 4; grid-row: 1; flex-direction: row; gap: 0; margin-top: calc(var(--tree-joint) - 10px - 22px); padding: 0; }
-  .act, .c-actions > .pause-controls { display: none; }
-  .c-actions .icon-btn:is(.more, .bin) { width: 44px; height: 44px; opacity: 1; }
+  /* One slot stays reserved even while its menu trigger is hidden. Remove,
+     Pause, Resume and Change tier stay available in that menu. */
+  .row > .c-actions { grid-column: 4; grid-row: 1; flex-direction: row; gap: 0; margin-top: calc(var(--tree-joint) - 10px - var(--row-action) / 2); padding: 0; }
+  .act, .c-actions > .pause-controls, .c-actions > .bin { display: none; }
+  .row > .c-actions .more { width: var(--row-action); height: var(--row-action); opacity: 0; }
+  .row:is(:hover, :focus-within) > .c-actions .more, .row > .c-actions .more[aria-expanded="true"] { opacity: 1; }
 }
 @media (pointer: coarse), (max-width: 720px) {
-  .table { --fold: 44px; }
+  .table { --fold: 44px; --row-action: 44px; }
+  .row > .c-actions .more { opacity: 1; }
   /* The Ended toggle is a 44 px target on touch, in a header of its own height. */
   .group-row { height: 44px; margin-block: 4px 0; }
   .group-toggle { height: 44px; }

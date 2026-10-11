@@ -76,7 +76,8 @@ details open over the list as a sheet and the preset button hides. Phones have a
 full-height sheet with a 44 px Back control and safe-area padding. In a split,
 the work area comes directly under the app header; the list and details have
 viewport-high panes with separate scrolling. A new selection resets the details
-to their top while the picked row stays in view.
+to their top while the picked row stays in view. Opening a sheet, including when
+a smaller window replaces the split, also starts its body at the top.
 
 F and / (including numpad slash) search this list; S jumps the presets when they
 fit. These actions, their hints and the focused divider's Left/Right (16 px),
@@ -112,10 +113,12 @@ a table without Computer and the account line, with the ticket key before the na
 (the details name and rename the computer); under 560 px (phones) compact rows.
 A compact row opens line 1 with a 12 px harness mark whose tooltip and name say
 the model, effort, harness and account ("gpt-6.1-sol · xhigh · Codex · ChatGPT
-Pro"), ends line 1 with the short time ("42m", "3m ago"), and keeps ⋯ beside
-the two lines (an ended or silent row also keeps its one-tap bin): Pause,
-Resume and Change tier are in its menu, and the details name and rename the
-computer.
+Pro"), ends line 1 with the short time ("42m", "3m ago"), and reserves one slot
+for ⋯ beside the two lines. The menu appears on hover or focus and stays visible
+on touch. Remove stale session, Pause, Resume and Change tier are in its menu;
+table rows retain the one-tap bin for ended or silent sessions. Family summaries
+have their own row above the first worker. The details name and rename the
+computer; a failed service tier read explains what failed and offers Try again.
 
 **Rows enter and leave calmly.** New sessions, rows leaving the list, rows
 moving to another group or parent, rows that start or stop matching the filter

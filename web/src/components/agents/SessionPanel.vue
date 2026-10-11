@@ -183,14 +183,14 @@ watch(() => s.value?.id, async id => {
   thread.value?.scrollTo({ top: 0 })
   await agents.refreshAgentRuns(s.value.agent_principal_id)
 }, { immediate: true })
-watch([() => s.value?.id, () => auth.identity?.tenant.id, () => auth.identity?.principal.id], async (_next, previous) => {
+watch([() => s.value?.id, () => auth.identity?.tenant.id, () => auth.identity?.principal.id, () => props.sheet], async (_next, previous) => {
   actionsAnchor.value = null; composing.value = false
-  if (previous && (_next[1] !== previous[1] || _next[2] !== previous[2])) { tab.value = 'overview'; unread.value = 0 }
+  if (previous?.length && (_next[1] !== previous[1] || _next[2] !== previous[2])) { tab.value = 'overview'; unread.value = 0 }
   const id = s.value?.id, owner = `${auth.identity?.tenant.id}/${auth.identity?.principal.id}`
   await nextTick()
   if (id !== s.value?.id || owner !== `${auth.identity?.tenant.id}/${auth.identity?.principal.id}`) return
   for (const body of root.value?.querySelectorAll<HTMLElement>('.scroll') ?? []) body.scrollTop = 0
-}, { flush: 'post' })
+}, { flush: 'post', immediate: true })
 onMounted(() => { root.value?.focus({ preventScroll: true }); phoneMedia.addEventListener('change', syncPhone) })
 onBeforeUnmount(() => phoneMedia.removeEventListener('change', syncPhone))
 
