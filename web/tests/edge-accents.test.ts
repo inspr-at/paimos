@@ -15,7 +15,6 @@ const NEUTRAL = /^(var\(--(line|line-2|border|paper-line|paper-ink|paper-ink-3|g
 // Deliberate exceptions, each with its reason.
 const ALLOW: { file: string; includes: string; why: string }[] = [
   { file: 'styles/base.css', includes: '.check-box:checked::after', why: 'the two rotated strokes draw the checkbox glyph; they are not a row or panel edge' },
-  { file: 'views/business/QuoteDocumentView.vue', includes: '.doc-totals .grand', why: 'the totals rule on a printed quote, typography in paper ink' },
   // The line a customer signs on in the printed quote: a document rule, not a UI accent.
   { file: 'components/quotes/editor/QuoteAcceptance.vue', includes: '.quote-signatures > div { border-top', why: 'the printed signature line of a quote' },
   { file: 'components/CommandPalette.vue', includes: '.spinner', why: 'a spinner arc, not an edge' },
