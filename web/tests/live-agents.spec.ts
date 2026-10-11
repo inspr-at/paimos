@@ -344,7 +344,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await chip.click()
       const popup = page.getByRole('dialog', { name: 'Active agents on Aeon' })
       await expect(popup).toBeVisible()
-      const preferences = popup.getByRole('button', { name: 'Model preferences for Aeon' })
+      const preferences = popup.getByRole('button', { name: 'Model preferences', exact: true })
       const guard = await controlStability(page, { chip, preferences })
       await guard.check(() => preferences.hover())
       guard.done()

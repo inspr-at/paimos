@@ -423,7 +423,7 @@ func TestModelsV2OrderNativeEffortCompatibility(t *testing.T) {
 	}
 }
 
-// Risk: same-line route fallback hides its pause cause, or Quick jobs reports
+// Risk: same-line route fallback hides its pause cause or the route that runs, or Quick jobs reports
 // the normal row's strong model instead of the resolver's fast-tier choice.
 func TestModelsV2SameLineFallbackAndQuickJobs(t *testing.T) {
 	admin, _ := boardFixture(t)
@@ -439,6 +439,10 @@ func TestModelsV2SameLineFallbackAndQuickJobs(t *testing.T) {
 	doc := boardDecode[simpleDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
 	if len(doc.Unavailable) != 1 || doc.Unavailable[0].Cause != "paused" || doc.Unavailable[0].Waits || doc.Unavailable[0].RunsInstead == nil || *doc.Unavailable[0].RunsInstead != "openai:sol" || doc.Unavailable[0].Route == nil || *doc.Unavailable[0].Route != "codex" {
 		t.Fatalf("same-line sibling route hid the pause: %+v", doc.Unavailable)
+	}
+	// The page says "runs through Cursor instead" only from the route that actually runs.
+	if via := doc.Unavailable[0].RunsVia; via == nil || *via != "cursor" {
+		t.Fatalf("same-line fallback did not name the route that runs: %+v", doc.Unavailable[0])
 	}
 	if doc.Quick.Line == nil || *doc.Quick.Line != "openai:luna" || doc.Quick.Effort == nil || *doc.Quick.Effort != "medium" || doc.Quick.Harness == nil || *doc.Quick.Harness != "codex" || !slices.ContainsFunc(doc.Quick.Trace, func(trace simpleTrace) bool { return trace.Selected && trace.Line == "openai:luna" }) {
 		t.Fatalf("Quick jobs differs from dispatch: %+v", doc.Quick)
@@ -460,7 +464,7 @@ func TestModelsV2ResidencyCauseMatchesEvidence(t *testing.T) {
 	read := func(cause string) {
 		t.Helper()
 		doc := boardDecode[simpleDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
-		if len(doc.Unavailable) != 1 || doc.Unavailable[0].Cause != cause || !doc.Unavailable[0].Waits || doc.Unavailable[0].Until != nil {
+		if len(doc.Unavailable) != 1 || doc.Unavailable[0].Cause != cause || !doc.Unavailable[0].Waits || doc.Unavailable[0].Until != nil || doc.Unavailable[0].RunsVia != nil {
 			t.Fatalf("cause differs from qualification: %+v", doc.Unavailable)
 		}
 	}

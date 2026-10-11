@@ -8,10 +8,10 @@ import { toast } from './toast'
 import { getMembers } from './access'
 import { preferenceFailure } from './modelsSettings'
 import { useSession } from '../stores/session'
-import { dismissLine, getRegistry, getSimple, getTail, getWorkspaceRules, putDismissed, putEffort, putOrder, putWorkspaceRules, resetOrder } from './modelsSimpleApi'
+import { dismissLine, getRegistry, getSimple, getTail, getTicketResolution, getWorkspaceRules, putDismissed, putEffort, putOrder, putWorkspaceRules, resetOrder } from './modelsSimpleApi'
 import {
-  ALL_COLUMN, buildEntries, buildRows, effortLevel, lockReason, movePin, nearestEffort, nextView, orderBody, orderWithFirst, pinFirst, rulesBody, unpin,
-  type ModelEntry, type RegistryProfile, type RowView, type RulesBody, type Scope, type SimpleDocument, type TailBoard, type TailColumn,
+  ALL_COLUMN, buildEntries, buildRows, effortLevel, lockReason, movePin, nearestEffort, nextView, orderBody, orderWithFirst, pinFirst, rulesBody, ticketWhy, unpin,
+  type ModelEntry, type RegistryProfile, type RowView, type RulesBody, type Scope, type SimpleDocument, type TailBoard, type TailColumn, type WhyView,
 } from './modelsSimple'
 
 interface Revs { prefs: number; rules: number }
@@ -257,6 +257,19 @@ export function useModelsSimple() {
     if (draft.value === column) draft.value = null
     return done
   }
+  /** Why the ticket a person clicked runs where it does: its own resolution, read for the identity on screen. */
+  async function explain(ticket: string): Promise<WhyView | null> {
+    const current = capture()
+    try {
+      const resolution = await getTicketResolution(ticket)
+      if (!current()) return null
+      if (!resolution || !Array.isArray(resolution.ladder)) throw new Error('invalid resolution')
+      return ticketWhy({ ticket, resolution, profiles: profiles.value, entries: entries.value })
+    } catch {
+      if (current()) error.value = `Couldn’t load why ${ticket} runs on its model. Open it again from the ticket.`
+      return null
+    }
+  }
   function startException(column: string) { if (editable.value && columnOf(column)) draft.value = column }
   function discardException() { draft.value = null }
   function setScope(value: Scope) { if (value === 'default' && !can('model_prefs.manage')) return; scope.value = value }
@@ -272,5 +285,5 @@ export function useModelsSimple() {
   watch(() => can('models.read'), allowed => { if (allowed && !doc.value && !loading.value && owner.value) void load() })
   onBeforeUnmount(() => { alive = false; generation++; epoch.value++; abort?.abort(); unsubscribe() })
 
-  return { scope, doc, rows, names, entries, labels, kinds, freeKinds, next, news, tail, loading, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey, cantReason, load, pick, use, clear, lock, dismiss, startException, discardException, setScope, dropError }
+  return { scope, doc, rows, names, entries, labels, kinds, freeKinds, next, news, tail, loading, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey, cantReason, load, pick, use, clear, lock, dismiss, explain, startException, discardException, setScope, dropError }
 }

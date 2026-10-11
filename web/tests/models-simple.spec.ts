@@ -36,12 +36,14 @@ test('the default leads, overrides read as exceptions, reviews pick themselves a
   expect(state.problems).toEqual([])
 })
 
-test('the picker lists every model by harness with its own thinking levels, and a click on a level picks both', async ({ page }) => {
+test('the picker lists every model by provider and line with its own levels, and a click on a level picks both', async ({ page }) => {
   const state = await open(page)
   await pick(page, 'all').click()
   await expect(page.locator('.mdl-pop [role="group"]')).toHaveCount(5)
-  expect(await page.locator('.mdl-pop [role="group"]').evaluateAll(groups => groups.map(group => group.getAttribute('aria-label')))).toEqual(['Codex', 'Claude', 'Grok', 'Cursor', 'Pi'])
-  await expect(page.locator('.mdl-pop [role="group"][aria-label="Codex"] [role="option"]')).toHaveCount(3)
+  expect(await page.locator('.mdl-pop [role="group"]').evaluateAll(groups => groups.map(group => group.getAttribute('aria-label')))).toEqual(['OpenAI', 'Anthropic', 'xAI', 'Cursor', 'Unknown provider'])
+  await expect(page.locator('.mdl-pop [role="group"][aria-label="OpenAI"] [role="option"]')).toHaveCount(3)
+  // Nothing older is registered here, so no provider shows an "Older versions" line.
+  await expect(page.locator('.mdl-pop .opt.more')).toHaveCount(0)
   await expect(option(page, 'openai:sol')).toContainText('Codex · strongest for building')
   await expect(option(page, 'openai:luna')).toContainText('retiring 31 Oct')
   expect(await option(page, 'anthropic:opus').locator('.lvc').allTextContents()).toEqual(['high', 'xhigh', 'max'])
@@ -168,21 +170,23 @@ test('clicking elsewhere takes a row that was never picked away again, and an ag
   await expect(page.getByRole('button', { name: 'Different model for…' })).toHaveCount(0); await expect(page.locator('[data-scope-group]')).toHaveCount(0)
 })
 
-test('a pick that cannot run says so in words under its row, and Why? shows the skipped step', async ({ page }) => {
+test('a pick that cannot run says one sentence from one cause under its row, and Why? shows the skipped route', async ({ page }) => {
   await open(page, { down: true })
-  const note = row(page, 'design').locator('[data-unavailable]')
-  await expect(note).toContainText('Can’t run right now · Sonnet 5.5 · xhigh runs instead · the Claude account is tied to another profile (AEON-1000)')
-  await expect(note.locator('svg')).toBeVisible()
-  await expect(page.locator('[data-next-line]')).toContainText('The next UI design runs on Sonnet 5.5 · xhigh instead of Opus 5.5, reviewed by GPT-6.1 Sol.')
+  // Approved state "a pick can't run": the Claude account is at its daily cap. Opus takes its Cursor route; Fable waits.
+  const notes = page.locator('[data-unavailable]')
+  await expect(notes).toHaveCount(2)
+  await expect(row(page, 'design').locator('[data-unavailable]')).toHaveText(/^Claude account is at its daily cap until \d\d:\d\d, so Opus 5\.5 runs through Cursor instead\.$/)
+  await expect(row(page, 'concept').locator('[data-unavailable]')).toHaveText(/^Claude account is at its daily cap until \d\d:\d\d, so work waits until then\.$/)
+  for (const text of await notes.allTextContents()) { expect(text).not.toMatch(/allowance|;|_|\b(\w+) \1\b/); expect(text.match(/\d\d:\d\d/g)).toHaveLength(1) }
+  await expect(row(page, 'design').locator('[data-unavailable] > svg')).toBeVisible()
+  await expect(page.locator('[data-next-line]')).toContainText('The next UI design runs on Opus 5.5 · max through Cursor, reviewed by GPT-6.1 Sol.')
   await page.getByRole('button', { name: 'Why?' }).click()
-  const why = page.getByRole('dialog', { name: 'Why Sonnet 5.5?' })
+  const why = page.getByRole('dialog', { name: 'Why Opus 5.5?' })
   await expect(why).toBeVisible()
-  expect(await why.locator('li').allTextContents()).toEqual([
-    'UI design has its own model: Opus 5.5 · xhigh.',
-    'Skipped Opus 5.5: the Claude account is tied to another profile (AEON-1000).',
-    'Next in its order that can do UI design: Sonnet 5.5 · xhigh.',
-    'Reviews always use another family: GPT-6.1 Sol.',
-  ])
+  const steps = await why.locator('li').allTextContents()
+  expect(steps).toHaveLength(4)
+  expect(steps[0]).toBe('UI design has its own model: Opus 5.5 · xhigh.'); expect(steps[1]).toMatch(/^Skipped Opus 5\.5 through Claude: Claude account is at its daily cap until \d\d:\d\d\.$/)
+  expect(steps.slice(2)).toEqual(['It takes its next route, Cursor: Opus 5.5 · max.', 'Reviews always use another family: GPT-6.1 Sol.'])
   await page.keyboard.press('Escape'); await expect(why).toHaveCount(0); await expect(page.getByRole('button', { name: 'Why?' })).toBeFocused()
 })
 
@@ -193,7 +197,7 @@ test('a pick that has no tools here is still offered, with its reason, and the r
   await expect(option(page, 'xai:grok')).not.toHaveAttribute('aria-disabled', 'true')
   await option(page, 'xai:grok').locator('.lvc[data-eff="high"]').click()
   await expect(pick(page, 'docs')).toContainText('Grok 4.7 · high')
-  await expect(row(page, 'docs').locator('[data-unavailable]')).toContainText('Can’t run right now · GPT-6.1 Sol · high runs instead · no tools in PAIMOS')
+  await expect(row(page, 'docs').locator('[data-unavailable]')).toHaveText('Grok 4.7 has no tools in PAIMOS, so GPT-6.1 Sol · high runs instead.')
 })
 
 test('a new model is one line with Use it for… and Not now; it asks for no capability filter', async ({ page }) => {
@@ -256,8 +260,51 @@ test('a failing read shows one honest line with Try again, in place of the card'
 
 test('old links still land on the page: ?why=1 opens the trace, the full-screen board redirects', async ({ page }) => {
   await open(page, { down: true }, '?why=1')
-  await expect(page.getByRole('dialog', { name: 'Why Sonnet 5.5?' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: 'Why Opus 5.5?' })).toBeVisible()
   await page.goto('/settings/models/board'); await expect(page).toHaveURL(/\/settings\/models$/)
+})
+
+test('a ticket’s “Why this model?” explains that ticket, never the next queued one (Tick, AEON-1138)', async ({ page }) => {
+  const state = await open(page, {}, '?why=1&ticket=PHAROS-12')
+  const why = page.getByRole('dialog', { name: 'Why Opus 5.5 for PHAROS-12?' })
+  await expect(why).toBeVisible()
+  expect(await why.locator('li').allTextContents()).toEqual(['Skipped Sonnet 5.5: the account is at its daily cap.', 'PHAROS-12 runs on Opus 5.5 · xhigh.'])
+  expect(state.calls).toContain('GET /models/resolve?ticket=PHAROS-12')
+  await expect(page.getByRole('dialog', { name: 'Why GPT-6.1 Sol?' })).toHaveCount(0)
+  await page.keyboard.press('Escape'); await expect(why).toHaveCount(0)
+  // The queued ticket itself opens the queued trace and asks nothing more.
+  await openModelsSettings(page, '?why=1&ticket=AEON-1011')
+  await expect(page.getByRole('dialog', { name: 'Why GPT-6.1 Sol?' })).toBeVisible()
+  expect(state.calls.filter(call => call.startsWith('GET /models/resolve'))).toHaveLength(1)
+  expect(state.problems).toEqual([])
+})
+
+test('many models stay calm: one option per line, older versions fold per provider and are never picked', async ({ page }) => {
+  const state = await open(page, { many: true })
+  await pick(page, 'all').click()
+  const menu = page.locator('.mdl-pop')
+  expect(await menu.locator('[role="group"]').evaluateAll(groups => groups.map(group => group.getAttribute('aria-label')))).toEqual(['OpenAI', 'Anthropic', 'xAI', 'Google', 'Cursor', 'Unknown provider'])
+  await expect(menu.locator('.opt.is-old')).toHaveCount(0)
+  await expect(option(page, 'anthropic:opus')).toContainText('Claude, Cursor · best for design and concepts')
+  const older = menu.locator('[data-older="anthropic"]')
+  await expect(older).toHaveText('Older versions · 3'); await expect(older).toHaveAttribute('aria-label', 'Show 3 older Anthropic versions')
+  // The fold opens in place: the filter and the options above it stay where they were (AEON-541).
+  const guard = await controlStability(page, { filter: page.getByRole('combobox'), sol: option(page, 'openai:sol'), opus: option(page, 'anthropic:opus') })
+  await guard.check(async () => { await older.click(); await expect(menu.locator('[data-provider="anthropic"] .opt.is-old')).toHaveCount(3) }); guard.done()
+  await expect(menu.locator('[data-provider="anthropic"] .pm-oh')).toHaveText('Older versions')
+  const opus48 = menu.locator('[data-old="anthropic:opus@4.8"]')
+  await expect(opus48).toContainText('Claude · replaced by Opus 5.5'); await expect(opus48).toHaveAttribute('aria-disabled', 'true')
+  await opus48.click(); await expect(menu).toBeVisible(); expect(state.writes).toHaveLength(0)
+  // Typing searches older versions too; Enter on one says why it isn't picked, Enter on the newest picks it.
+  await page.getByRole('combobox').fill('opus')
+  await expect(menu.locator('[role="option"]')).toHaveCount(2)
+  await page.keyboard.press('ArrowDown'); await expect(opus48).toHaveClass(/\bon\b/)
+  await page.keyboard.press('Enter'); await expect(menu.locator('[aria-live="polite"]')).toHaveText('Opus 4.8 is an older version. Its line runs Opus 5.5; pick that to use it.')
+  expect(state.writes).toHaveLength(0)
+  await page.keyboard.press('ArrowUp'); await page.keyboard.press('Enter')
+  await expect(menu).toHaveCount(0); await expect(pick(page, 'all')).toContainText('Opus 5.5 · xhigh')
+  expect(state.writes[0]).toMatchObject({ method: 'PUT', path: '/model-preferences/orders/other/first' }); expect((state.writes[0]!.body!.rank as string[])[0]).toBe('anthropic:opus')
+  expect(state.problems).toEqual([])
 })
 
 test('controls stay still while menus open, picks change, rows come and go and the scope switches (AEON-541)', async ({ page }) => {

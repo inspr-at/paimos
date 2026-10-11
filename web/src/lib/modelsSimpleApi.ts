@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api'
 import { policyJSON } from './policyEditor'
-import type { OrderBody, RegistryProfile, RulesBody, RulesDocument, Scope, SimpleDocument, TailBoard, WriteResult } from './modelsSimple'
+import type { OrderBody, RegistryProfile, RulesBody, RulesDocument, Scope, SimpleDocument, TailBoard, TicketResolution, WriteResult } from './modelsSimple'
 
 async function request<T>(path: string, method = 'GET', body?: unknown, person?: string | null, signal?: AbortSignal): Promise<T> {
   const response = await api(path, { method, signal, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(person ? { 'If-Prefs-Person': person } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
@@ -29,3 +29,5 @@ export const putEffort = (scope: Scope, column: string, effort: string | null, r
 export const putWorkspaceRules = (column: string, body: RulesBody, revision: number) => request<RulesDocument>(`/model-rules/workspace/${encodeURIComponent(column)}`, 'PUT', { ...body, revision })
 export const dismissLine = (scope: Scope, line: string, revision: number, person: string | null) => request<WriteResult>(`/model-preferences/tray/${encodeURIComponent(line)}/dismiss?for=${scope}`, 'POST', { revision }, who(scope, person))
 export const putDismissed = (scope: Scope, lines: string[], revision: number, person: string | null) => request<WriteResult>(`/model-preferences/profile?for=${scope}`, 'PUT', { dismissed_lines: lines, revision }, who(scope, person))
+/** How one ticket resolves, for the "Why this model?" link on a ticket row. */
+export const getTicketResolution = (ticket: string, signal?: AbortSignal) => request<TicketResolution>(`/models/resolve?${new URLSearchParams({ ticket })}`, 'GET', undefined, undefined, signal)

@@ -10,7 +10,7 @@ import ModelsPopover from './models/ModelsPopover.vue'
 import ModelRefreshSettings from './ModelRefreshSettings.vue'
 import ModelRegistryCard from './models/ModelRegistryCard.vue'
 import { useModelsSimple } from '../../lib/useModelsSimple'
-import { lineFallback, lockTip, pickText, reasonText, type ModelEntry, type RowView } from '../../lib/modelsSimple'
+import { cantSentence, lockTip, type ModelEntry, type RowView, type WhyView } from '../../lib/modelsSimple'
 
 // Settings › Models, minimal (AEON-999 v3): one default for all work, overrides only where it matters, reviews pick
 // themselves, and one line on what runs next. The stored board, rules and situations keep working underneath.
@@ -28,8 +28,11 @@ const catalog = ref(route.hash === '#model-refresh')
 const picker = ref<{ key: string; anchor: HTMLElement } | null>(null)
 const kinds = ref<{ anchor: HTMLElement; use?: { entry: ModelEntry; canDo: string[] } } | null>(null)
 const why = ref<HTMLElement | null>(null)
+const pickerPop = ref<InstanceType<typeof ModelsPopover> | null>(null)
+// The Why of the ticket a person clicked on a ticket row, anchored at the line about what runs next.
+const ticketWhy = ref<{ view: WhyView; anchor: HTMLElement } | null>(null)
 const pickRow = computed(() => picker.value ? rows.value.find(row => row.key === picker.value!.key) ?? null : null)
-function closeMenus() { picker.value = null; kinds.value = null; why.value = null }
+function closeMenus() { picker.value = null; kinds.value = null; why.value = null; ticketWhy.value = null }
 watch(actionKey, closeMenus)
 watch(pickRow, row => { if (picker.value && !row) picker.value = null })
 
@@ -96,12 +99,23 @@ async function notNow() { if (news.value) await model.dismiss(news.value.entry.l
 
 // ----- text -------------------------------------------------------------------------------------------------
 const tip = (row: RowView) => row.lock ? lockTip(row.lock, { mine: !!row.lock.by && row.lock.by === person.value, name: id => model.names.value.get(id) ?? 'An admin', admin: admin.value, scope: scope.value }) : ''
-const instead = (row: RowView) => row.unavailable ? pickText(entries.value.find(entry => entry.line === row.unavailable!.runs_instead) ?? null, row.unavailable.effort, lineFallback(row.unavailable.runs_instead)) : ''
-// ?why=1 (a ticket's "Why this model?" link) opens the trace for the next queued ticket, once.
+const cant = (row: RowView) => cantSentence(row.unavailable, entries.value)
+// ?why=1 (a ticket's "Why this model?" link) explains the ticket that was clicked, once (Tick, AEON-1138): the queued
+// trace only when it is that ticket, else the ticket's own resolution. Without a ticket it opens the queued trace.
 let whyOpened = false
-watch(() => [route.query.why, shown.value, !!next.value.why], async () => {
-  if (route.query.why !== '1' || !shown.value || !next.value.why || whyOpened) return
-  whyOpened = true; await nextTick(); why.value = document.getElementById('why')
+watch(() => [route.query.why, route.query.ticket, shown.value, !!next.value.why], async () => {
+  if (route.query.why !== '1' || !shown.value || whyOpened) return
+  const ticket = typeof route.query.ticket === 'string' ? route.query.ticket : ''
+  if (!ticket || ticket === doc.value?.next?.ticket) {
+    if (!next.value.why) return
+    whyOpened = true; await nextTick(); why.value = document.getElementById('why'); return
+  }
+  whyOpened = true
+  const shownFor = actionKey.value, view = await model.explain(ticket)
+  if (!view || shownFor !== actionKey.value) return
+  await nextTick()
+  const anchor = document.querySelector<HTMLElement>('[data-next-line]')
+  if (anchor) { closeMenus(); ticketWhy.value = { view, anchor } }
 }, { immediate: true })
 // #model-refresh opens the catalog fold and scrolls to the model registry card under the models card.
 watch(() => [route.hash, shown.value], async () => {
@@ -132,11 +146,11 @@ watch(() => [route.hash, shown.value], async () => {
       <template v-else>
         <Transition name="rw"><div v-if="news" class="rw" data-news><div class="rw-in"><div class="news-in"><AppIcon name="sparkle" :size="15" /><span class="grow"><b>{{ news.entry.name }}</b> is new. <button id="news-use" type="button" class="link-btn" aria-haspopup="listbox" :aria-expanded="!!kinds?.use" data-news-use @click="openUse">Use it for…</button></span><button type="button" class="icon-btn sm flat" data-news-x aria-label="Not now" data-tip="Not now" :disabled="busy" @click="notNow"><AppIcon name="close" :size="14" /></button></div></div></div></Transition>
         <div class="m-list">
-          <ModelRow v-if="defaultRow" :row="defaultRow" :expanded="picker?.key === defaultRow.key" :lock-tip="tip(defaultRow)" :instead="instead(defaultRow)" :reason="defaultRow.unavailable ? reasonText(defaultRow.unavailable.reason) : ''" @open="openPicker(defaultRow, $event)" @reset="resetRow(defaultRow)" @remove="removeRow(defaultRow)" />
+          <ModelRow v-if="defaultRow" :row="defaultRow" :expanded="picker?.key === defaultRow.key" :lock-tip="tip(defaultRow)" :cant="cant(defaultRow)" @open="openPicker(defaultRow, $event)" @reset="resetRow(defaultRow)" @remove="removeRow(defaultRow)" />
           <div class="ex-group" role="group" aria-labelledby="ex-h">
             <p v-if="exceptions.length" id="ex-h" class="ex-h">Except for</p><span v-else id="ex-h" class="sr-only">Overrides</span>
             <TransitionGroup name="rw">
-              <div v-for="row in exceptions" :key="row.key" class="rw" :data-key="row.key"><div class="rw-in"><ModelRow :row="row" :expanded="picker?.key === row.key" :lock-tip="tip(row)" :instead="instead(row)" :reason="row.unavailable ? reasonText(row.unavailable.reason) : ''" @open="openPicker(row, $event)" @reset="resetRow(row)" @remove="removeRow(row)" /></div></div>
+              <div v-for="row in exceptions" :key="row.key" class="rw" :data-key="row.key"><div class="rw-in"><ModelRow :row="row" :expanded="picker?.key === row.key" :lock-tip="tip(row)" :cant="cant(row)" @open="openPicker(row, $event)" @reset="resetRow(row)" @remove="removeRow(row)" /></div></div>
             </TransitionGroup>
             <div v-if="editable && model.freeKinds.value.length" class="addrow"><button id="add" type="button" class="add" aria-haspopup="listbox" :aria-expanded="!!kinds && !kinds.use" data-add :disabled="busy" @click="openAdd"><AppIcon name="plus" :size="15" /><span>Different model for…</span></button></div>
           </div>
@@ -152,8 +166,8 @@ watch(() => [route.hash, shown.value], async () => {
     </section>
     <ModelRegistryCard />
     <p class="sr-only" role="status" aria-live="polite">{{ announcement }}</p>
-    <ModelsPopover v-if="pickRow && picker" :open="true" :anchor="picker.anchor" :label="`Model for ${pickRow.isDefault ? 'the default' : pickRow.label}`" role="presentation" :width="Math.max(picker.anchor.offsetWidth, 520)" @close="pickerClosed">
-      <ModelPicker :entries="entries" :row="pickRow" :name="pickRow.isDefault ? 'the default' : pickRow.label" :cant="line => model.cantReason(pickRow!.column, line)" :fresh="fresh" :lock="scope === 'default' && admin && !pickRow.draft" :locked="!!pickRow.lock" @choose="choose" @lock="lockRow" />
+    <ModelsPopover v-if="pickRow && picker" ref="pickerPop" :open="true" :anchor="picker.anchor" :label="`Model for ${pickRow.isDefault ? 'the default' : pickRow.label}`" role="presentation" :width="Math.max(picker.anchor.offsetWidth, 540)" @close="pickerClosed">
+      <ModelPicker :entries="entries" :row="pickRow" :name="pickRow.isDefault ? 'the default' : pickRow.label" :cant="line => model.cantReason(pickRow!.column, line)" :fresh="fresh" :lock="scope === 'default' && admin && !pickRow.draft" :locked="!!pickRow.lock" @choose="choose" @lock="lockRow" @grew="pickerPop?.place()" />
     </ModelsPopover>
     <ModelsPopover v-if="kinds" :open="true" :anchor="kinds.anchor" label="Kinds of work" role="presentation" :width="280" @update:open="value => { if (!value) kinds = null }">
       <KindMenu :kinds="menuKinds" :note="menuNote" :link="!kinds.use" @choose="chooseKind" @navigate="closeMenus" />
@@ -161,6 +175,10 @@ watch(() => [route.hash, shown.value], async () => {
     <ModelsPopover v-if="why && next.why" :open="true" :anchor="why" :label="next.why.title" kind="why" labelledby="why-t" @update:open="value => { if (!value) why = null }">
       <h3 id="why-t">{{ next.why.title }}</h3>
       <ol><li v-for="(step, index) in next.why.steps" :key="index" :class="{ skip: step[0]?.text.startsWith('Skipped') }"><template v-for="(part, at) in step" :key="at"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></li></ol>
+    </ModelsPopover>
+    <ModelsPopover v-if="ticketWhy" :open="true" :anchor="ticketWhy.anchor" :label="ticketWhy.view.title" kind="why" labelledby="ticket-why-t" @update:open="value => { if (!value) ticketWhy = null }">
+      <h3 id="ticket-why-t">{{ ticketWhy.view.title }}</h3>
+      <ol data-ticket-why><li v-for="(step, index) in ticketWhy.view.steps" :key="index" :class="{ skip: step[0]?.text.startsWith('Skipped') }"><template v-for="(part, at) in step" :key="at"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></li></ol>
     </ModelsPopover>
   </div>
 </template>
