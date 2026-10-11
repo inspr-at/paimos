@@ -546,6 +546,30 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 	if !claimed {
 		t.Fatal("daemon claim did not retain the selected account and launch")
 	}
+	// The owner's personal routine stays hidden from the daemon's own view,
+	// yet its exact launch and exit evidence must record and release holds.
+	telemetry := func(body string) {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/api/runs/"+d.agentRun+"/telemetry", strings.NewReader(body)).WithContext(tenant.WithPrincipal(t.Context(), f.agent))
+		req.Header.Set("Authorization", "Bearer "+f.token)
+		req.Header.Set(agentpairing.LedgerGenerationHeader, grant.LedgerGeneration)
+		req.Header.Set(agentruns.DaemonHeader, grant.DaemonID)
+		req.Header.Set(agentruns.GenerationHeader, grant.DaemonGeneration)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != 200 {
+			t.Fatalf("routine telemetry %s=%d %s", body, w.Code, w.Body.String())
+		}
+	}
+	telemetry(`{"sequence":1,"kind":"started"}`)
+	telemetry(`{"sequence":2,"kind":"finished","status":"failed","process_state":"exited"}`)
+	var exited bool
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT (SELECT state='exit_observed' AND exit_observed_at IS NOT NULL FROM routine_launch_intents WHERE agent_run_id=$1)
+ AND (SELECT count(*)=2 FROM routine_launch_evidence e JOIN routine_launch_intents l ON l.id=e.launch_id WHERE l.agent_run_id=$1 AND e.kind IN ('launched','exit_observed'))
+ AND NOT EXISTS(SELECT 1 FROM account_reservations WHERE run_id=$1 AND state='active')`, d.agentRun).Scan(&exited))
+	if !exited {
+		t.Fatal("personal routine exit evidence or hold release was lost")
+	}
 }
 
 // Risks: one routine's WAIT must neither stall ordinary lead pickup with the

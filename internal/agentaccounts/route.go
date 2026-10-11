@@ -46,8 +46,20 @@ func routineExitObservedTx(ctx context.Context, tx pgx.Tx, run runRow) (bool, er
 	if run.RoutineLaunchID == nil {
 		return true, nil
 	}
+	// A personal routine's intent is hidden from its daemon's projection; this
+	// internal read returns only whether the exact launch exit was observed.
+	var visibility, system string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),''),coalesce(current_setting('aeon.system',true),'')`).Scan(&visibility, &system); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
+		return false, err
+	}
 	var observed bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_intents WHERE id=$1 AND agent_run_id=$2 AND state='exit_observed' AND exit_observed_at IS NOT NULL)`, *run.RoutineLaunchID, run.ID).Scan(&observed)
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_intents WHERE id=$1 AND agent_run_id=$2 AND state='exit_observed' AND exit_observed_at IS NOT NULL)`, *run.RoutineLaunchID, run.ID).Scan(&observed); err != nil {
+		return false, err // caller rolls back, including visibility
+	}
+	_, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.system',$2,true)`, visibility, system)
 	return observed, err
 }
 
