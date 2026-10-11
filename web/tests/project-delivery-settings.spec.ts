@@ -23,6 +23,7 @@ async function setup(page: Page) {
   const data = fixtures(), errors = watchErrors(page)
   await mockWork(page, data)
   const world = { state: 'none' as State, readOnly: false, fail: false, source: null as MetricSource | null, overrides: { deadlines: { ci_green: 30 } } as DeliverySettings, revision: 1, writes: [] as { id: string; body: DeliverySettings; revision: string }[], links: [] as Record<string, unknown>[], history: [] as Record<string, unknown>[], held: null as null | { entered: () => void; until: Promise<void> }, pendingLoad: null as null | { entered: () => void; until: Promise<void> } }
+  const otherSettings = new Map<string, { overrides: DeliverySettings; revision: number }>()
   await page.route('**/api/me/permissions**', route => {
     const id = new URL(route.request().url()).searchParams.get('project_id') ?? undefined
     const answer = mockEffectivePermissions(world.readOnly ? 'viewer' : 'admin', id)
@@ -49,16 +50,19 @@ async function setup(page: Page) {
   })
   await page.route('**/api/projects/*/delivery-settings**', async route => {
     const url = new URL(route.request().url()), method = route.request().method()
+    const id = url.pathname.split('/')[3]!
+    if (id !== 'p-aeon' && !otherSettings.has(id)) otherSettings.set(id, { overrides: {}, revision: 1 })
+    const target = id === 'p-aeon' ? world : otherSettings.get(id)!
     if (method === 'PUT') {
       const body = route.request().postDataJSON(), revision = route.request().headers()['if-match']
       world.writes.push({ id: url.pathname.split('/')[3], body, revision })
       if (world.held) { const hold = world.held; world.held = null; hold.entered(); await hold.until }
       if (world.readOnly) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
-      if (world.fail || revision !== `"${world.revision}"`) return route.fulfill({ status: 412, json: { error: 'Delivery settings changed; reload before saving.' } })
-      world.overrides = structuredClone(body); world.revision++
+      if (world.fail || revision !== `"${target.revision}"`) return route.fulfill({ status: 412, json: { error: 'Delivery settings changed; reload before saving.' } })
+      target.overrides = structuredClone(body); target.revision++
     }
-    const effective = { ...defaults, ...world.overrides, deadlines: { ...defaults.deadlines, ...world.overrides.deadlines } }
-    return route.fulfill({ json: url.searchParams.get('view') === 'overrides' ? world.overrides : effective, headers: { ETag: `"${world.revision}"` } })
+    const effective = { ...defaults, ...target.overrides, deadlines: { ...defaults.deadlines, ...target.overrides.deadlines } }
+    return route.fulfill({ json: url.searchParams.get('view') === 'overrides' ? target.overrides : effective, headers: { ETag: `"${target.revision}"` } })
   })
   return { world, errors }
 }
