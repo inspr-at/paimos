@@ -41,8 +41,9 @@ h2 { font: 600 15px/1.35 var(--font); letter-spacing: 0; color: var(--ink); }
 .project-card .card-body { margin-top: 0; }
 @container project-settings-body (max-width: 600px) {
   .settings-card.project-card { padding: 18px 14px 14px; }
-  .project-card .card-head { flex-wrap: wrap; }
-  .project-card .card-aside { flex-basis: auto; padding-left: 0; }
+  .project-card .card-head { flex-wrap: wrap; row-gap: 8px; }
+  .project-card .card-titles { flex-basis: 100%; }
+  .project-card .card-aside { flex-basis: auto; padding-left: 0; margin-top: 0; flex-wrap: wrap; }
 }
 @media (max-width: 600px) {
   .settings-card { padding: 16px; }

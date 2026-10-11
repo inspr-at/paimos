@@ -148,5 +148,8 @@ onBeforeUnmount(() => { focusRun++; overlay.value?.close(); disposeKeys.forEach(
   .section-nav { display: none; position: absolute; z-index: 30; top: calc(100% + 8px); left: 0; right: 0; padding: 8px; border-radius: 14px; background: var(--surface-raised); box-shadow: var(--shadow-pop); }
   .nav-open .section-nav { display: grid; }
 }
-@media (pointer: coarse), (max-width: 600px) { .owner-links a, .link-btn { min-height: 44px; } }
+@media (pointer: coarse), (max-width: 600px) {
+  .owner-links a, .link-btn, .settings-body :deep(.btn.sm), .settings-body :deep(select.field) { min-height: 44px; }
+  .settings-body :deep(.icon-btn.sm) { width: 44px; height: 44px; }
+}
 </style>

@@ -64,7 +64,6 @@ function load(preserveDraft = false) {
     node.value = value
     if (!keepName) name.value = value.title
     if (!keepDescription) description.value = fullDescription(value)
-    if (route.hash === '#f-name') void nextTick(() => nameInput.value?.focus({ preventScroll: true }))
   }), { failed: error => { loadError.value = sayError(error, 'The project could not be read.'); }, settled: () => { loading.value = false } })
   void groupReads.run(({ after }) => after(refreshGroups(), ({ target: readTarget, result }) => {
     if (readTarget !== props.project.id) return
@@ -75,6 +74,14 @@ watch(() => scope.owner.value, () => {
   node.value = null; name.value = props.project.title; description.value = ''; groups.value = []; groupId.value = ''; groupsReady.value = false; busy.value = false; close(false); load()
 }, { immediate: true, flush: 'sync' })
 watch(admin, allowed => { if (!allowed) close(false) })
+// A disabled field cannot take focus. Wait for the read and write permission
+// to settle before fulfilling the header's edit link.
+watch([loading, writable, () => route.hash], () => {
+  if (loading.value || !writable.value || route.hash !== '#f-name') return
+  void nextTick(() => {
+    if (!loading.value && writable.value && route.hash === '#f-name') nameInput.value?.focus({ preventScroll: true })
+  })
+}, { flush: 'post' })
 function undoWrite(before: WorkNode, saved: WorkNode, patch: NodePatch, owner: string) {
   if (scope.owner.value !== owner || props.project.id !== before.id) return
   if (!writable.value || busy.value || node.value?.updated_at !== saved.updated_at) { toast('The project changed. Undo was not applied.', { tone: 'error' }); return }
