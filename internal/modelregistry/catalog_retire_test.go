@@ -819,12 +819,16 @@ func TestCatalogOutdatedUseLevels(t *testing.T) {
 			return err
 		}
 		var err error
-		if pinned, err = insertActivatedProfile(t.Context(), tx, admin, profileWrite{Slug: "old-opus-xhigh", Version: "1", Harness: "claude", Family: "anthropic", Model: old.Model, Effort: "xhigh", Tier: "strong"}, true, modelactivation.Person); err != nil {
+		if pinned, err = insertActivatedProfile(t.Context(), tx, admin, profileWrite{Slug: "old-opus-xhigh", Version: "1", Harness: "claude", Family: "anthropic", Model: old.Model, Effort: "xhigh", Tier: "strong", RegisteredEffortLevel: ptrInt(4)}, true, modelactivation.Person); err != nil {
 			return err
 		}
-		// The successor offers high and max only: xhigh lies between them and goes up.
-		for _, effort := range []string{"high", "max"} {
-			if _, err := insertActivatedProfile(t.Context(), tx, admin, profileWrite{Slug: "native-next-" + effort, Version: "1", Harness: "claude", Family: "anthropic", Model: "claude-sonnet-5", Effort: effort, Tier: "strong"}, true, modelactivation.Person); err != nil {
+		// Native scales are explicit fixture inputs; the successor offers high (3)
+		// and max (5) only, so xhigh (4) lies between them and goes up.
+		for _, native := range []struct {
+			effort string
+			level  int
+		}{{"high", 3}, {"max", 5}} {
+			if _, err := insertActivatedProfile(t.Context(), tx, admin, profileWrite{Slug: "native-next-" + native.effort, Version: "1", Harness: "claude", Family: "anthropic", Model: "claude-sonnet-5", Effort: native.effort, Tier: "strong", RegisteredEffortLevel: ptrInt(native.level)}, true, modelactivation.Person); err != nil {
 				return err
 			}
 		}
