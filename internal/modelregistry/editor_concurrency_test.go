@@ -268,11 +268,8 @@ func TestEditorConditionalWriteWaitsForAdditivePreparation(t *testing.T) {
 				}
 				// The concurrent change is an explicit fixture write under
 				// the held fence; ID bootstrap must not invent extra routes.
-				pin, err := insertProfile(ctx, tx, p.TenantID, profileWrite{Slug: "explicit-addition", Version: "fixture", Harness: "claude", Family: "anthropic", Model: "sonnet", Effort: "high", Tier: "standard"})
+				_, err := insertProfile(ctx, tx, p.TenantID, profileWrite{Slug: "explicit-addition", Version: "fixture", Harness: "claude", Family: "anthropic", Model: "sonnet", Effort: "high", Tier: "standard"})
 				if err != nil {
-					return time.Time{}, err
-				}
-				if err := insertRoute(ctx, tx, p.TenantID, Route{Role: "build", Priority: 18, ProfileID: pin.ID, State: "available"}); err != nil {
 					return time.Time{}, err
 				}
 			}

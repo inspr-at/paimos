@@ -472,6 +472,16 @@ func TestCatalogOutdatedRetireSafetyAndPrivacy(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_rules(tenant_id,scope,column_key,line,lock,why,set_by) VALUES($1,'workspace','other','anthropic:opus','top','Keep locked',$2)`, admin.TenantID, admin.ID); err != nil {
 			return err
 		}
+		// The merge retains retirement/Undo across the Models v2 storage split.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pref_situation_orders(tenant_id,profile_id,column_key,situation,rank,efforts,end_mode) VALUES($1,$2,'backend','review',ARRAY['anthropic:opus'],'{"anthropic:opus":"high"}','wait')`, admin.TenantID, workspace); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_row_constraints(tenant_id,scope,column_key,line,kind,why,set_by) VALUES($1,'workspace','frontend','anthropic:opus','never','Keep the Models reason',$2)`, admin.TenantID, admin.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by) VALUES($1,'claude',$2,'Keep the pause',$3)`, admin.TenantID, old.Model, admin.ID); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_rule_revisions(tenant_id,scope,scope_key) VALUES($1,'workspace','')`, admin.TenantID)
 		return err
 
@@ -504,7 +514,7 @@ func TestCatalogOutdatedRetireSafetyAndPrivacy(t *testing.T) {
 	}
 	beforeMove := retireState(t, admin)
 	moved := boardDecode[retireResult](t, boardCall(t, admin, "POST", "/api/models/outdated/retire", body, ""), 200)
-	if len(moved.Moved) != 6 {
+	if len(moved.Moved) != 9 {
 		t.Fatal("preview omitted a Default, fallback, never, lock or person reference", moved.Moved)
 	}
 	inRegistry(t, admin, func(tx pgx.Tx) error {
@@ -521,6 +531,16 @@ func TestCatalogOutdatedRetireSafetyAndPrivacy(t *testing.T) {
 		}
 		if count != 0 {
 			t.Fatal("fallback or never reference did not move")
+		}
+		var complete bool
+		if err := tx.QueryRow(t.Context(), `SELECT
+ (SELECT rank=ARRAY['anthropic:sonnet'] AND efforts='{"anthropic:sonnet":"high"}'::jsonb AND end_mode='wait' FROM model_pref_situation_orders WHERE column_key='backend' AND situation='review')
+ AND EXISTS(SELECT 1 FROM model_row_constraints WHERE column_key='frontend' AND line='anthropic:sonnet' AND kind='never' AND why='Keep the Models reason' AND set_by=$1)
+ AND EXISTS(SELECT 1 FROM model_pauses new JOIN model_pauses old ON old.harness=new.harness WHERE old.model=$2 AND new.model='claude-sonnet-5' AND new.until_at IS NULL AND new.reason=old.reason AND new.set_by=old.set_by AND new.set_at=old.set_at)`, admin.ID, old.Model).Scan(&complete); err != nil {
+			return err
+		}
+		if !complete {
+			t.Fatal("retirement stranded a Models situation, constraint or pause")
 		}
 		return nil
 	})
