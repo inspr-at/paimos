@@ -7,7 +7,7 @@ import { useSession } from '../../stores/session'
 import { can, onAccessRevalidate } from '../../lib/authz'
 import { createScope, scopeOwner } from '../../lib/identityScope'
 import { readDeliveryMetrics, type MetricSource } from '../../lib/deliveryNumbers'
-import { HISTORY_DAYS, linkProjectRepository, readRepositoryHistory, repositoryState, workflowFile, type HistoryPosition } from '../../lib/projectDeliverySettings'
+import { HISTORY_DAYS, checkRepositoryHistory, linkProjectRepository, readRepositoryHistory, repositoryState, workflowFile, type HistoryPosition } from '../../lib/projectDeliverySettings'
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
 import { claimSettingsPopover } from '../../lib/settingsOverlays'
 import { usePoller } from '../../lib/usePolledData'
@@ -68,11 +68,11 @@ async function openForm() {
   await nextTick(); form.value?.querySelector<HTMLInputElement>('input')?.focus({ preventScroll: true })
 }
 function cancelForm() { if (busy.value) return; formOpen.value = false; feedback.value = ''; void nextTick(() => linkButton.value?.focus({ preventScroll: true })) }
-function startHistory(restart = false) {
+function startHistory(action: 'continue' | 'restart' | 'check' = 'continue') {
   if (!manage.value || !source.value || busy.value) return Promise.resolve()
   const id = props.project.id, selectedDays = days.value
   closeMenu(false); reader.cancel(); busy.value = true; feedback.value = ''
-  return scope.run(({ after, signal }) => after(readRepositoryHistory(id, selectedDays, restart, signal), value => {
+  return scope.run(({ after, signal }) => after(action === 'check' ? checkRepositoryHistory(id, signal) : readRepositoryHistory(id, selectedDays, action === 'restart', signal), value => {
     position.value = value
     if (value.truncated) toast('GitHub returned only part of the history. Delivery keeps those windows partial.')
   }), { failed: cause => { toast(cause instanceof Error ? cause.message : 'History could not be read. The repository stays linked.', { tone: source.value?.last_read_error ? 'info' : 'error', key: `repository-history/${id}` }) }, settled: () => { busy.value = false; void load() } })
@@ -131,7 +131,7 @@ onBeforeUnmount(() => { poller.stop(); stopAccess(); scope.dispose(); closeMenu(
             <p v-else class="ds-b">The last stored history is kept. <template v-if="source.retry_at">The server retries {{ date(source.retry_at, true) }}.</template><template v-else>The server will try again.</template></p>
             <div class="ds-acts">
               <a v-if="state === 'noactions' || state === 'appoff'" class="btn sm" :href="state === 'noactions' ? appURL : 'https://github.com/settings/installations'" target="_blank" rel="noopener noreferrer"><AppIcon name="external" :size="13" /><span class="wide">{{ state === 'noactions' ? `Open ${repoOwner}’s GitHub Apps` : 'Open the App’s repository access' }}</span><span class="narrow">{{ state === 'noactions' ? 'GitHub Apps' : 'Repository access' }}</span></a>
-              <button v-if="manage && ['noactions', 'appoff', 'stale', 'unavailable'].includes(state)" type="button" class="btn sm" data-act="check" :disabled="busy" @click="startHistory()"><AppIcon name="refresh" :size="13" />Check again</button>
+              <button v-if="manage && ['noactions', 'appoff', 'stale', 'unavailable'].includes(state)" type="button" class="btn sm" data-act="check" :disabled="busy" @click="startHistory('check')"><AppIcon name="refresh" :size="13" />Check again</button>
               <span v-if="checked" class="checked">{{ checked }}</span>
               <RouterLink v-if="state === 'done'" class="link-btn quiet" :to="`/p/${encodeURIComponent(project.routeKey)}/delivery`">See the numbers on Delivery<AppIcon name="chevron-right" :size="12" /></RouterLink>
               <ProjectSettingsExplainer v-if="state === 'reading' || state === 'done'" id="backfill" :project-key="project.routeKey" :repository="source.repository" />
@@ -142,7 +142,7 @@ onBeforeUnmount(() => { poller.stop(); stopAccess(); scope.dispose(); closeMenu(
     </div>
     <p v-if="formOpen" class="feedback" :class="{ problem: feedback }" role="status" :aria-busy="busy">{{ feedback || (busy ? 'Linking the repository…' : '') }}</p>
   </SettingsCard>
-  <FloatingPanel v-if="menuOpen" :anchor="moreButton ?? null" :width="340" :tallest="180" label="More for the repository" @close="restore => closeMenu(restore)"><div ref="menuContent" role="menu" aria-label="More for the repository"><button type="button" class="history-menu" role="menuitem" @click="startHistory(true)"><AppIcon name="history" :size="14" /><span><b>Read history again…</b><small>Starts over on the server. Use it after GitHub was unreadable for a while.</small></span></button></div></FloatingPanel>
+  <FloatingPanel v-if="menuOpen" :anchor="moreButton ?? null" :width="340" :tallest="180" label="More for the repository" @close="restore => closeMenu(restore)"><div ref="menuContent" role="menu" aria-label="More for the repository"><button type="button" class="history-menu" role="menuitem" @click="startHistory('restart')"><AppIcon name="history" :size="14" /><span><b>Read history again…</b><small>Starts over on the server. Use it after GitHub was unreadable for a while.</small></span></button></div></FloatingPanel>
 </template>
 
 <style scoped>

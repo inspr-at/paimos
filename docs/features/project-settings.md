@@ -36,7 +36,8 @@ Repository & delivery links one GitHub repository and its workflow files, with
 7, 30, 60 or 90 days of history. AEON-1234 owns the server job: this page makes
 one start/resume request and polls the source, never loops the backfill cursor.
 Saved Actions permission failures name the GitHub owner and the configuration
-path; Check again resumes history, and the repository menu can restart it.
+path; Check again immediately retries the current history step, bypassing its
+retry time while keeping progress. The repository menu can restart history.
 Missing events, stale events, GitHub failures and partial history stay explicit.
 Phase and count details appear only when a backfill response supplies them; the
 source read has no history-progress fields. Every ordinary state reserves the

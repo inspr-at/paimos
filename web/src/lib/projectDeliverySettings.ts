@@ -34,6 +34,7 @@ export async function saveProjectDeliverySettings(project: string, overrides: De
 export const linkProjectRepository = (project: string, input: RepositoryInput, signal?: AbortSignal) => request<MetricSource>(path(project, 'delivery/metrics/source'), signal, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) }).then(answer => answer.value)
 // One request asks the server job to resume/restart; the page never walks its cursor.
 export const readRepositoryHistory = (project: string, days: number, restart: boolean, signal?: AbortSignal) => request<HistoryPosition>(path(project, 'delivery/metrics/backfill'), signal, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days, restart }) }).then(answer => answer.value)
+export const checkRepositoryHistory = (project: string, signal?: AbortSignal) => request<HistoryPosition>(path(project, 'delivery/metrics/check-again'), signal, { method: 'POST' }).then(answer => answer.value)
 export type RepositoryState = 'none' | 'reading' | 'done' | 'noactions' | 'appoff' | 'stale' | 'unavailable'
 export function repositoryState(source: MetricSource | null, now: number): RepositoryState {
   if (!source) return 'none'
