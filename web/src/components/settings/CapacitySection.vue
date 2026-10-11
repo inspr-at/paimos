@@ -9,6 +9,7 @@
 // #when (and the older #capacity-and-load) focuses the pacing editors.
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRefs, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { HARNESS_LABEL } from '../../lib/agentState'
 import { HARNESS_NAME, hidesCapacityLimit, POOL_ORDER } from '../../lib/capacity'
 import { dailyOf, DEFAULT_DAILY_POINTS, pct, typedPoints, type PaceChoice, type PlanRead } from '../../lib/dailyLimits'
 import { capacityCaption } from '../../lib/quotaBar'
@@ -39,7 +40,10 @@ watch(() => route.hash, async hash => {
 // The legend names Keep for you whenever the person keeps something, as in Accounts.
 const keeps = computed(() => capacity.value.schedule.reserve !== 'off')
 const defaultPoints = computed(() => agentsPlan.value?.daily_default_points ?? DEFAULT_DAILY_POINTS)
-const name = (harness: string) => HARNESS_NAME[harness] ?? harness
+// A harness row, its picker and the At the limit line name the harness ("Claude Code"); the
+// picker's foot names the vendor's accounts ("the Claude account").
+const name = (harness: string) => HARNESS_LABEL[harness] ?? harness
+const vendor = (harness: string) => HARNESS_NAME[harness] ?? harness
 const rank = (harness: string) => { const i = POOL_ORDER.indexOf(harness); return i < 0 ? POOL_ORDER.length : i }
 const PACE_WORDS = { everything: 'Use everything', points: (n: number) => `+${n} percentage points a day` }
 const harnesses = computed(() => {
@@ -213,7 +217,7 @@ watch([paceHash, harnesses], async ([harness]) => {
         </div>
         <button type="button" class="ch-o" role="radio" :aria-checked="pickerPace.mode === 'everything'" :data-autofocus="pickerPace.mode === 'everything' || undefined" :data-setpace="`${picker.harness}:everything`" @click="choose('everything')"><span class="r" /><span class="t">Use everything before the reset</span><span class="d">No daily limit. The floor and what’s kept for you still hold.</span></button>
         <p id="own-pace-note" class="pp-note" aria-live="polite">{{ ownNote }}</p>
-        <p class="pp-foot">Applies to {{ pickerAccounts > 1 ? `all ${pickerAccounts} ${name(picker.harness)} accounts, in their order` : `the ${name(picker.harness)} account` }}. The Agents dial edits this same value; Boost today, also on the dial, changes today only.</p>
+        <p class="pp-foot">Applies to {{ pickerAccounts > 1 ? `all ${pickerAccounts} ${vendor(picker.harness)} accounts, in their order` : `the ${vendor(picker.harness)} account` }}. The Agents dial edits this same value; Boost today, also on the dial, changes today only.</p>
       </div>
     </FloatingPanel>
   </AccountsPanel>

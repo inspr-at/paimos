@@ -13,8 +13,12 @@ import { ACCOUNTS, NOW, TZ, capacityWorld } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { controlStability } from './control-stability'
 import { mockDailyPlan } from './agents-daily-fixtures'
+import { HARNESS_LABEL } from '../src/lib/agentState'
 
 test.use({ timezoneId: TZ })
+// The harness's name as the dial shows it: "Claude" until AEON-1160 names it "Claude Code"; both pass.
+// The vendor's accounts stay "Claude" ("the Claude account").
+const CLAUDE = HARNESS_LABEL.claude!
 
 async function permissions(page: Page, manage: boolean) {
   await page.route('**/api/me/permissions*', route => {
@@ -55,12 +59,12 @@ test('one value, two editors: the dial’s pace shows in Capacity, Capacity’s 
   // The dial's "in Capacity" lands on the harness's row.
   await page.goto('/settings/capacity#pace-claude')
   const picker = page.locator('button[data-pace="claude"]')
-  await expect(picker).toHaveAccessibleName('Daily limit for Claude: +14 percentage points a day. Change')
+  await expect(picker).toHaveAccessibleName(`Daily limit for ${CLAUDE}: +14 percentage points a day. Change`)
   await expect(page.locator('#pace-claude')).toBeFocused()
   await expect(page).toHaveURL('/settings/capacity')
 
   await picker.click()
-  const pop = page.getByRole('dialog', { name: 'Daily limit for Claude' })
+  const pop = page.getByRole('dialog', { name: `Daily limit for ${CLAUDE}`, exact: true })
   await expect(pop.getByRole('radio', { name: 'Its own pace' })).toHaveAttribute('aria-checked', 'true')
   await pop.getByLabel('Own pace, percentage points a day').fill('12')
   await pop.getByRole('radio', { name: 'Its own pace' }).click()
@@ -77,8 +81,8 @@ test('one value, two editors: the dial’s pace shows in Capacity, Capacity’s 
       },
     },
   })
-  await expect(page.locator('.toast').filter({ hasText: 'Claude: +12 percentage points a day' })).toBeVisible()
-  await expect(picker).toHaveAccessibleName('Daily limit for Claude: +12 percentage points a day. Change')
+  await expect(page.locator('.toast').filter({ hasText: `${CLAUDE}: +12 percentage points a day` })).toBeVisible()
+  await expect(picker).toHaveAccessibleName(`Daily limit for ${CLAUDE}: +12 percentage points a day. Change`)
   await expect(picker).toBeFocused()
 
   await page.goto('/agents')
@@ -93,21 +97,21 @@ test('a number equal to the default follows the default in Capacity too, and Und
   const backend = await mockDailyPlan(page, { example: 'pace', settings: { claude: { pace: { mode: 'pace', points_per_day: 15 }, boost_today: null, at_limit: 'ladder' } } })
   await page.goto('/settings/capacity')
   const picker = page.locator('button[data-pace="claude"]')
-  await expect(picker).toHaveAccessibleName('Daily limit for Claude: +15 percentage points a day. Change')
+  await expect(picker).toHaveAccessibleName(`Daily limit for ${CLAUDE}: +15 percentage points a day. Change`)
   await picker.click()
-  const pop = page.getByRole('dialog', { name: 'Daily limit for Claude' })
+  const pop = page.getByRole('dialog', { name: `Daily limit for ${CLAUDE}`, exact: true })
   await pop.getByLabel('Own pace, percentage points a day').fill('10')
   await pop.getByLabel('Own pace, percentage points a day').press('Enter')
   await expect.poll(() => backend.puts.length).toBe(1)
   expect(backend.puts[0]!.value.daily!.claude!.pace).toEqual({ mode: 'pace', points_per_day: null })
-  await expect(picker).toHaveAccessibleName('Daily limit for Claude: +10 percentage points a day, the default. Change')
+  await expect(picker).toHaveAccessibleName(`Daily limit for ${CLAUDE}: +10 percentage points a day, the default. Change`)
   await expect(picker).toContainText('· default')
-  const toast = page.locator('.toast').filter({ hasText: 'Claude: +10 percentage points a day, the default' })
+  const toast = page.locator('.toast').filter({ hasText: `${CLAUDE}: +10 percentage points a day, the default` })
   await toast.getByRole('button', { name: 'Undo' }).click()
   await expect.poll(() => backend.puts.length).toBe(2)
   // Undo is guarded by the revision its own write left, so it never overwrites a later change.
   expect(backend.puts[1]).toMatchObject({ expected_updated_at: new Date(NOW + 1000).toISOString(), value: { daily: { claude: { pace: { mode: 'pace', points_per_day: 15 } } } } })
-  await expect(picker).toHaveAccessibleName('Daily limit for Claude: +15 percentage points a day. Change')
+  await expect(picker).toHaveAccessibleName(`Daily limit for ${CLAUDE}: +15 percentage points a day. Change`)
 })
 
 test('a pace changed elsewhere meanwhile is read again and said; nothing is overwritten', async ({ page }) => {
@@ -201,14 +205,14 @@ test('the default pace saves on Enter with Undo; harnesses that follow it follow
   const field = page.locator('#def-pace')
   await expect(field).toHaveValue('10')
   await expect(page.locator('button[data-pace="codex"]')).toHaveAccessibleName('Daily limit for Codex: +10 percentage points a day, the default. Change')
-  await expect(page.locator('button[data-pace="claude"]')).toHaveAccessibleName('Daily limit for Claude: +6 percentage points a day. Change')
+  await expect(page.locator('button[data-pace="claude"]')).toHaveAccessibleName(`Daily limit for ${CLAUDE}: +6 percentage points a day. Change`)
   const guard = await controlStability(page, { field, codex: page.locator('button[data-pace="codex"]'), claude: page.locator('button[data-pace="claude"]'), keep: page.locator('#capacity-and-load').getByRole('button', { name: /Keep for you/ }) })
   await guard.check(async () => {
     await field.fill('14'); await field.press('Enter')
     await expect.poll(() => state.patches).toEqual([{ daily_points_per_day: 14, expected_revision: 0 }])
     await expect(page.locator('button[data-pace="codex"]')).toHaveAccessibleName('Daily limit for Codex: +14 percentage points a day, the default. Change')
   })
-  await expect(page.locator('button[data-pace="claude"]')).toHaveAccessibleName('Daily limit for Claude: +6 percentage points a day. Change')
+  await expect(page.locator('button[data-pace="claude"]')).toHaveAccessibleName(`Daily limit for ${CLAUDE}: +6 percentage points a day. Change`)
   await expect(field).toHaveValue('14')
   await guard.check(async () => {
     await page.locator('.toast').filter({ hasText: 'Default pace: +14 percentage points a day' }).getByRole('button', { name: 'Undo' }).click()
@@ -272,19 +276,19 @@ test('Undo of a harness’s pace puts back the whole pace before, the number “
   const backend = await mockDailyPlan(page, { example: 'pace', settings: { claude: { pace: { mode: 'everything', points_per_day: 13 }, boost_today: null, at_limit: 'ladder' } } })
   await page.goto('/settings/capacity')
   const picker = page.locator('button[data-pace="claude"]')
-  await expect(picker).toHaveAccessibleName('Daily limit for Claude: Use everything. Change')
+  await expect(picker).toHaveAccessibleName(`Daily limit for ${CLAUDE}: Use everything. Change`)
   await picker.click()
-  const own = page.getByRole('dialog', { name: 'Daily limit for Claude' }).getByLabel('Own pace, percentage points a day')
+  const own = page.getByRole('dialog', { name: `Daily limit for ${CLAUDE}`, exact: true }).getByLabel('Own pace, percentage points a day')
   await own.fill('20'); await own.press('Enter')
   await expect.poll(() => backend.puts.length).toBe(1)
   expect(backend.puts[0]!.value.daily!.claude!.pace).toEqual({ mode: 'pace', points_per_day: 20 })
-  await page.locator('.toast').filter({ hasText: 'Claude: +20 percentage points a day' }).getByRole('button', { name: 'Undo' }).click()
+  await page.locator('.toast').filter({ hasText: `${CLAUDE}: +20 percentage points a day` }).getByRole('button', { name: 'Undo' }).click()
   await expect.poll(() => backend.puts.length).toBe(2)
   // The 13 comes back with "use everything", so switching back to pace on the dial uses 13 again.
   expect(backend.puts[1]!.expected_updated_at).toBe(new Date(NOW + 1000).toISOString())
   expect(backend.puts[1]!.value.daily!.claude!.pace).toEqual({ mode: 'everything', points_per_day: 13 })
-  await expect(picker).toHaveAccessibleName('Daily limit for Claude: Use everything. Change')
-  await expect(page.locator('.toast').filter({ hasText: 'Claude: uses everything before the reset' })).toBeVisible()
+  await expect(picker).toHaveAccessibleName(`Daily limit for ${CLAUDE}: Use everything. Change`)
+  await expect(page.locator('.toast').filter({ hasText: `${CLAUDE}: uses everything before the reset` })).toBeVisible()
 })
 
 test('the bars, Boost today and what happens at the limit say what the plan says', async ({ page }) => {
@@ -292,6 +296,9 @@ test('the bars, Boost today and what happens at the limit say what the plan says
   await capacityPage(page)
   await page.goto('/settings/capacity')
   const codex = page.locator('#pace-codex'), claude = page.locator('#pace-claude')
+  // A row names the harness, as the dial does (design AEON-1149: "Claude Code").
+  expect(['Claude', 'Claude Code']).toContain(CLAUDE)
+  await expect(claude.locator('.hz-n b')).toHaveText(CLAUDE)
   await expect(codex.locator('.hz-s')).toHaveText('3 accounts · used in this order')
   await expect(codex.locator('.ab-who b')).toHaveText(['Main', 'Spare', 'Studio'])
   const caption = (id: string) => page.locator(`.ab[data-account="${id}"] [data-capacity-caption]`)
@@ -303,7 +310,7 @@ test('the bars, Boost today and what happens at the limit say what the plan says
   await expect(page.locator('#pace-cursor [data-pace]')).toHaveCount(0)
   // At the limit follows Models, shown as a link; Claude still waits as set on the dial.
   const foot = page.locator('.cap-foot')
-  await expect(foot.locator('.cap-line').first()).toContainText('At the limit, new work follows Settings › Models: the next model in its order runs, or the work waits. Claude waits until midnight instead, as set on the Agents dial.')
+  await expect(foot.locator('.cap-line').first()).toContainText(`At the limit, new work follows Settings › Models: the next model in its order runs, or the work waits. ${CLAUDE} waits until midnight instead, as set on the Agents dial.`)
   await expect(foot.getByRole('link', { name: 'Models' })).toHaveAttribute('href', '/settings/models')
   await expect(foot.getByRole('link', { name: 'Agents' })).toHaveAttribute('href', '/agents')
   // The floor links to the account's own panel, where it is set.
@@ -320,23 +327,26 @@ test('the picker overlays and a save moves nothing; the picker keeps its width w
   const guard = await controlStability(page, { codex, claude, field: page.locator('#def-pace'), days: page.locator('#capacity-and-load').getByRole('radio', { name: '5' }), keep: page.locator('#capacity-and-load').getByRole('button', { name: /Keep for you/ }) })
   await guard.check(async () => {
     await claude.click()
-    await expect(page.getByRole('dialog', { name: 'Daily limit for Claude' })).toBeVisible()
+    await expect(page.getByRole('dialog', { name: `Daily limit for ${CLAUDE}`, exact: true })).toBeVisible()
   })
   await guard.check(async () => {
-    await page.getByRole('dialog', { name: 'Daily limit for Claude' }).getByRole('radio', { name: 'Use everything before the reset' }).click()
+    await page.getByRole('dialog', { name: `Daily limit for ${CLAUDE}`, exact: true }).getByRole('radio', { name: 'Use everything before the reset' }).click()
     await expect.poll(() => backend.puts.length).toBe(1)
-    await expect(claude).toHaveAccessibleName('Daily limit for Claude: Use everything. Change')
+    await expect(claude).toHaveAccessibleName(`Daily limit for ${CLAUDE}: Use everything. Change`)
   })
   await guard.check(async () => {
     await claude.click()
-    await page.getByRole('dialog', { name: 'Daily limit for Claude' }).getByRole('radio', { name: 'Follow the default' }).click()
+    await page.getByRole('dialog', { name: `Daily limit for ${CLAUDE}`, exact: true }).getByRole('radio', { name: 'Follow the default' }).click()
     await expect.poll(() => backend.puts.length).toBe(2)
     await expect(claude).toContainText('· default')
   })
   guard.done()
   // Keyboard: the arrows move between the choices, Esc closes and hands focus back.
   await claude.click()
-  const pop = page.getByRole('dialog', { name: 'Daily limit for Claude' })
+  const pop = page.getByRole('dialog', { name: `Daily limit for ${CLAUDE}`, exact: true })
+  // The title names the harness, the foot the vendor's account.
+  await expect(pop.getByRole('heading')).toHaveText(`Daily limit for ${CLAUDE}`)
+  await expect(pop.locator('.pp-foot')).toContainText('Applies to the Claude account.')
   await expect(pop.getByRole('radio', { name: 'Follow the default' })).toBeFocused()
   await page.keyboard.press('ArrowDown')
   await expect(pop.getByRole('radio', { name: 'Its own pace' })).toBeFocused()
@@ -379,7 +389,7 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
       expect(audit.small).toEqual([])
       await shot(page, info, `capacity-${width}-${theme}`)
       await page.locator('button[data-pace="claude"]').click()
-      await expect(page.getByRole('dialog', { name: 'Daily limit for Claude' })).toBeVisible()
+      await expect(page.getByRole('dialog', { name: `Daily limit for ${CLAUDE}`, exact: true })).toBeVisible()
       expect(await overflow(page)).toBeLessThanOrEqual(1)
       await shot(page, info, `capacity-picker-${width}-${theme}`, false)
       await page.keyboard.press('Escape')

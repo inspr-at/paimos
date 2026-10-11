@@ -5,7 +5,8 @@
 // a missing or stale reading is "not measured", never an on-pace claim, and
 // never the red "at today's limit".
 import { api } from './api.ts'
-import { HARNESS_NAME, whenFull } from './capacity.ts'
+import { HARNESS_LABEL } from './agentState.ts'
+import { whenFull } from './capacity.ts'
 
 export const DEFAULT_DAILY_POINTS = 10
 export type PaceMode = 'pace' | 'everything'
@@ -42,7 +43,8 @@ export function sameDaily(a: DailyMap | undefined, b: DailyMap | undefined): boo
 /** Percentages of an allowance window: whole numbers read as whole numbers, anything else with one decimal. */
 export const pct = (n: number) => String(Math.round(n * 10) / 10)
 export const points = (n: number) => `${pct(n)} percentage ${pct(n) === '1' ? 'point' : 'points'}`
-const name = (harness: string) => HARNESS_NAME[harness] ?? harness
+/** The harness's name ("Claude Code"), not the vendor account's ("Claude account"). */
+const name = (harness: string) => HARNESS_LABEL[harness] ?? harness
 
 export type DailyKind = 'none' | 'unknown' | 'no_limit' | 'everything' | 'on_pace' | 'over_pace' | 'at_limit'
 export interface DailyView {

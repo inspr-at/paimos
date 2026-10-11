@@ -19,6 +19,7 @@ import { DEFAULT_QUOTA_THRESHOLDS, isProblemSignin, quotaWindowWarns, signinStat
 import { accountsPartNeeds, matrixNeedFacts, NO_MATRIX_FACTS, partCounts, workContextLink, type AccountsPart, type MatrixNeedFacts } from './accountsNeeds'
 import { PERMISSION as USE_PERMISSION, readMatrix } from './accountUse'
 import { hostCapacityReason } from './hostCapacity'
+import { HARNESS_LABEL } from './agentState'
 import { daysSummary, HARNESS_NAME, ownOverride, poolOfRow, reserveLevel, timeLabel, when, type CapacityWindow } from './capacity'
 import { dailyOf, DEFAULT_DAILY_POINTS, paceChoice, PlanChanged, storedPace, withDaily, writePace, type DailyPace, type PaceChoice, type PlanRead } from './dailyLimits'
 import { fieldMessage, getProfile, ProfileError, profileChanged } from './profile'
@@ -182,7 +183,7 @@ export function useAccountsSettings(part: AccountsPart) {
       const written: PlanRead = { ...(plan.value ?? basis), total: basis.total, limits: basis.limits, daily: withDaily(basis.daily, harness, { ...settings, pace }), updated_at: updatedAt }
       plan.value = written
       void readPlan()
-      toast(`${vendorName(harness)}: ${said}`, undoable ? { action: { label: 'Undo', run: () => { if (identity === owner.value && turn === generation) void writeHarnessPace(harness, before, paceDone(paceChoice(before), def), written, false) } } } : {})
+      toast(`${HARNESS_LABEL[harness] ?? harness}: ${said}`, undoable ? { action: { label: 'Undo', run: () => { if (identity === owner.value && turn === generation) void writeHarnessPace(harness, before, paceDone(paceChoice(before), def), written, false) } } } : {})
     } catch (error) {
       if (identity !== owner.value || turn !== generation) return
       toast(error instanceof Error ? error.message : 'Couldn’t save the daily limit. Please try again.', { tone: 'error' })
