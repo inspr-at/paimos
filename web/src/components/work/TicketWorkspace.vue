@@ -46,7 +46,7 @@ import TicketProperties from './TicketProperties.vue'
 import TicketBenefits from './TicketBenefits.vue'
 import TicketExtensions from './TicketExtensions.vue'
 import { needsBenefitPrompt } from '../../lib/doneGate'
-import { benefitDraft, benefitTextKeys, completedTicketState, firstBenefitGap } from '../../lib/ticketBenefits'
+import { benefitDraft, benefitTextKeys, completedTicketState, firstBenefitGap, firstPillGap } from '../../lib/ticketBenefits'
 import { can } from '../../lib/authz'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
 import { openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } from '../../lib/releaseMembership'
@@ -259,13 +259,12 @@ function focusBenefit(key: string) {
 }
 function refreshBenefitNotice() {
   const target = item.value
-  if (!benefitNotice.value || !target) return
-  if (!needsBenefitPrompt({ kind_id: target.kind_id, kind_slug: target.kind_slug, estimate: target.estimate, state: base.state, fields: draft }, draft.state)) {
-    benefitNotice.value = ''
-    benefitInvalidKey.value = ''
+  if ((!benefitNotice.value && !benefitInvalidKey.value) || !target) return
+  if (!benefitNotice.value) {
+    benefitInvalidKey.value = firstPillGap(draft)?.key ?? ''
     return
   }
-  const gap = firstBenefitGap(draft)
+  const gap = firstPillGap(draft) ?? (needsBenefitPrompt({ kind_id: target.kind_id, kind_slug: target.kind_slug, estimate: target.estimate, state: base.state, fields: draft }, draft.state) ? firstBenefitGap(draft) : null)
   benefitNotice.value = gap?.line ?? ''
   benefitInvalidKey.value = gap?.key ?? ''
 }
@@ -326,9 +325,12 @@ async function saveEdit() {
   const fields: Record<string, unknown> = { ...(ticket.base()?.fields ?? target.fields) }
   for (const [key, value] of Object.entries(changed)) { if (value === undefined) delete fields[key]; else fields[key] = value }
   // The benefit editor is already on this form. Point at the first incomplete field.
-  if (needsBenefitPrompt({ kind_id: target.kind_id, kind_slug: target.kind_slug, estimate: target.estimate, state: base.state, fields }, draft.state)) {
-    const gap = firstBenefitGap(fields)
-    benefitNotice.value = gap?.line ?? 'A 2–4 word pill and a benefit, in both languages, are required.'
+  const pillGap = ['ticket', 'work'].includes(target.kind_slug) ? firstPillGap(fields) : null
+  if (pillGap || needsBenefitPrompt({ kind_id: target.kind_id, kind_slug: target.kind_slug, estimate: target.estimate, state: base.state, fields }, draft.state)) {
+    const gap = pillGap ?? firstBenefitGap(fields)
+    // Pill errors already have an in-place word count and invalid outline.
+    // Keep the guidance in place so focusing the field never moves controls.
+    benefitNotice.value = pillGap ? '' : gap?.line ?? 'A 2–4 word pill and a benefit, in both languages, are required.'
     benefitInvalidKey.value = gap?.key ?? 'pill_en'
     await nextTick()
     focusBenefit(benefitInvalidKey.value)
