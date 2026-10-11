@@ -31,6 +31,10 @@ import { useSession } from '../stores/session'
 import type { NeedsYouItem } from '../components/settings/NeedsYouList.vue'
 import type { SettingsMenuItem } from '../components/settings/SettingsPopover.vue'
 
+// The last thresholds and matrix facts per person: moving between the parts keeps
+// the counts steady until the next read instead of dropping to the defaults.
+const remembered: { owner: string; thresholds: QuotaWarningSettings; facts: MatrixNeedFacts } = { owner: '', thresholds: { ...DEFAULT_QUOTA_THRESHOLDS }, facts: NO_MATRIX_FACTS }
+
 type MenuTarget = { kind: 'computer'; computer: PairingView } | { kind: 'signin'; signin: SignInReference } | { kind: 'account'; account: OverviewAccount } | { kind: 'cleanup'; computer: PairingView }
 
 export function useAccountsSettings(part: AccountsPart) {
@@ -50,7 +54,8 @@ export function useAccountsSettings(part: AccountsPart) {
   const account = computed(() => selected.value?.kind === 'account' ? accountOf(selected.value.id) : undefined)
   const selectedKey = computed(() => `${owner.value}/${selected.value?.kind}/${selected.value?.id}`)
   const title = computed(() => computer.value?.computer_name ?? account.value?.vendor ?? 'Details')
-  const thresholds = ref<QuotaWarningSettings>({ ...DEFAULT_QUOTA_THRESHOLDS })
+  const known = remembered.owner === owner.value
+  const thresholds = ref<QuotaWarningSettings>(known ? remembered.thresholds : { ...DEFAULT_QUOTA_THRESHOLDS })
   const busy = ref(false)
   // The section root, for focusing a sign-in row inside the open panel.
   let root: HTMLElement | null = null
@@ -78,7 +83,8 @@ export function useAccountsSettings(part: AccountsPart) {
   const problemSignins = computed(() => accounts.value.flatMap(a => a.signins.filter(s => isProblemSignin(s) || verification.retained.value.some(x => signinKey(x) === signinKey(s))).map(s => ({ account: a, signin: s }))))
 
   // ---------- Needs you, per part (AEON-1149 spec c) ----------
-  const facts = ref<MatrixNeedFacts>(NO_MATRIX_FACTS)
+  const facts = ref<MatrixNeedFacts>(known ? remembered.facts : NO_MATRIX_FACTS)
+  watch([thresholds, facts], ([t, f]) => { Object.assign(remembered, { owner: owner.value, thresholds: t, facts: f }) }, { immediate: true })
   const choosesWhere = computed(() => session.identity?.principal.kind === 'person' && can(USE_PERMISSION))
   const needs = computed<Record<AccountsPart, NeedsYouItem[]>>(() => {
     const signins: NeedsYouItem[] = problemSignins.value.map(({ account: a, signin: s }) => ({ id: `verify:${s.computer.computer_id}:${s.enrollment.account_id}`, name: `${a.vendor} verification on ${s.computer.computer_name}`, detail: verification.message(s) || (expired(s) ? 'Verification expired. New agents wait until the sign-in passes again.' : status(s.computer, s.enrollment.account_id)), count: isProblemSignin(s) ? 1 : 0, icon: 'alert', action: { label: manage.value && mayVerify(s) ? 'Verify again' : 'Details', fixesProblem: manage.value && mayVerify(s), disabled: verificationBusy(s) || busy.value, busy: verificationBusy(s) } }))
@@ -167,7 +173,8 @@ export function useAccountsSettings(part: AccountsPart) {
   // shows up); the poller coalesces it with a read already in flight.
   function onFocus() { poller.tick(true); void readThresholds() }
   onMounted(() => { poller.start(true); void readThresholds(); window.addEventListener('focus', onFocus) })
-  onBeforeUnmount(() => { generation++; thresholdTurn++; factsRead?.abort(); poller.stop(); window.removeEventListener('focus', onFocus); settingsNeeds.value = 0; accountsNeeds.value = null })
+  // The nav counts stay while the next part opens; Settings clears them when it closes or the person changes.
+  onBeforeUnmount(() => { generation++; thresholdTurn++; factsRead?.abort(); poller.stop(); window.removeEventListener('focus', onFocus); settingsNeeds.value = 0 })
 
   // ---------- Deep links ----------
   watch(() => route.hash, hash => {

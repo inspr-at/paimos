@@ -181,7 +181,6 @@ test('every old link lands in the right part with the same panel open', async ({
   await expect(page).toHaveURL('/settings/accounts#quota-warnings')
   // #capacity-and-load opens Capacity with the pacing editors focused.
   await page.goto('/settings/accounts#capacity-and-load')
-  await expect(page.locator('#when')).toHaveClass(/arrived/)
   await expect(page).toHaveURL('/settings/capacity')
   await expect(page.locator('#capacity-and-load').getByRole('radio', { name: '5' })).toBeFocused()
   await page.goto('/settings/workspace#capacity-and-load')

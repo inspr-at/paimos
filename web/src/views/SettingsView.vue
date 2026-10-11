@@ -59,6 +59,7 @@ const mountedOwner = ref(scopeOwner(session.identity))
 watch(() => scopeOwner(session.identity), now => {
   if (!now || now === mountedOwner.value) return
   mountedOwner.value = now
+  accountsNeeds.value = null
   shown.clear()
   sections.value = liveSections.value
   closePicker()
@@ -96,7 +97,7 @@ void refreshPermissions()
 const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, models: ModelsSection, workspace: WorkspaceSection, vocabulary: VocabularySection, kinds: KindsOfWorkSection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, computers: ComputersSection, capacity: CapacitySection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
 const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', models: 'columns', workspace: 'building', vocabulary: 'tag', kinds: 'list', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'key', computers: 'monitor', capacity: 'gauge', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
 // While Accounts, Computers or Capacity is open, the nav says how many things need you in each (AEON-1171).
-const navNeeds = (id: SectionId) => isAccountsPart(id) ? accountsNeeds.value?.[id] ?? 0 : 0
+const navNeeds = (id: SectionId) => isAccountsPart(id) && isAccountsPart(current.value) ? accountsNeeds.value?.[id] ?? 0 : 0
 const groups = computed(() => SETTINGS_GROUPS.map(label => ({ label, sections: sections.value.filter(section => section.group === label) })).filter(group => group.sections.length))
 const pickerOpen = ref(false)
 const picker = ref<HTMLButtonElement>()
@@ -127,7 +128,7 @@ watch(current, async () => {
 }, { flush: 'post' })
 watch(sections, () => closePicker())
 onMounted(() => { document.addEventListener('pointerdown', outside); window.addEventListener('resize', resize) })
-onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', resize); clearTimeout(arrival); disposed = true })
+onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', resize); clearTimeout(arrival); disposed = true; accountsNeeds.value = null })
 let disposed = false
 
 // A deep link scrolls to its target once the section has rendered it.

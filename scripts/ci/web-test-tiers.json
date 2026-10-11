@@ -946,6 +946,10 @@
     ,
     "browser:tests/settings-account-parts.spec.ts:a sign-in to verify: Needs you only in its own part, and the nav counts match"
     ,
+    "browser:tests/settings-account-parts.spec.ts:every part at 1440 and 390, light and dark, without sideways scrolling: nothing needs you"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:every part at 1440 and 390, light and dark, without sideways scrolling: things need you"
+    ,
     "browser:tests/settings-account-parts.spec.ts:everything at once: Needs you only in its own part, and the nav counts match"
     ,
     "browser:tests/settings-account-parts.spec.ts:nothing to do: no Needs-you block in any part, no nav count and nothing in the footer"
@@ -11749,6 +11753,10 @@
     {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"a sign-in to verify: Needs you only in its own part, and the nav counts match","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"every old link lands in the right part with the same panel open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"every part at 1440 and 390, light and dark, without sideways scrolling: nothing needs you","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"every part at 1440 and 390, light and dark, without sideways scrolling: things need you","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"everything at once: Needs you only in its own part, and the nav counts match","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
