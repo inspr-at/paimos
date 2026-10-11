@@ -41,8 +41,11 @@ refusals. After a route conflict, an independent run read may prove the attempt
 obsolete: terminal or already-started runs release the ledger hold and the
 never-launched resource/checkout owners. A queued routine remains retained,
 including a bound account whose route response may have been lost. The terminal
-route intent stays in the journal as the allocation's recovery anchor; cleanup
-errors are reported and retried. The branch and worktree files remain intact.
+route intent stays in the journal as the allocation's recovery anchor. Cleanup
+runs once and is not retried: a failure is reported as
+`routine_cleanup_failed` and holds only that run's durable owners. A resource
+record that could not be stopped stays unstopped, and `owner.json` keeps naming
+the run; other runs keep starting. The branch and worktree files remain intact.
 
 Managed Git uses the owned linked worktree's index and HEAD, common objects and
 only its branch's writable refs and logs. Sibling checkouts and their private

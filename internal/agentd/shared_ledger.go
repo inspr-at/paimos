@@ -379,7 +379,7 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 	// intent retains its own slot and logins; other records and admission continue.
 	replayCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	unconfirmed := false
+	unconfirmed, cleanupFailed := false, false
 	defer func() {
 		s.mu.Lock()
 		previous := s.ledgerRouteUnconfirmed
@@ -387,7 +387,10 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 		s.mu.Unlock()
 		// Emit the first hold immediately. Later polls retain their complete
 		// reason set, including queue failures, for unchanged-cause rate limiting.
-		if unconfirmed && !previous {
+		// A routine cleanup runs once, so its failure is reported when it happens.
+		if cleanupFailed {
+			s.reportPollDiagnostic("routine_cleanup_failed")
+		} else if unconfirmed && !previous {
 			s.reportPollDiagnostic("")
 		}
 	}()
@@ -414,11 +417,13 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 				entry.mu.Unlock()
 			}
 		}
-		if r.RoutineWorkspace != nil && r.LaunchState == launchRoutePending && r.State != "route_pending" {
+		if r.RoutineWorkspace != nil && r.LaunchState == launchRoutePending && (r.State == "cancelled" || r.State == "failed" || r.State == "completed") {
 			// A terminal route intent proves no native launch was attempted.
-			// Retry resource/checkout cleanup even after ledger coordinates clear.
-			if err = s.releaseObsoleteRoutineRoute(r); err != nil {
-				return err
+			// Release remaining resource/checkout handles even after ledger
+			// coordinates clear. A failure holds only this record's owners.
+			if s.releaseObsoleteRoutineRoute(r) != nil {
+				unconfirmed, cleanupFailed = true, true
+				continue
 			}
 		}
 		if r.LedgerGroup == "" {
@@ -463,8 +468,8 @@ func (s *Supervisor) reconcileLedgerLocked(ctx context.Context) error {
 								return err
 							}
 							s.setLedgerRecord(r)
-							if err = s.releaseObsoleteRoutineRoute(r); err != nil {
-								return err
+							if s.releaseObsoleteRoutineRoute(r) != nil {
+								unconfirmed, cleanupFailed = true, true
 							}
 							continue
 						}

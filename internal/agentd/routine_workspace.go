@@ -508,26 +508,27 @@ func (w RoutineWorkspace) pickup() agentsetup.RoutinePickup {
 // Caller holds dispatchMu. A terminal route_pending launch state is durable
 // proof that neither the adapter nor any native fixture was launched. Keep the
 // journal and allocation, while releasing only this attempt's live owners.
+// Cleanup runs once: Finish closes a lease whatever it returns, and a removed
+// checkout never accepts a write. A failure keeps the durable owners held
+// instead (the lease record stays unstopped, owner.json keeps naming this run).
 func (s *Supervisor) releaseObsoleteRoutineRoute(r Record) error {
 	if r.RoutineWorkspace == nil || r.LaunchState != launchRoutePending || (r.State != "cancelled" && r.State != "failed" && r.State != "completed") {
 		return ErrProcessesUnconfirmed
 	}
+	var err error
 	if lease := s.routineResources[r.RunID]; lease != nil {
-		if err := lease.Finish(true); err != nil {
-			return err
-		}
+		err = lease.Finish(true)
 		delete(s.routineResources, r.RunID)
 	}
 	if store := s.routineCheckouts[r.RunID]; store != nil {
-		if err := store.Write("owner.json", []byte("[]"), false); err != nil {
-			return err
+		// Release the checkout owner only after its resources are stopped.
+		if err == nil {
+			err = store.Write("owner.json", []byte("[]"), false)
 		}
-		if err := store.Close(); err != nil {
-			return err
-		}
+		err = errors.Join(err, store.Close())
 		delete(s.routineCheckouts, r.RunID)
 	}
-	return nil
+	return err
 }
 
 func (s *Supervisor) releaseRoutineCheckouts() error {
