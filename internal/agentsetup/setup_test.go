@@ -69,6 +69,7 @@ const testAccount = "44444444-4444-4444-8444-444444444444"
 const otherAccount = "55555555-5555-4555-8555-555555555555"
 
 type setupAPI struct {
+	nextAccountID   string
 	prior           View
 	request         DeviceRequest
 	createCount     int
@@ -118,6 +119,9 @@ func (a *setupAPI) Redeem(_ context.Context, r ProofRequest) (View, error) {
 			id := testAccount
 			if i > 0 || a.request.ExistingComputerID != "" {
 				id = otherAccount
+				if a.nextAccountID != "" {
+					id = a.nextAccountID
+				}
 			}
 			v.Enrollments = append(v.Enrollments, Enrollment{AccountID: id, AccountKey: c.Key, Harness: c.Harness, Label: c.Label, State: "connected", VerificationState: "not_selected"})
 		}
@@ -457,5 +461,90 @@ func TestAddManagedHarnessRequiresFreshPersonApproval(t *testing.T) {
 	config, err := ReadRuntimeConfig(e.Store.Path())
 	if err != nil || len(config.Accounts) != 1 || config.Accounts[0].Harness != "codex" {
 		t.Fatal("unapproved harness reached runtime")
+	}
+}
+
+// Risk: a second login silently inherits the first login's approval or mutates
+// the running service. Advance the same request with an injected clock.
+func TestRunningEnrollmentKeepsEachClaudeLoginPersonGated(t *testing.T) {
+	e, api, _, opts, x := engineFixture(t)
+	_, node, sdk := claudeFixture(t)
+	opts.NodePath, opts.ClaudeSDKPath = node, sdk
+	opts.Candidates[0].Harness = "claude"
+	opts.Candidates[0].Label, opts.Candidates[0].Identity = "a@example.test", "a@example.test"
+	approveFixture(t, e, api, opts)
+	e.Store.Unlock()
+	before, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	api.approved = false
+	e.RunningService = true
+	// Simulate a paired, owner-managed running service. Its receipt and start
+	// choice must survive; no service manager is provided to the running lane.
+	saved, err := e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.StartService = true
+	if err := e.save(saved, false); err != nil {
+		t.Fatal(err)
+	}
+	e.Services = nil
+	c := opts.Candidates[0]
+	c.Label, c.Identity = "b@example.test", "b@example.test"
+	req := SetupRequest{Operation: "add_harness", Candidates: []LocalCandidate{{Candidate: c, Path: c.Path, Home: c.Home, Identity: c.Identity, Version: c.Version}}}
+	p, err := e.SetupExisting(t.Context(), req)
+	e.Store.Unlock()
+	if err != nil || p.Stage != "awaiting_approval" || api.createCount != 2 {
+		t.Fatalf("new login did not await its own approval: %s %v", p.Stage, err)
+	}
+	pending, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil || len(pending.Accounts) != 1 || pending.Accounts[0] != before.Accounts[0] {
+		t.Fatal("unapproved login changed runtime")
+	}
+	requestID := p.RequestID
+	other := req
+	other.Candidates = append([]LocalCandidate(nil), req.Candidates...)
+	other.Candidates[0].Identity, other.Candidates[0].Candidate.Label = "c@example.test", "c@example.test"
+	if _, err := e.SetupExisting(t.Context(), other); err == nil || !strings.Contains(err.Error(), "another login enrollment is pending") {
+		t.Fatalf("different pending login accepted: %v", err)
+	}
+	e.Store.Unlock()
+	if _, err := e.SetupExisting(t.Context(), SetupRequest{Operation: "step", RequestID: "stale"}); err == nil || !strings.Contains(err.Error(), "pairing request changed") {
+		t.Fatalf("stale poll accepted: %v", err)
+	}
+	e.Store.Unlock()
+	api.approved = true
+	now := e.now().Add(10 * time.Second)
+	e.Now = func() time.Time { return now }
+	p, err = e.SetupExisting(t.Context(), SetupRequest{Operation: "step", RequestID: requestID})
+	e.Store.Unlock()
+	if err != nil || p.Stage != "connected" {
+		t.Fatalf("approved login did not connect: %s %v", p.Stage, err)
+	}
+	after, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil || len(after.Accounts) != 2 || after.Accounts[0] != before.Accounts[0] || after.Accounts[1].Identity != "b@example.test" || after.Accounts[1].Home != before.Accounts[0].Home || len(x.calls) != 0 {
+		t.Fatal("login approval lost identity isolation or touched service")
+	}
+	api.approved, api.nextAccountID = false, "66666666-6666-4666-8666-666666666666"
+	p, err = e.SetupExisting(t.Context(), other)
+	e.Store.Unlock()
+	if err != nil || p.Stage != "awaiting_approval" || api.createCount != 3 {
+		t.Fatalf("third login did not need approval: %v", err)
+	}
+	pending, err = ReadRuntimeConfig(e.Store.Path())
+	if err != nil || len(pending.Accounts) != 2 {
+		t.Fatal("third login inherited approval")
+	}
+	api.approved = true
+	now = now.Add(10 * time.Second)
+	if _, err := e.SetupExisting(t.Context(), SetupRequest{Operation: "step", RequestID: p.RequestID}); err != nil {
+		t.Fatal(err)
+	}
+	e.Store.Unlock()
+	third, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil || len(third.Accounts) != 3 || third.Accounts[0] != after.Accounts[0] || third.Accounts[1] != after.Accounts[1] || third.Accounts[2].Identity != "c@example.test" || third.Accounts[2].Home != before.Accounts[0].Home {
+		t.Fatal("third approved login replaced a sibling")
 	}
 }

@@ -385,6 +385,7 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 			accountReport := local.AccountStatuses != nil
 			local = enrollmentReadiness(v, local)
 			p.AccountStatuses = local.AccountStatuses
+			p.AccountLogins = local.AccountLogins
 			p.HarnessDetails, p.HarnessStatuses = local.HarnessDetails, local.HarnessStatuses
 			p.BlockedAccounts = append([]BlockedAccount(nil), local.BlockedAccounts...)
 			// A Claude hold keeps its own stage: repin is a Claude-only flow.
@@ -540,6 +541,22 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		}
 	}
 	if s.Request.ExistingComputerID != "" && (s.Phase == "awaiting_approval" || s.Phase == "requesting" || s.Phase == "provisioning") {
+		if len(candidates) != len(s.Request.Accounts) {
+			return e.progress(s), errors.New("another login enrollment is pending; finish its approval first")
+		}
+		for _, c := range candidates {
+			matches := false
+			for _, local := range s.Candidates {
+				for _, requested := range s.Request.Accounts {
+					if local.Candidate.Key == requested.Key && c.Harness == requested.Harness && c.Path == local.Path && c.Home == local.Home && c.Identity == local.Identity {
+						matches = true
+					}
+				}
+			}
+			if !matches {
+				return e.progress(s), errors.New("another login enrollment is pending; finish its approval first")
+			}
+		}
 		return e.Step(ctx)
 	}
 	if s.DisconnectAll || s.View.ComputerState != "connected" {

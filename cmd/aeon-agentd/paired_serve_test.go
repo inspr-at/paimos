@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
@@ -26,6 +27,231 @@ import (
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/localjournal"
 )
+
+// Risk: CLI enrollment races a running daemon's setup.lock, or the daemon
+// reinstalls its service. A barrier holds real SyncFences while the socket
+// request arrives; the same connection then polls and links the approved login.
+func TestRunningDaemonEnrollmentAndRelinkShareLifecycle(t *testing.T) {
+	root, err := os.MkdirTemp("", "al-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const tenant = "11111111-1111-4111-8111-111111111111"
+	const principal = "22222222-2222-4222-8222-222222222222"
+	const computer = "33333333-3333-4333-8333-333333333333"
+	const originalRequest = "44444444-4444-4444-8444-444444444444"
+	const oldAccount = "55555555-5555-4555-8555-555555555555"
+	const newAccount = "66666666-6666-4666-8666-666666666666"
+	proof := strings.Repeat("a", 64)
+	oldCandidate := agentsetup.Candidate{Key: "old-key", Harness: "codex", Label: "original@example.test"}
+	view := agentsetup.View{RequestID: originalRequest, TenantID: tenant, PrincipalID: principal, ComputerID: computer, ComputerName: "fixture", DaemonID: "fixture-daemon", Platform: "darwin", Arch: "arm64", Workspace: workspace, State: "redeemed", ComputerState: "connected", Revision: 1,
+		Enrollments: []agentsetup.Enrollment{{AccountID: oldAccount, AccountKey: oldCandidate.Key, Harness: oldCandidate.Harness, Label: oldCandidate.Label, State: "connected"}}}
+	var mu sync.Mutex
+	var requested agentsetup.DeviceRequest
+	var approved bool
+	var hold atomic.Bool
+	reconciling, release := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(release) })
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/agent-pairing/reconcile" && hold.CompareAndSwap(true, false) {
+			close(reconciling)
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				return
+			}
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/api/me":
+			_ = json.NewEncoder(w).Encode(map[string]any{"tenant": map[string]string{"id": tenant}, "principal": map[string]string{"id": principal, "tenant_id": tenant, "kind": "agent"}})
+		case "/api/agent-pairing/reconcile", "/api/agent-pairing/self":
+			_ = json.NewEncoder(w).Encode(view)
+		case "/api/agent-pairing/device":
+			if json.NewDecoder(r.Body).Decode(&requested) != nil || requested.ExistingComputerID != computer || len(requested.Accounts) != 1 {
+				t.Error("lost existing-computer approval binding")
+				w.WriteHeader(400)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(agentsetup.DeviceResponse{RequestID: requested.RequestID, TenantID: tenant, UserCode: "123-456-789", VerificationURI: serverOrigin(r) + "/agents/register-agent", Digest: agentsetup.Hash([]byte("details")), State: "pending"})
+		case "/api/agent-pairing/redeem":
+			v := view
+			v.RequestID, v.Digest, v.Requested, v.ExistingComputerID = requested.RequestID, agentsetup.Hash([]byte("details")), requested.Accounts, computer
+			if !approved {
+				v.State = "pending"
+				v.ComputerID = ""
+				v.Enrollments = nil
+			} else {
+				v.RuntimePrefix = "fixture"
+				v.Enrollments = append(append([]agentsetup.Enrollment(nil), view.Enrollments...), agentsetup.Enrollment{AccountID: newAccount, AccountKey: requested.Accounts[0].Key, Harness: "cursor", Label: requested.Accounts[0].Label, State: "connected"})
+				view = v
+			}
+			_ = json.NewEncoder(w).Encode(v)
+		case "/api/agent-pairing/account-link":
+			var body map[string]string
+			if json.NewDecoder(r.Body).Decode(&body) != nil || body["account_id"] != newAccount || body["device_proof"] != proof {
+				t.Error("link lost account or installation proof")
+				w.WriteHeader(400)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(agentsetup.AccountLinkView{AccountID: newAccount, State: "pending"})
+		default:
+			t.Errorf("unexpected fixture route: %s", r.URL.Path)
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+	priorTransport := http.DefaultTransport
+	http.DefaultTransport = server.Client().Transport
+	defer func() { http.DefaultTransport = priorTransport }()
+	bin := filepath.Join(root, "cursor-agent")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 1.0.0; else echo '{\"status\":\"authenticated\",\"isAuthenticated\":true,\"userInfo\":{\"userId\":\"42\",\"email\":\"new@example.test\"}}'; fi\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	c := agentsetup.RuntimeConfig{Schema: "aeon.agent-runtime.v1", Origin: server.URL, TenantID: tenant, PrincipalID: principal, ComputerID: computer, DaemonID: view.DaemonID, Workspace: workspace,
+		Accounts: []agentsetup.RuntimeAccount{{Harness: "codex", Key: oldCandidate.Key, AccountID: oldAccount, Identity: oldCandidate.Label, Path: filepath.Join(root, "missing-codex"), Home: root}}}
+	store, err := agentsetup.OpenStore(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := map[string]any{"schema": "aeon.agent-setup.private.v1", "origin": server.URL, "phase": "connected", "start_service": true,
+		"request":  agentsetup.DeviceRequest{Details: agentsetup.Details{ComputerName: view.ComputerName, Platform: view.Platform, Arch: view.Arch, Workspace: workspace}, RequestID: originalRequest},
+		"response": agentsetup.DeviceResponse{TenantID: tenant}, "view": view, "device_secret": proof, "runtime_secret": proof, "lifecycle_secret": proof, "lifecycle_request_id": originalRequest,
+		"candidates": []agentsetup.LocalCandidate{{Candidate: oldCandidate, Path: c.Accounts[0].Path, Home: root, Identity: oldCandidate.Label}}}
+	for name, value := range map[string]any{"pairing.json": snapshot, agentsetup.RuntimeName: c} {
+		raw, _ := json.Marshal(value)
+		if err := store.Write(name, raw, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Write("runtime.key", []byte("aeon_fixture_"+proof), true); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	accounts, adapters, err := pairedAdapters(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := agentd.NewRemote(server.URL, "aeon_fixture_"+proof)
+	remote.SetAccountLinkProof(proof)
+	s, err := agentd.NewSupervisor(t.Context(), agentd.Config{API: remote, StateRoot: filepath.Join(root, "daemon"), DaemonID: c.DaemonID, Workspace: workspace, Accounts: accounts, Adapters: adapters})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close(context.Background())
+	lifecycle := &pairedSetup{root: root, origin: server.URL, supervisor: s, gate: make(chan struct{}, 1)}
+	entered := make(chan struct{})
+	var enteredOnce sync.Once
+	s.SetSetupHandler(func(ctx context.Context, req agentsetup.SetupRequest) (agentsetup.Progress, error) {
+		enteredOnce.Do(func() { close(entered) })
+		return lifecycle.setup(ctx, req)
+	})
+	socket, err := agentsetup.ResolveSocketPath(filepath.Join(root, "daemon"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := agentsetup.PrepareSocketDirectory(socket); err != nil {
+		t.Fatal(err)
+	}
+	local, err := agentd.ServePairedLocal(s, socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	ref, _ := json.Marshal(agentsetup.ControlReference{Socket: socket, DaemonID: c.DaemonID, Generation: s.Generation()})
+	daemonStore, err := agentsetup.OpenStore(filepath.Join(root, "daemon"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := daemonStore.Write("control.json", ref, true); err != nil {
+		t.Fatal(err)
+	}
+	daemonStore.Close()
+	client := agentdwire.Client{Socket: socket, TokenFile: socket + ".token"}
+	hold.Store(true)
+	synced := make(chan error, 1)
+	go func() { synced <- lifecycle.sync(t.Context()) }()
+	select {
+	case <-reconciling:
+	case <-time.After(10 * time.Second):
+		t.Fatal("reconciliation barrier not reached")
+	}
+	// Real CLI discovery executes only the temporary cursor-agent fixture.
+	t.Setenv("PATH", root)
+	var output bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		done <- setupCommand("add-harness", []string{"--state-root", root, "--harness", "cursor", "--once"}, &output)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("CLI failed to use running daemon")
+	}
+	releaseOnce.Do(func() { close(release) })
+	if err := <-synced; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil || !strings.Contains(output.String(), "awaiting_approval") || strings.Contains(output.String(), "store_busy") {
+		t.Fatalf("running enrollment failed: %v %s", err, output.String())
+	}
+	mu.Lock()
+	requestID := requested.RequestID
+	approved = true
+	mu.Unlock()
+	// Expire only the fixture's poll clock, not a real approval wait.
+	store, err = agentsetup.OpenStore(root, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := store.Read("pairing.json", 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatal(err)
+	}
+	saved["next_poll"] = json.RawMessage(`"2000-01-01T00:00:00Z"`)
+	raw, _ = json.Marshal(saved)
+	if err := store.Write("pairing.json", raw, false); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	if _, err := client.Step(t.Context(), requestID); err != nil {
+		t.Fatal(err)
+	}
+	next, err := agentsetup.ReadRuntimeConfig(root)
+	if err != nil || len(next.Accounts) != 2 || next.Accounts[0] != c.Accounts[0] {
+		t.Fatal("approval lost original enrollment")
+	}
+	_, nextAccounts, nextAdapters, stop, _, err := runtimeRefresh(c, next)
+	if err != nil || stop {
+		t.Fatalf("enrollment requested daemon stop: %v", err)
+	}
+	if err := s.RefreshAccounts(nextAccounts, nextAdapters); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.AccountLink(t.Context(), agentd.AccountLinkRequest{Harness: "cursor", AccountID: newAccount, Operation: "offer"}); err != nil {
+		t.Fatalf("running re-link failed: %v", err)
+	}
+	if _, err := client.Step(t.Context(), originalRequest); err == nil || !strings.Contains(err.Error(), "pairing request changed") || errors.Is(err, agentsetup.ErrBusy) {
+		t.Fatalf("stale poll reason hidden: %v", err)
+	}
+}
+
+func serverOrigin(r *http.Request) string { return "https://" + r.Host }
 
 // Risk: a durable, unconfirmed Route makes paired startup exit before its
 // authenticated socket exists. Exercise real startup twice with isolated state.

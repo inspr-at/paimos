@@ -510,6 +510,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestRepinReceiptFailureHoldsOnlyClaudeAndResumesWithoutRestart","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestRunningDaemonEnrollmentAndRelinkShareLifecycle","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestRuntimeDriftKeepsSiblingPolling","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestServeStartupLogsExactMissingFile","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -523,6 +525,8 @@
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestStatusCommandDuringPairLockIsReadOnly","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestStatusListsEveryAccountIncludingReady","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestStatusNamesActiveClaudeLoginAndApproval","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestStatusShowsReadyAccountVerificationExpiryAndPendingCleanup","tier":"GATED-FULL"}
     ,
@@ -1370,6 +1374,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeReviewBridgeHasNoToolsAndCapturesFinalAnswer","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestClaudeRotatedLoginsKeepOnlyTheirOwnEnrollmentReady","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeRunTelemetryCarriesCachedTokens","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestClaudeRuntimeCloneSharesQuotaIdentity","tier":"GATED-FULL"}
@@ -2173,6 +2179,8 @@
     {"kind":"go","package":"internal/agentdwire","name":"TestAttachedHookMaximumInboxDeliveryDoesNotBlockNext","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentdwire","name":"TestAuthenticatedLocalControl","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentdwire","name":"TestLifecycleReasonsAreSurfacedWithoutUnsafeResponseText","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentdwire","name":"TestOpenClientReportsFallbackHomeMismatch","tier":"GATED-FULL"}
     ,
@@ -3081,6 +3089,8 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestResolveOwnedPathReturnsFinalInfoForParentLink","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestRevokedActiveWorkDrainsThenCleansWithUnsettledAudit","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestRunningEnrollmentKeepsEachClaudeLoginPersonGated","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestRuntimeHookChangesDuringVerification","tier":"GATED-FULL"}
     ,
