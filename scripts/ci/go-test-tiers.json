@@ -5872,7 +5872,17 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryUIFactsHoldReplayAndAvailability","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookInternalRetry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookReceiptIntegrityAndClaims","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookRetryBudget","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookSequenceRebuildIsolationAndHolds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookTerminalNoOps","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookUnlinkedMetricSource","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWorkQueueConcurrentClaimOwnsSlugOnce","tier":"ESSENTIAL"}
     ,

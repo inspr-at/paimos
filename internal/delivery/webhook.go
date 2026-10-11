@@ -8,19 +8,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/jackc/pgx/v5"
 )
@@ -138,101 +134,44 @@ func validAction(name, action string) bool {
 	}
 	return false
 }
-func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
-	app := &crossreview.GitHubApp{Config: m.config}
-	if m.github == nil || len(m.secret) < 32 || !app.Configured(m.config.TenantID, m.config.Repository) {
-		m.rejectWebhook(w, r, "unknown", "audit", 404, webhookClass("not_configured"))
-		return
-	}
-	raw, err := httpapi.ReadRequestBody(w, r, 2<<20, 5*time.Second)
-	if err != nil || len(raw) > 2<<20 {
-		class := webhookClass("body_too_large")
-		var tooLarge *http.MaxBytesError
-		if err != nil && !errors.As(err, &tooLarge) {
-			class = "body_read"
-		}
-		closeAfterFailedRead(w)
-		m.rejectWebhook(w, r, "unknown", "audit", 413, class)
-		return
-	}
-	name, id := r.Header.Get("X-GitHub-Event"), r.Header.Get("X-GitHub-Delivery")
-	// Missing/invalid signatures always get an authentication refusal.
-	sig := r.Header.Get("X-Hub-Signature-256")
-	mac := hmac.New(sha256.New, m.secret)
-	_, _ = mac.Write(raw)
-	decoded, decodeErr := hex.DecodeString(strings.TrimPrefix(sig, "sha256="))
-	if decodeErr != nil || len(sig) != 71 || !strings.HasPrefix(sig, "sha256=") || !hmac.Equal(decoded, mac.Sum(nil)) {
-		m.rejectWebhook(w, r, webhookLogAction(raw, name), "audit", 401, webhookClass("invalid_signature"))
-		return
-	}
-	e, err := authenticate(name, id, sig, raw, m.secret)
-	if err != nil || !validAction(name, e.Action) {
-		m.rejectWebhook(w, r, webhookLogAction(raw, name), "audit", 400, webhookClass("invalid_envelope"))
-		return
-	}
-	if strconv.FormatInt(e.Installation.ID, 10) != m.config.InstallationID || e.Repository.Name != m.config.Repository {
-		m.rejectWebhook(w, r, e.Action, "audit", 404, webhookClass("installation_mismatch"))
-		return
-	}
-	if name == "pull_request" && e.Pull.Base.Repo.FullName != m.config.Repository {
-		m.rejectWebhook(w, r, e.Action, "audit", 404, webhookClass("repository_mismatch"))
-		return
-	}
-	if err := m.recordMetricEvent(r.Context()); err != nil {
-		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
-		return
-	}
+
+// projectWebhook consumes a receipt that has already passed authentication and
+// installation binding. Its ledger remains separate from durable checkpoints.
+func (m *Module) projectWebhook(ctx context.Context, name, id string, raw []byte, e envelope) (webhookOutcome, error) {
 	// A workflow run is a flow fact, not a delivery observation. The audit
 	// handler records the live checks after this acceptance.
 	if name == "workflow_run" {
-		w.WriteHeader(204)
-		return
+		return webhookNothingToRecord, nil
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	ctx, release, err := m.observationLock(ctx)
 	if err != nil {
-		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
-		return
+		return webhookFailed, err
 	}
 	defer release()
 	dup, err := m.duplicate(ctx, id)
 	if err != nil {
-		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
-		return
+		return webhookFailed, err
 	}
 	if dup {
-		if err := m.fanoutRecord(ctx, id); err != nil {
-			m.rejectWebhook(w, r, e.Action, "audit", 502, err)
-			return
-		}
-		w.WriteHeader(204)
-		return
+		return webhookRecorded, nil
 	}
 	if handled, queueErr := m.quarantineEvent(ctx, name, id, raw); handled {
 		if queueErr != nil {
-			var refusal *apiError
-			status := 502
-			if errors.As(queueErr, &refusal) {
-				status = refusal.status
-			}
-			m.rejectWebhook(w, r, e.Action, "audit", status, queueErr)
-			return
+			return webhookFailed, queueErr
 		}
-		w.WriteHeader(204)
-		return
+		return webhookRecorded, nil
 	}
 	if name == "push" && (e.Repository.Default == "" || e.Ref != "refs/heads/"+e.Repository.Default) {
-		w.WriteHeader(204)
-		return
+		return webhookNothingToRecord, nil
 	}
 	var pulls []Pull
 	var head string
 	switch name {
 	case "pull_request":
 		if e.Pull.Number < 1 || !reviewgate.ValidSHA(e.Pull.Head.SHA) || !reviewgate.ValidSHA(e.Pull.Base.SHA) {
-			m.rejectWebhook(w, r, e.Action, "audit", 400, webhookClass("invalid_pull"))
-			return
+			return webhookFailed, webhookClass("invalid_pull")
 		}
 		p, er := m.github.Pull(ctx, e.Pull.Number)
 		err = er
@@ -256,8 +195,7 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if !reviewgate.ValidSHA(head) || len(ns) > 100 {
-			m.rejectWebhook(w, r, e.Action, "audit", 400, webhookClass("invalid_check_subjects"))
-			return
+			return webhookFailed, webhookClass("invalid_check_subjects")
 		}
 		err = db.InTenant(db.AllProjects(ctx, "delivery check subjects"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 			rows, err := tx.Query(ctx, `SELECT pull_request FROM delivery_items WHERE repository=$1 AND head_sha=$2 AND pull_request IS NOT NULL ORDER BY pull_request LIMIT 101`, m.config.Repository, head)
@@ -294,8 +232,7 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	case "merge_group":
 		head = e.Group.Head
 		if !reviewgate.ValidSHA(head) || !reviewgate.ValidSHA(e.Group.Base) || !queueRef.MatchString(e.Group.Ref) || strings.Contains(e.Group.Ref, "..") {
-			m.rejectWebhook(w, r, e.Action, "audit", 400, webhookClass("invalid_group"))
-			return
+			return webhookFailed, webhookClass("invalid_group")
 		}
 		if e.Action == "checks_requested" {
 			pulls, err = m.github.Group(ctx, head, e.Group.Base, e.Group.Ref)
@@ -328,16 +265,14 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	case "push":
 		head = e.After
 		if !reviewgate.ValidSHA(head) {
-			m.rejectWebhook(w, r, e.Action, "audit", 400, webhookClass("invalid_push"))
-			return
+			return webhookFailed, webhookClass("invalid_push")
 		}
 	}
 	if err != nil || len(pulls) > 100 {
 		if err == nil {
 			err = webhookClass("observation_limit")
 		}
-		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
-		return
+		return webhookFailed, err
 	}
 	at := m.now()
 	service := db.AllProjects(ctx, "authenticated delivery webhook")
@@ -385,23 +320,13 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 		_, err := recordTx(ctx, tx, m.config.TenantID, rec)
 		return err
 	})
-	if err == nil {
-		err = m.fanoutRecord(ctx, id)
-	}
 	if err != nil {
-		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
-		return
+		return webhookFailed, err
 	}
-	w.WriteHeader(204)
+	return webhookRecorded, nil
 }
 
-func (m *Module) recordMetricEvent(ctx context.Context) error {
-	service := db.AllProjects(ctx, "authenticated repository webhook receipt")
-	return db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
-			return err
-		}
-		_, err := tx.Exec(ctx, `UPDATE delivery_metric_sources SET last_event_at=greatest(last_event_at,$2) WHERE repository=$1`, m.config.Repository, m.now())
-		return err
-	})
+func (m *Module) recordMetricEventTx(ctx context.Context, tx pgx.Tx) error {
+	_, err := tx.Exec(ctx, `UPDATE delivery_metric_sources SET last_event_at=greatest(last_event_at,$2) WHERE repository=$1`, m.config.Repository, m.now())
+	return err
 }

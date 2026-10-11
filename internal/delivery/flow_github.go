@@ -78,8 +78,8 @@ func flowStepsFromRuns(runs []metricRun) []flowStepInput {
 }
 
 // flowFromRuns records checks and merge-queue runs of pull requests that
-// PAIMOS links to a ticket. It runs after the metric facts committed; an
-// error returns 502 to GitHub and the redelivery converges on the same rows.
+// PAIMOS links to a ticket, including projects without a metric source.
+// Repeated input converges on the same rows; failures remain visible as 502.
 func (m *Module) flowFromRuns(ctx context.Context, runs []metricRun) error {
 	byPR := map[int64][]metricRun{}
 	var prs []int64
