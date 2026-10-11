@@ -69,7 +69,7 @@ test('an admin on Just me reads the workspace situations; empty cells read Same 
   await expect(fold).toHaveAttribute('aria-expanded', 'false'); await expect(fold).toContainText('Different fallback by situation · 3 set'); await expect(fold).toContainText('Expert')
   await fold.click(); await expect(fold).toHaveAttribute('aria-expanded', 'true')
   await expect(page.locator('.sx-lead')).toContainText('An empty cell uses the row. Change these under For everyone.')
-  expect(await page.locator('.sx-h small').allTextContents()).toEqual(['2 h or less', 'after findings', 'after 3 rounds', 'another family'])
+  await expect(page.locator('.sx-h small')).toHaveText(['2 h or less', 'after findings', 'after 3 rounds', 'another family'])
   await expect(page.locator('.sx-t button')).toHaveCount(0)
   await expect(shown(page, 'other:small')).toHaveText('Same'); await expect(shown(page, 'other:review')).toHaveText('Automatic')
   await expect(shown(page, 'design:fix')).toHaveText('Same'); await expect(shown(page, 'concept:review')).toHaveText('Automatic')

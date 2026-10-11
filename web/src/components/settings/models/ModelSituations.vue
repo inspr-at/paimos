@@ -92,8 +92,10 @@ function startAdd() {
 function removeStep(index: number) {
   const target = cell.value
   if (!target || props.busy) return
+  // The order comes from the open cell, so it is read before the editor closes.
+  const next = situationOrder(steps.value.filter((_, at) => at !== index))
   cell.value = null
-  void write(target, situationOrder(steps.value.filter((_, at) => at !== index)))
+  void write(target, next)
 }
 function sameAsRow() {
   const target = cell.value
