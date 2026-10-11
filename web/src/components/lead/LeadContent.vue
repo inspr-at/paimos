@@ -128,11 +128,11 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
             <button type="button" class="wk worker" :aria-label="`${row.name}: ${row.view?.status.label || row.worker.phase}`" :data-tip="[row.name, row.worker.current_activity?.text || row.worker.activity_note, row.model, row.account, row.view?.session.host].filter(Boolean).join(' · ')" @click="openWorker(row.worker.session_id)">
               <span class="worker-session" role="cell">
                 <AgentGlyph v-if="row.view" :view="row.view" :size="26" /><span v-else class="vendor"><HarnessMark :harness="row.worker.harness" :size="15" /></span>
-                <span class="wk-t"><span class="worker-name" :data-tip="row.name">{{ row.name }}</span><small>{{ row.worker.current_activity?.text || row.worker.activity_note }}</small></span>
+                <span class="wk-t"><span v-clip-tip="row.name" class="worker-name">{{ row.name }}</span><small v-clip-tip>{{ row.worker.current_activity?.text || row.worker.activity_note }}</small></span>
               </span>
               <span class="size worker-time" role="cell">{{ row.view ? elapsed(row.view.session, now) : `${minutes(row.worker.since)} min` }}</span>
-              <span class="worker-execution" role="cell"><span>{{ row.model || 'Model not reported' }}</span><small>{{ row.account }}</small></span>
-              <span class="worker-computer" role="cell">{{ row.view?.session.host || 'Not reported' }}</span>
+              <span class="worker-execution" role="cell"><span v-clip-tip>{{ row.model || 'Model not reported' }}</span><small v-clip-tip>{{ row.account }}</small></span>
+              <span v-clip-tip class="worker-computer" role="cell">{{ row.view?.session.host || 'Not reported' }}</span>
               <span class="size worker-beat" role="cell">{{ row.worker.heartbeat_at ? relativeTime(row.worker.heartbeat_at, { now }) : 'Not reported' }}</span>
             </button>
           </div>
@@ -182,10 +182,13 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
 .worker-session { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .worker-name { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .worker-execution, .worker-computer, .worker-beat, .worker-columns > :nth-child(n+3) { display: none; }
+.worker-execution, .worker-computer { min-width: 0; }
+.worker-execution > span, .worker-execution small, .worker-computer { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.worker-execution > span { display: block; }
 .worker-execution small { display: block; color: var(--ink-3); font-size: 11.5px; }
 @container (min-width: 560px) {
-  .worker-columns, .wk.worker { grid-template-columns: minmax(0, 1fr) 4ch minmax(0, .7fr) minmax(0, .4fr) 5ch; }
-  .worker-execution, .worker-computer, .worker-beat, .worker-columns > :nth-child(n+3) { display: block; overflow-wrap: anywhere; }
+  .worker-columns, .wk.worker { grid-template-columns: minmax(0, 1fr) 4ch minmax(0, .7fr) minmax(0, .4fr) 12ch; }
+  .worker-execution, .worker-computer, .worker-beat, .worker-columns > :nth-child(n+3) { display: block; }
 }
 .needs { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 2px 10px; margin: 10px 0 4px; padding: 10px 12px; border-radius: 12px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .needs strong { color: var(--ink); font-size: 13.5px; }
