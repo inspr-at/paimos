@@ -414,10 +414,14 @@ function move(step: number) {
   if (sessionId.value && cursor.value.startsWith('s:')) void router.replace({ path: `/agents/${cursor.value.slice(2)}`, query: route.query })
 }
 const serviceTiers = useServiceTiers()
-const actionScope = {
+const pageActionScope = {
   enabled: () => !!session.identity,
+  when: (event: KeyboardEvent) => !(event.target instanceof Node && document.querySelector('.ticket-peek-host')?.contains(event.target)),
+}
+const actionScope = {
+  ...pageActionScope,
   when: (event: KeyboardEvent) => {
-    if (event.target instanceof Node && document.querySelector('.ticket-peek-host')?.contains(event.target)) return false
+    if (!pageActionScope.when(event)) return false
     // Local controls get first refusal through the bubble dispatcher; these
     // role guards also keep navigation inside controls such as the mode selector.
     return !(event.target instanceof HTMLElement && event.target.closest('[role="radiogroup"], [role="tablist"], [role="slider"], [role="spinbutton"], [role="listbox"], [role="separator"]'))
@@ -430,9 +434,9 @@ function pauseSelected(action: 'pause' | 'resume') {
   pause.open(action, [view.session])
 }
 const shortcutDisposers = [
-  onAction('agents.search.focus', () => { if (!sessionList.value?.focusSearch()) return false }, actionScope),
-  onAction('agents.filter.add', () => { if (!sessionList.value?.openFilter()) return false }, actionScope),
-  onAction('agents.layout.preset', () => { void cycleLayout() }, { ...actionScope, enabled: () => layoutEnabled.value }),
+  onAction('agents.search.focus', () => { if (!sessionList.value?.focusSearch()) return false }, pageActionScope),
+  onAction('agents.filter.add', () => { if (!sessionList.value?.openFilter()) return false }, pageActionScope),
+  onAction('agents.layout.preset', () => { void cycleLayout() }, { ...pageActionScope, enabled: () => layoutEnabled.value }),
   ...(['left', 'right', 'min', 'max'] as const).map(direction => onAction(`agents.divider.${direction}`, () => {
     moveHandle(direction === 'min' ? LIST_MIN : direction === 'max' ? maxHandle.value : handle.value + (direction === 'left' ? -16 : 16))
   }, { enabled: () => split.value, when: event => event.target === divider.value })),
@@ -450,7 +454,7 @@ const shortcutDisposers = [
     if (sessionId.value) void closePanel()
     else if (filter.value) filter.value = null
     else return false
-  }, actionScope),
+  }, pageActionScope),
 ]
 const hintGroups: { actions: ShortcutAction[]; label: string }[] = [
   { actions: ['agents.row.next', 'agents.row.prev'], label: 'move' },

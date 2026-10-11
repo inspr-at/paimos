@@ -198,6 +198,12 @@ test('AEON-1213: registered F, numpad slash, S and divider keys respect fields a
   await page.keyboard.press('End')
   const workWidth = await page.locator('.agents-work').evaluate(el => el.getBoundingClientRect().width)
   expect(await listWidth(page)).toBe(workWidth - 16 - 380)
+  await page.keyboard.press('f'); await expect(search).toBeFocused()
+  await search.press('Escape')
+  await separator.focus(); await page.keyboard.press('s'); await preset(page, 'list')
+  await page.keyboard.press('s'); await preset(page, 'focus')
+  await separator.focus(); await page.keyboard.press('Escape'); await preset(page, 'list')
+  await expect(pane(page)).toHaveCount(0)
   const native = await page.evaluate(() => ['s', 'r', 'd', 'p', 'a'].map(key => {
     const event = new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true }); document.body.dispatchEvent(event); return event.defaultPrevented
   }))
