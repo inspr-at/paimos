@@ -1,0 +1,1 @@
+{"data":[{"id":"grok-420-reasoning","aliases":[],"context_length":256000,"capabilities":{"reasoning_effort":["low","medium","high","xhigh"],"default_reasoning_effort":"high"}}],"object":"list"}

@@ -227,7 +227,7 @@ func (f *fixture) preparationBarrier(t *testing.T) (*pgxpool.Pool, *beforePrepar
 }
 
 func TestCompletionBoundarySettlesBudgetReviewsAndReplay(t *testing.T) {
-	f := newCatalogFixture(t, false) // required additions absent; author profile retained
+	f := newCatalogFixture(t, false) // catalog evidence absent; author profile retained
 	run, report := f.completion(t)
 	h := f.boundaryHandler(t, f.d.App)
 	before := len(f.eventTypes(t))
@@ -245,9 +245,10 @@ func TestCompletionBoundarySettlesBudgetReviewsAndReplay(t *testing.T) {
 	f.tx(t, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM model_profiles),(SELECT count(*) FROM events WHERE type='model.registry_seeded')`).Scan(&profiles, &seed)
 	})
-	if profiles <= 3 || seed != 1 {
+	if profiles != 3 || seed != 1 {
 		t.Fatal("incomplete catalog was not prepared once")
 	}
+	f.assertPreparedCatalog(t, 3)
 	out = serveBoundary(h, boundaryRequest(t.Context(), "/api/runs/"+run+"/telemetry", report, f.token, nil))
 	if out.Code != 200 || f.completionState(t) != state {
 		t.Fatal("identical completion replay changed state")
@@ -299,11 +300,12 @@ func TestCompletionEventFailureRollsBackWholeUnitButKeepsAuthorizedSetup(t *test
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='model.catalog_upgraded'`).Scan(&upgraded); err != nil {
 			return err
 		}
-		if upgraded != 1 {
-			t.Fatal("authorized standalone catalog upgrade was lost")
+		if upgraded != 0 {
+			t.Fatal("initial catalog preparation emitted a duplicate upgrade")
 		}
 		return nil
 	})
+	f.assertPreparedCatalog(t, 3)
 	if _, err := f.d.Admin.Exec(t.Context(), `DROP TRIGGER reject_final_event ON events`); err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +482,7 @@ func (f *fixture) guardEventTail(t *testing.T) {
   CREATE FUNCTION resource_after_events() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF current_setting('aeon633.events_started',true)='on' THEN RAISE EXCEPTION 'resource write after event batch'; END IF; IF TG_OP='DELETE' THEN RETURN OLD; END IF; RETURN NEW; END $$`); err != nil {
 		t.Fatal(err)
 	}
-	for _, table := range []string{"nodes", "work_orders", "work_criteria", "work_order_reviews", "agent_runs", "run_telemetry", "agent_accounts", "account_allowance_windows", "account_reservations", "agent_pairing_enrollments", "agent_pairing_computers", "agent_keys", "account_person_link_requests", "model_profiles", "model_role_routes", "account_capacity_learning", "account_capacity_readings", "agent_pairing_requests", "harness_activity_notes", "work_evidence"} {
+	for _, table := range []string{"nodes", "work_orders", "work_criteria", "work_order_reviews", "agent_runs", "run_telemetry", "agent_accounts", "account_allowance_windows", "account_reservations", "agent_pairing_enrollments", "agent_pairing_computers", "agent_keys", "account_person_link_requests", "model_profiles", "model_role_routes", "model_catalog_facts", "account_capacity_learning", "account_capacity_readings", "agent_pairing_requests", "harness_activity_notes", "work_evidence"} {
 		if _, err := f.d.Admin.Exec(t.Context(), `CREATE TRIGGER resource_after_events BEFORE INSERT OR UPDATE OR DELETE ON `+table+` FOR EACH ROW EXECUTE FUNCTION resource_after_events()`); err != nil {
 			t.Fatal(err)
 		}
@@ -633,15 +635,16 @@ func TestModelReadKeyCanPrepareWithoutManagementScope(t *testing.T) {
 	if err := json.Unmarshal(out.Body.Bytes(), &profiles); err != nil {
 		t.Fatal(err)
 	}
-	if len(profiles) <= 3 {
-		t.Fatal("cold catalog not initialized by authorized reader")
+	if len(profiles) != 0 {
+		t.Fatal("identity preparation created dispatch pins for the read-only key")
 	}
+	f.assertPreparedCatalog(t, 0)
 }
 
 func TestCompletionPreparationWaitsForConcurrentKeyRevoker(t *testing.T) {
 	f := newCatalogFixture(t, false)
 	run, report := f.completion(t)
-	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "INSERT INTO model_profiles") })
+	pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "INSERT INTO model_catalog_facts") })
 	h := f.boundaryHandler(t, pool)
 	plain := f.boundaryHandler(t, f.d.App)
 	cookie := f.boundaryCookie(t)
@@ -968,7 +971,7 @@ type beforeFinal struct {
 }
 
 func (b *beforeFinal) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryStartData) context.Context {
-	if strings.Contains(q.SQL, "INSERT INTO model_profiles") {
+	if strings.Contains(q.SQL, "INSERT INTO model_catalog_facts") {
 		b.seeded.Store(true)
 	}
 	if b.prepared.Load() && strings.Contains(q.SQL, "FROM tenants WHERE") && strings.Contains(q.SQL, "FOR NO KEY UPDATE") && b.used.CompareAndSwap(false, true) {
@@ -1113,7 +1116,7 @@ func TestCompletionCurrentTelemetryAuthorityAtBothBoundaries(t *testing.T) {
 						return err
 					}
 					if afterSetup {
-						if profiles <= 3 || seeds != 1 {
+						if profiles != 3 || seeds != 1 {
 							t.Fatal("legitimate independently authorized setup was lost")
 						}
 					} else if profiles != 3 || seeds != 0 {
@@ -1121,6 +1124,9 @@ func TestCompletionCurrentTelemetryAuthorityAtBothBoundaries(t *testing.T) {
 					}
 					return nil
 				})
+				if afterSetup {
+					f.assertPreparedCatalog(t, 3)
+				}
 			})
 		}
 	}
