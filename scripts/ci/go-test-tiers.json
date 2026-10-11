@@ -6388,6 +6388,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestProgressSortUsesTheDisplayedCompletionAwarePercent","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadActionsTrackCurrentPersonAndGeneration","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadAdmissionIsFreshAndFailClosed","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadAdoptionNeedsPersonAndExactLease","tier":"ESSENTIAL"}
@@ -8877,6 +8879,8 @@
     {"kind":"go","package":"internal/reportercontract","name":"TestPausePlanningHeartbeatFieldsStayOptional","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestPinnedShapeKeys","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestProjectLeadReadContractAdditionIsMinor","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestProjectLeadResponseDescriptions","tier":"ESSENTIAL"}
     ,
