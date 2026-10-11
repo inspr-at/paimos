@@ -2,6 +2,7 @@
 // AEON-266: a phone can select ticket cards and add them to a release.
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
+import { mockReleases, releaseWorld } from './release-fixtures'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -11,6 +12,7 @@ const bulkBar = (page: Page) => page.getByRole('toolbar', { name: /selected tick
 test('on a phone, select two tickets, open Add to release, then cancel', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockWork(page, fixtures())
+  await mockReleases(page, releaseWorld('plan'))
   await page.goto('/p/PHAROS')
   await expect(row(page, 'PHAROS-12')).toBeVisible()
   await expect(page.getByRole('checkbox', { name: 'Select PHAROS-12' })).toBeHidden()

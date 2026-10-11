@@ -16,7 +16,8 @@ import (
 )
 
 // Risk C1: the first DailyStart counts denied headroom or unknown readings;
-// an all-denied harness obeys a daily wait instead of skipping context denial.
+// an all-denied harness obeys a daily wait instead of skipping context denial;
+// a per-harness Wait saved before the dial followed Models still stops the walk.
 func TestResolverProjectDailyCapsAndContextLadder(t *testing.T) {
 	for _, tc := range []struct {
 		name                               string
@@ -24,7 +25,7 @@ func TestResolverProjectDailyCapsAndContextLadder(t *testing.T) {
 		atLimit, pinned, want              string
 	}{
 		{"a denied headroom ladder", false, false, false, "ladder", "", "claude"},
-		{"a denied headroom wait", false, false, false, "wait", "", "daily_limit"},
+		{"a denied headroom old wait ignored", false, false, false, "wait", "", "claude"},
 		{"b denied unknown", true, false, false, "ladder", "", "claude"},
 		{"c all denied ignores wait", false, true, false, "wait", "", "claude"},
 		{"c all denied pinned", false, true, false, "wait", "codex", "context"},
@@ -208,7 +209,17 @@ func accountlessSuccessorFixture(t *testing.T, tx pgx.Tx, p tenant.Principal, no
 	if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Successor runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
 		t.Fatal(err)
 	}
-	if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,allowed_model_profile_ids) VALUES($1,'successor-codex','codex','successor-runner',$2,'Successor',$3,true,'generation',$4,ARRAY[$5::uuid]) RETURNING id::text`, p.TenantID, runner, now, p.ID, profile).Scan(&account); err != nil {
+	return runnableAccountFixture(t, tx, p, runner, "successor-codex", "codex", profile, now), profile
+}
+
+// runnableAccountFixture enrolls an account, registered by runner, that may
+// run only profile: a fresh sign-in check, the default work context, an open
+// requests window and an always-on sprint schedule, so board resolution
+// counts it as a qualified account.
+func runnableAccountFixture(t *testing.T, tx pgx.Tx, p tenant.Principal, runner, key, harness, profile string, now time.Time) (account string) {
+	t.Helper()
+	ctx := t.Context()
+	if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,allowed_model_profile_ids) VALUES($1,$6,$7,'successor-runner',$2,'Successor',$3,true,'generation',$4,ARRAY[$5::uuid]) RETURNING id::text`, p.TenantID, runner, now, p.ID, profile, key, harness).Scan(&account); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by) SELECT $1,$2,id,'person',$3 FROM work_contexts WHERE kind='default' ON CONFLICT DO NOTHING`, p.TenantID, account, p.ID); err != nil {
@@ -227,7 +238,7 @@ func accountlessSuccessorFixture(t *testing.T, tx pgx.Tx, p tenant.Principal, no
 	if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, account, raw); err != nil {
 		t.Fatal(err)
 	}
-	return account, profile
+	return account
 }
 
 func assertRunnableSuccessor(t *testing.T, out WorkResolution, account, profile, reason string) {

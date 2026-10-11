@@ -344,11 +344,17 @@
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: without the right to manage accounts the Accounts tile names the problem and offers no Verify"
     ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1166 1440 dark: at the limit the detail follows Settings › Models and the line keeps every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1166 1440 light: at the limit the detail follows Settings › Models and the line keeps every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1166 390 dark: at the limit the detail follows Settings › Models and the line keeps every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1166 390 light: at the limit the detail follows Settings › Models and the line keeps every control put"
+    ,
     "browser:tests/agents-dial-daily.spec.ts:phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list"
     ,
-    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › At the limit works from the keyboard: the arrow keys pick the other option and take focus with them"
-    ,
-    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › At the limit: follow the model ladder or wait, and nothing else"
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › AEON-1166: at the limit the dial follows Settings › Models: one line and a link, no choice of its own"
     ,
     "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Boost today is read-only for accounts the person may not change; the server refuses that write too"
     ,
@@ -780,6 +786,18 @@
     ,
     "browser:tests/knowledge.spec.ts:Decision entries expose active and superseded history without generic mutation controls"
     ,
+    "browser:tests/models-fallback.spec.ts:at 1440 dark › A · For everyone: folds, menus, keyboard reorder and Undo"
+    ,
+    "browser:tests/models-fallback.spec.ts:at 1440 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers"
+    ,
+    "browser:tests/models-fallback.spec.ts:at 390 dark › A · For everyone: folds, menus, keyboard reorder and Undo"
+    ,
+    "browser:tests/models-fallback.spec.ts:at 390 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers"
+    ,
+    "browser:tests/models-fallback.spec.ts:at 390 light › A · For everyone: folds, menus, keyboard reorder and Undo"
+    ,
+    "browser:tests/models-fallback.spec.ts:at 390 light › C · a member: a locked row is read-only, an edit makes a workspace row hers"
+    ,
     "browser:tests/models-outdated.spec.ts:Remove moves every use and removes the versions in one step; Undo restores the versions and every use"
     ,
     "browser:tests/models-outdated.spec.ts:a review that went stale is refused without removing anything, says so and shows the list read again"
@@ -787,6 +805,8 @@
     "browser:tests/models-outdated.spec.ts:old versions that can move reach the tray when the first page holds only versions that cannot, and Remove keeps that page's revision"
     ,
     "browser:tests/models-outdated.spec.ts:on a phone › the sheet fills the screen with its actions pinned at the bottom, Keep them left of Remove, and every target is at least 44 px"
+    ,
+    "browser:tests/models-outdated.spec.ts:on a phone › the tray puts Review… on its own line under the sentence, which keeps the full width"
     ,
     "browser:tests/models-outdated.spec.ts:screenshots of the tray and the sheet at 1440, 1024 and 390 px, light and dark"
     ,
@@ -798,7 +818,31 @@
     ,
     "browser:tests/models-outdated.spec.ts:with auto-update on the uses already moved, so the tray says nothing uses them and Remove only removes"
     ,
-    "browser:tests/models-registry.spec.ts:screenshots of the card at 1440 and 400 px, light and dark"
+    "browser:tests/models-registry-shots.spec.ts:screenshots of the registry at 1440, 1024 and 390 px, light and dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1024 › situations for everyone dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1024 › situations for everyone light"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1024 › situations on just me dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1024 › situations on just me light"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1440 › situations for everyone dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1440 › situations for everyone light"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1440 › situations on just me dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1440 › situations on just me light"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 390 › situations for everyone dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 390 › situations for everyone light"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 390 › situations on just me dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 390 › situations on just me light"
     ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
     ,
@@ -1229,14 +1273,6 @@
     "browser:tests/settings-computers-table.spec.ts:evidence: the Computers part at 1440, 1024 and 390, light and dark"
     ,
     "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
-    ,
-    "browser:tests/stability.spec.ts:Policies controls and detail sheet stay put at 1024px dark"
-    ,
-    "browser:tests/stability.spec.ts:Policies controls and detail sheet stay put at 1024px light"
-    ,
-    "browser:tests/stability.spec.ts:Policies lazy tab responses cannot overwrite a later tab"
-    ,
-    "browser:tests/stability.spec.ts:Policies tabs always reference an existing panel"
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 dark"
     ,
@@ -6066,11 +6102,17 @@
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: without the right to manage accounts the Accounts tile names the problem and offers no Verify","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 1440 dark: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 1440 light: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 390 dark: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 390 light: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › At the limit works from the keyboard: the arrow keys pick the other option and take focus with them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › At the limit: follow the model ladder or wait, and nothing else","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › AEON-1166: at the limit the dial follows Settings › Models: one line and a link, no choice of its own","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today is read-only for accounts the person may not change; the server refuses that write too","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9700,6 +9742,36 @@
     ,
     {"kind":"browser","file":"tests/model-refresh.spec.ts","name":"the Models page carries the registry card: the old freshness links land on it and Check now shows its cooldown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"a member keeps a step a workspace pin holds last where it is, and the fold says why","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"a step comes out and Undo puts it back with its level; a level changes in the step’s own menu","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"a step drags by its handle to a new place; the order keeps its height while it moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"admins allow a Never line again for everyone; Undo sets it again with its reason","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"an admin takes a step a workspace pin holds last out with its pin; Undo sets both again, and moving it lifts the pin too","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 dark › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 light › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 light › C · a member: a locked row is read-only, an edit makes a workspace row hers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 390 dark › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 390 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 390 light › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 390 light › C · a member: a locked row is read-only, an edit makes a workspace row hers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"folds grow in place: the controls above a fold, and the fold’s own controls, never move (AEON-541)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"the folds and their menus have no accessibility violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"Remove moves every use and removes the versions in one step; Undo restores the versions and every use","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"a review that went stale is refused without removing anything, says so and shows the list read again","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -9707,6 +9779,8 @@
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"old versions that can move reach the tray when the first page holds only versions that cannot, and Remove keeps that page's revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"on a phone › the sheet fills the screen with its actions pinned at the bottom, Keep them left of Remove, and every target is at least 44 px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"on a phone › the tray puts Review… on its own line under the sentence, which keeps the full width","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"screenshots of the tray and the sheet at 1440, 1024 and 390 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9717,6 +9791,12 @@
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"unticking versions changes what moves and the button label while the actions and boxes stay put (±0.5 px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"with auto-update on the uses already moved, so the tray says nothing uses them and Remove only removes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-registry-shots.spec.ts","name":"on a phone, the design check › passes on the built registry at 400 px with 44 px targets, light and dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry-shots.spec.ts","name":"screenshots of the registry at 1440, 1024 and 390 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-registry-shots.spec.ts","name":"the design check passes on the built registry at 1440 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Add model with several levels registers them in order, and a failure after the first level is never reported as saved","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9734,21 +9814,27 @@
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit binds the revision to the line read with it when that line changed before the revision was captured","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit creates a new version with only the changed fields; an auto-discovered entry keeps harness, route and slug","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit of a hand-added entry can change its slug and route, and a server refusal is shown in the form","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit of a hand-added route can change its slug and route, and a server refusal is shown in the form","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Edit sends the revision captured with the form, Undo sends the revision the edit returned, and a conflict reloads","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Esc leaves a field, then closes the remove question, then the editor and returns focus to its Edit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Esc in the editor leaves a field, then closes it and returns focus to its Edit; Esc in the remove question returns focus to Remove…","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"How new models are found: a quiet fold whose settings never touch auto-update, with vendor keys and models that wait","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Pause… offers tomorrow, a week or until resumed; every route pauses, the row says so, and Undo puts back what was there","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove cannot go ahead without its preview, and a partly failed removal says how far it got","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove names each use’s own replacement and effort, and says when there is no qualified fallback","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove of an unused hand-added entry says nothing uses it; other people’s uses are reported as not shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove of an unused hand-added line says nothing uses it; other people’s uses are reported as not shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove shows where the model is used and what takes over before anything is removed, and Undo restores every level","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Remove… asks where every route of the version is used before anything is removed, removes every level of every route, and Undo restores them","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"a line opens in place: its routes with their own levels and source, provider, lifecycle and note facts; nothing above it moves","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"a pause refused on one route says how far it got and never reports the version paused","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"a person who cannot read models sees who to ask instead of an empty list","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9760,15 +9846,21 @@
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"auto-update writes the whole settings object and a failed save puts the switch back","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"controls stay put: the strip, the entry that was used and its form buttons do not move (±0.5 px)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"controls stay put: the strip, an opened line's actions and the editor's buttons do not move (±0.5 px)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"many models stay calm: about 35 routes as at most 20 rows, Cursor's Grok levels as one route, older versions folded with their levels","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"models that cannot load say so in place and Try again recovers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"pausing, resuming and their Undo never move a line's row or actions (±0.5 px) at 1440 px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"pausing, resuming and their Undo never move a line's row or actions (±0.5 px) at 390 px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"people without models.manage read the registry and get no controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"screenshots of the card at 1440 and 400 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"provider and harness facts are read-only: only a route added by hand has Edit","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"the registry lists every model with its note, source, levels and state, newest versions first","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-registry.spec.ts","name":"the registry groups lines by provider, folded by default, each with its source, levels and state, and never says Auto-discovered","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"thinking levels growing or shrinking do not move the input, note or actions at desktop or phone width","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9820,6 +9912,8 @@
     ,
     {"kind":"browser","file":"tests/models-simple-shots.spec.ts","name":"why at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-simple.spec.ts","name":"#model-refresh lands on the registry card, and no catalog fold above the models card remains","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a 403 refusal says so, keeps what was shown and never offers Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a 409 refusal says so, keeps what was shown and never offers Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -9866,13 +9960,43 @@
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"the card holds its layout on a phone","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/models-simple.spec.ts","name":"the catalog settings stay one fold away until the registry card replaces them","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"the default leads, overrides read as exceptions, reviews pick themselves and one line says what runs next","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"the keyboard picks without the mouse: arrows choose the model and its level, Enter keeps both, Esc gives focus back","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"the picker lists every model by provider and line with its own levels, and a click on a level picks both","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations for everyone dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations for everyone light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations on just me dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations on just me light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations for everyone dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations for everyone light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations on just me dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations on just me light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations for everyone dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations for everyone light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations on just me dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations on just me light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-situations.spec.ts","name":"For everyone edits a cell in a popover that stays on screen and moves nothing; Undo restores it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations.spec.ts","name":"an admin on Just me reads the workspace situations; empty cells read Same or Automatic","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations.spec.ts","name":"members read Quick jobs and its Why, and never see the situation fold","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations.spec.ts","name":"on a phone › each cell names its situation, every target is 44 px and the popovers stay on screen","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -10436,9 +10560,27 @@
     ,
     {"kind":"browser","file":"tests/planning-columns.spec.ts","name":"unknown planned and used effort stays undrawn and is explained to hover and screen readers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"Policies Ladders tab links to Settings › Models and never calls the ladder endpoints","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"Policies links to Settings › Models and never calls the ladder endpoints","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"on a phone the moved link keeps a 44 px target inside its sentence","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"on a phone › the Models link keeps a 44 px target inside its sentence","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 1440 dark › a member reads the permission note and links only where they open at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 1440 dark › three cards, rules only; a risk group grows below its head at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 1440 light › a member reads the permission note and links only where they open at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 1440 light › three cards, rules only; a risk group grows below its head at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 390 dark › a member reads the permission note and links only where they open at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 390 dark › three cards, rules only; a risk group grows below its head at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 390 light › a member reads the permission note and links only where they open at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 390 light › three cards, rules only; a risk group grows below its head at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"“Rule in Policies” lands on the cross-family card and the next Tab stays inside it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/polish-round-two.spec.ts","name":"PL2 hours 390 dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
@@ -12593,26 +12735,6 @@
     {"kind":"browser","file":"tests/shell.spec.ts","name":"theme follows the OS and explicit choice wins without hover layout shift","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/shell.spec.ts","name":"version uses six-segment Pretty, keyboard reveal, exact clipboard and one request","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies announces state transitions through a persistent live region","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies lazy tab responses cannot overwrite a later tab","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies settings-only reader sees permission sentences and static ownership","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies tabs always reference an existing panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/stability.spec.ts","name":"at 1440px › an open session holds still while runs and messages land","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14840,29 +14962,19 @@
     ,
     {"kind":"node","file":"tests/playwright-policy.test.ts","name":"worker override is explicit and invalid overrides fail closed","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/policies.test.ts","name":"failures and invalid answers never report success; other tabs still work","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/policies.test.ts","name":"Policies names no model, says no Touch ID yet, and keeps one language","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/policies.test.ts","name":"identity, tenant, permission loss and disposal discard responses and clear read state","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/policies.test.ts","name":"reviewer sentences say the review-policy fields and nothing else","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/policies.test.ts","name":"live registry exclusions group by risk, and owner links need actual destination permissions","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/policies.test.ts","name":"the asks list is exactly the registry’s never-on-an-agent-key permissions, at their risk","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/policies.test.ts","name":"only Agent key limits has a source; the Ladders tab never requests /models/routes","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policies.test.ts","name":"tab switches discard slow successes and failures, even when aborted requests still resolve","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policies.test.ts","name":"truncation and suspension expiry are honest with an injected observation time","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/policies.test.ts","name":"twelve rules elsewhere; a link shows only when every permission of its place is held","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"403/permission_denied retains draft without auto-retry or success","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"409/stale_revision retains draft without auto-retry or success","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"422/locked_above retains draft without auto-retry or success","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"HTTP success alone cannot confirm wrong identity/revision","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"absent-scope scalar compensation uses null/false/false level PUT","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"closed builders preserve sibling fields, capture paths/person and never replace a whole level","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"confirmed save followed by denied preview 401 clears private snapshot and Undo","tier":"GATED-FULL"}
     ,
@@ -14880,25 +14992,15 @@
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"equal-revision person conflict discards old draft and Undo","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"ladder role CAS, expiry-clear Undo and actual normalized token","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"level writes remain serialized across two row editors and retain each captured revision","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"local picker invalidation keeps its document while dropping drafts, Undo and late writes","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"managed order drafts preserve holds and Undo restores rows plus captured mode","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"older read cannot replace newer snapshot/draft","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"response byte bounds precede JSON parsing","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"retired-kind compensation has the specific honest refusal","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"row Reset and new-row Undo send query revisions at default scope","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"row Reset and new-row Undo send query revisions at person scope","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"row Reset and new-row Undo send query revisions at project scope","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"same-identity preview refresh keeps the captured draft baseline and confirmed Undo revision","tier":"GATED-FULL"}
     ,
@@ -15816,7 +15918,7 @@
     ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > never reports the limit for a stale, missing or private reading, although the server also refuses starts then","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > words what happens at the limit without inventing a ladder","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > words what happens at the limit without inventing an order: Settings › Models decides","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial remembers > keeps only known keys with the right type","tier":"ESSENTIAL"}
     ,
@@ -16485,6 +16587,8 @@
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"delivery queue reads stay with the ticket and person and expose refresh failures","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"family eligibility comes from the server; empty allowlists never save and failed writes keep the draft","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"reviewer rules stay through a project switch and never land for another person","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"the paused step and configured check progress are shown without inventing a completed step","tier":"ESSENTIAL"}
     ,
@@ -17220,9 +17324,21 @@
     ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses server review evidence, including newly qualified harnesses and per-model residency","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"AEON-1163: discovery drafts stay bound to their account and cannot be submitted after management access is lost","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"AEON-1163: discovery drafts survive access refresh but reset synchronously with the session and release their listener on unmount","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"How new models are found writes its settings with auto-update as the server holds it and never sends the matrix revision","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"Remove on a version asks one read about every level of every route it removes, then retires exactly those","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a pause refused on one route says how far it got, and its Undo puts back only the routes it changed","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a refusal the server answered still says nothing was removed","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a removal whose answer is lost after it committed is not called \"nothing removed\": it says the outcome is open and shows the list read again","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a remove question about a version that changed on screen closes, and Remove retires nothing it did not ask about","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a save that waited for a read and lost its editor writes nothing and does not call it a conflict","tier":"GATED-FULL"}
     ,
@@ -17260,15 +17376,13 @@
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"old versions > writes each use in words: the row, the person, and what a lock or rule does, never a server code","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > describes a line as harness, route (when it adds something), id, source and what was taken on","tier":"GATED-FULL"}
-    ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > groups profiles into one line per model, levels in the model's own order, retired profiles left out","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > keeps legacy auto provenance generic until the server names its origin","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > marks a discovered, disabled line New and shows a scheduled retirement, never both","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > names a level whose effort level is unknown after those that have one, and a missing display name falls back to the model id","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > names a source only when the server does: legacy auto stays unknown, a hand-added line says so","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > orders harnesses as the page does, newest version first and then by name","tier":"GATED-FULL"}
     ,
@@ -17277,6 +17391,28 @@
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"routes and families > derives the provider the server compares with the model's own namespace","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"routes and families > mirrors the server's family rule, so an unknown OpenRouter family is allowed for pi only through \"unknown\"","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > calls a model by one name in the picker, the registry row, the tray and the sheet","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > folds Cursor's per-level ids into one route: Grok 4.7 runs through Grok and Cursor, its fast variant is its own line","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > is one model per version across harnesses: Opus 5.5 through Claude Code, Cursor and pi, the alias as one more route, Opus 5 folded","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > keeps the version that runs on the row: a newer one that is off waits on a row of its own; the newest that is old moves into the fold","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > names how long a pause lasts and what the menu offers","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > pauses every route of a version, Cursor's Grok levels through one id, stops at the first refusal and undoes exactly what it changed","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > reads one remove question for a whole version: every profile it removes goes with that one read","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > says token budgets once and names a level as the sheet does","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > says where each fact came from, and \"unknown\" (null) when nobody reported it; only hand-added routes are editable","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > shows about 35 routes as at most 20 rows, providers in order, with the count above the list","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > tags a pause on the row: every route, one named route, or part of a route","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the inline form > accepts an OpenRouter slug with or without its prefix and a variant, and refuses what the server would","tier":"GATED-FULL"}
     ,
@@ -17303,6 +17439,44 @@
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > restores levels and reports how many could not come back","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > stops the next request when the captured person or workspace is gone","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > Remove of a row without an order of its own lifts its lock; Undo sets the lock again and invents no order","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > Reset Undo writes back a migrated order that stored no ending without one, so the pinned tail still runs","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > Reset Undo writes the own order back whole: rank, exclusions, its Wait ending and each fallback’s level, then its own level","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > Undo of an ending change, or of an edit back to the workspace’s order, writes back no ending where the order stored none","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > a member’s edit of a workspace row writes their own order with their person; Undo resets it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > adds a step with every step’s level; the pick’s level is written only when the row holds its own","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > allows a Never line again only for admins on For everyone, against the rules revision; Undo sets it with its reason","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > an admin on For everyone takes a pinned step out, or moves it, with its pin lifted in the same change; Undo sets the pin again","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > an own order edited back to the workspace’s follows it again; Undo brings the own order back as it was","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > moves a step with one rank-only write, says where it went, and Undo writes the order back","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > on Just me a step a workspace pin keeps last stays there, and a new step joins before it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > refuses a locked row, a draft, a line already in the order and an ending on the default, without a write","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > says a lock refused the change, refreshes, and offers no Undo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > writes the order’s own level back after a write with levels, so rows that follow it keep following it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"the fallback in words > lists each line’s routes in registry order, from its latest enabled version only","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"the fallback in words > reads the pick, every step and the ending; the default always ends in Wait","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"the fallback in words > says one cause per step in words, with its time, and never guesses about steps without evidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"the fallback in words > stores step levels, keeps an inherited pick level inherited and leaves unknown lines automatic","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"the fallback in words > treats a row from an older server as an empty order, and a draft as a new exception","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"preserves project, kind and ticket context when entry points navigate to Models","tier":"ESSENTIAL"}
     ,
@@ -17343,6 +17517,8 @@
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > Undo of a reset brings a stored effort back","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > Undo of a reset does not turn an inherited effort into a stored one","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > Undo of “Same as the row” writes the whole situation order back, its saved exclusions included","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"the card’s writes > a draft row writes nothing until it is picked, and picking the default for everyone stores nothing at all","tier":"ESSENTIAL"}
     ,
@@ -17405,6 +17581,12 @@
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"what runs next > keeps a queued ticket that nothing can run, and the skip trace behind Why","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"what runs next > leaves a reviewer skip out of the build trace, and says plainly when nothing is queued","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-situations.unit.test.ts","name":"Quick jobs > names what was skipped in plain words, what runs now, and the default it falls back to","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-situations.unit.test.ts","name":"a review step > sends no level, so the server runs the highest native one instead of refusing a lower one","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-situations.unit.test.ts","name":"situation matrix > shows every row with a cell, counts only what it shows, and writes orders the server accepts","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After beyond the lifetime ends the follow instead of reading later","tier":"GATED-FULL"}
     ,
@@ -17530,11 +17712,11 @@
     ,
     {"kind":"vitest","file":"tests/planning-states.unit.test.ts","name":"server list payload planning hovers > preserves the subscription marker beside an unreported session","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/policies-ladders-moved.unit.test.ts","name":"Policies links to Settings › Models and requests no ladder endpoint","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/policies-ladders-moved.unit.test.ts","name":"Policies no longer imports the ladder editor or its writer","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/policies-ladders-moved.unit.test.ts","name":"the Ladders tab shows the moved line with its Settings › Models link and requests no ladder endpoint","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/policies-ladders-moved.unit.test.ts","name":"without See models the tab says so and still requests no ladder endpoint","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/policies-ladders-moved.unit.test.ts","name":"without See models the Models rule names its owner without a link and requests no ladder endpoint","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/position.unit.test.ts","name":"a polled collection drops an answer below a newer one and re-reads one that predates a write","tier":"GATED-FULL"}
     ,
@@ -18189,6 +18371,14 @@
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-a\"},\"principal\":{\"id\":\"person-b\"}})","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-b\"},\"principal\":{\"id\":\"person-a\"}})","tags":[],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from a control rings and takes focus: false","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from nowhere rings and takes focus: true","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from the main landmark rings and takes focus: true","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from the page rings and takes focus: true","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a new owner without Access cannot resurrect the previous owner’s shown section on expiry","tags":[],"tier":"GATED-FULL"}
     ,

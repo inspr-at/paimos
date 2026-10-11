@@ -11,6 +11,7 @@ import { whenFull } from './capacity.ts'
 export const DEFAULT_DAILY_POINTS = 10
 export type PaceMode = 'pace' | 'everything'
 export type EnteredAs = 'used' | 'left'
+/** Deprecated and ignored by the server (AEON-1166); writes still carry it so the previous release can read the plan. */
 export type AtLimit = 'ladder' | 'wait'
 export interface DailyBoost { limit_used_pct: number; entered_as: EnteredAs; until: string }
 export interface DailySettings { pace: { mode: PaceMode; points_per_day: number | null }; boost_today: DailyBoost | null; at_limit: AtLimit }
@@ -31,7 +32,7 @@ export interface DailyState {
 export interface DailyPlanFields { daily?: DailyMap; daily_state?: Record<string, DailyState>; daily_default_points?: number; daily_timezone?: string; daily_until?: string }
 
 export const DEFAULT_DAILY: Readonly<DailySettings> = Object.freeze({ pace: Object.freeze({ mode: 'pace' as PaceMode, points_per_day: null }), boost_today: null, at_limit: 'ladder' as AtLimit })
-/** A missing harness means pace at the person's default, no Boost and the ladder. */
+/** A missing harness means pace at the person's default and no Boost; at the limit it follows Settings › Models. */
 export const dailyOf = (daily: DailyMap | undefined, harness: string): DailySettings => daily?.[harness] ?? { ...DEFAULT_DAILY, pace: { ...DEFAULT_DAILY.pace } }
 export const cloneDaily = (daily: DailyMap | undefined): DailyMap => Object.fromEntries(Object.entries(daily ?? {}).map(([key, d]) => [key, { pace: { ...d.pace }, boost_today: d.boost_today && { ...d.boost_today }, at_limit: d.at_limit }]))
 export function sameDaily(a: DailyMap | undefined, b: DailyMap | undefined): boolean {
@@ -99,11 +100,14 @@ export function dailyView(harness: string, settings: DailySettings, state: Daily
 /** Over pace (gold) and at the limit (red) are the only states that keep a flag on the folded row. */
 export const needsAttention = (v: DailyView) => v.kind === 'over_pace' || v.kind === 'at_limit'
 
-/** What happens to new work at the limit, in the words of the person's choice. */
+/**
+ * What happens to new work at the limit: Settings › Models decides (AEON-1166). The capped
+ * route is skipped and the order continues, or waits where it ends in Wait; the old
+ * per-harness at_limit is ignored.
+ */
 export function atLimitWords(v: DailyView, short = false): string {
-  if (v.settings.at_limit === 'wait') return short ? 'new work waits' : 'new work waits until midnight'
-  if (v.next) return short ? `${name(v.next)} next` : `${name(v.next)} next on the model ladder`
-  return short ? 'follows the model ladder' : 'new work follows the model ladder'
+  if (v.next) return short ? `${name(v.next)} next` : `${name(v.next)} next in the Models order`
+  return short ? 'follows Models' : 'new work follows Settings › Models'
 }
 /** On pace; under "use everything" with a Boost there is no pace, only today's limit. */
 const withinWords = (v: DailyView, capital = false) => v.share === null ? (capital ? 'Within today’s limit' : 'within today’s limit') : capital ? 'On pace' : 'on pace'

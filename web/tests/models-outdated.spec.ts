@@ -23,14 +23,15 @@ function outdatedProfiles(): MockProfile[] {
   )
   return profiles.map(profile => ({ ...profile, identity: identityOf(profile) }))
 }
-const use = (label: string, who: string, from: string, to: string) => ({ label, who, from, to })
+// AEON-1163: each use carries the level it runs the old version at and the one it moves to.
+const use = (label: string, who: string, from: string, to: string, fromEffort: string | null = 'high', toEffort: string | null = 'high') => ({ label, who, from, to, from_effort: fromEffort, to_effort: toEffort })
 function outdatedVersions(): MockOutdatedVersion[] {
   const version = (over: Partial<MockOutdatedVersion> & Pick<MockOutdatedVersion, 'version' | 'successor' | 'line'>): MockOutdatedVersion => ({ state: 'superseded', date: null, reason: 'Source reports a successor', source: 'agent-report:codex', uses: [], incomplete: false, ...over })
   return [
     version({ version: 'anthropic:claude-opus-5', line: 'anthropic:claude-opus', successor: 'anthropic:claude-opus-5-5', state: 'retiring', date: '2027-01-15T12:00:00Z', source: 'https://api.anthropic.com/v1/models', reason: 'Source reports a retirement date',
-      uses: [use('Except for · concept · first', MIA, 'anthropic:claude-opus-5', 'anthropic:claude-opus-5-5'), use('Except for · backend · first', 'Default', 'anthropic:claude-opus-5', 'anthropic:claude-opus-5-5')] }),
+      uses: [use('Except for · concept · first', MIA, 'anthropic:claude-opus-5', 'anthropic:claude-opus-5-5', 'xhigh', 'xhigh'), use('Except for · backend · first', 'Default', 'anthropic:claude-opus-5', 'anthropic:claude-opus-5-5')] }),
     version({ version: 'google:gemini-2.5-pro', line: 'google:gemini-pro', successor: 'google:gemini-3-pro', source: 'aeon_model_line/aeon_model_version_newer', reason: 'Same model line has a newer sourced version',
-      uses: [use('fallback · backend · first', 'Default', 'google:gemini-2.5-pro', 'google:gemini-3-pro')] }),
+      uses: [use('fallback · backend · first', 'Default', 'google:gemini-2.5-pro', 'google:gemini-3-pro', '32k', 'high')] }),
     version({ version: 'openai:gpt-6-sol', line: 'openai:gpt-sol', successor: 'openai:gpt-6.1-sol', uses: [use('Default · other · first', MIA, 'openai:gpt-6-sol', 'openai:gpt-6.1-sol')] }),
     version({ version: 'xai:grok-4.5', line: 'xai:grok', successor: 'xai:grok-4.7', source: 'aeon_model_line/aeon_model_version_newer', reason: 'Same model line has a newer sourced version',
       uses: [use('Default · other · fix', 'Default', 'xai:grok-4.5', 'xai:grok-4.7')] }),
@@ -56,11 +57,11 @@ async function setup(page: Page, world: RegistryWorld) {
   await page.route('**/api/members', route => route.fulfill({ json: { people: [{ principal_id: MIA, name: 'Mia' }], agents: [], invites: [], imported: [], owner_count: 1 } }))
   await mockRegistry(page, world)
   await openRegistry(page)
-  await expect(page.locator('[data-reg-row="gpt-6.1-sol"]')).toBeVisible()
+  await expect(page.locator('[data-reg-row="openai:sol"]')).toBeVisible()
   return world
 }
 /** Top edges of everything on the card, in page coordinates: an overlay must not change one of them. */
-const tops = (page: Page) => page.locator('[data-model-registry] .reg-strip, [data-model-registry] [data-reg-tray], [data-model-registry] .reg-row').evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().top + (el.closest('.harness-scroll')?.scrollTop ?? 0))).join(','))
+const tops = (page: Page) => page.locator('[data-model-registry] .reg-strip, [data-model-registry] [data-reg-tray], [data-model-registry] .ln-row').evaluateAll(els => els.map(el => Math.round(el.getBoundingClientRect().top + (el.closest('.harness-scroll')?.scrollTop ?? 0))).join(','))
 /** The design check's edge-accent probe (check.mjs __accents): a 2 px or wider coloured edge, or an inset bar. */
 const accents = (page: Page) => page.locator('[role="dialog"], [role="dialog"] *').evaluateAll(els => els.flatMap(el => {
   const cs = getComputedStyle(el), out: string[] = [], width = (side: string) => parseFloat(cs.getPropertyValue(`border-${side}-width`)) || 0, colour = (side: string) => cs.getPropertyValue(`border-${side}-color`)
@@ -85,7 +86,7 @@ const small = (page: Page, min: number) => page.locator('[role="dialog"] button,
 test('the tray names the two successors that take over most uses and the count, only for admins and only when something is outdated', async ({ page }) => {
   const world = await setup(page, outdatedWorld())
   // The list comes sorted by identity; Opus 5 has two uses, the others one each, so Gemini is the second name.
-  await expect(tray(page).locator('[data-reg-tray-text]')).toHaveText('Claude Opus 5.5 replaces Claude Opus 5 · Gemini Pro 3 replaces Gemini Pro 2.5 · 4 old versions')
+  await expect(tray(page).locator('[data-reg-tray-text]')).toHaveText('Opus 5.5 replaces Opus 5 · Gemini Pro 3 replaces Gemini Pro 2.5 · 4 old versions')
   await expect(review(page)).toHaveAttribute('aria-haspopup', 'dialog')
   expect(world.reads.filter(path => path === '/models/outdated')).toHaveLength(1)
   // People who read models but don't manage them get no tray, and the page doesn't ask for the list.
@@ -97,7 +98,7 @@ test('the tray names the two successors that take over most uses and the count, 
   await expect(tray(page)).toHaveCount(0)
   await setup(page, outdatedWorld({ outdated: null }))
   await expect(tray(page)).toHaveCount(0)
-  await expect(page.locator('[data-reg-row="gpt-6-sol"]')).toBeVisible()
+  await expect(page.locator('[data-reg-row="openai:sol"] .tag-oldn')).toHaveText('+1 older')
 })
 
 test('old versions that can move reach the tray when the first page holds only versions that cannot, and Remove keeps that page\'s revision', async ({ page }) => {
@@ -106,7 +107,7 @@ test('old versions that can move reach the tray when the first page holds only v
   const stuck = Array.from({ length: 50 }, (_, i): MockOutdatedVersion => ({ version: `aaa:old-${String(i).padStart(2, '0')}`, line: 'aaa:old', state: 'superseded', date: null, successor: 'aaa:unregistered', reason: 'Source reports a successor', source: 'agent-report:codex', uses: [], incomplete: false }))
   world.outdated!.versions = [...stuck, ...world.outdated!.versions]
   await setup(page, world)
-  await expect(tray(page).locator('[data-reg-tray-text]')).toHaveText('Claude Opus 5.5 replaces Claude Opus 5 · Gemini Pro 3 replaces Gemini Pro 2.5 · 4 old versions')
+  await expect(tray(page).locator('[data-reg-tray-text]')).toHaveText('Opus 5.5 replaces Opus 5 · Gemini Pro 3 replaces Gemini Pro 2.5 · 4 old versions')
   expect(world.reads.filter(path => path === '/models/outdated')).toHaveLength(2)
   await review(page).click()
   await expect(sheet(page).locator('.od')).toHaveCount(4)
@@ -131,11 +132,16 @@ test('the review sheet overlays the page: inside the viewport, nothing on the pa
   // Every old version with why it is old, and every use that moves.
   await expect(sheet(page).locator('.od')).toHaveCount(4)
   await expect(sheet(page).locator('.rf:not(.none)')).toHaveCount(5)
-  await expect(sheet(page).locator('[data-od-row="anthropic:claude-opus-5"] .od-n')).toHaveText(/^Claude Opus 5\s*replaced by\s*Claude Opus 5\.5$/)
+  await expect(sheet(page).locator('[data-od-row="anthropic:claude-opus-5"] .od-n')).toHaveText(/^Opus 5\s*replaced by\s*Opus 5\.5$/)
   await expect(sheet(page).locator('[data-od-row="anthropic:claude-opus-5"] .od-r')).toHaveText('pi · anthropic/claude-opus-5')
   await expect(sheet(page).locator('[data-od-row="anthropic:claude-opus-5"] .od-why')).toHaveText('Retires on 15 Jan 2027From provider')
   await expect(sheet(page).locator('[data-od-row="xai:grok-4.5"] .od-why')).toHaveText('Newer version in the same line')
   await expect(sheet(page).locator('.rf').first()).toContainText('ConceptsMia')
+  // Tick (W5 review): every use says the level it moves at, in the names the picker and the registry use.
+  await expect(sheet(page).locator('.rf .rf-c')).toHaveText([
+    /^Opus 5 · xhigh\s*moves to\s*Opus 5\.5 · xhigh$/, /^Opus 5 · high\s*moves to\s*Opus 5\.5 · high$/, /^Gemini Pro 2\.5 · 32k budget\s*moves to\s*Gemini Pro 3 · high$/,
+    /^GPT-6 Sol · high\s*moves to\s*GPT-6\.1 Sol · high$/, /^Grok 4\.5 · high\s*moves to\s*Grok 4\.7 · high$/,
+  ])
   await expect(sheet(page).locator('.rf').filter({ hasText: 'Fix rounds · Default' })).toContainText('for everyone · situation')
   await expect(sheet(page).locator('.od-note')).toContainText('Auto-update is off, which is why these are still in use.')
   // Focus starts on the first box and never leaves: a full round of Tab and of Shift+Tab stays inside,
@@ -184,7 +190,7 @@ test('Remove moves every use and removes the versions in one step; Undo restores
   await expect(sheet(page)).toHaveCount(0)
   expect(world.writes.filter(write => write.path.startsWith('/models/outdated'))).toEqual([{ method: 'POST', path: '/models/outdated/retire', body: { versions: ['anthropic:claude-opus-5', 'google:gemini-2.5-pro', 'openai:gpt-6-sol', 'xai:grok-4.5'], revision: REVISION } }])
   await expect(tray(page)).toHaveCount(0)
-  await expect(page.locator('[data-reg-row="gpt-6-sol"]')).toHaveCount(0)
+  await expect(page.locator('[data-reg-row="openai:sol"] .tag-oldn')).toHaveCount(0)
   await expect(page.locator('[data-reg-add]')).toBeFocused()
   const done = toasts(page).filter({ hasText: 'Removed 4 old versions · 5 uses moved' })
   await expect(done).toBeVisible()
@@ -193,7 +199,7 @@ test('Remove moves every use and removes the versions in one step; Undo restores
   expect(world.writes.at(-1)).toEqual({ method: 'POST', path: '/models/outdated/undo', body: { undo_token: `41.${'c'.repeat(64)}` } })
   // The versions and every use are back: the same tray, the same rows, the same five uses in the sheet.
   await expect(tray(page).locator('[data-reg-tray-text]')).toHaveText(text!)
-  await expect(page.locator('[data-reg-row="gpt-6-sol"]')).toBeVisible()
+  await expect(page.locator('[data-reg-row="openai:sol"] .tag-oldn')).toHaveText('+1 older')
   await review(page).click()
   await expect(sheet(page).locator('.rf:not(.none)')).toHaveCount(5)
 })
@@ -232,6 +238,18 @@ test('with auto-update on the uses already moved, so the tray says nothing uses 
 
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+  // Tick (W5 review): at 390 the sentence squeezed to five lines beside Review…; Review… sits under it instead.
+  test('the tray puts Review… on its own line under the sentence, which keeps the full width', async ({ page }) => {
+    await setup(page, outdatedWorld())
+    const text = (await tray(page).locator('[data-reg-tray-text]').boundingBox())!, button = (await review(page).boundingBox())!
+    expect(button.y).toBeGreaterThanOrEqual(text.y + text.height - 0.5)
+    expect(Math.abs(button.x - text.x)).toBeLessThanOrEqual(0.5)
+    const lines = await tray(page).locator('[data-reg-tray-text]').evaluate(el => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)))
+    expect(lines).toBeLessThanOrEqual(3)
+    // On touch screens base.css gives buttons a 44 px hit area.
+    const hit = await review(page).evaluate(el => { const r = el.getBoundingClientRect(), b = getComputedStyle(el, '::before'); return Math.max(r.height, b.content !== 'none' && b.position === 'absolute' ? parseFloat(b.height) || 0 : 0) })
+    expect(hit).toBeGreaterThanOrEqual(43.5)
+  })
   test('the sheet fills the screen with its actions pinned at the bottom, Keep them left of Remove, and every target is at least 44 px', async ({ page }) => {
     await setup(page, outdatedWorld())
     await review(page).click()

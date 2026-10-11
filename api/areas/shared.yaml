@@ -469,6 +469,14 @@ components:
       properties:
         value: {type: number}
         at: {type: string, format: date-time}
+    DeliveryMetricReadError:
+      type: object
+      additionalProperties: false
+      required: [reason, permission, at]
+      properties:
+        reason: {type: string, enum: [actions_read_missing, not_installed, github_unavailable]}
+        permission: {type: [string, 'null'], enum: [actions:read, null], description: 'The missing GitHub permission, when known.'}
+        at: {type: string, format: date-time}
     DeliveryMetricSource:
       type: object
       additionalProperties: false
@@ -482,12 +490,16 @@ components:
         backfill_since: {type: [string, 'null'], format: date-time}
         backfill_done_at: {type: [string, 'null'], format: date-time}
         covered_since: {type: [string, 'null'], format: date-time, description: 'Run and pull request facts are complete from this time on.'}
+        last_read_error: {oneOf: [{$ref: '#/components/schemas/DeliveryMetricReadError'}, {type: 'null'}], description: 'Last failed history step; cleared after a successful step.'}
+        last_event_at: {type: [string, 'null'], format: date-time, description: 'Last accepted webhook for this repository; stale after seven days without an event.'}
+        retry_at: {type: [string, 'null'], format: date-time, description: 'Earliest server retry of a deferred history step.'}
     DeliveryMetricSourceInput:
       type: object
       additionalProperties: false
       required: [repository]
       properties:
         repository: {type: string, description: 'owner/name'}
+        days: {type: integer, minimum: 1, maximum: 90, default: 30, description: 'History window for a new or changed source.'}
         ci_workflow: {type: string, pattern: '^\.github/workflows/[A-Za-z0-9._-]{1,100}\.ya?ml$', default: '.github/workflows/ci.yml'}
         nightly_workflow: {type: string, pattern: '^\.github/workflows/[A-Za-z0-9._-]{1,100}\.ya?ml$', default: '.github/workflows/nightly-full.yml'}
     DeliveryMetricTarget:
@@ -535,7 +547,7 @@ components:
         runs: {type: integer, minimum: 0}
         pulls: {type: integer, minimum: 0}
         jobs: {type: integer, minimum: 0, description: 'Runs whose jobs this step read (the jobs pass).'}
-        retry_at: {type: [string, 'null'], format: date-time, description: 'When a jobs read failed and no other job work is eligible, the earliest time to call again. Absent when this step has no deferred retry.'}
+        retry_at: {type: [string, 'null'], format: date-time, description: 'Earliest retry of a failed history or jobs read; the server waits until this time. Absent when no retry is deferred.'}
         truncated: {type: boolean, description: 'A day had more runs than GitHub lists; metrics stay partial.'}
     DeliveryMetricsBackfillInput:
       type: object

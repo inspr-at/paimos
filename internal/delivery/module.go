@@ -10,21 +10,26 @@ import (
 
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Module struct {
-	pool             *pgxpool.Pool
-	config           crossreview.AppConfig
-	secret           []byte
-	github           GitHub
-	fanout           func(context.Context, []byte) error
-	now              func() time.Time
-	queueAdmission   QueueAdmission
-	routineArtifacts RoutineArtifactReader
-	routineReviews   *crossreview.Module
-	flowSlots        chan struct{}
+	pool                 *pgxpool.Pool
+	config               crossreview.AppConfig
+	secret               []byte
+	github               GitHub
+	fanout               func(context.Context, []byte) error
+	now                  func() time.Time
+	queueAdmission       QueueAdmission
+	routineArtifacts     RoutineArtifactReader
+	routineReviews       *crossreview.Module
+	flowSlots            chan struct{}
+	metricsWake          chan struct{}
+	metricsTenantCursor  string
+	metricsProjectCursor string
+	metricsProjectTenant string
 	// flowStreamNow is the live stream's authorization clock. Nil uses the
 	// wall clock, so a frozen business clock cannot expire every heartbeat.
 	flowStreamNow   func() time.Time
@@ -32,7 +37,7 @@ type Module struct {
 }
 
 func New(pool *pgxpool.Pool, config crossreview.AppConfig, secret []byte, github GitHub, fanout func(context.Context, []byte) error) *Module {
-	return &Module{pool: pool, config: config, secret: append([]byte(nil), secret...), github: github, fanout: fanout, now: func() time.Time { return time.Now().UTC() }, flowSlots: make(chan struct{}, flowStreamSlots)}
+	return &Module{pool: pool, config: config, secret: append([]byte(nil), secret...), github: github, fanout: fanout, now: func() time.Time { return time.Now().UTC() }, flowSlots: make(chan struct{}, flowStreamSlots), metricsWake: make(chan struct{}, 1)}
 }
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountWorkQueue(mux)
@@ -65,10 +70,12 @@ func (m *Module) mountWorkQueue(mux *http.ServeMux) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 			defer cancel()
+			r = r.WithContext(ctx)
 			if r.Method != http.MethodGet {
-				controller := http.NewResponseController(w)
-				_ = controller.SetReadDeadline(time.Now().Add(5 * time.Second))
-				defer controller.SetReadDeadline(time.Time{})
+				if err := httpapi.BufferRequestBodyTimeout(w, r, 1<<20, 5*time.Second); err != nil {
+					respondError(w, fail(http.StatusBadRequest, "invalid request body"))
+					return
+				}
 			}
 			handler(w, r.WithContext(ctx))
 		})

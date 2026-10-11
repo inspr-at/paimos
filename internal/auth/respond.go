@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+
+	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
 type errorJSON struct {
@@ -57,7 +59,11 @@ func writeBadRequest(w http.ResponseWriter, msg string) {
 	writeJSON(w, http.StatusBadRequest, errorJSON{Error: msg})
 }
 
-func writeInternal(w http.ResponseWriter) {
+// internalFailure logs the class of a failure the auth boundary answers with
+// 500, next to the request id, without error text (AEON-1228: these answers
+// were silent, so an already cancelled request context stayed invisible).
+func internalFailure(w http.ResponseWriter, r *http.Request, step string, err error) {
+	httpapi.LogFailure(r, step, err)
 	writeJSON(w, http.StatusInternalServerError, errorJSON{Error: "internal"})
 }
 

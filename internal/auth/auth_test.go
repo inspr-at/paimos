@@ -4,24 +4,124 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestNewRejectsShortKey(t *testing.T) {
 	_, err := New(Config{SessionKey: []byte("short")}, nil)
 	if err == nil {
 		t.Fatal("expected error")
+	}
+}
+
+// Risk: a shared authentication failure is invisible except for generic 500
+// access logs, while logging raw driver errors can disclose credentials (AEON-1228).
+func TestIncident1228MiddlewareRecordsFailureClass(t *testing.T) {
+	var logs bytes.Buffer
+	prior := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(prior) })
+	for _, fixture := range []struct {
+		name, class string
+		err         error
+	}{
+		{"cancelled", "context_canceled", fmt.Errorf("set tenant: %w", context.Canceled)},
+		{"deadline", "context_deadline", fmt.Errorf("bootstrap: %w", context.DeadlineExceeded)},
+		{"closed", "connection_closed", fmt.Errorf("begin: %w", pgconn.ErrConnClosed)},
+		{"database", "postgres_57014", &pgconn.PgError{Code: "57014", Message: "private-fixture-value", Detail: "private-fixture-value"}},
+		{"unknown", "internal", errors.New("private-fixture-value")},
+		{"invalid SQLSTATE", "postgres_unknown", &pgconn.PgError{Code: "private-fixture-value", Message: "private-fixture-value"}},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			logs.Reset()
+			mod, err := New(Config{SessionKey: bytes.Repeat([]byte{1}, 32)}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mod.inTenant = func(context.Context, *pgxpool.Pool, string, func(pgx.Tx) error) error {
+				return fixture.err
+			}
+			req := httptest.NewRequest(http.MethodGet, "/api/me?private-fixture-value", nil)
+			if fixture.name == "cancelled" {
+				// Exercise the real acquisition path without a database. Any attempted
+				// dial fails the proof that this 500 originates before PostgreSQL.
+				cfg, err := db.ParsePoolConfig("host=127.0.0.1 port=1 dbname=fixture user=fixture sslmode=disable pool_min_conns=0 pool_min_idle_conns=0")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var dials atomic.Int32
+				cfg.ConnConfig.DialFunc = func(context.Context, string, string) (net.Conn, error) {
+					dials.Add(1)
+					return nil, errors.New("unexpected fixture dial")
+				}
+				pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(pool.Close)
+				t.Cleanup(func() {
+					if dials.Load() != 0 || pool.Stat().CanceledAcquireCount() != 1 {
+						t.Error("cancelled authentication did not fail before dialing")
+					}
+				})
+				mod.pool, mod.inTenant = pool, db.InTenant
+			}
+			req.Pattern = "GET /api/me"
+			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: strings.Repeat("0", 64)})
+			rec := httptest.NewRecorder()
+			mux := http.NewServeMux()
+			mux.HandleFunc("GET /api/me", func(http.ResponseWriter, *http.Request) {
+				t.Error("failed authentication reached handler")
+			})
+			server := &httpapi.Server{Mux: mux, Middleware: []func(http.Handler) http.Handler{
+				func(next http.Handler) http.Handler {
+					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						if fixture.name == "cancelled" {
+							// Cancel after admission, before the real auth acquire.
+							ctx, cancel := context.WithCancel(r.Context())
+							cancel()
+							r = r.WithContext(ctx)
+						}
+						next.ServeHTTP(w, r)
+					})
+				}, mod.Middleware,
+			}}
+			server.Handler().ServeHTTP(rec, req)
+			if rec.Code != http.StatusInternalServerError || strings.TrimSpace(rec.Body.String()) != `{"error":"internal"}` {
+				t.Fatalf("unexpected response: status %d", rec.Code)
+			}
+			if !strings.Contains(logs.String(), `"error_class":"`+fixture.class+`"`) || !strings.Contains(logs.String(), `"step":"authenticate"`) {
+				t.Fatalf("authentication failure class was not logged: %s", logs.String())
+			}
+			if strings.Contains(logs.String(), "private-fixture-value") || strings.Contains(logs.String(), req.Cookies()[0].Value) {
+				t.Fatal("diagnostic log disclosed raw error, query or cookie")
+			}
+			id := rec.Header().Get("X-Request-ID")
+			if id == "" || !strings.Contains(logs.String(), `"request_id":"`+id+`"`) || !strings.Contains(logs.String(), `"route":"GET /api/me"`) {
+				t.Fatal("diagnostic log lost request id or route")
+			}
+		})
 	}
 }
 

@@ -111,14 +111,17 @@ for (const theme of ['light', 'dark'] as const) {
       await page.goto(`/agents/${worker.id}`)
       const panel = panelOf(page)
       const mine = panel.locator('.msg.mine')
-      await expect(mine).toHaveCount(4)
+      const queued = panel.locator('.queue-item')
+      await expect(mine).toHaveCount(3)
+      await expect(queued).toHaveCount(1)
+      await expect(queued).toContainText(messages.at(-1)!.body)
       await expect(mine.nth(0).locator('.delivery')).toHaveText('Read')
       await expect(mine.nth(0).locator('.delivery')).toHaveAttribute('data-tip', /^Read by the session · /)
       await expect(mine.nth(1).locator('.delivery')).toHaveText('Delivered')
       await expect(mine.nth(2).locator('.undelivered > span')).toHaveText('Not delivered · the session ended')
       await expect(mine.nth(2).getByRole('button', { name: 'Retry', exact: true })).toBeVisible()
       await expect(mine.nth(2).locator('.delivery')).toHaveCount(0)
-      await expect(mine.nth(3).locator('.delivery')).toHaveText('Sending')
+      await expect(queued).toHaveAttribute('data-status', 'sent')
       // Only the viewer's own posts are asked for.
       const own = new Set(messages.filter(m => m.sender_principal_id === me.id).map(m => m.id))
       expect(asked.flat().every(id => own.has(id))).toBe(true)
@@ -128,6 +131,8 @@ for (const theme of ['light', 'dark'] as const) {
       statuses[last] = 'delivered'
       const before = asked.length
       await signal(page, 'inbox.message_fetched')
+      await expect(queued).toHaveCount(0)
+      await expect(mine).toHaveCount(4)
       await expect(mine.nth(3).locator('.delivery')).toHaveText('Delivered')
       const reread = asked.slice(before).flat()
       expect(reread).toContain(last)

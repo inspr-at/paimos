@@ -41,10 +41,12 @@ func (m *Module) mountFlow(mux *http.ServeMux) {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			ctx, cancel := context.WithTimeout(r.Context(), timeout)
 			defer cancel()
+			r = r.WithContext(ctx)
 			if r.Method != http.MethodGet {
-				controller := http.NewResponseController(w)
-				_ = controller.SetReadDeadline(time.Now().Add(5 * time.Second))
-				defer controller.SetReadDeadline(time.Time{})
+				if err := httpapi.BufferRequestBodyTimeout(w, r, 1<<20, 5*time.Second); err != nil {
+					respondError(w, fail(http.StatusBadRequest, "invalid request body"))
+					return
+				}
 			}
 			handler(w, r.WithContext(ctx))
 		})

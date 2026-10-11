@@ -50,7 +50,8 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), readyProbeTimeout)
 		defer cancel()
 		if err := db.Probe(ctx, s.Pool); err != nil {
-			slog.Warn("liveness database probe failed", "pool", db.Stats(s.Pool))
+			LogFailure(r, "liveness_probe", err)
+			slog.Warn("liveness database probe failed", "error_class", ErrorClass(err), "request_context", ErrorClass(r.Context().Err()), "pool", db.Stats(s.Pool))
 		} else {
 			dbState = "ok"
 		}
@@ -69,6 +70,7 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		body.Pool = &stats
 	}
 	if !s.accepting() || !s.readyPingAvailable() {
+		LogFailure(r, "readiness_admission", nil)
 		body.Reason = "not_accepting"
 		if s.accepting() {
 			body.Reason = "database_unavailable"
@@ -90,13 +92,37 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 			body.Reason = "pool_exhausted"
 			body.Detail = fmt.Sprintf("pool exhausted: %d acquired, %d waiting", body.Pool.Acquired, body.Pool.Waiting)
 		}
-		slog.Warn("readiness database probe failed", "reason", body.Reason, "pool", body.Pool)
+		LogFailure(r, "readiness_probe", err)
+		slog.Warn("readiness database probe failed", "reason", body.Reason, "error_class", ErrorClass(err), "pool", body.Pool)
 		WriteJSON(w, http.StatusServiceUnavailable, body)
 		return
+	}
+	if s.AuthProbe != nil {
+		err := s.AuthProbe(ctx)
+		// Client cancellations must not become a process health observation.
+		if r.Context().Err() != nil {
+			body.Reason = "database_unavailable"
+			WriteJSON(w, http.StatusServiceUnavailable, body)
+			return
+		}
+		now := time.Now()
+		if s.readyNow != nil {
+			now = s.readyNow()
+		}
+		if !s.authReady.observe(now, err != nil) {
+			body.Reason = "authentication_unavailable"
+			LogFailure(r, "readiness_authentication", err)
+			WriteJSON(w, http.StatusServiceUnavailable, body)
+			return
+		}
+		if err != nil {
+			LogFailure(r, "readiness_authentication", err)
+		}
 	}
 	// Drain can start while the ping is in flight. The check above would
 	// otherwise answer ready from a state that is already false.
 	if !s.accepting() {
+		LogFailure(r, "readiness_drain", nil)
 		body.Reason = "not_accepting"
 		WriteJSON(w, http.StatusServiceUnavailable, body)
 		return

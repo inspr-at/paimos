@@ -91,7 +91,7 @@ test('offline and revoked computers do not present prior harness reports as live
   // Never a problem row from an old report, and never Ready on an offline computer.
   await expect(section(page).locator('.att-row')).toHaveCount(0)
   await expect(section(page).getByText('Ready', { exact: true })).toHaveCount(0)
-  await expect(section(page).getByRole('link', { name: /^Claude on studio: Last reported: / })).toBeVisible()
+  await expect(section(page).getByRole('link', { name: /^Claude Code on studio: Last reported: / })).toBeVisible()
   await expect(section(page).locator('thead').getByText('studio')).toBeVisible()
   report.computer_state = 'revoked'
   await refresh(page)

@@ -9,8 +9,8 @@ const mira = '22222222-2222-4222-8222-222222222222'
 // request first logs what changed since the last look (as node events with
 // node_changes, never values), then answers in live mode and closes; the
 // browser reconnects after `retry`, as after a real drop. Playwright does not
-// show the Last-Event-ID header Chromium adds to a reconnect, so each page's
-// last delivered ID stands in for it (the Go stream tests cover the header).
+// show the Last-Event-ID header Chromium adds to a reconnect, so each native
+// connection's last delivered ID stands in for it (Go covers the header).
 // actor: whose writes the events name (the signed-in person: their other tab).
 export function liveServer(data: Fixtures, actor = mira) {
   const seen = new Map(data.nodes.map(node => [node.id, structuredClone(node)]))
@@ -47,22 +47,36 @@ export function liveServer(data: Fixtures, actor = mira) {
   }
   // first: the page's first stream request waits for it (the stream connects late).
   async function install(page: Page, name: string, options: { first?: Promise<unknown> } = {}) {
-    let lastEventId: number | null = null
-    let waitFirst = options.first
+    const cursors = new Map<string, number>()
+    // A page can have several subscribers. Preserve Chromium's actual SSE
+    // transport while giving each connection an independent server cursor.
+    await page.addInitScript(() => {
+      const NativeSource = window.EventSource
+      let connection = 0
+      class FixtureSource extends NativeSource {
+        constructor(url: string | URL, init?: EventSourceInit) {
+          const target = new URL(url, location.href)
+          if (target.pathname === '/api/events/stream') target.searchParams.set('fixture_connection', String(++connection))
+          super(target, init)
+        }
+      }
+      window.EventSource = FixtureSource
+    })
     // Registered after mockWork, so it answers first.
     await page.route('**/api/events/stream**', async route => {
-      if (waitFirst) { const wait = waitFirst; waitFirst = undefined; await wait }
+      if (options.first) await options.first
       const query = new URL(route.request().url()).searchParams
+      const connection = query.get('fixture_connection')!
       scan()
       const numeric = query.get('after') !== 'latest' ? Number(query.get('after')) : null
-      const resume = lastEventId ?? numeric
+      const resume = cursors.get(connection) ?? numeric
       const after = resume ?? newest
       requests.push({ page: name, after: query.get('after'), resumed: resume !== null })
       const lines = ['retry: 150', '', ': connected', '', `id: ${after}`, 'event: stream.ready', `data: ${JSON.stringify({ after, resumed: resume !== null })}`, '']
-      lastEventId = after
+      cursors.set(connection, after)
       for (const event of held.has(name) ? [] : log.filter(event => event.id > after)) {
         lines.push(`id: ${event.id}`, `event: ${event.type}`, `data: ${JSON.stringify(event.data)}`, '')
-        lastEventId = event.id
+        cursors.set(connection, event.id)
       }
       return route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' }, body: `${lines.join('\n')}\n` })
     })
