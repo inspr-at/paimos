@@ -88,7 +88,7 @@ func receiptState(t *testing.T, f *fixture, id string) (attempts int64, next tim
 
 func receiptEffects(t *testing.T, f *fixture) []int {
 	t.Helper()
-	out := make([]int, 8)
+	out := make([]int, 9)
 	f.tx(t, func(tx pgx.Tx) error {
 		return tx.QueryRow(t.Context(), `SELECT
 			(SELECT count(*) FROM delivery_github_events WHERE delivery_id='retry-delivery'),
@@ -98,7 +98,8 @@ func receiptEffects(t *testing.T, f *fixture) []int {
 			(SELECT count(*) FROM delivery_metric_runs),
 			(SELECT count(*) FROM delivery_flow_steps WHERE source='github_app'),
 			(SELECT count(*) FROM events WHERE type='delivery.merge_done'),
-			(SELECT count(*) FROM events WHERE type LIKE 'delivery.flow.%')`).Scan(&out[0], &out[1], &out[2], &out[3], &out[4], &out[5], &out[6], &out[7])
+			(SELECT count(*) FROM events WHERE type IN ('delivery.step','delivery.item','delivery.incident')),
+			(SELECT count(*) FROM events WHERE type='delivery.bypass_merge')`).Scan(&out[0], &out[1], &out[2], &out[3], &out[4], &out[5], &out[6], &out[7], &out[8])
 	})
 	return out
 }
@@ -231,6 +232,12 @@ func TestDeliveryWebhookInternalRetry(t *testing.T) {
 				want := map[string]int{"projection": 0, "fanout": 1, "check_audit": 2, "merge_audit": 3, "metrics": 4, "flow": 5, "completion": 6}[step]
 				if effects[want] != 1 {
 					t.Fatalf("%s effect count %v, want exactly one", step, effects)
+				}
+				if step == "flow" && effects[7] == 0 {
+					t.Fatal("fixture did not retain any Flow event")
+				}
+				if afterEffect && step == "merge_audit" && (before[8] == 0 || effects[8] != before[8]) {
+					t.Fatalf("merge audit event was emitted twice: %v -> %v", before, effects)
 				}
 				if afterEffect && step == "flow" && effects[7] != before[7] {
 					t.Fatalf("flow effect was emitted twice: %v -> %v", before, effects)
