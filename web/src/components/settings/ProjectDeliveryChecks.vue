@@ -26,11 +26,23 @@ let release: (() => void) | undefined, unregister: (() => void) | undefined
 const checks = computed(() => snapshot.value?.effective.required_checks ?? [])
 function own(key: 'required_workflow' | 'required_checks' | Deadline) { return snapshot.value ? (key === 'required_workflow' || key === 'required_checks' ? snapshot.value.overrides[key] !== undefined : snapshot.value.overrides.deadlines?.[key] !== undefined) : false }
 function fill() { workflow.value = snapshot.value?.effective.required_workflow ?? ''; deadlineValues.value = Object.fromEntries(DEADLINES.map(([key]) => [key, String(snapshot.value?.effective.deadlines?.[key] ?? '')])) }
-function load() {
+function load(acceptNewRevision = false) {
   if (!allowed.value || busy.value) return Promise.resolve()
-  const id = props.project.id, hadValues = !!snapshot.value
+  const id = props.project.id
   return reader.run(({ after, signal }) => after(readProjectDeliverySettings(id, signal), value => {
-    snapshot.value = value; error.value = ''; conflict.value = false; if (!hadValues) fill()
+    const before = snapshot.value
+    const dirtyWorkflow = !!before && workflow.value !== before.effective.required_workflow
+    const dirtyDeadlines = DEADLINES.filter(([key]) => before && deadlineValues.value[key] !== String(before.effective.deadlines?.[key] ?? '')).map(([key]) => key)
+    if (before && value.revision !== before.revision && (dirtyWorkflow || dirtyDeadlines.length) && !acceptNewRevision) {
+      conflict.value = true; feedback.value = 'Delivery settings changed. Reload saved settings before saving this draft.'; return
+    }
+    snapshot.value = value; error.value = ''; conflict.value = false
+    if (!before) fill()
+    else {
+      if (!dirtyWorkflow) workflow.value = value.effective.required_workflow ?? ''
+      for (const [key] of DEADLINES) if (!dirtyDeadlines.includes(key)) deadlineValues.value[key] = String(value.effective.deadlines?.[key] ?? '')
+      if (acceptNewRevision) feedback.value = 'Saved values reloaded; the draft is kept.'
+    }
   }), { failed: cause => { error.value = cause instanceof Error ? cause.message : 'Checks and deadlines could not be loaded.' }, settled: () => { loading.value = false } })
 }
 function closeAdd(restore = true) { addOpen.value = false; release?.(); release = undefined; unregister?.(); unregister = undefined; if (restore) addButton.value?.focus({ preventScroll: true }) }
@@ -102,7 +114,7 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose(); closeAdd(false) })
       <div class="dl"><form v-for="[key, label] in DEADLINES" :key="key" class="dl-r" data-project-field @submit.prevent="saveDeadline(key)"><label :for="`dl-${key}`">{{ label }}</label><span class="dl-v"><input v-if="manage" :id="`dl-${key}`" v-model="deadlineValues[key]" class="field n" inputmode="numeric" maxlength="5" :disabled="busy" @blur="saveDeadline(key)" /><b v-else>{{ snapshot.effective.deadlines?.[key] }}</b><span class="u">min</span><button v-if="own(key) && manage" type="button" class="link-btn quiet rst" :disabled="busy" @click="resetValue(key)">Reset</button><span v-else class="origin">{{ own(key) ? 'this project' : 'workspace default' }}</span></span></form></div>
       <p class="foot"><AppIcon name="info" :size="13" /><span>0 turns an alert off. Values marked “workspace default” follow the workspace; changing one sets it for this project only. <ProjectSettingsExplainer id="inherit" :project-key="project.routeKey" /></span></p>
       <p class="feedback" role="status" :aria-busy="busy">{{ feedback || (busy ? 'Saving…' : '') }}</p>
-      <button v-if="conflict" type="button" class="link-btn" @click="load">Reload saved settings; keep this draft</button>
+      <button v-if="conflict" type="button" class="link-btn" @pointerdown.prevent @click="load(true)">Reload saved settings; keep this draft</button>
     </template>
   </SettingsCard>
   <FloatingPanel v-if="addOpen" :anchor="addButton ?? null" :width="340" :tallest="280" label="Add a required check" @close="restore => closeAdd(restore)"><form id="check-form" ref="addForm" class="check-form" aria-label="Add a required check" @submit.prevent="addCheck"><label>Check name<input v-model="checkName" class="field" maxlength="200" autocomplete="off" :disabled="busy" /></label><p>Exactly as GitHub names it in the pull request’s checks.</p><p class="check-error" role="status">{{ checkError }}</p><div class="acts"><button type="button" class="btn" :disabled="busy" @click="closeAdd()">Cancel</button><button type="submit" class="btn primary" :disabled="busy">Add</button></div></form></FloatingPanel>

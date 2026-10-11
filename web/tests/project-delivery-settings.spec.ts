@@ -135,6 +135,20 @@ test('AEON-1226: repository states stay put and delivery edits preserve authorit
   expect(world.overrides.deadlines?.ci_green).toBe(30); world.fail = false
   await deadline.press('Enter'); await expect(deadline).toBeEnabled(); expect(world.overrides.deadlines?.ci_green).toBe(45)
 
+  // A background revalidation cannot attach a newer revision to an older draft.
+  await wf.fill('Retained workflow draft')
+  const draftRevision = `"${world.revision}"`
+  world.overrides.required_workflow = 'Another writer’s workflow'; world.revision++
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.locator('#checks .feedback')).toContainText('Reload saved settings')
+  await wf.press('Enter'); await expect(wf).toBeEnabled()
+  expect(world.writes.at(-1)?.revision).toBe(draftRevision)
+  expect(world.overrides.required_workflow).toBe('Another writer’s workflow')
+  await page.getByRole('button', { name: 'Reload saved settings; keep this draft', exact: true }).click()
+  await expect(page.locator('#checks .feedback')).toHaveText('Saved values reloaded; the draft is kept.')
+  await expect(wf).toHaveValue('Retained workflow draft')
+  await wf.press('Enter'); await expect(wf).toBeEnabled(); expect(world.overrides.required_workflow).toBe('Retained workflow draft')
+
   // The response is released after navigation; it must not populate PHAROS.
   let entered!: () => void, release!: () => void
   const reached = new Promise<void>(resolve => { entered = resolve })
