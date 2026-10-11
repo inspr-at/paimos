@@ -15,6 +15,103 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Risk: an ID-only Cursor probe splits a route from its recorded launch tuple,
+// or suffix guessing folds a route for which no effort has ever been recorded.
+func TestCursorHarnessProbeReusesRecordedLaunchIdentity(t *testing.T) {
+	for _, withPin := range []bool{true, false} {
+		name := "observation"
+		if withPin {
+			name = "pin"
+		}
+		t.Run(name, func(t *testing.T) {
+			reset(t)
+			owner := makePrincipal(t, "cursor-probe-identity", "person", "Owner", []string{"admin"})
+			agent := addPrincipal(t, owner.TenantID, "agent", "Daemon", nil)
+			grantModelReporter(t, owner, agent)
+			agent.Scopes = []string{"models.read", "models.report"}
+			decode[catalogPage](t, &agent, "GET", "/api/models/catalog", "", 200)
+			account := enrollEvidenceHarness(t, owner, agent, "cursor")
+			model, effort := "grok-4.7-xhigh", "xhigh"
+			inRegistry(t, owner, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['models.read','models.report'] WHERE principal_id=$1`, agent.ID); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_daemon_generation='generation' WHERE id=$1`, account); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET auto_add_profiles=false`); err != nil {
+					return err
+				}
+				if withPin {
+					_, err := insertObservedProfile(t.Context(), tx, owner.TenantID, profileWrite{Slug: "cursor-probe-pin", Version: "fixture", Harness: "cursor", Family: "xai", Model: model, Effort: effort, Tier: "standard", Source: "harness"})
+					return err
+				}
+				return nil
+			})
+			seedEvidenceSession(t, owner, agent, "cursor", model, effort)
+			if got := reportEvidence(t, agent, []Observation{{ReportID: EvidenceID("cursor-run-start"), Harness: "cursor", Model: model, Effort: effort, Status: "working"}}, 200); got.Recorded != 1 {
+				t.Fatal("run-start report was not recorded", got)
+			}
+			inRegistry(t, owner, func(tx pgx.Tx) error {
+				var pins int
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_profiles WHERE harness='cursor' AND model=$1`, model).Scan(&pins); err != nil {
+					return err
+				}
+				if withPin && pins != 1 || !withPin && pins != 0 {
+					t.Fatal("fixture did not isolate pin and observation identity sources", pins)
+				}
+				return nil
+			})
+			claim := decode[struct {
+				Items []modelreport.CatalogProbe `json:"items"`
+			}](t, &agent, "POST", "/api/models/harness-probes/claim", `{"daemon_id":"fixture","daemon_generation":"generation"}`, 200)
+			if len(claim.Items) != 1 || claim.Items[0].AccountID != account {
+				t.Fatal("Cursor probe was not claimed", claim)
+			}
+			unknown := "grok-4.7-high"
+			report := modelreport.CatalogReport{RequestID: claim.Items[0].RequestID, BindingRevision: claim.Items[0].BindingRevision, DaemonID: "fixture", Generation: "generation", State: "fresh", Models: []modelreport.CatalogModel{
+				{Model: model, Facts: map[string]modelreport.CatalogField{"display_name": {Value: json.RawMessage(`"Grok native fixture"`), Path: "models[].name"}}},
+				{Model: unknown, Facts: map[string]modelreport.CatalogField{}},
+			}}
+			raw, err := json.Marshal(report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decode[map[string]any](t, &agent, "POST", "/api/models/harness-probes/"+account, string(raw), 200)
+			page := decode[catalogPage](t, &owner, "GET", "/api/models/catalog?limit=50", "", 200)
+			if page.NextCursor != "" || page.Truncated {
+				t.Fatal("fixture catalog read was incomplete")
+			}
+			for _, tc := range []struct{ model, identity string }{{model, "xai:grok-4.7"}, {unknown, "xai:" + unknown}} {
+				identities, native, runStart := 0, false, false
+				for _, entry := range page.Models {
+					for _, route := range entry.Routes {
+						if route.Route != "cursor/"+tc.model {
+							continue
+						}
+						identities++
+						if entry.Identity != tc.identity {
+							t.Errorf("route %s appeared under %s, want %s", route.Route, entry.Identity, tc.identity)
+						}
+						if tc.model == model {
+							f := route.Facts["display_name"]
+							native = f.Source == "harness:cursor:"+account && f.FieldPath == "models[].name" && string(f.Value) == `"Grok native fixture"`
+							for _, f := range entry.Evidence {
+								if f.Route == route.Route && f.Source == "agent-report:cursor" && f.Fact == "observed_level.xhigh" {
+									runStart = true
+								}
+							}
+						}
+					}
+				}
+				if identities != 1 || tc.model == model && (!native || !runStart) {
+					t.Errorf("route %s split or lost probe/run-start facts: identities=%d native=%v run-start=%v", tc.model, identities, native, runStart)
+				}
+			}
+		})
+	}
+}
+
 // Risk: scheduled/manual probes publish stale account authority, partial lists
 // prove disappearance, or native harness facts grant/reorder existing routes.
 func TestHarnessProbesScheduleCheckNowAndFencePublication(t *testing.T) {

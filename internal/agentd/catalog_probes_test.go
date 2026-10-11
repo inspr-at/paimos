@@ -8,6 +8,7 @@ import (
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/modelreport"
 )
@@ -158,6 +159,92 @@ func (a *catalogFixtureAPI) ClaimCatalogProbes(context.Context, string, string, 
 func (a *catalogFixtureAPI) ReportCatalogProbe(_ context.Context, _ string, report modelreport.CatalogReport) error {
 	a.reports = append(a.reports, report)
 	return nil
+}
+
+type catalogBlockedClaimAPI struct {
+	*catalogFixtureAPI
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (a *catalogBlockedClaimAPI) ClaimCatalogProbes(ctx context.Context, daemon, generation, cursor string) ([]modelreport.CatalogProbe, string, error) {
+	select {
+	case a.entered <- struct{}{}:
+	default:
+	}
+	select {
+	case <-ctx.Done():
+		return nil, "", ctx.Err()
+	case <-a.release:
+		return a.catalogFixtureAPI.ClaimCatalogProbes(ctx, daemon, generation, cursor)
+	}
+}
+
+// Risk: a slow catalog claim/capture holds queued runs and health polling on
+// the dispatch path. Channels establish the overlap; deadlines only guard hangs.
+func TestCatalogCaptureLoopDoesNotHoldDispatchOrHealthPolling(t *testing.T) {
+	s, base, _ := testSupervisor(t)
+	api := &catalogBlockedClaimAPI{catalogFixtureAPI: &catalogFixtureAPI{fakeAPI: base}, entered: make(chan struct{}, 1), release: make(chan struct{})}
+	s.api = api
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	pollDone := make(chan error, 1)
+	go func() { pollDone <- s.PollOnce(ctx) }()
+	select {
+	case <-api.entered:
+		close(api.release)
+		<-pollDone
+		t.Fatal("dispatch poll entered the blocking catalog claim before starting queued work")
+	case err := <-pollDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("dispatch poll did not finish")
+	}
+	if base.claims != 1 || api.claims != 0 {
+		t.Fatal("queued run was not claimed independently of catalog discovery")
+	}
+	captureDone := make(chan struct{})
+	go func() { defer close(captureDone); s.runCapacityCaptureTick(ctx) }()
+	defer func() {
+		cancel()
+		select {
+		case <-captureDone:
+		case <-time.After(5 * time.Second):
+			t.Error("catalog loop did not join cancellation")
+		}
+	}()
+	select {
+	case <-api.entered:
+	case <-captureDone:
+		t.Fatal("background capture tick omitted model catalog discovery")
+	case <-time.After(5 * time.Second):
+		t.Fatal("background capture tick did not reach catalog claim")
+	}
+	go func() { pollDone <- s.ProbeOnce(ctx) }()
+	select {
+	case err := <-pollDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("blocked catalog claim held the health poll")
+	}
+	select {
+	case <-captureDone:
+		t.Fatal("catalog claim completed before its release barrier")
+	default:
+	}
+	close(api.release)
+	select {
+	case <-captureDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("background catalog capture did not join")
+	}
+	if api.claims != 1 {
+		t.Fatal("background tick did not service exactly one catalog claim")
+	}
 }
 
 // Risk: no queued run means no discovery, or scheduled discovery bypasses idle
