@@ -4,17 +4,15 @@ package modelregistry
 import (
 	"context"
 	"encoding/json"
+	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/inspr-at/paimos/internal/capacity"
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/jackc/pgx/v5"
 )
 
 // reviewOrderPut sends a review-order write to the retired ladder writer.
@@ -460,4 +458,13 @@ func TestReviewOrderCatalogUpgradePreservesSavedV2Default(t *testing.T) {
 	if eventCount(t, p, "model.catalog_upgraded") != 1 {
 		t.Fatal("catalog upgrade did not run")
 	}
+}
+
+func reviewOrderSave(t *testing.T, tx pgx.Tx, p tenant.Principal, profiles ...string) error {
+	t.Helper()
+	if len(profiles) == 0 {
+		_, err := tx.Exec(t.Context(), `DELETE FROM model_pref_situation_orders WHERE column_key='other' AND situation='review'`)
+		return err
+	}
+	return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "review", "wait", profiles...)
 }

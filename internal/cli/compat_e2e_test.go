@@ -7,6 +7,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/inspr-at/paimos/internal/activity"
+	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/search"
 	"io"
 	"net"
 	"net/http"
@@ -19,20 +30,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-
-	"github.com/jackc/pgx/v5"
-
-	"github.com/inspr-at/paimos/internal/activity"
-	"github.com/inspr-at/paimos/internal/auth"
-	"github.com/inspr-at/paimos/internal/capacity"
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/harness"
-	"github.com/inspr-at/paimos/internal/httpapi"
-	"github.com/inspr-at/paimos/internal/inbox"
-	"github.com/inspr-at/paimos/internal/modelregistry"
-	"github.com/inspr-at/paimos/internal/nodes"
-	"github.com/inspr-at/paimos/internal/search"
 )
 
 func TestUnsupportedCompatCommands(t *testing.T) {
@@ -249,18 +246,21 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatalf("models %d %s", status, raw)
 	}
 	if err := db.InTenant(dbtest.Seed(ctx), opened.App, worker.TenantID, func(tx pgx.Tx) error {
-		// Activated pins register their native levels; Models orders own routing.
-		var codexProfile, claudeProfile string
-		if err := tx.QueryRow(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES
-			($1,'compat-codex','compat-fixture','codex','openai','gpt-6.1-sol','high','standard',3) RETURNING id::text`, worker.TenantID).Scan(&codexProfile); err != nil {
+		// An ID-only catalog reports no native levels, so the reviewer pin
+		// declares its own: reviews need the highest level at xhigh or above.
+		if _, err := tx.Exec(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES
+			($1,'compat-codex','compat-fixture','codex','openai','gpt-6.1-sol','high','standard',NULL),
+			($1,'compat-claude','compat-fixture','claude','anthropic','opus','xhigh','frontier',4)`, worker.TenantID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES
-			($1,'compat-claude','compat-fixture','claude','anthropic','opus','xhigh','frontier',4) RETURNING id::text`, worker.TenantID).Scan(&claudeProfile); err != nil {
+		// The Default and its Review order run Codex, then Claude (build and
+		// review-gate ladders before Models v2 migration 1333).
+		var pins []string
+		if err := tx.QueryRow(ctx, `SELECT array_agg(id::text ORDER BY harness='claude') FROM model_profiles WHERE slug IN ('compat-codex','compat-claude')`).Scan(&pins); err != nil {
 			return err
 		}
 		for _, situation := range []string{"first", "review"} {
-			if err := dbtest.SetModelOrder(ctx, tx, worker.TenantID, "", "other", situation, codexProfile, claudeProfile); err != nil {
+			if err := dbtest.ModelsOrder(ctx, tx, worker.TenantID, "other", situation, "wait", pins...); err != nil {
 				return err
 			}
 		}
@@ -309,7 +309,8 @@ func TestCompatEndToEnd(t *testing.T) {
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "model", "resolve", "review-gate", "--author-family", "xai"}, "")
 	line, _, _ := strings.Cut(out, "\n")
 	if code != 0 || !strings.Contains(out, "'{prompt}'") || strings.HasSuffix(strings.TrimSpace(line), "xai") {
-		t.Fatalf("review-gate code %d out %q err %q", code, out, errOut)
+		_, ladder, _ := runCLI([]string{"paimos", "--config", missing, "--json", "model", "resolve", "review-gate", "--author-family", "xai"}, "")
+		t.Fatalf("review-gate code %d out %q err %q; resolution %s", code, out, errOut, ladder)
 	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "session", "start", "--project", "AEON", "--agent", "worker"}, "")

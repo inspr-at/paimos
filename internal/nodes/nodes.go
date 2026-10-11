@@ -335,7 +335,7 @@ func (m *Module) createNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		if err != nil {
 			return err
 		}
-		issues, err := benefitTransition(ctx, tx, kindID, kind.Slug, "", state, fields)
+		issues, err := benefitTransition(ctx, tx, kindID, kind.Slug, "", state, nil, fields)
 		if err != nil {
 			return err
 		}
@@ -610,7 +610,7 @@ func (m *Module) updateNodeTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 				sets = append(sets, "status_autopilot = status_autopilot - 'missed_release'")
 			}
 		}
-		issues, err := benefitTransition(ctx, tx, current.KindID, kind.Slug, current.State, nextState, nextFields)
+		issues, err := benefitTransition(ctx, tx, current.KindID, kind.Slug, current.State, nextState, current.Fields, nextFields)
 		if err != nil {
 			return err
 		}

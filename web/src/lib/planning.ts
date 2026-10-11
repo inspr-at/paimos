@@ -52,6 +52,8 @@ export interface TicketPlanning {
   estimate_snapshot?: PlanningSnapshot
   route: PlanningRoute | null
   route_gap?: 'area' | 'review_gate' | 'registry'
+  /** A registry gap because the registry exceeds the Models bounds. */
+  route_truncated?: boolean
   tokens: PlanningTokens
   cost?: PlanningCost
   children?: { total: number; estimated: number; uncalibrated?: number }

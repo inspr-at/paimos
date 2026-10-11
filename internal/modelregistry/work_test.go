@@ -5,11 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
-
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/capacity"
@@ -17,8 +12,11 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
 )
 
 func prefsFixture(t *testing.T, fn func(pgx.Tx, tenant.Principal) error) {
@@ -712,5 +710,31 @@ func TestModelsV2NativeLevelsPerRoute(t *testing.T) {
 	ties[1].EffortLevel = ptr(4)
 	if tie := modelsRouteCandidates(ties, "", 3, false); len(tie) != 1 || tie[0].ID != "cursor-ultra" {
 		t.Fatalf("native tie did not go up: %+v", tie)
+	}
+}
+
+func enrollHarnesses(t *testing.T, tx pgx.Tx, p tenant.Principal, harnesses ...string) {
+	t.Helper()
+	var runner string
+	if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Work runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
+		t.Fatal(err)
+	}
+	schedule := capacity.DefaultSchedule()
+	schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+	raw, _ := json.Marshal(schedule)
+	for _, h := range harnesses {
+		var account string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner)
+ VALUES($1,$2,$2,'work-runner',$3,$2,now(),true,'work-generation',$4) RETURNING id::text`, p.TenantID, h, runner, p.ID).Scan(&account); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model)
+ VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted')`, p.TenantID, account); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule)
+ VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, account, raw); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

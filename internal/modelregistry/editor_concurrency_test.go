@@ -5,17 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/modelprefs"
-	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/jackc/pgx/v5"
 )
 
 func startEditorRequest(t *testing.T, h *editorHTTP, p tenant.Principal, method, path, body string, headers map[string]string) <-chan *httptest.ResponseRecorder {

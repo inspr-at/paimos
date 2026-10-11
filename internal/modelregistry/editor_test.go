@@ -8,13 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
-
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -23,7 +16,12 @@ import (
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/principallink"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/jackc/pgx/v5"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
 )
 
 func editorProject(t *testing.T, p tenant.Principal, key string) string {
@@ -474,4 +472,42 @@ type legacyPreferenceTestModule struct{ *Module }
 
 func (m legacyPreferenceTestModule) Mount(mux *http.ServeMux) {
 	m.Module.mount(mux, m.Module.writePreferences)
+}
+
+func errorText(raw []byte) string {
+	var out struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.Error == "" {
+		return string(raw)
+	}
+	return out.Error
+}
+
+func modelsState(t *testing.T, p tenant.Principal) string {
+	t.Helper()
+	var state string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
+ 'profiles',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_profiles p),
+ 'prefs',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_pref_profiles p),
+ 'orders',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_orders o),
+ 'situations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_situation_orders o),
+ 'pauses',(SELECT jsonb_agg(to_jsonb(o) ORDER BY harness,model) FROM model_pauses o),
+ 'constraints',(SELECT jsonb_agg(to_jsonb(o) ORDER BY scope,column_key,line) FROM model_row_constraints o),
+ 'ladders',(SELECT jsonb_agg(to_jsonb(r) ORDER BY role,priority) FROM model_role_routes r),
+ 'events',(SELECT count(*) FROM events WHERE type=$1),
+ 'counter',(SELECT to_jsonb(c) FROM event_counters c))::text`, evRoutes).Scan(&state)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func retiredLadderWrite(t *testing.T, h *editorHTTP, p tenant.Principal, path, body string, headers map[string]string) {
+	t.Helper()
+	w := h.call(t, p, "PUT", path, body, headers)
+	if w.Code != http.StatusGone || w.Header().Get("Deprecation") != "true" || w.Header().Get("Link") != `</api/model-preferences/orders>; rel="successor-version"` {
+		t.Fatalf("retired ladder writer answered %d: %s", w.Code, w.Body.String())
+	}
 }

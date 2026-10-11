@@ -5,6 +5,11 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"io"
 	"net"
 	"net/http"
@@ -13,13 +18,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/modelprefs"
-	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/inspr-at/paimos/internal/workorders"
-	"github.com/jackc/pgx/v5"
 )
 
 // Read signals the exact stalled-input boundary; Close releases it, including
@@ -193,17 +191,19 @@ func TestProjectQualifiedResolvePreservesLegacyLadder(t *testing.T) {
 	minimalAccount(t, p, profileBySlug(profiles, "claude-fable-xhigh"))
 	legacy := decode[Resolution](t, &p, http.MethodGet, path, "", 200)
 	if legacy.Profile == nil || legacy.CommandTemplate == "" || legacy.OwnerRequired {
-		t.Fatal("fixture must have a runnable automatic Models review")
+		t.Fatal("fixture must have a runnable Automatic review")
 	}
+	// Models v2 qualifies every route by residency (design c1), so the project's
+	// EU floor now holds review too: no EU account means no reviewer.
 	qualified := decode[struct {
 		Resolution
 		Trace PreferenceTrace `json:"trace"`
 	}](t, &p, http.MethodGet, path+"&project_id="+project, "", 200)
-	if qualified.Profile != nil || qualified.CommandTemplate != "" || !qualified.OwnerRequired || qualified.Trace.Blocked == "" {
-		t.Fatalf("project residency did not qualify Models routing: %+v", qualified)
+	if qualified.Profile != nil || !qualified.OwnerRequired || qualified.CommandTemplate != "" {
+		t.Fatalf("project residency did not hold the review route: %+v", qualified.Resolution)
 	}
 	if qualified.Trace.PersonID == nil || *qualified.Trace.PersonID != p.ID || qualified.Trace.Residency.Value != "eu" {
-		t.Fatalf("legacy project residency evidence lost: %+v", qualified.Trace)
+		t.Fatalf("project residency evidence lost: %+v", qualified.Trace)
 	}
 	placement := decode[struct {
 		WorkResolution
@@ -211,44 +211,6 @@ func TestProjectQualifiedResolvePreservesLegacyLadder(t *testing.T) {
 	}](t, &p, http.MethodGet, path+"&project_id="+project+"&mode=placement", "", 200)
 	if placement.Preference.Role != "review-gate" || placement.Trace.Residency.Value != "eu" || placement.CommandTemplate != "" || !placement.OwnerRequired {
 		t.Fatalf("explicit placement must enforce managed-review account requirements: %+v", placement)
-	}
-}
-
-// Risk: disabled history beyond the 512-profile bound fails harness-filtered
-// resolution, although live routing bounds only the enabled catalog.
-func TestResolveHarnessFilterIgnoresDisabledHistoryBound(t *testing.T) {
-	var p tenant.Principal
-	prefsFixture(t, func(tx pgx.Tx, who tenant.Principal) error {
-		p = who
-		return nil
-	})
-	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
-	fable := profileBySlug(profiles, "claude-fable-xhigh")
-	minimalAccount(t, p, fable)
-	var total, enabled int
-	inRegistry(t, p, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled)
-			SELECT $1,'disabled-history-'||n,'1','claude','anthropic','claude-opus-4','high','strong',false
-			FROM generate_series(1,513) n`, p.TenantID); err != nil {
-			return err
-		}
-		return tx.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER (WHERE enabled) FROM model_profiles`).Scan(&total, &enabled)
-	})
-	if total <= 512 || enabled == 0 || enabled > 512 {
-		t.Fatalf("fixture must exceed the bound only through disabled history: total %d, enabled %d", total, enabled)
-	}
-	path := "/api/models/resolve?role=review-gate&author_family=openai"
-	filtered := decode[Resolution](t, &p, http.MethodGet, path+"&harness=claude", "", http.StatusOK)
-	if filtered.Profile == nil || filtered.Profile.ID != fable.ID || filtered.CommandTemplate == "" {
-		t.Fatalf("harness-filtered resolve lost its enabled route: %+v", filtered)
-	}
-	unfiltered := decode[Resolution](t, &p, http.MethodGet, path, "", http.StatusOK)
-	if unfiltered.Profile == nil || unfiltered.Profile.ID != fable.ID || unfiltered.CommandTemplate == "" {
-		t.Fatalf("unfiltered resolve lost its enabled route: %+v", unfiltered)
-	}
-	status, body := call(t, &p, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "")
-	if status != http.StatusBadRequest || !strings.Contains(string(body), "role and harness combination is unsupported") {
-		t.Fatalf("harness outside the role's enabled routes: %d %s", status, body)
 	}
 }
 
@@ -316,13 +278,14 @@ func TestExplicitPlacementModeSelectsManagedReview(t *testing.T) {
 		WorkResolution
 		Preference PreferenceDecision `json:"preference"`
 	}](t, &p, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude&mode=placement", "", http.StatusOK)
-	if got.Preference.Role != "review-gate" || got.Preference.Kind.Slug != "other" || got.CommandTemplate != "" || !got.OwnerRequired || got.Profile != nil {
+	// Models v2 reviews are the Review situation of the work's row (Default here).
+	if got.Preference.Role != "review-gate" || got.Preference.Kind.Slug != "other" || got.Trace.Situation != "review" || got.CommandTemplate != "" || !got.OwnerRequired || got.Profile != nil {
 		t.Fatalf("explicit placement bypassed managed-review requirements: %+v", got)
 	}
 }
 
-// An unsaved initialized board is already Models authority. Review uses its
-// automatic fallback without reverting to retained role ladders.
+// The closed board an explicit placement request initializes stays at revision
+// zero. Review dispatch reads the same Models board and stays Automatic.
 func TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "closed-board", "person", "Owner", []string{"admin"})
@@ -330,7 +293,7 @@ func TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch(t *testing.T) {
 		WorkResolution
 		Preference PreferenceDecision `json:"preference"`
 	}](t, &p, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude&mode=placement", "", http.StatusOK)
-	if got.Preference.Kind.Slug != "other" || got.Trace.PreferenceOf == nil {
+	if got.Preference.Kind.Slug != "other" || got.Trace.Situation != "review" || got.Trace.PreferenceOf == nil {
 		t.Fatalf("explicit placement did not read the initialized board: %+v", got.Trace)
 	}
 	var revision int
@@ -348,8 +311,10 @@ func TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch(t *testing.T) {
 	if revision != 0 {
 		t.Fatalf("fixture is not the closed initializer: revision %d", revision)
 	}
-	if review.Trace.PreferenceOf == nil || review.Trace.OrderMode != reviewOrderLegacy || review.Trace.Column != "other" || review.Trace.Situation != "review" {
-		t.Fatalf("unsaved Models board lost automatic review authority: %+v", review.Trace)
+	// Since Models v2 every dispatch reads Models; with no saved Review order
+	// review stays Automatic (the former legacy order), untouched by the read.
+	if review.Trace.PreferenceOf == nil || review.Trace.OrderMode != reviewOrderLegacy {
+		t.Fatalf("closed board review dispatch is not Automatic through Models: %+v", review.Trace)
 	}
 }
 
@@ -380,5 +345,41 @@ func TestInvalidResolutionModeDoesNotPrepareCatalog(t *testing.T) {
 		if after := catalogSetupState(t, p); after != before {
 			t.Fatal("invalid mode persisted catalog setup")
 		}
+	}
+}
+
+func TestResolveHarnessFilterIgnoresDisabledHistoryBound(t *testing.T) {
+	var p tenant.Principal
+	prefsFixture(t, func(tx pgx.Tx, who tenant.Principal) error {
+		p = who
+		return nil
+	})
+	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
+	fable := profileBySlug(profiles, "claude-fable-xhigh")
+	minimalAccount(t, p, fable)
+	var total, enabled int
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled)
+			SELECT $1,'disabled-history-'||n,'1','claude','anthropic','claude-opus-4','high','strong',false
+			FROM generate_series(1,513) n`, p.TenantID); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER (WHERE enabled) FROM model_profiles`).Scan(&total, &enabled)
+	})
+	if total <= 512 || enabled == 0 || enabled > 512 {
+		t.Fatalf("fixture must exceed the bound only through disabled history: total %d, enabled %d", total, enabled)
+	}
+	path := "/api/models/resolve?role=review-gate&author_family=openai"
+	filtered := decode[Resolution](t, &p, http.MethodGet, path+"&harness=claude", "", http.StatusOK)
+	if filtered.Profile == nil || filtered.Profile.ID != fable.ID || filtered.CommandTemplate == "" {
+		t.Fatalf("harness-filtered resolve lost its enabled route: %+v", filtered)
+	}
+	unfiltered := decode[Resolution](t, &p, http.MethodGet, path, "", http.StatusOK)
+	if unfiltered.Profile == nil || unfiltered.Profile.ID != fable.ID || unfiltered.CommandTemplate == "" {
+		t.Fatalf("unfiltered resolve lost its enabled route: %+v", unfiltered)
+	}
+	status, body := call(t, &p, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "")
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "role and harness combination is unsupported") {
+		t.Fatalf("harness outside the role's enabled routes: %d %s", status, body)
 	}
 }

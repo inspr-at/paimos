@@ -42,7 +42,7 @@ func (l localPairing) client() (agentdwire.Client, error) {
 	return agentdwire.OpenClient(filepath.Join(l.root, "daemon"))
 }
 func localStatus(s agentd.LifecycleStatus) agentsetup.LocalStatus {
-	return agentsetup.LocalStatus{VerificationReasons: s.VerificationReasons, AccountStatuses: s.AccountStatuses, HarnessDetails: s.HarnessDetails, HarnessStatuses: s.HarnessStatuses, HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults, BlockedAccounts: append([]agentsetup.BlockedAccount(nil), s.BlockedAccounts...)}
+	return agentsetup.LocalStatus{AccountLogins: s.AccountLogins, VerificationReasons: s.VerificationReasons, AccountStatuses: s.AccountStatuses, HarnessDetails: s.HarnessDetails, HarnessStatuses: s.HarnessStatuses, HarnessErrors: s.HarnessErrors, ProfilePermissions: s.ProfilePermissions, HarnessFailed: s.HarnessFailed, LoginRequired: s.LoginRequired, VerificationUnavailable: s.VerificationUnavailable, Ready: s.Ready, DaemonID: s.DaemonID, State: s.State, Active: s.ActiveRunIDs, Unconfirmed: s.UnconfirmedRunIDs, SettlementPending: s.SettlementPendingRunIDs, VerificationResults: s.VerificationResults, BlockedAccounts: append([]agentsetup.BlockedAccount(nil), s.BlockedAccounts...)}
 }
 func (l localPairing) Status(ctx context.Context, account string) (agentsetup.LocalStatus, error) {
 	if l.supervisor != nil {
@@ -148,7 +148,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	var provider, openRouterFile string
 	f.StringVar(&provider, "provider", "", "pi provider ID; openrouter prompts for the key locally")
 	f.StringVar(&openRouterFile, "openrouter-env-file", "", "owner-selected private file containing OPENROUTER_API_KEY")
-	f.Var(&harnesses, "harness", "selected harness; repeat for another harness. Several accounts per harness require separate isolated config homes and account keys")
+	f.Var(&harnesses, "harness", "selected harness; repeat for another harness. Enroll each Claude login separately; every login needs person approval")
 	f.StringVar(&contextLabel, "account-context", "", "Expected account identity (pi: configured provider ID)")
 	f.StringVar(&account, "account-id", "", "remove only this enrolled account")
 	f.StringVar(&nodePath, "node-path", "", "pinned Node executable for npm harness launchers")
@@ -423,22 +423,48 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 		computer, _ = os.Hostname()
 	}
 	var p agentsetup.Progress
-	switch command {
-	case "setup":
-		p, err = engine.Begin(ctx, agentsetup.Options{Origin: origin, TenantID: tenantID, TenantSlug: tenantSlug, Workspace: workspace, ComputerName: computer, Platform: platform, Candidates: candidates, StartService: startService, NodePath: nodePath, ClaudeSDKPath: sdkPath})
-	case "repair":
-		if !installHooks {
-			return errors.New("repair requires --install-user-hooks; messaging remains off")
+	var poller setupPoller = engine
+	var running *agentdwire.Client
+	if savedErr == nil && (command == "add-harness" || command == "setup") {
+		c, openErr := agentdwire.OpenClient(filepath.Join(root, "daemon"))
+		if openErr == nil {
+			running = &c
+		} else if !errors.Is(openErr, os.ErrNotExist) {
+			return openErr
 		}
-		p, err = engine.RepairHooks(ctx, false)
-	case "status":
-		p, err = engine.Status(ctx)
-	case "disconnect":
-		p, err = engine.Disconnect(ctx, account)
-	case "add-harness":
-		p, err = engine.AddHarness(ctx, candidates)
-	default:
-		return errors.New("unknown setup command")
+	}
+	if running != nil {
+		req := agentsetup.SetupRequest{Operation: "add_harness", NodePath: nodePath, ClaudeSDKPath: sdkPath}
+		for _, c := range candidates {
+			req.Candidates = append(req.Candidates, agentsetup.LocalCandidate{Candidate: c, Path: c.Path, Home: c.Home, Identity: c.Identity, Version: c.Version})
+		}
+		if command == "setup" {
+			status, statusErr := engine.Status(ctx)
+			if statusErr != nil {
+				return statusErr
+			}
+			req = agentsetup.SetupRequest{Operation: "step", RequestID: status.RequestID}
+		}
+		p, err = running.Setup(ctx, req)
+		poller = daemonSetupPoller{client: *running, requestID: p.RequestID}
+	} else {
+		switch command {
+		case "setup":
+			p, err = engine.Begin(ctx, agentsetup.Options{Origin: origin, TenantID: tenantID, TenantSlug: tenantSlug, Workspace: workspace, ComputerName: computer, Platform: platform, Candidates: candidates, StartService: startService, NodePath: nodePath, ClaudeSDKPath: sdkPath})
+		case "repair":
+			if !installHooks {
+				return errors.New("repair requires --install-user-hooks; messaging remains off")
+			}
+			p, err = engine.RepairHooks(ctx, false)
+		case "status":
+			p, err = engine.Status(ctx)
+		case "disconnect":
+			p, err = engine.Disconnect(ctx, account)
+		case "add-harness":
+			p, err = engine.AddHarness(ctx, candidates)
+		default:
+			return errors.New("unknown setup command")
+		}
 	}
 	store.Unlock()
 	if command == "status" && err == nil {
@@ -450,7 +476,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	if err != nil {
 		return err
 	}
-	p, err = pollSetupProgress(ctx, command, p, once, jsonOutput, out, engine, store.Unlock, waitSetupPoll)
+	p, err = pollSetupProgress(ctx, command, p, once, jsonOutput, out, poller, store.Unlock, waitSetupPoll)
 	if err != nil {
 		return err
 	}
@@ -493,7 +519,6 @@ func setupVersionStatus(ctx context.Context, api agentsetup.PairingAPI, origin s
 }
 
 type setupPoller interface {
-	Status(context.Context) (agentsetup.Progress, error)
 	Step(context.Context) (agentsetup.Progress, error)
 }
 
@@ -528,6 +553,15 @@ func pollSetupProgress(ctx context.Context, command string, p agentsetup.Progres
 		}
 	}
 	return p, nil
+}
+
+type daemonSetupPoller struct {
+	client    agentdwire.Client
+	requestID string
+}
+
+func (p daemonSetupPoller) Step(ctx context.Context) (agentsetup.Progress, error) {
+	return p.client.Step(ctx, p.requestID)
 }
 
 func setupNeedsPoll(command string, p agentsetup.Progress) bool {
@@ -632,6 +666,30 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 		if _, err = fmt.Fprintln(out, line); err != nil {
 			return err
 		}
+		// A rotated profile may appear under several enrollments. Show its
+		// active login once, approved when it matches any connected enrollment.
+		logins := map[string]bool{}
+		for _, account := range p.Accounts {
+			if account.Harness == harness && account.State == "connected" {
+				if login, ok := p.AccountLogins[account.AccountID]; ok && login.ActiveIdentity != "" {
+					logins[login.ActiveIdentity] = logins[login.ActiveIdentity] || login.Approved
+				}
+			}
+		}
+		identities := make([]string, 0, len(logins))
+		for identity := range logins {
+			identities = append(identities, identity)
+		}
+		sort.Strings(identities)
+		for _, identity := range identities {
+			approval := "not approved on this computer; run aeon-agentd add-harness --harness " + harness
+			if logins[identity] {
+				approval = "approved on this computer"
+			}
+			if _, err = fmt.Fprintf(out, "harness %s active login %s: %s\n", harness, identity, approval); err != nil {
+				return err
+			}
+		}
 	}
 	accounts := append([]agentsetup.Enrollment(nil), p.Accounts...)
 	sort.Slice(accounts, func(i, j int) bool { return accounts[i].AccountID < accounts[j].AccountID })
@@ -644,6 +702,9 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 			}
 		}
 		line := "account " + account.AccountID + " harness " + account.Harness + " " + detail.State
+		if agentsetup.ValidLoginLabel(account.Label) {
+			line += " login " + account.Label
+		}
 		if detail.Reason != "" {
 			line += " reason " + detail.Reason
 		}

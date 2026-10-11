@@ -2,16 +2,14 @@
 package modelregistry
 
 import (
-	"net/http"
-	"reflect"
-	"testing"
-
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/jackc/pgx/v5"
+	"github.com/inspr-at/paimos/internal/modelprefs"
+	"net/http"
+	"testing"
 )
 
-// Risk: reading catalog facts appends guessed harness pins or replaces a saved policy.
+// Risk: reading catalog facts appends guessed harness pins or replaces a saved Models choice.
 func TestExistingTenantCatalogFactsPreservePolicyAndPins(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "upgrade", "person", "Ada", []string{"admin"})
@@ -29,56 +27,40 @@ func TestExistingTenantCatalogFactsPreservePolicyAndPins(t *testing.T) {
 				first = r.ID
 			}
 		}
-		return insertRoute(t.Context(), tx, p.TenantID, Route{Role: "build", Priority: 40, ProfileID: first, State: "available", Reason: "saved person policy"})
+		// The saved policy: a Default order of one step that ends in Wait.
+		return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "first", "wait", first)
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	readOrders := func() string {
+		t.Helper()
+		var orders string
+		if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT jsonb_agg(jsonb_build_array(column_key,situation,rank,efforts,end_mode) ORDER BY column_key,situation)::text FROM (`+modelprefs.OrdersSQL+`) o`).Scan(&orders)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return orders
+	}
+	saved := readOrders()
+	if saved != `[["other", "first", ["openai:sol"], {"openai:sol": "high"}, "wait"]]` {
+		t.Fatal("unexpected saved policy fixture", saved)
 	}
 	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
 	if len(profiles) != 40 {
 		t.Fatal("upgrade profiles", len(profiles))
 	}
-	readRoutes := func() []Route {
-		t.Helper()
-		var rows []Route
-		if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
-			var err error
-			result, err := tx.Query(t.Context(), `SELECT role,priority,profile_id::text,state,reason,valid_until FROM model_role_routes ORDER BY role,priority,profile_id LIMIT 301`)
-			if err != nil {
-				return err
-			}
-			rows, err = pgx.CollectRows(result, func(row pgx.CollectableRow) (Route, error) {
-				var r Route
-				err := row.Scan(&r.Role, &r.Priority, &r.ProfileID, &r.State, &r.Reason, &r.ValidUntil)
-				return r, err
-			})
-			return err
-		}); err != nil {
-			t.Fatal(err)
-		}
-		return rows
+	if got := readOrders(); got != saved {
+		t.Fatal("saved policy missing or replaced", got)
 	}
-	routes := readRoutes()
-	foundPolicy := false
-	for _, r := range routes {
-		if r.Role == "build" && r.Priority == 40 {
-			foundPolicy = r.Reason == "saved person policy"
-		}
-	}
-	if !foundPolicy {
-		t.Fatal("saved person policy missing or replaced", routes)
-	}
-	if len(routes) != 1 || routes[0].Role != "build" || routes[0].Priority != 40 {
-		t.Fatal("catalog added automatic routes", routes)
-	}
-	for _, prof := range profiles {
-		if prof.Harness == "gemini" || prof.Harness == "opencode" {
-			t.Fatal("catalog fabricated additional harness pin", prof)
+	for _, profile := range profiles {
+		if profile.Harness == "gemini" || profile.Harness == "opencode" {
+			t.Fatal("catalog fabricated additional harness pin", profile)
 		}
 	}
 	decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
-	again := readRoutes()
-	if !reflect.DeepEqual(again, routes) || eventCount(t, p, evSeeded) != 1 {
+	if readOrders() != saved || eventCount(t, p, evSeeded) != 1 {
 		t.Fatal("upgrade replay changed policy")
 	}
 }

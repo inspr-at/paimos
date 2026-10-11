@@ -5,12 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"testing"
-	"time"
-
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -21,8 +15,12 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/views"
 	"github.com/inspr-at/paimos/internal/workorders"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
 )
 
 func fairQueue(t *testing.T, f *harnessFixture, at time.Time) string {
@@ -168,7 +166,7 @@ func fairWorkerRoute(t *testing.T, f *harnessFixture) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'fair-worker','1','codex','openai','test-model','high','strong')`, f.person.TenantID, profile); err != nil {
 			return err
 		}
-		if err := dbtest.SetModelOrder(t.Context(), tx, f.person.TenantID, "", "other", "first", profile); err != nil {
+		if err := dbtest.ModelsOrder(t.Context(), tx, f.person.TenantID, "other", "first", "wait", profile); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2::uuid,$2::text,'codex','fair-test',$3,'Fair worker',1,clock_timestamp(),true,'generation-1',$4)`, f.person.TenantID, account, f.agent.ID, f.person.ID); err != nil {

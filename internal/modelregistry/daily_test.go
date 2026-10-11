@@ -3,15 +3,13 @@ package modelregistry
 
 import (
 	"encoding/json"
-	"slices"
-	"testing"
-	"time"
-
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/jackc/pgx/v5"
+	"slices"
+	"testing"
+	"time"
 )
 
 // Risk: daily fallback invents a provider order, ignores wait or unknown
@@ -84,7 +82,10 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 				return err
 			}
 		}
-		if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, "", "other", "first", next.ID, claude.ID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE model_role_routes SET priority=priority+100 WHERE role='build'`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2),($1,'build',2,$3)`, p.TenantID, next.ID, claude.ID); err != nil {
 			return err
 		}
 		settings := agentplan.DefaultDaily()
@@ -99,26 +100,52 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 		if err := save(); err != nil {
 			return err
 		}
-		// Both workspace and personal Models orders apply the cap at each
-		// route. Historical per-harness Wait is not a routing authority.
-		for _, board := range []bool{false, true} {
-			owner := ""
-			if board {
-				owner = p.ID
-			}
-			if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, owner, "other", "first", next.ID, claude.ID); err != nil {
-				return err
+		// Both passes route through Models: a Default the person saved, and the
+		// Default the migration builds from the ranked build ladder above.
+		for _, pass := range []string{"saved", "migrated"} {
+			if pass == "saved" {
+				var id string
+				if err := tx.QueryRow(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,template,thinking,usage,revision) VALUES($1,'workspace','balanced','deep','balanced',1) RETURNING id::text`, p.TenantID).Scan(&id); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank) VALUES($1,$2,'other','first',ARRAY['openai:sol','anthropic:opus'])`, p.TenantID, id); err != nil {
+					return err
+				}
+			} else {
+				// A saved multi-step Default keeps its chain in the migration;
+				// remove it so the migration converts the ladder instead.
+				if _, err := tx.Exec(ctx, `DELETE FROM model_pref_orders`); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `DELETE FROM model_pref_profiles`); err != nil {
+					return err
+				}
 			}
 			settings.AtLimit = "ladder"
 			if err := save(); err != nil {
 				return err
+			}
+			if pass == "migrated" {
+				// Risk: the live dial's Wait switch stops working after cutover.
+				// Migrate while following the ladder, then save Wait below so
+				// no migrated Wait-ending row can mask a missing dial bridge.
+				if _, err := tx.Exec(ctx, `SELECT aeon_migrate_models_v2($1)`, p.TenantID); err != nil {
+					return err
+				}
+				var rank []string
+				if err := tx.QueryRow(ctx, `SELECT rank FROM model_pref_orders WHERE column_key='other' AND situation='first'`).Scan(&rank); err != nil {
+					return err
+				}
+				if !slices.Equal(rank, []string{"openai:sol", "anthropic:opus"}) {
+					t.Fatalf("migration did not convert the ranked ladder: %v", rank)
+				}
 			}
 			got, err := ResolveWork(ctx, tx, p, WorkQuery{Role: "build", Area: "other", Situation: "first"}, now)
 			if err != nil {
 				return err
 			}
 			if got.Profile == nil || got.Profile.ID != claude.ID || !slices.Equal(got.Trace.QualifyingAccountIDs, []string{accounts["claude"]}) {
-				t.Fatalf("board=%v wrong ranked successor: %+v", board, got)
+				t.Fatalf("%s: wrong ranked successor: %+v", pass, got)
 			}
 			found := false
 			for _, step := range got.Ladder {
@@ -137,40 +164,30 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if got.Profile == nil || got.Profile.ID != claude.ID || !slices.Equal(got.Trace.QualifyingAccountIDs, []string{accounts["claude"]}) {
-				t.Fatalf("historical per-harness wait overrode Models: %+v", got)
+			if got.Profile != nil || got.Trace.Blocked != "daily_limit" {
+				t.Fatalf("%s: wait became successor: %+v", pass, got)
 			}
-			// Wait belongs to the Models order's ending. A one-line order
-			// stops after its capped route, with no provider added implicitly.
-			if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, owner, "other", "first", next.ID); err != nil {
-				return err
-			}
-			got, err = ResolveWork(ctx, tx, p, WorkQuery{Role: "build", Area: "other", Situation: "first"}, now)
+			// Risk: preserving a private owner's Wait choice leaks its cap
+			// code/reset to a workspace preview without usage visibility.
+			preview := tenant.Principal{TenantID: p.TenantID, Kind: tenant.Agent}
+			private, err := ResolveWork(ctx, tx, preview, WorkQuery{Role: "build", Area: "other", Situation: "first", WorkspaceOnly: true}, now)
 			if err != nil {
 				return err
 			}
-			// The order's Wait ending reports the capped route's own cause.
-			if got.Profile != nil || got.Trace.Blocked != "Codex account is at its daily cap until "+end.UTC().Format(time.RFC3339) {
-				t.Fatalf("Models Wait acquired a successor: %+v", got)
+			if private.Profile != nil || private.Trace.Blocked != "Codex account cannot take new work right now" || len(private.Ladder) == 0 || !slices.Equal(private.Ladder[0].SkipReasons, []string{"Codex account cannot take new work right now"}) {
+				t.Fatalf("private Wait leaked metrics or selected a successor: %+v", private)
 			}
-			if board {
-				// Risk: preserving a private owner's Wait choice leaks its cap
-				// code/reset to a workspace preview without usage visibility.
-				preview := tenant.Principal{TenantID: p.TenantID, Kind: tenant.Agent}
-				private, err := ResolveWork(ctx, tx, preview, WorkQuery{Role: "build", Area: "other", Situation: "first", WorkspaceOnly: true}, now)
-				if err != nil {
-					return err
-				}
-				if private.Profile != nil || private.Trace.Blocked != "Codex account cannot take new work right now" || len(private.Ladder) == 0 || !slices.Equal(private.Ladder[0].SkipReasons, []string{"Codex account cannot take new work right now"}) {
-					t.Fatalf("private Wait leaked metrics or selected a successor: %+v", private)
-				}
+			settings.AtLimit = "ladder"
+			if err := save(); err != nil {
+				return err
 			}
-		}
-		if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, "", "other", "first", next.ID, claude.ID); err != nil {
-			return err
-		}
-		if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, p.ID, "other", "first", next.ID, claude.ID); err != nil {
-			return err
+			resumed, err := ResolveWork(ctx, tx, p, WorkQuery{Role: "build", Area: "other", Situation: "first"}, now)
+			if err != nil {
+				return err
+			}
+			if resumed.Profile == nil || resumed.Profile.ID != claude.ID || !slices.Equal(resumed.Trace.QualifyingAccountIDs, []string{accounts["claude"]}) {
+				t.Fatalf("saving Follow the model ladder did not restore fallback: %+v", resumed)
+			}
 		}
 		settings.AtLimit = "ladder"
 		if err := save(); err != nil {
@@ -226,10 +243,8 @@ func TestDailyReviewKeepsReviewQualifiedAccounts(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes WHERE role='review-gate'`); err != nil {
-			return err
-		}
-		if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, "", "other", "review", reviewer.ID); err != nil {
+		// A saved Review order with this one model (a one-step review ladder).
+		if err := dbtest.ModelsOrder(ctx, tx, p.TenantID, "other", "review", "wait", reviewer.ID); err != nil {
 			return err
 		}
 		runner := func(name string, approved bool) (string, error) {
@@ -301,12 +316,14 @@ func TestDailyReviewKeepsReviewQualifiedAccounts(t *testing.T) {
 			return ResolveWork(ctx, tx, p, WorkQuery{Role: "review-gate", AuthorFamily: "openai"}, now)
 		}
 		// The only review-qualified account is exhausted; room on the unapproved sibling must not count.
+		// The one-step order ends in Wait, reporting the route's cause.
+		capped := "Claude account is at its daily cap until " + end.UTC().Format(time.RFC3339)
 		for _, atLimit := range []string{"ladder", "wait"} {
 			got, err := resolve(atLimit)
 			if err != nil {
 				return err
 			}
-			if got.Profile != nil || got.Trace.Blocked != "Claude account is at its daily cap until "+end.UTC().Format(time.RFC3339) || len(got.Trace.QualifyingAccountIDs) != 0 {
+			if got.Profile != nil || got.Trace.Blocked != capped || len(got.Trace.QualifyingAccountIDs) != 0 {
 				t.Fatalf("%s: headroom on an account review does not qualify kept the route: %+v", atLimit, got)
 			}
 		}

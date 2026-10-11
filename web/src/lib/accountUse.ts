@@ -2,7 +2,8 @@
 // AEON-1054: which accounts may work in which work context (concept AEON-1044
 // §2.5). The server is the boundary: every write carries the matrix revision it
 // was made on, a competing change answers 409 and nothing is saved. Undo sends
-// the inverse cells with the revision its own save returned.
+// the inverse cells with the revision its own save returned. A rule save names
+// only the rules it changes; new_models belongs to Models' Auto-update (AEON-1173).
 import { api, APIError } from './api.ts'
 
 export const PERMISSION = 'account.use.manage'
@@ -11,7 +12,8 @@ export type NewProjects = 'default' | 'holding'
 export type NewModels = 'allow' | 'shipped_only' | 'deny'
 export interface RuleValues { new_accounts: AllowAsk; new_contexts: AllowAsk; new_projects: NewProjects; new_models: NewModels }
 export interface Rules extends RuleValues { revision: number; enforced_at: string | null; confirmation_required: boolean; confirmed_at: string | null }
-export interface UseAccount { id: string; label: string; harness: string; plan: string | null; billing_mode: string; owner_id: string | null }
+/** awaiting (AEON-1173): added while New accounts asked first and no live context allows it yet; absent from older servers. */
+export interface UseAccount { id: string; label: string; harness: string; plan: string | null; billing_mode: string; owner_id: string | null; awaiting?: boolean }
 export interface WorkContext { id: string; name: string; kind: 'default' | 'regular' | 'holding'; new_accounts_override: 'deny' | null; archived_at: string | null; revision: number }
 export interface UseCell { account_id: string; context_id: string; allowed: boolean }
 export interface RunningOutside { run_id: string; account_id: string; node_id: string | null }
@@ -19,6 +21,8 @@ export interface Matrix {
   rules: Rules; accounts: UseAccount[]; contexts: WorkContext[]; cells: UseCell[]
   next_account: string | null; next_context: string | null
   running_outside: RunningOutside[]; running_outside_truncated: boolean
+  /** Projects waiting in Unassigned (AEON-1173); absent from older servers. */
+  holding_projects?: { count: number; first: { project_id: string; key: string; name: string }[] }
 }
 export interface CellResult { revision: number; changes: UseCell[]; undo: UseCell[] }
 export type Bulk = { scope: 'all'; allowed: boolean } | { scope: 'account'; account_id: string; allowed: boolean } | { scope: 'context'; context_id: string; allowed: boolean }
@@ -116,8 +120,18 @@ export function projectContextSummary(mapped: boolean, context: WorkContext | nu
 }
 export const saveCells = (expected_revision: number, change: { changes: UseCell[] } | { bulk: Bulk }, signal?: AbortSignal) =>
   call<CellResult>('/account-use/cells', 'PATCH', { expected_revision, ...change }, signal)
-export const saveRules = (expected_revision: number, values: RuleValues, signal?: AbortSignal) =>
-  call<Rules>('/account-use/rules', 'PUT', { expected_revision, ...values }, signal)
+/** The rules Settings edits. new_models is shown read-only; only Models' Auto-update writes it (AEON-1148). */
+export const RULE_KEYS = ['new_accounts', 'new_contexts', 'new_projects'] as const
+export type RuleKey = typeof RULE_KEYS[number]
+export type RuleChange = Partial<Pick<RuleValues, RuleKey>>
+/** A partial rule write: only the named rules of RULE_KEYS travel, whatever else the caller holds; the server keeps the rest. */
+export function ruleBody(expected_revision: number, change: RuleChange): Record<string, unknown> {
+  const body: Record<string, unknown> = { expected_revision }
+  for (const key of RULE_KEYS) if (change[key] !== undefined) body[key] = change[key]
+  return body
+}
+export const saveRules = (expected_revision: number, change: RuleChange, signal?: AbortSignal) =>
+  call<Rules>('/account-use/rules', 'PUT', ruleBody(expected_revision, change), signal)
 export const confirmMatrix = (expected_revision: number, signal?: AbortSignal) =>
   call<Rules>('/account-use/confirm', 'POST', { expected_revision }, signal)
 export const createContext = (expected_revision: number, name: string, signal?: AbortSignal) =>
@@ -167,22 +181,35 @@ export function predictedForNewAccount(rules: Pick<Rules, 'new_accounts'>, conte
   return rules.new_accounts === 'allow' ? tickable(contexts).filter(c => c.new_accounts_override !== 'deny') : []
 }
 
-export interface SwitchChoice<V extends string> { value: V; label: string; retired?: boolean }
-export interface SwitchDef<K extends keyof RuleValues = keyof RuleValues> { key: K; title: string; hint: string; choices: SwitchChoice<RuleValues[K]>[] }
-// D1 (decided 2026-10-09). Two values each; a migrated workspace keeps its third
-// model value visible, but it is never offered as a fresh choice.
-export const SWITCHES: SwitchDef[] = [
-  { key: 'new_accounts', title: 'New accounts', hint: 'Also covers a new harness', choices: [{ value: 'allow', label: 'Allow automatically' }, { value: 'ask', label: 'Ask first' }] },
-  { key: 'new_contexts', title: 'New contexts', hint: 'Which accounts a new context starts with', choices: [{ value: 'allow', label: 'Allow automatically' }, { value: 'ask', label: 'Ask first' }] },
-  { key: 'new_projects', title: 'New projects', hint: 'Ask first puts them in Unassigned', choices: [{ value: 'default', label: 'Follow automatically' }, { value: 'holding', label: 'Ask first' }] },
-  { key: 'new_models', title: 'New model versions', hint: 'New vendor lines always need a person', choices: [{ value: 'allow', label: 'Allow automatically' }, { value: 'deny', label: 'Ask first' }] },
+/** {default} and {unassigned} stand for the names of those two contexts in this workspace. */
+export interface RuleDef { key: RuleKey; title: string; auto: string; ask: string; say: Record<string, string>; example: Record<string, string>; short: Record<string, string> }
+// AEON-1149 "For new things": Automatic · Ask first, one sentence for the chosen value and one example.
+export const RULES: readonly RuleDef[] = [
+  { key: 'new_accounts', title: 'New accounts', auto: 'allow', ask: 'ask',
+    say: { allow: 'A new login may work in every context at once.', ask: 'A new login runs nothing until you tick where it may work.' },
+    example: { allow: 'you sign in to Claude with another login on one of your computers, and it works on every project right away.', ask: 'you sign in to Claude with another login on one of your computers, and it waits in the table below, unticked.' },
+    short: { allow: 'accounts work everywhere', ask: 'accounts ask first' } },
+  { key: 'new_contexts', title: 'New contexts', auto: 'allow', ask: 'ask',
+    say: { allow: 'A new context starts with every account ticked.', ask: 'A new context starts empty; you tick the accounts it may use.' },
+    example: { allow: 'you add a context for a client, and every account may work on its projects at once.', ask: 'you add a context for a client, and nothing works on its projects until you tick an account.' },
+    short: { allow: 'contexts start with every account', ask: 'contexts start empty' } },
+  { key: 'new_projects', title: 'New projects', auto: 'default', ask: 'holding',
+    say: { default: 'A new project goes to {default}, so the accounts ticked there work on it.', holding: 'A new project waits in {unassigned}, where no account works, until it gets a context.' },
+    example: { default: 'you create a project, and the accounts ticked in {default} may pick up its tickets at once.', holding: 'you create a project, and its tickets wait until someone chooses its context.' },
+    short: { default: 'projects go to {default}', holding: 'projects wait in {unassigned}' } },
 ]
-/** keepRetired: the screen opened with the third model value, so it keeps its place (AEON-541) once left, as a retired choice that cannot be picked. */
-export function switchChoices(def: SwitchDef, current: string, keepRetired = false): SwitchChoice<string>[] {
-  const legacy = def.key === 'new_models' && (current === 'shipped_only' || keepRetired)
-  return legacy ? [...def.choices, { value: 'shipped_only', label: 'Only with PAIMOS updates', retired: current !== 'shipped_only' }] : [...def.choices]
-}
-export const ruleValues = (r: RuleValues): RuleValues => ({ new_accounts: r.new_accounts, new_contexts: r.new_contexts, new_projects: r.new_projects, new_models: r.new_models })
+export interface ContextNames { default: string; unassigned: string }
+export const contextNames = (contexts: readonly WorkContext[]): ContextNames => ({
+  default: contexts.find(c => c.kind === 'default')?.name || 'Default',
+  unassigned: contexts.find(c => c.kind === 'holding')?.name || 'Unassigned',
+})
+export const named = (text: string, names: ContextNames) => text.replace(/\{(default|unassigned)\}/g, (_, key: keyof ContextNames) => names[key])
+export const ruleLabel = (def: RuleDef, value: string) => value === def.auto ? 'Automatic' : 'Ask first'
+/** The folded line: one short phrase per rule. */
+export const rulesPreview = (rules: RuleValues, names: ContextNames) => RULES.map(d => named(d.short[rules[d.key]] ?? '', names)).join(' · ')
+/** New model versions, read-only here: Auto-update in Models is its only editor. */
+export const modelRuleLabel = (value: NewModels) => value === 'allow' ? 'Automatic' : value === 'deny' ? 'Ask first' : 'Only with PAIMOS updates'
+export const MODELS_LINK = '/settings/models#model-refresh'
 
 export function billingLabel(mode: string): string {
   return mode === 'subscription' ? 'Subscription' : mode === 'api' ? 'API billing' : 'Billing unknown'

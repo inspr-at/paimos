@@ -4,7 +4,9 @@ import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useBusiness, type AreaId } from '../../stores/business'
 import { useSession } from '../../stores/session'
+import { settingsLink } from '../../lib/settings'
 import AppIcon, { type BizIconName as IconName } from './BizIcon.vue'
+import { SETUP_PLACE } from './areas'
 
 // The frame every Business page shares: eyebrow, title, one summary line, the
 // section tabs, and the closed state when the page's plugin is not enabled.
@@ -58,9 +60,10 @@ onMounted(() => { void business.loadPlugins() })
     <div v-else-if="closed" class="gate glass-card">
       <span class="gate-icon"><AppIcon name="lock" :size="18" /></span>
       <h2>{{ title }} is not enabled for this workspace</h2>
-      <p v-if="business.admin">You can enable it on the Business overview. Nothing changes for your projects until you do.</p>
+      <p v-if="business.admin">You can enable it in {{ SETUP_PLACE }}. Nothing changes for your projects until you do.</p>
       <p v-else>A workspace admin can enable it. Until then this page stays closed.</p>
-      <RouterLink class="btn" to="/business">{{ business.admin ? 'Open Business setup' : 'Business overview' }}</RouterLink>
+      <RouterLink v-if="business.admin" class="btn" :to="settingsLink('business', 'parts')">Set up in {{ SETUP_PLACE }}</RouterLink>
+      <RouterLink v-else class="btn" to="/business">Business overview</RouterLink>
     </div>
     <slot v-else />
   </section>

@@ -5,16 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http/httptest"
-	"strings"
-	"testing"
-	"time"
-
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/jackc/pgx/v5"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
 )
 
 func storedKindRows(t *testing.T, p tenant.Principal, kind string) string {

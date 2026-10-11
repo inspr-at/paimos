@@ -18,10 +18,11 @@ import (
 // Version 5 adds immutable routine workspace/grant provenance. Earlier records
 // retain their launch/process/ledger evidence and acquire no routine authority.
 // Version 6 separates retained checkout lineage from a continuation's launch.
-const RecordSchemaVersion = 6
+// Version 7 adds coordinator-owned review/fix artifact and policy lineage.
+const RecordSchemaVersion = 7
 
 func recordMigrations() map[int]func(json.RawMessage) (Record, error) {
-	return map[int]func(json.RawMessage) (Record, error){2: migrateRecordV2, 3: migrateRecordV2, 4: migrateRecordV2, 5: migrateRecordV5}
+	return map[int]func(json.RawMessage) (Record, error){2: migrateRecordV2, 3: migrateRecordV2, 4: migrateRecordV2, 5: migrateRecordV5, 6: migrateRecordV6}
 }
 
 func migrateRecordV2(raw json.RawMessage) (Record, error) {
@@ -39,12 +40,23 @@ func migrateRecordV2(raw json.RawMessage) (Record, error) {
 }
 
 func migrateRecordV5(raw json.RawMessage) (Record, error) {
-	record, err := decodeLegacyRecord(raw)
+	record, err := migrateRecordV6(raw)
 	if err != nil {
 		return Record{}, err
 	}
 	if record.RoutineWorkspace != nil && record.RoutineWorkspace.CheckoutLaunchID != "" {
 		return Record{}, errors.New("version 5 Record cannot carry continuation lineage")
+	}
+	return record, nil
+}
+
+func migrateRecordV6(raw json.RawMessage) (Record, error) {
+	record, err := decodeLegacyRecord(raw)
+	if err != nil {
+		return Record{}, err
+	}
+	if record.RoutineWorkspace != nil && record.RoutineWorkspace.Grant.Lineage != nil {
+		return Record{}, errors.New("legacy Record cannot carry review/fix lineage")
 	}
 	return record, nil
 }

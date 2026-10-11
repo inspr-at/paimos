@@ -43,6 +43,7 @@ func (s *managedToolServer) Close() error {
 
 type toolBinding struct {
 	routine                               *agentsetup.RoutineGrant
+	browser                               BrowserCaptureRequester
 	resourceEnvironment                   []string
 	reportActivity                        func(string) (string, bool)
 	api                                   RunToolAPI
@@ -58,7 +59,7 @@ func startManagedTools(credential string, b toolBinding) (*managedToolServer, er
 	}
 	if b.routine != nil {
 		grant := *b.routine
-		if grant.Validate() != nil || grant.AgentRunID != b.runID || grant.RuntimeCapability != "routine_native_coding_v1" || b.branch != "routine/"+grant.LaunchID {
+		if grant.Validate() != nil || grant.AgentRunID != b.runID || b.branch != "routine/"+grant.LaunchID {
 			return nil, ErrRoutineToolsUnavailable
 		}
 		b.routine = &grant
@@ -84,7 +85,8 @@ func startManagedTools(credential string, b toolBinding) (*managedToolServer, er
 	})
 	httpServer := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
 	out := &managedToolServer{listener: listener, server: httpServer,
-		tools: RunTools{URL: "http://" + listener.Addr().String(), Token: credential, Routine: b.routine != nil}}
+		tools: RunTools{URL: "http://" + listener.Addr().String(), Token: credential, Routine: b.routine != nil,
+			BrowserCaptureOnly: b.routine != nil && b.routine.RuntimeCapability == agentsetup.RoutineBrowserCapability}}
 	go func() { _ = httpServer.Serve(listener) }()
 	return out, nil
 }
@@ -131,6 +133,10 @@ type activityResult struct {
 
 func addManagedTools(s *mcp.Server, b toolBinding) {
 	if b.routine != nil {
+		addBrowserCaptureTool(s, b)
+		if b.routine.RuntimeCapability == agentsetup.RoutineBrowserCapability {
+			return
+		}
 		// Outward catalogue/evaluation/spend tools belong to the broker, never
 		// the builder's legacy daemon API credential or prompt instructions.
 		addManagedFileTools(s, b)

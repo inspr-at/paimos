@@ -7,12 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"testing"
-	"time"
-
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/capacity"
@@ -23,8 +17,12 @@ import (
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
 )
 
 type movedEscalationFixture struct {
@@ -625,7 +623,9 @@ func TestEscalationRetainsOriginalModelAcrossSelections(t *testing.T) {
 				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$1::uuid,$2::uuid] WHERE account_key='retry-claude'`, f.opus, fable); err != nil {
 					return err
 				}
-				if err := dbtest.SetModelOrder(t.Context(), tx, f.p.TenantID, "", "other", "stuck", fable, f.opus); err != nil {
+				// Explicit fixture build authority: a Stuck order of the two
+				// routes the account allows, ending in Wait (no Default tail).
+				if err := dbtest.ModelsOrder(t.Context(), tx, f.p.TenantID, "other", "stuck", "wait", f.opus, fable); err != nil {
 					return err
 				}
 				// Observe first while Fable is the original writer. It must survive a later session.
@@ -672,7 +672,10 @@ func TestEscalationRetainsOriginalModelAcrossSelections(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if pick.Profile != nil || pick.Trace.Blocked != "no allowed stronger route" {
+				// The escalation block is the whole walk's (the Decision Desk
+				// stores it as the route block); each held step names its own
+				// cause: Opus attempted by the retry, Fable as the retained original.
+				if pick.Profile != nil || pick.Trace.Blocked != "no allowed stronger route" || len(pick.Trace.Held) != 2 || pick.Trace.Held[0].Line != "anthropic:opus" || pick.Trace.Held[0].Reason != "already attempted" || pick.Trace.Held[1].Line != "anthropic:fable" || pick.Trace.Held[1].Reason != "already attempted" {
 					t.Fatal("original model returned to routing", pick)
 				}
 				if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {

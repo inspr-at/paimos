@@ -5,46 +5,43 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
-	"strings"
-	"testing"
-	"time"
-
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/jackc/pgx/v5"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
 )
 
+// reviewLookupFailure fails the nth query matching match (n=0 only counts).
 type reviewLookupFailure struct {
 	pgx.Tx
-	profiles bool
-	accounts int
-	failAt   int
-	err      error
+	match func(string) bool
+	seen  int
+	fail  int
+	err   error
 }
 
 func (f *reviewLookupFailure) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
-	query := strings.Join(strings.Fields(sql), " ")
-	if f.profiles && strings.Contains(query, "FROM model_profiles p JOIN model_profile_display d") && strings.Contains(query, "ORDER BY p.slug, p.version, p.id") {
-		return nil, f.err
-	}
-	if !f.profiles && strings.HasPrefix(query, "SELECT id::text, account_key, harness, daemon_id") {
-		f.accounts++
-		if f.err != nil && f.accounts == f.failAt {
+	if f.match(strings.Join(strings.Fields(sql), " ")) {
+		f.seen++
+		if f.seen == f.fail {
 			return nil, f.err
 		}
 	}
 	return f.Tx.Query(ctx, sql, args...)
 }
 
+// Risk: a lookup failing after the reviewer was chosen becomes a review
+// command or a silently different reviewer. Each fault is injected at its
+// query's last use, which a counting dry run locates after the choice.
 func TestResolveWorkPropagatesLateReviewLookupErrors(t *testing.T) {
-	for _, profiles := range []bool{true, false} {
-		name := "ReviewAccount"
-		if profiles {
-			name = "listProfiles"
-		}
+	for name, match := range map[string]func(string) bool{
+		"ReviewAccount": func(q string) bool { return strings.HasPrefix(q, "SELECT id::text, account_key, harness, daemon_id") },
+		"accountUse":    func(q string) bool { return strings.Contains(q, "aeon_account_use_allowed_for_project") },
+	} {
 		t.Run(name, func(t *testing.T) {
 			prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
 				var runner, account string
@@ -71,51 +68,31 @@ func TestResolveWorkPropagatesLateReviewLookupErrors(t *testing.T) {
  VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','tokens',10000000,'unrestricted')`, p.TenantID, account); err != nil {
 					return err
 				}
-				scope, err := modelprefs.SaveScope(t.Context(), tx, p, modelprefs.Scope{Level: "default"})
-				if err != nil {
-					return err
-				}
-				var kindID string
-				if err := tx.QueryRow(t.Context(), `SELECT id::text FROM work_kinds WHERE slug='review'`).Scan(&kindID); err != nil {
-					return err
-				}
-				if err := modelprefs.PutRow(t.Context(), tx, p, scope, kindID, modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": {Mode: "latest", Family: "anthropic", Line: "opus", Effort: "xhigh"}}}); err != nil {
-					return err
-				}
-				// A one-line saved Review order makes the chosen reviewer's
-				// account lookup the walk's second one.
 				var opus string
-				if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh' ORDER BY version DESC LIMIT 1`).Scan(&opus); err != nil {
+				if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&opus); err != nil {
 					return err
 				}
-				if err := dbtest.SetModelOrder(t.Context(), tx, p.TenantID, "", "other", "review", opus); err != nil {
+				// The Default's saved Review order (a review matrix pick before Models v2).
+				if err := dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "review", "wait", opus); err != nil {
 					return err
 				}
 				q := WorkQuery{Role: "review-gate", AuthorFamily: "openai", Harness: "claude"}
 				now := time.Now()
 				injected := errors.New("review lookup unavailable")
-				// Count the walk's account lookups; the last follows the choice.
-				counting := &reviewLookupFailure{Tx: tx}
-				if _, err := ResolveReviewFor(t.Context(), counting, p, q, now); err != nil {
-					return err
+				failing := &reviewLookupFailure{Tx: tx, match: match, err: injected}
+				if dry, err := ResolveReviewFor(t.Context(), failing, p, q, now); err != nil || dry.Profile == nil || dry.Account == nil || failing.seen == 0 {
+					t.Fatalf("fixture must choose a reviewer through this lookup: %+v seen=%d %v", dry, failing.seen, err)
 				}
-				failing := &reviewLookupFailure{Tx: tx, profiles: profiles, err: injected, failAt: counting.accounts}
+				failing.fail, failing.seen = failing.seen, 0
 				partial, err := ResolveReviewFor(t.Context(), failing, p, q, now)
-				if profiles {
-					// Models reads its catalog before the walk: the fault
-					// aborts resolution before any reviewer is chosen.
-					if partial.Profile != nil || !errors.Is(err, injected) {
-						t.Fatalf("catalog fault must abort before a choice: profile=%v error=%v", partial.Profile, err)
-					}
-				} else if partial.Profile == nil || !errors.Is(err, injected) {
+				if partial.Profile == nil || !errors.Is(err, injected) {
 					t.Fatalf("fault must follow a chosen profile: profile=%v error=%v", partial.Profile, err)
 				}
-				// Dispatch adds its daily account check after the choice.
-				countingWork := &reviewLookupFailure{Tx: tx}
-				if _, err := ResolveWork(t.Context(), countingWork, p, q, now); err != nil {
-					return err
+				failing.fail, failing.seen = 0, 0
+				if _, err := ResolveWork(t.Context(), failing, p, q, now); err != nil || failing.seen == 0 {
+					t.Fatalf("dispatch must use this lookup: seen=%d %v", failing.seen, err)
 				}
-				failing.accounts, failing.failAt = 0, countingWork.accounts
+				failing.fail, failing.seen = failing.seen, 0
 				out, err := ResolveWork(t.Context(), failing, p, q, now)
 				if !errors.Is(err, injected) || out.CommandTemplate != "" {
 					t.Fatalf("review error became a command: %+v, %v", out, err)

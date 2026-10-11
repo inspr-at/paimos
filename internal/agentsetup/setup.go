@@ -121,6 +121,7 @@ type snapshot struct {
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
+	AccountLogins         map[string]AccountLogin  `json:"account_logins,omitempty"`
 	HookCapabilities      []hookcap.Capability     `json:"hook_capabilities,omitempty"`
 	TouchIDConfirmation   string                   `json:"touch_id_confirmation,omitempty"`
 	TouchIDUpgradeCommand string                   `json:"touch_id_upgrade_command,omitempty"`
@@ -143,6 +144,7 @@ type Progress struct {
 	RetryAfterSeconds     int                      `json:"retry_after_seconds,omitempty"`
 }
 type LocalStatus struct {
+	AccountLogins                          map[string]AccountLogin
 	VerificationReasons                    map[string]string
 	AccountStatuses                        map[string]HarnessDetail
 	ProfilePermissions                     bool
@@ -187,6 +189,9 @@ type LocalDaemon interface {
 	Status(context.Context, string) (LocalStatus, error)
 }
 type Engine struct {
+	// RunningService advances existing enrollment only; its service owner is
+	// never called by enrollment happening inside the daemon.
+	RunningService     bool
 	PrepareLedger      func(context.Context, RuntimeConfig) error
 	LeaveLedger        func(context.Context) error
 	Hooks              *HookInstaller
@@ -733,7 +738,7 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 			return e.progress(s), err
 		}
 	}
-	if s.StartService {
+	if s.StartService && !e.RunningService {
 		if e.Services == nil {
 			return e.progress(s), errors.New("service manager unavailable")
 		}

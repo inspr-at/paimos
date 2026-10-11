@@ -2,15 +2,13 @@
 package modelregistry
 
 import (
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/jackc/pgx/v5"
 )
 
 func TestEditorExpiryBoundaryNewAndRetainedHolds(t *testing.T) {
