@@ -510,7 +510,7 @@ test('AEON-1212 approved check.mjs: the exact round-7 design passes and supplies
   const fixture = fileURLToPath(new URL('./fixtures/aeon-1212-ag-approved/', import.meta.url))
   const output = info.outputPath('AEON-1212/approved-reference')
   await mkdir(output, { recursive: true })
-  const units = await promisify(execFile)(process.execPath, ['--experimental-strip-types', '--test', fileURLToPath(new URL('./lead-panel.test.ts', import.meta.url))], { timeout: 30_000, maxBuffer: 1024 * 1024 })
+  const units = await promisify(execFile)(process.execPath, ['--experimental-strip-types', '--test', '--test-reporter=tap', fileURLToPath(new URL('./lead-panel.test.ts', import.meta.url))], { timeout: 30_000, maxBuffer: 1024 * 1024 })
   expect(units.stdout).toMatch(/# pass 3\b/)
   console.log('AEON-1212 panel units: 3 passed')
   await copyFile(resolve(fixture, 'agents-page-approved.html'), resolve(output, 'fragment.html'))
