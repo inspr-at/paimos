@@ -84,8 +84,8 @@ func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 					return err
 				}
 				// Lines of their own, so no catalog route stands in for them.
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier)
-    VALUES($1,$2,'complex-review','1','claude','anthropic','claude-complex-review-1','xhigh','strong')`, f.person.TenantID, complexProfile); err != nil {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,registered_effort_level)
+    VALUES($1,$2,'complex-review','1','claude','anthropic','claude-complex-review-1','xhigh','strong',4)`, f.person.TenantID, complexProfile); err != nil {
 					return err
 				}
 				pin := complexProfile
@@ -96,8 +96,8 @@ func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 					}
 				case "unqualified":
 					pin = testID()
-					if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier)
-    VALUES($1,$2,'unqualified-review','1','claude','anthropic','claude-unqualified-review-1','high','strong')`, f.person.TenantID, pin); err != nil {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,registered_effort_level)
+    VALUES($1,$2,'unqualified-review','1','claude','anthropic','claude-unqualified-review-1','high','strong',3)`, f.person.TenantID, pin); err != nil {
 						return err
 					}
 				}

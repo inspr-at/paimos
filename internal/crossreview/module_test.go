@@ -215,6 +215,20 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 	if len(unavailableProfiles) != 2 {
 		t.Fatalf("fixture must retain both unavailable fallback profiles, got %d", len(unavailableProfiles))
 	}
+	f.tx(t, func(tx pgx.Tx) error {
+		// Models stops at the selected candidate. Put the held fallback line
+		// before the reviewer so both native routes prove their refusal reason.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason)
+			SELECT tenant_id,harness,model,now()+interval '1 hour','fixture fallback unavailable'
+			FROM model_profiles WHERE version='review-fallback-fixture'`); err != nil {
+			return err
+		}
+		var fallback string
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='gemini-gemini-2-5-pro-32768'`).Scan(&fallback); err != nil {
+			return err
+		}
+		return reviewOrderFirst(t, tx, fallback)
+	})
 	path := "/api/nodes/" + f.ticket + "/reviews"
 	in := f.input()
 	var v Review

@@ -18,7 +18,7 @@ func TestManagedOrderActivationOnlyChangesFutureReviewBindings(t *testing.T) {
 	strong := testID()
 	f.tx(t, func(tx pgx.Tx) error {
 		// Its own line: a catalog Opus route would otherwise run first.
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'saved-strong-review','1','claude','anthropic','claude-saved-review-1','xhigh','strong')`, f.person.TenantID, strong); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,$2,'saved-strong-review','1','claude','anthropic','claude-saved-review-1','xhigh','strong',4)`, f.person.TenantID, strong); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET max_parallel_runs=4 WHERE id=$1`, f.account)
@@ -93,7 +93,7 @@ func TestManagedSavedOrderFinishedTelemetryThroughProductionMiddleware(t *testin
 	strong := testID()
 	f.tx(t, func(tx pgx.Tx) error {
 		// Its own line: a catalog Opus route would otherwise run first.
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'completion-saved-review','1','claude','anthropic','claude-completion-review-1','xhigh','strong')`, f.person.TenantID, strong); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,$2,'completion-saved-review','1','claude','anthropic','claude-completion-review-1','xhigh','strong',4)`, f.person.TenantID, strong); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET max_parallel_runs=4 WHERE id=$1`, f.account)
