@@ -227,7 +227,7 @@ func TestPoliciesLadderStatementTimeout503NoPartialAnswer(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if w.Code != 503 || w.Header().Get("Retry-After") != "1" || body["error"] != "Models compatibility read timed out; retry shortly." || body["steps"] != nil {
+	if w.Code != 503 || w.Header().Get("Retry-After") != "1" || body["error"] != "Review ladder read timed out; retry shortly." || body["steps"] != nil {
 		t.Fatalf("wrong timeout response %d %s", w.Code, w.Body.String())
 	}
 }
