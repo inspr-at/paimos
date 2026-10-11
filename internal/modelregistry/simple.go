@@ -133,7 +133,7 @@ func simpleTraceFor(out *WorkResolution, c boardCatalog) []simpleTrace {
 				if !step.Selected && seen[line] {
 					continue
 				}
-				trace = append(trace, simpleTrace{Role: out.Role, Line: line, Stage: candidateStage(step), Reason: strings.Join(step.SkipReasons, "; "), Selected: step.Selected})
+				trace = append(trace, simpleTrace{Role: out.Role, Line: line, Stage: candidateStage(step), Reason: joinReasons(step.SkipReasons), Selected: step.Selected})
 				seen[line] = true
 			}
 		}
@@ -224,7 +224,7 @@ func (m *Module) simple(w http.ResponseWriter, r *http.Request) {
 						reasons = append(reasons, step.Reason)
 					}
 				}
-				reason := strings.Join(reasons, "; ")
+				reason := joinReasons(reasons)
 				if reason == "" {
 					reason = "no qualified account with available capacity"
 				}

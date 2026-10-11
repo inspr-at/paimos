@@ -36,6 +36,7 @@ func (d Display) FullName() string { return strings.TrimSpace(d.DisplayName + " 
 // Profile is one immutable model pin.
 type Profile struct {
 	Source   string     `json:"source"`
+	Origin   string     `json:"origin"`
 	Note     string     `json:"note"`
 	RetireAt *time.Time `json:"retire_at"`
 	Retired  bool       `json:"retired"`
@@ -168,6 +169,15 @@ func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	if in.ModelVersion != "" {
 		overrides["model_version"] = in.ModelVersion
 	}
+	if cause == modelactivation.ShippedCatalog {
+		in.Source = "shipped"
+	}
+	// Keep the stored auto/manual contract readable by older servers. Origin
+	// is server-owned metadata, ignored by the existing display projection.
+	switch in.Source {
+	case "manual", "shipped", "provider", "harness":
+		overrides["origin"] = in.Source
+	}
 	stored, err := modelactivation.Activate(ctx, tx, p, modelactivation.Pin{
 		Slug: in.Slug, Version: in.Version, Harness: in.Harness, Family: in.Family,
 		Model: in.Model, Effort: in.Effort, Tier: in.Tier, Enabled: enabled,
@@ -186,6 +196,7 @@ func insertActivatedProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		out.EffortLevel = harnesslaunch.GeminiEffortLevel(out.Effort)
 	}
 	out.Source, out.Note = profileSource(in.Source), in.Note
+	out.Origin = profileOrigin(out, in.Source)
 	if in.RegisteredEffortLevel != nil {
 		out.EffortLevel = in.RegisteredEffortLevel
 	}
@@ -220,7 +231,7 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 
 func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, error) {
 	query := `
-		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.note,''),
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.display_overrides->>'origin',''), coalesce(p.note,''),
  (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
  EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
@@ -234,7 +245,7 @@ func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, er
 // listPickerProfiles bounds editor metadata before decoding and excludes retired revisions.
 func listPickerProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	return readProfiles(ctx, tx, `
-		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.note,''),
+		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.display_overrides->>'origin',''), coalesce(p.note,''),
  (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
  EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
@@ -251,9 +262,11 @@ func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 	out := []Profile{}
 	for rows.Next() {
 		var profile Profile
-		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Note, &profile.RetireAt, &profile.Retired); err != nil {
+		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Origin, &profile.Note, &profile.RetireAt, &profile.Retired); err != nil {
 			return nil, err
 		}
+		profile.Source = profileSource(profile.Source)
+		profile.Origin = profileOrigin(profile, profile.Origin)
 		if profile.Harness == "gemini" {
 			profile.EffortLevel = harnesslaunch.GeminiEffortLevel(profile.Effort)
 		}
@@ -547,4 +560,22 @@ func flushCatalogChanges(ctx context.Context, tx pgx.Tx, p tenant.Principal, cha
 		}
 	}
 	return nil
+}
+
+// Origin preserves the legacy auto/manual source contract while exposing provenance.
+// Later working observations cannot relabel an immutable shipped pin.
+func profileOrigin(p Profile, stored string) string {
+	switch stored {
+	case "manual", "shipped", "provider", "harness":
+		return stored
+	}
+	if p.Source == "manual" {
+		return "manual"
+	}
+	for _, cp := range catalogProfiles() {
+		if cp.Slug == p.Slug && cp.Harness == p.Harness && cp.Model == p.Model && cp.Effort == p.Effort {
+			return "shipped"
+		}
+	}
+	return "harness"
 }

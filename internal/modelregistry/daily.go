@@ -120,12 +120,12 @@ func resolveDailyWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			daily = agentplan.DailyStart(narrowed, harness, now)
 		}
 		if !daily.FollowLadder || q.Harness != "" {
-			return blockDaily(out, daily.Reason), nil
+			return blockDaily(out, daily.Reason, &daily), nil
 		}
 		for _, c := range out.Ladder {
 			c.Selected = false
 			if c.ProfileID == out.Profile.ID {
-				c.SkipReasons = append(c.SkipReasons, daily.Reason)
+				c.SkipReasons = append(c.SkipReasons, agentaccounts.ModelWaitReason(harness, &agentaccounts.CapacityWait{Code: daily.Reason, Until: daily.Until}))
 			}
 			trace = append(trace, c)
 		}
@@ -158,13 +158,25 @@ func dailyQualified(ctx context.Context, tx pgx.Tx, out WorkResolution, projectI
 	return agentaccounts.QualifyingAccountIDs(ctx, tx, profile.ID, profile.Harness, projectID, out.Residency, now)
 }
 
-func blockDaily(out WorkResolution, reason string) WorkResolution {
+func blockDaily(out WorkResolution, reason string, decisions ...*agentplan.DailyDecision) WorkResolution {
+	text := reason
+	if reason == "daily_limit" || reason == "daily_limit_unknown" {
+		harness := ""
+		if out.Profile != nil {
+			harness = out.Profile.Harness
+		}
+		wait := &agentaccounts.CapacityWait{Code: reason}
+		if len(decisions) > 0 {
+			wait.Until = decisions[0].Until
+		}
+		text = agentaccounts.ModelWaitReason(harness, wait)
+	}
 	out.Profile, out.CommandTemplate, out.OwnerRequired = nil, "", true
 	out.Trace.Blocked = reason
 	out.Trace.QualifyingAccountIDs = []string{}
 	for i := range out.Ladder {
 		if out.Ladder[i].Selected {
-			out.Ladder[i].SkipReasons = append(out.Ladder[i].SkipReasons, reason)
+			out.Ladder[i].SkipReasons = append(out.Ladder[i].SkipReasons, text)
 		}
 		out.Ladder[i].Selected = false
 	}
