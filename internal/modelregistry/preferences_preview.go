@@ -127,22 +127,24 @@ func derivedRoleSteps(ctx context.Context, tx pgx.Tx, person *string, role strin
 	if err != nil {
 		return nil, "", err
 	}
-	return derivedRoleStepsIn(ctx, tx, c, person, role, limit)
+	return derivedRoleStepsIn(ctx, tx, c, person, "", role, limit)
 }
 
 // routingRoleSteps derives the role's routes from the enabled catalog live
-// routing reads, so disabled history never counts toward its bound.
-func routingRoleSteps(ctx context.Context, tx pgx.Tx, person *string, role string) ([]ladderStep, error) {
+// routing reads, so disabled history never counts toward its bound. A
+// project's rules join as they do in resolution, so a route the project
+// pins counts as one of the role's routes.
+func routingRoleSteps(ctx context.Context, tx pgx.Tx, person *string, project, role string) ([]ladderStep, error) {
 	c, err := loadBoardCatalog(ctx, tx, true)
 	if err != nil {
 		return nil, err
 	}
-	steps, _, err := derivedRoleStepsIn(ctx, tx, c, person, role, 0)
+	steps, _, err := derivedRoleStepsIn(ctx, tx, c, person, project, role, 0)
 	return steps, err
 }
 
-func derivedRoleStepsIn(ctx context.Context, tx pgx.Tx, c boardCatalog, person *string, role string, limit int) ([]ladderStep, string, error) {
-	s, err := modelprefs.LoadBoardRouting(ctx, tx, person, "")
+func derivedRoleStepsIn(ctx context.Context, tx pgx.Tx, c boardCatalog, person *string, project, role string, limit int) ([]ladderStep, string, error) {
+	s, err := modelprefs.LoadBoardRouting(ctx, tx, person, project)
 	if err != nil {
 		return nil, "", err
 	}
