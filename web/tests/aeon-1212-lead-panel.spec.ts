@@ -378,9 +378,9 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
     const errors = watchErrors(page), world = await setup(page)
-    const shot = async (state: string) => {
+    const shot = async (state: string, captureWidth = width) => {
       await checkPanel(page, width === 400)
-      await page.screenshot({ path: info.outputPath(`AEON-1212/${state}-${width}-${look}.png`) })
+      await page.screenshot({ path: info.outputPath(`AEON-1212/${state}-${captureWidth}-${look}.png`) })
     }
     await page.goto(`/agents/${LEAD_SESSION}?tab=chat`)
     await expect(question(page)).toContainText('Asks you')
@@ -452,15 +452,15 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
     // The current P4 branch has the predecessor's fixed side panel; Focus and
     // Overview are P5 layouts. Its own rows must also behave in a wide panel.
     if (width === 1440) {
-      await panel(page).evaluate(element => (element as HTMLElement).style.setProperty('--panel-w', '760px'))
+      await page.setViewportSize({ width: 1800, height: 1000 })
       await expect(row.locator('.worker-execution')).toBeVisible()
     }
     await row.scrollIntoViewIfNeeded()
     await expectStableControls({ controls: { ...controls, row }, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
       { name: 'hover the owned worker row', run: async () => { await row.hover(); await expect(row).toBeVisible() } },
     ] })
-    await shot('worker-row')
-    if (width === 1440) await panel(page).evaluate(element => (element as HTMLElement).style.removeProperty('--panel-w'))
+    await shot('worker-row', width === 1440 ? 1800 : width)
+    if (width === 1440) await page.setViewportSize({ width, height: 1000 })
     await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
       { name: 'held history', run: async () => {
         world.state.admission = [{ ...makeAdmission(), reason_codes: ['dial_full'] }]
