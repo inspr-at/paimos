@@ -244,25 +244,6 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await row(page, 2).locator('.agent-link').click()
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('.now-eta .report-source')).toBeVisible()
-    // TEMPORARY diagnostic (AEON-1210 r4): which box or pseudo-element sticks out of the sheet's right edge.
-    const sticking = await panel.evaluate(el => {
-      const edge = el.getBoundingClientRect().left + el.clientLeft + el.clientWidth
-      const name = (c: Element) => `${c.tagName.toLowerCase()}.${[...c.classList].join('.')}[${(c.getAttribute('aria-label') ?? c.textContent ?? '').trim().slice(0, 30)}]`
-      const out: string[] = []
-      for (const c of el.querySelectorAll('*')) {
-        const r = c.getBoundingClientRect()
-        if (!r.width && !r.height) continue
-        if (r.right > edge - 14) out.push(`box ${name(c)} ${r.left.toFixed(1)}..${r.right.toFixed(1)}`)
-        for (const pseudo of ['::before', '::after']) {
-          const cs = getComputedStyle(c, pseudo)
-          if (cs.content === 'none' || cs.content === 'normal' || cs.display === 'none') continue
-          const w = parseFloat(cs.width)
-          if (w > r.width + 0.5) out.push(`${pseudo} ${name(c)} w ${w} over box ${r.width.toFixed(1)} ${cs.position} ${cs.transform} left ${cs.left} right ${cs.right}; box ${r.left.toFixed(1)}..${r.right.toFixed(1)}`)
-        }
-      }
-      return [`edge ${edge.toFixed(1)} scroll ${el.scrollWidth}/${el.clientWidth}`, ...out]
-    })
-    expect(sticking).toEqual([])
     // The Messages tab is Chat since AEON-977.
     await expectStableControls({
       controls: { overview: panel.getByRole('tab', { name: 'Overview' }), chat: panel.getByRole('tab', { name: 'Chat' }), tabs: panel.getByRole('tablist'), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel },
