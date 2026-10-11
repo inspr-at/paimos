@@ -81,8 +81,8 @@ func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 				if err := modelprefs.SeedKinds(t.Context(), tx, f.person.TenantID); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier)
-    VALUES($1,$2,'complex-review','1','claude','anthropic','qualified-review-model','xhigh','strong')`, f.person.TenantID, complexProfile); err != nil {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,registered_effort_level)
+    VALUES($1,$2,'complex-review','1','claude','anthropic','qualified-review-model','xhigh','strong',4)`, f.person.TenantID, complexProfile); err != nil {
 					return err
 				}
 				if tc.pin != "off-ladder" {

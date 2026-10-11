@@ -2,7 +2,6 @@
 package modelregistry
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -47,14 +46,14 @@ func TestInvalidInitializerStructureDoesNotPrepareCatalog(t *testing.T) {
 	const id = "00000000-0000-0000-0000-000000000001"
 	for _, additive := range []bool{false, true} {
 		for _, tc := range []struct{ name, method, path, body, reason string }{
-			{"null routes", "PUT", "/api/models/routes", `null`, "routes must be an array"},
-			{"role", "PUT", "/api/models/routes", `[{"role":"invalid","priority":1,"profile_id":"` + id + `","state":"available"}]`, "invalid role"},
-			{"priority", "PUT", "/api/models/routes", `[{"role":"build","priority":0,"profile_id":"` + id + `","state":"available"}]`, "priority must be positive"},
-			{"profile id", "PUT", "/api/models/routes", `[{"role":"build","priority":1,"profile_id":"invalid","state":"available"}]`, "invalid profile id"},
-			{"state", "PUT", "/api/models/routes", `[{"role":"build","priority":1,"profile_id":"` + id + `","state":"invalid"}]`, "invalid route state"},
-			{"duplicate", "PUT", "/api/models/routes", `[{"role":"build","priority":1,"profile_id":"` + id + `","state":"available"},{"role":"build","priority":2,"profile_id":"` + strings.ToUpper(id) + `","state":"available"}]`, "duplicate route"},
-			{"reason", "PUT", "/api/models/routes", `[{"role":"build","priority":1,"profile_id":"` + id + `","state":"unavailable","valid_until":"2030-01-01T00:00:00Z"}]`, "suppression requires a reason"},
-			{"expiry", "PUT", "/api/models/routes", `[{"role":"build","priority":1,"profile_id":"` + id + `","state":"unavailable","reason":"hold"}]`, "suppression requires a future expiry"},
+			{"null routes", "PUT", "/api/models/routes", `null`, "Role ladders moved"},
+			{"role", "PUT", "/api/models/routes", `[{"role":"invalid","priority":1,"profile_id":"` + id + `","state":"available"}]`, "Role ladders moved"},
+			{"priority", "PUT", "/api/models/routes", `[{"role":"build","priority":0,"profile_id":"` + id + `","state":"available"}]`, "Role ladders moved"},
+			{"profile id", "PUT", "/api/models/routes", `[{"role":"build","priority":1,"profile_id":"invalid","state":"available"}]`, "Role ladders moved"},
+			{"state", "PUT", "/api/models/routes", `[{"role":"build","priority":1,"profile_id":"` + id + `","state":"invalid"}]`, "Role ladders moved"},
+			{"duplicate", "PUT", "/api/models/routes", `[{"role":"build","priority":1,"profile_id":"` + id + `","state":"available"},{"role":"build","priority":2,"profile_id":"` + strings.ToUpper(id) + `","state":"available"}]`, "Role ladders moved"},
+			{"reason", "PUT", "/api/models/routes", `[{"role":"build","priority":1,"profile_id":"` + id + `","state":"unavailable","valid_until":"2030-01-01T00:00:00Z"}]`, "Role ladders moved"},
+			{"expiry", "PUT", "/api/models/routes", `[{"role":"build","priority":1,"profile_id":"` + id + `","state":"unavailable","reason":"hold"}]`, "Role ladders moved"},
 			{"resolver role", "GET", "/api/models/resolve?role=invalid", "", "unknown model role"},
 			{"resolver family", "GET", "/api/models/resolve?role=build&author_family=invalid", "", "unknown author family"},
 			{"resolver review family", "GET", "/api/models/resolve?role=review-gate", "", "review-gate requires author_family"},
@@ -75,20 +74,13 @@ func TestInvalidInitializerStructureDoesNotPrepareCatalog(t *testing.T) {
 				}
 				before := catalogSetupState(t, p)
 				status, body := call(t, &p, tc.method, tc.path, tc.body)
-				want, reason, message := http.StatusBadRequest, tc.reason, string(body)
-				if tc.path == "/api/models/routes" {
-					// The retired ladder writer refuses every body with 410, unread.
-					// Its JSON body escapes ">"; read the message as a client does.
-					want, reason = http.StatusGone, "Role ladders moved to Settings > Models"
-					var gone struct {
-						Error string `json:"error"`
-					}
-					if json.Unmarshal(body, &gone) == nil {
-						message = gone.Error
-					}
+				want := http.StatusBadRequest
+				if tc.method == "PUT" && tc.path == "/api/models/routes" {
+					// The retired ladder writer refuses every body undecoded.
+					want = http.StatusGone
 				}
-				if status != want || !strings.Contains(message, reason) {
-					t.Fatalf("wrong validation refusal %d %s; want %d %s", status, body, want, reason)
+				if status != want || !strings.Contains(string(body), tc.reason) {
+					t.Fatalf("wrong validation refusal %d %s; want %s", status, body, tc.reason)
 				}
 				if after := catalogSetupState(t, p); after != before {
 					t.Fatal("rejected request persisted setup")

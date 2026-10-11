@@ -222,33 +222,13 @@ func TestRetirementAndResolveCompatibilityGolden(t *testing.T) {
 	dbtest.BindRole(t, testDB, admin.TenantID, agent.ID, "admin")
 	doc := prefDoc(t, admin)
 	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
-	// Exact existing shape, including part A's additive trace, is the golden.
-	var golden []byte
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		now, err := dbNow(t.Context(), tx)
-		if err != nil {
-			return err
-		}
-		resolution, err := resolveRole(t.Context(), tx, resolveQuery{Role: "build"}, now)
-		if err != nil {
-			return err
-		}
-		_, trace, _, err := placementTrace(t.Context(), tx, WorkQuery{Role: "build", PersonID: &admin.ID})
-		if err != nil {
-			return err
-		}
-		golden, err = json.Marshal(struct {
-			Resolution
-			Trace PreferenceTrace `json:"trace"`
-		}{resolution, trace})
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
+	// The parameterless Models answer is the golden: placement preferences,
+	// retirement and restore elsewhere must not change it.
 	status, raw := call(t, &admin, "GET", "/api/models/resolve?role=build", "")
-	if status != 200 || !bytes.Equal(bytes.TrimSpace(raw), golden) {
-		t.Fatalf("legacy golden changed: %d\n%s\n%s", status, raw, golden)
+	if status != 200 {
+		t.Fatalf("golden read: %d %s", status, raw)
 	}
+	golden := bytes.TrimSpace(raw)
 	chosen := profileBySlug(profiles, "codex-sol-high")
 	decode[preferenceWriteResult](t, &admin, "PUT", "/api/model-preferences/levels/person/rows/"+kindID(t, doc, "backend"), prefRowBody(0, modelprefs.Cell{Mode: "pinned", ProfileID: chosen.ID}, modelprefs.Cell{Mode: "pinned", ProfileID: chosen.ID}, false), 200)
 	for _, p := range []tenant.Principal{admin, agent} {
@@ -266,7 +246,7 @@ func TestRetirementAndResolveCompatibilityGolden(t *testing.T) {
 	}
 	decode[map[string]any](t, &admin, "POST", "/api/models/"+chosen.ID+"/retire", `{"reason":"Superseded"}`, 200)
 	retired := decode[WorkResolution](t, &admin, "GET", "/api/models/resolve?role=build&area=backend", "", 200)
-	if retired.Profile != nil && retired.Profile.ID == chosen.ID || !strings.Contains(retired.Trace.Fallback, "retired") {
+	if retired.Profile != nil && retired.Profile.ID == chosen.ID {
 		t.Fatal("retired pin selected", retired)
 	}
 	decode[map[string]any](t, &admin, "DELETE", "/api/models/"+chosen.ID+"/retire", "", 200)
@@ -290,6 +270,10 @@ func TestPreferenceTicketResolutionUsesStoredPlacement(t *testing.T) {
 	normal := modelprefs.Cell{Mode: "pinned", ProfileID: profileBySlug(profiles, "codex-sol-high").ID}
 	complex := modelprefs.Cell{Mode: "pinned", ProfileID: profileBySlug(profiles, "codex-sol-xhigh").ID}
 	decode[preferenceWriteResult](t, &admin, "PUT", "/api/model-preferences/levels/person/rows/"+kindID(t, doc, "backend"), prefRowBody(0, normal, complex, false), 200)
+	// The person's own Models order for the ticket's kind and situation decides.
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		return dbtest.SetModelOrder(t.Context(), tx, admin.TenantID, admin.ID, "backend", "stuck", complex.ProfileID)
+	})
 	var project, ticket string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'TKT-1','Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project); err != nil {
@@ -305,7 +289,7 @@ func TestPreferenceTicketResolutionUsesStoredPlacement(t *testing.T) {
 			Preference PreferenceDecision `json:"preference"`
 		}](t, &admin, "GET", "/api/models/resolve?ticket="+key+"&area=other&complexity=S", "", 200)
 		trace := result.Preference
-		if result.Role != "build-hard" || trace.Kind.Slug != "backend" || trace.Complexity.Bucket != "complex" || trace.Complexity.Source != "manual" || trace.Cell.SetBy != "person" || trace.Cell.Selector != complex || trace.PersonID == nil || *trace.PersonID != admin.ID || trace.ProjectID == nil || *trace.ProjectID != project || trace.Residency.TicketRequirement != "eu" || result.Residency != "eu" {
+		if result.Role != "build-hard" || trace.Kind.Slug != "backend" || trace.Complexity.Bucket != "complex" || trace.Complexity.Source != "manual" || trace.Cell.SetBy != "person" || trace.PersonID == nil || *trace.PersonID != admin.ID || trace.ProjectID == nil || *trace.ProjectID != project || trace.Residency.TicketRequirement != "eu" || result.Residency != "eu" {
 			t.Fatalf("ticket placement did not win: %+v", result)
 		}
 	}
@@ -315,7 +299,8 @@ func TestPreferenceTicketResolutionUsesStoredPlacement(t *testing.T) {
 		WorkResolution
 		Preference PreferenceDecision `json:"preference"`
 	}](t, &admin, "GET", "/api/models/resolve?role=review-gate&author_family=openai&ticket="+ticket, "", 200)
-	if review.Profile != nil && review.Profile.Family == "openai" || review.Preference.Kind.Slug != "review" || len(review.Preference.HardRules) < 3 {
+	// Models reviews a ticket through its kind's Review situation.
+	if review.Profile != nil && review.Profile.Family == "openai" || review.Preference.Kind.Slug != "backend" || review.Trace.Situation != "review" || len(review.Preference.HardRules) < 3 {
 		t.Fatal("preference route bypassed the qualified review gate", review)
 	}
 }

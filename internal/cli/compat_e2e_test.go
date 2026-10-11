@@ -249,16 +249,20 @@ func TestCompatEndToEnd(t *testing.T) {
 		t.Fatalf("models %d %s", status, raw)
 	}
 	if err := db.InTenant(dbtest.Seed(ctx), opened.App, worker.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES
-			($1,'compat-codex','compat-fixture','codex','openai','gpt-6.1-sol','high','standard'),
-			($1,'compat-claude','compat-fixture','claude','anthropic','opus','xhigh','frontier')`, worker.TenantID); err != nil {
+		// Activated pins register their native levels; Models orders own routing.
+		var codexProfile, claudeProfile string
+		if err := tx.QueryRow(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES
+			($1,'compat-codex','compat-fixture','codex','openai','gpt-6.1-sol','high','standard',3) RETURNING id::text`, worker.TenantID).Scan(&codexProfile); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state)
-			SELECT $1,roles.role,CASE harness WHEN 'codex' THEN 1 ELSE 2 END,id,'available'
-			FROM model_profiles CROSS JOIN (VALUES ('build'),('review-gate')) AS roles(role)
-			WHERE slug IN ('compat-codex','compat-claude')`, worker.TenantID); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES
+			($1,'compat-claude','compat-fixture','claude','anthropic','opus','xhigh','frontier',4) RETURNING id::text`, worker.TenantID).Scan(&claudeProfile); err != nil {
 			return err
+		}
+		for _, situation := range []string{"first", "review"} {
+			if err := dbtest.SetModelOrder(ctx, tx, worker.TenantID, "", "other", situation, codexProfile, claudeProfile); err != nil {
+				return err
+			}
 		}
 		var owner string
 		if err := tx.QueryRow(ctx, `SELECT created_by_principal_id::text FROM agent_keys WHERE principal_id=$1`, worker.PrincipalID).Scan(&owner); err != nil {

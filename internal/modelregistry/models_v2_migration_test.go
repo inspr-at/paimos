@@ -57,9 +57,12 @@ func TestModelsV2MigrationGolden(t *testing.T) {
 		if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,set_by) VALUES($1,$2,'other','first',ARRAY['openai:sol'],$3)`, admin.TenantID, workspace, admin.ID); err != nil {
 			return err
 		}
-		// These ladders replace the compatibility fixture's shipped ones, so
-		// the golden reads exactly the saved ladders below.
+		// The fixture owns the saved ladders it migrates, rather than the
+		// catalog fixture's retained default history.
 		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
 			return err
 		}
 		for role, slugs := range map[string][]string{

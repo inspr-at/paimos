@@ -339,6 +339,17 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 		}
 
 		query := WorkQuery{Role: q.Role, AuthorFamily: q.AuthorFamily, Harness: q.Harness, ProjectID: project, PersonID: modelprefs.PrefsPerson(r.Context(), tx, current)}
+		if query.Harness != "" {
+			// A harness filter must name one of the role's Models routes,
+			// as it named a ladder route before the retirement.
+			steps, err := routingRoleSteps(r.Context(), tx, query.PersonID, query.Role)
+			if err != nil {
+				return err
+			}
+			if !ladderHasHarness(steps, query.Harness) {
+				return fail(http.StatusBadRequest, "role and harness combination is unsupported")
+			}
+		}
 		resolved, err := resolveDailyWith(r.Context(), tx, current, query, now, func(query WorkQuery) (WorkResolution, error) {
 			boardQuery := query
 			boardQuery.Area, boardQuery.Situation = "other", "first"

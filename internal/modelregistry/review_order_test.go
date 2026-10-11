@@ -4,6 +4,7 @@ package modelregistry
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,65 +17,54 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// reviewOrderSave saves the workspace Review order, Models v2's saved review
-// fallback (a saved-mode review ladder before). No profiles clears it, so
-// reviews return to Automatic (the former legacy mode).
-func reviewOrderSave(t *testing.T, tx pgx.Tx, p tenant.Principal, profiles ...string) error {
+// reviewOrderPut sends a review-order write to the retired ladder writer.
+func reviewOrderPut(t *testing.T, h *editorHTTP, p tenant.Principal, mode string, rows []Route) *httptest.ResponseRecorder {
 	t.Helper()
-	if len(profiles) == 0 {
-		_, err := tx.Exec(t.Context(), `DELETE FROM model_pref_situation_orders WHERE column_key='other' AND situation='review'`)
-		return err
+	path := "/api/models/routes?role=review-gate"
+	if mode != "" {
+		path += "&order_mode=" + mode
 	}
-	return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "review", "wait", profiles...)
+	return h.call(t, p, "PUT", path, editorJSON(rows), map[string]string{"If-Match": `"` + strings.Repeat("2", 64) + `"`})
 }
 
-// Risk: the retired ladder writer can still activate or undo a saved review
-// order, or the deprecated read misreports which one applies. It reports
-// "saved" exactly while a Review order exists and "legacy" (Automatic)
-// otherwise; every former activation write is 410 and changes nothing.
+// Risk: the retired ladder writer activates or resets the managed review
+// order, or changes rows or events. A saved Models Review situation is the
+// managed order now; retained mode metadata stays tenant-isolated.
 func TestReviewOrderActivationTokenAuditUndoAndLegacyPreservation(t *testing.T) {
 	p, h := editorFixture(t)
-	var strong, frontier Profile
-	inRegistry(t, p, func(tx pgx.Tx) error { strong, frontier = reviewOrderProfiles(t, tx, p); return nil })
 	before := h.ladder(t, p, "review-gate")
-	other := h.ladder(t, p, "build")
-	if before.OrderMode != "legacy" || len(before.ManagedFallbackOrder) != len(before.Routes) || before.EditToken != nil {
-		t.Fatal("missing Automatic snapshot", before)
+	if before.OrderMode != "legacy" || len(before.Steps) == 0 || len(before.ManagedFallbackOrder) != len(before.Steps) || before.EditToken != nil || before.CanEdit {
+		t.Fatal("missing automatic review snapshot")
 	}
-	state := modelsState(t, p)
-	for _, q := range []string{"?role=review-gate", "?role=review-gate&order_mode=saved", "?role=review-gate&order_mode=legacy", "", "?order_mode=saved", "?role=build&order_mode=saved", "?role=review-gate&order_mode=unknown", "?role=review-gate&order_mode=saved&order_mode=legacy"} {
-		retiredLadderWrite(t, h, p, "/api/models/routes"+q, editorJSON(before.Routes), map[string]string{"If-Match": routeEditToken("review-gate", before.Routes, "saved")})
+	n, state := eventCount(t, p, evRoutes), catalogSetupState(t, p)
+	for _, mode := range []string{"", "saved", "legacy", "unknown"} {
+		editorRetired(t, reviewOrderPut(t, h, p, mode, before.Routes))
 	}
-	if modelsState(t, p) != state || h.ladder(t, p, "review-gate").OrderMode != "legacy" {
-		t.Fatal("retired writer activated a saved order")
+	editorRetired(t, h.call(t, p, "PUT", "/api/models/routes?order_mode=saved", "[]", nil))
+	if eventCount(t, p, evRoutes) != n || catalogSetupState(t, p) != state || h.ladder(t, p, "review-gate").OrderMode != "legacy" {
+		t.Fatal("retired writer activated managed order or wrote")
 	}
-	// The successor: save a Review order, then remove it again (Undo).
-	inRegistry(t, p, func(tx pgx.Tx) error { return reviewOrderSave(t, tx, p, frontier.ID, strong.ID) })
-	saved := h.ladder(t, p, "review-gate")
-	if saved.OrderMode != "saved" || !reflect.DeepEqual(saved.ManagedFallbackOrder, []string{frontier.ID, strong.ID}) || saved.EditToken != nil {
-		t.Fatal("saved Review order not reported", saved)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return dbtest.SetModelOrder(t.Context(), tx, p.TenantID, "", "other", "review", before.ManagedFallbackOrder...)
+	}); err != nil {
+		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(h.ladder(t, p, "build").Routes, other.Routes) {
-		t.Fatal("Review order changed an unrelated role")
-	}
-	inRegistry(t, p, func(tx pgx.Tx) error { return reviewOrderSave(t, tx, p) })
-	restored := h.ladder(t, p, "review-gate")
-	if restored.OrderMode != "legacy" || !reflect.DeepEqual(restored.Routes, before.Routes) {
-		t.Fatal("removing the Review order did not restore Automatic", restored)
+	if saved := h.ladder(t, p, "review-gate"); saved.OrderMode != "saved" || saved.EditToken != nil || saved.CanEdit || len(saved.Steps) == 0 {
+		t.Fatal("saved Review situation is not the managed order", saved)
 	}
 	otherTenant := makePrincipal(t, "order-isolation", "person", "Other", []string{"admin"})
 	empty := h.ladder(t, otherTenant, "review-gate")
 	if empty.OrderMode != "legacy" || empty.Setup {
-		t.Fatal("order crossed tenant or initialized registry")
+		t.Fatal("mode crossed tenant or initialized registry")
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, otherTenant.TenantID, func(tx pgx.Tx) error {
 		expectConstraint(t, tx, "42501", `INSERT INTO model_review_order(tenant_id,ordinary_review_order_mode) VALUES($1,'saved')`, p.TenantID)
 		var count int
-		if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM model_review_order)+(SELECT count(*) FROM model_pref_situation_orders)`).Scan(&count); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_review_order`).Scan(&count); err != nil {
 			return err
 		}
 		if count != 0 {
-			t.Fatal("RLS exposed review ordering")
+			t.Fatal("RLS exposed ordering metadata")
 		}
 		return nil
 	}); err != nil {
@@ -82,12 +72,12 @@ func TestReviewOrderActivationTokenAuditUndoAndLegacyPreservation(t *testing.T) 
 	}
 }
 
-// Risk: a refused activation leaves part of a change behind. The retired
-// writer never reaches the event insert, so nothing can be half-written.
+// Risk: a review-order write to the retired ladder writer still reaches the
+// event insert, leaving a partial mode or rows behind an audit failure.
 func TestReviewOrderEventFailureRollsBackRowsAndMode(t *testing.T) {
 	p, h := editorFixture(t)
 	before := h.ladder(t, p, "review-gate")
-	state := modelsState(t, p)
+	n, state := eventCount(t, p, evRoutes), catalogSetupState(t, p)
 	if _, err := adminPool.Exec(t.Context(), `CREATE SEQUENCE review_order_probe; CREATE FUNCTION review_order_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type='model.routes_replaced' THEN PERFORM nextval('review_order_probe'); RAISE EXCEPTION 'review order injected event failure'; END IF; RETURN NEW; END $$; CREATE TRIGGER review_order_fail BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION review_order_fail()`); err != nil {
 		t.Fatal(err)
 	}
@@ -104,10 +94,10 @@ func TestReviewOrderEventFailureRollsBackRowsAndMode(t *testing.T) {
 		if reorder && len(rows) > 0 {
 			rows[0].Priority = 500
 		}
-		retiredLadderWrite(t, h, p, "/api/models/routes?role=review-gate&order_mode=saved", editorJSON(rows), map[string]string{"If-Match": routeEditToken("review-gate", before.Routes, "legacy")})
+		editorRetired(t, reviewOrderPut(t, h, p, "saved", rows))
 		after := h.ladder(t, p, "review-gate")
-		if after.OrderMode != "legacy" || !reflect.DeepEqual(after.Routes, before.Routes) || modelsState(t, p) != state {
-			t.Fatal("partial mode or rows after a refused activation")
+		if after.OrderMode != before.OrderMode || !reflect.DeepEqual(after.Routes, before.Routes) || eventCount(t, p, evRoutes) != n || catalogSetupState(t, p) != state {
+			t.Fatal("retired writer changed mode, rows or events")
 		}
 	}
 	var reached bool
@@ -116,9 +106,8 @@ func TestReviewOrderEventFailureRollsBackRowsAndMode(t *testing.T) {
 	}
 }
 
-// One qualified Claude account, with a strong and a frontier profile on lines
-// of their own. A saved Review order can change their rank, never their
-// qualification.
+// One qualified Claude account, with a strong profile before a frontier profile.
+// Saved mode can change their fallback rank, never their qualification.
 func reviewOrderProfiles(t *testing.T, tx pgx.Tx, p tenant.Principal) (Profile, Profile) {
 	t.Helper()
 	strong, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: "order-strong", Version: "1", Harness: "claude", Family: "anthropic", Model: "opus-order-strong", Effort: "xhigh", Tier: "strong"})
@@ -128,6 +117,14 @@ func reviewOrderProfiles(t *testing.T, tx pgx.Tx, p tenant.Principal) (Profile, 
 	frontier, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: "order-frontier", Version: "1", Harness: "claude", Family: "anthropic", Model: "opus-order-frontier", Effort: "xhigh", Tier: "frontier"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes WHERE role='review-gate'`); err != nil {
+		t.Fatal(err)
+	}
+	for i, profile := range []Profile{strong, frontier} {
+		if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "review-gate", Priority: i + 1, ProfileID: profile.ID, State: "available"}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	var runner, account string
 	if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Order runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
@@ -155,20 +152,27 @@ func reviewOrderProfiles(t *testing.T, tx pgx.Tx, p tenant.Principal) (Profile, 
 	return strong, frontier
 }
 
+// Risk: a saved Models Review order changes which qualified reviewer runs
+// first but qualifies a profile it lists: an unqualified, disabled, retired,
+// author-family, unsupported-adapter, filtered, accountless or non-resident
+// choice must stay refused with its cause.
 func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
 		strong, frontier := reviewOrderProfiles(t, tx, p)
+		// Only the fixture pins have an account; catalog lines stay unrunnable.
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$1::uuid,$2::uuid] WHERE account_key='order'`, strong.ID, frontier.ID); err != nil {
+			return err
+		}
 		now := time.Now()
 		q := WorkQuery{AuthorFamily: "openai"}
 		automatic, err := ResolveReviewFor(t.Context(), tx, p, q, now)
 		if err != nil {
 			return err
 		}
-		// Automatic takes the strongest qualified model, never the strong one first.
-		if automatic.Profile == nil || automatic.Profile.Tier != "frontier" || automatic.Trace.OrderMode != "legacy" {
-			t.Fatal("Automatic frontier/tier fallback changed", automatic)
+		if automatic.Profile == nil || automatic.Profile.ID != frontier.ID || automatic.Trace.OrderMode != "legacy" {
+			t.Fatal("automatic frontier/tier order changed", automatic)
 		}
-		if err := reviewOrderSave(t, tx, p, strong.ID, frontier.ID); err != nil {
+		if err := dbtest.SetModelOrder(t.Context(), tx, p.TenantID, "", "other", "review", strong.ID, frontier.ID); err != nil {
 			return err
 		}
 		saved, err := ResolveReviewFor(t.Context(), tx, p, q, now)
@@ -176,10 +180,9 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 			return err
 		}
 		if saved.Profile == nil || saved.Profile.ID != strong.ID || saved.Trace.OrderMode != "saved" || saved.Ladder[0].ProfileID != strong.ID {
-			t.Fatal("saved fallback not applied", saved)
+			t.Fatal("saved order not applied", saved)
 		}
-		// The former preferred pick is the Review order's first step.
-		if err := reviewOrderSave(t, tx, p, frontier.ID, strong.ID); err != nil {
+		if err := dbtest.SetModelOrder(t.Context(), tx, p.TenantID, "", "other", "review", frontier.ID, strong.ID); err != nil {
 			return err
 		}
 		preferred, err := ResolveReviewFor(t.Context(), tx, p, q, now)
@@ -187,21 +190,22 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 			return err
 		}
 		if preferred.Profile == nil || preferred.Profile.ID != frontier.ID || !preferred.Ladder[0].Selected || preferred.Trace.OrderMode != "saved" {
-			t.Fatal("preference lost qualified precedence", preferred)
+			t.Fatal("saved order lost qualified precedence", preferred)
 		}
+		const notRoute = "no registered route for this line"
 		for _, tc := range []struct {
 			name, sql, reason string
 			query             WorkQuery
 		}{
 			{"effort", "", "review requires strong or frontier at the highest native level", q},
 			{"tier", "", "review requires strong or frontier at the highest native level", q},
-			{"disabled", "", "policy", q},
+			{"disabled", "", notRoute, q},
 			{"retired", `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($2,$1,'order-test',$3)`, "retired", q},
 			{"author", "", "author family", WorkQuery{AuthorFamily: "anthropic"}},
 			{"adapter", "", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", WorkQuery{AuthorFamily: "xai"}},
 			{"harness", "", "harness filter", WorkQuery{AuthorFamily: "openai", Harness: "codex"}},
-			{"account", `UPDATE agent_accounts SET last_probe_ok=false`, "no qualified account with available capacity", q},
-			{"residency", "", "no qualified account with available capacity", WorkQuery{AuthorFamily: "openai", TicketResidency: "eu"}},
+			{"account", `UPDATE agent_accounts SET last_probe_ok=false`, "Claude account cannot take new work right now", q},
+			{"residency", "", "not allowed: eu", WorkQuery{AuthorFamily: "openai", TicketResidency: "eu"}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				sub, err := tx.Begin(t.Context())
@@ -209,7 +213,7 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer sub.Rollback(t.Context())
-				target := frontier.ID
+				target := frontier
 				if tc.name == "effort" || tc.name == "tier" || tc.name == "disabled" || tc.name == "adapter" {
 					effort, tier := frontier.Effort, frontier.Tier
 					if tc.name == "effort" {
@@ -218,21 +222,19 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 					if tc.name == "tier" {
 						tier = "fast"
 					}
-					// Lines of their own, so no catalog route stands in for them.
 					harness, family, model := "claude", "anthropic", "opus-test"
 					if tc.name == "adapter" {
-						harness, family, model = "codex", "openai", "gpt-6-ordertest"
+						harness, family, model = "codex", "openai", "gpt-6-sol"
 					}
-					level := 4
-					if tc.name == "effort" {
-						level = 3
-					}
-					if err := sub.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled,registered_effort_level) VALUES($1,$2,'1',$6,$7,$8,$3,$4,$5,$9) RETURNING id::text`, p.TenantID, "unqualified-"+tc.name, effort, tier, tc.name != "disabled", harness, family, model, level).Scan(&target); err != nil {
+					if err := sub.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled,registered_effort_level) VALUES($1,$2,'1',$6,$7,$8,$3,$4,$5,CASE $3 WHEN 'xhigh' THEN 4 ELSE 3 END) RETURNING id::text`, p.TenantID, "unqualified-"+tc.name, effort, tier, tc.name != "disabled", harness, family, model).Scan(&target.ID); err != nil {
 						t.Fatal(err)
 					}
-					if err := reviewOrderSave(t, sub, p, target, strong.ID); err != nil {
-						t.Fatal(err)
-					}
+					target.Harness, target.Family, target.Model = harness, family, model
+				}
+				// The saved order lists the target first.
+				order := []string{target.ID, strong.ID}
+				if err := dbtest.SetModelOrder(t.Context(), sub, p.TenantID, "", "other", "review", order...); err != nil {
+					t.Fatal(err)
 				}
 				if tc.sql != "" {
 					var err error
@@ -249,52 +251,74 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got.Profile != nil && got.Profile.ID == target {
-					t.Fatal("preferred unqualified profile escaped", tc.name)
+				if got.Profile != nil && got.Profile.ID == target.ID {
+					t.Fatal("saved unqualified profile escaped", tc.name)
 				}
-				var candidate Candidate
+				reasons := []string{}
+				found := false
 				for _, c := range got.Ladder {
-					if c.ProfileID == target {
-						candidate = c
+					if c.ProfileID == target.ID {
+						found = true
+						if c.Selected {
+							t.Fatal("saved unqualified profile selected", tc.name)
+						}
+						reasons = append(reasons, c.SkipReasons...)
 					}
 				}
-				if !strings.Contains(strings.Join(candidate.SkipReasons, ";"), tc.reason) || candidate.Selected {
-					t.Fatal("wrong qualifying refusal", tc.name, candidate, got.Ladder)
+				if !found {
+					// A choice without a dispatchable route is held at its line.
+					line, _ := modelsLine(target)
+					for _, held := range got.Trace.Held {
+						if held.Line == line {
+							reasons = append(reasons, held.Reason)
+						}
+					}
+				}
+				if !strings.Contains(strings.Join(reasons, ";"), tc.reason) {
+					t.Fatal("wrong qualifying refusal", tc.name, reasons, got)
 				}
 			})
 		}
-		// Security reviews read the same Review order, never Anthropic.
 		security, err := ResolveReviewFor(t.Context(), tx, p, WorkQuery{AuthorFamily: "openai", Area: "security"}, now)
 		if err != nil {
 			return err
 		}
-		if !security.OwnerRequired || security.Profile != nil || security.Trace.OrderMode != "saved" || security.Role != "review-gate-security" || len(security.Trace.Hard) != 1 || security.Trace.Hard[0] != "security_review" {
+		if !security.OwnerRequired || security.Profile != nil || security.Role != "review-gate-security" || len(security.Trace.Hard) != 1 || security.Trace.Hard[0] != "security_review" || security.Trace.Blocked != "no qualified security review profile/account" {
 			t.Fatal("saved order escaped security path", security)
 		}
 		return nil
 	})
 }
 
-// Risk: a read overlapping a Review order save mixes the old and new order.
-// The read waits on the order write and then sees the complete new order.
+// Risk: the compatibility read or the resolver mixes a saved Models Review
+// order with its previous state, or reads it without waiting for the writer
+// that holds it. Both wait for the commit and report the saved order.
 func TestReviewOrderReadAndResolverSnapshotBarrier(t *testing.T) {
 	for _, resolver := range []bool{false, true} {
 		t.Run(map[bool]string{false: "GET", true: "resolver"}[resolver], func(t *testing.T) {
 			p, h := editorFixture(t)
 			var strong, frontier Profile
-			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-				strong, frontier = reviewOrderProfiles(t, tx, p)
-				// The workspace profile exists before the barrier, so only the order changes.
-				_, err := tx.Exec(t.Context(), `INSERT INTO model_pref_profiles(tenant_id,scope,template,thinking,usage) SELECT $1,'workspace','balanced','standard','balanced' WHERE NOT EXISTS(SELECT 1 FROM model_pref_profiles WHERE scope='workspace')`, p.TenantID)
-				return err
-			}); err != nil {
+			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error { strong, frontier = reviewOrderProfiles(t, tx, p); return nil }); err != nil {
 				t.Fatal(err)
 			}
-			writer, pid := lockModelsTable(t, "model_pref_situation_orders")
+			writer, err := adminPool.Begin(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = writer.Rollback(context.Background()) })
+			// Hold every Models preference table the readers load, so the first
+			// such read waits for the whole saved order.
+			if _, err := writer.Exec(t.Context(), `LOCK TABLE model_pref_profiles, model_pref_orders, model_pref_situation_orders IN ACCESS EXCLUSIVE MODE`); err != nil {
+				t.Fatal(err)
+			}
+			var pid int
+			if err := writer.QueryRow(t.Context(), `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+				t.Fatal(err)
+			}
 			if _, err := writer.Exec(t.Context(), `SELECT set_config('aeon.tenant_id',$1,true)`, p.TenantID); err != nil {
 				t.Fatal(err)
 			}
-			if err := dbtest.ModelsOrder(t.Context(), writer, p.TenantID, "other", "review", "wait", strong.ID, frontier.ID); err != nil {
+			if err := dbtest.SetModelOrder(t.Context(), writer, p.TenantID, "", "other", "review", strong.ID, frontier.ID); err != nil {
 				t.Fatal(err)
 			}
 			result := make(chan error, 1)
@@ -332,55 +356,45 @@ func TestReviewOrderReadAndResolverSnapshotBarrier(t *testing.T) {
 				if route.Trace.OrderMode != "saved" || route.Profile == nil || route.Profile.ID != strong.ID || route.Ladder[0].ProfileID != strong.ID {
 					t.Fatal("resolver mixed order snapshot", route)
 				}
-			} else if view.OrderMode != "saved" || view.EditToken != nil || !reflect.DeepEqual(view.ManagedFallbackOrder, []string{strong.ID, frontier.ID}) {
+			} else if view.OrderMode != "saved" || view.EditToken != nil || len(view.ManagedFallbackOrder) < 2 || view.ManagedFallbackOrder[0] != strong.ID || view.ManagedFallbackOrder[1] != frontier.ID {
 				t.Fatal("GET mixed order snapshot", view)
 			}
 		})
 	}
 }
 
-// Risk: the retired activation still waits on the tenant fence, or a refused
-// activation (stale or revoked) changes the order. It is 410 at once.
+// Risk: a review-order write to the retired ladder writer waits behind the
+// tenant fence or commits; after demotion the route permission refuses it.
 func TestReviewOrderFinalRevocationAndConcurrentCAS(t *testing.T) {
 	for _, revoke := range []bool{false, true} {
 		t.Run(map[bool]string{false: "mode CAS", true: "revoke"}[revoke], func(t *testing.T) {
 			p, h := editorFixture(t)
 			before := h.ladder(t, p, "review-gate")
-			state := modelsState(t, p)
-			blocker, err := appPool.Begin(t.Context())
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer blocker.Rollback(context.Background())
-			if _, err := blocker.Exec(t.Context(), `SELECT set_config('aeon.tenant_id',$1,true)`, p.TenantID); err != nil {
-				t.Fatal(err)
-			}
-			if err := db.LockTenant(t.Context(), blocker, p.TenantID); err != nil {
-				t.Fatal(err)
-			}
+			check := editorRetired
 			if revoke {
-				_, err = blocker.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='member') WHERE principal_id=$1 AND scope_type='workspace'`, p.ID)
-				if err != nil {
+				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='member') WHERE principal_id=$1 AND scope_type='workspace'`, p.ID)
+					return err
+				}); err != nil {
 					t.Fatal(err)
 				}
+				check = func(t *testing.T, w *httptest.ResponseRecorder) {
+					t.Helper()
+					if w.Code != 403 {
+						t.Fatalf("demoted person reached the retired writer: %d %s", w.Code, w.Body.String())
+					}
+				}
 			}
-			// Answered while the fence is held: the retired writer waits for nothing.
-			w := finishEditorRequest(t, startEditorRequest(t, h, p, "PUT", "/api/models/routes?role=review-gate&order_mode=saved", editorJSON(before.Routes), map[string]string{"If-Match": routeEditToken("review-gate", before.Routes, "legacy")}))
-			if err := blocker.Commit(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			if w.Code != 410 {
-				t.Fatalf("retired activation answered %d: %s", w.Code, w.Body.String())
-			}
-			if h.ladder(t, p, "review-gate").OrderMode != "legacy" || modelsState(t, p) != state {
-				t.Fatal("refused activation changed the order or events")
+			retiredWriteWhileFenced(t, p, "/api/models/routes?role=review-gate&order_mode=saved", editorJSON(before.Routes), map[string]string{"If-Match": `"` + strings.Repeat("3", 64) + `"`}, check)
+			if h.ladder(t, p, "review-gate").OrderMode != before.OrderMode {
+				t.Fatal("refused mode write changed the order mode")
 			}
 		})
 	}
 }
 
-// Risk: the catalog upgrade replaces a saved Review order that equals the
-// historical default; equality does not undo the workspace's choice.
+// Catalog v3 must distinguish an explicitly saved v2 default from an untouched
+// fallback; equality with the historical rows does not undo opt-in ownership.
 func TestReviewOrderCatalogUpgradePreservesSavedV2Default(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "saved-v2-upgrade", "person", "Owner", []string{"admin"})
@@ -388,9 +402,9 @@ func TestReviewOrderCatalogUpgradePreservesSavedV2Default(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,'2')`, p.TenantID); err != nil {
 			return err
 		}
-		slugs := []string{"codex-astra-xhigh", "claude-fable-xhigh", "claude-opus-xhigh", "cursor-grok-xhigh", "gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default"}
-		ids := []string{}
-		for _, slug := range slugs {
+		slugs := append([]string(nil), v2Ladders["review-gate"]...)
+		slugs = append(slugs, "gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default")
+		for i, slug := range slugs {
 			var seed seedProfile
 			for _, candidate := range catalogProfiles() {
 				if candidate.Slug == slug {
@@ -404,25 +418,34 @@ func TestReviewOrderCatalogUpgradePreservesSavedV2Default(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			ids = append(ids, profile.ID)
-		}
-		if err := reviewOrderSave(t, tx, p, ids...); err != nil {
-			return err
+			if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "review-gate", Priority: i + 1, ProfileID: profile.ID, State: "available"}); err != nil {
+				return err
+			}
 		}
 		return saveReviewOrder(t.Context(), tx, p.TenantID, reviewOrderSaved)
 	})
-	order := func() string {
-		t.Helper()
-		var rank string
+	// Retained ladder rows are history for the deprecation release; the
+	// upgrade neither rewrites them nor turns them into Models orders.
+	retained := func() string {
+		var state string
 		inRegistry(t, p, func(tx pgx.Tx) error {
-			return tx.QueryRow(t.Context(), `SELECT jsonb_build_array(rank,efforts,end_mode)::text FROM model_pref_situation_orders WHERE column_key='other' AND situation='review'`).Scan(&rank)
+			return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
+ 'ladder',(SELECT jsonb_agg(jsonb_build_array(priority,profile_id,state) ORDER BY priority) FROM model_role_routes WHERE role='review-gate'),
+ 'orders',(SELECT count(*) FROM model_pref_orders)+(SELECT count(*) FROM model_pref_situation_orders))::text`).Scan(&state)
 		})
-		return rank
+		return state
 	}
-	before := order()
+	before := retained()
+	var rows int
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT count(*) FROM model_role_routes WHERE role='review-gate'`).Scan(&rows)
+	})
+	if rows != 6 {
+		t.Fatal("historical default fixture lost its rows")
+	}
 	decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
-	if after := order(); after != before {
-		t.Fatalf("catalog upgrade replaced saved Review order: before=%s after=%s", before, after)
+	if after := retained(); after != before {
+		t.Fatalf("catalog upgrade replaced saved review history: before=%s after=%s", before, after)
 	}
 	inRegistry(t, p, func(tx pgx.Tx) error {
 		mode, err := storedReviewOrder(t.Context(), tx)

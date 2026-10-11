@@ -7502,6 +7502,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestResolveAPIReturnsLoosenedResidencyTrace","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestResolveHarnessFilterIgnoresDisabledHistoryBound","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestResolvePlacementAuthorizationPrecedesPersonAndTicketMismatch","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestResolveTicketRoute","tier":"GATED-FULL"}
