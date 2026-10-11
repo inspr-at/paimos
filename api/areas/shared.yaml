@@ -1940,9 +1940,16 @@ components:
           uniqueItems: true
           description: "Nonempty only for allowlist; other modes require an empty list."
           items: {type: string, enum: [openai, anthropic, xai, cursor, google, local]}
+    ReviewDispatchFloor:
+      type: object
+      readOnly: true
+      required: [tiers, min_effort_level]
+      properties:
+        tiers: {type: array, items: {type: string, enum: [strong, frontier]}}
+        min_effort_level: {type: integer, const: 4, description: 'Reviews use the highest native level, with an equivalent effort level of at least 4.'}
     ReviewPolicySettings:
       type: object
-      required: [project_id, policy, effective, source, updated_by, updated_at]
+      required: [project_id, policy, effective, source, updated_by, updated_at, family_order, floor, security_excludes]
       properties:
         project_id: {type: [string, 'null'], format: uuid}
         policy:
@@ -1951,6 +1958,9 @@ components:
             - {type: 'null'}
           description: "The policy stored at this scope; null means inherited."
         effective: {$ref: '#/components/schemas/ReviewPolicy'}
+        family_order: {type: array, readOnly: true, maxItems: 6, uniqueItems: true, items: {type: string}, description: 'Automatic reviewer family order, skipping the author family.'}
+        floor: {$ref: '#/components/schemas/ReviewDispatchFloor'}
+        security_excludes: {type: array, readOnly: true, items: {type: string, const: anthropic}}
         workspace: {$ref: '#/components/schemas/ReviewPolicy', description: 'Current workspace default before the project override.'}
         valid_families: {type: array, maxItems: 6, uniqueItems: true, items: {type: string}, description: 'The server registry of eligible model families.'}
         source: {type: string, enum: [default, tenant, project]}

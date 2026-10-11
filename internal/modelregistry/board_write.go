@@ -224,6 +224,13 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 		if !validBoardColumn(s, column) {
 			return prefFail(422, "unknown_column")
 		}
+		if level == "person" {
+			for _, rule := range s.Rules {
+				if rule.Scope == "workspace" && rule.Column == column && rule.Lock == "top" {
+					return prefFail(http.StatusLocked, "column_locked")
+				}
+			}
+		}
 		profile := targetBoardProfile(s, level)
 		if err := checkBoardRevision(profile, in.Revision); err != nil {
 			return err

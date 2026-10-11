@@ -336,7 +336,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 // ModelsReviewHighestNative is the reversible 2026-10-10 review-floor decision.
 // The minimum equivalent stays xhigh even when the native catalog has no name.
 const ModelsReviewHighestNative = true
-const modelsReviewMinLevel = 4
+const modelsReviewMinLevel = reviewgate.ReviewMinEffortLevel
 
 // S2 carries a saved build ladder into the workspace Default when it has no
 // chain. Read that same expansion until persistence catches up, rather than

@@ -15,6 +15,7 @@
   "routes": {
     "DELETE /api/model-preferences/levels/{level}": "models.read|model_prefs.manage",
     "DELETE /api/model-preferences/levels/{level}/rows/{kindId}": "models.read|model_prefs.manage",
+    "DELETE /api/model-preferences/orders/{column}/first/never/{line}": "model_prefs.manage",
     "DELETE /api/model-preferences/orders/{column}/{situation}": "models.read|model_prefs.manage",
     "DELETE /api/models/{id}/retire": "models.manage",
     "DELETE /api/projects/{projectId}/lead-settings": "model_prefs.manage",
@@ -46,6 +47,7 @@
     "POST /api/work-kinds/{kindId}/restore": "model_prefs.manage",
     "PUT /api/model-preferences/levels/{level}": "models.read|model_prefs.manage",
     "PUT /api/model-preferences/levels/{level}/rows/{kindId}": "models.read|model_prefs.manage",
+    "PUT /api/model-preferences/orders/{column}/first/never/{line}": "model_prefs.manage",
     "PUT /api/model-preferences/orders/{column}/{situation}": "models.read|model_prefs.manage",
     "PUT /api/model-preferences/orders/{column}/{situation}/thinking": "models.read|model_prefs.manage",
     "PUT /api/model-preferences/profile": "models.read|model_prefs.manage",

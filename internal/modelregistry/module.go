@@ -48,6 +48,8 @@ func (m *Module) mount(mux *http.ServeMux, legacy http.HandlerFunc) {
 	mux.HandleFunc("GET /api/model-preferences/board", boundedPreferenceHandler(m.board))
 	mux.HandleFunc("PUT /api/model-preferences/orders/{column}/{situation}", boundedPreferenceHandler(m.writeBoardOrder))
 	mux.HandleFunc("DELETE /api/model-preferences/orders/{column}/{situation}", boundedPreferenceHandler(m.writeBoardOrder))
+	mux.HandleFunc("PUT /api/model-preferences/orders/{column}/first/never/{line}", boundedPreferenceHandler(m.writeNeverRule))
+	mux.HandleFunc("DELETE /api/model-preferences/orders/{column}/first/never/{line}", boundedPreferenceHandler(m.writeNeverRule))
 	mux.HandleFunc("PUT /api/model-preferences/orders/{column}/{situation}/thinking", boundedPreferenceHandler(m.writeBoardOrder))
 	mux.HandleFunc("PUT /api/model-preferences/profile", boundedPreferenceHandler(m.writeBoardProfile))
 	mux.HandleFunc("POST /api/model-preferences/tray/{line}/dismiss", boundedPreferenceHandler(m.dismissBoardLine))
