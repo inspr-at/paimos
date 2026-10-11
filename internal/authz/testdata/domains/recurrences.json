@@ -40,6 +40,7 @@
     "DELETE /api/recurrences/{recurrenceId}": "recurrences.manage",
     "GET /api/recurrences": "nodes.read|recurrences.manage",
     "GET /api/recurrences/{recurrenceId}": "nodes.read|recurrences.manage",
+    "GET /api/recurrences/{recurrenceId}/execution-principals": "recurrences.manage",
     "GET /api/recurrences/{recurrenceId}/guardrails": "nodes.read|recurrences.manage",
     "GET /api/recurrences/{recurrenceId}/history": "nodes.read|recurrences.manage",
     "GET /api/recurrences/{recurrenceId}/preview": "nodes.read|recurrences.manage",
