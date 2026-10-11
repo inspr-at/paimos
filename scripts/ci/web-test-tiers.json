@@ -688,6 +688,66 @@
     ,
     "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (short at 390)"
     ,
+    "browser:tests/header-desk-split.spec.ts:a long request wraps inside the preview at 1024"
+    ,
+    "browser:tests/header-desk-split.spec.ts:a long request wraps inside the preview at 1440"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 601 dark the trail drops whole segments and never cuts a chip"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 601 light the trail drops whole segments and never cuts a chip"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 640 dark the trail drops whole segments and never cuts a chip"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 640 light the trail drops whole segments and never cuts a chip"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 721 dark the trail drops whole segments and never cuts a chip"
+    ,
+    "browser:tests/header-desk-split.spec.ts:at 721 light the trail drops whole segments and never cuts a chip"
+    ,
+    "browser:tests/header-desk-split.spec.ts:from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a 375 px phone the chevron gives way to a ticket key and returns on the home page"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a 390 px phone the chevron gives way to a ticket key and returns on the home page"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 1024 the header fits the window and the search pill gives way last"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 601 the header fits the window and the search pill gives way last"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 640 the header fits the window and the search pill gives way last"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 721 the header fits the window and the search pill gives way last"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a project's tickets at 768 the header fits the window and the search pill gives way last"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a ticket at 375 px the preview is one entry away in the avatar sheet"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on a ticket at 390 px the preview is one entry away in the avatar sheet"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on home at 375 px the preview is one entry away in the avatar sheet"
+    ,
+    "browser:tests/header-desk-split.spec.ts:on home at 390 px the preview is on its chevron, not in the avatar sheet"
+    ,
+    "browser:tests/header-desk-split.spec.ts:the Desk is the last place; its chevron previews the Desk without moving the header at 1024 dark"
+    ,
+    "browser:tests/header-desk-split.spec.ts:the Desk is the last place; its chevron previews the Desk without moving the header at 1024 light"
+    ,
+    "browser:tests/header-desk-split.spec.ts:the Desk is the last place; its chevron previews the Desk without moving the header at 1440 dark"
+    ,
+    "browser:tests/header-desk-split.spec.ts:the Desk is the last place; its chevron previews the Desk without moving the header at 1440 light"
+    ,
+    "browser:tests/header-desk-split.spec.ts:the Desk is the last place; its chevron previews the Desk without moving the header at 390 dark"
+    ,
+    "browser:tests/header-desk-split.spec.ts:the Desk is the last place; its chevron previews the Desk without moving the header at 390 light"
+    ,
+    "browser:tests/header-desk-split.spec.ts:the preview opens on every page and links to the whole Desk"
+    ,
+    "browser:tests/header-desk-split.spec.ts:the preview says when it shows part of the Desk, nothing, or could not read it"
+    ,
+    "browser:tests/header-desk-split.spec.ts:the preview's controls stay put through reading, a failure, Retry and a refresh at 1440"
+    ,
+    "browser:tests/header-desk-split.spec.ts:the preview's controls stay put through reading, a failure, Retry and a refresh at 390"
+    ,
     "browser:tests/header-glimpse.spec.ts:the glimpse is off unless the developer setting turns it on, even after an earlier Display choice"
     ,
     "browser:tests/hours.spec.ts:an older week shows existing hours and logs into its existing period"
@@ -8288,6 +8348,66 @@
     ,
     {"kind":"browser","file":"tests/guest.spec.ts","name":"a project guest reads the project and may comment, nothing more","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"a long request wraps inside the preview at 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"a long request wraps inside the preview at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 601 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 601 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 640 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 640 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 721 dark the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"at 721 light the trail drops whole segments and never cuts a chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a 375 px phone the chevron gives way to a ticket key and returns on the home page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a 390 px phone the chevron gives way to a ticket key and returns on the home page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 1024 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 601 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 640 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 721 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a project's tickets at 768 the header fits the window and the search pill gives way last","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a ticket at 375 px the preview is one entry away in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on a ticket at 390 px the preview is one entry away in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on home at 375 px the preview is one entry away in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"on home at 390 px the preview is on its chevron, not in the avatar sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"the Desk is the last place; its chevron previews the Desk without moving the header at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"the Desk is the last place; its chevron previews the Desk without moving the header at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"the Desk is the last place; its chevron previews the Desk without moving the header at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"the Desk is the last place; its chevron previews the Desk without moving the header at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"the Desk is the last place; its chevron previews the Desk without moving the header at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"the Desk is the last place; its chevron previews the Desk without moving the header at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"the preview opens on every page and links to the whole Desk","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"the preview says when it shows part of the Desk, nothing, or could not read it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"the preview's controls stay put through reading, a failure, Retry and a refresh at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/header-desk-split.spec.ts","name":"the preview's controls stay put through reading, a failure, Retry and a refresh at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"Hide closed and status use the Tickets context and Open graph retains it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/header-glimpse-context.spec.ts","name":"a large project with fewer than eight linked matches has no glimpse","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14718,7 +14838,7 @@
     ,
     {"kind":"node","file":"tests/places.test.ts","name":"g then a place key goes there within the window; anything else disarms","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/places.test.ts","name":"places are Projects, Decision Desk, Agents, Business in that order; pages belong to one or none","tier":"ESSENTIAL"}
+    {"kind":"node","file":"tests/places.test.ts","name":"places are Projects, Agents, Business, Decision Desk in that order; pages belong to one or none","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/planning.test.ts","name":"canonical work aggregates disclose excluded uncalibrated leaves in token and cost tips","tier":"NIGHTLY"}
     ,
