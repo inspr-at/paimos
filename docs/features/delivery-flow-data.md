@@ -76,6 +76,8 @@ logs or credentials.
   returns 502; recovery also runs internally without a GitHub redelivery.
   Repeated attempts use the existing idempotent fact and event identities.
   A delivery ID reused with different authenticated content returns 409.
+  Missing canonical merge proof and refused ticket transitions stay pending;
+  internal recovery rechecks them under the existing ownership and human gates.
 
   The tenant-isolated receipt retains the verified payload, its digest and
   installation binding, never authentication headers or signatures. The DSAR

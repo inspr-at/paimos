@@ -239,7 +239,7 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 			continue
 		}
 		outcome, err := m.webhookStep(ctx, step, &receipt, e)
-		if err == nil {
+		if err == nil && outcome != webhookPending {
 			err = m.checkpointWebhook(ctx, step, outcome, &receipt)
 		}
 		if err != nil {
@@ -263,6 +263,17 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 				return &webhookStepError{step: "receipt", err: storeErr}
 			}
 			return &webhookStepError{step: failedStep, err: err}
+		}
+		if outcome == webhookPending {
+			// The receipt was accepted and the existing Needs You refusal, if
+			// any, is durable. Keep this step open for later proof/gate recovery.
+			return db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+				if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+					return err
+				}
+				_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET next_attempt_at=$2,last_step=$3,last_error_class=NULL WHERE delivery_id=$1`, id, m.now().Add(webhookBackoff(receipt.attempts)), step)
+				return err
+			})
 		}
 	}
 	return db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
@@ -322,7 +333,7 @@ func (m *Module) webhookStep(ctx context.Context, step string, receipt *webhookR
 		if !enabled {
 			return webhookNotConfigured, nil
 		}
-		return webhookRecorded, m.completeWebhook(ctx, receipt.event, receipt.raw, reader)
+		return m.completeWebhook(ctx, receipt.event, receipt.raw, reader)
 	}
 	return webhookFailed, errRead
 }

@@ -47,7 +47,7 @@ func (m *Module) mergeWebhook(w http.ResponseWriter, r *http.Request) {
 // The authenticated audit phase has accepted before merge completion starts.
 func (m *Module) finishMergeWebhook(w http.ResponseWriter, r *http.Request, raw []byte, reader MergeReader) {
 	name := r.Header.Get("X-GitHub-Event")
-	if err := m.completeWebhook(r.Context(), name, raw, reader); err != nil {
+	if _, err := m.completeWebhook(r.Context(), name, raw, reader); err != nil {
 		step := "completion"
 		var failed *webhookStepError
 		if errors.As(err, &failed) {
@@ -63,12 +63,13 @@ func (m *Module) finishMergeWebhook(w http.ResponseWriter, r *http.Request, raw 
 	w.WriteHeader(204)
 }
 
-func (m *Module) completeWebhook(ctx context.Context, name string, raw []byte, reader MergeReader) error {
+func (m *Module) completeWebhook(ctx context.Context, name string, raw []byte, reader MergeReader) (webhookOutcome, error) {
 	var e envelope
 	if err := json.Unmarshal(raw, &e); err != nil {
-		return &webhookStepError{step: "parse", err: webhookClass("invalid_json")}
+		return webhookFailed, &webhookStepError{step: "parse", err: webhookClass("invalid_json")}
 	}
 	var err error
+	pending := false
 	step := ""
 	facts := []MergeFact{}
 	switch name {
@@ -84,7 +85,7 @@ func (m *Module) completeWebhook(ctx context.Context, name string, raw []byte, r
 	case "merge_group":
 		if e.Action == "destroyed" {
 			step = "reader-completedGroup"
-			facts, err = m.completedGroup(ctx, reader, e.Group.Head)
+			facts, pending, err = m.completedGroup(ctx, reader, e.Group.Head)
 		}
 	case "push":
 		if e.Ref == "refs/heads/main" {
@@ -94,49 +95,64 @@ func (m *Module) completeWebhook(ctx context.Context, name string, raw []byte, r
 	}
 	if err == nil && len(facts) > 0 {
 		step = "completeMerges"
-		err = m.completeMerges(ctx, facts)
+		var refused bool
+		refused, err = m.completeMergesPending(ctx, facts)
+		pending = pending || refused
 	}
 	if err != nil {
-		return &webhookStepError{step: step, err: err}
+		return webhookFailed, &webhookStepError{step: step, err: err}
 	}
-	return nil
+	if step == "" {
+		return webhookNothingToRecord, nil
+	}
+	// Canonical merge proof can arrive after destruction/closure. A refused
+	// ticket can also become eligible later; neither is a completed effect.
+	if pending || len(facts) == 0 {
+		return webhookPending, nil
+	}
+	return webhookRecorded, nil
 }
 
 // Queue refs can disappear before destroyed is delivered. The authenticated
 // checks_requested ledger retains every constituent; confirm each through the
 // canonical pull endpoint, including distinct merge SHAs in one group.
-func (m *Module) completedGroup(ctx context.Context, reader MergeReader, head string) ([]MergeFact, error) {
+func (m *Module) completedGroup(ctx context.Context, reader MergeReader, head string) ([]MergeFact, bool, error) {
 	var raw []byte
 	err := db.InTenant(db.AllProjects(ctx, "merge group completion subjects"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, `SELECT observations FROM delivery_github_events WHERE repository=$1 AND event='merge_group' AND action='checks_requested' AND head_sha=$2 ORDER BY sequence DESC LIMIT 1`, m.config.Repository, head).Scan(&raw)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return reader.MergedGroup(ctx, head)
+		facts, err := reader.MergedGroup(ctx, head)
+		return facts, len(facts) == 0, err
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var observations []Observation
 	if json.Unmarshal(raw, &observations) != nil || len(observations) > 100 {
-		return nil, errRead
+		return nil, false, errRead
 	}
 	if len(observations) == 0 {
-		return reader.MergedGroup(ctx, head)
+		facts, err := reader.MergedGroup(ctx, head)
+		return facts, len(facts) == 0, err
 	}
 	out := []MergeFact{}
+	pending := false
 	for _, o := range observations {
 		if o.PR == nil {
-			return nil, errRead
+			return nil, false, errRead
 		}
 		f, err := reader.MergedPull(ctx, *o.PR)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if f != nil {
 			out = append(out, *f)
+		} else {
+			pending = true
 		}
 	}
-	return out, nil
+	return out, pending, nil
 }
 
 type mergeEntry struct {
@@ -433,14 +449,20 @@ func lockMergeEventParentsTx(ctx context.Context, tx pgx.Tx, actor tenant.Princi
 }
 
 func (m *Module) completeMerges(ctx context.Context, facts []MergeFact) error {
+	_, err := m.completeMergesPending(ctx, facts)
+	return err
+}
+
+func (m *Module) completeMergesPending(ctx context.Context, facts []MergeFact) (bool, error) {
 	if len(facts) > 100 {
-		return errRead
+		return false, errRead
 	}
 	actor, err := m.auditActor(ctx, m.config.TenantID)
 	if err != nil {
-		return err
+		return false, err
 	}
-	return db.InTenant(db.AllProjects(ctx, "authenticated main merge completion"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+	pending := false
+	err = db.InTenant(db.AllProjects(ctx, "authenticated main merge completion"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 		if err := db.LockWorkTreeTx(ctx, tx); err != nil {
 			return err
 		}
@@ -476,7 +498,9 @@ func (m *Module) completeMerges(ctx context.Context, facts []MergeFact) error {
 			if c != nil {
 				changes = append(changes, *c)
 			}
+			pending = pending || e.Result == "refused"
 		}
 		return flushMergeTx(ctx, tx, actor, m.config.Repository, entries, changes)
 	})
+	return pending, err
 }

@@ -16,6 +16,7 @@ const (
 	webhookRecorded        webhookOutcome = "recorded"
 	webhookNotConfigured   webhookOutcome = "not_configured"
 	webhookNothingToRecord webhookOutcome = "nothing_to_record"
+	webhookPending         webhookOutcome = "pending"
 	webhookFailed          webhookOutcome = "failed"
 )
 

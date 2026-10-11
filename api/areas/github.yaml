@@ -12,7 +12,7 @@ paths:
         - {name: X-GitHub-Event, in: header, required: true, schema: {type: string, enum: [pull_request, check_run, check_suite, merge_group, push, status, workflow_run]}}
       requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
       responses:
-        '204': {description: 'Processed or duplicate delivery'}
+        '204': {description: 'Verified delivery accepted; unfinished merge proof or ticket-gate work remains queued'}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
