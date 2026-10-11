@@ -11,7 +11,7 @@ import { mockSettings, settingsData } from './settings-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
 import { crmData, mockCRM } from './crm-fixtures'
 import { mockPublicQuote, mockQuotes, quoteWorld } from './quote-list-fixtures'
-import { mockPolicies } from './policies-fixtures'
+import { ladderRequests, mockPolicies } from './policies-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { POLICY_TABS } from '../src/lib/policies'
 
@@ -153,12 +153,7 @@ test('the approval queue never says nothing waits before it knows', async ({ pag
 // AEON-616: Policies uses pattern A. Measure controls across all pairs, not
 // page/frame height. Only the full-height phone detail sheet uses pattern B.
 // AEON-1204: role ladders moved to Settings › Models. The Ladders tab holds one
-// line with a link there and never reaches the retired ladder endpoints.
-function ladderRequests(page: Page) {
-  const seen: string[] = []
-  page.on('request', request => { if (/\/api\/models\/routes(\?|$)/.test(request.url())) seen.push(`${request.method()} ${new URL(request.url()).pathname}`) })
-  return seen
-}
+// line with a link there; the gated guard lives in policies-ladders-moved.spec.ts.
 for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
   test(`Policies controls and detail sheet stay put at ${width}px ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
@@ -282,26 +277,6 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     expect(ladders).toEqual([])
   })
 }
-
-test('Policies Ladders tab links to Settings › Models and never calls the ladder endpoints', async ({ page }) => {
-  const mock = await mockPolicies(page, 'light')
-  const ladders = ladderRequests(page)
-  await page.goto('/settings/policies')
-  const panel = page.locator('.policies'), content = panel.locator('.policy-content')
-  await expect(content).toHaveAttribute('aria-busy', 'false')
-  await expect(panel.getByTestId('policies-ladders-moved')).toBeVisible()
-  // No edit, Save or Undo control remains anywhere on Policies.
-  for (const id of ['policy-edit', 'policy-save', 'policy-cancel', 'policy-undo', 'policy-reload']) await expect(page.getByTestId(id)).toHaveCount(0)
-  // A same-person focus refresh and every tab leave the ladder endpoints alone.
-  const answer = page.waitForResponse(response => response.url().includes('/api/me/permissions') && response.request().method() === 'GET')
-  await page.evaluate(() => window.dispatchEvent(new Event('focus'))); await answer
-  for (const item of [...POLICY_TABS, POLICY_TABS[0]]) { await panel.locator(`#policy-tab-${item.id}`).click(); await expect(content).toHaveAttribute('aria-busy', 'false') }
-  await expect(panel.getByTestId('policies-ladders-moved')).toBeVisible()
-  await panel.getByRole('link', { name: 'Settings, Models' }).click()
-  await expect(page).toHaveURL(/\/settings\/models$/)
-  expect(ladders).toEqual([])
-  expect(mock.data.calls.filter(path => path !== '/api/authz/permissions')).toEqual([])
-})
 
 test('Policies settings-only reader sees permission sentences and static ownership', async ({ page }) => {
   const mock = await mockPolicies(page, 'light', true)

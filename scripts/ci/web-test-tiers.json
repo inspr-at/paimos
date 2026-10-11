@@ -10104,6 +10104,10 @@
     ,
     {"kind":"browser","file":"tests/planning-columns.spec.ts","name":"unknown planned and used effort stays undrawn and is explained to hover and screen readers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"Policies Ladders tab links to Settings › Models and never calls the ladder endpoints","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"on a phone the moved link keeps a 44 px target inside its sentence","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/polish-round-two.spec.ts","name":"PL2 hours 390 dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/polish-round-two.spec.ts","name":"PL2 hours 390 light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
@@ -12211,8 +12215,6 @@
     {"kind":"browser","file":"tests/shell.spec.ts","name":"theme follows the OS and explicit choice wins without hover layout shift","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/shell.spec.ts","name":"version uses six-segment Pretty, keyboard reveal, exact clipboard and one request","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies Ladders tab links to Settings › Models and never calls the ladder endpoints","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies announces state transitions through a persistent live region","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

@@ -50,6 +50,7 @@ action bars. Save keycaps follow the platform; keyboard Save focuses the stable
 Save action before fields are disabled, retaining focus for subsequent keyboard
 Undo and Escape. Escape first leaves a field, then
 closes the editor. Browser geometry for the Policies tabs lives in
-`web/tests/stability.spec.ts`, and `web/tests/policies-ladders-moved.unit.test.ts`
-guards the moved line and the absence of ladder requests. Screenshot evidence
+`web/tests/stability.spec.ts`. `web/tests/policies-ladders-moved.unit.test.ts`
+and the gated `web/tests/policies-ladders-moved.spec.ts` guard the moved line,
+its link and the absence of ladder requests. Screenshot evidence
 is generated locally under `web/test-results/` and is not committed.
