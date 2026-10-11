@@ -7286,6 +7286,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RolesRoutesAndWait","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RoundRoutingCompatibility","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2UnadoptedSavedLadder","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestNewHarnessProfileValidation","tier":"GATED-FULL"}

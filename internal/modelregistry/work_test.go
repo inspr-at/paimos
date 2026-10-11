@@ -370,6 +370,74 @@ func TestPreferenceStoreCanonicalPeopleAndGuards(t *testing.T) {
 	})
 }
 
+// Risk: queued rounds lose their previous-family fallback or saved review row
+// while the Models migration is pending, or bypass an explicit order or lock.
+func TestModelsV2RoundRoutingCompatibility(t *testing.T) {
+	admin, _ := boardFixture(t)
+	runner := addPrincipal(t, admin.TenantID, "agent", "Round runner", []string{"admin"})
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		ctx := tenant.WithPrincipal(t.Context(), admin)
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE model_pref_profiles SET thinking='deep' WHERE scope='workspace'`); err != nil {
+			return err
+		}
+		for column, rank := range map[string][]string{
+			"backend":       {"openai:sol", "anthropic:opus"},
+			"review:openai": {"anthropic:opus", "openai:sol"},
+		} {
+			if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank)
+ SELECT $1,id,$2,'first',$3 FROM model_pref_profiles WHERE scope='workspace'`, admin.TenantID, column, rank); err != nil {
+				return err
+			}
+		}
+		schedule := capacity.DefaultSchedule("UTC")
+		schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+		raw, _ := json.Marshal(schedule)
+		for _, harness := range []string{"codex", "claude"} {
+			var account string
+			if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner)
+ VALUES($1,$2,$2,'round-fixture',$3,'Round fixture',$4,true,'round-generation',$5) RETURNING id::text`, admin.TenantID, harness, runner.ID, now, admin.ID).Scan(&account); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model)
+ VALUES($1,$2,$3,$4,'requests',1000,'unrestricted')`, admin.TenantID, account, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule)
+ VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, admin.TenantID, admin.ID, account, raw); err != nil {
+				return err
+			}
+		}
+		var project, ticket string
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'ROUND-1','Round project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,fields) SELECT $1,id,'ROUND-2','Round work',$2,'{"area":"backend","estimate_hours":4}' FROM node_kinds WHERE slug='work' RETURNING id::text`, admin.TenantID, project).Scan(&ticket); err != nil {
+			return err
+		}
+		for _, tc := range []struct{ kind, situation, column, family, effort string }{
+			{"first_build", "first", "backend", "openai", "xhigh"},
+			{"fix", "stuck", "backend", "anthropic", "xhigh"},
+			{"review", "first", "review:openai", "anthropic", "xhigh"},
+		} {
+			t.Run(tc.kind, func(t *testing.T) {
+				q := WorkQuery{TicketID: ticket, ProjectID: project, FixRound: 4, PreviousFamily: "openai", AuthorFamily: "openai"}
+				got, design, err := ResolveRound(ctx, tx, admin, q, tc.kind, true, now)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if design || got.Profile == nil || got.Profile.Family != tc.family || got.Profile.Effort != tc.effort || got.Trace.Column != tc.column || got.Trace.Situation != tc.situation || got.OwnerRequired || len(got.Trace.QualifyingAccountIDs) == 0 {
+					t.Fatalf("round lost compatibility: %+v; profile %+v", got, got.Profile)
+				}
+			})
+		}
+		return nil
+	})
+}
+
 // Risk: the resolver ignores Models, tries another model before its sibling
 // route, admits an author's family/security Anthropic, or blocks unknown quota.
 func TestModelsV2RolesRoutesAndWait(t *testing.T) {
