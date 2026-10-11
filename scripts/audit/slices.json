@@ -170,6 +170,7 @@
         "internal/runisolation/**",
         "internal/agentd/routine_tools.go",
         "internal/agentd/routine_tools_test.go",
+        "internal/routineexec/**",
         "internal/modelregistry/routine_reads.go"
       ]
     },
