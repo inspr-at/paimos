@@ -358,6 +358,10 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 		}
 		codex = runnableAccountFixture(t, tx, admin, agent.ID, "local-codex", "codex", luna.ID, now)
 		runnableAccountFixture(t, tx, admin, agent.ID, "local-claude", "claude", haiku.ID, now)
+		// Shared usage keeps the Codex account's exact wait reason visible.
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=true WHERE id=$1`, codex); err != nil {
+			return err
+		}
 		if err := dbtest.ModelsOrder(t.Context(), tx, admin.TenantID, "other", "first", "wait", luna.ID, haiku.ID); err != nil {
 			return err
 		}
