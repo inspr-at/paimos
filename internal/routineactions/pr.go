@@ -27,7 +27,9 @@ type PROpen = evidence.PROpen
 type PullRequests interface {
 	Configured(string, string) bool
 	Find(context.Context, PROpen, string) (*Pull, error)
-	Open(context.Context, PROpen, string) (*Pull, error)
+	// Open calls claim after its read-only preparation, immediately before
+	// POST. A false claim forbids the write; a committed claim is never retried.
+	Open(context.Context, PROpen, string, func() (bool, error)) (*Pull, error)
 }
 
 type Pull = evidence.Pull
@@ -182,21 +184,18 @@ func (b *Broker) ReconcilePR(ctx context.Context, tid, id string) (Receipt, erro
 		pull, err = b.pr.Find(ctx, in, ref)
 		reason = "pr_reconciliation_unconfirmed"
 		if err == nil && pull == nil && state == "pending" {
-			claimed := false
-			err = b.effectTx(ctx, tid, id, func(tx pgx.Tx, _ tenant.Principal, _ Binding, _ effect, s string, r *Receipt) error {
-				if s != "pending" || r.State == "succeeded" {
-					return nil
-				}
-				_, err := tx.Exec(ctx, `UPDATE routine_effect_outbox SET state='sending',updated_at=clock_timestamp() WHERE action_id=$1`, id)
-				claimed = err == nil
-				return err
+			pull, err = b.pr.Open(ctx, in, ref, func() (bool, error) {
+				claimed := false
+				err := b.effectTx(ctx, tid, id, func(tx pgx.Tx, _ tenant.Principal, _ Binding, _ effect, s string, r *Receipt) error {
+					if s != "pending" || r.State == "succeeded" {
+						return nil
+					}
+					_, err := tx.Exec(ctx, `UPDATE routine_effect_outbox SET state='sending',updated_at=clock_timestamp() WHERE action_id=$1`, id)
+					claimed = err == nil
+					return err
+				})
+				return claimed, err
 			})
-			if err != nil {
-				return out, err
-			}
-			if claimed {
-				pull, err = b.pr.Open(ctx, in, ref)
-			}
 		}
 		if err != nil {
 			pull = nil

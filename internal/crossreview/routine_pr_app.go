@@ -75,8 +75,8 @@ func (a AppRoutinePullRequests) Find(ctx context.Context, in evidence.PROpen, re
 	})
 	return out, err
 }
-func (a AppRoutinePullRequests) Open(ctx context.Context, in evidence.PROpen, ref string) (*evidence.Pull, error) {
-	if a.App == nil || !in.Valid() {
+func (a AppRoutinePullRequests) Open(ctx context.Context, in evidence.PROpen, ref string, claim func() (bool, error)) (*evidence.Pull, error) {
+	if a.App == nil || !in.Valid() || claim == nil {
 		return nil, ErrUnavailable
 	}
 	var out *evidence.Pull
@@ -99,6 +99,15 @@ func (a AppRoutinePullRequests) Open(ctx context.Context, in evidence.PROpen, re
 			if v.Ref != "refs/heads/"+branch || v.Object.Type != "commit" || v.Object.SHA != sha {
 				return ErrUnavailable
 			}
+		}
+		// All external reads precede the live authority check and durable send
+		// claim. The transaction ends before this sole outward mutation.
+		allowed, err := claim()
+		if err != nil {
+			return err
+		}
+		if !allowed {
+			return ErrUnavailable
 		}
 		var p appPull
 		if err := post(map[string]any{"title": in.Title, "body": in.Body + "\n\n" + operationMarker(ref), "head": in.Branch, "base": in.BaseBranch, "draft": false}, &p); err != nil {

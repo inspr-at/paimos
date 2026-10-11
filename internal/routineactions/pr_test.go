@@ -144,7 +144,14 @@ func (p *lostPull) Find(_ context.Context, _ PROpen, _ string) (*Pull, error) {
 	}
 	return out, nil
 }
-func (p *lostPull) Open(_ context.Context, in PROpen, ref string) (*Pull, error) {
+func (p *lostPull) Open(_ context.Context, in PROpen, ref string, claim func() (bool, error)) (*Pull, error) {
+	allowed, err := claim()
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, nil
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.posts++
