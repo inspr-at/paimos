@@ -51,6 +51,7 @@ func (m *Module) WithHistory(publications []Publication) *Module {
 }
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountTemplates(mux)
+	mux.HandleFunc("GET /api/routine-guardrails", m.getDraftGuardrails)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/runs", m.listRuns)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/runs/{runId}", m.getRun)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/guardrails", m.getGuardrails)
@@ -244,12 +245,18 @@ func nextTime(t Trigger, now time.Time) (*time.Time, error) {
 	return &at, err
 }
 func (m *Module) get(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	p, ok := principal(w, r)
 	if !ok {
 		return
 	}
 	var out Recurrence
-	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenantReadSnapshot(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.SetLocalStatementTimeout(r.Context(), tx, 5*time.Second); err != nil {
+			return err
+		}
 		var err error
 		out, err = load(r.Context(), tx, r.PathValue("recurrenceId"), false)
 		if err != nil {
@@ -266,6 +273,9 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 	reply(w, 200, out, err)
 }
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	p, ok := principal(w, r)
 	if !ok {
 		return
@@ -283,7 +293,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	}
 	items := []Recurrence{}
 	var next *string
-	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenantReadSnapshot(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := db.SetLocalStatementTimeout(r.Context(), tx, 5*time.Second); err != nil {
 			return err
 		}

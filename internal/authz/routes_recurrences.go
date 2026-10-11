@@ -15,6 +15,7 @@ func init() {
 		"GET /api/recurrences/{recurrenceId}/guardrails":                         "nodes.read|recurrences.manage",
 		"PUT /api/recurrences/{recurrenceId}/guardrails":                         "recurrences.manage",
 		"DELETE /api/recurrences/{recurrenceId}":                                 "recurrences.manage",
+		"GET /api/routine-guardrails":                                            "nodes.read|recurrences.manage",
 		// Read-only people enter with nodes.read. Recurrence handlers still require
 		// recurrences.manage for agents, including their explicit role and key scope.
 		"GET /api/recurrences":                                     "nodes.read|recurrences.manage",
@@ -37,6 +38,7 @@ func init() {
 	registerDeclarations("recurrences", "project_filtered", ProjectFilteredRoutes, map[string]bool{
 		"GET /api/recurrences":           true,
 		"GET /api/recurrences/templates": true,
+		"GET /api/routine-guardrails":    true,
 	})
 	registerDeclarations("recurrences", "project_decided", ProjectDecidedRoutes, map[string]bool{
 		"POST /api/recurrences":                                                  true,

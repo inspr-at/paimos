@@ -40,6 +40,20 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /routine-guardrails:
+    get:
+      operationId: getDraftRoutineGuardrails
+      description: 'Read effective routine rules without saving a definition. Project scope requires current project read authority; workspace scope requires workspace read authority; personal scope uses only the signed-in canonical person and requires read authority in an accessible project. Returns the same compiled floor and applicable scope policy as a saved routine. No writes or execution grants.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: scope, in: query, required: true, schema: {type: string, enum: [personal, project, workspace]}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}, description: 'Required exactly for project scope; personal scope never accepts another owner.'}
+      responses:
+        '200': {description: 'Effective policy', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineGuardPolicy'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /recurrences/{recurrenceId}/runs:
     parameters:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -433,6 +447,7 @@ components:
             updated_at: {type: string, format: date-time}
             last_result: {$ref: '#/components/schemas/RecurrenceResult'}
             open_previous: {$ref: '#/components/schemas/RecurrenceResult'}
+            last_run: {$ref: '#/components/schemas/RoutineLastRun'}
             execution_policy: {$ref: '#/components/schemas/RoutineExecutionPolicy'}
     RecurrenceHistoryEntry:
       type: object
@@ -471,6 +486,16 @@ components:
         reason: {type: string}
         created_at: {type: string, format: date-time}
         run: {$ref: '#/components/schemas/RoutineRunReceipt'}
+    RoutineLastRun:
+      type: object
+      additionalProperties: false
+      required: [id, state, reason, created_at]
+      description: 'Latest visible routine run by created_at then ID, resolved in a bounded join after recurrence paging. Omitted when no run exists. S21 states and reasons normalize legacy outcomes; successful execution requires confirmed process evidence. No assignments, accounts, host selectors or evidence payloads are exposed.'
+      properties:
+        id: {type: string, format: uuid}
+        state: {type: string, enum: [created, running, waiting_for_person, held, failed, done, skipped]}
+        reason: {type: string, description: 'S21 reason sentence; empty only for confirmed successful execution.'}
+        created_at: {type: string, format: date-time}
     RoutineRunReceipt:
       type: object
       additionalProperties: false
