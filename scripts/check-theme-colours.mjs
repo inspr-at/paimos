@@ -11,7 +11,6 @@ export const fixedSurfaces = {
   'components/quotes/editor/QuotePositions.vue': 'Document rules',
   'components/quotes/editor/QuoteProse.vue': 'Document editor focus on paper',
   'components/settings/QuoteSettingsCard.vue': 'Document specimen',
-  'views/business/QuoteDocumentView.vue': 'Document and print output',
   'views/settings/DocumentProfilesView.vue': 'Document paper specimens',
   'components/settings/profiles/ProfilePreview.vue': 'Document layout guides',
   'components/settings/BrandCard.vue': 'Supplied brand artwork in light/dark specimens',

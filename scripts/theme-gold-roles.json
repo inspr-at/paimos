@@ -411,30 +411,6 @@
       "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
     },
     {
-      "file": "web/src/components/business/QuoteLines.vue",
-      "selector": ".line.problem .c-pos",
-      "original": "var(--gold-ink)",
-      "role": "warning",
-      "replacement": "var(--warn-ink)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/business/QuoteLines.vue",
-      "selector": ".no-rate",
-      "original": "var(--gold-ink)",
-      "role": "warning",
-      "replacement": "var(--warn-ink)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/business/QuoteLines.vue",
-      "selector": ".rate-hint.warn",
-      "original": "var(--gold-ink)",
-      "role": "warning",
-      "replacement": "var(--warn-ink)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
       "file": "web/src/components/agents/ScheduleEditor.vue",
       "selector": ".ed-err",
       "original": "var(--gold-ink)",
@@ -449,70 +425,6 @@
       "role": "highlight",
       "replacement": "var(--secondary-ink)",
       "reason": "Decorative emphasis, release history, favourite or measured reference"
-    },
-    {
-      "file": "web/src/components/agents/ApprovalQueue.vue",
-      "selector": ".attach-terminal",
-      "original": "var(--gold-ink)",
-      "role": "warning",
-      "replacement": "var(--warn-ink)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/agents/ApprovalQueue.vue",
-      "selector": "/* Something waits: a warm full tint and a soft gold ring, never an edge bar. */\n.queue:not(.clear)",
-      "original": "var(--gold-2)",
-      "role": "warning",
-      "replacement": "var(--gold-2)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/agents/ApprovalQueue.vue",
-      "selector": "/* Something waits: a warm full tint and a soft gold ring, never an edge bar. */\n.queue:not(.clear)",
-      "original": "var(--gold-2)",
-      "role": "warning",
-      "replacement": "var(--gold-2)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/agents/ApprovalQueue.vue",
-      "selector": "/* Something waits: a warm full tint and a soft gold ring, never an edge bar. */\n.queue:not(.clear)",
-      "original": "var(--gold)",
-      "role": "warning",
-      "replacement": "var(--gold)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/agents/ApprovalQueue.vue",
-      "selector": ".queue:not(.clear) .item + .item",
-      "original": "var(--gold)",
-      "role": "warning",
-      "replacement": "var(--gold)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/agents/ApprovalQueue.vue",
-      "selector": ".item.medium .mark",
-      "original": "var(--gold-wash)",
-      "role": "warning",
-      "replacement": "var(--gold-wash)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/agents/ApprovalQueue.vue",
-      "selector": ".item.medium .mark",
-      "original": "var(--gold-ink)",
-      "role": "warning",
-      "replacement": "var(--warn-ink)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/agents/ApprovalQueue.vue",
-      "selector": ".expiry.soon",
-      "original": "var(--gold-ink)",
-      "role": "warning",
-      "replacement": "var(--warn-ink)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
     },
     {
       "file": "web/src/components/agents/CapacityGauge.vue",
@@ -633,54 +545,6 @@
       "role": "warning",
       "replacement": "var(--gold-wash)",
       "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/agents/CapacityCard.vue",
-      "selector": ".plan.ahead :deep(.n)",
-      "original": "var(--gold-ink)",
-      "role": "warning",
-      "replacement": "var(--warn-ink)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/agents/CapacityCard.vue",
-      "selector": ".dot.signin",
-      "original": "var(--gold)",
-      "role": "warning",
-      "replacement": "var(--gold)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/agents/CapacityCard.vue",
-      "selector": ".dot.signin",
-      "original": "var(--gold)",
-      "role": "warning",
-      "replacement": "var(--gold)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/agents/CapacityCard.vue",
-      "selector": ".left.kept b",
-      "original": "var(--gold-ink)",
-      "role": "highlight",
-      "replacement": "var(--secondary-ink)",
-      "reason": "Decorative emphasis, release history, favourite or measured reference"
-    },
-    {
-      "file": "web/src/components/agents/CapacityCard.vue",
-      "selector": ".today.ahead b",
-      "original": "var(--gold-ink)",
-      "role": "warning",
-      "replacement": "var(--warn-ink)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/agents/CapacityCard.vue",
-      "selector": ".today.kept",
-      "original": "var(--gold-ink)",
-      "role": "highlight",
-      "replacement": "var(--secondary-ink)",
-      "reason": "Decorative emphasis, release history, favourite or measured reference"
     },
     {
       "file": "web/src/components/agents/ConnectedComputers.vue",
@@ -1201,22 +1065,6 @@
       "role": "fixed-category",
       "replacement": "var(--kind-parent)",
       "reason": "Work kind is a fixed category"
-    },
-    {
-      "file": "web/src/components/work/ListFreshness.vue",
-      "selector": ".list-freshness.stale",
-      "original": "var(--gold-ink)",
-      "role": "warning",
-      "replacement": "var(--warn-ink)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
-    },
-    {
-      "file": "web/src/components/work/ListFreshness.vue",
-      "selector": ".stale .live-mark",
-      "original": "var(--gold)",
-      "role": "warning",
-      "replacement": "var(--gold)",
-      "reason": "Caution, stale/unsaved state, risk, limit or pending attention"
     },
     {
       "file": "web/src/components/work/TicketProperties.vue",

@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/approvals"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/stepup/server"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -114,7 +115,10 @@ questions(id,kind,project_id,revision,title,created_at,expires_at,held,source) A
  AND ($2='' OR $2='account_matrix' AND r.tenant_id=$3::uuid)
 )`
 
-const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
+const visibleSQL = sourceSQL + `, routine_consents(id,kind,project_id,revision,title,created_at,expires_at,held,source) AS (
+ SELECT id,'routine_consent'::text,project_id,revision,title,created_at,NULL::timestamptz,false,href
+ FROM jsonb_to_recordset($26::jsonb) AS r(id uuid,project_id uuid,revision bigint,title text,created_at timestamptz,href text)
+), visible AS MATERIALIZED (
  SELECT *,CASE WHEN held AND kind IN ('approval','stepup') THEN 0 WHEN held THEN 1 ELSE 2 END AS bucket,
  CASE WHEN held AND kind IN ('approval','stepup') THEN expires_at ELSE created_at END AS order_at
  FROM (
@@ -128,6 +132,7 @@ const visibleSQL = sourceSQL + `, visible AS MATERIALIZED (
  UNION ALL SELECT * FROM stepups WHERE EXISTS(SELECT 1 FROM stepup_requests s WHERE s.tenant_id=$1 AND s.id=stepups.id AND coalesce($22::jsonb->s.permission,'[]'::jsonb) @> jsonb_build_array(coalesce(s.project_id::text,'')))
  UNION ALL SELECT * FROM tier_requests WHERE project_id=ANY($23::uuid[]) AND project_id=ANY($24::uuid[])
  UNION ALL SELECT * FROM account_matrix WHERE $25
+ UNION ALL SELECT * FROM routine_consents
  ) items
 ), totals AS (
  SELECT count(*)::int AS open,count(*) FILTER (WHERE held)::int AS held,
@@ -151,11 +156,11 @@ SELECT (SELECT at FROM clock),totals.open,totals.held,totals.chores,
 // ReadTx serves the canonical HTTP projection for the future desk cutover.
 // NoticesTx reuses its source predicates for the pending phone integration.
 // Neither projection read acquires source mutation locks.
-func ReadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int, after *cursor) (Page, error) {
-	return readProjection(ctx, tx, p, limit, after, false, false)
+func ReadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int, after *cursor, readers ...recurrences.ExecutionRuntimeReader) (Page, error) {
+	return readProjection(ctx, tx, p, limit, after, false, false, readers...)
 }
 
-func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int, after *cursor, eligibleOnly, unclaimedOnly bool) (Page, error) {
+func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit int, after *cursor, eligibleOnly, unclaimedOnly bool, readers ...recurrences.ExecutionRuntimeReader) (Page, error) {
 	page := Page{Items: []Item{}}
 	if p.Kind != tenant.Person || p.KeyCreatorID != "" || limit < 1 || limit > 100 {
 		return page, errors.New("invalid desk reader")
@@ -211,7 +216,19 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 	if err != nil {
 		return page, err
 	}
-	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", "")).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
+	var reader recurrences.ExecutionRuntimeReader
+	if len(readers) > 0 {
+		reader = readers[0]
+	}
+	consents, err := recurrences.ConsentRequestsTx(ctx, tx, p, reader)
+	if err != nil {
+		return page, err
+	}
+	consentSource, err := json.Marshal(consents)
+	if err != nil {
+		return page, err
+	}
+	err = tx.QueryRow(ctx, visibleSQL, p.TenantID, "", nil, p.ID, projects["questions.read"], projects["approvals.read"], projects["inbox.manage"], check("approvals.read", ""), check("rules.read", "") && check("rules.write", ""), after != nil, c.Bucket, c.At, c.ID, c.Kind, limit+1, eligibleOnly, unclaimedOnly, int(NearExpiry/time.Second), check("approvals.decide", ""), projects["questions.decide"], check("keys.manage", ""), stepupVisibility, projects["harness.control"], projects["harness.read"], check("account.use.manage", ""), consentSource).Scan(&page.AsOf, &page.Counts.Open, &page.Counts.Held, &page.Counts.Chores, &raw)
 	if err != nil {
 		return page, err
 	}
@@ -236,6 +253,9 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 		}
 		prefix := map[string]string{"question": "q:", "approval": "a:", "action_request": "m:", "doctrine": "r:", "tier_request": "t:", "key_trim": "k:", "stepup": "s:"}[i.Kind]
 		i.Href = "/decision-desk?item=" + prefix + i.ID
+		if i.Kind == "routine_consent" {
+			i.Href = i.Source
+		}
 		if i.Kind == "account_matrix" {
 			i.Href = "/settings/accounts#account-use"
 		}
@@ -265,6 +285,8 @@ func readProjection(ctx context.Context, tx pgx.Tx, p tenant.Principal, limit in
 			i.CanDecide = check("keys.manage", "")
 		case "account_matrix":
 			i.CanDecide = check("account.use.manage", "")
+		case "routine_consent":
+			i.CanDecide = true // Canonical owner and native policy checked before paging.
 		}
 		page.Items = append(page.Items, i)
 	}
