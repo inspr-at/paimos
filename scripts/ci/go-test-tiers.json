@@ -8828,6 +8828,8 @@
     ,
     {"kind":"go","package":"internal/routineguard","name":"TestIndependentEvaluationBindsEvidenceAndCannotBootstrap","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/routineguard","name":"TestLocalArtifactPathPolicyMatchesServerFloor","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/rules","name":"TestAccessChangesStillTakeConflictingTenantFence","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestAgentControlDenialStaysForbiddenUntilPreview","tier":"GATED-FULL"}

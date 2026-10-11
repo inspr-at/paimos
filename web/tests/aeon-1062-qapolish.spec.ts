@@ -168,7 +168,7 @@ for (const width of [390, 620, 1024]) for (const theme of themes) {
     const counts: string[] = []
     for (let index = 0; index < await rows.count(); index++) {
       await rows.nth(index).click()
-      const line = page.getByRole('dialog').locator('.p-head').filter({ hasText: 'Shared quota' }).locator('span')
+      const line = page.getByRole('dialog').locator('[data-quota] .p-head span')
       await expect(line).toHaveText(/^Shared by (1 computer|\d+ computers)$/)
       counts.push(await line.innerText())
       if (index === 0) await page.screenshot({ path: testInfo.outputPath(`account-drawer-${theme}-${width}.png`) })

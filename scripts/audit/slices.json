@@ -273,6 +273,7 @@
         "internal/recurrences/execution_principals.go",
         "internal/recurrences/execution_principals_test.go",
         "internal/routineguard/**",
+        "internal/routineguard/pathpolicy/path.go",
         "internal/routineguard/evaluation.go",
         "internal/routineguard/evaluation_test.go",
         "internal/routineguard/evaluation_tx_test.go",

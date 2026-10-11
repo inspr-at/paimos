@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
-	"github.com/inspr-at/paimos/internal/routineguard"
+	"github.com/inspr-at/paimos/internal/routineguard/pathpolicy"
 )
 
 var ErrRoutineToolsUnavailable = errors.New("routine_tool_enforcement_unavailable")
@@ -56,7 +56,7 @@ func validRoutineToolMode(run Run, adapter Adapter) error {
 // does not grant outward action authority or replace the broker's full policy
 // and fixed different-family evaluation before an artifact leaves the tree.
 func routineWritablePath(workspace, name string) error {
-	if len(name) > routineguard.MaxPathBytes {
+	if len(name) > pathpolicy.MaxPathBytes {
 		return errManagedFile
 	}
 	rel, err := managedRelative(workspace, name)
@@ -70,10 +70,7 @@ func routineWritablePath(workspace, name string) error {
 			return ErrRoutineToolsUnavailable
 		}
 	}
-	decision, err := routineguard.Evaluate(nil, routineguard.Context{
-		Checkpoint: "action", Action: "artifact.validate", Paths: []string{rel},
-	})
-	if err != nil || decision.DeterministicResult != routineguard.Allow {
+	if !pathpolicy.LocalWriteAllowed(rel) {
 		return ErrRoutineToolsUnavailable
 	}
 	return nil
