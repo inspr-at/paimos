@@ -435,6 +435,46 @@ func TestModelsV2RoundRoutingCompatibility(t *testing.T) {
 				}
 			})
 		}
+		q := WorkQuery{TicketID: ticket, ProjectID: project, FixRound: 4}
+		checkStuck := func() {
+			t.Helper()
+			got, _, err := ResolveRound(ctx, tx, admin, q, "fix", true, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Profile == nil || got.Profile.Family != "openai" || got.Trace.Situation != "stuck" {
+				t.Fatalf("explicit order or lock was reordered: %+v; profile %+v", got, got.Profile)
+			}
+		}
+		// Ordinary Models routing keeps the row when no previous family is sent.
+		checkStuck()
+		q.PreviousFamily = "openai"
+		if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank)
+ SELECT $1,id,'backend','stuck',ARRAY['openai:sol','anthropic:opus'] FROM model_pref_profiles WHERE scope='workspace'`, admin.TenantID); err != nil {
+			return err
+		}
+		checkStuck()
+		if _, err := tx.Exec(ctx, `DELETE FROM model_pref_orders WHERE column_key='backend' AND situation='stuck'`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_rules(tenant_id,scope,column_key,line,lock,why)
+ VALUES($1,'workspace','backend','openai:sol','top','Freeze the workspace order')`, admin.TenantID); err != nil {
+			return err
+		}
+		checkStuck()
+		// An exhausted saved review chain must Wait instead of silently running
+		// Automatic or the build Default; its author's family never qualifies.
+		if _, err := tx.Exec(ctx, `UPDATE model_pref_orders SET rank=ARRAY['openai:sol'] WHERE column_key='review:openai'`); err != nil {
+			return err
+		}
+		q.AuthorFamily = "openai"
+		waited, _, err := ResolveRound(ctx, tx, admin, q, "review", true, now)
+		if err != nil {
+			return err
+		}
+		if waited.Profile != nil || !waited.OwnerRequired || waited.Trace.Blocked == "" || len(waited.Trace.QualifyingAccountIDs) != 0 || waited.Trace.OrderMode != reviewOrderSaved || waited.Trace.Column != "review:openai" {
+			t.Fatalf("saved review chain escaped Wait or family policy: %+v", waited)
+		}
 		return nil
 	})
 }
