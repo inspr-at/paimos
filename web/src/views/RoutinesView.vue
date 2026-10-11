@@ -184,11 +184,12 @@ function loadNames() {
   void names.run(({ after }) => after(getMembers(), list => { owners.value = new Map(list.people.map(person => [person.principal_id, person.name])) }), { failed: () => {} })
 }
 // A linked routine that isn't on the loaded pages is read on its own, and again with each
-// refresh (again: it is on screen already); gone (404) means a calm line.
+// refresh (again: it is on screen already); gone (404) means a calm line. The previous
+// person's address is never read for the next one while it is being cleared.
 function readLinked(again = false) {
   const id = routineId.value
   linkFailure.value = ''
-  if (!id || !loaded.value || denied.value || items.value.some(item => item.id === id) || (!again && linked.value?.id === id)) return
+  if (leaving || !id || !loaded.value || denied.value || items.value.some(item => item.id === id) || (!again && linked.value?.id === id)) return
   void links.run(({ after, signal }) => after(getRecurrence(id, signal), item => {
     if (routineId.value !== id || item.id !== id) return
     if (linked.value?.id !== id || item.revision >= linked.value.revision) linked.value = item
@@ -206,22 +207,22 @@ function gone() {
   if (routineId.value) setQuery({ routine: undefined, run: undefined })
 }
 // The person (or workspace) changed: everything of the previous one goes, filters included.
-let shownFor = ''
+let shownFor = '', leaving: Promise<unknown> | undefined
 watch(() => identity.owner.value, owner => {
   const principal = session.identity?.principal.id ?? '', switched = !!shownFor && !!principal && principal !== shownFor
   const hadOpen = !!editor.value || !!routineId.value || filtered.value
   clear()
   if (switched) {
-    if (Object.keys(route.query).length) void router.replace({ path: '/agents/routines', query: {} })
+    if (Object.keys(route.query).length) { const going = router.replace({ path: '/agents/routines', query: {} }); leaving = going; void going.finally(() => { if (leaving === going) leaving = undefined }) }
     if (hadOpen) toast(`Signed in as ${session.identity?.principal.name ?? 'someone else'} · the previous person’s open logbook, filters and draft were cleared.`, { timeout: 6000 })
   }
   if (principal) shownFor = principal
   if (owner) { load(); loadNames() }
 }, { immediate: true, flush: 'sync' })
-// The poll refreshes whatever pages are loaded, and the routine on screen even when no page lists it.
 // A permission reset (another person or workspace, a new session) drops every read in flight
 // with the scope: start from nothing and read again. The scope's own listener runs first.
 const stopAccess = onAccessChange(change => { if (change === 'reset' && !permissionsRevoked()) { clear(); if (identity.owner.value) { load(); loadNames() } } })
+// The poll refreshes whatever pages are loaded, and the routine on screen even when no page lists it.
 const poller = usePoller(() => {
   if (busy.value.length || editor.value || runPrompt.value || menu.value) return
   load(loaded.value ? 'refresh' : 'first')
