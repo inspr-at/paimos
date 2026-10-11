@@ -128,7 +128,7 @@ func admissionInputs(ctx context.Context, tx pgx.Tx, a Account, all []Window, no
 		return nil, nil, err
 	}
 	regular = append(regular, measuredFacts...)
-	if err := excludeWindowReservations(ctx, tx, regular, exceptReservations); err != nil {
+	if err := excludeWindowReservations(ctx, tx, regular, exceptReservations, a.QuotaPoolFingerprint != ""); err != nil {
 		return nil, nil, err
 	}
 	active := activeWindows(regular, now)

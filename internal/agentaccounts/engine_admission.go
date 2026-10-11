@@ -258,8 +258,8 @@ func engineHost(ctx context.Context, tx pgx.Tx, account, owner string, now time.
 
 // Adjust projections only; never release the persisted ledger. Shared quota and
 // fact windows carry overlapping historical holds, so match their resource key
-// and interval rather than only the current observation's window ID.
-func excludeWindowReservations(ctx context.Context, tx pgx.Tx, windows []Window, runID string) error {
+// and interval. Independent account windows retain their exact window IDs.
+func excludeWindowReservations(ctx context.Context, tx pgx.Tx, windows []Window, runID string, sharedQuota bool) error {
 	if runID == "" {
 		return nil
 	}
@@ -285,7 +285,7 @@ func excludeWindowReservations(ctx context.Context, tx pgx.Tx, windows []Window,
 		for i := range windows {
 			w := &windows[i]
 			match := w.ID == id
-			if w.capacityReadAt != nil && !synthetic(*w) {
+			if w.capacityKind == "fact" || sharedQuota && w.capacityReadAt != nil && !synthetic(*w) {
 				match = kind == w.capacityKind && bucket == w.capacityBucket && start.Before(w.EndsAt) && w.StartsAt.Before(end)
 			}
 			if match {

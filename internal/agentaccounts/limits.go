@@ -376,7 +376,7 @@ func limitWait(ctx context.Context, tx pgx.Tx, a Account, active []Window, now t
 			if len(exceptReservations) > 0 && exceptReservations[0] != "" {
 				w.ID = *rule.FromWindowID
 				projection := []Window{w}
-				if err := excludeWindowReservations(ctx, tx, projection, exceptReservations[0]); err != nil {
+				if err := excludeWindowReservations(ctx, tx, projection, exceptReservations[0], false); err != nil {
 					return nil, err
 				}
 				w = projection[0]
