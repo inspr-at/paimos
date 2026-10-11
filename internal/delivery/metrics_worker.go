@@ -56,7 +56,7 @@ func (m *Module) wakeMetrics() {
 }
 
 func backfillPosition(source *metricSourceRow, now time.Time) BackfillResult {
-	out := BackfillResult{State: "running", Phase: "runs", Since: dayStart(now.AddDate(0, 0, -metricDays)), RetryAt: source.RetryAt}
+	out := BackfillResult{State: "running", Phase: "runs", Since: dayStart(now.AddDate(0, 0, -source.BackfillDays)), RetryAt: source.RetryAt}
 	if c := source.Cursor; c != nil {
 		out.Since, out.Phase, out.Truncated = c.Since, c.Phase, c.Truncated
 		if c.Phase == "runs" {
@@ -93,6 +93,11 @@ func (m *Module) scheduleMetricBackfill(ctx context.Context, p tenant.Principal,
 		}
 		if source == nil {
 			return fail(409, "link a repository to this project first")
+		}
+		// A failed first read may not have committed a cursor yet. Continue the
+		// persisted selection; only an explicit fresh window replaces it.
+		if !in.Restart && (in.Days == nil || source.Cursor != nil) {
+			days = source.BackfillDays
 		}
 		var raw []byte
 		if source.Cursor == nil || in.Restart {
@@ -229,13 +234,10 @@ func (m *Module) sweepMetrics(ctx context.Context) {
 			projectAfter = m.metricsProjectCursor
 		}
 		service := db.AllProjects(op, "durable delivery history jobs")
-		type job struct {
-			project, actor, key string
-			days                int
-		}
+		type job struct{ project, actor, key string }
 		var jobs []job
 		err = db.InTenant(service, m.pool, tid, func(tx pgx.Tx) error {
-			rows, err := tx.Query(op, `SELECT s.project_id::text,s.backfill_actor_id::text,coalesce(s.backfill_key_id::text,''),coalesce(s.backfill_days,30)
+			rows, err := tx.Query(op, `SELECT s.project_id::text,s.backfill_actor_id::text,coalesce(s.backfill_key_id::text,'')
     FROM delivery_metric_sources s JOIN nodes n ON n.id=s.project_id
     WHERE s.backfill_pending AND s.backfill_actor_id IS NOT NULL AND n.deleted_at IS NULL
     AND (s.backfill_retry_at IS NULL OR s.backfill_retry_at<=$1) AND s.project_id::text>$2 ORDER BY s.project_id::text LIMIT 16`, m.now(), projectAfter)
@@ -245,7 +247,7 @@ func (m *Module) sweepMetrics(ctx context.Context) {
 			defer rows.Close()
 			for rows.Next() {
 				var j job
-				if err = rows.Scan(&j.project, &j.actor, &j.key, &j.days); err != nil {
+				if err = rows.Scan(&j.project, &j.actor, &j.key); err != nil {
 					return err
 				}
 				jobs = append(jobs, j)
@@ -282,7 +284,7 @@ func (m *Module) sweepMetrics(ctx context.Context) {
 			})
 			if err == nil {
 				step := tenant.WithPrincipal(op, p)
-				_, err = m.metricBackfillStep(step, p, j.project, backfillInput{Days: &j.days})
+				_, err = m.metricBackfillStep(step, p, j.project, backfillInput{})
 			}
 			if err != nil && op.Err() == nil {
 				slog.WarnContext(op, "delivery history step incomplete", "project_id", j.project)

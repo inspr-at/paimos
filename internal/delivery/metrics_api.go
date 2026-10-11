@@ -409,6 +409,9 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 	if source == nil {
 		return BackfillResult{}, fail(409, "link a repository to this project first")
 	}
+	if in.Days == nil && !in.Restart {
+		days = source.BackfillDays
+	}
 	if source.RetryAt != nil && source.RetryAt.After(now) {
 		return backfillPosition(source, now), nil
 	}

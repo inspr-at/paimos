@@ -64,6 +64,10 @@ func TestDeliveryHistoryFirstReadFailurePreservesSelectedWindow(t *testing.T) {
 			if source := historySource(t, f); source.LastReadError == nil || source.LastReadError.Reason != "actions_read_missing" || source.RetryAt == nil || !source.RetryAt.Equal(f.at.Add(30*time.Minute)) || len(g.calls) != 1 {
 				t.Fatalf("first automatic read did not fail as expected: %+v calls=%v", source, g.calls)
 			}
+			deferred, err := f.m.metricBackfillStep(tenant.WithPrincipal(t.Context(), f.person), f.person, f.project, backfillInput{})
+			if err != nil || !deferred.Since.Equal(dayStart(f.at.AddDate(0, 0, -90))) || deferred.RetryAt == nil || !deferred.RetryAt.Equal(f.at.Add(30*time.Minute)) || len(g.calls) != 1 {
+				t.Fatalf("deferred read lost its selected window or retried early: %+v err=%v calls=%v", deferred, err, g.calls)
+			}
 			// Ordinary continuation waits for retry_at; Check again clears it.
 			if action == "backfill" {
 				f.at = f.at.Add(30 * time.Minute)
