@@ -99,8 +99,8 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 	// Risk: an unconfigured metric consumer rejects an authenticated delivery
 	// on an unnecessary Actions read, or suppresses linked checks/queue facts.
 	for _, tc := range []struct {
-		name                                                    string
-		linked, queue, projectedQueue, suitePR, unrelated, fail bool
+		name                                                               string
+		linked, queue, projectedQueue, suiteRefs, suitePR, unrelated, fail bool
 	}{
 		{name: "read_available"},
 		{name: "read_unavailable", fail: true},
@@ -108,6 +108,7 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 		{name: "linked_checks_empty_suite_pulls", linked: true},
 		{name: "linked_checks_explicit_suite_pull", linked: true, suitePR: true},
 		{name: "linked_queue_empty_suite_pulls", linked: true, queue: true},
+		{name: "linked_queue_refs_prefix", linked: true, queue: true, suiteRefs: true},
 		{name: "linked_queue_projected_head", linked: true, queue: true, projectedQueue: true},
 		{name: "linked_read_failure_then_redelivery", linked: true, fail: true},
 	} {
@@ -164,6 +165,9 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 				return nil
 			})
 			suiteBranch := branch
+			if tc.suiteRefs {
+				suiteBranch = "refs/heads/" + branch
+			}
 			if tc.projectedQueue {
 				suiteBranch = ""
 			}

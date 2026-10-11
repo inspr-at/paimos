@@ -7,6 +7,7 @@ import (
 	"errors"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -176,7 +177,7 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) (web
 			for _, p := range e.Suite.Pulls {
 				prs = append(prs, p.Number)
 			}
-			if match := queueBranch.FindStringSubmatch(e.Suite.Branch); match != nil {
+			if match := queueBranch.FindStringSubmatch(strings.TrimPrefix(e.Suite.Branch, "refs/heads/")); match != nil {
 				if pr, err := strconv.ParseInt(match[1], 10, 64); err == nil {
 					prs = append(prs, pr)
 				}
