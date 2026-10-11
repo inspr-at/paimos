@@ -31,18 +31,18 @@ of `Touch ID confirmation: needs pairing upgrade` concerns privileged Touch ID
 operations; it is not a prerequisite for these two flows. No new signing key,
 pairing replacement or service takeover is performed by enrollment.
 
-## mbp2607 operator procedure after release
+## Operator procedure after release
 
-The slot mapping was checked with the installed `cswap list` on 2026-10-11:
-1 is markus.barta, 2 is admin, and 3 is agent.one. Run `cswap list` again before
-starting and use the matching slots if the operator has changed that mapping.
+Run the installed `cswap list` before starting and confirm the intended three
+logins. The example below uses slots 1, 2 and 3; use the matching slots if the
+operator has changed that mapping.
 LEAD must hold its automatic Claude rotation for this procedure, using its own
 controller; a login must remain selected until its approval and local enrollment
 finish. The quota guard must be resumed afterwards. No worker changes that
 controller or takes over the service.
 
 After the service owner has activated the released daemon and matching CLI,
-run the following on mbp2607. Keep the service running:
+run the following on the paired Mac. Keep the service running:
 
 ```sh
 pairing_root="$HOME/Library/Application Support/aeon/paired"
@@ -62,7 +62,7 @@ aeon-agentd add-harness --state-root "$pairing_root" --harness claude
 aeon-agentd status --state-root "$pairing_root"
 ```
 
-For **each new login**, Markus opens the printed `/agents/register-agent` URL,
+For **each new login**, the person opens the printed `/agents/register-agent` URL,
 enters its pairing code, checks the named login and computer, and approves Connect.
 Choose connect-only when no verification run is intended. Optional verification
 and ongoing-use/spending approvals remain separate person decisions. Wait for
@@ -77,7 +77,7 @@ its UUID from the preceding status output:
 aeon-agentd link-account --setup-root "$pairing_root" --harness claude --account-id ACCOUNT_UUID
 ```
 
-Markus opens the printed `/link` URL, enters its code and confirms the named
+The person opens the printed `/link` URL, enters its code and confirms the named
 account, computer and person. Repeat this optional step for each unlinked login
 while its slot is active. A linked account returns without another prompt. To
 re-link an account, its current owner first chooses Unlink on `/link`, then the

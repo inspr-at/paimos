@@ -151,6 +151,21 @@ func TestRunningDaemonEnrollmentAndRelinkShareLifecycle(t *testing.T) {
 	}
 	defer s.Close(context.Background())
 	lifecycle := &pairedSetup{root: root, origin: server.URL, supervisor: s, gate: make(chan struct{}, 1)}
+	// The daemon must verify the login rather than trusting a socket caller's
+	// label; a rejected proposal must not create a person approval request.
+	forged := agentsetup.SetupRequest{Operation: "add_harness", Candidates: []agentsetup.LocalCandidate{{
+		Candidate: agentsetup.Candidate{Harness: "cursor", Label: "other@example.test"},
+		Path:      bin, Identity: "42",
+	}}}
+	if _, err := lifecycle.setup(t.Context(), forged); err == nil || !strings.Contains(err.Error(), "vendor login changed before enrollment") {
+		t.Fatalf("forged login was not rejected by vendor discovery: %v", err)
+	}
+	mu.Lock()
+	requestCreated := requested.RequestID != ""
+	mu.Unlock()
+	if requestCreated {
+		t.Fatal("unverified login reached person approval")
+	}
 	entered := make(chan struct{})
 	var enteredOnce sync.Once
 	s.SetSetupHandler(func(ctx context.Context, req agentsetup.SetupRequest) (agentsetup.Progress, error) {
