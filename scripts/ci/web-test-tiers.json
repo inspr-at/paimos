@@ -410,6 +410,10 @@
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 390"
     ,
+    "browser:tests/business.spec.ts:a partly set up overview shows status only, and its one link to Settings › Business stays put"
+    ,
+    "browser:tests/business.spec.ts:members see a partly set up overview without the parts status or the settings link"
+    ,
     "browser:tests/business.spec.ts:the overview includes open periods older than a year in its waiting count"
     ,
     "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 dark"
@@ -6496,9 +6500,13 @@
     ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"the bulk bar and its menus have no axe violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/business.spec.ts","name":"a partly set up overview shows status only, and its one link to Settings › Business stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"an admin enables Business: every part with the compiled digests","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"disabling a part asks first and closes its page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/business.spec.ts","name":"members see a partly set up overview without the parts status or the settings link","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"the header offers Business once a business plugin is enabled","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13707,6 +13715,12 @@
     {"kind":"node","file":"tests/avatar.test.ts","name":"zones and languages read well","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/brandMarks.test.ts","name":"known harnesses and providers use distinct vendored silhouettes","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/business-setup-owner.test.ts","name":"every setup link on the Business pages ends in Settings › Business","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/business-setup-owner.test.ts","name":"only Settings › Business mounts the business parts switches","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/business-setup-owner.test.ts","name":"the overview and its parts status only read the parts","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/business.test.ts","name":"amounts display exactly with en-GB grouping and the currency scale","tier":"GATED-FULL"}
     ,

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Business entry and overview: the header link, admin setup, the week and rates.
+// Business entry and overview: the header link, the parts status, the week and rates.
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { addHistoricalPeriod, businessData, mockBusiness, type BusinessMockOptions } from './business-fixtures'
+import { controlStability } from './control-stability'
 
 test.use({ timezoneId: 'Europe/Vienna' })
 
@@ -55,16 +56,30 @@ test('without an enabled plugin the header stays quiet and members see why', asy
   await page.goto('/business')
   await expect(page.getByRole('heading', { name: 'Business is not set up for this workspace' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Enable Business' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Set up in Settings › Business' })).toHaveCount(0)
 })
 
 test('an admin enables Business: every part with the compiled digests', async ({ page }) => {
   const { calls } = await setup(page, { enabled: [] })
   await page.goto('/business')
-  await expect(page.getByRole('heading', { name: 'Set up Business' })).toBeVisible()
-  await expect(page.getByRole('checkbox', { name: 'Hours enabled' })).not.toBeChecked()
-  await expect(page.getByText('Also enables Rates.')).toBeVisible()
-  await page.getByRole('button', { name: 'Enable Business' }).click()
+  // AEON-1189: the overview shows what is missing and only links to the one writer.
+  const parts = page.getByRole('region', { name: 'Set up Business' })
+  const rows = parts.getByRole('list', { name: 'Business parts' }).getByRole('listitem')
+  await expect(rows).toHaveText([/^Customers.*Not enabled$/, /^Quotes.*Needs Rates and Customers\.\s*Not enabled$/, /^Hours.*Needs Rates\.\s*Not enabled$/, /^Rates.*Not enabled$/])
+  const overview = page.getByRole('region', { name: 'Business', exact: true })
+  await expect(overview.getByRole('checkbox')).toHaveCount(0)
+  await expect(overview.getByRole('button')).toHaveCount(0)
+  await expect(overview.getByRole('link', { name: 'Set up in Settings › Business' })).toHaveCount(1)
+  await parts.getByRole('link', { name: 'Set up in Settings › Business' }).click()
+  await expect(page).toHaveURL('/settings/business#parts')
+  const settings = page.locator('#parts')
+  await expect(settings.getByRole('checkbox', { name: 'Hours enabled' })).not.toBeChecked()
+  await expect(settings.getByText('Also enables Rates.')).toBeVisible()
+  await settings.getByRole('button', { name: 'Enable Business' }).click()
+  await expect(settings.getByRole('checkbox', { name: 'Hours enabled' })).toBeChecked()
+  await header(page).getByRole('link', { name: 'Business' }).click()
   await expect(page.getByRole('heading', { name: 'Your week' })).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Business parts' })).toHaveCount(0)
   const writes = calls.filter(c => c.method === 'PUT')
   expect(writes.map(c => c.path)).toEqual(['/api/plugins/business_costs/installation', '/api/plugins/business_crm/installation', '/api/plugins/business_quotes/installation', '/api/plugins/business_hours/installation'])
   expect(writes[0].body).toEqual({ manifest_digest_sha256: 'ab'.repeat(32), enabled: true, permissions: ['nodes.contribute', 'steps.apply', 'views.provide'] })
@@ -74,8 +89,9 @@ test('an admin enables Business: every part with the compiled digests', async ({
 test('disabling a part asks first and closes its page', async ({ page }) => {
   const { calls } = await setup(page)
   await page.goto('/business')
-  await page.getByRole('button', { name: 'Manage parts' }).click()
-  await page.getByRole('checkbox', { name: 'Hours enabled' }).click()
+  await page.getByRole('link', { name: 'Set up in Settings › Business' }).click()
+  await expect(page).toHaveURL('/settings/business#parts')
+  await page.locator('#parts').getByRole('checkbox', { name: 'Hours enabled' }).click()
   const dialog = page.getByRole('dialog', { name: 'Disable Hours?' })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: 'Disable Hours' }).click()
@@ -83,6 +99,51 @@ test('disabling a part asks first and closes its page', async ({ page }) => {
   expect(calls.find(c => c.method === 'PUT')?.body).toMatchObject({ enabled: false })
   await page.goto('/business/hours')
   await expect(page.getByRole('heading', { name: 'Hours is not enabled for this workspace' })).toBeVisible()
+})
+
+// AEON-1189: Settings › Business is the only writer. A partly set up overview says
+// which parts are on and what is missing, and its one link holds still while the
+// rest of the overview arrives.
+test('a partly set up overview shows status only, and its one link to Settings › Business stays put', async ({ page }) => {
+  const errors = watchErrors(page)
+  await setup(page, { enabled: ['business_costs'] })
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/cost-units/*/rates', async route => { await held; await route.fallback() })
+  await page.goto('/business')
+  const overview = page.getByRole('region', { name: 'Business', exact: true })
+  const parts = overview.getByRole('region', { name: 'Business parts' })
+  await expect(parts.getByRole('list', { name: 'Business parts' }).getByRole('listitem')).toHaveText([/^Customers\s*Not enabled$/, /^Quotes\s*Needs Customers\.\s*Not enabled$/, /^Hours\s*Not enabled$/, /^Rates\s*Enabled$/])
+  await expect(overview.getByRole('checkbox')).toHaveCount(0)
+  await expect(overview.getByRole('button')).toHaveCount(0)
+  await expect(parts.getByRole('link')).toHaveCount(0)
+  const link = overview.getByRole('link', { name: 'Set up in Settings › Business' })
+  await expect(link).toHaveCount(1)
+  const guard = await controlStability(page, { link, parts })
+  await guard.check(async () => {
+    release()
+    await expect(page.getByText('3 rates in force', { exact: true })).toBeVisible()
+    await expect(overview.getByRole('list', { name: 'Cost units and rates in force' }).getByRole('listitem')).toHaveCount(2)
+  })
+  guard.done()
+  await link.click()
+  await expect(page).toHaveURL('/settings/business#parts')
+  await expect(page.locator('#parts').getByRole('checkbox', { name: 'Rates enabled' })).toBeChecked()
+  expect(errors).toEqual([])
+})
+
+test('members see a partly set up overview without the parts status or the settings link', async ({ page }) => {
+  await setup(page, { role: 'member', enabled: ['business_costs'] })
+  await page.goto('/business')
+  const overview = page.getByRole('region', { name: 'Business', exact: true })
+  await expect(overview.getByRole('region', { name: 'Rates in force' })).toBeVisible()
+  await expect(overview.getByRole('region', { name: 'Business parts' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: 'Set up in Settings › Business' })).toHaveCount(0)
+  await page.goto('/business/hours')
+  await expect(page.getByRole('heading', { name: 'Hours is not enabled for this workspace' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Set up in Settings › Business' })).toHaveCount(0)
+  await page.getByRole('link', { name: 'Business overview' }).click()
+  await expect(page).toHaveURL('/business')
 })
 
 test('the overview shows the week, where it went, what waits and the rates', async ({ page }) => {

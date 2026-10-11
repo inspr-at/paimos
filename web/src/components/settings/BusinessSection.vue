@@ -9,8 +9,8 @@ import QuoteSettingsCard from './QuoteSettingsCard.vue'
 import QuoteProfilesCard from './QuoteProfilesCard.vue'
 import SettingsCard from './SettingsCard.vue'
 
-// Business for admins: which parts are on (the same switches as the overview),
-// the quote sender and numbering, and how customers are kept.
+// Business for admins: the one place that enables the parts (the overview only
+// shows them), the quote sender and numbering, and how customers are kept.
 const business = useBusiness()
 onMounted(() => { void business.loadPlugins() })
 </script>
@@ -18,7 +18,7 @@ onMounted(() => { void business.loadPlugins() })
 <template>
   <div v-if="business.plugins" class="section">
     <div id="parts" class="parts-anchor">
-      <SetupCard variant="manage" />
+      <SetupCard />
     </div>
 
     <QuoteSettingsCard />
@@ -41,7 +41,7 @@ onMounted(() => { void business.loadPlugins() })
 .section-placeholder { display: grid; align-content: start; gap: 14px; min-height: 100vh; }
 .section-placeholder .skeleton { height: 90px; }
 .parts-anchor { scroll-margin-top: 20px; }
-/* The parts card is the overview's own; here it takes the settings cards' measure. */
+/* The parts card keeps its own frame; here it takes the settings cards' measure. */
 .parts-anchor :deep(.setup) { margin: 0; padding: 20px; }
 .parts-anchor :deep(.setup-head) { gap: 12px; }
 .parts-anchor :deep(.setup-icon) { width: 32px; height: 32px; border-radius: 10px; }
