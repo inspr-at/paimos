@@ -960,6 +960,10 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRetiredCapacityOverridesCanStillEnd","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRetiredCapacityOverridesDropExpiredOnSave","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRetiredCapacityOverridesRoundTripUnchanged","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRouteOnlyClaimsLocalDaemonEnrollment","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRouterKeepsTheRunwayReserve","tier":"GATED-FULL"}
