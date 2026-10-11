@@ -172,9 +172,6 @@ func loadLadderSnapshot(ctx context.Context, tx pgx.Tx, role string, limit int) 
 			return nil, "", err
 		}
 		if step != nil {
-			if step.Profile.Harness == "gemini" {
-				step.Profile.EffortLevel = harnesslaunch.GeminiEffortLevel(step.Profile.Effort)
-			}
 			step.Profile.Origin = profileOrigin(step.Profile, step.Profile.Origin)
 			step.Profile.Source = profileSource(step.Profile.Source)
 			out = append(out, *step)

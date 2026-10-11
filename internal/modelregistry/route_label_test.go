@@ -48,6 +48,11 @@ func TestRevisionFollowsRoutes(t *testing.T) {
 	if code, body := call(t, &p, http.MethodGet, "/api/models", ""); code != http.StatusOK {
 		t.Fatalf("seed: %d %s", code, body)
 	}
+	if got := revision(); got != "" {
+		t.Fatalf("ID-only catalog created routing revision %q", got)
+	}
+	// The routing revision belongs to explicit fixture policy, not model IDs.
+	inRegistry(t, p, func(tx pgx.Tx) error { return ensureCatalog(t.Context(), tx, p) })
 	seeded := revision()
 	if !regexp.MustCompile(`^[0-9a-f]{8}$`).MatchString(seeded) || revision() != seeded {
 		t.Fatalf("seeded revision %q", seeded)
