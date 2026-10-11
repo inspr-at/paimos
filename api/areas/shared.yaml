@@ -1290,6 +1290,8 @@ components:
         - type: object
           required: [id, enabled, created_at]
           properties:
+            identity: {type: string, description: "Canonical provider:model identity shared across harness routes"}
+            lifecycle: {$ref: '#/components/schemas/ModelCatalogLifecycle'}
             id: {type: string, format: uuid}
             enabled: {type: boolean}
             created_at: {type: string, format: date-time}
