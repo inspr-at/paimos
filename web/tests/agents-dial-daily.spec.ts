@@ -11,8 +11,12 @@ import type { PairingView } from '../src/lib/agentPairing'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { mockDailyPlan, UNTIL, type DailyPlanOptions } from './agents-daily-fixtures'
+import { HARNESS_LABEL } from '../src/lib/agentState'
 
 const shots = process.env.AEON_1036_SHOTS ?? 'test-results/aeon-1036-capsdial'
+// The harness's name in the daily limit's words (AEON-1175): "Claude" until AEON-1160 names it "Claude Code";
+// both pass. The dial's row label stays the vendor's ("Open the dial at Claude").
+const CLAUDE = HARNESS_LABEL.claude!
 interface SetupOptions extends DailyPlanOptions { folded?: boolean; waiting?: number; dial?: Record<string, unknown>; room?: Record<string, number>; manage?: boolean; capacityEdit?: (capacity: ReturnType<typeof capacityWorld>) => void }
 async function setup(page: Page, options: SetupOptions = {}) {
   await page.clock.setSystemTime(NOW)
@@ -72,7 +76,7 @@ test('AEON-1036: folded, the dial is one row as high as the other folded cards a
   // Over pace is one gold flag on Claude; on pace and no daily limit leave no flag.
   await expect(card.locator('.cap-flag')).toHaveCount(1)
   await expect(chip(page, 'claude').locator('.cap-flag')).toHaveClass(/st-over_pace/)
-  await expect(chip(page, 'claude').locator('.cap-flag')).toHaveAccessibleName('Claude · at most 2 · ≤ 60 % used today · 4 percentage points over pace. Open the dial at Claude')
+  await expect(chip(page, 'claude').locator('.cap-flag')).toHaveAccessibleName(`${CLAUDE} · at most 2 · ≤ 60 % used today · 4 percentage points over pace. Open the dial at Claude`)
   await expect(chip(page, 'codex').locator('.cap-flag')).toHaveCount(0)
   await expect(chip(page, 'cursor').locator('.cap-flag')).toHaveCount(0)
   // Everything else is hover and keyboard focus: the chip says its limit and today's state.
@@ -95,7 +99,7 @@ test('AEON-1036: at the limit the flag is red and says where new work goes', asy
   await page.goto('/agents')
   const flag = chip(page, 'claude').locator('.cap-flag')
   await expect(flag).toHaveClass(/st-at_limit/)
-  await expect(flag).toHaveAccessibleName('Claude · at most 2 · at today’s limit · Codex next. Open the dial at Claude')
+  await expect(flag).toHaveAccessibleName(`${CLAUDE} · at most 2 · at today’s limit · Codex next. Open the dial at Claude`)
   const sample = await flag.evaluate(el => ({ background: getComputedStyle(el).backgroundColor, width: el.getBoundingClientRect().width }))
   expect(sample.background).not.toBe('rgba(0, 0, 0, 0)')
   expect(sample.width).toBe(22)
@@ -108,7 +112,7 @@ test('AEON-1036: a stale reading never claims the limit, although the server als
   await expect(chip(page, 'claude')).toBeVisible()
   await expect(chip(page, 'claude').locator('.cap-flag')).toHaveCount(0)
   await chip(page, 'claude').hover()
-  await expect(chip(page, 'claude').locator('.chip-tip')).toHaveText('Claude · at most 2 · usage not measured right now')
+  await expect(chip(page, 'claude').locator('.chip-tip')).toHaveText(`${CLAUDE} · at most 2 · usage not measured right now`)
 })
 
 test('AEON-1036: "● N running (M waiting) ▾" opens the info area, from the folded dial too, and it is remembered', async ({ page }) => {
@@ -218,7 +222,7 @@ test('AEON-1036: a flag opens the dial at that harness, and a pick is remembered
   await expect(row(page, 'claude')).toHaveClass(/sel/)
   await expect(card.locator('.f-sel[data-sel="claude"]')).toHaveAttribute('aria-pressed', 'true')
   await expect(card.locator('.f-sel[data-sel="claude"]')).toBeFocused()
-  await expect(detail(page, 'claude').getByRole('heading')).toHaveText('Claude · daily limit: up to 50 % used')
+  await expect(detail(page, 'claude').getByRole('heading')).toHaveText(`${CLAUDE} · daily limit: up to 50 % used`)
   await expect.poll(() => work.preferences['ui.agents.dial']).toMatchObject({ selected: 'claude' })
   // Another pick replaces it; a click on the row (not its controls) picks too, a click on its controls does not.
   await row(page, 'codex').locator('.sub').click()
@@ -255,7 +259,7 @@ test('AEON-1036: the detail reads week, today, the bar and the pace state, then 
   await setup(page, { example: 'over', dial: { selected: 'claude' } })
   await page.goto('/agents')
   const claude = detail(page, 'claude')
-  await expect(claude.getByRole('heading')).toHaveText('Claude · daily limit: up to 60 % used')
+  await expect(claude.getByRole('heading')).toHaveText(`${CLAUDE} · daily limit: up to 60 % used`)
   await expect(claude).toContainText('54 % used · 46 % left this week · resets Thu 1 Oct 21:02')
   await expect(claude).toContainText('Today: 14 of 20 percentage points used · 6 left today')
   await expect(claude.getByRole('img', { name: 'Today: 14 of 20 percentage points used; 10 is today’s share.' })).toBeVisible()

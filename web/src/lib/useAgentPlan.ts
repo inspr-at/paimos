@@ -4,7 +4,7 @@
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { api } from './api.ts'
 import { basePlan, planValue, type PlanSnapshot, type WaitingWork, type WorkingPreference } from './agentsWorking.ts'
-import { cloneDaily, sameDaily, type DailySettings } from './dailyLimits.ts'
+import { PlanChanged, putAgentsPlan, sameDaily, withDaily, type DailySettings } from './dailyLimits.ts'
 import { queueRequest, type QueueWireSnapshot } from './workQueue.ts'
 import { usePoller } from './usePolledData.ts'
 /** After − or + is released, the final value is saved once this long passes without another press. */
@@ -59,9 +59,16 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
     while (pending && !holds && !settle && current(turn, who)) {
       const job = pending; pending = undefined
       try {
-        const response = await api('/preferences/agents.working', { method: 'PUT', keepalive: leaving, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: job.value, expected_updated_at: confirmedAt }) })
+        // The same guarded write as Settings › Capacity's pace (AEON-1175): one helper, one rule.
+        const updatedAt = await putAgentsPlan(job.value, confirmedAt, { keepalive: leaving, failure: job.daily ? 'Couldn’t save the daily limit. Please try again.' : 'Couldn’t save the total and limits. Please try again.' })
         if (!current(turn, who)) return
-        if (response.status === 409) {
+        confirmed = planValue(job.value)
+        confirmedAt = updatedAt
+        readVersion++ // Drop polls that started before this committed write.
+        if (job.version === version) saveError.value = ''
+      } catch (e) {
+        if (!current(turn, who)) return
+        if (e instanceof PlanChanged) {
           // A queued edit was made against the same stale plan. Drop it too;
           // the next deliberate click must start from the newly read revision.
           pending = undefined; version++
@@ -76,16 +83,6 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
           interrupts.value++
           break
         }
-        if (!response.ok) throw new Error(job.daily ? 'Couldn’t save the daily limit. Please try again.' : 'Couldn’t save the total and limits. Please try again.')
-        const stored = await response.json() as { updated_at?: string }
-        if (!current(turn, who)) return
-        if (typeof stored.updated_at !== 'string' || !Number.isFinite(Date.parse(stored.updated_at))) throw new Error('Couldn’t confirm the save. Please try again.')
-        confirmed = planValue(job.value)
-        confirmedAt = stored.updated_at
-        readVersion++ // Drop polls that started before this committed write.
-        if (job.version === version) saveError.value = ''
-      } catch (e) {
-        if (!current(turn, who)) return
         if (job.version === version) {
           plan.value = confirmed && planValue(confirmed)
           saveError.value = e instanceof Error ? e.message : 'Couldn’t confirm the save. Please try again.'
@@ -114,8 +111,7 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
    */
   function saveDaily(harness: string, settings: DailySettings) {
     if (!plan.value || !snapshot.value) return
-    const next = cloneDaily(daily.value)
-    next[harness] = { pace: { ...settings.pace }, boost_today: settings.boost_today && { ...settings.boost_today }, at_limit: settings.at_limit }
+    const next = withDaily(daily.value, harness, settings)
     if (sameDaily(next, daily.value)) return
     save({ ...planValue(plan.value), daily: next }, true)
   }

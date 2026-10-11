@@ -806,6 +806,8 @@
         ,
         {"file":"tests/capacity-learning.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/capacity-pace.spec.ts","listedTests":13,"weightSeconds":39,"weightSource":"AEON-1175 estimate: thirteen mocked Capacity and dial flows, six at three widths and two themes with the pacing editors"}
+        ,
         {"file":"tests/connect-verification.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/cost-units.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
