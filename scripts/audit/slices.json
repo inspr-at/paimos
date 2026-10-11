@@ -108,6 +108,7 @@
         "internal/agentplan/**",
         "internal/sessionusage/**",
         "internal/agentruns/**",
+        "internal/agentruns/routine_preparation.go",
         "internal/agentactivity/**",
         "internal/agentcompat/**",
         "internal/runkind/**",
@@ -124,6 +125,8 @@
         "internal/agents/**",
         "internal/hooknote/**",
         "internal/delivery/**",
+        "internal/delivery/webhook_log.go",
+        "internal/delivery/webhook_log_test.go",
         "internal/engineadmission/**",
         "internal/agentsetup/ledger.go",
         "internal/agentsetup/ledger_test.go",
@@ -152,7 +155,8 @@
         "internal/agentd/queue_cadence.go",
         "internal/agentd/queue_cadence_test.go",
         "internal/agentruns/queue_notifications.go",
-        "internal/agentruns/queue_notifications_test.go"
+        "internal/agentruns/queue_notifications_test.go",
+        "internal/runisolation/**"
       ]
     },
     {
@@ -168,7 +172,11 @@
         "internal/plugins/**",
         "internal/events/**",
         "internal/attachedmsg/**",
-        "internal/cli/project_identity_test.go"
+        "internal/cli/project_identity_test.go",
+        "internal/cli/hook_subagent.go",
+        "internal/cli/hook_subagent_unix.go",
+        "internal/cli/hook_subagent_other.go",
+        "internal/cli/hook_subagent_unix_test.go"
       ]
     },
     {
@@ -247,7 +255,8 @@
         "internal/recurrences/consent_test.go",
         "internal/routineguard/**",
         "internal/recurrences/runs.go",
-        "internal/recurrences/runs_test.go"
+        "internal/recurrences/runs_test.go",
+        "internal/routinebudget/**"
       ]
     },
     {

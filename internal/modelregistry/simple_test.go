@@ -92,14 +92,28 @@ func TestMinimalModelSourceAndNoteOwnership(t *testing.T) {
 	if status != 400 {
 		t.Fatal("source was writable", status)
 	}
+	status, _ = call(t, &admin, "POST", "/api/models", strings.TrimSuffix(payload, "}")+`,"origin":"shipped"}`)
+	if status != 400 {
+		t.Fatal("origin was writable", status)
+	}
 	status, _ = call(t, &admin, "POST", "/api/models", strings.Replace(payload, "Useful for building", strings.Repeat("x", 81), 1))
 	if status != 400 {
 		t.Fatal("oversized note", status)
 	}
 	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
-	if profileBySlug(profiles, "codex-6-1-sol-high").Source != "auto" {
+	if profileBySlug(profiles, "codex-6-1-sol-high").Source != "auto" || profileBySlug(profiles, "codex-6-1-sol-high").Origin != "shipped" {
 		t.Fatal("seed source")
 	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		var incompatible int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_profiles WHERE source NOT IN ('auto','manual')`).Scan(&incompatible); err != nil {
+			return err
+		}
+		if incompatible != 0 {
+			t.Fatal("provenance broke the source vocabulary for older readers")
+		}
+		return nil
+	})
 }
 
 // Risk: a scheduled retirement blocks early, never becomes effective on the
@@ -691,3 +705,187 @@ func TestMinimalOmittedKindFollowsDefaultAndKeepsStoredTail(t *testing.T) {
 	}
 }
 func ptrInt(n int) *int { return &n }
+
+// Risk: models.read discloses another account's wait cause or reset/schedule
+// through either resolver surface, including after usage sharing is revoked.
+func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
+	for _, cause := range []string{"allowance", "schedule"} {
+		t.Run(cause, func(t *testing.T) {
+			owner, member := boardFixture(t)
+			admin := addPrincipal(t, owner.TenantID, "person", "Nonowning admin", []string{"admin"})
+			agent := addPrincipal(t, owner.TenantID, "agent", "Scoped model reader", []string{"admin"})
+			profiles := decode[[]Profile](t, &owner, "GET", "/api/models", "", 200)
+			sol := profileBySlug(profiles, "codex-6-1-sol-xhigh")
+			opus := profileBySlug(profiles, "claude-opus-xhigh")
+			account := minimalAccount(t, owner, sol)
+			fallback := minimalAccount(t, owner, opus)
+			boardDecode[boardWriteResult](t, boardCall(t, owner, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"openai:sol", "anthropic:opus"}, "not": []string{}, "revision": 0}, ""), 200)
+			boardDecode[boardWriteResult](t, boardCall(t, owner, "PUT", "/api/model-preferences/orders/other/first/thinking?for=default", map[string]any{"effort": "xhigh", "revision": 1}, ""), 200)
+			var until time.Time
+			inRegistry(t, owner, func(tx pgx.Tx) error {
+				now, err := dbNow(t.Context(), tx)
+				if err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=$3,share_usage=false WHERE id=ANY($1::uuid[])`, []string{account, fallback}, owner.ID, now); err != nil {
+					return err
+				}
+				if cause == "allowance" {
+					until = now.Add(24 * time.Hour)
+					_, err = tx.Exec(t.Context(), `UPDATE account_allowance_windows SET used=allowance,ends_at=$2 WHERE account_id=$1`, account, until)
+					return err
+				}
+				// Unknown quota with the next band two days away keeps this
+				// fixture outside working hours throughout all HTTP reads.
+				until = time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day()+2, 8, 0, 0, 0, time.UTC)
+				schedule := capacity.DefaultSchedule("UTC")
+				schedule.Reserve, schedule.OffDays = capacity.ReserveOff, "rest"
+				for i := range schedule.Week {
+					schedule.Week[i].On = i == int(until.Weekday()+6)%7
+				}
+				raw, err := json.Marshal(schedule)
+				if err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET removed_at=$2 WHERE account_id=$1`, account, now); err != nil {
+					return err
+				}
+				_, err = tx.Exec(t.Context(), `UPDATE account_capacity_schedules SET schedule=$2 WHERE account_id=$1`, account, raw)
+				return err
+			})
+			detail := "Codex account is at its allowance or floor until " + until.UTC().Format(time.RFC3339)
+			if cause == "schedule" {
+				detail = "Codex account is outside its scheduled hours until " + until.Format(time.RFC3339)
+			}
+			for _, phase := range []struct {
+				name  string
+				share bool
+			}{{"private", false}, {"shared", true}, {"revoked", false}} {
+				inRegistry(t, owner, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=$2 WHERE id=$1`, account, phase.share)
+					return err
+				})
+				for _, reader := range []tenant.Principal{owner, member, admin, agent} {
+					t.Run(phase.name+"/"+reader.Name, func(t *testing.T) {
+						want := "Codex account cannot take new work right now"
+						if reader.ID == owner.ID || phase.share {
+							want = detail
+						}
+						resolved := decode[Resolution](t, &reader, "GET", "/api/models/resolve?role=build-hard", "", 200)
+						if resolved.Profile == nil || resolved.Profile.ID != opus.ID || resolved.OwnerRequired {
+							t.Fatalf("privacy changed the eligible fallback: %+v", resolved)
+						}
+						found := false
+						for _, candidate := range resolved.Ladder {
+							if candidate.ProfileID == sol.ID {
+								found = true
+								if candidate.Selected || !slices.Equal(candidate.SkipReasons, []string{want}) {
+									t.Errorf("resolver reason=%v selected=%v, want one %q", candidate.SkipReasons, candidate.Selected, want)
+								}
+							}
+						}
+						if !found {
+							t.Fatal("resolver omitted the blocked model")
+						}
+						simple := decode[simpleDocument](t, &reader, "GET", "/api/model-preferences/simple?for=default", "", 200)
+						found = false
+						for _, row := range simple.Unavailable {
+							if row.Column == "other" && row.Line == "openai:sol" {
+								found = true
+								if row.Reason != want || row.RunsInstead == nil || *row.RunsInstead != "anthropic:opus" {
+									t.Errorf("simple reason=%q fallback=%v, want %q and Claude", row.Reason, row.RunsInstead, want)
+								}
+							}
+						}
+						if !found {
+							t.Fatal("simple view omitted the blocked model")
+						}
+					})
+				}
+			}
+		})
+	}
+}
+
+// Risk (AEON-1146 / AEON-990): missing quota stops every harness, or a real
+// vendor limit suppresses a healthy sibling and repeats once per effort/stage.
+func TestModelAllowanceUnknownAndMeasuredLimit(t *testing.T) {
+	admin, _ := boardFixture(t)
+	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	opus := profileBySlug(profiles, "claude-opus-xhigh")
+	sol := profileBySlug(profiles, "codex-6-1-sol-xhigh")
+	runner := addPrincipal(t, admin.TenantID, "agent", "Allowance runner", nil)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"anthropic:opus", "openai:sol"}, "not": []string{}, "revision": 0}, ""), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first/thinking?for=default", map[string]any{"effort": "xhigh", "revision": 1}, ""), 200)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		now, err := dbNow(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		reset := now.Add(time.Hour)
+		schedule := capacity.DefaultSchedule("UTC")
+		schedule.Override, schedule.OverrideUntil, schedule.Reserve = "sprint", &reset, capacity.ReserveOff
+		raw, err := json.Marshal(schedule)
+		if err != nil {
+			return err
+		}
+		ids := map[string]string{}
+		for _, h := range []string{"claude", "codex"} {
+			profileID := opus.ID
+			if h == "codex" {
+				profileID = sol.ID
+			}
+			var id string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation,owner_person_id,linked_at,allowed_model_profile_ids) VALUES($1,$2,$2,'fixture',$3,$2,'available',$4,true,'fixture',$5,$7,ARRAY[$6::uuid]) RETURNING id::text`, admin.TenantID, h, runner.ID, now, admin.ID, profileID, now.Add(-2*time.Minute)).Scan(&id); err != nil {
+				return err
+			}
+			ids[h] = id
+			if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, admin.TenantID, admin.ID, id, raw); err != nil {
+				return err
+			}
+		}
+		query := WorkQuery{Role: "build", Column: "other", Area: "other", Situation: "first", WorkspaceOnly: true, ExplicitBoard: true}
+		ctx := tenant.WithPrincipal(t.Context(), admin)
+		unknown, err := resolveBoardWork(ctx, tx, admin, query, now, nil)
+		if err != nil {
+			return err
+		}
+		if unknown == nil || unknown.Profile == nil || unknown.Profile.ID != opus.ID || len(unknown.Ladder[0].SkipReasons) != 0 {
+			t.Fatalf("unknown quota must select top Claude profile: %+v", unknown)
+		}
+		used := 14.0
+		for _, amount := range []float64{used, 100} {
+			readAt := now
+			if amount < 100 {
+				readAt = now.Add(-time.Minute)
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','',10080,$3,$4,$5,'harness')`, admin.TenantID, ids["claude"], amount, reset, readAt); err != nil {
+				return err
+			}
+			out, err := resolveBoardWork(ctx, tx, admin, query, now, nil)
+			if err != nil {
+				return err
+			}
+			if amount < 100 {
+				if out.Profile == nil || out.Profile.ID != opus.ID {
+					t.Fatalf("under-limit Claude must be eligible: %+v", out)
+				}
+			} else {
+				if out.Profile == nil || out.Profile.ID != sol.ID {
+					t.Fatalf("only exhausted account's routes must be skipped: %+v", out)
+				}
+				reasons := []string{}
+				for _, step := range out.Ladder {
+					if step.ProfileID == opus.ID {
+						reasons = append(reasons, step.SkipReasons...)
+					}
+				}
+				text := joinReasons(reasons)
+				if !strings.Contains(text, "Claude account reported a vendor limit until "+reset.UTC().Format(time.RFC3339)) || strings.Contains(text, ";") {
+					t.Fatalf("one human sentence with reset required: %q", text)
+				}
+			}
+		}
+		return nil
+	})
+}

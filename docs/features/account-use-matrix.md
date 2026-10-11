@@ -67,14 +67,16 @@ candidate schema and checks activated empty and denied pools.
 The pinned release's embedded principal-entry migration identifies whether it
 supports the capability. Supported releases must return only a catalog preview
 for an empty pool, refuse denied context selection and account hand-outs, and
-leave reservations, claims, starts and background state unchanged. The harness
-then boots the pinned release 128 image without `account_use_v1` on a separate
-copy of the inactive, migrated fixture. It verifies that image's exact version
-and non-activated reads before checking activated empty and populated pools.
-For releases below the floor, handlers sanitize database errors, so each
-refused request must produce the exact `0A000` message from
-`aeon_enter_principal` in the disposable Postgres log. Generic HTTP errors alone
-cannot pass that gate.
+leave reservations, claims, starts and background state unchanged. The rollback
+checks use Release 128 (`v261009095632.0.0`), pinned to its published image digest.
+Both probes seed and migrate separate fresh disposable databases, even when the
+latest release is also Release 128, so policy activation cannot contaminate the
+rollback fixture. Each image's exact version and non-activated reads are checked
+before checking its activated pools. Release 129 advertises account-use
+capability and must pass the supported policy checks. For releases below the
+floor, handlers sanitize database errors, so each refused request must produce
+the exact `0A000` message from `aeon_enter_principal` in the disposable Postgres
+log. Generic HTTP errors alone cannot pass that gate.
 
 The selection layer uses the same database predicates for dispatch, claims,
 explicit account targets, review, catalog choices and account hand-outs. Denied

@@ -78,6 +78,7 @@ func TestHostCapacityLargestEncodingsStayBounded(t *testing.T) {
 	load := 10000.0
 	policy := Policy{Mode: "smart", MaximumAgents: 64, MaximumLoad: 199.99999999999997, WaitWhenBusy: true, EaseOnBattery: true, EaseWhenHot: true, ConsiderActivity: true}
 	signals := Signals{Load: &load, Cores: 4096, MemoryPressure: "unknown", MemoryUsedGB: &big, MemoryTotalGB: &big, Power: "plugged_in", Thermal: "unknown", InputActive: &yes}
+	signals.Unattended = &UnattendedSignals{LoginSession: "required", IdleSleep: "disabled", FileVault: "unknown"}
 	if policy.Validate() != nil || signals.Validate() != nil {
 		t.Fatal("fixture must be valid")
 	}

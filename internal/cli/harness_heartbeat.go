@@ -435,6 +435,12 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 
 // heartbeatLoop serves both the PID observer and a one-shot child process.
 func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep heartbeatDeps, session *heartbeatSession) error {
+	defer func() {
+		if session.subagentScan != nil {
+			session.subagentScan.Close()
+			session.subagentScan = nil
+		}
+	}()
 	if dep.alive == nil {
 		pid, start := session.disk.OwnerPID, session.disk.OwnerStart
 		dep.alive = func(int) bool { return ownerAlive(pid, start) }
@@ -483,6 +489,7 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 		case err != nil:
 			fmt.Fprintf(rt.stderr, "heartbeat: beat failed: %s\n", err.Error())
 		default:
+			rt.heartbeatSubagents(ctx, session, false)
 			if serr := saveHeartbeatSession(session); serr != nil {
 				fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
 			}
@@ -564,6 +571,16 @@ func waitHeartbeat(ctx context.Context, pid int, alive func(int) bool, interval 
 }
 
 func (rt *runtime) finishHeartbeat(o heartbeatOptions, session *heartbeatSession) error {
+	if session.subagentScan != nil {
+		session.subagentScan.Close()
+		session.subagentScan = nil
+	}
+	session.subagentNames = nil
+	rt.heartbeatSubagents(context.Background(), session, true)
+	if session.subagentScan != nil {
+		session.subagentScan.Close()
+		session.subagentScan = nil
+	}
 	if !session.disk.Terminal {
 		usageCtx, cancel := context.WithTimeout(context.Background(), heartbeatUsageFlushTimeout)
 		rt.drainHeartbeatUsage(usageCtx, o, session)

@@ -113,7 +113,7 @@ func TestResolverProjectDailyCapsAndContextLadder(t *testing.T) {
 					if out.Profile == nil || out.Profile.Harness != "claude" {
 						t.Fatalf("wrong successor: %+v", out)
 					}
-					reason := "daily_limit"
+					reason := "Codex account is at its daily cap until " + end.UTC().Format(time.RFC3339)
 					if tc.allDenied {
 						reason = agentaccounts.ContextSkipReason
 					}
