@@ -24,6 +24,7 @@ import (
 type Module struct {
 	pool             *pgxpool.Pool
 	executionRuntime ExecutionRuntimeReader
+	actionEvaluator  ActionEvaluatorTx
 	// now is an injected database-clock substitute for deterministic tests only.
 	now     func(context.Context, pgx.Tx) (time.Time, error)
 	history []Publication

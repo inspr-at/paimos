@@ -8366,6 +8366,8 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRollbackUniqueKeyAndInvalidTarget","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineActionGrantRejectsUnverifiedAndRevokedOwner","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineConsentBindsQualificationAndScopedIdentity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineConsentRechecksOwnerBehindAccessFence","tier":"ESSENTIAL"}
@@ -8761,6 +8763,10 @@
     {"kind":"go","package":"internal/reviewgate","name":"TestModelMatchesRequiresRequestedPin","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reviewgate","name":"TestParseFinalVerdict","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/routineactions","name":"TestRoutineActionCatalogueClosedAndBounded","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineactions","name":"TestRoutineActionsAtomicReplayAndTargets","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetAdmissionAndOwnership","tier":"ESSENTIAL"}
     ,
