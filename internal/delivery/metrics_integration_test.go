@@ -2,14 +2,18 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -81,6 +85,77 @@ func metricCounts(t *testing.T, f *fixture) (runs, pulls, marks int) {
 		return tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM delivery_metric_runs),(SELECT count(*) FROM delivery_metric_pulls),(SELECT count(*) FROM delivery_metric_marks)`).Scan(&runs, &pulls, &marks)
 	})
 	return
+}
+
+func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
+	// Risk: an unconfigured metric consumer performs unnecessary GitHub reads,
+	// and a failed read rejects an otherwise valid, authenticated delivery.
+	// This regression intentionally remains red until AEON-1241's durable
+	// ingress expansion is assigned; the brief requires stopping for a migration.
+	for _, unavailable := range []bool{false, true} {
+		name := "read_available"
+		if unavailable {
+			name = "read_unavailable"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			head := strings.Repeat("d", 40)
+			g := &metricsFake{auditFake: &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}}
+			g.respond = func(path string) (any, error) {
+				if path != "/actions/runs?check_suite_id=900&head_sha="+head+"&per_page=2" {
+					t.Fatalf("unexpected GitHub read: %s", path)
+				}
+				if unavailable {
+					return nil, crossreview.ErrUnavailable
+				}
+				run := githubRunBody(501, 1, defaultCIWorkflow, "pull_request", "work/aeon-1241", head, f.at.Add(-time.Hour), 10*time.Minute, "success", 900)
+				return map[string]any{"total_count": 1, "workflow_runs": []any{run}}, nil
+			}
+			f.m.github = g
+			var logs bytes.Buffer
+			f.m.webhookFailures.logger = slog.New(slog.NewJSONHandler(&logs, nil))
+			f.tx(t, func(tx pgx.Tx) error {
+				var sources int
+				if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_metric_sources`).Scan(&sources); err != nil {
+					return err
+				}
+				if sources != 0 {
+					t.Fatalf("fixture unexpectedly linked %d metric sources", sources)
+				}
+				return nil
+			})
+			body := map[string]any{
+				"action":       "completed",
+				"installation": map[string]any{"id": 456},
+				"repository":   map[string]any{"full_name": f.m.config.Repository, "default_branch": "main"},
+				"check_suite":  map[string]any{"id": 900, "head_sha": head, "status": "completed", "app": map[string]any{"slug": "github-actions"}, "pull_requests": []any{}},
+			}
+			raw, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := webhookLogRequest("check_suite", string(raw))
+			r.Header.Set("X-Hub-Signature-256", signed(raw, f.m.secret))
+			w := httptest.NewRecorder()
+			f.mux.ServeHTTP(w, r)
+			var ledger int
+			f.tx(t, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_github_events WHERE delivery_id='delivery-log-test' AND event='check_suite'`).Scan(&ledger)
+			})
+			runs, pulls, marks := metricCounts(t, f)
+			t.Logf("status=%d sources=0 upstream_reads=%d projection_ledger=%d metric_runs=%d", w.Code, len(g.calls), ledger, runs)
+			if w.Code != 204 {
+				if !unavailable || len(g.calls) != 1 || ledger != 1 {
+					t.Fatal("rejected for a reason other than the unlinked metrics API read")
+				}
+				assertWebhookFailureLine(t, &logs, "check_suite", "completed", "audit", "github_unavailable", 502, nil)
+				t.Fatalf("unlinked metric source: status %d, want 204 without a metric read", w.Code)
+			}
+			if len(g.calls) != 0 || runs+pulls+marks != 0 || logs.Len() != 0 {
+				t.Fatalf("unlinked metrics must be a no-op: reads=%d facts=%d logs=%d", len(g.calls), runs+pulls+marks, logs.Len())
+			}
+		})
+	}
 }
 
 func TestDeliveryMetricsWebhookRecordsEachEventKind(t *testing.T) {
