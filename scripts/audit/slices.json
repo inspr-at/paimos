@@ -86,6 +86,9 @@
         "cmd/aeon-agentd/ledger_test.go",
         "internal/agentaccounts/probe_batch.go",
         "internal/agentaccounts/probe_batch_test.go"
+      ],
+      "exclude": [
+        "internal/db/migrations/1333_models_v2_migration.sql"
       ]
     },
     {

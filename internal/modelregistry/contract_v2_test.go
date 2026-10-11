@@ -373,3 +373,31 @@ func TestModelsV2SameLineFallbackAndQuickJobs(t *testing.T) {
 		t.Fatalf("Quick jobs differs from dispatch: %+v", doc.Quick)
 	}
 }
+
+// Risk: a known residency rejection is called a missing account, or an absent
+// account is falsely described as a residency rejection.
+func TestModelsV2ResidencyCauseMatchesEvidence(t *testing.T) {
+	admin, _ := boardFixture(t)
+	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	sol := profileBySlug(profiles, "codex-6-1-sol-xhigh")
+	account := minimalAccount(t, admin, sol)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"openai:sol"}, "efforts": map[string]string{"openai:sol": "xhigh"}, "end": "wait", "revision": 0}, ""), 200)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE model_pref_profiles SET residency='eu' WHERE scope='workspace'`)
+		return err
+	})
+	read := func(cause string) {
+		t.Helper()
+		doc := boardDecode[simpleDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
+		if len(doc.Unavailable) != 1 || doc.Unavailable[0].Cause != cause || !doc.Unavailable[0].Waits || doc.Unavailable[0].Until != nil {
+			t.Fatalf("cause differs from qualification: %+v", doc.Unavailable)
+		}
+	}
+	read("residency")
+	luna := profileBySlug(profiles, "codex-luna-medium")
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$2::uuid] WHERE id=$1`, account, luna.ID)
+		return err
+	})
+	read("no_account")
+}

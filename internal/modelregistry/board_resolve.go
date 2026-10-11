@@ -249,7 +249,24 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				}
 			}
 			if len(reasons) == 0 && len(ids) == 0 {
-				reasons = append(reasons, "no qualified account with available capacity")
+				reason := "no qualified account with available capacity"
+				if requirement != "any" {
+					// Distinguish residency evidence from absent/unavailable
+					// accounts without exposing account identities or quotas.
+					var unrestricted []string
+					if review {
+						unrestricted, err = reviewQualifiedAccountIDs(ctx, tx, profile, q.ProjectID, "any", now)
+					} else {
+						unrestricted, err = boardRouteAccounts(ctx, tx, profile, q.ProjectID, "any", now)
+					}
+					if err != nil {
+						return nil, err
+					}
+					if len(unrestricted) > 0 {
+						reason = "not allowed: " + requirement
+					}
+				}
+				reasons = append(reasons, reason)
 			}
 			stage := order.Stage
 			if stage == "quick" || stage == "automatic" {
