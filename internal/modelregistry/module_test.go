@@ -328,7 +328,8 @@ func TestAuthorFamilyAliasesResolveAndReview(t *testing.T) {
 // outlives its expiry or reaches another tenant; account health stops skipping
 // a step; or the retired ladder writer still stores or audits a hold. Build
 // follows the workspace Default order, so the order fixes which step is first
-// (Scout puts catalog-priced Quick-job steps ahead of it).
+// (Scout puts catalog-priced Quick-job steps ahead of it), and resolution runs
+// on the Models board, which selects only a step with a qualified account.
 func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
@@ -348,15 +349,23 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	if modelsState(t, admin) != before || eventCount(t, admin, evRoutes) != 0 {
 		t.Fatal("retired writer changed Models storage or audited a route change")
 	}
+	// Models selects only with a qualified account, so each step gets one.
+	var codex string
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		now, err := dbNow(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		codex = runnableAccountFixture(t, tx, admin, agent.ID, "local-codex", "codex", luna.ID, now)
+		runnableAccountFixture(t, tx, admin, agent.ID, "local-claude", "claude", haiku.ID, now)
 		if err := dbtest.ModelsOrder(t.Context(), tx, admin.TenantID, "other", "first", "wait", luna.ID, haiku.ID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by) VALUES($1,$2,$3,$4,'hold',$5)`, admin.TenantID, luna.Harness, luna.Model, until, admin.ID)
+		_, err = tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by) VALUES($1,$2,$3,$4,'hold',$5)`, admin.TenantID, luna.Harness, luna.Model, until, admin.ID)
 		return err
 	})
 	if err != nil {
-		t.Fatalf("order and pause: %v", err)
+		t.Fatalf("accounts, order and pause: %v", err)
 	}
 	firstReason := func(r Resolution) string {
 		if len(r.Ladder) == 0 || r.Ladder[0].ProfileID != luna.ID || len(r.Ladder[0].SkipReasons) == 0 {
@@ -409,16 +418,11 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	}
 
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `
-			INSERT INTO agent_accounts
-				(tenant_id, account_key, harness, daemon_id, registered_by_principal_id, label, state,
-				 last_probe_at, last_probe_ok, last_daemon_generation, share_usage)
-			VALUES ($1::uuid, 'local-codex', 'codex', 'daemon-a', $2::uuid, 'Codex', 'available',
-			        now() - interval '10 minutes', true, 'gen-1', true)`, admin.TenantID, agent.ID)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at = now() - interval '10 minutes' WHERE id = $1`, codex)
 		return err
 	})
 	if err != nil {
-		t.Fatalf("account: %v", err)
+		t.Fatalf("stale account: %v", err)
 	}
 	build = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=build", "", http.StatusOK)
 	if build.Profile == nil || build.Profile.ID != haiku.ID || firstReason(build) != "Codex account has no recent successful sign-in check" {
@@ -426,15 +430,14 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	}
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `
-			UPDATE agent_accounts SET last_probe_at = now() WHERE account_key = 'local-codex'`)
+			UPDATE agent_accounts SET last_probe_at = now() WHERE id = $1`, codex)
 		if err != nil {
 			return err
 		}
 		_, err = tx.Exec(t.Context(), `
 			INSERT INTO account_allowance_windows
 				(tenant_id, account_id, starts_at, ends_at, unit, allowance, used, pace_model, burst_ratio)
-			SELECT $1::uuid, id, now() - interval '1 hour', now() + interval '1 hour', 'requests', 10, 10, 'unrestricted', 0
-			FROM agent_accounts WHERE account_key = 'local-codex'`, admin.TenantID)
+			VALUES ($1::uuid, $2::uuid, now() - interval '1 hour', now() + interval '1 hour', 'requests', 10, 10, 'unrestricted', 0)`, admin.TenantID, codex)
 		return err
 	})
 	if err != nil {

@@ -278,7 +278,15 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 	grantModelReporter(t, owner, agent)
 	agent.Scopes = []string{"models.read", "models.report", "models.refresh", "models.manage"}
 	enrollEvidenceHarness(t, owner, agent, "grok") // null allowlist
+	// Saved policy the grant must leave alone (a pause on another model).
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by) VALUES($1,'grok','grok-4.7','Owner hold',$2)`, owner.TenantID, owner.ID)
+		return err
+	})
 	before := modelsPolicy(t, owner)
+	if !strings.Contains(before, "Owner hold") {
+		t.Fatalf("policy snapshot lost the saved pause: %s", before)
+	}
 	o := Observation{ReportID: EvidenceID("observed-disabled"), Harness: "grok", Model: "grok-next", Effort: "xhigh", Status: "advertised"}
 	if result := reportEvidence(t, agent, []Observation{o}, 200); result.Added != 1 {
 		t.Fatal(result)
