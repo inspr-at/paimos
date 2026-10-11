@@ -48,7 +48,6 @@ func ConsentRequestsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, reade
  JOIN nodes project ON project.tenant_id=r.tenant_id AND project.id=r.project_id
  WHERE d.owner_principal_id=$1 AND d.assignment IS NOT NULL AND r.retired_at IS NULL
  AND project.deleted_at IS NULL AND project.state<>'archived'
- AND (NOT d.execute_consent OR d.consent_revision<>r.revision)
  ORDER BY r.id LIMIT 1001`, person)
 	if err != nil {
 		return nil, err
@@ -80,7 +79,10 @@ func ConsentRequestsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, reade
 		} else if err != nil {
 			return nil, err
 		}
-		policy, err := routinePolicyTx(ctx, tx, p.TenantID, item, reader, false)
+		// Stored consent can expire without a routine edit when the project
+		// revision, qualification or owner policy changes. Use the same live
+		// fingerprint check as the recurrence read before projecting a request.
+		policy, err := routinePolicyTx(ctx, tx, p.TenantID, item, reader, true)
 		if err != nil {
 			return nil, err
 		}
