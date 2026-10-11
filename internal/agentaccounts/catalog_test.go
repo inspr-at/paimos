@@ -29,8 +29,8 @@ func TestCatalogSecurityRoutesHonorOverridesAndAuthorFamily(t *testing.T) {
 		}
 	}
 	seed(admin.TenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier)
-		 VALUES($1,'security-sol','1','codex','openai','gpt-6.1-sol','xhigh','frontier') RETURNING id::text`, admin.TenantID).Scan(&profile); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level)
+		 VALUES($1,'security-sol','1','codex','openai','gpt-6.1-sol','xhigh','frontier',4) RETURNING id::text`, admin.TenantID).Scan(&profile); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,until_at,set_by)
@@ -119,8 +119,11 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'other','1','claude','anthropic','other-model','high','standard') RETURNING id::text`, admin.TenantID).Scan(&wrongHarness); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2),($1,'build',2,$3),($1,'review-gate',1,$2)`, admin.TenantID, otherProfile, profile)
-		return err
+		// The Models orders the retired build and review ladders migrate into.
+		if err := dbtest.ModelsOrder(t.Context(), tx, admin.TenantID, "other", "first", "wait", otherProfile, profile); err != nil {
+			return err
+		}
+		return dbtest.ModelsOrder(t.Context(), tx, admin.TenantID, "other", "review", "wait", otherProfile)
 	})
 	register := func(key, daemon string) Account {
 		t.Helper()
@@ -455,5 +458,69 @@ func TestCatalogAvailabilityAndAllowanceBoundaries(t *testing.T) {
 				t.Fatalf("eligibility: %+v", got)
 			}
 		})
+	}
+}
+
+// Risk: the picker defaults an account with several versions of one line to
+// an older version than dispatch runs. Dispatch takes only the latest active
+// version (modelprefs.RouteCandidates); three versions keep the older ones
+// first under both byte and locale collation of the catalog's model order.
+func TestCatalogDefaultFollowsDispatchLatestVersion(t *testing.T) {
+	reset(t)
+	admin := makePrincipal(t, "versions", "person", "Ada", []string{"admin"})
+	runner := addPrincipal(t, admin.TenantID, "agent", "runner", nil)
+	token := issueKey(t, runner, []string{"account.manage"})
+	mod := accountsMod()
+	seed := func(fn func(pgx.Tx) error) {
+		t.Helper()
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, fn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	models := []string{"gpt-6-sol", "gpt-6.1-sol", "gpt-6.2-sol"}
+	ids := make([]string, len(models))
+	seed(func(tx pgx.Tx) error {
+		for i, model := range models {
+			if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level)
+			 VALUES($1,$2,'1','codex','openai',$3,'xhigh','frontier',4) RETURNING id::text`, admin.TenantID, "codex-"+strings.ReplaceAll(model, ".", "-")+"-xhigh", model).Scan(&ids[i]); err != nil {
+				return err
+			}
+		}
+		// One Models step on the Sol line at xhigh, named through its oldest version.
+		return dbtest.ModelsOrder(t.Context(), tx, admin.TenantID, "other", "first", "wait", ids[0])
+	})
+	var a Account
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"local-versions","harness":"codex","daemon_id":"daemon-v","label":"Initial"}`, 201, &a)
+	ownFixtureAccount(t, admin, &a)
+	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/"+a.ID+"/probe", `{"daemon_id":"daemon-v","daemon_generation":"g1","available":true,"host_label":"Studio"}`, 200, nil)
+	callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/"+a.ID+"/windows", windowBody(time.Now().Add(-time.Hour), time.Now().Add(time.Hour), "requests", 100, "unrestricted"), 201, nil)
+	fixtureAlwaysOn(t, mod, admin, a.ID)
+	grant, err := json.Marshal(map[string]any{"label": "Versions", "plan": "Pro", "host_label": "Studio", "allowed_model_profile_ids": ids})
+	if err != nil {
+		t.Fatal(err)
+	}
+	callStatus(t, mod, &runner, token, "PUT", "/api/agent-accounts/"+a.ID+"/metadata", string(grant), 200, nil)
+	choice := func() CatalogAccount {
+		t.Helper()
+		var catalog Catalog
+		callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/catalog", "", 200, &catalog)
+		if len(catalog.Hosts) != 1 || len(catalog.Hosts[0].Harnesses) != 1 || len(catalog.Hosts[0].Harnesses[0].Accounts) != 1 {
+			t.Fatalf("catalog shape: %+v", catalog.Hosts)
+		}
+		return catalog.Hosts[0].Harnesses[0].Accounts[0]
+	}
+	got := choice()
+	if !got.Available || len(got.Models) != 3 || got.DefaultProfileID == nil || *got.DefaultProfileID != ids[2] {
+		t.Fatalf("picker default is not the version dispatch runs (want %s): %+v", ids[2], got)
+	}
+	// Dispatch skips a paused latest version rather than run an older one, so
+	// the picker offers the older versions without preselecting either.
+	seed(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,until_at,set_by) VALUES($1,'codex','gpt-6.2-sol','test',now()+interval '1 hour',$2)`, admin.TenantID, admin.ID)
+		return err
+	})
+	got = choice()
+	if len(got.Models) != 2 || got.DefaultProfileID != nil {
+		t.Fatalf("paused latest version fell back to an older default: %+v", got)
 	}
 }

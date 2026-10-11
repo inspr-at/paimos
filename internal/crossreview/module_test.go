@@ -44,6 +44,31 @@ func (f *fixture) tx(t *testing.T, fn func(pgx.Tx) error) {
 		t.Fatal(err)
 	}
 }
+
+// Preparation commits identity evidence, preserving every fixture-owned pin
+// and route. Check provenance as well as the independently committed event.
+func (f *fixture) assertPreparedCatalog(t *testing.T, wantProfiles int) {
+	t.Helper()
+	f.tx(t, func(tx pgx.Tx) error {
+		var profiles, routes, facts, invalid, seeds int
+		var version string
+		if err := tx.QueryRow(t.Context(), `SELECT
+			(SELECT count(*) FROM model_profiles),
+			(SELECT coalesce(sum(cardinality(rank)),0) FROM model_pref_situation_orders WHERE situation='review'),
+			(SELECT count(*) FROM model_catalog_facts WHERE source='offline-bootstrap'),
+			(SELECT count(*) FROM model_catalog_facts WHERE source='offline-bootstrap' AND
+				(source_kind<>'bootstrap' OR fact<>'model_id' OR field_path<>'id' OR jsonb_typeof(value)<>'string' OR route='')),
+			(SELECT count(*) FROM events WHERE type='model.registry_seeded'),
+			(SELECT catalog_version FROM model_refresh_settings)`).Scan(&profiles, &routes, &facts, &invalid, &seeds, &version); err != nil {
+			return err
+		}
+		if profiles != wantProfiles || routes != wantProfiles || facts <= 3 || invalid != 0 || seeds != 1 || version != modelregistry.CatalogVersion {
+			t.Fatalf("catalog setup: profiles=%d routes=%d facts=%d invalid=%d seeds=%d version=%q", profiles, routes, facts, invalid, seeds, version)
+		}
+		return nil
+	})
+}
+
 func newFixture(t *testing.T) *fixture { return newCatalogFixture(t, true) }
 
 func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
@@ -76,27 +101,37 @@ func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
 		if err := modelregistry.PrepareCatalog(t.Context(), f.d.App, f.person, modelregistry.CatalogPreparation{Operation: modelregistry.CatalogRead, Request: request}); err != nil {
 			t.Fatal(err)
 		}
-		// An explicit saved policy narrows the complete catalog to this fixture's
-		// three profiles and two unavailable cross-provider fallback entries.
-		f.tx(t, func(tx pgx.Tx) error { _, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes`); return err })
 	}
 	f.profile = testID()
 	f.account = testID()
 	f.tx(t, func(tx pgx.Tx) error {
+		// An explicit saved Review order narrows the complete catalog to this
+		// fixture's three profiles and two unavailable cross-provider fallbacks.
+		review := []string{}
 		if len(cold) == 0 || !cold[0] {
-			for i, row := range []struct{ id, harness, family string }{{testID(), "codex", "openai"}, {testID(), "cursor", "xai"}, {f.profile, "claude", "anthropic"}} {
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,$3,'test-version',$4,$5,'review-model','xhigh','frontier')`, tid, row.id, "review-"+row.id, row.harness, row.family); err != nil {
+			for _, row := range []struct{ id, harness, family string }{{testID(), "codex", "openai"}, {testID(), "cursor", "xai"}, {f.profile, "claude", "anthropic"}} {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,$2,$3,'test-version',$4,$5,'review-model','xhigh','frontier',4)`, tid, row.id, "review-"+row.id, row.harness, row.family); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state) VALUES($1,'review-gate',$2,$3,'available')`, tid, i+1, row.id); err != nil {
-					return err
-				}
+				review = append(review, row.id)
 			}
 		}
 		if complete {
-			if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state)
-          SELECT $1,'review-gate',CASE harness WHEN 'gemini' THEN 4 ELSE 5 END,id,'available'
-          FROM model_profiles WHERE slug IN ('gemini-gemini-2-5-pro-32768','opencode-google-gemini-2-5-pro-default')`, tid); err != nil {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES
+				($1,'gemini-gemini-2-5-pro-32768','review-fallback-fixture','gemini','google','gemini-2.5-pro','32768','strong',4),
+				($1,'opencode-google-gemini-2-5-pro-default','review-fallback-fixture','opencode','google','google/gemini-2.5-pro','default','strong',4)`, tid); err != nil {
+				return err
+			}
+			for _, slug := range []string{"gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default"} {
+				var id string
+				if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug=$1`, slug).Scan(&id); err != nil {
+					return err
+				}
+				review = append(review, id)
+			}
+		}
+		if len(review) > 0 {
+			if err := dbtest.ModelsOrder(t.Context(), tx, tid, "other", "review", "wait", review...); err != nil {
 				return err
 			}
 		}
@@ -159,6 +194,41 @@ func (f *fixture) input() CreateInput {
 
 func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 	f := newFixture(t)
+	// Risk: absent bootstrap pins must not silently erase the unavailable
+	// fallback entries, or let an author-family skip satisfy that assertion.
+	unavailableProfiles := map[string]bool{}
+	f.tx(t, func(tx pgx.Tx) error {
+		rows, err := tx.Query(t.Context(), `SELECT id::text FROM model_profiles WHERE slug IN ('gemini-gemini-2-5-pro-32768','opencode-google-gemini-2-5-pro-default')`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			unavailableProfiles[id] = false
+		}
+		return rows.Err()
+	})
+	if len(unavailableProfiles) != 2 {
+		t.Fatalf("fixture must retain both unavailable fallback profiles, got %d", len(unavailableProfiles))
+	}
+	f.tx(t, func(tx pgx.Tx) error {
+		// Models stops at the selected candidate. Put the held fallback line
+		// before the reviewer so both native routes prove their refusal reason.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason)
+			SELECT tenant_id,harness,model,now()+interval '1 hour','fixture fallback unavailable'
+			FROM model_profiles WHERE version='review-fallback-fixture'`); err != nil {
+			return err
+		}
+		var fallback string
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='gemini-gemini-2-5-pro-32768'`).Scan(&fallback); err != nil {
+			return err
+		}
+		return reviewOrderFirst(t, tx, fallback)
+	})
 	path := "/api/nodes/" + f.ticket + "/reviews"
 	in := f.input()
 	var v Review
@@ -166,8 +236,7 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 	if v.Status != "queued" || v.ReviewerFamily == nil || *v.ReviewerFamily != "anthropic" || v.GateOpen || v.RunID == nil {
 		t.Fatalf("invalid queued review: %+v", v)
 	}
-	// A deliberately incomplete catalog receives all required missing profiles.
-	// Find the original custom policy entries by identity, not fixed indices.
+	// Find the fixture's policy entries by identity, not fixed indices.
 	selected, authorSkipped, unavailableSkipped := false, false, false
 	for _, candidate := range v.Ladder {
 		if candidate.ProfileID == f.profile {
@@ -182,9 +251,21 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 		if !candidate.Selected && len(candidate.SkipReasons) > 0 {
 			unavailableSkipped = true
 		}
+		if _, exists := unavailableProfiles[candidate.ProfileID]; exists {
+			for _, reason := range candidate.SkipReasons {
+				if strings.HasPrefix(reason, "paused until ") && strings.HasSuffix(reason, ": fixture fallback unavailable") && !candidate.Selected {
+					unavailableProfiles[candidate.ProfileID] = true
+				}
+			}
+		}
 	}
 	if !selected || !authorSkipped || !unavailableSkipped {
 		t.Fatal("fallback reasons were lost")
+	}
+	for id, skipped := range unavailableProfiles {
+		if !skipped {
+			t.Fatalf("fallback %s missing its explicit unavailability reason: %+v", id, v.Ladder)
+		}
 	}
 	var replay Review
 	f.call(t, f.person, "POST", path, in, 201, &replay)
@@ -239,7 +320,7 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 	f.call(t, f.person, "GET", "/api/work-orders/"+v.OrderID, nil, 200, &o)
 	f.call(t, f.person, "PATCH", "/api/work-orders/"+v.OrderID, map[string]any{"expected_revision": o.Revision, "assignee_principal_id": f.other.ID}, 409, nil)
 	f.tx(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET state='unavailable',valid_until=now()+interval '1 hour',reason='fixture unavailable' WHERE profile_id=$1`, f.profile)
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason) SELECT tenant_id,harness,model,now()+interval '1 hour','fixture unavailable' FROM model_profiles WHERE id=$1`, f.profile)
 		return err
 	})
 	unavailable := f.input()

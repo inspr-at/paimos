@@ -9,6 +9,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -104,19 +105,32 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 		}
 		capped := "Codex account is at its daily cap until " + end.UTC().Format(time.RFC3339)
 		// The row's level picks Opus's native route: standard thinking without a
-		// saved board runs it at high, the saved deep workspace at xhigh.
+		// saved Default runs it at high; the saved deep Default and the Default
+		// the migration builds from the ranked xhigh ladder run it at xhigh.
 		var opusHigh string
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-high' AND version=$1`, CatalogVersion).Scan(&opusHigh); err != nil {
 			return err
 		}
-		opus := map[bool]string{false: opusHigh, true: claude.ID}
-		for _, board := range []bool{false, true} {
-			var workspace string
-			if board {
-				if err := tx.QueryRow(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,template,thinking,usage,revision) VALUES($1,'workspace','balanced','deep','balanced',1) RETURNING id::text`, p.TenantID).Scan(&workspace); err != nil {
+		opus := map[string]string{"default": opusHigh, "saved": claude.ID, "migrated": claude.ID}
+		// Every pass routes through Models: the built-in Default, a Default the
+		// person saved, and the Default the migration builds from the ladder above.
+		for _, pass := range []string{"default", "saved", "migrated"} {
+			switch pass {
+			case "saved":
+				var id string
+				if err := tx.QueryRow(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,template,thinking,usage,revision) VALUES($1,'workspace','balanced','deep','balanced',1) RETURNING id::text`, p.TenantID).Scan(&id); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank) VALUES($1,$2,'other','first',ARRAY['openai:sol','anthropic:opus'])`, p.TenantID, workspace); err != nil {
+				if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank) VALUES($1,$2,'other','first',ARRAY['openai:sol','anthropic:opus'])`, p.TenantID, id); err != nil {
+					return err
+				}
+			case "migrated":
+				// A saved multi-step Default keeps its chain in the migration;
+				// remove it so the migration converts the ladder instead.
+				if _, err := tx.Exec(ctx, `DELETE FROM model_pref_orders`); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `DELETE FROM model_pref_profiles`); err != nil {
 					return err
 				}
 			}
@@ -128,19 +142,26 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 				if err := save(); err != nil {
 					return err
 				}
-				if board && atLimit == "ladder" {
-					// Migrate while following the order, so no migrated Wait
+				if pass == "migrated" && atLimit == "ladder" {
+					// Migrate while following the ladder, so no migrated Wait
 					// ending can stand in for the saved Wait below.
 					if _, err := tx.Exec(ctx, `SELECT aeon_migrate_models_v2($1)`, p.TenantID); err != nil {
 						return err
+					}
+					var rank []string
+					if err := tx.QueryRow(ctx, `SELECT rank FROM model_pref_orders WHERE column_key='other' AND situation='first'`).Scan(&rank); err != nil {
+						return err
+					}
+					if !slices.Equal(rank, []string{"openai:sol", "anthropic:opus"}) {
+						t.Fatalf("migration did not convert the ranked ladder: %v", rank)
 					}
 				}
 				got, err := ResolveWork(ctx, tx, p, WorkQuery{Role: "build", Area: "other", Situation: "first"}, now)
 				if err != nil {
 					return err
 				}
-				if got.Profile == nil || got.Profile.ID != opus[board] || !slices.Equal(got.Trace.QualifyingAccountIDs, []string{accounts["claude"]}) {
-					t.Fatalf("board=%v at_limit=%s: the capped route did not continue the order: %+v", board, atLimit, got)
+				if got.Profile == nil || got.Profile.ID != opus[pass] || !slices.Equal(got.Trace.QualifyingAccountIDs, []string{accounts["claude"]}) {
+					t.Fatalf("%s at_limit=%s: the capped route did not continue the order: %+v", pass, atLimit, got)
 				}
 				found := false
 				for _, step := range got.Ladder {
@@ -149,14 +170,20 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 					}
 				}
 				if !found {
-					t.Fatalf("board=%v at_limit=%s: missing skipped-cap evidence", board, atLimit)
+					t.Fatalf("%s at_limit=%s: missing skipped-cap evidence", pass, atLimit)
 				}
 			}
-			if !board {
+			if pass == "default" {
 				continue
 			}
 			// A row whose order ends in Wait right after the capped model waits
 			// until the reset, with the cause and its until, and no successor.
+			var workspace string
+			var rank []string
+			var endMode *string
+			if err := tx.QueryRow(ctx, `SELECT profile_id::text,rank,end_mode FROM model_pref_orders WHERE column_key='other' AND situation='first'`).Scan(&workspace, &rank, &endMode); err != nil {
+				return err
+			}
 			if _, err := tx.Exec(ctx, `UPDATE model_pref_orders SET rank=ARRAY['openai:sol'],end_mode='wait' WHERE profile_id=$1 AND column_key='other' AND situation='first'`, workspace); err != nil {
 				return err
 			}
@@ -165,11 +192,11 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 				return err
 			}
 			if got.Profile != nil || !got.OwnerRequired || got.Trace.Blocked != capped {
-				t.Fatalf("an order ending in Wait did not wait until the reset: %+v", got)
+				t.Fatalf("%s: an order ending in Wait did not wait until the reset: %+v", pass, got)
 			}
 			for _, step := range got.Ladder {
 				if step.ProfileID == claude.ID {
-					t.Fatalf("a model after the Wait ending was tried: %+v", got.Ladder)
+					t.Fatalf("%s: a model after the Wait ending was tried: %+v", pass, got.Ladder)
 				}
 			}
 			// Risk: a Wait ending leaks the private owner's cap code or reset to
@@ -180,9 +207,9 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 				return err
 			}
 			if private.Profile != nil || private.Trace.Blocked != "Codex account cannot take new work right now" || len(private.Ladder) == 0 || !slices.Equal(private.Ladder[0].SkipReasons, []string{"Codex account cannot take new work right now"}) {
-				t.Fatalf("private Wait leaked metrics or selected a successor: %+v", private)
+				t.Fatalf("%s: private Wait leaked metrics or selected a successor: %+v", pass, private)
 			}
-			if _, err := tx.Exec(ctx, `UPDATE model_pref_orders SET rank=ARRAY['openai:sol','anthropic:opus'],end_mode=NULL WHERE profile_id=$1 AND column_key='other' AND situation='first'`, workspace); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE model_pref_orders SET rank=$2,end_mode=$3 WHERE profile_id=$1 AND column_key='other' AND situation='first'`, workspace, rank, endMode); err != nil {
 				return err
 			}
 		}
@@ -240,10 +267,8 @@ func TestDailyReviewKeepsReviewQualifiedAccounts(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes WHERE role='review-gate'`); err != nil {
-			return err
-		}
-		if err := insertRoute(ctx, tx, p.TenantID, Route{Role: "review-gate", Priority: 1, ProfileID: reviewer.ID, State: "available"}); err != nil {
+		// A saved Review order with this one model (a one-step review ladder).
+		if err := dbtest.ModelsOrder(ctx, tx, p.TenantID, "other", "review", "wait", reviewer.ID); err != nil {
 			return err
 		}
 		runner := func(name string, approved bool) (string, error) {
@@ -315,7 +340,8 @@ func TestDailyReviewKeepsReviewQualifiedAccounts(t *testing.T) {
 			return ResolveWork(ctx, tx, p, WorkQuery{Role: "review-gate", AuthorFamily: "openai"}, now)
 		}
 		// The only review-qualified account is exhausted; room on the unapproved sibling must not count.
-		// The Models walk names the reviewer's cap on its own step; an old saved Wait changes nothing.
+		// The one-step order ends in Wait, reporting the route's cause on its own
+		// step; an old saved Wait on the dial changes nothing.
 		capped := "Claude account is at its daily cap until " + end.UTC().Format(time.RFC3339)
 		for _, atLimit := range []string{"ladder", "wait"} {
 			got, err := resolve(atLimit)
@@ -328,7 +354,7 @@ func TestDailyReviewKeepsReviewQualifiedAccounts(t *testing.T) {
 					skipped = !step.Selected && slices.Equal(step.SkipReasons, []string{capped})
 				}
 			}
-			if got.Profile != nil || !got.OwnerRequired || len(got.Trace.QualifyingAccountIDs) != 0 || !skipped {
+			if got.Profile != nil || !got.OwnerRequired || got.Trace.Blocked != capped || len(got.Trace.QualifyingAccountIDs) != 0 || !skipped {
 				t.Fatalf("%s: headroom on an account review does not qualify kept the route: %+v", atLimit, got)
 			}
 		}

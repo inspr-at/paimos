@@ -95,6 +95,8 @@
       "title": "Agent runtime, harnesses and runs",
       "paths": [
         "internal/agentd/**",
+        "internal/agentd/routine_budget.go",
+        "internal/agentd/routine_budget_test.go",
         "internal/agentsetup/**",
         "internal/harness/**",
         "internal/harness/lead_remove_test.go",
@@ -154,12 +156,18 @@
         "internal/agentsetup/routine_launch.go",
         "internal/agentruns/routine_launch.go",
         "internal/agentd/probe_batch.go",
+        "internal/agentd/catalog_probes.go",
+        "internal/agentd/catalog_parsers.go",
+        "internal/agentd/catalog_probes_test.go",
+        "internal/agentd/claudeassets/bridge.mjs",
+        "internal/modelregistry/harness_probes.go",
+        "internal/modelregistry/harness_probes_test.go",
+        "internal/modelreport/catalog.go",
         "internal/agentd/queue_cadence.go",
         "internal/agentd/queue_cadence_test.go",
         "internal/agentruns/queue_notifications.go",
         "internal/agentruns/queue_notifications_test.go",
         "internal/runisolation/**",
-        "internal/db/migrations/1333_models_v2_migration.sql",
         "internal/modelregistry/models_v2_migration_test.go",
         "internal/modelregistry/legacy_deprecation_test.go"
       ]
@@ -258,13 +266,18 @@
         "internal/questions/lock_order_test.go",
         "internal/recurrences/consent.go",
         "internal/recurrences/consent_test.go",
+        "internal/recurrences/execution_principals.go",
+        "internal/recurrences/execution_principals_test.go",
         "internal/routineguard/**",
         "internal/routineguard/evaluation.go",
         "internal/routineguard/evaluation_test.go",
         "internal/routineguard/evaluation_tx_test.go",
+        "internal/routineactions/**",
         "internal/recurrences/runs.go",
         "internal/recurrences/runs_test.go",
-        "internal/routinebudget/**"
+        "internal/routinebudget/**",
+        "internal/recurrences/run_history.go",
+        "internal/recurrences/run_history_test.go"
       ]
     },
     {

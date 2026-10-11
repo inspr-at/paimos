@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/usagedashboard"
@@ -55,11 +56,14 @@ type planningView struct {
 	// RouteGap says why a role has no model: "area" (no area set),
 	// "review_gate" (resolved against the author's family at dispatch) or
 	// "registry" (no available route in the registry).
-	RouteGap string            `json:"route_gap,omitempty"`
-	Models   []planningModel   `json:"models,omitempty"`
-	Tokens   planningTokens    `json:"tokens"`
-	Cost     *planningCost     `json:"cost,omitempty"`
-	Children *planningChildren `json:"children,omitempty"`
+	RouteGap string `json:"route_gap,omitempty"`
+	// RouteTruncated marks a "registry" gap where the model registry exceeds
+	// Models' bounds, so no route was resolved (dispatch refuses it too).
+	RouteTruncated bool              `json:"route_truncated,omitempty"`
+	Models         []planningModel   `json:"models,omitempty"`
+	Tokens         planningTokens    `json:"tokens"`
+	Cost           *planningCost     `json:"cost,omitempty"`
+	Children       *planningChildren `json:"children,omitempty"`
 }
 type planningRoute struct {
 	Provider string `json:"provider,omitempty"`
@@ -633,12 +637,13 @@ type planPrice struct {
 // planRoute is one resolved placement, shared by rows with the same project,
 // person, kind, bucket, role and residency. view is nil without a selected model.
 type planRoute struct {
-	cell     usagedashboard.LearningCell
-	price    *planPrice
-	view     *planningRoute
-	key      routeKey
-	mixPrice *float64
-	gap      string
+	cell      usagedashboard.LearningCell
+	price     *planPrice
+	view      *planningRoute
+	key       routeKey
+	mixPrice  *float64
+	gap       string
+	truncated bool
 }
 
 // planBilling is how a harness was billed most recently.
@@ -763,7 +768,7 @@ func (pl *planner) view(self planRow, kids []planRow, used *planUsage, costVisib
 			case route == nil && self.area == "":
 				view.RouteGap = "area"
 			case route != nil && route.gap != "":
-				view.RouteGap = route.gap
+				view.RouteGap, view.RouteTruncated = route.gap, route.truncated
 			case route == nil || route.view == nil:
 				view.RouteGap = "registry"
 			default:
@@ -1069,7 +1074,7 @@ type planRouteCacheKey struct{}
 func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[string]*planRoute, error) {
 	out := map[string]*planRoute{}
 	cache, _ := ctx.Value(planRouteCacheKey{}).(map[string]*planRoute)
-	revision := ""
+	revision, revised, bounded := "", false, false
 	now := time.Now()
 	for _, r := range rows {
 		if r.role == "" || out[r.placementKey()] != nil || !modelregistry.KnownRouteRole(r.role) {
@@ -1079,16 +1084,27 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 			out[r.placementKey()] = cached
 			continue
 		}
-		if revision == "" {
+		if !revised {
 			var err error
-			if revision, err = modelregistry.Revision(ctx, tx); err != nil {
+			// A registry beyond Models' bounds has no route for any row. Say so
+			// on each row rather than failing the whole page.
+			revision, err = modelregistry.Revision(ctx, tx)
+			if errors.Is(err, modelprefs.ErrBoardBounds) {
+				bounded, err = true, nil
+			}
+			if err != nil {
 				return nil, err
 			}
+			revised = true
 		}
 		route := &planRoute{}
 		out[r.placementKey()] = route
 		if cache != nil {
 			cache[r.placementKey()] = route
+		}
+		if bounded && !strings.HasPrefix(r.role, "review-gate") {
+			route.gap, route.truncated = "registry", true
+			continue
 		}
 		if strings.HasPrefix(r.role, "review-gate") {
 			if r.area == "" {
@@ -1108,6 +1124,10 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 		}
 		resolved, err := modelregistry.ResolveWork(ctx, tx, tenant.Principal{}, modelregistry.WorkQuery{
 			Role: r.role, Area: r.area, Complexity: complexity, ProjectID: r.project, PersonID: person, TicketResidency: r.residency}, now)
+		if errors.Is(err, modelprefs.ErrBoardBounds) {
+			route.gap, route.truncated = "registry", true
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

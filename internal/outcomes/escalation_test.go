@@ -459,13 +459,25 @@ func setupEscalationRetry(t *testing.T) escalationRetryFixture {
 	project := insertNode(t, d, p, "project", "RTY-1", "Project", nil)
 	ticket := insertNode(t, d, p, "ticket", "RTY-2", "Stuck work", &project)
 	order := insertNode(t, d, p, "work_order", "RTY-3", "Fix", &ticket)
-	// Seed the real registry, then register only a qualified Claude account.
+	// Prepare the ID-only catalog, then own every pin and route needed by this
+	// retry fixture. Production bootstrap must not supply test dispatch policy.
 	w := callAs(t, modelregistry.New(d.App), p, "GET", "/api/models", "")
 	if w.Code != 200 {
 		t.Fatalf("catalog: %d %s", w.Code, w.Body.String())
 	}
 	var runner, account, opus, sol, run, session string
 	inTenant(t, d, p, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES
+			($1,'claude-opus-xhigh','retry-fixture','claude','anthropic','opus','xhigh','strong'),
+			($1,'codex-6-1-sol-high','retry-fixture','codex','openai','gpt-6.1-sol','high','standard'),
+			($1,'claude-fable-xhigh','retry-fixture','claude','anthropic','fable','xhigh','frontier')`, p.TenantID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state,reason)
+			SELECT $1,'build-hard',1,id,'available','Explicit fixture retry authority'
+			FROM model_profiles WHERE slug='claude-opus-xhigh'`, p.TenantID); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Retry runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
 			return err
 		}
@@ -613,7 +625,9 @@ func TestEscalationRetainsOriginalModelAcrossSelections(t *testing.T) {
 				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$1::uuid,$2::uuid] WHERE account_key='retry-claude'`, f.opus, fable); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state,reason) VALUES($1,'build-hard',99,$2,'available','Explicit fixture build authority')`, f.p.TenantID, fable); err != nil {
+				// Explicit fixture build authority: a Stuck order of the two
+				// routes the account allows, ending in Wait (no Default tail).
+				if err := dbtest.ModelsOrder(t.Context(), tx, f.p.TenantID, "other", "stuck", "wait", f.opus, fable); err != nil {
 					return err
 				}
 				// Observe first while Fable is the original writer. It must survive a later session.
@@ -660,7 +674,9 @@ func TestEscalationRetainsOriginalModelAcrossSelections(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if pick.Profile != nil || pick.Trace.Blocked != "no allowed stronger route" {
+				// Models reports the first held step's cause; both steps were
+				// attempted (Opus by the retry, Fable as the retained original).
+				if pick.Profile != nil || pick.Trace.Blocked != "already attempted" || len(pick.Trace.Held) != 2 || pick.Trace.Held[1].Line != "anthropic:fable" || pick.Trace.Held[1].Reason != "already attempted" {
 					t.Fatal("original model returned to routing", pick)
 				}
 				if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {

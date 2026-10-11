@@ -19,23 +19,31 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func displayRoutesFixture(t *testing.T, p tenant.Principal, count int) {
+// displayModel names a line of its own: no version digits, so Models never
+// folds two fixture models into one line's versions.
+func displayModel(i int) string {
+	return "fixture-model-" + string(rune('a'+(i-1)/26)) + string(rune('a'+(i-1)%26))
+}
+
+// displayRoutesFixture saves a Review order of count frontier lines, the
+// Models form of a count-step review ladder. It returns the profiles in order.
+func displayRoutesFixture(t *testing.T, p tenant.Principal, count int) []string {
 	t.Helper()
+	ids := []string{}
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		for i := 1; i <= count; i++ {
-			profile, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: fmt.Sprintf("display-%d", i), Version: "1", Harness: "claude", Family: "anthropic", Model: fmt.Sprintf("fixture-model-%d", i), Effort: "xhigh", Tier: "frontier"})
+			profile, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: fmt.Sprintf("display-%d", i), Version: "1", Harness: "claude", Family: "anthropic", Model: displayModel(i), Effort: "xhigh", Tier: "frontier"})
 			if err != nil {
 				return err
 			}
-			if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "review-gate", Priority: i, ProfileID: profile.ID, State: "available"}); err != nil {
-				return err
-			}
+			ids = append(ids, profile.ID)
 		}
-		return nil
+		return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "review", "wait", ids...)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	return ids
 }
 
 func TestPoliciesLadderBoundsSetupPermissionsAndTenantIsolation(t *testing.T) {
@@ -56,13 +64,13 @@ func TestPoliciesLadderBoundsSetupPermissionsAndTenantIsolation(t *testing.T) {
 	if profiles != 0 {
 		t.Fatal("unseeded read wrote profiles")
 	}
-	displayRoutesFixture(t, p, 51)
+	ids := displayRoutesFixture(t, p, 51)
 	got := decode[routesRead](t, &p, "GET", "/api/models/routes?role=review-gate", "", 200)
 	if !got.Setup || !got.Truncated || len(got.Steps) != 50 {
 		t.Fatalf("setup %v truncated %v steps %d", got.Setup, got.Truncated, len(got.Steps))
 	}
 	for i, step := range got.Steps {
-		if step.Priority != i+1 || step.Profile.Model != fmt.Sprintf("fixture-model-%d", i+1) || step.Profile.ID != step.ProfileID {
+		if step.Priority != i+1 || step.Profile.Model != displayModel(i+1) || step.Profile.ID != step.ProfileID {
 			t.Fatalf("wrong order/profile at %d", i)
 		}
 	}
@@ -71,8 +79,7 @@ func TestPoliciesLadderBoundsSetupPermissionsAndTenantIsolation(t *testing.T) {
 		t.Fatal("ladder crossed tenants")
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes WHERE priority=51`)
-		return err
+		return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "review", "wait", ids[:50]...)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -189,14 +196,22 @@ func TestPoliciesFamilyRanksCannotMutateDispatch(t *testing.T) {
 	}
 }
 
+// lockDisplayTable holds the model pauses every derived step reads.
 func lockDisplayTable(t *testing.T) (pgx.Tx, int) {
+	t.Helper()
+	return lockModelsTable(t, "model_pauses")
+}
+
+// lockModelsTable holds one Models table exclusively in an open transaction.
+// Only these constant identifiers are passed; the name is never caller input.
+func lockModelsTable(t *testing.T, table string) (pgx.Tx, int) {
 	t.Helper()
 	tx, err := adminPool.Begin(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
-	if _, err := tx.Exec(t.Context(), `LOCK TABLE model_role_routes IN ACCESS EXCLUSIVE MODE`); err != nil {
+	if _, err := tx.Exec(t.Context(), `LOCK TABLE `+table+` IN ACCESS EXCLUSIVE MODE`); err != nil {
 		t.Fatal(err)
 	}
 	var pid int
@@ -229,27 +244,22 @@ func TestPoliciesLadderReplaceReadConsistentSnapshotBarrier(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "snapshot", "person", "Owner", []string{"admin"})
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		if err := ensureCatalog(t.Context(), tx, p); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes`)
-		return err
+		return ensureCatalog(t.Context(), tx, p)
 	}); err != nil {
 		t.Fatal(err)
 	}
-	displayRoutesFixture(t, p, 2)
+	ids := displayRoutesFixture(t, p, 2)
 	old := decode[routesRead](t, &p, "GET", "/api/models/routes?role=review-gate", "", 200)
-	now := time.Date(2026, 10, 2, 18, 0, 0, 0, time.UTC)
-	expires := now.Add(time.Hour)
-	replacement := []Route{}
-	for _, step := range old.Steps {
-		replacement = append(replacement, Route{Role: "review-gate", Priority: step.Priority, ProfileID: step.ProfileID, State: "unavailable", Reason: "replacement", ValidUntil: &expires})
+	if len(old.Steps) != 2 || old.Steps[0].ProfileID != ids[0] || old.Steps[1].ProfileID != ids[1] {
+		t.Fatalf("fixture Review order not derived: %+v", old.Steps)
 	}
+	expires := time.Date(2030, 10, 2, 18, 0, 0, 0, time.UTC)
+	// Pause both models in one transaction (the successor of a ladder hold).
 	writer, pid := lockDisplayTable(t)
 	if _, err := writer.Exec(t.Context(), `SELECT set_config('aeon.tenant_id',$1,true)`, p.TenantID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := replaceRoutes(t.Context(), writer, p, replacement, now); err != nil {
+	if _, err := writer.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason) SELECT tenant_id,harness,model,$2,'replacement' FROM model_profiles WHERE id=ANY($1::uuid[])`, ids, expires); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)

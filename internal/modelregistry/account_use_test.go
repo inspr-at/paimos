@@ -10,6 +10,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -178,19 +179,21 @@ func TestEscalationSkipsAccountlessHarnessForRunnableSuccessor(t *testing.T) {
 			return err
 		}
 		account, successor := accountlessSuccessorFixture(t, tx, p, now)
-		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes WHERE role='build-hard'`); err != nil {
+		// The kind's Stuck order (a two-step build-hard ladder before Models v2).
+		var opus string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh' AND version=$1`, CatalogVersion).Scan(&opus); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,profile_id,priority) SELECT $1,'build-hard',id,CASE slug WHEN 'claude-opus-xhigh' THEN 1 ELSE 2 END FROM model_profiles WHERE slug IN ('claude-opus-xhigh','codex-astra-xhigh')`, p.TenantID); err != nil {
+		if err := dbtest.ModelsOrder(ctx, tx, p.TenantID, "backend", "stuck", "wait", opus, successor); err != nil {
 			return err
 		}
 		out, err := ResolveEscalation(ctx, tx, p, WorkQuery{Role: "build", Area: "backend"}, nil, now)
 		if err != nil {
 			return err
 		}
-		assertRunnableSuccessor(t, out, account, successor, "no qualified account; wait for live admission")
-		if len(out.Ladder) != 2 {
-			t.Fatalf("fixture did not exercise the two-route ladder: %+v", out.Ladder)
+		assertRunnableSuccessor(t, out, account, successor, "no qualified account with available capacity")
+		if out.Trace.Situation != "stuck" || out.Trace.CardIndex != 2 {
+			t.Fatalf("escalation did not continue to the order's second step: %+v", out.Trace)
 		}
 		return nil
 	})

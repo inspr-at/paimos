@@ -4,6 +4,9 @@ package modelregistry
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"net/http"
 	"os"
@@ -343,6 +346,35 @@ func TestModelsV2NoRuntimeLadderReaders(t *testing.T) {
 		raw, err := os.ReadFile(path)
 		if err != nil {
 			return err
+		}
+		// Main's retirement/Undo keeps historical references. Permit only its
+		// named declarations, so new readers in those files are still rejected.
+		historical := map[string]map[string]bool{
+			"../modelregistry/catalog_retire_snapshot.go": {"retireTables": true, "retirementUses": true, "transferRetiredLadderReferences": true},
+			"../modelregistry/catalog_retire_http.go":     {"profileReferenced": true, "undoOutdated": true},
+		}
+		if allowed := historical[path]; allowed != nil {
+			positions := token.NewFileSet()
+			file, err := parser.ParseFile(positions, path, raw, 0)
+			if err != nil {
+				return err
+			}
+			for _, declaration := range file.Decls {
+				name := ""
+				switch decl := declaration.(type) {
+				case *ast.FuncDecl:
+					name = decl.Name.Name
+				case *ast.GenDecl:
+					if decl.Tok == token.VAR && len(decl.Specs) == 1 {
+						if value, ok := decl.Specs[0].(*ast.ValueSpec); ok && len(value.Names) == 1 {
+							name = value.Names[0].Name
+						}
+					}
+				}
+				if allowed[name] {
+					clear(raw[positions.Position(declaration.Pos()).Offset:positions.Position(declaration.End()).Offset])
+				}
+			}
 		}
 		for _, table := range []string{"model_role_routes", "model_security_role_routes"} {
 			if strings.Contains(string(raw), table) {

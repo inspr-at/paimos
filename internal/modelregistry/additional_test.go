@@ -7,10 +7,12 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/jackc/pgx/v5"
 )
 
-func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) {
+// Risk: reading catalog facts appends guessed harness pins or replaces a saved Models choice.
+func TestExistingTenantCatalogFactsPreservePolicyAndPins(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "upgrade", "person", "Ada", []string{"admin"})
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
@@ -27,48 +29,40 @@ func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) 
 				first = r.ID
 			}
 		}
-		return insertRoute(t.Context(), tx, p.TenantID, Route{Role: "build", Priority: 40, ProfileID: first, State: "available", Reason: "saved person policy"})
+		// The saved policy: a Default order of one step that ends in Wait.
+		return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "first", "wait", first)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
-	if len(profiles) != 51 {
-		t.Fatal("upgrade profiles", len(profiles))
-	}
-	readRoutes := func() []Route {
+	readOrders := func() string {
 		t.Helper()
-		var rows []Route
+		var orders string
 		if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
-			var err error
-			rows, err = listRoutes(t.Context(), tx)
-			return err
+			return tx.QueryRow(t.Context(), `SELECT jsonb_agg(jsonb_build_array(column_key,situation,rank,efforts,end_mode) ORDER BY column_key,situation)::text FROM (`+modelprefs.OrdersSQL+`) o`).Scan(&orders)
 		}); err != nil {
 			t.Fatal(err)
 		}
-		return rows
+		return orders
 	}
-	routes := readRoutes()
-	foundPolicy := false
-	for _, r := range routes {
-		if r.Role == "build" && r.Priority == 40 {
-			foundPolicy = r.Reason == "saved person policy"
+	saved := readOrders()
+	if saved != `[["other", "first", ["openai:sol"], {"openai:sol": "high"}, "wait"]]` {
+		t.Fatal("unexpected saved policy fixture", saved)
+	}
+	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
+	if len(profiles) != 40 {
+		t.Fatal("upgrade profiles", len(profiles))
+	}
+	if got := readOrders(); got != saved {
+		t.Fatal("saved policy missing or replaced", got)
+	}
+	for _, profile := range profiles {
+		if profile.Harness == "gemini" || profile.Harness == "opencode" {
+			t.Fatal("catalog fabricated additional harness pin", profile)
 		}
 	}
-	if !foundPolicy {
-		t.Fatal("saved person policy missing or replaced", routes)
-	}
-	for _, h := range []string{"gemini", "opencode"} {
-		r := decode[Resolution](t, &p, http.MethodGet, "/api/models/resolve?role=build&harness="+h, "", http.StatusOK)
-		if r.Profile == nil || r.Profile.Harness != h {
-			t.Fatal("new harness not routable", r)
-		}
-		if h == "gemini" && (r.Profile.EffortLevel == nil || *r.Profile.EffortLevel != 3) {
-			t.Fatal("budget level missing", r.Profile)
-		}
-	}
-	again := readRoutes()
-	if len(again) != len(routes) || eventCount(t, p, evSeeded) != 1 {
+	decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
+	if readOrders() != saved || eventCount(t, p, evSeeded) != 1 {
 		t.Fatal("upgrade replay changed policy")
 	}
 }
