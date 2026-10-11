@@ -161,7 +161,7 @@ watch(() => [route.hash, shown.value], async () => {
           </div>
           <div class="row rv" data-reviews>
             <div class="rl"><span class="rn">Reviews</span></div>
-            <div class="rv-v"><span class="hg" aria-hidden="true"><AppIcon name="compare" :size="13" /></span><span>Automatic · always another family</span><span class="grow" /><RouterLink class="link-btn quiet" to="/settings/policies">Rule in Policies</RouterLink></div>
+            <div class="rv-v"><span class="hg" aria-hidden="true"><AppIcon name="compare" :size="13" /></span><span>Automatic · always another family</span><span class="grow" /><RouterLink class="link-btn quiet" to="/settings/policies#cross-family-review">Rule in Policies</RouterLink></div>
           </div>
         </div>
         <p class="next" data-next-line><AppIcon name="arrow" :size="14" /><span class="next-copy"><template v-for="(part, index) in next.parts" :key="index"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></span><button v-if="next.why" id="why" type="button" class="link-btn" aria-haspopup="dialog" :aria-expanded="!!why" data-why @click="why = why ? null : ($event.currentTarget as HTMLElement)">Why?</button></p>
