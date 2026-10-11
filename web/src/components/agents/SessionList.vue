@@ -26,6 +26,7 @@ import { currentActivity, currentStep, workerActivity } from './activity'
 import { timeShort, timeText, timeTip } from './sessionTime'
 import { inFrameOrder, lingers, movesAt, useSessionHold, type Structure } from './sessionHold'
 import { clockTime } from '../../lib/agentPause'
+import { STATE_LABEL } from '../../lib/agentSignals'
 import ExecutionMark from './ExecutionMark.vue'
 import SessionHost from './SessionHost.vue'
 import { listHostLabels } from '../../lib/agents'
@@ -195,8 +196,10 @@ function lineTwo(branch: Branch, view: SessionView) {
   const lead = view.session.archived_at ? 'Removed' : tierRequestLabel(view) || pendingLabel(view)
   const handedOver = view.session.stopped_at && view.session.handed_over_to_id ? `Handed over to ${lineageName(view.session.handed_over_to_id)}` : ''
   const step = handedOver || activityLine(branch) || currentStep(view, branch.children.reduce((sum, child) => sum + child.liveCount, 0), props.now)
+  // A word more precise than the badge's ("Stop requested", "Lost contact") opens the line.
+  const precise = view.status.label !== STATE_LABEL[view.status.state] && view.status.label !== step ? view.status.label : ''
   const moves = lingering(view) ? `moves to Ended at ${clockTime(movesAt(view.session))}` : ''
-  return [lead, step, moves].filter(Boolean).join(' · ')
+  return [lead, precise, step, moves].filter(Boolean).join(' · ')
 }
 // A filter shows every kept child; otherwise the list hides stopped ones until asked.
 const offered = (branch: Branch) => filtering.value ? branch.children.filter(keeps) : candidates(branch)
