@@ -12,7 +12,7 @@ vi.mock('../src/lib/api.ts', () => ({
   },
 }))
 import { StaleScopeError } from '../src/lib/identityScope'
-import { RegistryError, addLine, getRefreshStatus, listProfiles, buildLines, changeOf, checkReport, cooldownLabel, draftOf, emptyDraft, familyOf, intervalLabel, lastChecked, lineWriteOf, metaParts, modelSlug, removalText, removeLine, restoreLine, routeOf, routesFor, shortDate, splitLevels, takenText, useText, validateDraft, checkNow, lifecycleSource, outdatedEntries, outdatedTray, outdatedUseText, outdatedWhy, readOutdated, retireOutdated, undoOutdated, type LineDraft, type LineUsage, type OutdatedDocument, type OutdatedVersion, type RegistryProfile, type WriteScope } from '../src/lib/modelRegistry'
+import { RegistryError, addLine, getRefreshStatus, listProfiles, buildLines, changeOf, checkReport, cooldownLabel, draftOf, emptyDraft, familyOf, intervalLabel, lastChecked, lineWriteOf, metaParts, modelSlug, removalText, removeLine, restoreLine, routeOf, routesFor, shortDate, splitLevels, takenText, useText, validateDraft, checkNow, lifecycleSource, outdatedBatch, outdatedEntries, outdatedTray, outdatedUseText, outdatedWhy, readOutdated, readOutdatedBatch, refused, retireOutdated, undoOutdated, OUTDATED_LIMIT, OUTDATED_PAGES, type LineDraft, type LineUsage, type OutdatedDocument, type OutdatedVersion, type RegistryProfile, type WriteScope } from '../src/lib/modelRegistry'
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...headers } })
 let counter = 0
@@ -328,6 +328,74 @@ describe('old versions', () => {
     http.handle = () => json({ event_id: 8, restored: true })
     await undoOutdated('7.abc')
     expect(http.calls.at(-1)).toEqual({ method: 'POST', path: '/models/outdated/undo', body: { undo_token: '7.abc' } })
+  })
+  // AEON-1164 fix2. Risk: old versions without a usable successor fill the first page, so the tray stays hidden
+  // although later pages hold versions that can move; or the walk mixes pages read at different revisions.
+  it('reads on past pages whose versions cannot move, at the first page\'s revision, and stops at a full batch, a changed revision, an unreadable page or the page bound', async () => {
+    const stuck = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => old({ version: `${prefix}:m-${String(i).padStart(3, '0')}`, successor: `${prefix}:unregistered` }))
+    const movable = (prefix: string, n: number) => Array.from({ length: n }, (_, i) => old({ version: `${prefix}:m-${String(i).padStart(3, '0')}`, successor: 'openai:gpt-6.1-sol' }))
+    // The server's keyset page: versions after the cursor in identity order, the last one as the next cursor while more remain.
+    const pager = (versions: OutdatedVersion[], answer: (page: number) => { revision?: string; status?: number } = () => ({})) => (_method: string, path: string) => {
+      const url = new URL(path, 'http://registry'), after = url.searchParams.get('cursor') ?? '', limit = Number(url.searchParams.get('limit'))
+      const { revision = REVISION, status } = answer(http.calls.length)
+      if (status) return json({ error: 'unavailable' }, status)
+      const rest = versions.filter(version => version.version > after), items = rest.slice(0, limit)
+      return json(doc(items, { revision, next_cursor: rest.length > limit ? items.at(-1)!.version : '' }))
+    }
+    const walk = async () => readOutdatedBatch(await readOutdated(), registry)
+    const reads = () => http.calls.map(call => call.path)
+
+    // A first page of versions that cannot move, then one that can: the walk reaches it, bound to the first revision.
+    http.handle = pager([...stuck('aaa', 50), old({ version: 'openai:gpt-6-sol', successor: 'openai:gpt-6.1-sol' })])
+    let read = await walk()
+    expect(reads()).toEqual(['/models/outdated?limit=50', '/models/outdated?limit=50&cursor=aaa%3Am-049'])
+    expect(read).toMatchObject({ revision: REVISION, next_cursor: '' })
+    expect(outdatedBatch(read, registry)).toMatchObject({ entries: [{ version: 'openai:gpt-6-sol' }], more: false })
+
+    // A later page read at another revision is not mixed in; the cursor left over says more exist.
+    http.calls.length = 0
+    http.handle = pager([...stuck('aaa', 50), old({ version: 'openai:gpt-6-sol', successor: 'openai:gpt-6.1-sol' })], page => page > 1 ? { revision: 'b'.repeat(64) } : {})
+    read = await walk()
+    expect(read).toMatchObject({ revision: REVISION, next_cursor: 'aaa:m-049' })
+    expect(read.versions).toHaveLength(50)
+    expect(outdatedBatch(read, registry)).toEqual({ entries: [], more: true })
+
+    // A later page that cannot be read ends the walk the same way, without failing the pages already read.
+    http.calls.length = 0
+    http.handle = pager([...stuck('aaa', 50), old({ version: 'openai:gpt-6-sol', successor: 'openai:gpt-6.1-sol' })], page => page > 1 ? { status: 503 } : {})
+    read = await walk()
+    expect(read).toMatchObject({ revision: REVISION, next_cursor: 'aaa:m-049' })
+    expect(reads()).toHaveLength(2)
+
+    // The walk is bounded: eleven pages reach every version a registry of 512 profiles can hold, and no more are read.
+    http.calls.length = 0
+    http.handle = pager(stuck('aaa', 600))
+    read = await walk()
+    expect(reads()).toHaveLength(OUTDATED_PAGES)
+    expect(read.versions).toHaveLength(OUTDATED_PAGES * OUTDATED_LIMIT)
+    expect(read.next_cursor).not.toBe('')
+
+    // A full batch ends the walk, and the sheet never offers more than the server retires in one step.
+    http.calls.length = 0
+    http.handle = pager([...movable('bbb', 20), ...stuck('ccc', 30), ...movable('ddd', 50)])
+    read = await walk()
+    expect(reads()).toHaveLength(2)
+    const batch = outdatedBatch(read, registry)
+    expect(batch.entries).toHaveLength(OUTDATED_LIMIT)
+    expect(batch.entries.at(-1)!.version).toBe('ddd:m-029')
+    expect(batch.more).toBe(true)
+  })
+  it('tells a refusal from an answer that never came: only a 4xx means nothing was written', async () => {
+    expect(refused(new RegistryError(409, 'stale outdated preview'))).toBe(true)
+    expect(refused(new RegistryError(403, 'forbidden'))).toBe(true)
+    expect(refused(new RegistryError(502, 'bad gateway'))).toBe(false)
+    expect(refused(new RegistryError(504, 'gateway timeout'))).toBe(false)
+    expect(refused(new TypeError('Failed to fetch'))).toBe(false)
+    // A success whose body is not the retirement result is not a confirmed step either.
+    http.handle = () => json({ ok: true })
+    const lost = await retireOutdated(['openai:gpt-6-sol'], REVISION).catch((error: unknown) => error)
+    expect(lost).toBeInstanceOf(RegistryError)
+    expect(refused(lost)).toBe(false)
   })
   it('offers only versions whose uses can move: a registered successor, and a runnable one when something uses the old version', () => {
     const entries = outdatedEntries(doc([

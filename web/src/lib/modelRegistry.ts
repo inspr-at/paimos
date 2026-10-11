@@ -416,17 +416,44 @@ export interface OutdatedRetired { moved: OutdatedUse[]; removed: string[]; undo
 
 // One page is one batch: the server retires at most fifty versions in one step.
 export const OUTDATED_LIMIT = 50
+// The server reads the outdated list only while the registry holds at most 512 profiles, so eleven pages of fifty reach every version in it.
+export const OUTDATED_PAGES = 11
 const isUse = (use: unknown): use is OutdatedUse => !!use && typeof (use as OutdatedUse).label === 'string' && typeof (use as OutdatedUse).who === 'string' && typeof (use as OutdatedUse).from === 'string'
-export async function readOutdated(signal?: AbortSignal): Promise<OutdatedDocument> {
-  const doc = await request<OutdatedDocument>(`/models/outdated?limit=${OUTDATED_LIMIT}`, 'GET', undefined, signal)
+export async function readOutdated(signal?: AbortSignal, cursor = ''): Promise<OutdatedDocument> {
+  const doc = await request<OutdatedDocument>(`/models/outdated?limit=${OUTDATED_LIMIT}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, 'GET', undefined, signal)
   const valid = !!doc && Array.isArray(doc.versions) && doc.versions.length <= OUTDATED_LIMIT && typeof doc.revision === 'string' && doc.revision.length === 64
+    && typeof doc.next_cursor === 'string' && doc.next_cursor.length <= 200
     && doc.versions.every(version => typeof version?.version === 'string' && Array.isArray(version.uses) && version.uses.every(isUse))
   if (!valid) throw new RegistryError(502, 'The outdated list was not in the expected form')
   return doc
 }
+/**
+ * Reads on past the first page until the list holds a full batch the sheet can offer, so versions without a usable
+ * successor on early pages never hide later ones. A retirement is bound to one revision: a page read at another one,
+ * or a page that cannot be read, ends the walk, and the cursor left over says more old versions exist.
+ */
+export async function readOutdatedBatch(first: OutdatedDocument, profiles: RegistryProfile[], signal?: AbortSignal): Promise<OutdatedDocument> {
+  let doc = first
+  for (let pages = 1; doc.next_cursor && pages < OUTDATED_PAGES && outdatedEntries(doc, profiles).length < OUTDATED_LIMIT; pages++) {
+    let next: OutdatedDocument
+    try { next = await readOutdated(signal, doc.next_cursor) } catch (error) { if (signal?.aborted) throw error; break }
+    if (next.revision !== first.revision) break
+    doc = { versions: [...doc.versions, ...next.versions], revision: first.revision, next_cursor: next.next_cursor, incomplete: doc.incomplete || next.incomplete }
+  }
+  return doc
+}
 /** Moves every use of the versions to their successors and removes them, in one step; the token undoes the whole step. */
-export const retireOutdated = (versions: string[], revision: string, signal?: AbortSignal) => request<OutdatedRetired>('/models/outdated/retire', 'POST', { versions, revision }, signal)
+export async function retireOutdated(versions: string[], revision: string, signal?: AbortSignal): Promise<OutdatedRetired> {
+  const done = await request<OutdatedRetired>('/models/outdated/retire', 'POST', { versions, revision }, signal)
+  if (!done || !Array.isArray(done.removed) || !Array.isArray(done.moved)) throw new RegistryError(502, 'The registry did not say what was removed')
+  return done
+}
 export const undoOutdated = (token: string, signal?: AbortSignal) => request<{ event_id: number; restored: boolean }>('/models/outdated/undo', 'POST', { undo_token: token }, signal)
+/**
+ * The server answered and refused, so nothing was written. A timeout, a lost or unreadable answer and a gateway
+ * error are not refusals: the write may have happened.
+ */
+export const refused = (error: unknown): error is RegistryError => error instanceof RegistryError && error.status >= 400 && error.status < 500
 
 /** An old version as the page shows it: names instead of identities, the reason in plain words, and every use that moves. */
 export interface OutdatedEntry {
@@ -483,6 +510,11 @@ export function outdatedEntries(doc: OutdatedDocument, profiles: RegistryProfile
     })
   }
   return entries
+}
+/** What the tray and the sheet offer: at most one batch the server retires in one step, and whether more old versions remain. */
+export function outdatedBatch(doc: OutdatedDocument, profiles: RegistryProfile[], now = new Date()): { entries: OutdatedEntry[]; more: boolean } {
+  const all = outdatedEntries(doc, profiles, now)
+  return { entries: all.slice(0, OUTDATED_LIMIT), more: !!doc.next_cursor || all.length > OUTDATED_LIMIT }
 }
 
 export interface OutdatedTray { named: { from: string; to: string }[]; count: string; unused: string }

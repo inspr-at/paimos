@@ -908,7 +908,7 @@
         ,
         {"file":"tests/markdown-ticket-links.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/models-outdated.spec.ts","listedTests":8,"weightSeconds":10,"weightSource":"AEON-1164 local-single-worker-7.5s-plus-margin"}
+        {"file":"tests/models-outdated.spec.ts","listedTests":9,"weightSeconds":10,"weightSource":"AEON-1164 local-single-worker-7.5s-plus-margin"}
         ,
         {"file":"tests/multiple-account-pairing.spec.ts","listedTests":6,"weightSeconds":13.317072,"weightSource":"unmeasured-test-rate"}
         ,

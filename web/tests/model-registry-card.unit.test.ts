@@ -190,3 +190,106 @@ it('a save that waited for a read and lost its editor writes nothing and does no
   expect(toasts).toEqual([])
   expect(server.lists).toBe(listsBefore)
 })
+
+// AEON-1164 fix2: the outdated tray and the review sheet.
+// Risks: old versions that cannot move fill the first page of the outdated list, so later versions that can
+// never reach the tray; and a removal whose answer is lost after it committed is reported as "Nothing was
+// removed" while the sheet keeps offering versions that are gone.
+interface OldCard {
+  lines: Vue.ComputedRef<registry.RegistryLine[]>; entries: Vue.ComputedRef<registry.OutdatedEntry[]>; tray: Vue.ComputedRef<registry.OutdatedTray | null>
+  more: Vue.ComputedRef<boolean>; retireOld(versions: string[]): void
+}
+const OLD_REVISION = 'a'.repeat(64)
+const gpt6 = (): Profile[] => LEVELS.map((effort, index) => ({
+  id: `old-${effort}`, slug: `old-${effort}`, version: '6', harness: 'codex', family: 'openai', model: 'gpt-6-sol', effort, tier: 'strong', enabled: true, created_at: '2026-08-20T12:00:00Z',
+  display_name: 'GPT Sol', model_version: '6', source: 'auto', retired: false, retire_at: null, effort_level: index + 1, identity: 'openai:gpt-6-sol',
+}))
+const version = (id: string, successor: string): registry.OutdatedVersion => ({ version: id, line: 'openai:gpt-sol', state: 'superseded', date: null, successor, reason: 'Source reports a successor', source: 'agent-report:codex', uses: [], incomplete: false })
+/** The outdated list as the server pages it, and its one-step retire; `lose` commits a retire and then loses its answer. */
+function oldServer(versions: registry.OutdatedVersion[], lose: ((committed: () => void) => unknown) | null = null) {
+  const state = { versions, revision: OLD_REVISION, reads: [] as string[], retires: [] as unknown[] }
+  server.profiles = [...sol('strongest for building').map(profile => ({ ...profile, identity: 'openai:gpt-6.1-sol' })), ...gpt6()]
+  const base = http.handler
+  http.handler = async (path, init) => {
+    const method = init.method ?? 'GET'
+    if (path.startsWith('/models/outdated?') && method === 'GET') {
+      state.reads.push(path)
+      const url = new URL(path, 'http://registry'), after = url.searchParams.get('cursor') ?? '', limit = Number(url.searchParams.get('limit'))
+      const rest = state.versions.filter(item => item.version > after), items = rest.slice(0, limit)
+      return answer({ versions: items, revision: state.revision, next_cursor: rest.length > limit ? items.at(-1)!.version : '', incomplete: false })
+    }
+    if (path === '/models/outdated/retire' && method === 'POST') {
+      const body = JSON.parse(String(init.body)) as { versions: string[]; revision: string }
+      state.retires.push(body)
+      if (body.revision !== state.revision) return answer({ error: 'stale outdated preview' }, 409)
+      const commit = () => {
+        for (const profile of server.profiles) if (body.versions.includes(profile.identity ?? '')) profile.retired = true
+        state.versions = state.versions.filter(item => !body.versions.includes(item.version))
+        state.revision = 'b'.repeat(64)
+      }
+      if (lose) return lose(commit)
+      commit()
+      return answer({ moved: [], removed: body.versions, undo_token: `9.${'c'.repeat(64)}` })
+    }
+    return base(path, init)
+  }
+  return state
+}
+async function mountOld(): Promise<OldCard> {
+  const scope = Vue.effectScope(); scopes.push(scope)
+  const card = scope.run(setup)! as unknown as OldCard
+  await settle()
+  return card
+}
+// Fifty versions sorted before the one that can move, each naming a successor the registry does not hold.
+const unmovable = () => Array.from({ length: 50 }, (_, i) => version(`aaa:old-${String(i).padStart(2, '0')}`, 'aaa:unregistered'))
+
+it('versions that can move still reach the tray when the first page holds only versions that cannot, and Remove sends the first page\'s revision', async () => {
+  const old = oldServer([...unmovable(), version('openai:gpt-6-sol', 'openai:gpt-6.1-sol')])
+  const card = await mountOld()
+  expect(old.reads).toEqual(['/models/outdated?limit=50', '/models/outdated?limit=50&cursor=aaa%3Aold-49'])
+  expect(card.entries.value.map(entry => entry.version)).toEqual(['openai:gpt-6-sol'])
+  expect(card.tray.value).toMatchObject({ named: [{ from: 'GPT Sol 6', to: 'GPT Sol 6.1' }], count: '1 old version' })
+  expect(card.more.value).toBe(false)
+
+  card.retireOld(['openai:gpt-6-sol'])
+  await settle()
+  expect(old.retires).toEqual([{ versions: ['openai:gpt-6-sol'], revision: OLD_REVISION }])
+  expect(toasts.map(item => item.message)).toEqual(['Removed 1 old version · 0 uses moved'])
+  expect(card.tray.value).toBeNull()
+})
+
+it('a removal whose answer is lost after it committed is not called "nothing removed": it says the outcome is open and shows the list read again', async () => {
+  const lost: [string, (committed: () => void) => unknown][] = [
+    ['a lost answer', committed => { committed(); throw new TypeError('Failed to fetch') }],
+    ['a gateway timeout', committed => { committed(); return answer({ error: 'gateway timeout' }, 504) }],
+  ]
+  for (const [how, lose] of lost) {
+    toasts.length = 0
+    const old = oldServer([version('openai:gpt-6-sol', 'openai:gpt-6.1-sol')], lose)
+    const card = await mountOld()
+    expect(card.entries.value.map(entry => entry.version), how).toEqual(['openai:gpt-6-sol'])
+    const reads = old.reads.length
+
+    card.retireOld(['openai:gpt-6-sol'])
+    await settle()
+    expect(old.retires, how).toHaveLength(1)
+    expect(toasts.map(item => item.message), how).toEqual(['The registry didn’t confirm the removal, so it may have happened. The list was refreshed; check it before removing again.'])
+    expect(toasts[0]!.options?.tone, how).toBe('error')
+    // The card shows what the server holds now: the version is gone from the sheet, the tray and the list.
+    expect(old.reads.length, how).toBeGreaterThan(reads)
+    expect(card.entries.value, how).toEqual([])
+    expect(card.tray.value, how).toBeNull()
+    expect(card.lines.value.map(line => line.model), how).toEqual(['gpt-6.1-sol'])
+  }
+})
+
+it('a refusal the server answered still says nothing was removed', async () => {
+  const old = oldServer([version('openai:gpt-6-sol', 'openai:gpt-6.1-sol')], () => answer({ error: 'invalid or duplicate version' }, 400))
+  const card = await mountOld()
+  card.retireOld(['openai:gpt-6-sol'])
+  await settle()
+  expect(old.retires).toHaveLength(1)
+  expect(toasts.map(item => item.message)).toEqual(['Nothing was removed. Try again.'])
+  expect(card.entries.value.map(entry => entry.version)).toEqual(['openai:gpt-6-sol'])
+})

@@ -15,7 +15,8 @@ export interface MockOutdatedUse { label: string; who: string; from: string; to:
 export interface MockOutdatedVersion { version: string; line: string; state: string | null; date: string | null; successor: string | null; reason: string; source: string; uses: MockOutdatedUse[]; incomplete: boolean }
 /** AEON-1164: the outdated list and its one-step retire with Undo. Retiring marks the version's profiles retired; Undo brings them and their uses back. */
 export interface OutdatedWorld {
-  versions: MockOutdatedVersion[]; revision: string; nextCursor: string; incomplete: boolean
+  /** Sorted by identity; GET pages them as the server does, by limit and cursor. */
+  versions: MockOutdatedVersion[]; revision: string; incomplete: boolean
   /** The next retire answers with this status and error instead (once). */
   failRetire: { status: number; error: string } | null
   undo: { token: string; versions: MockOutdatedVersion[] } | null
@@ -109,7 +110,11 @@ export async function mockRegistry(page: Page, world: RegistryWorld, options: { 
     }
     const old = world.outdated
     if (path.startsWith('/models/outdated') && !old) return route.fulfill({ status: 404, json: { error: 'not found' } })
-    if (path === '/models/outdated' && method === 'GET') return route.fulfill({ json: { versions: old!.versions, revision: old!.revision, next_cursor: old!.nextCursor, incomplete: old!.incomplete } })
+    if (path === '/models/outdated' && method === 'GET') {
+      const after = url.searchParams.get('cursor') ?? '', limit = Number(url.searchParams.get('limit') ?? 20)
+      const rest = old!.versions.filter(version => version.version > after), versions = rest.slice(0, limit)
+      return route.fulfill({ json: { versions, revision: old!.revision, next_cursor: rest.length > limit ? versions.at(-1)!.version : '', incomplete: old!.incomplete } })
+    }
     if (path === '/models/outdated/retire' && method === 'POST') {
       if (old!.failRetire) { const fail = old!.failRetire; old!.failRetire = null; return route.fulfill({ status: fail.status, json: { error: fail.error } }) }
       if (body.revision !== old!.revision) return route.fulfill({ status: 409, json: { error: 'stale outdated preview' } })
@@ -124,7 +129,7 @@ export async function mockRegistry(page: Page, world: RegistryWorld, options: { 
       if (!old!.undo || body.undo_token !== old!.undo.token) return route.fulfill({ status: 409, json: { error: 'invalid retirement undo' } })
       const back = old!.undo.versions
       for (const version of back) for (const profile of world.profiles) if (profile.identity === version.version) profile.retired = false
-      old!.versions = [...back, ...old!.versions]
+      old!.versions = [...back, ...old!.versions].sort((a, b) => a.version < b.version ? -1 : 1)
       old!.undo = null
       return route.fulfill({ json: { event_id: 42, restored: true } })
     }

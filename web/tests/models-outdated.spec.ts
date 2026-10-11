@@ -42,7 +42,7 @@ function outdatedWorld(over: Partial<RegistryWorld> = {}, auto = false): Registr
   return registryWorld({
     profiles: outdatedProfiles(), permissions: ['models.read', 'models.manage', 'models.refresh', 'account.use.manage', 'members.read'],
     settings: { agent_reports_enabled: true, auto_add_profiles: auto, api_enabled: true, interval_minutes: 360 },
-    outdated: { versions, revision: REVISION, nextCursor: '', incomplete: false, failRetire: null, undo: null }, ...over,
+    outdated: { versions, revision: REVISION, incomplete: false, failRetire: null, undo: null }, ...over,
   })
 }
 
@@ -93,11 +93,27 @@ test('the tray names the two successors that take over most uses and the count, 
   await expect(tray(page)).toHaveCount(0)
   expect(reader.reads.filter(path => path === '/models/outdated')).toEqual([])
   // Nothing outdated, or a server without the list: no tray, and the registry still loads.
-  await setup(page, outdatedWorld({ outdated: { versions: [], revision: REVISION, nextCursor: '', incomplete: false, failRetire: null, undo: null } }))
+  await setup(page, outdatedWorld({ outdated: { versions: [], revision: REVISION, incomplete: false, failRetire: null, undo: null } }))
   await expect(tray(page)).toHaveCount(0)
   await setup(page, outdatedWorld({ outdated: null }))
   await expect(tray(page)).toHaveCount(0)
   await expect(page.locator('[data-reg-row="gpt-6-sol"]')).toBeVisible()
+})
+
+test('old versions that can move reach the tray when the first page holds only versions that cannot, and Remove keeps that page\'s revision', async ({ page }) => {
+  // Fifty old versions sort first and name a successor the registry does not hold, so the first page offers none.
+  const world = outdatedWorld()
+  const stuck = Array.from({ length: 50 }, (_, i): MockOutdatedVersion => ({ version: `aaa:old-${String(i).padStart(2, '0')}`, line: 'aaa:old', state: 'superseded', date: null, successor: 'aaa:unregistered', reason: 'Source reports a successor', source: 'agent-report:codex', uses: [], incomplete: false }))
+  world.outdated!.versions = [...stuck, ...world.outdated!.versions]
+  await setup(page, world)
+  await expect(tray(page).locator('[data-reg-tray-text]')).toHaveText('Claude Opus 5.5 replaces Claude Opus 5 · Gemini Pro 3 replaces Gemini Pro 2.5 · 4 old versions')
+  expect(world.reads.filter(path => path === '/models/outdated')).toHaveLength(2)
+  await review(page).click()
+  await expect(sheet(page).locator('.od')).toHaveCount(4)
+  await go(page).click()
+  await expect(toasts(page).filter({ hasText: 'Removed 4 old versions · 5 uses moved' })).toBeVisible()
+  expect(world.writes.filter(write => write.path === '/models/outdated/retire')).toEqual([{ method: 'POST', path: '/models/outdated/retire', body: { versions: ['anthropic:claude-opus-5', 'google:gemini-2.5-pro', 'openai:gpt-6-sol', 'xai:grok-4.5'], revision: REVISION } }])
+  await expect(tray(page)).toHaveCount(0)
 })
 
 test('the review sheet overlays the page: inside the viewport, nothing on the page moves, focus stays in it and Esc closes it without a write', async ({ page }) => {

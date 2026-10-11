@@ -13,7 +13,7 @@ import { useSession } from '../../../stores/session'
 import { PERMISSION, readMatrix } from '../../../lib/accountUse'
 import {
   RegistryError, REMOVED_REASON, UNDONE_REASON, addLine, buildLines, changeOf, checkNow, checkReport, cooldownLabel, draftOf, draftsMatch, editLine, emptyDraft, getRefreshStatus, hasErrors, intervalLabel, lastChecked, lineWriteOf,
-  listProfiles, metaParts, modelSlug, outdatedEntries, outdatedTray, previewRemoval, putRefreshSettings, readOutdated, removalText, removeLine, restoreLine, retireOutdated, shortDate, snapshotFromUsage, splitLevels, undoOutdated, validateDraft,
+  listProfiles, metaParts, modelSlug, outdatedBatch, outdatedTray, previewRemoval, putRefreshSettings, readOutdated, readOutdatedBatch, refused, removalText, removeLine, restoreLine, retireOutdated, shortDate, snapshotFromUsage, splitLevels, undoOutdated, validateDraft,
   type DraftErrors, type LineDraft, type LinePick, type LineSnapshot, type LineUsage, type OutdatedDocument, type RefreshStatus, type RegistryLine, type RegistryProfile, type WriteScope,
 } from '../../../lib/modelRegistry'
 
@@ -53,7 +53,11 @@ const bindEditor = (el: unknown) => { editor = el as EditorHandle | null }
 
 // ---------- loading ----------
 // The outdated read is a hint for admins: when it fails, every version still shows in the list with its tags, so the registry loads without it.
-const readAll = (signal: AbortSignal) => Promise.all([listProfiles(signal), getRefreshStatus(signal), manageable.value ? readOutdated(signal).catch(() => null) : null])
+// Its first page comes with the list; later pages only when the earlier ones offer less than a batch (AEON-1164).
+async function readAll(signal: AbortSignal): Promise<[RegistryProfile[], RefreshStatus, OutdatedDocument | null]> {
+  const [list, refresh, first] = await Promise.all([listProfiles(signal), getRefreshStatus(signal), manageable.value ? readOutdated(signal).catch(() => null) : null])
+  return [list, refresh, first && await readOutdatedBatch(first, list, signal)]
+}
 function adopt([list, refresh, old]: [RegistryProfile[], RefreshStatus, OutdatedDocument | null]) { profiles.value = list; status.value = refresh; outdated.value = old; phase.value = 'ready' }
 function load() {
   phase.value = 'loading'
@@ -284,8 +288,10 @@ function remove() {
 // ---------- old versions: the tray and the review sheet (AEON-1164) ----------
 const sheetOpen = ref(false), removingOld = ref(false)
 const cardEl = ref<HTMLElement | null>(null)
-const entries = computed(() => manageable.value && outdated.value ? outdatedEntries(outdated.value, profiles.value, new Date(now.value)) : [])
-const tray = computed(() => entries.value.length ? outdatedTray(entries.value, !!outdated.value?.next_cursor, outdated.value?.incomplete === true) : null)
+const batch = computed(() => manageable.value && outdated.value ? outdatedBatch(outdated.value, profiles.value, new Date(now.value)) : null)
+const entries = computed(() => batch.value?.entries ?? [])
+const more = computed(() => batch.value?.more === true)
+const tray = computed(() => entries.value.length ? outdatedTray(entries.value, more.value, outdated.value?.incomplete === true) : null)
 // A list read again with nothing left to review closes the sheet.
 watch(entries, list => { if (!list.length) sheetOpen.value = false })
 function openSheet() { if (manageable.value && entries.value.length && phase.value === 'ready') sheetOpen.value = true }
@@ -316,13 +322,19 @@ function retireOld(versions: string[]) {
     })
   }), {
     failed: error => {
-      if (error instanceof RegistryError && error.status === 409) {
+      // No answer, a lost or unreadable one, or a gateway error: the step may have happened, so say so and show what the server holds.
+      if (!refused(error)) {
+        toast('The registry didn’t confirm the removal, so it may have happened. The list was refreshed; check it before removing again.', { tone: 'error' })
+        void reload()
+        return
+      }
+      if (error.status === 409) {
         toast(RETIRE_CONFLICT[error.message] ?? `Nothing was removed: ${error.message}. The list was refreshed.`, { tone: 'error' })
         void reload()
         return
       }
-      toast(error instanceof RegistryError && error.status === 403 ? 'You can’t remove old versions or move their uses. Ask a workspace admin.'
-        : error instanceof RegistryError && error.status === 413 ? 'Too many uses move at once. Nothing was removed; select fewer versions.'
+      toast(error.status === 403 ? 'You can’t remove old versions or move their uses. Ask a workspace admin.'
+        : error.status === 413 ? 'Too many uses move at once. Nothing was removed; select fewer versions.'
           : 'Nothing was removed. Try again.', { tone: 'error' })
     },
     settled: () => { removingOld.value = false },
@@ -409,7 +421,7 @@ onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
         <li v-if="!lines.length && editing !== 'new'" class="reg-note" role="status">No models are registered yet.</li>
       </ul>
     </div>
-    <ModelOutdatedSheet v-if="sheetOpen && entries.length" :entries="entries" :auto-on="autoOn" :incomplete="outdated?.incomplete === true" :more="!!outdated?.next_cursor" :busy="removingOld"
+    <ModelOutdatedSheet v-if="sheetOpen && entries.length" :entries="entries" :auto-on="autoOn" :incomplete="outdated?.incomplete === true" :more="more" :busy="removingOld"
       @close="sheetOpen = false" @remove="retireOld" />
   </section>
 </template>
