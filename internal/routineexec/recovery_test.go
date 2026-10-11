@@ -64,16 +64,16 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 	f.exec(`UPDATE routine_budget_grants SET state='unknown' WHERE id=$1`, g.BudgetGrantID)
 	var admin string
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Responsible administrator') RETURNING id::text`, f.owner.TenantID).Scan(&admin))
-	dbtest.BindRole(t, f.d, f.owner.TenantID, admin, "admin")
+	dbtest.BindRole(t, f.d, f.owner.TenantID, admin, "owner")
 	// Establish the revocation transaction first, holding the real access fence.
-	pool, barrier, raceCtx := dbtest.BarrierPool(t, f.d.App, func(q string) bool { return strings.HasPrefix(q, "UPDATE principals SET status='disabled'") })
+	pool, barrier, raceCtx := dbtest.BarrierPool(t, f.d.App, func(q string) bool { return strings.HasPrefix(q, "UPDATE principals SET status='deactivated'") })
 	revoked := make(chan error, 1)
 	go func() {
 		revoked <- db.InTenant(db.AllProjects(raceCtx, "revocation fixture"), pool, f.owner.TenantID, func(tx pgx.Tx) error {
 			if err := agentpairing.Lock(raceCtx, tx); err != nil {
 				return err
 			}
-			_, err := tx.Exec(raceCtx, `UPDATE principals SET status='disabled' WHERE id=$1`, f.owner.ID)
+			_, err := tx.Exec(raceCtx, `UPDATE principals SET status='deactivated' WHERE id=$1`, f.owner.ID)
 			return err
 		})
 	}()
