@@ -561,7 +561,7 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 						continue
 					}
 					values[name] = "skipped"
-					if lane == "full" || lane == "spec-only" && (name == "WEB_SETUP" || name == "WEB_UNIT" || name == "WEB_SHARD") {
+					if lane == "full" || lane == "spec-only" && (name == "WEB_CATALOGUE" || name == "WEB_SETUP" || name == "WEB_UNIT" || name == "WEB_SHARD") {
 						values[name] = "success"
 					}
 				}

@@ -1804,7 +1804,7 @@ test('nightly runs every tier and fixed gate; PR/MQ aggregates and compatibility
   for(const command of ['run go --all --shard','run web --all --unit','run web --all --shard'])assert.ok(nightly.includes(command))
   for(const id of ['go-static','go-timing','migration-compat','e2e','release-check'])assert.ok(nightly.includes(`  nightly-${id}:`))
   assert.match(ci,/  go:\n\s+if: always\(\)\n\s+needs: \[ci-plan, go-test, go-static, go-timing, tree-reuse, cache-prime, tier-plan\]/)
-  assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[ci-plan, web-setup, web-unit, web-shard, tree-reuse, cache-prime, tier-plan\]/)
+  assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[ci-plan, web-catalogue, web-setup, web-unit, web-shard, tree-reuse, cache-prime, tier-plan\]/)
   assert.match(ci,/  migration-compat:\n\s+permissions:/)
   assert.doesNotMatch(ci,/ci-flake-guard\.mjs --kind/)
 })
