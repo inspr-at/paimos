@@ -320,12 +320,13 @@ test('AEON-1213 regression: failed layout reads retain the local handle until re
 // column cannot put model/computer/beat content under the wrong heading.
 test('AEON-1213 regression: the table uses the approved columns with the ticket in the session name', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
-  const { data } = await setup(page)
+  const { data, work } = await setup(page)
   await page.goto('/agents')
   const worker = row(page, data.sessions[1]!.id)
+  const ticket = work.nodes.find(node => node.id === data.sessions[1]!.ticket_node_id)!
   await expect(worker).toBeVisible()
   await expect(page.locator('.sessions .thead [role="columnheader"]')).toHaveText(['Session', 'Time', 'Execution', 'Computer', 'Beat', 'Actions'])
-  await expect(worker.locator('.l1 .key-inline')).toHaveText(`${data.sessions[1]!.ticket!.key} ·`)
+  await expect(worker.locator('.l1 .key-inline')).toHaveText(`${ticket.key} ·`)
   await expect(worker.locator('.l1 .key-inline')).toBeVisible()
   await expect(page.locator('.sessions .c-ticket, .sessions .c-tier')).toHaveCount(0)
   const header = page.locator('.sessions .thead')
