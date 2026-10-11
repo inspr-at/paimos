@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getRecurrence, listRoutines, pauseRecurrence, runRecurrence } from '../lib/api'
 import { getMembers } from '../lib/access'
 import { can, myWorkspaceRole } from '../lib/authz'
+import type { After } from '../lib/identityScope'
 import { ROUTINE_STATE_WORDS, reasonWords, recurrenceName, recurrenceZone, routineState, when, type Recurrence, type RecurrenceResult } from '../lib/recurrences'
 import { SCOPE_FILTERS, STATE_FILTERS, STATE_LOOK, countWords, matchesScope, parseScope, parseState, scopeOf, stateCounts, type ScopeFilter } from '../lib/routineRuns'
 import { toast } from '../lib/toast'
@@ -29,9 +30,11 @@ import RoutineRow from '../components/routines/RoutineRow.vue'
 const route = useRoute(), router = useRouter(), session = useSession(), projects = useProjects()
 const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const person = computed(() => !!session.identity && session.identity.principal.kind !== 'agent')
-const identity = useIdentityScope(() => person.value && can('nodes.read'))
+// Every person asks: the server lists what their workspace or project access lets them read.
+const identity = useIdentityScope(() => person.value)
 const reads = identity.lane(), links = identity.lane(), names = identity.lane()
 const items = ref<Recurrence[]>([]), cursor = ref<string | null>(null), loading = ref(false), loaded = ref(false), failure = ref(''), moreFailure = ref('')
+const denied = ref(false), refreshing = ref(false), pagesRead = ref(0), known = computed(() => loaded.value && !denied.value)
 const linked = ref<Recurrence | null>(null), linkFailure = ref(''), closed = ref(false), revoked = ref(false), busy = ref<string[]>([])
 const editor = ref<{ item: Recurrence; consent?: boolean } | null>(null), runPrompt = ref<Recurrence | null>(null)
 const menu = ref<{ type: 'new' | 'more'; item?: Recurrence; anchor: HTMLElement } | null>(null)
@@ -130,40 +133,72 @@ function listKeys(event: KeyboardEvent) {
 // ---------- Reads ----------
 function clear() {
   reads.cancel(); links.cancel(); names.cancel()
-  items.value = []; cursor.value = null; loaded.value = false; loading.value = false; failure.value = ''; moreFailure.value = ''
+  items.value = []; cursor.value = null; loaded.value = false; loading.value = false; refreshing.value = false; failure.value = ''; moreFailure.value = ''; denied.value = false; pagesRead.value = 0
   linked.value = null; linkFailure.value = ''; closed.value = false; revoked.value = false; busy.value = []; editor.value = null; runPrompt.value = null; menu.value = null; owners.value = new Map()
 }
-function load(older = false) {
+function cancelReads() { reads.cancel(); loading.value = false; refreshing.value = false }
+// First reads page one; More appends the next page; a refresh reads the pages loaded so
+// far again, following the fresh cursors, so later pages and the routine on screen stay.
+function load(mode: 'first' | 'more' | 'refresh' = 'first') {
   if (!identity.owner.value) return
-  const after = older ? cursor.value ?? undefined : undefined
-  if (older && !after) return
-  loading.value = true
-  if (older) moreFailure.value = ''; else failure.value = ''
-  void reads.run(({ after: then, signal }) => then(listRoutines({ after }, signal), page => {
+  if ((mode === 'more' && !cursor.value) || (mode === 'refresh' && (loading.value || refreshing.value))) return
+  const start = mode === 'more' ? cursor.value ?? undefined : undefined, pages = mode === 'refresh' ? Math.max(1, pagesRead.value) : 1, before = items.value, fresh: Recurrence[] = []
+  // A refresh runs quietly; First or More replaces it on the lane, so it no longer counts as running.
+  if (mode === 'refresh') refreshing.value = true; else { loading.value = true; refreshing.value = false }
+  if (mode === 'more') moreFailure.value = ''; else if (mode === 'first') failure.value = ''
+  const read = (then: After, signal: AbortSignal, after: string | undefined, count: number): Promise<void> => then(listRoutines({ after }, signal), page => {
     if (!Array.isArray(page?.items)) throw new Error('The routines answer was not a list.')
+    fresh.push(...page.items)
+    if (page.next_cursor && count + 1 < pages) return read(then, signal, page.next_cursor, count + 1)
     // Lists are replaced, never merged across people; More appends this list's next page once per definition.
     const seen = new Set<string>(), unique = (list: Recurrence[]) => list.filter(item => !seen.has(item.id) && !!seen.add(item.id))
-    items.value = older ? unique([...items.value, ...page.items]) : unique(page.items)
-    cursor.value = page.next_cursor; loaded.value = true
+    items.value = mode === 'more' ? unique([...items.value, ...fresh]) : unique(fresh)
+    cursor.value = page.next_cursor; pagesRead.value = mode === 'more' ? pagesRead.value + 1 : count + 1
+    loaded.value = true; denied.value = false
+    if (mode !== 'more') failure.value = ''
     if (linked.value && items.value.some(item => item.id === linked.value?.id)) linked.value = null
-  }), { failed: error => { const reason = error instanceof Error ? error.message : 'the server didn’t answer'; if (older) moreFailure.value = reason; else failure.value = reason }, settled: () => { loading.value = false } })
+    if (mode === 'refresh') keepShown(before)
+  })
+  void reads.run(({ after, signal }) => read(after, signal, start, 0), { failed: error => {
+    // No read access in any project: nothing is listed, and that is said, never shown as none.
+    if ((error as { status?: number }).status === 403) { deny(); return }
+    const reason = error instanceof Error ? error.message : 'the server didn’t answer'
+    if (mode === 'more') moreFailure.value = reason; else failure.value = reason
+  }, settled: () => { if (mode === 'refresh') refreshing.value = false; else loading.value = false } })
+}
+function deny() {
+  links.cancel()
+  items.value = []; cursor.value = null; pagesRead.value = 0; linked.value = null; linkFailure.value = ''; failure.value = ''; moreFailure.value = ''; loaded.value = true; denied.value = true
+}
+// The routine on screen stays on screen: missing from the fresh pages, it is kept and read on its own.
+function keepShown(before: Recurrence[]) {
+  const id = routineId.value
+  if (!id || items.value.some(item => item.id === id) || linked.value?.id === id) return
+  const shown = before.find(item => item.id === id)
+  if (!shown) return
+  linked.value = shown
+  readLinked(true)
 }
 function loadNames() {
   if (!can('members.read')) return
   void names.run(({ after }) => after(getMembers(), list => { owners.value = new Map(list.people.map(person => [person.principal_id, person.name])) }), { failed: () => {} })
 }
-// A linked routine that isn't on the loaded pages is read on its own; gone (404) means a calm line.
-function readLinked() {
+// A linked routine that isn't on the loaded pages is read on its own, and again with each
+// refresh (again: it is on screen already); gone (404) means a calm line.
+function readLinked(again = false) {
   const id = routineId.value
   linkFailure.value = ''
-  if (!id || !loaded.value || items.value.some(item => item.id === id) || linked.value?.id === id) return
-  void links.run(({ after, signal }) => after(getRecurrence(id, signal), item => { if (routineId.value === id) linked.value = item }), { failed: error => {
+  if (!id || !loaded.value || denied.value || items.value.some(item => item.id === id) || (!again && linked.value?.id === id)) return
+  void links.run(({ after, signal }) => after(getRecurrence(id, signal), item => {
+    if (routineId.value !== id || item.id !== id) return
+    if (linked.value?.id !== id || item.revision >= linked.value.revision) linked.value = item
+  }), { failed: error => {
     if (routineId.value !== id) return
     if ((error as { status?: number }).status === 404) gone()
     else linkFailure.value = error instanceof Error ? error.message : 'the server didn’t answer'
   } })
 }
-watch([routineId, loaded], readLinked)
+watch([routineId, loaded], () => readLinked())
 function gone() {
   const id = routineId.value || chosen.value?.id
   closed.value = true
@@ -183,7 +218,12 @@ watch(() => identity.owner.value, owner => {
   if (principal) shownFor = principal
   if (owner) { load(); loadNames() }
 }, { immediate: true, flush: 'sync' })
-const poller = usePoller(() => { if (!cursor.value && !busy.value.length && !editor.value && !runPrompt.value && !menu.value) load() }, 20_000)
+// The poll refreshes whatever pages are loaded, and the routine on screen even when no page lists it.
+const poller = usePoller(() => {
+  if (busy.value.length || editor.value || runPrompt.value || menu.value) return
+  load(loaded.value ? 'refresh' : 'first')
+  if (linked.value) readLinked(true)
+}, 20_000)
 onMounted(() => {
   void projects.load(); poller.start()
   observer = new ResizeObserver(([entry]) => { if (entry) single.value = entry.contentRect.width < 1100 })
@@ -209,7 +249,7 @@ function replace(item: Recurrence) {
 function toggle(item: Recurrence, undo = false) {
   if (!current(item) || busy.value.includes(item.id)) return
   const owner = identity.owner.value, paused = !item.paused
-  reads.cancel(); busy.value = [...busy.value, item.id]
+  cancelReads(); busy.value = [...busy.value, item.id]
   void identity.run(({ after, signal }) => after(pauseRecurrence(item.id, paused, item.revision, signal), updated => {
     replace(updated)
     toast(`${paused ? 'Paused' : 'Resumed'} ${recurrenceName(item)}.`, { timeout: 8000, action: undo ? undefined : { label: 'Undo', run: () => {
@@ -221,7 +261,7 @@ function toggle(item: Recurrence, undo = false) {
 }
 function run(item: Recurrence) {
   if (!current(item) || busy.value.includes(item.id)) return
-  reads.cancel(); busy.value = [...busy.value, item.id]
+  cancelReads(); busy.value = [...busy.value, item.id]
   void identity.run(({ after, signal }) => after(getRecurrence(item.id, signal), latest => {
     if (!current(item) || latest.id !== item.id) return
     replace(latest)
@@ -287,14 +327,14 @@ const stateIcon = (state: RoutineState) => STATE_LOOK[state].icon as IconName | 
     <p v-if="!person" class="calm-line" role="note"><AppIcon name="info" :size="13" /><span>Routines are listed for people. Agents read them through the API with Manage recurring work.</span></p>
     <template v-else>
       <div class="tools">
-        <div class="seg scope" role="radiogroup" aria-label="Scope"><button v-for="[key, label] in SCOPE_FILTERS" :key="key" type="button" role="radio" :data-scope="key" :aria-checked="scopeFilter === key" @click="setQuery({ scope: key })">{{ label }}<span class="sn">{{ loaded ? scopeCount(key) : '' }}</span></button></div>
+        <div class="seg scope" role="radiogroup" aria-label="Scope"><button v-for="[key, label] in SCOPE_FILTERS" :key="key" type="button" role="radio" :data-scope="key" :aria-checked="scopeFilter === key" @click="setQuery({ scope: key })">{{ label }}<span class="sn">{{ known ? scopeCount(key) : '' }}</span></button></div>
         <label class="proj"><span class="sr-only">Project</span><select id="routines-project" class="field" :value="projectFilter" @change="setQuery({ project: ($event.target as HTMLSelectElement).value || undefined })"><option value="">All projects</option><option v-for="option in projectOptions" :key="option.id" :value="option.id">{{ option.key }}</option></select></label>
         <div class="counts" role="group" aria-label="Show routines by state">
-          <button v-for="state in STATE_FILTERS" :key="state" type="button" class="cnt" :class="STATE_LOOK[state].tone" :data-sf="state" :aria-pressed="stateFilter === state" :aria-disabled="!counts[state] && stateFilter !== state ? 'true' : undefined" @click="toggleState(state)"><span v-if="stateIcon(state) === 'live'" class="pulse" aria-hidden="true" /><AppIcon v-else :name="stateIcon(state) as IconName" :size="13" /><b>{{ loaded ? countWords(counts[state], more) : '·' }}</b><span>{{ ROUTINE_STATE_WORDS[state].toLowerCase() }}</span></button>
+          <button v-for="state in STATE_FILTERS" :key="state" type="button" class="cnt" :class="STATE_LOOK[state].tone" :data-sf="state" :aria-pressed="stateFilter === state" :aria-disabled="!counts[state] && stateFilter !== state ? 'true' : undefined" @click="toggleState(state)"><span v-if="stateIcon(state) === 'live'" class="pulse" aria-hidden="true" /><AppIcon v-else :name="stateIcon(state) as IconName" :size="13" /><b>{{ known ? countWords(counts[state], more) : '·' }}</b><span>{{ ROUTINE_STATE_WORDS[state].toLowerCase() }}</span></button>
         </div>
       </div>
       <p v-if="revoked" class="calm-line" role="status"><AppIcon name="eye" :size="13" /><span><b>The routine editor closed:</b> your rights for that routine changed. Nothing was saved; your draft was discarded. You can still read it.</span></p>
-      <p v-if="linkFailure" class="calm-line" role="alert"><AppIcon name="alert" :size="13" /><span><b>The linked routine couldn’t be read:</b> {{ linkFailure }}. </span><button type="button" class="btn sm ghost" @click="readLinked">Try again</button></p>
+      <p v-if="linkFailure" class="calm-line" role="alert"><AppIcon name="alert" :size="13" /><span><b>The linked routine couldn’t be read:</b> {{ linkFailure }}. </span><button type="button" class="btn sm ghost" @click="readLinked(true)">Try again</button></p>
       <p v-if="closed" class="calm-line" role="status"><AppIcon name="eye" :size="13" /><span><b>This logbook closed.</b> The routine is gone or no longer visible to you, so nothing of it is shown here.</span></p>
       <div class="grid" :class="{ one: loaded && !rows.length && !chosen, 'pv-log': single && !!chosen, 'pv-list': single && !chosen }">
         <section class="glass-card rt-list" aria-label="Routine list" :aria-busy="loading && !loaded" @keydown="listKeys">
@@ -302,6 +342,7 @@ const stateIcon = (state: RoutineState) => STATE_LOOK[state].icon as IconName | 
             <div v-for="index in 5" :key="index" class="sk-row" aria-hidden="true"><span class="skeleton round" /><span class="skeleton" /><span class="skeleton" /></div>
             <p class="sr-only" role="status">Loading routines…</p>
           </template>
+          <p v-else-if="denied" class="calm-line list-line" role="status"><AppIcon name="eye" :size="13" /><span><b>No routines to show you.</b> Reading them needs read access to at least one project.</span></p>
           <p v-else-if="failure && !items.length" class="m-err" role="alert"><AppIcon name="alert" :size="15" /><span>Routines could not be loaded: {{ failure }}. Nothing here changed.</span><button type="button" class="btn sm" @click="load()">Try again</button></p>
           <div v-else-if="!items.length" class="rt-empty">
             <span class="glyph big" aria-hidden="true"><AppIcon name="repeat" :size="22" /></span>
@@ -314,8 +355,9 @@ const stateIcon = (state: RoutineState) => STATE_LOOK[state].icon as IconName | 
             <div class="rt-lh" aria-hidden="true"><span /><span>Routine</span><span>Next run</span><span>State</span><span /></div>
             <RoutineRow v-for="item in rows" :key="item.id" :item="item" :selected="chosen?.id === item.id" :me="me" :owner-name="owners.get(item.definition?.owner_principal_id ?? '')" :project-key="projectKeyOf(item)" @select="select(item.id)" />
           </template>
+          <p v-if="failure && items.length" class="m-err small" role="alert"><AppIcon name="alert" :size="13" /><span>Routines couldn’t be refreshed: {{ failure }}. The ones shown stay and may be out of date.</span></p>
           <p v-if="moreFailure" class="m-err small" role="alert"><AppIcon name="alert" :size="13" /><span>More routines couldn’t be read: {{ moreFailure }}. The ones shown stay.</span></p>
-          <button v-if="cursor && items.length" type="button" class="btn sm ghost more" :disabled="loading" @click="load(true)">More routines</button>
+          <button v-if="cursor && items.length" type="button" class="btn sm ghost more" :disabled="loading" @click="load('more')">More routines</button>
           <p v-if="rows.length" class="list-hint" aria-hidden="true"><KeyCap k="j" /><KeyCap k="k" /> move · <KeyCap k="enter" /> open the logbook · <KeyCap k="n" /> run now</p>
         </section>
         <div class="lb-col">
@@ -369,6 +411,7 @@ const stateIcon = (state: RoutineState) => STATE_LOOK[state].icon as IconName | 
 .calm-line { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); background: var(--surface-sunken); }
 .calm-line > svg { flex: none; margin-top: 2px; }
 .calm-line b { color: var(--ink); font-weight: 600; }
+.calm-line.list-line { margin: 6px 0; }
 .grid { display: grid; grid-template-columns: minmax(0, 680px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .grid.one { grid-template-columns: minmax(0, 1fr); }
 .single .grid { grid-template-columns: minmax(0, 1fr); }

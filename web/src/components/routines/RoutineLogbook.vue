@@ -1,11 +1,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
-import { listRoutineRuns, recurrenceHistory, resolveRoutineRoute } from '../../lib/api'
+import { getRoutineRun, listRoutineRuns, recurrenceHistory, resolveRoutineRoute } from '../../lib/api'
 import { getMembers } from '../../lib/access'
 import { can } from '../../lib/authz'
 import { budgetWords, changeWords, effortWord, mayWords, reasonWords, recurrenceZone, routeWords, recurrenceName, routineState, triggerWords, waitReasonWords, when, type HistoryFilter, type Recurrence, type RecurrenceHistoryEntry, type RecurrenceResult } from '../../lib/recurrences'
-import { HISTORY_PAGE, RUNS_PAGE, RUN_LOOK, checkedRuns, runLine, runTitle, scopeOf, usageShort, type RoutineRun } from '../../lib/routineRuns'
+import { HISTORY_PAGE, RUNS_PAGE, RUN_LOOK, checkedDetail, checkedRuns, runLine, runState, runTitle, scopeOf, usageShort, type RoutineRun } from '../../lib/routineRuns'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { statusMeta } from '../../lib/work'
 import { useSession } from '../../stores/session'
@@ -18,12 +18,13 @@ import RunChain from './RunChain.vue'
 // Budget, Runs on and Owner. Agent routines list S21 runs (Runs · Changes), each opening
 // into its chain; ticket-only routines keep today's filters (All · Created · Skipped ·
 // Changes). One lane per routine and filter: a late page for another routine, filter or
-// person never alters the record on screen, and a failed page keeps what is shown.
+// person never alters the record on screen, and a failed page keeps what is shown. A
+// linked run (?run=) older than the loaded pages is read on its own and shown first.
 const props = withDefaults(defineProps<{ item: Recurrence; projectKey: string; mayManage: boolean; busy: boolean; back?: boolean; more?: boolean; openRun?: string }>(), { back: false, more: false, openRun: '' })
 const emit = defineEmits<{ toggle: []; run: []; edit: []; consent: []; back: []; more: [anchor: HTMLElement]; gone: [] }>()
 type LogFilter = 'runs' | HistoryFilter
 const session = useSession(), uid = useId()
-const scope = useIdentityScope(), pages = scope.lane(), olderPages = scope.lane(), routes = scope.lane(), names = scope.lane()
+const scope = useIdentityScope(), pages = scope.lane(), olderPages = scope.lane(), routes = scope.lane(), names = scope.lane(), links = scope.lane()
 const agent = computed(() => !!props.item.definition?.assignment)
 const zone = computed(() => recurrenceZone(props.item.trigger))
 const at = (value: string) => when(value, zone.value)
@@ -33,6 +34,7 @@ const filter = ref<LogFilter>(defaultFilter())
 const runs = ref<RoutineRun[]>([]), entries = ref<RecurrenceHistoryEntry[]>([]), cursor = ref<string | number | null>(null), loadedMore = ref(false)
 const loading = ref(false), failure = ref(''), refreshFailure = ref(''), older = ref<'' | 'busy' | 'failed'>(''), olderReason = ref(''), gone = ref(false)
 const opened = ref(new Set<string>()), defaulted = ref(false)
+const linkedRun = ref<RoutineRun | null>(null), linkNote = ref<'' | 'missing' | 'failed'>(''), linkReason = ref('')
 const shown = computed(() => filter.value === 'runs' ? runs.value.length : entries.value.length)
 // A running run says how long so far; the clock moves once a minute.
 const now = ref(Date.now()), clock = setInterval(() => { now.value = Date.now() }, 60_000)
@@ -67,6 +69,7 @@ function load(mode: 'first' | 'refresh' | 'older' = 'first') {
     else if (mode === 'refresh' && loadedMore.value) { const fresh = new Set(page.items.map(run => run.id)); runs.value = [...page.items, ...runs.value.filter(run => !fresh.has(run.id))] }
     else { runs.value = page.items; cursor.value = page.next_cursor }
     if (!defaulted.value) openDefault()
+    else if (mode === 'refresh' && pinned.value) readLinked(false)
   }), handlers)
   else void lane.run(({ after, signal }) => after(recurrenceHistory(id, chosen, before as number | undefined, signal), page => {
     if (!Array.isArray(page?.items)) throw new Error('The history answer was not a history page.')
@@ -79,19 +82,59 @@ function load(mode: 'first' | 'refresh' | 'older' = 'first') {
 const expandable = (run: RoutineRun) => run.state !== 'skipped'
 // The first open run is the one that needs attention (or the newest); a linked run wins.
 function openDefault() {
+  if (props.openRun) { defaulted.value = true; openLinked(); return }
   if (!runs.value.length) return
   defaulted.value = true
-  const linked = props.openRun ? runs.value.find(run => run.id === props.openRun) : undefined
-  const first = linked ?? runs.value.find(run => ['waiting_for_person', 'failed', 'running', 'held'].includes(run.state)) ?? runs.value[0]
-  if (first && expandable(first)) opened.value = new Set([first.id])
+  openFirst()
+}
+function openFirst() {
+  const first = runs.value.find(run => ['waiting_for_person', 'failed', 'running', 'held'].includes(run.state)) ?? runs.value[0]
+  opened.value = first && expandable(first) ? new Set([first.id]) : new Set()
+}
+// A linked run opens where it is listed. Older than the loaded pages, it is read on its
+// own lane, bound to this routine and this link, and shown first until Show older lists it.
+const pinned = computed(() => linkedRun.value && !runs.value.some(run => run.id === linkedRun.value!.id) ? linkedRun.value : null)
+function openLinked() {
+  links.cancel(); linkedRun.value = null; linkNote.value = ''; linkReason.value = ''
+  const want = props.openRun
+  if (!want) return
+  const listed = runs.value.find(run => run.id === want)
+  if (listed) opened.value = expandable(listed) ? new Set([want]) : new Set()
+  else readLinked(true)
+}
+function readLinked(open: boolean) {
+  const id = props.item.id, want = props.openRun
+  const current = () => props.item.id === id && props.openRun === want
+  if (!want) return
+  linkNote.value = ''
+  void links.run(({ after, signal }) => after(getRoutineRun(id, want, signal), raw => {
+    const found = checkedDetail(raw, want).run
+    if (!current()) return
+    if (found.recurrence_id !== id) throw new Error('the run belongs to another routine')
+    linkedRun.value = { ...found, state: runState(found.state) }
+    if (open) opened.value = expandable(linkedRun.value) ? new Set([want]) : new Set()
+  }), { failed: error => {
+    if (!current()) return
+    if ((error as { status?: number }).status === 404) linkNote.value = 'missing'
+    else { linkNote.value = 'failed'; linkReason.value = error instanceof Error ? error.message : 'the server didn’t answer' }
+    if (open && !opened.value.size) openFirst()
+  } })
 }
 function toggleRun(id: string) { const next = new Set(opened.value); if (next.has(id)) next.delete(id); else next.add(id); opened.value = next }
+function forget() { reset(); links.cancel(); opened.value = new Set(); defaulted.value = false; gone.value = false; linkedRun.value = null; linkNote.value = ''; linkReason.value = '' }
 // Another routine on screen starts from nothing, synchronously, before any read.
-watch(() => props.item.id, () => { reset(); opened.value = new Set(); defaulted.value = false; gone.value = false; filter.value = defaultFilter() }, { flush: 'sync' })
+watch(() => props.item.id, () => { forget(); filter.value = defaultFilter() }, { flush: 'sync' })
 watch(agent, () => { if (!filters.value.some(([key]) => key === filter.value)) filter.value = defaultFilter() }, { flush: 'sync' })
 watch(filter, () => { reset() }, { flush: 'sync' })
 // Another person or workspace: nothing read for the previous one stays.
-watch(() => scope.owner.value, () => { reset(); opened.value = new Set(); defaulted.value = false; gone.value = false; if (scope.owner.value) load('first') }, { flush: 'sync' })
+watch(() => scope.owner.value, () => { forget(); if (scope.owner.value) load('first') }, { flush: 'sync' })
+// The link moved on (back, forward or another link to this routine): that run opens instead.
+watch(() => props.openRun, want => {
+  if (!want) { links.cancel(); linkedRun.value = null; linkNote.value = ''; return }
+  if (!agent.value) return
+  if (filter.value !== 'runs') { defaulted.value = false; filter.value = 'runs'; return }
+  if (defaulted.value) openLinked()
+})
 watch([() => props.item.id, filter], () => load('first'), { immediate: true })
 // The list's poll shows a new revision or run: read the newest page again, keeping older pages.
 watch(() => [props.item.id, `${props.item.revision}/${props.item.occurrence_count}/${props.item.last_run?.id ?? ''}/${props.item.last_run?.state ?? ''}`] as const, (next, previous) => { if (previous && next[0] === previous[0] && next[1] !== previous[1]) load('refresh') })
@@ -166,7 +209,8 @@ const emptyWords = computed(() => {
   return `Nothing ${filter.value === 'created' ? 'created' : filter.value === 'skipped' ? 'skipped' : filter.value === 'changes' ? 'changed' : 'here'} yet.`
 })
 const entryRows = computed(() => entries.value.map(entry => ({ entry, look: entryLook(entry) })))
-const runRows = computed(() => runs.value.map(run => ({ run, look: RUN_LOOK[run.state], title: runTitle(run, now.value), line: runLine(run, at(run.created_at), true), usage: usageShort(run) })))
+const runRow = (run: RoutineRun, linked = false) => ({ run, look: RUN_LOOK[run.state], title: runTitle(run, now.value), line: `${runLine(run, at(run.created_at), true)}${linked ? ' · the linked run, older than the runs below' : ''}`, usage: usageShort(run) })
+const runRows = computed(() => [...(pinned.value ? [runRow(pinned.value, true)] : []), ...runs.value.map(run => runRow(run))])
 const ticketLink = (key: string) => `/p/${encodeURIComponent(props.projectKey)}/${encodeURIComponent(key)}`
 </script>
 
@@ -195,8 +239,8 @@ const ticketLink = (key: string) => `/p/${encodeURIComponent(props.projectKey)}/
       <div class="lb-filter"><p class="eyebrow">Logbook</p><div class="seg" role="radiogroup" aria-label="Show in the logbook"><button v-for="[value, label] in filters" :key="value" type="button" role="radio" :data-lf="value" :aria-checked="filter === value" @click="filter = value">{{ label }}</button></div></div>
       <p v-if="failure" class="m-err" role="alert"><AppIcon name="alert" :size="15" /><span>The logbook couldn’t be read: {{ failure }}. Nothing here changed.</span><button type="button" class="btn sm" @click="load()">Try again</button></p>
       <div v-else-if="loading && !shown" class="runs-loading" role="status" aria-label="Loading the logbook"><span v-for="index in 3" :key="index" class="skeleton" /></div>
-      <p v-else-if="!shown" class="empty">{{ emptyWords }}</p>
-      <ol v-if="filter === 'runs' && runs.length" class="runs">
+      <p v-else-if="!shown && !(filter === 'runs' && pinned)" class="empty">{{ emptyWords }}</p>
+      <ol v-if="filter === 'runs' && runRows.length" class="runs">
         <li v-for="{ run, look, title, line, usage } in runRows" :key="run.id" class="run" :class="[look.tone, { open: opened.has(run.id) }]">
           <button type="button" class="run-btn" :data-run="run.id" :aria-expanded="expandable(run) ? opened.has(run.id) : undefined" :disabled="!expandable(run)" @click="toggleRun(run.id)">
             <span class="r-ic" :class="look.tone" aria-hidden="true"><span v-if="look.icon === 'live'" class="pulse" /><AppIcon v-else :name="look.icon as IconName" :size="13" /></span>
@@ -219,6 +263,10 @@ const ticketLink = (key: string) => `/p/${encodeURIComponent(props.projectKey)}/
         <span v-else>{{ cursor !== null ? `Showing the newest ${shown} · ${filter === 'runs' ? RUNS_PAGE : HISTORY_PAGE} per page` : `Showing all ${shown}` }}</span>
         <button v-if="refreshFailure && older !== 'failed'" type="button" class="btn sm ghost" @click="load('refresh')">Try again</button>
         <button v-else-if="cursor !== null" type="button" class="btn sm ghost" data-older :disabled="older === 'busy'" @click="load('older')"><span class="btn-label"><span>{{ older === 'failed' ? 'Try again' : 'Show older' }}</span><span aria-hidden="true">{{ older === 'failed' ? 'Show older' : 'Try again' }}</span></span></button>
+      </p>
+      <p v-if="filter === 'runs' && linkNote" class="lb-foot" data-link-note :role="linkNote === 'failed' ? 'alert' : 'status'">
+        <span class="warn-line"><AppIcon name="alert" :size="13" /><span>{{ linkNote === 'missing' ? 'The linked run isn’t in this logbook, or isn’t visible to you.' : `The linked run couldn’t be read (${linkReason}).` }}</span></span>
+        <button v-if="linkNote === 'failed'" type="button" class="btn sm ghost" @click="readLinked(true)">Try again</button>
       </p>
       <p v-if="agent" class="lb-note"><AppIcon name="info" :size="13" /><span>Accounts never show here. Usage counts each agent session once; unknown or partial usage is never shown as zero.</span></p>
     </template>
@@ -280,6 +328,7 @@ const ticketLink = (key: string) => `/p/${encodeURIComponent(props.projectKey)}/
 .m-err > svg { flex: none; color: var(--warn-ink); }
 .m-err > span { flex: 1 1 240px; }
 .lb-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; margin-top: 2px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+.lb-foot + .lb-foot { margin-top: 0; padding-top: 6px; border-top: 0; }
 .warn-line { display: inline-flex; align-items: flex-start; gap: 8px; padding: 4px 10px; border-radius: 10px; color: var(--queue-wait-ink); background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); line-height: 1.5; }
 .warn-line > svg { flex: none; margin-top: 2px; }
 .lb-note { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--ink-3); }

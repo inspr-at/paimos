@@ -50,6 +50,26 @@ describe('usage words', () => {
     expect(settledWords(run({ state: 'waiting_for_person', usage: usage({ tokens: { measured: '212000', known: 1, unknown: 0 }, reserved_tokens: '400000' }) }))).toEqual({ tone: 'hold', strong: 'Not yet', text: '212k tokens so far · 400k tokens stay reserved until the run settles' })
     expect(settledWords(run({ usage: usage({ tokens: { measured: null, known: 0, unknown: 0 }, gaps: ['usage_visibility_withheld'] }) })).tone).toBe('off')
   })
+  it('unknown usage and unknown reservations are said as unknown; only a run that never started, with a zero balance, used nothing', () => {
+    // S21 without a balance row: reservations and paid are null, the lineage is empty.
+    const unknown = usage({ tokens: { measured: null, known: 0, unknown: 1 }, paid_microusd: null, estimated_api_usd: null, reserved_tokens: null, reserved_microusd: null, reserved_recovery_ms: null, partial: true, gaps: ['execution_usage_unknown', 'measurement_incomplete', 'paid_usage_unknown'] })
+    for (const state of ['running', 'held', 'waiting_for_person', 'failed'] as const) {
+      const settled = settledWords(run({ state, usage: unknown }))
+      expect(settled.text, state).not.toContain('Nothing used')
+      expect(settled.text, state).toContain('what stays reserved is unknown')
+      expect(usageShort(run({ state, usage: unknown })), state).toEqual({ text: 'Usage unknown', warn: true })
+    }
+    expect(settledWords(run({ state: 'held', usage: unknown }))).toEqual({ tone: 'hold', strong: 'Not yet', text: 'usage unknown so far · what stays reserved is unknown' })
+    // A balance of zero proves nothing is held; a run that never started then used nothing (the approved design's line).
+    const idle = usage({ ...unknown, reserved_tokens: '0', reserved_microusd: '0', reserved_recovery_ms: '0' })
+    expect(settledWords(run({ state: 'held', usage: idle }))).toEqual({ tone: 'off', strong: '', text: 'Nothing used, nothing held' })
+    expect(usageShort(run({ state: 'held', usage: idle }))).toEqual({ text: '', warn: false })
+    // A running or failed run may have used something before any session reported: still unknown.
+    for (const state of ['running', 'failed'] as const) {
+      expect(settledWords(run({ state, usage: idle })).text, state).not.toContain('Nothing used')
+      expect(usageShort(run({ state, usage: idle })), state).toEqual({ text: 'Usage unknown', warn: true })
+    }
+  })
 })
 
 describe('the run chain', () => {

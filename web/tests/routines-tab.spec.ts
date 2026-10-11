@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
-import { mockEffectivePermissions } from './authz-fixtures'
+import { mockEffectivePermissions, mockGuestPermissions } from './authz-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { Recurrence } from '../src/lib/recurrences'
@@ -11,7 +11,9 @@ import type { RoutineRun, RunDetail, RunUsage } from '../src/lib/routineRuns'
 // Done tint or a created ticket as finished, lets a late page for another routine or
 // person alter the logbook on screen, keeps the previous person's routines after a
 // switch, offers the wrong logbook filters for the kind of routine, or moves its
-// controls while filters, rows and runs change.
+// controls while filters, rows and runs change. Fix round 2: a project-only reader
+// sees nothing, a link to an older run opens another one, and the poll stops with a
+// remaining cursor or drops later pages and the routine on screen.
 const MIRA = '22222222-2222-4222-8222-222222222222'
 const id = (n: number) => `59200000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
 const [DEPS, LINKS, NOTES, TRIAGE, CLEANUP, TESTS] = [1, 2, 3, 4, 5, 6].map(id)
@@ -117,6 +119,11 @@ const list = (page: Page) => page.getByRole('region', { name: 'Routine list', ex
 const logbook = (page: Page) => page.locator('[data-logbook]')
 const row = (page: Page, rid: string) => page.locator(`[data-routine="${rid}"]`)
 const runButton = (page: Page, n: number) => page.locator(`[data-run="${run(n)}"]`)
+// The page's pollers run now, as when the browser comes back online.
+const poll = (page: Page) => page.evaluate(() => { dispatchEvent(new Event('online')) })
+const painted = (page: Page) => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
+// Back or forward to another address of this page, as vue-router sees it.
+const historyTo = (page: Page, url: string) => page.evaluate(to => { history.pushState(null, '', to); dispatchEvent(new PopStateEvent('popstate', { state: null })) }, url)
 // The page scrolls inside main: evidence starts at its top.
 async function shot(page: Page, info: TestInfo, name: string) { await page.evaluate(() => document.querySelector('main')?.scrollTo(0, 0)); await page.screenshot({ path: info.outputPath(`${name}.png`) }) }
 
@@ -244,6 +251,94 @@ test('a person switch clears the open logbook, filters and the previous person�
   await expect(list(page).locator('[data-routine]')).toHaveCount(4)
   await expect(row(page, NOTES)).toHaveCount(0)
   await expect(page.getByText('Release notes check')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('a person who reads only projects sees their routines; without any read access the list says so', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { errors } = await setup(page)
+  // Nothing in the workspace; read access only on the projects the person is bound to.
+  await page.route('**/api/me/permissions**', route => route.fulfill({ json: mockGuestPermissions(new URL(route.request().url()).searchParams.get('project_id') || undefined, ['p-pharos', 'p-aeon']) }))
+  await page.goto('/agents/routines')
+  await expect(list(page).locator('[data-routine]')).toHaveCount(5)
+  await expect(logbook(page).getByRole('heading', { level: 2 })).toHaveText('Monday triage')
+  await expect(logbook(page).getByRole('button', { name: 'Run now', exact: true })).toBeDisabled()
+  // Access to the last project goes: the server refuses, and nothing reads as "no routines".
+  await page.route(url => url.pathname === '/api/recurrences', route => route.fulfill({ status: 403, json: { error: 'forbidden' } }))
+  await poll(page)
+  await expect(list(page)).toContainText('Reading them needs read access to at least one project.')
+  await expect(list(page).locator('[data-routine]')).toHaveCount(0)
+  await expect(list(page)).not.toContainText('No routines yet')
+  await expect(page.locator('[data-sf="failed"] b')).toHaveText('·')
+  await expect(logbook(page)).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('a link to an older run opens that run, keeps it through Show older, and follows the link', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  const { errors } = await setup(page)
+  // Run #10 is older than the first page: only its own read or Show older finds it.
+  const old = entry(DEPS, 10, 'done', '2026-08-31T06:00:00Z')
+  await page.route(url => url.pathname === `/api/recurrences/${DEPS}/runs/${run(10)}`, route => route.fulfill({ json: detail(old) }))
+  await page.route(url => url.pathname === `/api/recurrences/${DEPS}/runs` && url.searchParams.get('before') === 'older-1', route => route.fulfill({ json: { items: [old], next_cursor: null } }))
+  await page.goto(`/agents/routines?routine=${DEPS}&run=${run(10)}`)
+  await expect(runButton(page, 10)).toHaveAttribute('aria-expanded', 'true')
+  await expect(runButton(page, 10)).toContainText('the linked run, older than the runs below')
+  await expect(logbook(page).locator('[data-run]').first()).toHaveAttribute('data-run', run(10))
+  await expect(runButton(page, 15)).toHaveAttribute('aria-expanded', 'false')
+  // Show older lists it in its place, once, and it stays the open run.
+  await logbook(page).locator('[data-older]').click()
+  await expect(logbook(page).locator('[data-run]')).toHaveCount(6)
+  await expect(logbook(page).locator('[data-run]').last()).toHaveAttribute('data-run', run(10))
+  await expect(runButton(page, 10)).toHaveAttribute('aria-expanded', 'true')
+  await expect(runButton(page, 10)).not.toContainText('the linked run')
+  await expect(runButton(page, 15)).toHaveAttribute('aria-expanded', 'false')
+  // Back or forward to another run of this routine opens that run instead.
+  await historyTo(page, `/agents/routines?routine=${DEPS}&run=${run(14)}`)
+  await expect(runButton(page, 14)).toHaveAttribute('aria-expanded', 'true')
+  await expect(runButton(page, 10)).toHaveAttribute('aria-expanded', 'false')
+  // A run this logbook doesn't have is said, not silently replaced.
+  await historyTo(page, `/agents/routines?routine=${DEPS}&run=${run(99)}`)
+  await expect(logbook(page).locator('[data-link-note]')).toContainText('The linked run isn’t in this logbook, or isn’t visible to you.')
+  await expect(logbook(page).getByRole('heading', { level: 2 })).toHaveText('Weekly dependency update')
+  expect(errors).toEqual([])
+})
+
+test('the poll refreshes with a remaining cursor, rereads every loaded page and keeps the routine on screen', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { errors } = await setup(page)
+  // After `changed`, Weekly dependency update failed and Test review (page two only) was renamed.
+  let changed = false
+  const now = () => world().map(item => !changed ? item
+    : item.id === DEPS ? { ...item, last_run: { id: run(16), state: 'failed' as const, reason: 'Execution failed and has not completed successfully.', created_at: '2026-10-11T03:00:00Z' } }
+    : item.id === TESTS ? { ...item, revision: 5, template: { ...item.template, name: 'Test review, weekly' } } : item)
+  await page.route(url => url.pathname === '/api/recurrences' || url.pathname === `/api/recurrences/${TESTS}`, route => {
+    const url = new URL(route.request().url()), items = now(), find = (rid: string) => items.find(item => item.id === rid)!
+    if (url.pathname !== '/api/recurrences') return route.fulfill({ json: find(TESTS) })
+    return route.fulfill({ json: url.searchParams.get('after') === 'p2' ? { items: [find(TESTS), find(DEPS)], next_cursor: null } : { items: items.filter(item => item.id !== TESTS), next_cursor: 'p2' } })
+  })
+  // Test review is on page two, which isn't loaded: it is read on its own.
+  await page.goto(`/agents/routines?routine=${TESTS}`)
+  await expect(list(page).locator('[data-routine]')).toHaveCount(5)
+  await expect(logbook(page).getByRole('heading', { level: 2 })).toHaveText('Test review')
+  await expect(row(page, DEPS)).toContainText('Waiting for a person')
+  changed = true
+  await poll(page)
+  // A remaining cursor no longer stops the poll, and the routine on screen is read again.
+  await expect(row(page, DEPS)).toContainText('Failed')
+  await expect(logbook(page).getByRole('heading', { level: 2 })).toHaveText('Test review, weekly')
+  // With both pages loaded, a refresh reads both again: page two and its selection stay.
+  await list(page).getByRole('button', { name: 'More routines' }).click()
+  await expect(list(page).locator('[data-routine]')).toHaveCount(6)
+  await expect(row(page, TESTS)).toHaveAttribute('aria-current', 'true')
+  const second = page.waitForResponse(response => { const url = new URL(response.url()); return url.pathname === '/api/recurrences' && url.searchParams.get('after') === 'p2' })
+  await poll(page)
+  await second
+  await painted(page)
+  await expect(list(page).locator('[data-routine]')).toHaveCount(6)
+  await expect(row(page, TESTS)).toHaveAttribute('aria-current', 'true')
+  await expect(logbook(page).getByRole('heading', { level: 2 })).toHaveText('Test review, weekly')
+  await expect(page).toHaveURL(new RegExp(`routine=${TESTS}`))
   expect(errors).toEqual([])
 })
 

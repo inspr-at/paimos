@@ -68,12 +68,16 @@ const withheld = (usage: RunUsage) => usage.gaps.includes('usage_visibility_with
 const nothingRan = (usage: RunUsage) => usage.gaps.includes('execution_usage_unknown') && usage.tokens.measured === null
 export const tokensPartial = (usage: RunUsage) => usage.truncated || usage.tokens.unknown > 0 || usage.gaps.some(gap => TOKEN_GAPS.has(gap))
 const positive = (value: string | null) => !!value && /^\d+$/.test(value) && /[1-9]/.test(value)
+const zero = (value: string | null) => value !== null && /^0+$/.test(value)
 const dollars = (value: number) => `$${value.toFixed(2)}`
 const tokensOf = (value: string | null) => { const count = compactCount(value); return count === null ? null : `${count} tokens` }
+// Missing usage is unknown, never zero. Only a run that never started, with no agent session
+// in its lineage and a balance that reports nothing held and nothing paid, used nothing.
+const idle = (state: RunState, u: RunUsage) => (state === 'held' || state === 'waiting_for_person') && nothingRan(u) && zero(u.reserved_tokens) && zero(u.reserved_microusd) && zero(u.reserved_recovery_ms) && !positive(u.paid_microusd)
 /** The usage next to a run: unknown or partial usage is never shown as zero or as complete. */
 export function usageShort(run: Pick<RoutineRun, 'state' | 'usage'>): { text: string; warn: boolean } {
   const state = runState(run.state), u = run.usage, tokens = tokensOf(u.tokens.measured), soFar = open(state) ? ' so far' : ''
-  if (state === 'created' || state === 'skipped' || (state === 'held' && nothingRan(u))) return { text: '', warn: false }
+  if (state === 'created' || state === 'skipped' || idle(state, u)) return { text: '', warn: false }
   if (tokens === null) return { text: 'Usage unknown', warn: true }
   if (tokensPartial(u)) return { text: `At least ${tokens}${soFar}`, warn: true }
   return { text: `${tokens}${soFar}`, warn: false }
@@ -82,11 +86,14 @@ export function usageShort(run: Pick<RoutineRun, 'state' | 'usage'>): { text: st
 export function settledWords(run: Pick<RoutineRun, 'state' | 'usage'>): { tone: StepTone; strong: string; text: string } {
   const state = runState(run.state), u = run.usage, tokens = tokensOf(u.tokens.measured), parts: string[] = []
   if (withheld(u)) return { tone: 'off', strong: '', text: 'Usage isn’t shown to you; it needs harness and outcome read rights in its project' }
-  const reserved = [positive(u.reserved_tokens) ? `${tokensOf(u.reserved_tokens)} stay reserved until the run settles` : '', positive(u.reserved_microusd) ? `${dollars(Number(u.reserved_microusd) / 1_000_000)} stays reserved until the run settles` : ''].filter(Boolean)
-  if (nothingRan(u) && !reserved.length) return { tone: 'off', strong: '', text: 'Nothing used, nothing held' }
+  if (idle(state, u)) return { tone: 'off', strong: '', text: 'Nothing used, nothing held' }
+  const reserved = [
+    positive(u.reserved_tokens) ? `${tokensOf(u.reserved_tokens)} stay reserved until the run settles` : '', positive(u.reserved_microusd) ? `${dollars(Number(u.reserved_microusd) / 1_000_000)} stays reserved until the run settles` : '',
+    u.reserved_tokens === null || u.reserved_microusd === null ? 'what stays reserved is unknown' : '',
+  ].filter(Boolean)
   const estimate = u.estimated_api_usd !== null && Number.isFinite(Number(u.estimated_api_usd)) ? `about ${dollars(Number(u.estimated_api_usd))} at API list prices, not charged` : ''
   if (open(state)) {
-    parts.push(tokens === null ? 'nothing measured so far' : tokensPartial(u) ? `at least ${tokens} so far` : `${tokens} so far`, ...reserved)
+    parts.push(tokens === null ? 'usage unknown so far' : tokensPartial(u) ? `at least ${tokens} so far` : `${tokens} so far`, ...reserved)
     return { tone: 'hold', strong: 'Not yet', text: parts.join(' · ') }
   }
   const paid = u.paid_microusd !== null && /^\d+$/.test(u.paid_microusd) ? `${dollars(Number(u.paid_microusd) / 1_000_000)} paid` : 'no paid charge recorded'

@@ -2,7 +2,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { listRoutines } from '../../lib/api'
-import { can } from '../../lib/authz'
 import { recurrenceZone, when, type Recurrence } from '../../lib/recurrences'
 import { routinesLine } from '../../lib/routineRuns'
 import { useIdentityScope } from '../../lib/useIdentityScope'
@@ -12,9 +11,10 @@ import AppIcon from '../AppIcon.vue'
 
 // The Agents page's Routines line (AEON-1192): one line, only while a routine waits
 // for a person or failed, leading to Agents › Routines. One bounded page is read; a
-// remaining cursor reads as "at least". A failed read shows nothing, never zero.
+// remaining cursor reads as "at least". A failed read shows nothing, never zero. Every
+// person asks; the server answers from their workspace or project access.
 const session = useSession()
-const identity = useIdentityScope(() => !!session.identity && session.identity.principal.kind !== 'agent' && can('nodes.read')), reads = identity.lane()
+const identity = useIdentityScope(() => !!session.identity && session.identity.principal.kind !== 'agent'), reads = identity.lane()
 const items = ref<Recurrence[]>([]), more = ref(false)
 function load() {
   void reads.run(({ after, signal }) => after(listRoutines({}, signal), page => {

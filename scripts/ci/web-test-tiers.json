@@ -994,7 +994,11 @@
     ,
     "browser:tests/routines-tab.spec.ts:a late page for another routine cannot alter the logbook on screen"
     ,
+    "browser:tests/routines-tab.spec.ts:a link to an older run opens that run, keeps it through Show older, and follows the link"
+    ,
     "browser:tests/routines-tab.spec.ts:a person switch clears the open logbook, filters and the previous person’s routines"
+    ,
+    "browser:tests/routines-tab.spec.ts:a person who reads only projects sees their routines; without any read access the list says so"
     ,
     "browser:tests/routines-tab.spec.ts:at tablet width the list and one logbook take turns, and the logbook keeps its controls"
     ,
@@ -1005,6 +1009,8 @@
     "browser:tests/routines-tab.spec.ts:phone › the list, then one logbook with a way back, in light"
     ,
     "browser:tests/routines-tab.spec.ts:the Agents page offers Routines in More, and one Routines line only while something waits or failed"
+    ,
+    "browser:tests/routines-tab.spec.ts:the poll refreshes with a remaining cursor, rereads every loaded page and keeps the routine on screen"
     ,
     "browser:tests/service-tier.spec.ts:1440: compact Default tier control keeps its box through confirmation and Undo"
     ,
@@ -1611,6 +1617,8 @@
     "vitest:tests/routines-tab.unit.test.ts:usage words > never shows unknown or partial usage as zero or complete"
     ,
     "vitest:tests/routines-tab.unit.test.ts:usage words > settles in measured facts: paid, the API list price and what stays reserved"
+    ,
+    "vitest:tests/routines-tab.unit.test.ts:usage words > unknown usage and unknown reservations are said as unknown; only a run that never started, with a zero balance, used nothing"
     ,
     "vitest:tests/row-store.unit.test.ts:RowStore: revisions only move forward > an authoritative GET clears withheld provenance even at the same revision and while editing"
     ,
@@ -11494,7 +11502,11 @@
     ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"a late page for another routine cannot alter the logbook on screen","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"a link to an older run opens that run, keeps it through Show older, and follows the link","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"a person switch clears the open logbook, filters and the previous person’s routines","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"a person who reads only projects sees their routines; without any read access the list says so","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"at tablet width the list and one logbook take turns, and the logbook keeps its controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11505,6 +11517,8 @@
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"phone › the list, then one logbook with a way back, in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"the Agents page offers Routines in More, and one Routines line only while something waits or failed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-tab.spec.ts","name":"the poll refreshes with a remaining cursor, rereads every loaded page and keeps the routine on screen","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/row-actions.spec.ts","name":"PDF from the list opens the quote on its page and prints it once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -17497,6 +17511,8 @@
     {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"usage words > never shows unknown or partial usage as zero or complete","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"usage words > settles in measured facts: paid, the API list price and what stays reserved","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-tab.unit.test.ts","name":"usage words > unknown usage and unknown reservations are said as unknown; only a run that never started, with a zero balance, used nothing","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/row-actions.unit.test.ts","name":"customer row actions > offers open, a new quote, the number and archive","tier":"GATED-FULL"}
     ,
