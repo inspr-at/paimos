@@ -2349,9 +2349,43 @@
       {
         "command": "remote-test.sh / web unit tests",
         "result": "not affected: this round changes an existing browser spec and evidence only; no Go, application or unit-test code changed"
+      },
+      {
+        "command": "Validate triage_table required fields and sum(failed_cases)",
+        "result": "passed: 91 rows, all seven required fields present, 183 cases; real-regression assertions and AEON-1238 files preserved"
       }
     ],
-    "post_fix_validation": "Pending committed-HEAD remote-spec and ci-static-locked attempts.",
-    "ownership": "Same branch/worktree; AEON-1238 files and real-regression assertions untouched. No new/renamed tests, source files, manifests, production code, API, migrations, versions or release metadata. No origin push, deploy, review gate, model CLI or delegation."
+    "post_fix_validation": [
+      {
+        "runner": "remote-spec.sh",
+        "spec": "tests/role-picker-layout.spec.ts",
+        "head": "136a1ec04",
+        "exit_code": 3,
+        "reason": "host level protocol refusal; no tests executed"
+      },
+      {
+        "runner": "ci-static-locked.sh",
+        "head": "136a1ec04",
+        "exit_code": 3,
+        "reason": "remote static paused by host level protocol; not green"
+      },
+      {
+        "runner": "remote-spec.sh",
+        "spec": "tests/role-picker-layout.spec.ts",
+        "head": "136a1ec04",
+        "exit_code": 3,
+        "reason": "retry after waiting: host level protocol refusal; no tests executed"
+      },
+      {
+        "runner": "ci-static-locked.sh",
+        "head": "136a1ec04",
+        "exit_code": 3,
+        "reason": "retry after waiting: remote static paused by host level protocol; not green"
+      }
+    ],
+    "ownership": "Same branch/worktree; AEON-1238 files and real-regression assertions untouched. No new/renamed tests, source files, manifests, production code, API, migrations, versions or release metadata. No origin push, deploy, review gate, model CLI or delegation.",
+    "code_commit": "136a1ec04 AEON-1239: check Parent phone scrolling on the shared sheet body",
+    "validation_complete": false,
+    "handoff": "LEAD runs remote-spec.sh for tests/role-picker-layout.spec.ts and ci-static-locked.sh when the guarded host is available, or hosted CI. Baseline ca18b021a browser proof is also unexecuted. Review explicitly treats browser/static execution as a hosted-CI residual; no pass claim and no guard bypass."
   }
 }
