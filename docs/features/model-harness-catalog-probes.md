@@ -15,8 +15,12 @@ generations and account binding revisions. Reports recheck the exact live agent
 key and `models.report` permission under tenant, tree, pairing, catalog and
 account fences. Revoked, archived, draining, rebound or unapproved accounts
 cannot publish. Same-request identical replay appends no second event; changed
-evidence or a superseded request returns 409. Account health, grants, immutable
-pins and routing orders are never changed by these catalog probes.
+evidence or a superseded request returns 409. Account health, grants, existing
+immutable pins and routing orders are unchanged. Explicit native levels record
+at most 200 advertised tuples per publication. The existing auto-add setting
+allows new inactive profiles; otherwise these remain proposals. Identifier-only
+models acquire no guessed default pin. The report response exposes `added`,
+`proposed` and `profiles_truncated`; an identical replay adds nothing.
 
 Each fact retains its exact native field path and an account-specific harness
 source. Route-specific evidence outranks provider/aggregator facts only for that

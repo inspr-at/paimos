@@ -226,6 +226,7 @@ func (m *Module) reportHarnessProbe(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fail(400, err.Error()))
 		return
 	}
+	added, proposed, profilesTruncated := 0, 0, false
 	err := m.harnessProbeTx(r, p, func(tx pgx.Tx, current tenant.Principal) error {
 		cfg, err := settings(ctx, tx)
 		if err != nil {
@@ -311,16 +312,55 @@ func (m *Module) reportHarnessProbe(w http.ResponseWriter, r *http.Request) {
 		if err = RecordCatalogFacts(ctx, tx, p.TenantID, facts); err != nil {
 			return err
 		}
+		// Only explicitly reported levels become advertised tuples. ID-only
+		// models acquire no default pin, and discovery never grants activation.
+		remaining := maxRefreshObservations
+		for _, model := range in.Models {
+			var levels []string
+			if field, ok := model.Facts["native_levels"]; ok {
+				if err = json.Unmarshal(field.Value, &levels); err != nil {
+					return err
+				}
+			}
+			for _, level := range levels {
+				if remaining == 0 {
+					profilesTruncated = true
+					continue
+				}
+				remaining--
+				o := Observation{Harness: harness, Model: model.Model, Effort: level, Status: "advertised"}
+				if err = observe(ctx, tx, p.TenantID, o, source); err != nil {
+					return err
+				}
+				var exists bool
+				if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE harness=$1 AND model=$2 AND effort=$3)`, harness, model.Model, level).Scan(&exists); err != nil {
+					return err
+				}
+				if exists {
+					continue
+				}
+				pin, mapped := observedPin(o)
+				if !cfg.AutoAddProfiles || !mapped || KnownInvalid(o.Model) {
+					proposed++
+					continue
+				}
+				pin.Source = "harness"
+				if _, err = insertObservedProfile(ctx, tx, p.TenantID, pin); err != nil {
+					return err
+				}
+				added++
+			}
+		}
 		if _, err = tx.Exec(ctx, `UPDATE model_harness_probes SET state=$2,completed_at=$3,model_count=$4,report_digest=$5,lease_until=NULL WHERE account_id=$1`, account, in.State, now, len(in.Models), hash); err != nil {
 			return err
 		}
-		return writeEvent(ctx, tx, current, "model.harness_probed", nil, map[string]any{"account_id": account, "harness": harness, "request_id": request, "state": in.State, "models": len(in.Models)})
+		return writeEvent(ctx, tx, current, "model.harness_probed", nil, map[string]any{"account_id": account, "harness": harness, "request_id": request, "state": in.State, "models": len(in.Models), "added": added, "proposed": proposed, "profiles_truncated": profilesTruncated})
 	})
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	httpapi.WriteJSON(w, 200, map[string]bool{"recorded": true})
+	httpapi.WriteJSON(w, 200, map[string]any{"recorded": true, "added": added, "proposed": proposed, "profiles_truncated": profilesTruncated})
 }
 
 func harnessProbeStatus(ctx context.Context, tx pgx.Tx) ([]map[string]any, bool, error) {

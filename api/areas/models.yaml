@@ -125,7 +125,7 @@ paths:
       - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: reportModelHarnessProbe
-      description: 'Agent with models.report publishes a claimed content-free list under tenant, tree, pairing, catalog and account fences. Rechecks the exact live key, ongoing approval, account owner, binding revision, daemon generation and request. At most 500 models and 1 MiB; exact native field paths are retained as route-specific harness facts. Missing fields stay unknown. Failed and partial lists retain last good evidence; they never prove disappearance. Identical replay is idempotent; different evidence or a replaced request returns 409. No model activation, account-health or allowance changes.'
+      description: 'Agent with models.report publishes a claimed content-free list under tenant, tree, pairing, catalog and account fences. Rechecks the exact live key, ongoing approval, account owner, binding revision, daemon generation and request. At most 500 models and 1 MiB; exact native field paths are retained as route-specific harness facts. Missing fields stay unknown. Failed and partial lists retain last good evidence; they never prove disappearance. Explicit native levels record at most 200 advertised tuples and, when auto_add_profiles permits, new inactive profiles. Identical replay is idempotent and adds nothing; different evidence or a replaced request returns 409. No model activation, account-health or allowance changes.'
       requestBody:
         required: true
         content:
@@ -142,7 +142,7 @@ paths:
                 state: {type: string, enum: [fresh, limited, unsupported, stale, timeout]}
                 models: {type: array, maxItems: 500, items: {$ref: '#/components/schemas/ModelHarnessCatalogModel'}}
       responses:
-        '200': {description: 'Probe outcome recorded', content: {application/json: {schema: {type: object, required: [recorded], properties: {recorded: {type: boolean}}}}}}
+        '200': {description: 'Probe outcome recorded', content: {application/json: {schema: {type: object, required: [recorded, added, proposed, profiles_truncated], properties: {recorded: {type: boolean}, added: {type: integer, minimum: 0, maximum: 200, description: 'New inactive profiles inserted by this publication; zero on replay'}, proposed: {type: integer, minimum: 0, maximum: 200}, profiles_truncated: {type: boolean, description: 'The advertised tuple bound omitted profile proposals; catalog facts remain independently bounded'}}}}}}
         '400': {description: 'Invalid or oversized public facts'}
         '403': {description: 'Current agent reporting authority required'}
         '409': {description: 'Binding, generation, request or evidence changed'}

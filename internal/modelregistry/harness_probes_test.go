@@ -102,6 +102,13 @@ func TestHarnessProbesScheduleCheckNowAndFencePublication(t *testing.T) {
 		t.Fatal("replay appended events or probe changed routes")
 	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {
+		var discovered, active int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER(WHERE enabled) FROM model_profiles WHERE harness='codex' AND model=$1 AND display_overrides->>'origin'='harness'`, model.Model).Scan(&discovered, &active); err != nil {
+			return err
+		}
+		if discovered != 3 || active != 0 {
+			t.Fatal("native discoveries were lost or activated", discovered, active)
+		}
 		rows, err := tx.Query(t.Context(), `SELECT provider,model_id,route,fact,value,source,source_kind,field_path,fetched_at FROM model_catalog_facts WHERE model_id=$1`, model.Model)
 		if err != nil {
 			return err
