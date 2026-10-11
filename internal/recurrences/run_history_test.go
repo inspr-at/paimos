@@ -158,7 +158,7 @@ func TestRoutineRunHistoryPrivacyUsageAndPagination(t *testing.T) {
 		read := func() RunHistory {
 			t.Helper()
 			raw := f.call(f.p, "GET", base, nil, 200)
-			if strings.Contains(string(raw), "PRIVATE ACCOUNT") || strings.Contains(string(raw), account) || strings.Contains(string(raw), "history-lease") {
+			if strings.Contains(string(raw), "PRIVATE ACCOUNT") || strings.Contains(string(raw), "PRIVATE PROCESS") || strings.Contains(string(raw), account) || strings.Contains(string(raw), "history-lease") {
 				t.Fatal("private account/process data leaked")
 			}
 			var out RunHistory
@@ -183,6 +183,13 @@ func TestRoutineRunHistoryPrivacyUsageAndPagination(t *testing.T) {
 		})
 		if out := read(); out.Run.State != RunDone || out.Run.Reason != "" {
 			t.Fatalf("confirmed completion not projected: %+v", out.Run)
+		}
+		f.tx(func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE routine_attempts SET process_receipt='{"exit_confirmed":true,"exit_code":1}' WHERE id=$1`, attempt)
+			return err
+		})
+		if out := read(); out.Run.State != RunFailed {
+			t.Fatal("nonzero process exit became successful completion")
 		}
 		f.tx(func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `UPDATE routine_runs SET state='failed' WHERE id=$1`, run.ID)
