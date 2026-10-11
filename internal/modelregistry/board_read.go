@@ -63,8 +63,9 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx, routing ...bool) (boardCat
 	return boardCatalogFrom(profiles, stamp), nil
 }
 
-// boardCatalogFrom groups already bounded pins into lines. Introduction
-// stamps only date cards; routing may pass none.
+// boardCatalogFrom groups profiles into lines. A nil stamp map (a preview's
+// shared, bounded catalog) leaves introduction dates unknown; routing never
+// reads them, only the board's cards do.
 func boardCatalogFrom(profiles []Profile, stamp map[string]time.Time) boardCatalog {
 	out := boardCatalog{profiles: map[string][]Profile{}, introduced: map[string]time.Time{}, lines: []modelprefs.BoardLine{}}
 	for _, p := range profiles {
@@ -84,9 +85,11 @@ func boardCatalogFrom(profiles []Profile, stamp map[string]time.Time) boardCatal
 			l.Tools = false
 		}
 		for _, p := range ps {
-			at := stamp[p.ID]
-			if out.introduced[id].IsZero() || at.Before(out.introduced[id]) {
-				out.introduced[id] = at
+			if stamp != nil {
+				at := stamp[p.ID]
+				if out.introduced[id].IsZero() || at.Before(out.introduced[id]) {
+					out.introduced[id] = at
+				}
 			}
 			if p.Effort == "xhigh" && (p.Tier == "strong" || p.Tier == "frontier") {
 				l.Review = true

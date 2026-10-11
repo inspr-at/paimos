@@ -27,7 +27,7 @@
     "path": ".github/workflows/ci.yml"
   },
   "jobs": {
-    "total_count": 39,
+    "total_count": 40,
     "jobs": [
       {
         "name": "tier-plan",
@@ -118,6 +118,19 @@
         "steps": [
           {
             "name": "Timing budgets, alone",
+            "status": "completed",
+            "conclusion": "success"
+          }
+        ]
+      },
+      {
+        "name": "web-catalogue",
+        "run_attempt": 1,
+        "status": "completed",
+        "conclusion": "success",
+        "steps": [
+          {
+            "name": "Require every web case to be classified",
             "status": "completed",
             "conclusion": "success"
           }

@@ -15,6 +15,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// Risk: the retired ladder writer still decodes an out-of-range priority and
+// prepares or changes the catalog. PUT is 410 before any body read (Models v2).
 func TestPriorityOverflowDoesNotPrepareCatalog(t *testing.T) {
 	for _, additive := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cold", true: "additive"}[additive], func(t *testing.T) {
@@ -32,14 +34,7 @@ func TestPriorityOverflowDoesNotPrepareCatalog(t *testing.T) {
 			before := catalogSetupState(t, p)
 			body := fmt.Sprintf(`[{"role":"build","priority":2147483648,"profile_id":%q,"state":"available"}]`, id)
 			status, raw := call(t, &p, http.MethodPut, "/api/models/routes", body)
-			var refusal struct {
-				Error string `json:"error"`
-			}
-			if err := json.Unmarshal(raw, &refusal); err != nil {
-				t.Fatalf("decode refusal: %v: %s", err, raw)
-			}
-			// The retired ladder writer refuses before decoding any priority.
-			if status != http.StatusGone || !strings.Contains(refusal.Error, "Role ladders moved") {
+			if status != http.StatusGone || !strings.HasPrefix(errorText(raw), "Role ladders moved to Settings > Models") {
 				t.Errorf("wrong retired-writer refusal: status=%d body=%s", status, raw)
 			}
 			if after := catalogSetupState(t, p); after != before {
@@ -49,23 +44,47 @@ func TestPriorityOverflowDoesNotPrepareCatalog(t *testing.T) {
 	}
 }
 
-// Risk: the retired ladder writer still stores a route at any priority,
-// including the storage maximum, instead of refusing it unchanged.
+// Risk: a retained ladder row at the largest stored priority overflows or
+// loses its place when Models v2 migrates the ladder into the Default's order.
 func TestMaximumRoutePriorityCanBeStored(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "priority-maximum", "person", "Owner", []string{"admin"})
 	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
-	if len(profiles) == 0 {
+	last, first := profileBySlug(profiles, "claude-opus-xhigh"), profileBySlug(profiles, "codex-6-1-sol-high")
+	if last.ID == "" || first.ID == "" {
 		t.Fatal("missing catalog fixture")
 	}
-	before := catalogSetupState(t, p)
-	body := fmt.Sprintf(`[{"role":"build","priority":%d,"profile_id":%q,"state":"available"}]`, math.MaxInt32, profiles[0].ID)
-	status, raw := call(t, &p, http.MethodPut, "/api/models/routes", body)
-	if status != http.StatusGone || !strings.Contains(string(raw), "Role ladders moved") {
-		t.Fatalf("retired writer accepted a route: %d %s", status, raw)
-	}
-	if catalogSetupState(t, p) != before {
-		t.Fatal("retired writer stored a route")
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "build", Priority: math.MaxInt32, ProfileID: last.ID, State: "available"}); err != nil {
+			return err
+		}
+		if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "build", Priority: 1, ProfileID: first.ID, State: "available"}); err != nil {
+			return err
+		}
+		var priority int
+		if err := tx.QueryRow(t.Context(), `SELECT priority FROM model_role_routes WHERE role='build' AND profile_id=$1`, last.ID).Scan(&priority); err != nil {
+			return err
+		}
+		if priority != math.MaxInt32 {
+			t.Fatalf("maximum priority not stored: %d", priority)
+		}
+		if _, err := tx.Exec(t.Context(), `SELECT aeon_migrate_models_v2($1)`, p.TenantID); err != nil {
+			return err
+		}
+		var rank, want []string
+		if err := tx.QueryRow(t.Context(), `SELECT o.rank FROM model_pref_orders o JOIN model_pref_profiles w ON w.id=o.profile_id
+ WHERE w.scope='workspace' AND o.column_key='other' AND o.situation='first'`).Scan(&rank); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT array_agg(aeon_models_line(family,harness,model) ORDER BY id=$2::uuid) FROM model_profiles WHERE id IN ($1::uuid,$2::uuid)`, first.ID, last.ID).Scan(&want); err != nil {
+			return err
+		}
+		if !slices.Equal(rank, want) {
+			t.Fatalf("maximum priority lost its place: rank %v, want %v", rank, want)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

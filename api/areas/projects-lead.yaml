@@ -66,12 +66,14 @@ paths:
   /projects/{projectId}/lead:
     get:
       summary: Read the project's explicitly owned lead
-      description: Requires harness.read. Returns none until a person explicitly requests a lead; existing coordinator registrations are never automatically adopted. Project members see only generation, state and redacted reason codes.
+      description: 'Requires harness.read. Returns none until a person explicitly requests a lead; existing coordinator registrations are never automatically adopted. Includes read-only action availability for the current caller, bound to this project, revision, generation and session snapshot. Agent callers receive person_required for every person action, irrespective of a worker lease. Availability grants no mutation or dispatch authority; final writes still recheck current grants, ownership, revision, generation and confirmed exit. No private owner, dispatch state or credentials are returned.'
       parameters:
         - $ref: '#/components/parameters/projectId'
       responses:
         '200':
-          description: Lead lifecycle snapshot
+          description: 'Lead lifecycle snapshot and current caller action availability'
+          headers:
+            Aeon-Contract: {$ref: '#/components/headers/ProjectLeadContract'}
           content:
             application/json:
               schema: {$ref: '#/components/schemas/ProjectLead'}
@@ -289,6 +291,8 @@ paths:
         '403': {description: 'Current worker lease, live harness.worker permission, or live owner authority rejected'}
         '409': {description: 'Stale identity, useful current turn, unavailable scheduling evidence or unavailable handover delivery'}
 components:
+  headers:
+    ProjectLeadContract: {description: 'Project lead read response contract; version 1.1 describes the existing automatic launch policy and adds read-only current-caller action availability to the lead lifecycle snapshot.', schema: {type: string, enum: ['project-lead/1.1']}}
   schemas:
     LeadRuntimeDemand:
       type: object
@@ -435,5 +439,27 @@ components:
         generation: {type: integer, minimum: 0}
         session_id: {type: [string, 'null'], format: uuid}
         state: {type: string, enum: [none, starting, working, waiting_for_room, paused, cannot_start]}
-        reason: {type: string, description: Redacted machine-readable reason; contains no account or credential details}
-        process_active: {type: boolean, description: True until the bound harness generation has confirmed stopped; heartbeat loss and archive do not prove exit}
+        reason: {type: string, description: 'Redacted machine-readable reason; contains no account or credential details'}
+        process_active: {type: boolean, description: 'True until the bound harness generation has confirmed stopped; heartbeat loss and archive do not prove exit'}
+        automatic_launch_enabled: {type: boolean, default: false, description: 'Effective person-owned project execution policy, independent of admission availability. Requires accepted exact-artifact coordinator/OPS qualification and matching current owner policy and trusted runtime facts. Defaults off; admission injection never enables it. This projection launches no process. Older servers may omit this field; clients must treat omission as unavailable.'}
+        actions:
+          $ref: '#/components/schemas/ProjectLeadActions'
+    ProjectLeadAction:
+      type: object
+      readOnly: true
+      required: [available, blocked_reason]
+      properties:
+        available: {type: boolean, description: 'True when the current caller satisfies this action prerequisite in the displayed snapshot. Start and resume also require effective automatic launch policy; live admission remains checked at execution.'}
+        blocked_reason: {type: string, maxLength: 64, description: 'Short redacted machine-readable reason when unavailable; empty when available. Contains no private identity, credential or dispatch details.'}
+    ProjectLeadActions:
+      type: object
+      readOnly: true
+      description: 'Returned on GET lead only, for the current caller and the surrounding revision, generation and session. Discard on caller changes and refresh after lead changes; omission on older servers or mutation responses means unavailable until a fresh GET. This view neither transfers ownership nor authorizes the agent lease path or separate managed session Interrupt/Stop controls.'
+      required: [start, resume, pause, adopt, cancel_adoption, remove]
+      properties:
+        start: {$ref: '#/components/schemas/ProjectLeadAction'}
+        resume: {$ref: '#/components/schemas/ProjectLeadAction'}
+        pause: {$ref: '#/components/schemas/ProjectLeadAction', description: 'Cooperative pause/checkpoint handover, including cancellation of an unbound start intent.'}
+        adopt: {$ref: '#/components/schemas/ProjectLeadAction', description: 'Explicit selection of an eligible already running same-person root coordinator. A bound lead requires ordinary succession.'}
+        cancel_adoption: {$ref: '#/components/schemas/ProjectLeadAction'}
+        remove: {$ref: '#/components/schemas/ProjectLeadAction', description: 'A person with harness.control may remove a never-started intent, following the existing removal rule even when another person owns it.'}

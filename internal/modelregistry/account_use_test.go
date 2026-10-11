@@ -3,7 +3,6 @@ package modelregistry
 
 import (
 	"encoding/json"
-	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -179,18 +178,12 @@ func TestEscalationSkipsAccountlessHarnessForRunnableSuccessor(t *testing.T) {
 			return err
 		}
 		account, successor := accountlessSuccessorFixture(t, tx, p, now)
-		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes WHERE role='build-hard'`); err != nil {
+		// The kind's Stuck order (a two-step build-hard ladder before Models v2).
+		var opus string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh' AND version=$1`, CatalogVersion).Scan(&opus); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,profile_id,priority) SELECT $1,'build-hard',id,CASE slug WHEN 'claude-opus-xhigh' THEN 1 ELSE 2 END FROM model_profiles WHERE slug IN ('claude-opus-xhigh','codex-astra-xhigh')`, p.TenantID); err != nil {
-			return err
-		}
-		var first string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&first); err != nil {
-			return err
-		}
-		// Stuck work walks its own kind's Stuck order, else that row's order.
-		if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, "", "backend", "stuck", first, successor); err != nil {
+		if err := dbtest.ModelsOrder(ctx, tx, p.TenantID, "backend", "stuck", "wait", opus, successor); err != nil {
 			return err
 		}
 		out, err := ResolveEscalation(ctx, tx, p, WorkQuery{Role: "build", Area: "backend"}, nil, now)
@@ -198,25 +191,8 @@ func TestEscalationSkipsAccountlessHarnessForRunnableSuccessor(t *testing.T) {
 			return err
 		}
 		assertRunnableSuccessor(t, out, account, successor, "no qualified account with available capacity")
-		// The walk covers exactly the order's two lines; a line may have
-		// several harness routes.
-		walked, ordered := map[string]bool{}, map[string]bool{}
-		for _, id := range []string{first, successor} {
-			var line string
-			if err := tx.QueryRow(ctx, `SELECT aeon_models_line(family,harness,model) FROM model_profiles WHERE id=$1`, id).Scan(&line); err != nil {
-				return err
-			}
-			ordered[line] = true
-		}
-		for _, candidate := range out.Ladder {
-			var line string
-			if err := tx.QueryRow(ctx, `SELECT aeon_models_line(family,harness,model) FROM model_profiles WHERE id=$1`, candidate.ProfileID).Scan(&line); err != nil {
-				return err
-			}
-			walked[line] = true
-		}
-		if !reflect.DeepEqual(walked, ordered) || len(ordered) != 2 {
-			t.Fatalf("fixture did not exercise the two-line order: %+v", out.Ladder)
+		if out.Trace.Situation != "stuck" || out.Trace.CardIndex != 2 {
+			t.Fatalf("escalation did not continue to the order's second step: %+v", out.Trace)
 		}
 		return nil
 	})

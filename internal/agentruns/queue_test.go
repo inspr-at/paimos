@@ -610,7 +610,8 @@ func TestTicketQueueAutomaticSecurityRoutingAndProjectVisibility(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET title='Check tenant permissions' WHERE id=$1`, security); err != nil {
 			return err
 		}
-		return dbtest.SetModelOrder(t.Context(), tx, f.person.TenantID, "", "other", "stuck", f.profile)
+		// The Stuck order the build-hard ladder migrates into.
+		return dbtest.ModelsOrder(t.Context(), tx, f.person.TenantID, "other", "stuck", "row", f.profile)
 	})
 	e := f.addQueue(t, security, nil)
 	if !e.Queued.SecurityReview || e.Queued.ExpectedAgentID != nil {

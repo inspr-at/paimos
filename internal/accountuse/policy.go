@@ -95,6 +95,31 @@ func validRules(v RuleValues) bool {
 	return (v.NewAccounts == "allow" || v.NewAccounts == "ask") && (v.NewContexts == "allow" || v.NewContexts == "ask") && (v.NewProjects == "default" || v.NewProjects == "holding") && (v.NewModels == "allow" || v.NewModels == "shipped_only" || v.NewModels == "deny")
 }
 
+// RulePatch is a partial rule write (AEON-1173): an absent rule keeps its
+// stored value. Settings › Accounts sends only the three rules it edits, so its
+// saves never carry new_models; Models' Auto-update edits that one (AEON-1148).
+type RulePatch struct {
+	NewAccounts *string `json:"new_accounts"`
+	NewContexts *string `json:"new_contexts"`
+	NewProjects *string `json:"new_projects"`
+	NewModels   *string `json:"new_models"`
+}
+
+func (r RulePatch) empty() bool {
+	return r.NewAccounts == nil && r.NewContexts == nil && r.NewProjects == nil && r.NewModels == nil
+}
+func (r RulePatch) apply(v RuleValues) RuleValues {
+	for _, f := range []struct {
+		from *string
+		to   *string
+	}{{r.NewAccounts, &v.NewAccounts}, {r.NewContexts, &v.NewContexts}, {r.NewProjects, &v.NewProjects}, {r.NewModels, &v.NewModels}} {
+		if f.from != nil {
+			*f.to = *f.from
+		}
+	}
+	return v
+}
+
 // WriteRules is the sole model-default writer, including the compatibility
 // Auto-update endpoint. The one-shot setting is armed only for its mirror
 // update, then cleared even when the existing settings already match.
@@ -102,6 +127,20 @@ func WriteRules(ctx context.Context, tx pgx.Tx, p tenant.Principal, expected int
 	if !validRules(values) {
 		return Rules{}, fail(400, "invalid account-use rules")
 	}
+	return writeRules(ctx, tx, p, expected, func(RuleValues) RuleValues { return values })
+}
+
+// WriteRulePatch saves the rules a patch names over the values stored under the
+// matrix fence; the revision guard is the same as for a full write.
+func WriteRulePatch(ctx context.Context, tx pgx.Tx, p tenant.Principal, expected int64, patch RulePatch) (Rules, error) {
+	// Every named value is checked before any lock: over valid values, the patch is valid only if each of its own is.
+	if patch.empty() || !validRules(patch.apply(RuleValues{NewAccounts: "ask", NewContexts: "ask", NewProjects: "default", NewModels: "allow"})) {
+		return Rules{}, fail(400, "invalid account-use rules")
+	}
+	return writeRules(ctx, tx, p, expected, patch.apply)
+}
+
+func writeRules(ctx context.Context, tx pgx.Tx, p tenant.Principal, expected int64, next func(RuleValues) RuleValues) (Rules, error) {
 	if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
 		return Rules{}, err
 	}
@@ -112,6 +151,7 @@ func WriteRules(ctx context.Context, tx pgx.Tx, p tenant.Principal, expected int
 	if err != nil {
 		return Rules{}, err
 	}
+	values := next(before.RuleValues)
 	if _, err = tx.Exec(ctx, `UPDATE account_use_rules SET new_accounts=$1,new_contexts=$2,new_projects=$3,new_models=$4,revision=revision+1`, values.NewAccounts, values.NewContexts, values.NewProjects, values.NewModels); err != nil {
 		return Rules{}, err
 	}

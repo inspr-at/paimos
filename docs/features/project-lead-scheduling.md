@@ -38,3 +38,43 @@ or failed adapter reports `admission_unavailable` without exposing error text.
 The wait projection is bounded to five minutes for a future qualified enabled
 launch, then reports `runtime_pickup_timeout`. This only changes visible state:
 it does not launch, retry, cancel, free slots or change Engine W2 dispatch.
+
+GET `/api/projects/{projectId}/lead` also returns read-only `actions` for the
+current caller (AEON-1220, `Aeon-Contract: project-lead/1.1`). Each of `start`,
+`resume`, `pause`, `adopt`, `cancel_adoption` and `remove` has `available` and a
+short `blocked_reason`; the reason is empty when available. The existing
+`automatic_launch_enabled` policy is now described in the authored contract.
+This backend projection is consumed by the Agents panel integration in
+AEON-1212; it does not itself change the panel's controls.
+
+The caller's active canonical person and live project grants determine the
+actions. Another person with identical grants receives `lead_owner_required`
+for owner actions, including when the intent has no session. Linked identities
+of the canonical owner count as that person. All person actions are unavailable
+to agents with `person_required`, even with a valid current worker lease.
+`harness_control_required` and `run_create_required` explain missing grants;
+pause needs only the former permission. Removal retains its existing rule:
+any person with harness.control can remove an intent that never started.
+
+Start and Resume also require the effective automatic-launch policy and
+executor-confirmed predecessor exit. `automatic_launch_disabled` and
+`process_exit_unconfirmed` explain those blocks; lost heartbeat and archive do
+not prove exit. Resume additionally needs a paused lead (`lead_not_paused`).
+Pause checkpoints and hands over cooperatively, or cancels an unbound start;
+`lead_required`, `already_paused` and `adoption_pending` explain its blocks.
+An adoption has to select an eligible same-person reporting root coordinator
+(`no_eligible_session`), requires an active project (`project_archived`), and
+cannot replace a bound lead (`ordinary_succession_required`) or resume a paused
+intent (`start_required`). Cancel adoption requires an unclaimed selection
+(`unclaimed_adoption_required`). Removal rejects session, generation or retained
+generation history (`lead_not_removable`). No ownership-transfer action or
+separate managed session Interrupt/Stop permission is implied.
+
+The action view belongs to the surrounding project, revision, generation and
+session snapshot. Clients discard it when the signed-in caller changes and
+refresh after any lead change; old-server omission or omission on mutation
+responses means unavailable until a fresh GET. Reads change no lead, process,
+control or audit history and expose no private owner, dispatch binding or proof.
+The projection is advisory: every final write still checks current authority,
+revision/generation and exact process/lease identity under its existing fences,
+and live admission remains necessary before execution.

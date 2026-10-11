@@ -61,16 +61,13 @@ func TestEditorExactRowAndBodyBounds(t *testing.T) {
 		t.Fatal(err)
 	}
 	displayRoutesFixture(t, p, 50)
-	var ids []string
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		rows, err := tx.Query(t.Context(), `SELECT profile_id::text FROM model_role_routes WHERE role='review-gate' ORDER BY priority`)
-		if err != nil {
-			return err
-		}
-		ids, err = pgx.CollectRows(rows, pgx.RowTo[string])
-		return err
-	}); err != nil {
-		t.Fatal(err)
+	full := h.ladder(t, p, "review-gate")
+	if full.Truncated || full.EditToken != nil || full.CanEdit || len(full.Routes) != 50 {
+		t.Fatal("complete bound misreported or editable", full.Truncated, len(full.Routes))
+	}
+	ids := make([]string, len(full.Routes))
+	for i, row := range full.Routes {
+		ids[i] = row.ProfileID
 	}
 	all := []Route{}
 	for _, role := range []string{"build", "build-hard", "scout", "mechanical", "review-gate"} {

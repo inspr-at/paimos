@@ -67,13 +67,15 @@ func seedReviewRoute(t *testing.T, f *fixture) string {
 	}
 	var profile, account string
 	f.tx(t, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes WHERE role='review-gate'`); err != nil {
+		// Its own line: Models walks a line's routes in registry order, so a
+		// catalog Opus route would otherwise run before this fixture's pin.
+		// Reviews need the route's highest native level at xhigh or above; an
+		// unknown model has no catalog level, so the fixture declares it.
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,'shadow-reviewer','test','claude','anthropic','claude-shadow-review-1','xhigh','frontier',4) RETURNING id::text`, f.person.TenantID).Scan(&profile); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,'shadow-reviewer','test','claude','anthropic','shadow-review-model','xhigh','frontier',4) RETURNING id::text`, f.person.TenantID).Scan(&profile); err != nil {
-			return err
-		}
-		if err := dbtest.SetModelOrder(t.Context(), tx, f.person.TenantID, "", "other", "review", profile); err != nil {
+		// A saved Review order (a saved review ladder before Models v2).
+		if err := dbtest.ModelsOrder(t.Context(), tx, f.person.TenantID, "other", "review", "wait", profile); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner)

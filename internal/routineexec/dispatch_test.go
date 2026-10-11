@@ -221,11 +221,9 @@ func setupDispatchOn(t *testing.T, f *fixture) *dispatchFixture {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,generation,state,dispatch_key_id) VALUES($1,$2,$3,$4,1,'working',$5)`, f.owner.TenantID, f.project, f.owner.ID, session, key); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, f.owner.TenantID, f.profile); err != nil {
-			return err
-		}
-		// Keep the legacy route as history and seed the live Models choice.
-		if err := dbtest.SetModelOrder(t.Context(), tx, f.owner.TenantID, "", "other", "first", f.profile); err != nil {
+		// The Default's Models order runs the budget profile (a build ladder
+		// before Models v2 migration 1333).
+		if err := dbtest.ModelsOrder(t.Context(), tx, f.owner.TenantID, "other", "first", "wait", f.profile); err != nil {
 			return err
 		}
 		return tx.QueryRow(t.Context(), `SELECT agent_run_id::text FROM routine_runs WHERE id=$1`, f.run).Scan(&agentRun)

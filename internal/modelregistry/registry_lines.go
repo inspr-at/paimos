@@ -67,21 +67,8 @@ func registryRevision(ctx context.Context, tx pgx.Tx, routingOnly ...bool) (stri
 		profilesWhere = " WHERE p.enabled"
 		retirementsWhere = " WHERE EXISTS(SELECT 1 FROM model_profiles p WHERE p.id=r.profile_id AND p.tenant_id=r.tenant_id AND p.enabled)"
 	}
-	// Limit every contributing set before building the digest.
-	var large bool
-	if err := tx.QueryRow(ctx, `SELECT
- (SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles p`+profilesWhere+` LIMIT 513) p) OR
- (SELECT count(*)>512 FROM (SELECT 1 FROM model_profile_retirements r`+retirementsWhere+` LIMIT 513) r) OR
- (SELECT count(*)>4096 FROM (SELECT 1 FROM model_pref_profiles LIMIT 4097) p) OR
- (SELECT count(*)>1536 FROM (SELECT 1 FROM model_rule_revisions LIMIT 1537) r) OR
- (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_orders LIMIT 1537) o) OR
- (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_situation_orders LIMIT 1537) o) OR
- (SELECT count(*)>4096 FROM (SELECT 1 FROM model_row_constraints LIMIT 4097) r) OR
- (SELECT count(*)>512 FROM (SELECT 1 FROM model_pauses LIMIT 513) p)`).Scan(&large); err != nil {
+	if err := registryBounds(ctx, tx, len(routingOnly) > 0 && routingOnly[0]); err != nil {
 		return "", err
-	}
-	if large {
-		return "", modelprefs.ErrBoardBounds
 	}
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT jsonb_build_array(
@@ -97,6 +84,32 @@ func registryRevision(ctx context.Context, tx pgx.Tx, routingOnly ...bool) (stri
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+// registryBounds limits every set a registry digest reads before building it.
+func registryBounds(ctx context.Context, tx pgx.Tx, routingOnly ...bool) error {
+	profilesWhere, retirementsWhere := "", ""
+	if len(routingOnly) > 0 && routingOnly[0] {
+		profilesWhere = " WHERE p.enabled"
+		retirementsWhere = " WHERE EXISTS(SELECT 1 FROM model_profiles p WHERE p.id=r.profile_id AND p.tenant_id=r.tenant_id AND p.enabled)"
+	}
+	var large bool
+	if err := tx.QueryRow(ctx, `SELECT
+ (SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles p`+profilesWhere+` LIMIT 513) p) OR
+ (SELECT count(*)>512 FROM (SELECT 1 FROM model_profile_retirements r`+retirementsWhere+` LIMIT 513) r) OR
+ (SELECT count(*)>4096 FROM (SELECT 1 FROM model_pref_profiles LIMIT 4097) p) OR
+ (SELECT count(*)>1536 FROM (SELECT 1 FROM model_rule_revisions LIMIT 1537) r) OR
+ (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_orders LIMIT 1537) o) OR
+ (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_situation_orders LIMIT 1537) o) OR
+ (SELECT count(*)>4096 FROM (SELECT 1 FROM model_row_constraints LIMIT 4097) r) OR
+ (SELECT count(*)>512 FROM (SELECT 1 FROM model_pauses LIMIT 513) p) OR
+ (SELECT count(*)>4096 FROM (SELECT 1 FROM model_rules LIMIT 4097) r)`).Scan(&large); err != nil {
+		return err
+	}
+	if large {
+		return modelprefs.ErrBoardBounds
+	}
+	return nil
 }
 
 func validateLineWrite(in lineWrite, h, oldModel string) error {
@@ -261,9 +274,21 @@ func boardLineID(p Profile) string { f, l, _ := ProfileLine(p); return f + ":" +
 // Caller holds the tenant and registry fences. All transfers precede events.
 func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile, moveLines ...bool) error {
 	moveLine := len(moveLines) == 0 || moveLines[0]
+	if err := transferRetiredLadderReferences(ctx, tx, before, after); err != nil {
+		return err
+	}
+	// A pause belongs to its harness route and never switches harness or family.
+	// A paused route without a matching successor rejects instead of dropping it.
 	for _, old := range before {
 		candidates := sameRouteProfiles(after, old)
 		if len(candidates) == 0 {
+			var paused bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_pauses WHERE harness=$1 AND model=$2)`, old.Harness, old.Model).Scan(&paused); err != nil {
+				return err
+			}
+			if paused {
+				return fail(409, "successor has no matching harness route")
+			}
 			continue
 		}
 		if err := copyModelPause(ctx, tx, old, nearestProfile(candidates, old.Effort, old.EffortLevel)); err != nil {

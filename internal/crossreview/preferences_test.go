@@ -4,15 +4,13 @@ package crossreview
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
-	"testing"
-
-	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
+	"strings"
+	"testing"
 )
 
 func TestReviewStoresLoosenedResidencyLockTrace(t *testing.T) {
@@ -61,18 +59,22 @@ func TestReviewStoresLoosenedResidencyLockTrace(t *testing.T) {
 	})
 }
 
+// Risk: a saved Review pick outside the qualified set dispatches, or a
+// qualified pick is ignored. Models v2 keeps one Review order per row (the
+// matrix's size cells are gone): its first qualified step runs, an
+// unqualified pick falls through, and security never uses Anthropic.
 func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 	for _, tc := range []struct {
 		name, c, role, pin    string
 		wantComplex, security bool
 	}{
-		{name: "normal", c: "M", role: "build"}, {name: "large", c: "L", role: "build", wantComplex: true},
-		{name: "latest qualified", c: "L", role: "build", pin: "latest", wantComplex: true},
-		{name: "role fallback", role: "build-hard", wantComplex: true}, {name: "explicit small", c: "S", role: "build-hard"},
+		{name: "normal", c: "M", role: "build"},
+		{name: "qualified pick", c: "L", role: "build", pin: "complex", wantComplex: true},
+		{name: "role and size keep the order", c: "S", role: "build-hard", pin: "complex", wantComplex: true},
 		{name: "codex pin rejected", c: "L", role: "build", pin: "codex"},
 		{name: "author family rejected", c: "L", role: "build", pin: "author"},
-		{name: "retired choice rejected", c: "L", role: "build", pin: "off-ladder"},
-		{name: "decoded security", c: "L", role: "build", security: true},
+		{name: "unqualified pick rejected", c: "L", role: "build", pin: "unqualified"},
+		{name: "decoded security", c: "L", role: "build", pin: "complex", security: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)
@@ -81,60 +83,34 @@ func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 				if err := modelprefs.SeedKinds(t.Context(), tx, f.person.TenantID); err != nil {
 					return err
 				}
+				// Lines of their own, so no catalog route stands in for them.
 				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,registered_effort_level)
-    VALUES($1,$2,'complex-review','1','claude','anthropic','qualified-review-model','xhigh','strong',4)`, f.person.TenantID, complexProfile); err != nil {
+    VALUES($1,$2,'complex-review','1','claude','anthropic','claude-complex-review-1','xhigh','strong',4)`, f.person.TenantID, complexProfile); err != nil {
 					return err
-				}
-				if tc.pin != "off-ladder" {
-					if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) SELECT $1,'review-gate',coalesce(max(priority),0)+1,$2 FROM model_role_routes WHERE role='review-gate'`, f.person.TenantID, complexProfile); err != nil {
-						return err
-					}
 				}
 				pin := complexProfile
-				if tc.pin == "codex" || tc.pin == "author" {
-					if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE family='openai'`).Scan(&pin); err != nil {
+				switch tc.pin {
+				case "codex", "author":
+					if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE family='openai' AND version='test-version'`).Scan(&pin); err != nil {
+						return err
+					}
+				case "unqualified":
+					pin = testID()
+					if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,registered_effort_level)
+    VALUES($1,$2,'unqualified-review','1','claude','anthropic','claude-unqualified-review-1','high','strong',3)`, f.person.TenantID, pin); err != nil {
 						return err
 					}
 				}
-				scope, err := modelprefs.SaveScope(t.Context(), tx, f.person, modelprefs.Scope{Level: "person", PersonID: &f.person.ID})
-				if err != nil {
-					return err
-				}
-				var kind string
-				if err := tx.QueryRow(t.Context(), `SELECT id::text FROM work_kinds WHERE slug='review'`).Scan(&kind); err != nil {
-					return err
-				}
-				complexCell := modelprefs.Cell{Mode: "pinned", ProfileID: pin}
-				if tc.pin == "latest" {
-					complexCell = modelprefs.Cell{Mode: "latest", Family: "anthropic", Line: "qualified-review-model", Effort: "xhigh"}
-				}
-				if err := modelprefs.PutRow(t.Context(), tx, f.person, scope, kind, modelprefs.Row{Cells: map[string]modelprefs.Cell{
-					"normal": {Mode: "pinned", ProfileID: f.profile}, "complex": complexCell}}); err != nil {
-					return err
-				}
-				// Models owns Review orders; complexity buckets remain historical
-				// evidence. Keep each qualification case's saved choice explicit.
-				order := []string{f.profile}
-				if tc.wantComplex {
-					order = []string{complexProfile, f.profile}
-				} else if tc.pin == "codex" || tc.pin == "author" {
-					order = []string{pin, f.profile}
-				} else if tc.pin == "off-ladder" {
-					// Model membership in the retired ladder is no longer a
-					// qualification. Retirement still excludes the choice.
-					if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($1,$2,'Unqualified fixture choice',$3)`, f.person.TenantID, complexProfile, f.person.ID); err != nil {
+				if tc.pin != "" {
+					if err := reviewOrderFirst(t, tx, pin); err != nil {
 						return err
 					}
-					order = []string{complexProfile, f.profile}
-				}
-				if err := dbtest.SetModelOrder(t.Context(), tx, f.person.TenantID, f.person.ID, "backend", "review", order...); err != nil {
-					return err
 				}
 				area := "backend"
 				if tc.security {
 					area = " security "
 				}
-				_, err = tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||jsonb_build_object('area',$2::text,'complexity',$3::text,'route_role',$4::text) WHERE id=$1`, f.ticket, area, tc.c, tc.role)
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||jsonb_build_object('area',$2::text,'complexity',$3::text,'route_role',$4::text) WHERE id=$1`, f.ticket, area, tc.c, tc.role)
 				return err
 			})
 			in := f.input()
@@ -145,7 +121,7 @@ func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 			f.call(t, f.person, "POST", "/api/nodes/"+f.ticket+"/reviews", in, 201, &review)
 			if tc.security {
 				if review.RunID != nil || review.Status != "blocked" {
-					t.Fatal("security used generic ladder", review)
+					t.Fatal("security used an Anthropic reviewer", review)
 				}
 				return
 			}

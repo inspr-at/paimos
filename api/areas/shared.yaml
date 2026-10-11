@@ -47,7 +47,7 @@ components:
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
       properties:
         routine_budget: {allOf: [{$ref: '#/components/schemas/RoutineProviderBudget'}], description: 'Optional server-issued remaining actor grant. It grants no launch authority. Missing qualification or provider-call enforcement refuses budget-bearing routine work before any vendor process.'}
-        routine_launch_id: {type: string, format: uuid, description: 'Optional immutable S11 launch intent. Its qualified binding lives in trace.routine_launch; missing or unsupported binding refuses automatic execution. Existing manual runs omit this property.'}
+        routine_launch_id: {type: string, format: uuid, description: 'Optional immutable S11 launch intent. Its qualified binding lives in trace.routine_launch; optional lineage binds coordinator review/fix actors to the prior run, exact repository/base/head and review-policy digest. Missing or unsupported binding refuses automatic execution. Existing manual runs omit this property.'}
         trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
         queue_node_id: {type: [string, 'null'], format: uuid}
         queue_target_agent_id: {type: [string, 'null'], format: uuid}
@@ -2153,7 +2153,7 @@ components:
     TicketBenefitFields:
       type: object
       additionalProperties: true
-      description: Tenant-default ticket fields. Drafts may be incomplete; entering a built-in completed state (done, accepted, delivered) from outside that set validates pills (2–4 whitespace-separated words) and nonblank benefits. One or two plain-language sentences and translation quality are editorial requirements, not inferred by software. roadmap_public publishes the ticket on the public roadmap. Only a person can turn that on or clear it. The server writes source, by and at. Agents cannot publish.
+      description: 'Tenant-default ticket fields. Drafts may be incomplete; every create, update and status transition rejects non-empty pills outside 2–4 whitespace-separated words. Entering a completed category (including tenant-defined states, done, accepted and delivered) from outside that set also requires both pills and nonblank benefits. One or two plain-language sentences and translation quality are editorial requirements, not inferred by software. roadmap_public publishes the ticket on the public roadmap. Only a person can turn that on or clear it. The server writes source, by and at. Agents cannot publish.'
       properties:
         pill_en: {type: string, description: "English pill, 2–4 words"}
         pill_de: {type: string, description: "German pill, 2–4 words"}
