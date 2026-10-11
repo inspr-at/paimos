@@ -172,7 +172,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.setViewportSize({ width, height: width === 1600 ? 1000 : 844 })
     await page.goto('/agents')
     await expect(page.locator('.row[data-state="awaiting"] .agent-state-label')).toHaveText('Awaiting heartbeat')
-    await expect(page.locator('.group-row').filter({ hasText: 'Needs attention' })).toBeVisible()
+    // AEON-1210: what needs a look stays in its project's group, never folded away with Ended.
+    await expect(page.locator('.sessions .grp:not(.ended) .row[data-state="awaiting"]').first()).toBeVisible()
     await expect(page.getByRole('group', { name: 'Show sessions by state' })).toContainText('working')
     // Closing a session retains the page keyboard cursor and returns to the list.
     await page.locator('[data-state="working"] .agent-link').click()

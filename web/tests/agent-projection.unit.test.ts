@@ -1,0 +1,179 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// AEON-1210 G2/G4 (audit AEON-1218): the shared Agents projection. Risk: a question attaches to a
+// lead by principal or to the wrong generation, workers bind by project instead of their real
+// parent, a failed or cut-short read looks complete, a read answered after a sign-in change is
+// shown to the next person, or named events flood the server with one reread each.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createPinia, setActivePinia } from 'pinia'
+import { addWake, asksBySession, emptyWake, eventNode, queueByProject, subtree } from '../src/lib/agentProjection'
+import type { Question } from '../src/lib/decisionDeskApi'
+
+type Handler = (...args: never[]) => unknown
+const mocks = vi.hoisted(() => ({
+  queue: (() => ({ items: [] })) as Handler, questions: (() => ({ items: [], has_more: false })) as Handler, sessions: (() => ({ items: [], next_cursor: null })) as Handler,
+  calls: [] as string[], wake: null as null | ((event?: string, node?: string | null) => void),
+  leads: { views: {} as Record<string, { caughtUp: boolean; decisions: unknown[] }>, loadMany: vi.fn(async () => {}), loadLead: vi.fn(async () => {}), load: vi.fn(async () => {}) },
+  agents: { loaded: false, views: [] as unknown[], admitSessions: (rows: unknown[]) => rows, loadAll: vi.fn(async () => {}) },
+  work: { snapshots: {} as Record<string, unknown>, load: vi.fn(async () => {}) },
+  identity: null as unknown as { identity: { tenant: { id: string }; principal: { id: string } } | null },
+}))
+vi.mock('../src/lib/api', () => {
+  class APIError extends Error { constructor(readonly status: number, message: string) { super(message) } }
+  return { APIError, api: async () => new Response('{}') }
+})
+vi.mock('../src/lib/workQueue', () => ({ queueRequest: async () => { mocks.calls.push('queue'); return mocks.queue() } }))
+vi.mock('../src/lib/decisionDeskApi', () => ({ MAX_QUESTION_PAGES: 10, readQuestions: async (query: { offset: number }) => { mocks.calls.push(`questions@${query.offset}`); return mocks.questions(query as never) } }))
+vi.mock('../src/lib/agentRows', () => ({ listAllSessions: async (params: { project: string }) => { mocks.calls.push(`sessions:${params.project}`); return mocks.sessions() } }))
+vi.mock('../src/lib/agents', () => ({ onProjectionWake: (listener: (event?: string, node?: string | null) => void) => { mocks.wake = listener; return () => { mocks.wake = null } } }))
+vi.mock('../src/lib/usePolledData', () => ({ usePoller: () => ({ start() {}, stop() {} }) }))
+vi.mock('../src/lib/authz', () => ({ onAccessRevalidate: () => () => {} }))
+vi.mock('../src/stores/projectLeads', () => ({ useProjectLeads: () => mocks.leads }))
+vi.mock('../src/stores/agents', () => ({ useAgents: () => mocks.agents }))
+vi.mock('../src/stores/workQueue', () => ({ useWorkQueue: () => mocks.work }))
+vi.mock('../src/stores/projects', () => ({ useProjects: () => ({ projects: [{ id: 'p1', archived: false }, { id: 'p2', archived: false }, { id: 'old', archived: true }] }) }))
+vi.mock('../src/stores/session', async () => {
+  const { reactive } = await import('vue')
+  mocks.identity = reactive({ identity: { tenant: { id: 't' }, principal: { id: 'markus' } } }) as typeof mocks.identity
+  return { useSession: () => mocks.identity }
+})
+import { useAgentProjection, WAKE_BATCH_MS } from '../src/stores/agentProjection'
+
+const S1 = '11111111-1111-4111-8111-111111111111', S2 = '22222222-2222-4222-8222-222222222222', W1 = '33333333-3333-4333-8333-333333333333'
+const q = (id: string, fields: { session?: string; inputSession?: string; principal?: string; project?: string; state?: 'open' | 'answered' } = {}) => ({
+  id, project_id: fields.project ?? 'p1', state: fields.state ?? 'open', revision: 1,
+  input: { request_id: id, question: id, options: [], meanwhile: 'carries_on', ...(fields.inputSession ? { session_id: fields.inputSession } : {}) },
+  askers: [{ id: `a-${id}`, principal_id: fields.principal ?? 'agent', reply_root_id: 'r', comment_node_id: 'c', input: { request_id: id, question: id, options: [], meanwhile: 'carries_on' }, ...(fields.session ? { session_id: fields.session } : {}) }],
+}) as unknown as Question
+const flush = () => new Promise(resolve => setTimeout(resolve, 0))
+const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
+
+describe('bindings', () => {
+  it('bind a question to the exact session that asked, never by principal; one without a session binds to nobody', () => {
+    const asks = asksBySession([q('by-session', { session: S1 }), q('by-input', { inputSession: S2 }), q('principal-only', { principal: 'lead-agent' }), q('answered', { session: S1, state: 'answered' })])
+    expect(asks.get(S1)?.map(x => x.id)).toEqual(['by-session'])
+    expect(asks.get(S2)?.map(x => x.id)).toEqual(['by-input'])
+    expect([...asks.keys()]).toEqual([S1, S2])
+  })
+  it('bind workers by their real parent, at any depth, and survive a cycle', () => {
+    const tree = [{ id: 'w1', parent: 'lead' }, { id: 'w2', parent: 'w1' }, { id: 'other', parent: 'another-lead' }, { id: 'x', parent: 'y' }, { id: 'y', parent: 'x' }, { id: 'lead', parent: null }]
+    expect([...subtree('lead', tree)].sort()).toEqual(['w1', 'w2'])
+    expect([...subtree('x', tree)].sort()).toEqual(['y'])
+    expect(queueByProject([{ project_id: 'p1' }, { project_id: 'p1' }, { project_id: null }, { project_id: 'p2' }])).toEqual(new Map([['p1', 2], ['p2', 1]]))
+  })
+  it('map each named event to what it wakes; no event rereads everything', () => {
+    const w = emptyWake()
+    addWake(w, 'lead.start_requested', 'p1'); addWake(w, 'node.lead_decision_recorded', 'p2'); addWake(w, 'queue.moved', 'ticket'); addWake(w, 'question.asked', 'question'); addWake(w, 'harness.reparented', 'p1'); addWake(w, 'harness.heartbeat', 'p1')
+    expect({ leads: [...w.leads], decisions: [...w.decisions], queue: w.queue, questions: w.questions, trees: [...w.trees], all: w.all }).toEqual({ leads: ['p1', 'p2'], decisions: ['p2'], queue: true, questions: true, trees: ['p1'], all: false })
+    expect(addWake(emptyWake()).all).toBe(true)
+    expect(eventNode(JSON.stringify({ node_id: 'p1', after: {} }))).toBe('p1')
+    expect(eventNode('not json')).toBeNull()
+    expect(eventNode(JSON.stringify({ node_id: 'x'.repeat(65) }))).toBeNull()
+  })
+})
+
+describe('the store', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mocks.calls.length = 0
+    mocks.queue = () => ({ items: [{ project_id: 'p1' }, { project_id: 'p1' }, { project_id: 'p2' }] })
+    mocks.questions = () => ({ items: [q('q1', { session: S1 })], has_more: false })
+    mocks.sessions = () => ({ items: [], next_cursor: null })
+    mocks.leads.views = {}; mocks.leads.loadMany.mockClear(); mocks.leads.loadLead.mockClear(); mocks.leads.load.mockClear()
+    mocks.agents.loaded = false; mocks.agents.loadAll.mockClear(); mocks.work.load.mockClear()
+    mocks.identity.identity = { tenant: { id: 't' }, principal: { id: 'markus' } }
+  })
+  afterEach(() => { vi.useRealTimers() })
+
+  it('reads the queue, the open questions and every active project’s lead while the page shows them', async () => {
+    const projection = useAgentProjection()
+    const stop = projection.watchProjects({ all: true })
+    await flush()
+    expect(mocks.leads.loadMany).toHaveBeenCalledWith(['p1', 'p2'])
+    expect([projection.queuedOf('p1'), projection.queuedOf('p2'), projection.queuedOf('p3')]).toEqual([2, 1, 0])
+    expect(projection.asksOf(S1).map(x => x.id)).toEqual(['q1'])
+    expect(projection.asksOf(S2)).toEqual([])
+    stop()
+  })
+
+  it('reads open questions within five pages and says when more exist; a failed later page keeps the rest', async () => {
+    const projection = useAgentProjection()
+    mocks.questions = (query: { offset: number }) => ({ items: Array.from({ length: 100 }, (_, i) => q(`q-${query.offset + i}`, { session: S1 })), has_more: true })
+    projection.watchProjects({ all: true })
+    await flush()
+    expect(mocks.calls.filter(c => c.startsWith('questions'))).toEqual(['questions@0', 'questions@100', 'questions@200', 'questions@300', 'questions@400'])
+    expect(projection.questions).toMatchObject({ state: 'ready', partial: true })
+    mocks.calls.length = 0
+    mocks.questions = (query: { offset: number }) => { if (query.offset > 0) throw new Error('page failed'); return { items: [q('first', { session: S1 })], has_more: true } }
+    await projection.refresh()
+    expect(projection.asksOf(S1).map(x => x.id)).toEqual(['first'])
+    expect(projection.questions.partial).toBe(true)
+  })
+
+  it('a failed read is said: queue counts become unknown, questions keep what was shown as incomplete', async () => {
+    const projection = useAgentProjection()
+    projection.watchProjects({ all: true })
+    await flush()
+    mocks.queue = () => { throw new Error('queue down') }
+    mocks.questions = () => { throw new Error('desk down') }
+    await projection.refresh()
+    expect(projection.queuedOf('p1')).toBeNull()
+    expect(projection.queue).toMatchObject({ state: 'error', error: 'queue down' })
+    expect(projection.asksOf(S1).map(x => x.id)).toEqual(['q1'])
+    expect(projection.questions).toMatchObject({ state: 'error', partial: true })
+  })
+
+  it('a read answered after a sign-in change is never shown to the next person', async () => {
+    const projection = useAgentProjection()
+    const slow = deferred<unknown>()
+    mocks.queue = () => slow.promise
+    projection.watchProjects({ all: true })
+    await flush()
+    mocks.identity.identity = { tenant: { id: 't' }, principal: { id: 'mia' } }
+    slow.resolve({ items: [{ project_id: 'p1' }] })
+    await flush()
+    expect(projection.queuedOf('p1')).toBeNull()
+    expect(projection.asksOf(S1)).toEqual([])
+  })
+
+  it('batches named events into one reread of what they changed; a reconnect rereads everything', async () => {
+    vi.useFakeTimers()
+    const projection = useAgentProjection()
+    projection.watchProjects({ all: true })
+    await vi.advanceTimersByTimeAsync(0)
+    mocks.calls.length = 0; mocks.leads.loadMany.mockClear()
+    mocks.leads.views = { p2: { caughtUp: true, decisions: [] } }
+    for (const event of ['queue.added', 'queue.moved', 'queue.picked_up']) mocks.wake!(event, 'ticket')
+    mocks.wake!('lead.claim_checked', 'p1'); mocks.wake!('lead.removed', 'p1'); mocks.wake!('lead.start_requested', 'not-a-project')
+    mocks.wake!('node.lead_decision_recorded', 'p2')
+    expect(mocks.calls).toEqual([])
+    await vi.advanceTimersByTimeAsync(WAKE_BATCH_MS)
+    expect(mocks.calls).toEqual(['queue'])
+    expect(mocks.leads.loadLead.mock.calls).toEqual([['p1']])
+    expect(mocks.leads.load.mock.calls).toEqual([['p2']])
+    expect(mocks.leads.loadMany).not.toHaveBeenCalled()
+    mocks.calls.length = 0
+    mocks.wake!('question.answered', 'question'); mocks.wake!('question.asked', 'question')
+    await vi.advanceTimersByTimeAsync(WAKE_BATCH_MS)
+    expect(mocks.calls).toEqual(['questions@0'])
+    mocks.calls.length = 0
+    mocks.wake!()
+    await vi.advanceTimersByTimeAsync(WAKE_BATCH_MS)
+    expect(mocks.calls.sort()).toEqual(['questions@0', 'queue'])
+    expect(mocks.leads.loadMany).toHaveBeenCalledWith(['p1', 'p2'])
+  })
+
+  it('binds a lead band’s workers by parent from the project’s own session read when the Agents list is not loaded', async () => {
+    const projection = useAgentProjection()
+    expect(projection.workersOf('p1', S1)).toBeNull()
+    mocks.sessions = () => ({ items: [{ id: W1, parent_harness_session_id: S1 }, { id: S2, parent_harness_session_id: null }, { id: 'w-other', parent_harness_session_id: S2 }], next_cursor: null })
+    projection.watchProjects({ project: 'p1' })
+    await flush()
+    expect(mocks.calls).toContain('sessions:p1')
+    expect([...projection.workersOf('p1', S1)!]).toEqual([W1])
+    expect(projection.workersOf('p1', null)).toEqual(new Set())
+    mocks.sessions = () => { throw new Error('sessions down') }
+    await projection.refresh()
+    expect(projection.workersOf('p1', S1)).toBeNull()
+    expect(projection.treeSource('p1')).toMatchObject({ state: 'error' })
+  })
+})

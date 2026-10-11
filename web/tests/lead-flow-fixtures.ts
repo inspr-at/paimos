@@ -64,7 +64,8 @@ export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
     id: 'qqqqqqqq-0000-4000-8000-000000000001', project_id: 'p-pharos', revision: 1, state: 'open', suggested_outcome: 'once', suggestion_reason: 'agent_suggestion', created_at: NOW, updated_at: NOW, pending: [],
     input: { request_id: 'r1', question: 'Show “not measured” or hide the Accounts line while nothing runs?', options: [{ id: 'a', title: 'Not measured', description: '', answer: 'a' }, { id: 'b', title: 'Hide', description: '', answer: 'b' }], recommend: 'a', meanwhile: 'carries_on' },
   }
-  const askers = [{ id: 'k1', principal_id: LEAD_AGENT, reply_root_id: 'x', comment_node_id: 'y', input: question.input }]
+  // The asking session travels with the asker (api/areas/shared.yaml QuestionAsker); the lead's questions bind by it (AEON-1210).
+  const askers = [{ id: 'k1', principal_id: LEAD_AGENT, session_id: LEAD_SESSION, reply_root_id: 'x', comment_node_id: 'y', input: question.input }]
   const entries = (project?: string | null): QueueWireEntry[] => state.queue.map((id, i) => {
     const node = data.nodes.find(n => n.id === id)!
     return { node_id: id, project_id: node.project, key: node.key, title: node.title, state: node.state, priority: String(node.fields.priority ?? 'medium'), estimate_hours: 2,
@@ -115,6 +116,8 @@ export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
       return json(state.settings)
     }
     if (/^\/api\/projects\/p-pharos\/lead-decisions$/.test(path)) return json({ items: decisions.filter(d => d.event_id > Number(url.searchParams.get('after') ?? 0)), next_after: null })
+    // The Agents page's Sessions card heads each project with its lead (AEON-1210); no session runs here.
+    if (path === '/api/harness-sessions' && method === 'GET') return json({ items: [], next_cursor: null })
     if (path === '/api/decision-desk') return json({ items: options.question ? [{ ...question, askers }] : [], has_more: false })
     if (path === '/api/projects/p-pharos/questions') return json({ items: options.question ? [{ ...question, askers }] : [], has_more: false })
     // The lead's agent, read once per session so its questions outlive the session.

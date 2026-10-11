@@ -57,7 +57,7 @@ it('AEON-1038: the card disables Start and Resume with a reason, preserves Cance
   const { useAgentProjects } = sourceModule<typeof import('../src/components/agents/useAgentProjects')>('components/agents/useAgentProjects.ts', {
     ...env.modules,
     '../../stores/projects': { useProjects: () => ({ projects: [{ id: 'p1', routeKey: 'AIT' }] }) },
-    '../../lib/workQueue': { queueRequest: async () => ({ items: [] }) },
+    '../../stores/agentProjection': { useAgentProjection: () => ({ watchProjects: () => () => {}, queuedOf: () => null, asksOf: () => [] }) },
   })
   const scope = effectScope()
   scopes.push(scope)

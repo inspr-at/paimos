@@ -13,7 +13,8 @@ const row = (page: Page, n: number) => page.locator(`[data-row="s:${id(n)}"]`)
 const familyFold = (page: Page, n: number) => row(page, n).locator('[data-fold="family"]')
 // AEON-1209: the folded dial is the light control in the capacity row; unfolded, its body is a card under it.
 const dial = (page: Page) => page.locator(':is(.cdial, .dial-card)')
-const liveCount = (page: Page) => page.locator('.sessions .group-row.live .mono')
+// AEON-1210: Sessions group by project, so the live total is the head's count, folded workers included.
+const headCount = (page: Page, filter: string) => page.locator(`.agents-page .page-head .count[data-filter="${filter}"]`)
 const shots = process.env.AEON691_SHOTS
 
 async function setup(page: Page, theme: 'light' | 'dark' = 'light', unrelated = false, endedCount = 696) {
@@ -66,7 +67,7 @@ test('live families count all external workers, hide hundreds of ended siblings 
   await setup(page)
   await page.goto('/agents')
   await expect(page.locator('.live-total')).toHaveText('4 live')
-  await expect(liveCount(page)).toHaveText('4')
+  await expect(headCount(page, 'working')).toContainText('4')
   await expect(page.locator('.sessions .row')).toHaveCount(4)
   await expect(row(page, 1).locator('.history-toggle')).toHaveText('696 stopped')
   await expect(row(page, 1).locator('.history-toggle')).toHaveAttribute('aria-expanded', 'false')
@@ -78,8 +79,8 @@ test('live families count all external workers, hide hundreds of ended siblings 
     controls: { lead: row(page, 1), workers: toggle, history: row(page, 1).locator('.history-toggle'), sort: page.locator('.th-sort').first() },
     scrollAreas: { sessions: page.locator('.sessions') },
     interactions: [
-      { name: 'fold live family', run: async () => { await toggle.click(); await expect(page.locator('.sessions .row')).toHaveCount(1); await expect(liveCount(page)).toHaveText('4') } },
-      { name: 'reveal live workers', run: async () => { await toggle.click(); await expect(page.locator('.sessions .row')).toHaveCount(4); await expect(liveCount(page)).toHaveText('4') } },
+      { name: 'fold live family', run: async () => { await toggle.click(); await expect(page.locator('.sessions .row')).toHaveCount(1); await expect(headCount(page, 'working')).toContainText('4') } },
+      { name: 'reveal live workers', run: async () => { await toggle.click(); await expect(page.locator('.sessions .row')).toHaveCount(4); await expect(headCount(page, 'working')).toContainText('4') } },
     ],
   })
   await row(page, 2).locator('.agent-link').click()
@@ -93,7 +94,7 @@ test('live families count all external workers, hide hundreds of ended siblings 
   await expect(row(page, 10)).toBeVisible()
   await expect(row(page, 11)).toHaveCount(0)
   await expect(row(page, 10).locator('.session-estimate')).toHaveCount(0)
-  await expect(liveCount(page)).toHaveText('4')
+  await expect(headCount(page, 'working')).toContainText('4')
 })
 
 test('another person’s visible account never becomes your full account or your capacity', async ({ page }) => {
@@ -115,7 +116,7 @@ test('ended workers remain recoverable through an opt-in fold without cleanup wr
     scrollAreas: { sessions: page.locator('.sessions') },
     interactions: [
       { name: 'show ended workers', run: async () => { await history.click(); await expect(page.locator('.sessions .row')).toHaveCount(7); await expect(history).toHaveAttribute('aria-expanded', 'true'); await expect(row(page, 10)).toHaveClass(/stopped/) } },
-      { name: 'hide ended workers', run: async () => { await history.click(); await expect(page.locator('.sessions .row')).toHaveCount(4); await expect(liveCount(page)).toHaveText('4') } },
+      { name: 'hide ended workers', run: async () => { await history.click(); await expect(page.locator('.sessions .row')).toHaveCount(4); await expect(headCount(page, 'working')).toContainText('4') } },
     ],
   })
   await history.click()
@@ -128,18 +129,22 @@ test('ended workers remain recoverable through an opt-in fold without cleanup wr
   // Main's durable paused sessions are stopped, but still belong to Paused.
   for (const session of data.sessions.filter(session => !session.stopped_at)) Object.assign(session, { phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'paused', pause: { state: 'paused' } })
   await page.reload()
-  await expect(page.locator('.sessions .group-row.paused .mono')).toHaveText('4')
-  await expect(liveCount(page)).toHaveCount(0)
+  await expect(headCount(page, 'paused')).toContainText('4')
+  await expect(headCount(page, 'working')).toContainText('0')
+  // Paused on purpose is not ended: the family keeps its place in its project, outside the Ended fold.
+  await expect(page.locator('.sessions .grp.ended')).toHaveCount(0)
+  await expect(row(page, 1)).toBeVisible()
 })
 
 test('a stopped failed session still counts as needing attention', async ({ page }) => {
   const { data } = await setup(page, 'light', false, 0)
   data.sessions = [data.sessions[0]!]
-  Object.assign(data.sessions[0]!, { phase: 'stopped', stopped_at: new Date(NOW - 60_000).toISOString(), stop_reason: 'failed', run_status: 'failed', has_problem: true })
+  // Hours after it ended, a failure still needs a look: it keeps its place in its project, never in the Ended fold.
+  Object.assign(data.sessions[0]!, { phase: 'stopped', stopped_at: new Date(NOW - 3 * 3600_000).toISOString(), stop_reason: 'failed', run_status: 'failed', has_problem: true })
   await page.goto('/agents')
   await expect(row(page, 1)).toHaveAttribute('data-state', 'problem')
   await expect(row(page, 1)).toBeVisible()
-  await expect(page.locator('.sessions .group-row.attention .mono')).toHaveText('1')
+  await expect(page.locator('.sessions .grp.ended')).toHaveCount(0)
 })
 
 test('attention counts relevant descendants through family folds and stopped history', async ({ page }) => {
@@ -153,9 +158,8 @@ test('attention counts relevant descendants through family folds and stopped his
   await page.goto('/agents')
   await expect(row(page, 3)).toHaveAttribute('data-state', 'problem')
   await expect(row(page, 4)).toHaveAttribute('data-state', 'paused')
-  const count = page.locator('.sessions .group-row.attention .mono')
-  await expect(count).toHaveText('2')
-  await expect(count).toHaveAttribute('data-tip', /needing attention/)
+  // Folded, the lead's line sums up both problems below it: the live one and the failed ended worker.
+  const line = row(page, 1).locator('.current-activity')
   const fold = familyFold(page, 1)
   const history = row(page, 1).locator('.history-toggle')
   // Folded, the problem roll joins the line end; the stopped-history control stays put and clickable.
@@ -163,13 +167,12 @@ test('attention counts relevant descendants through family folds and stopped his
     controls: { lead: row(page, 1), fold, history },
     scrollAreas: { sessions: page.locator('.sessions') },
     interactions: [
-      { name: 'fold family with a problem below', run: async () => { await fold.click(); await expect(page.locator('.sessions .row')).toHaveCount(1); await expect(count).toHaveText('2'); await expect(row(page, 1).locator('.roll.problem')).toBeVisible() } },
+      { name: 'fold family with a problem below', run: async () => { await fold.click(); await expect(page.locator('.sessions .row')).toHaveCount(1); await expect(line).toContainText('3 workers · 2 problems') } },
     ],
   })
   await history.click()
   await expect(row(page, 10)).toHaveAttribute('data-state', 'problem')
   await expect(row(page, 11)).toHaveAttribute('data-state', 'done')
-  await expect(count).toHaveText('2')
 })
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
@@ -218,7 +221,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
     await setup(page, theme)
     await page.goto('/agents')
-    await expect(liveCount(page)).toHaveText('4')
+    await expect(headCount(page, 'working')).toContainText('4')
     await expect(dial(page).locator('.f-status')).toContainText('room for 16 more')
     await expect(row(page, 2).locator('.report-source')).toBeVisible()
     await expect(row(page, 2).locator('.pct')).toHaveText('80%')

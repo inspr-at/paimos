@@ -69,7 +69,7 @@ for (const theme of ['light', 'dark'] as const) test(`${theme} 1440: projects in
   await expect(leadRow(page)).toBeVisible()
   // AEON first (the person's own order), then by key; Ended last. Groups part with a hairline.
   await expect(groups(page)).toHaveCount(5)
-  expect(await groups(page).evaluateAll(list => list.map(el => el.getAttribute('aria-label')))).toEqual(['AEON · Aeon', 'PHAROS · Pharos', 'PRJ-26', 'WEB · Website', 'Ended'])
+  expect(await groups(page).evaluateAll(list => list.map(el => el.getAttribute('aria-label')))).toEqual(['AEON · Aeon', 'PHAROS · Pharos', 'PRJ-26 · Studio infrastructure', 'WEB · Website', 'Ended'])
   expect(await groups(page).nth(1).evaluate(el => getComputedStyle(el).borderTopWidth)).toBe('1px')
   // PHAROS: the lead row heads the group, its workers nested below it.
   const pharos = groups(page).nth(1)

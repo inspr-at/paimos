@@ -24,7 +24,7 @@ const props = defineProps<{ projectId: string; projectKey: string; routeKey: str
 const w = LEAD_WORDS
 const leads = useProjectLeads(), queue = useWorkQueue(), session = useSession(), router = useRouter()
 const summary = useLeadSummary(toRef(props, 'projectId'), toRef(props, 'projectKey'))
-const { view, lead, band, queued, leadSession, workers, decisions, complete, gateIds, mergedIds, questions, questionsPartial, keyOf } = summary
+const { view, lead, band, queued, leadSession, workers, workersKnown, decisions, complete, gateIds, mergedIds, questions, questionsPartial, keyOf } = summary
 const closeButton = ref<HTMLButtonElement>()
 const dial = ref<{ running: number; total: number } | null>(null)
 // Relative times move on while the panel is open.
@@ -133,7 +133,7 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
         <p class="now-copy">{{ nowCopy }}</p>
         <p v-if="unmanaged" class="small" data-unmanaged>{{ unmanagedLeadCopy }}</p>
         <dl class="facts">
-          <div><dt>Workers</dt><dd>{{ workers.length }}</dd><dd class="sub">this project</dd></div>
+          <div><dt>Workers</dt><dd>{{ workersKnown ? workers.length : '—' }}</dd><dd class="sub">{{ workersKnown ? `of this ${w.l}` : 'can’t be read' }}</dd></div>
           <div><dt>Queued</dt><dd>{{ queued ? queued.length : '—' }}</dd><dd class="sub">{{ next[0] ? `next ${next[0].key}` : queued ? 'nothing waits' : 'can’t be read' }}</dd></div>
           <div><dt>Gate</dt><dd>{{ gateIds ? gateIds.length : '—' }}</dd><dd class="sub">{{ gateIds?.[0] ? keyOf(gateIds[0]) ?? '…' : gateIds ? 'none' : 'not read yet' }}</dd></div>
           <div><dt>Merged</dt><dd>{{ mergedIds ? mergedIds.length : '—' }}</dd><dd class="sub">today</dd></div>
@@ -141,7 +141,8 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
       </section>
       <section class="p-sec" aria-labelledby="lp-workers">
         <div class="p-head"><h3 id="lp-workers">Workers</h3><span class="small">Chosen by role</span></div>
-        <p v-if="!workers.length" class="small faint">{{ lead?.state === 'paused' ? 'No worker runs while paused.' : 'No workers yet.' }}</p>
+        <p v-if="!workersKnown" class="small warn">Its workers can’t be read right now.</p>
+        <p v-else-if="!workers.length" class="small faint">{{ lead?.state === 'paused' ? 'No worker runs while paused.' : 'No workers yet.' }}</p>
         <div v-for="s in workers" :key="s.session_id ?? `${s.harness}:${s.since}`" class="wk">
           <span class="vendor"><HarnessMark :harness="s.harness" :size="15" /></span>
           <span class="wk-t"><TicketPeekLink v-if="s.ticket" class="key" :ticket-key="s.ticket.key" :href="href(s.ticket.key)" />{{ s.ticket?.title ?? 'No ticket bound' }}</span>

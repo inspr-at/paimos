@@ -80,12 +80,16 @@ test('the header routes the canonical count to Decision Desk and keeps Agents se
   await expect(places.getByRole('link', { name: 'Decision Desk, 4 open', exact: true })).toHaveAttribute('aria-current', 'page')
 })
 
-test('sessions are grouped by what they need, with ticket and heartbeat; details show account and model', async ({ page }) => {
+test('sessions are grouped by project, the lead heading its group, with ticket and heartbeat; details show account and model', async ({ page }) => {
   const errors = watchErrors(page)
   await setup(page)
   await openAgents(page)
-  // Three buckets in urgency order; each row still names its exact state.
-  await expect(page.locator('.group-row')).toHaveText([/Needs attention\s*\d+/, /Live\s*\d+/, /Ended\s*1/])
+  // AEON-1210: each project is one group in a fixed order, the lead row heading it; Ended folds away at the end.
+  // Each row still names its exact state.
+  await expect(page.locator('.sessions .grp')).toHaveCount(4)
+  expect(await page.locator('.sessions .grp').evaluateAll(list => list.map(el => el.getAttribute('aria-label')))).toEqual(['AEON · Aeon', 'PHAROS · Pharos', 'PRJ-26 · Studio infrastructure', 'Ended'])
+  await expect(page.locator('.sessions .grp').nth(1).locator('[role="row"]').first()).toHaveAttribute('data-row', `s:${camy}`)
+  await expect(page.getByRole('button', { name: /^Ended\s*1/ })).toBeVisible()
   const lead = row(page, camy)
   await expect(lead.getByRole('link', { name: /Claude camy, Working/ })).toBeVisible()
   await expect(lead).toContainText('camy')
@@ -367,14 +371,17 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   await setup(page)
   await openAgents(page)
   // A click anywhere on the row that is not a link or button opens the session.
-  // Rows follow urgency, then start time: kite, which needs you and started first, sits right above nova.
-  await row(page, kite).locator('.c-state').click()
-  await expect(page).toHaveURL(`/agents/${kite}`)
-  await expect(panel(page).getByRole('heading', { name: /kite/ })).toBeVisible()
+  // AEON-1210: the PHAROS lead heads its group; its project's other sessions follow by urgency, then start
+  // time, so amy (heartbeat overdue) sits right below the lead and above nova.
+  await row(page, camy).locator('.c-state').click()
+  await expect(page).toHaveURL(`/agents/${camy}`)
+  await expect(panel(page).getByRole('heading', { name: /camy/ })).toBeVisible()
   await panel(page).focus()
   await page.keyboard.press('j')
+  await expect(page).toHaveURL(`/agents/${session(5)}`)
+  await expect(panel(page).getByRole('heading', { name: /amy/ })).toBeVisible()
+  await page.keyboard.press('j')
   await expect(page).toHaveURL(`/agents/${nova}`)
-  await expect(panel(page).getByRole('heading', { name: /nova/ })).toBeVisible()
   await page.keyboard.press('Escape')
   await expect(page).toHaveURL('/agents')
   await expect(panel(page)).toHaveCount(0)

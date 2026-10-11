@@ -126,8 +126,14 @@ const kept = computed(() => {
 })
 const keeps = (branch: Branch) => !filtering.value || kept.value.has(branch.view.session.id)
 const ended = (branch: Branch) => branch.group === 'stopped'
-const liveRoots = computed(() => forest.value.filter(branch => !ended(branch) && keeps(branch)))
-const endedRoots = computed(() => forest.value.filter(branch => ended(branch) && keeps(branch)))
+// An ended family keeps its place and its end state for 10 minutes, then moves to Ended (design
+// AEON-1196 §3.2), so a stop never pulls a row from under the pointer. Holding that move while the
+// pointer is over the list, and new rows, follow with package P3.
+const END_HOLD_MS = 10 * 60_000
+const lastEnd = (branch: Branch): number => Math.max(Date.parse(branch.view.session.stopped_at ?? branch.view.session.archived_at ?? '') || -Infinity, ...branch.children.map(lastEnd))
+const settled = (branch: Branch) => ended(branch) && props.now - lastEnd(branch) >= END_HOLD_MS
+const liveRoots = computed(() => forest.value.filter(branch => !settled(branch) && keeps(branch)))
+const endedRoots = computed(() => forest.value.filter(branch => settled(branch) && keeps(branch)))
 const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
@@ -176,7 +182,7 @@ const sections = computed<Section[]>(() => {
   } else {
     // By harness, state or computer each live session joins the group of its own value; a worker
     // whose lead sits in another group starts its own line there.
-    const views = flatten(live).filter(branch => !ended(branch) && keeps(branch) && branch.view.status.group !== 'stopped').map(branch => branch.view)
+    const views = flatten(live).filter(branch => keeps(branch) && (branch.view.status.group !== 'stopped' || (live.includes(branch) && !settled(branch)))).map(branch => branch.view)
     const keyOf = (view: SessionView) => group.value === 'harness' ? view.session.harness : group.value === 'state' ? view.status.group : view.session.host || HOSTLESS
     const label = (key: string) => group.value === 'harness' ? views.find(view => view.session.harness === key)?.harness || key : group.value === 'state' ? groupLabel(key) : key === HOSTLESS ? key : hostLabels.value.get(key) ?? key
     for (const g of keyedGroups(views, keyOf, label, group.value === 'state' ? GROUPS.map(item => item.id) : [])) {
@@ -274,7 +280,7 @@ function rowsOf(section: Section): Row[] {
     const primary = intendedResult(view)
     const leadRoot = !row.depth && prefRoots.value.has(view.session.id)
     const sub = row.foldable ? shownBelow(row.branch, offered) : 0
-    const under = below(row.branch, v => v.name)
+    const under = below(row.branch, v => v.name, v => !!props.projects?.asks(v.session.id))
     // Line 2 says what it does; a parent always has it, so a fold never changes the row's height.
     // Folded, it sums up what it holds (design AEON-1196: “· 5 workers · 1 problem · 1 question”).
     const doing = activityLine(row.branch)
@@ -344,7 +350,7 @@ watch(selectedPath, path => {
 }, { immediate: true })
 // The Ended fold or a folded group of Display's grouping opens for this visit to show a session.
 function openHolding(holds: (branch: Branch) => boolean) {
-  if (forest.value.some(branch => ended(branch) && holds(branch))) showStopped.value = true
+  if (forest.value.some(branch => settled(branch) && holds(branch))) showStopped.value = true
   for (const section of sections.value) if (section.header === 'fold' && flatten(section.roots).some(holds)) groupOpen.value[section.id] = true
 }
 
@@ -782,7 +788,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
       </div>
       <div v-if="filtering && !kept.size" class="group-row filter-empty" role="row"><span role="cell"><template v-if="terms.length">No session matches “{{ query }}”{{ stateFilter ? ` among ${FILTER_LABEL[stateFilter].toLowerCase()} sessions` : '' }}.</template><template v-else-if="stateFilter">No session is {{ FILTER_LABEL[stateFilter].toLowerCase() }} right now.</template><template v-else>No session matches these filters.</template></span></div>
       <!-- Each project is one group, its lead row heading it; groups part with a hairline (AEON-1210, design AEON-1196). -->
-      <div v-for="section in sections" :key="section.id" class="grp" :class="{ ended: section.id === 'ended' }" role="rowgroup" :aria-label="section.header === 'none' && section.project ? `${section.project.key}${section.project.title ? ` · ${section.project.title}` : ''}` : section.label">
+      <div v-for="section in sections" :key="section.id" class="grp" :class="{ ended: section.id === 'ended' }" role="rowgroup" :aria-label="section.project ? `${section.project.key}${section.project.title ? ` · ${section.project.title}` : ''}` : section.label">
         <div v-if="section.header === 'toggle'" class="group-row ended-head" role="row">
           <span role="rowheader" class="group-label">
             <button type="button" class="group-toggle" :aria-expanded="sectionOpen(section)" @click="showStopped = !showStopped">
