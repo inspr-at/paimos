@@ -103,10 +103,10 @@ func TestQueuedAgentDiagnosisUsesOnlyItsRunAccountAndFreshPairedHost(t *testing.
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='queued',account_id=NULL,requested_account_id=$2,started_at=NULL WHERE id=$1`, v.run, v.account); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_pairing_computers SET display_name='mbp2607' WHERE principal_id=$1`, f.agent.ID); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_pairing_computers SET display_name='fixture-computer' WHERE principal_id=$1`, f.agent.ID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=clock_timestamp(),last_probe_ok=false,last_probe_failure='auth_failed',allowed_model_profile_ids=ARRAY[$2::uuid] WHERE id=$1`, v.account, v.profile); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=clock_timestamp(),last_probe_ok=false,last_probe_failure='auth_failed',last_daemon_generation=$3,allowed_model_profile_ids=ARRAY[$2::uuid] WHERE id=$1`, v.account, v.profile, v.identity.Generation); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by)
@@ -114,15 +114,15 @@ func TestQueuedAgentDiagnosisUsesOnlyItsRunAccountAndFreshPairedHost(t *testing.
 			return err
 		}
 		// Other harness/account failures must not be attributed to this run.
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_probe_failure) VALUES($1,$2,'other-codex','codex','fixture',$3,'Other account',clock_timestamp(),false,'unavailable')`, f.person.TenantID, uid(), f.agent.ID)
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_probe_failure,last_daemon_generation) VALUES($1,$2,'other-codex','codex','fixture',$3,'Other account',clock_timestamp(),false,'unavailable',$4)`, f.person.TenantID, uid(), f.agent.ID, v.identity.Generation)
 		return err
 	})
 	for _, tc := range []struct {
 		probeOK                bool
 		failure, cause, detail string
 	}{
-		{false, "auth_failed", "login_required", "Claude needs signing in on mbp2607."},
-		{false, "unavailable", "probe_failed", "Claude availability could not be confirmed on mbp2607."},
+		{false, "auth_failed", "login_required", "Claude needs signing in on fixture-computer."},
+		{false, "unavailable", "probe_failed", "Claude availability could not be confirmed on fixture-computer."},
 	} {
 		f.tx(t, f.person, func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_ok=$2,last_probe_failure=$3 WHERE id=$1`, v.account, tc.probeOK, tc.failure)

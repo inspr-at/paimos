@@ -60,10 +60,10 @@ func TestQueuedAgentDiagnosisReportsDispatchBlockerWithoutRecoveryAuthority(t *t
 		name, code, cause, detail string
 		key, fresh                bool
 	}{
-		{"sign-in", "sign_in", "login_required", "Claude needs signing in on mbp2607.", true, true},
-		{"probe failure", "offline", "probe_failed", "Claude availability could not be confirmed on mbp2607.", true, true},
-		{"ready", "", "dispatch_pending", "Claude is waiting for dispatch on mbp2607.", true, true},
-		{"capacity", "capacity", "dispatch_wait", "Claude is waiting for an available account on mbp2607.", true, true},
+		{"sign-in", "sign_in", "login_required", "Claude needs signing in on fixture-computer.", true, true},
+		{"probe failure", "offline", "probe_failed", "Claude availability could not be confirmed on fixture-computer.", true, true},
+		{"ready", "", "dispatch_pending", "Claude is waiting for dispatch on fixture-computer.", true, true},
+		{"capacity", "capacity", "dispatch_wait", "Claude is waiting for an available account on fixture-computer.", true, true},
 		{"stale", "sign_in", "host_not_reporting", "The paired host has not reported recently; its process state is unknown.", true, false},
 		{"key revoked", "sign_in", "credential_rejected", "The paired daemon credential is revoked or expired. Credential delivery is required before recovery.", false, true},
 	} {
@@ -72,7 +72,7 @@ func TestQueuedAgentDiagnosisReportsDispatchBlockerWithoutRecoveryAuthority(t *t
 			if tc.code != "" {
 				wait = &agentaccounts.CapacityWait{Code: tc.code}
 			}
-			got := diagnoseQueuedAgent(session, now, tc.key, tc.fresh, "claude", "mbp2607", wait)
+			got := diagnoseQueuedAgent(session, now, tc.key, tc.fresh, "claude", "fixture-computer", wait)
 			if got.Cause != tc.cause || got.Detail != tc.detail || got.Action != "" {
 				t.Fatalf("wrong queued diagnosis: %+v", got)
 			}
