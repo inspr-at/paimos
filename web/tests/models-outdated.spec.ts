@@ -229,9 +229,9 @@ test.describe('on a phone', () => {
   })
 })
 
-test('screenshots of the tray and the sheet at 1440 and 390 px, light and dark', async ({ page }, testInfo) => {
+test('screenshots of the tray and the sheet at 1440, 1024 and 390 px, light and dark', async ({ page }, testInfo) => {
   await setup(page, outdatedWorld())
-  for (const [width, height, tall] of [[1440, 1000, 1900], [390, 844, 3600]] as const) {
+  for (const [width, height, tall] of [[1440, 1000, 1900], [1024, 800, 2000], [390, 844, 3600]] as const) {
     for (const scheme of ['light', 'dark'] as const) {
       // The harness scrolls inside its own frame: the whole card needs a tall window, the sheet a real one.
       await page.setViewportSize({ width, height: tall }); await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' })

@@ -588,7 +588,7 @@
     ,
     "browser:tests/models-outdated.spec.ts:on a phone › the sheet fills the screen with its actions pinned at the bottom, Keep them left of Remove, and every target is at least 44 px"
     ,
-    "browser:tests/models-outdated.spec.ts:screenshots of the tray and the sheet at 1440 and 390 px, light and dark"
+    "browser:tests/models-outdated.spec.ts:screenshots of the tray and the sheet at 1440, 1024 and 390 px, light and dark"
     ,
     "browser:tests/models-outdated.spec.ts:the review sheet overlays the page: inside the viewport, nothing on the page moves, focus stays in it and Esc closes it without a write"
     ,
@@ -9196,7 +9196,7 @@
     ,
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"on a phone › the sheet fills the screen with its actions pinned at the bottom, Keep them left of Remove, and every target is at least 44 px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"screenshots of the tray and the sheet at 1440 and 390 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"screenshots of the tray and the sheet at 1440, 1024 and 390 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"the review sheet overlays the page: inside the viewport, nothing on the page moves, focus stays in it and Esc closes it without a write","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
