@@ -485,8 +485,10 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .panel-head { padding: calc(6px + env(safe-area-inset-top)) 8px 10px 16px; }
   .head-actions { flex-wrap: wrap; }
   .head-actions .spacer { flex-basis: 100%; height: 0; }
-  /* Up to four quiet controls share one row on phones. */
-  .head-actions .btn { flex: 1 1 0; min-width: 0; min-height: 44px; padding-inline: 4px; }
+  /* Nested action components keep their labels' room and wrap onto the next line.
+     Shrinking their roots hid Remove beyond the sheet's edge. */
+  .head-actions :deep(.btn) { flex: 0 0 auto; min-width: min-content; min-height: 44px; padding-inline: 8px; }
+  .head-actions :deep(.pause-controls) { flex-wrap: wrap; max-width: 100%; }
   .head-top .icon-btn { width: 44px; height: 44px; }
   /* Compact only after entering the composer. Keep that frame while focus
      moves to thread actions, so focusing Retry/Copy cannot move the click. */

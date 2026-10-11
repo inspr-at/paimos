@@ -110,6 +110,7 @@ for (const theme of ['light', 'dark'] as const) {
     expect(await dock(page).evaluate(el => el === (window as unknown as { p5Dock: Element }).p5Dock)).toBe(true)
     stability.done()
     await row(page, data.sessions[1]!.id).click()
+    await preset(page, 'focus')
     expect(await listWidth(page)).toBe(280) // the last valid handle, not the closing drag
     await page.keyboard.press('Escape'); await preset(page, 'list')
     await toWork(page)
