@@ -540,8 +540,14 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
       await expect(z.locator('[data-use-holding]')).toContainText('Waiting now: Website relaunch and 2 more · Choose their contexts')
       await expect(z.locator('[data-use-holding]').getByRole('link', { name: 'Choose their contexts' })).toHaveAttribute('href', '/p/WEB-1/settings#project-work-context')
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 'sideways scroll').toBeLessThanOrEqual(0)
-      await z.scrollIntoViewIfNeeded()
-      await z.screenshot({ path: info.outputPath(`where-folded-${width}-${theme}.png`) })
+      // Evidence for the visual review: the whole card, in a window tall enough to hold it (the width, and so the layout, stays).
+      const shot = async (name: string) => {
+        const size = page.viewportSize()!
+        await page.setViewportSize({ width: size.width, height: 3000 })
+        await z.screenshot({ path: info.outputPath(`${name}-${width}-${theme}.png`) })
+        await page.setViewportSize(size)
+      }
+      await shot('where-folded')
 
       // The fold grows downward: nothing above it moves (measured in scroll-container coordinates).
       const top = (locator: ReturnType<Page['locator']>) => locator.evaluate(el => {
@@ -556,6 +562,7 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
       const after = await Promise.all(above.map(top))
       before.forEach((y, i) => expect(Math.abs(after[i]! - y), `fold moved ${i}`).toBeLessThanOrEqual(.5))
       expect((await z.locator('#use-rules').boundingBox())!.height, 'fold opened').toBeGreaterThan(100)
+      await shot('where-open')
 
       // A rule switch changes its sentence in place; the switch and the matrix below stay put.
       const radio = sw(page, 'New accounts').getByRole('radio', { name: 'Automatic' }), first = cell(page, ACCOUNTS.main, C.def)
@@ -578,7 +585,6 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
         expect(small, 'touch targets of at least 44 px').toEqual([])
       }
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 'sideways scroll').toBeLessThanOrEqual(0)
-      await z.screenshot({ path: info.outputPath(`where-open-${width}-${theme}.png`) })
       expect(errors).toEqual([])
     })
   })
