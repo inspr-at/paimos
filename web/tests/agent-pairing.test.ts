@@ -135,6 +135,7 @@ test('the Nix guide is additive, parsed as published, and never guesses a paired
 test('the public guide is not a session route and stays usable after sign-out', () => {
   assert.equal(agentRouteKind('/agents/register-agent'), 'register-agent')
   assert.equal(agentRouteKind('/agents/usage'), 'usage')
+  assert.equal(agentRouteKind('/agents/routines'), 'routines')
   assert.notEqual(agentRouteKind(PUBLIC_PAIRING_GUIDE_PATH), 'session')
   assert.equal(isPublicPairingGuide('/agents/register-agent'), true)
   assert.equal(sessionFreezeApplies('/agents/register-agent', true), false)
