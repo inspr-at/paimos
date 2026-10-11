@@ -10040,6 +10040,8 @@
     ,
     {"kind":"go","package":"internal/workorders","name":"TestBufferEndpointBodyCancellationKeepsInterruptDeadline","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/workorders","name":"TestBufferEndpointBodyDeadlineBudget","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/workorders","name":"TestEndpointBodyNetworkDeadline","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/workorders","name":"TestEndpointPositionedBodyNetworkDeadline","tier":"GATED-FULL"}
