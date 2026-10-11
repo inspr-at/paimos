@@ -16,12 +16,12 @@ import (
 
 // RunReceipt identifies persisted intent, never admission or a process launch.
 type RunReceipt struct {
-	ID               string  `json:"id"`
-	State            string  `json:"state"`
-	WorkOrderID      *string `json:"work_order_id,omitempty"`
-	AgentRunID       *string `json:"agent_run_id,omitempty"`
-	AssignmentDigest string  `json:"assignment_digest"`
-	PolicyDigest     string  `json:"policy_digest"`
+	ID               string   `json:"id"`
+	State            RunState `json:"state"`
+	WorkOrderID      *string  `json:"work_order_id,omitempty"`
+	AgentRunID       *string  `json:"agent_run_id,omitempty"`
+	AssignmentDigest string   `json:"assignment_digest"`
+	PolicyDigest     string   `json:"policy_digest"`
 }
 
 func runReceipt(ctx context.Context, tx pgx.Tx, o *Occurrence) error {
@@ -33,6 +33,7 @@ func runReceipt(ctx context.Context, tx pgx.Tx, o *Occurrence) error {
 		return nil
 	}
 	if err == nil {
+		run.State, _ = runState(string(run.State))
 		o.Run = &run
 	}
 	return err
@@ -103,7 +104,7 @@ func persistRun(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurr
 		return workorders.Fail(400, "source receipt exceeds its limits")
 	}
 	var run RunReceipt
-	run.State, run.AssignmentDigest, run.PolicyDigest = "pending", digest(assignment), digest(policy)
+	run.State, run.AssignmentDigest, run.PolicyDigest = RunCreated, digest(assignment), digest(policy)
 	if r.QueueEach {
 		if err := tx.QueryRow(ctx, `SELECT work_order_id::text,id::text FROM agent_runs WHERE queue_node_id=$1`, *o.NodeID).Scan(&run.WorkOrderID, &run.AgentRunID); err != nil {
 			return err
@@ -111,11 +112,11 @@ func persistRun(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurr
 	}
 	err = tx.QueryRow(ctx, `INSERT INTO routine_runs(tenant_id,recurrence_id,occurrence_key,definition_revision,
  scope_type,scope_project_id,owner_principal_id,output_project_id,output_parent_id,assignment,assignment_digest,
- policy_snapshot,policy_digest,execute_consent,consent_revision,execution_principal_id,work_node_id,work_order_id,agent_run_id,source_event_id,source_receipt)
- VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) RETURNING id::text`,
+ policy_snapshot,policy_digest,execute_consent,consent_revision,execution_principal_id,work_node_id,work_order_id,agent_run_id,source_event_id,source_receipt,state)
+ VALUES($1,$2,$3,$4,$5,nullif($6,'')::uuid,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) RETURNING id::text`,
 		actor.TenantID, r.ID, o.Key, r.Revision, d.Scope.Kind, d.Scope.ProjectID, d.OwnerPrincipalID, r.ProjectID, r.ParentID,
 		assignment, run.AssignmentDigest, policy, run.PolicyDigest, consent, consentRevision, executionPrincipal,
-		o.NodeID, run.WorkOrderID, run.AgentRunID, o.SourceEventID, sourceReceipt).Scan(&run.ID)
+		o.NodeID, run.WorkOrderID, run.AgentRunID, o.SourceEventID, sourceReceipt, run.State).Scan(&run.ID)
 	if err != nil {
 		return err
 	}

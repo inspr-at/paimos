@@ -81,12 +81,12 @@ func ReadPrivateFile(path string, max int64) ([]byte, error) {
 // openDirectory also anchors user-service directories, which may conventionally
 // be 0755. Their ancestors still cannot be writable by any other user.
 func openDirectory(path string, create, private bool) (*Store, error) {
-	return openDirectoryWithMkdir(path, create, private, unix.Mkdirat)
+	return openDirectoryWithMkdirat(path, create, private, unix.Mkdirat)
 }
 
-// Inject creation to establish a competing creator after ENOENT in tests,
-// without a process-global hook or timing-dependent race.
-func openDirectoryWithMkdir(path string, create, private bool, mkdir func(int, string, uint32) error) (_ *Store, resultErr error) {
+// The injectable syscall keeps the concurrent-creator race testable without a
+// process-global hook.
+func openDirectoryWithMkdirat(path string, create, private bool, mkdirat func(int, string, uint32) error) (_ *Store, resultErr error) {
 	defer func() {
 		if resultErr != nil {
 			resultErr = fmt.Errorf("open state directory %s: %w", path, resultErr)
@@ -108,9 +108,9 @@ func openDirectoryWithMkdir(path string, create, private bool, mkdir func(int, s
 		}
 		next, e := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		if errors.Is(e, unix.ENOENT) && create {
-			// Another creator may win after ENOENT. Reopen without following
-			// links and apply the same owner/mode checks below; never repair it.
-			if e = mkdir(fd, part, 0700); e == nil || errors.Is(e, unix.EEXIST) {
+			// A concurrent creator may win between lookup and mkdir; its entry is
+			// then opened and validated exactly like one that already existed.
+			if e = mkdirat(fd, part, 0700); e == nil || errors.Is(e, unix.EEXIST) {
 				e = unix.Fsync(fd)
 			}
 			if e != nil {
