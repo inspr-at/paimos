@@ -534,7 +534,6 @@ func TestRoutineControlledQualification(t *testing.T) {
 		current = request("pipeline", "pipeline.request")
 		current.PipelineRequest = &routineactions.PipelineRequest{PRActionKey: "pr", HeadSHA: buildRange.HeadSHA}
 
-		var err error
 		out, err = actions.Execute(ctx, f.agent, f.run, current)
 		must(t, err)
 	}
