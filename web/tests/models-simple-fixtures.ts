@@ -46,6 +46,7 @@ export const MANY: Line[] = [
   { id: 'google:gemini-flash@2.5', harness: 'gemini', family: 'google', model: 'gemini-2.5-flash', efforts: ['0', '1024', '4096'], display: 'Gemini Flash', short: 'Gemini Flash', version: '2.5' },
   { id: 'cursor:composer-fast', harness: 'cursor', family: 'cursor', model: 'composer-2.5-fast', efforts: ['default'], display: 'Cursor Composer fast', short: 'Composer fast', version: '2.5' },
 ]
+const FEW = ['openai:sol', 'anthropic:opus', 'anthropic:fable', 'anthropic:opus@4.8', 'anthropic:fable@5']
 export const NEW_LINE: Line = { id: 'xai:grok-preview', harness: 'grok', family: 'xai', model: 'grok-4.8-preview', efforts: ['medium', 'high', 'xhigh'], display: 'Grok 4.8 preview', short: 'Grok 4.8 preview', version: '', note: 'reviews and concepts', tools: false }
 export const KINDS: [string, string][] = [['design', 'UI design'], ['frontend', 'Frontend build'], ['backend', 'Backend build'], ['infra', 'Infrastructure'], ['docs', 'Docs and copy'], ['security', 'Security'], ['concept', 'Concepts']]
 const REVIEWS = ['review:openai', 'review:anthropic', 'review:xai']
@@ -66,6 +67,8 @@ export interface MockOptions {
   down?: boolean
   /** The live registry's spread: older versions of most lines and several routes per model. */
   many?: boolean
+  /** A short menu: Sol, Opus and Fable, with two older Anthropic versions behind the fold. */
+  few?: boolean
   /** Announce a new model. */
   fresh?: boolean
   /** No overrides anywhere. */
@@ -90,14 +93,15 @@ const REASON_DOWN = `Claude account is at its daily cap until ${CAP_UNTIL}`
 const CLAUDE_ONLY = ['anthropic:sonnet', 'anthropic:fable']
 
 export async function mockModels(page: Page, options: MockOptions = {}) {
-  const profiles = registry([...(options.fresh ? [NEW_LINE] : []), ...(options.down || options.many ? [OPUS_CURSOR] : []), ...(options.many ? MANY : [])])
+  const profiles = registry([...(options.fresh ? [NEW_LINE] : []), ...(options.down || options.many ? [OPUS_CURSOR] : []), ...(options.many || options.few ? MANY : [])])
+    .filter(profile => !options.few || FEW.includes(profile.slug))
   const line = (id: string | null | undefined) => [...LINES, NEW_LINE].find(item => item.id === id)
   const layers = { mine: new Map<string, Order>(), default: new Map<string, Order>() }
   const revision = { mine: 3, default: 5 }
   const dismissed = { mine: [] as string[], default: [] as string[] }
   let rules: ModelRule[] = [], rulesRevision = 2
   const writes: { method: string; path: string; search: string; body: Record<string, unknown> | null; person?: string }[] = []
-  let fail = options.fail, hold: (() => Promise<void>) | undefined, queued = !options.noQueue
+  let fail = options.fail, hold: (() => Promise<void>) | undefined, holdRead: (() => Promise<void>) | undefined, queued = !options.noQueue
   const state = { calls: [] as string[] }
   if (!options.bare) {
     layers.default.set('other', { rank: TEMPLATE, not: [], effort: 'xhigh' })
@@ -187,6 +191,8 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     if (path === '/models' && method === 'GET') return route.fulfill({ json: profiles })
     // A ticket resolves on its own: Sonnet was skipped for this ticket, Opus at xhigh runs it.
     if (path === '/models/resolve' && method === 'GET') {
+      const wait = holdRead; holdRead = undefined
+      if (wait) await wait()
       const runs = profiles.find(profile => profile.model === 'claude-opus-5-5' && profile.effort === 'xhigh')!, skipped = profiles.find(profile => profile.model === 'claude-sonnet-5-5' && profile.effort === 'high')!
       return route.fulfill({ json: { role: 'build', source: 'aeon', owner_required: false, profile: runs, ladder: [{ stage: 'column', profile_id: skipped.id, selected: false, skip_reasons: ['daily_limit'] }, { stage: 'column', profile_id: runs.id, selected: true, skip_reasons: [] }] } })
     }
@@ -242,5 +248,7 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
   return {
     writes, calls: state.calls, orders: layers, get rules() { return rules }, revision, setFail: (status?: number) => { fail = status }, setQueued: (value: boolean) => { queued = value },
     holdNext: () => { let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve }); hold = () => barrier; return () => { hold = undefined; release() } },
+    /** Holds the next ticket resolution read until the returned release runs. */
+    holdResolve: () => { let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve }); holdRead = () => barrier; return release },
   }
 }

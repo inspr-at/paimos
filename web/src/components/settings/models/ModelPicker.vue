@@ -51,7 +51,7 @@ function showOlder(provider: string) {
   const first = groups.value.find(group => group.provider === provider)?.older[0]
   if (first) active.value = first.key
   live.value = `${groups.value.find(group => group.provider === provider)?.older.length ?? 0} older versions shown`
-  // An opened fold may need more room than the menu was placed with; typing never re-places, so the field stays put.
+  // An opened fold may need more room than is left: the menu keeps its side and lets its list scroll, so the field stays put.
   void nextTick(() => emit('grew'))
 }
 const oldWords = (entry: ModelEntry) => `${entry.name} is an older version. Its line runs ${entry.replacedBy}; pick that to use it.`

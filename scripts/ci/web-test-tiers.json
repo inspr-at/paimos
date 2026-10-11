@@ -9296,6 +9296,10 @@
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a save refusal and its recovery leave every model control where it was","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a short menu low in the window keeps its side and its filter when older versions open (AEON-541)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a ticket’s Why follows the link on screen: another link closes the last answer, and a late answer is dropped (code health rule 4)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a ticket’s “Why this model?” explains that ticket, never the next queued one (Tick, AEON-1138)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"a very long kind name wraps and keeps every picker in line at 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

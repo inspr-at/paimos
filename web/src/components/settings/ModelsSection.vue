@@ -100,22 +100,27 @@ async function notNow() { if (news.value) await model.dismiss(news.value.entry.l
 // ----- text -------------------------------------------------------------------------------------------------
 const tip = (row: RowView) => row.lock ? lockTip(row.lock, { mine: !!row.lock.by && row.lock.by === person.value, name: id => model.names.value.get(id) ?? 'An admin', admin: admin.value, scope: scope.value }) : ''
 const cant = (row: RowView) => cantSentence(row.unavailable, entries.value)
-// ?why=1 (a ticket's "Why this model?" link) explains the ticket that was clicked, once (Tick, AEON-1138): the queued
-// trace only when it is that ticket, else the ticket's own resolution. Without a ticket it opens the queued trace.
-let whyOpened = false
+// ?why=1 (a ticket's "Why this model?" link) explains the ticket that was clicked, once per link (Tick, AEON-1138): the
+// queued trace only when it is that ticket, else the ticket's own resolution. Without a ticket it opens the queued trace.
+// A query-only navigation keeps this page, so another link closes the explanation of the last one and asks again; an
+// answer for a link no longer in the address is dropped (code health rule 4).
+let whyLink: string | null = null, whyDone = false, whyTurn = 0
 watch(() => [route.query.why, route.query.ticket, shown.value, !!next.value.why], async () => {
-  if (route.query.why !== '1' || !shown.value || whyOpened) return
   const ticket = typeof route.query.ticket === 'string' ? route.query.ticket : ''
+  const link = route.query.why === '1' ? ticket : null
+  if (link !== whyLink) { whyLink = link; whyDone = false; whyTurn++; why.value = null; ticketWhy.value = null }
+  if (link === null || !shown.value || whyDone) return
+  const turn = whyTurn, still = () => turn === whyTurn
   if (!ticket || ticket === doc.value?.next?.ticket) {
     if (!next.value.why) return
-    whyOpened = true; await nextTick(); why.value = document.getElementById('why'); return
+    whyDone = true; await nextTick(); if (still()) why.value = document.getElementById('why'); return
   }
-  whyOpened = true
-  const shownFor = actionKey.value, view = await model.explain(ticket)
-  if (!view || shownFor !== actionKey.value) return
+  whyDone = true
+  const shownFor = actionKey.value, view = await model.explain(ticket, still)
+  if (!view || !still() || shownFor !== actionKey.value) return
   await nextTick()
   const anchor = document.querySelector<HTMLElement>('[data-next-line]')
-  if (anchor) { closeMenus(); ticketWhy.value = { view, anchor } }
+  if (anchor && still()) { closeMenus(); ticketWhy.value = { view, anchor } }
 }, { immediate: true })
 // #model-refresh opens the catalog fold and scrolls to the model registry card under the models card.
 watch(() => [route.hash, shown.value], async () => {

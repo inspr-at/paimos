@@ -279,6 +279,65 @@ test('a ticket’s “Why this model?” explains that ticket, never the next qu
   expect(state.problems).toEqual([])
 })
 
+// A query-only navigation, as an in-app link makes it: the page and its section stay mounted.
+async function navigate(page: Page, to: string) {
+  await page.evaluate(async path => {
+    const root = document.querySelector('#app') as { __vue_app__?: { config: { globalProperties: { $router?: { push: (path: string) => Promise<unknown> } } } } } | null
+    const router = root?.__vue_app__?.config.globalProperties.$router
+    if (!router) throw new Error('no router on the page')
+    await router.push(path)
+  }, to)
+}
+
+test('a ticket’s Why follows the link on screen: another link closes the last answer, and a late answer is dropped (code health rule 4)', async ({ page }) => {
+  const state = await open(page, {}, '?why=1&ticket=PHAROS-12')
+  const why = (ticket: string) => page.getByRole('dialog', { name: `Why Opus 5.5 for ${ticket}?` })
+  const resolves = (ticket: string) => state.calls.filter(call => call === `GET /models/resolve?ticket=${ticket}`).length
+  await expect(why('PHAROS-12')).toBeVisible()
+  // Another ticket's link closes the answer for the last one at once and asks about the new ticket.
+  const releaseB = state.holdResolve()
+  await navigate(page, '/settings/models?why=1&ticket=PHAROS-13')
+  await expect(why('PHAROS-12')).toHaveCount(0)
+  await expect.poll(() => resolves('PHAROS-13')).toBe(1)
+  // A third link while PHAROS-13's answer is still held: that answer arrives first, and only PHAROS-14's shows.
+  const releaseC = state.holdResolve()
+  await navigate(page, '/settings/models?why=1&ticket=PHAROS-14')
+  await expect.poll(() => resolves('PHAROS-14')).toBe(1)
+  const lateB = page.waitForResponse(response => response.url().endsWith('/api/models/resolve?ticket=PHAROS-13'))
+  releaseB(); await (await lateB).finished()
+  releaseC()
+  await expect(why('PHAROS-14')).toBeVisible()
+  expect(await why('PHAROS-14').locator('li').last().textContent()).toBe('PHAROS-14 runs on Opus 5.5 · xhigh.')
+  await expect(why('PHAROS-13')).toHaveCount(0); await expect(page.locator('[data-models-error]')).toHaveCount(0)
+  expect(resolves('PHAROS-12') + resolves('PHAROS-13') + resolves('PHAROS-14')).toBe(3)
+  expect(state.problems).toEqual([])
+})
+
+test('a short menu low in the window keeps its side and its filter when older versions open (AEON-541)', async ({ page }) => {
+  const state = await open(page, { few: true })
+  const menu = page.locator('.mdl-pop'), trigger = pick(page, 'concept'), older = menu.locator('[data-older="anthropic"]')
+  // Measure the folded menu, then end the window just under it: it opens below its trigger, the opened fold needs
+  // more room than is left there, and more is left above.
+  await trigger.click(); await expect(older).toHaveText('Older versions · 2')
+  const folded = await menu.evaluate(el => el.getBoundingClientRect().height)
+  await page.keyboard.press('Escape'); await expect(menu).toHaveCount(0)
+  const box = (await trigger.boundingBox())!
+  await page.setViewportSize({ width: page.viewportSize()!.width, height: Math.ceil(box.y + box.height + folded + 32) })
+  await trigger.click(); await expect(older).toBeVisible()
+  const placed = await page.evaluate(() => {
+    const panel = document.querySelector('.mdl-pop')!.getBoundingClientRect(), anchor = document.querySelector('[data-pick="concept"]')!.getBoundingClientRect()
+    return { below: panel.top >= anchor.bottom, roomBelow: innerHeight - anchor.bottom - 18, roomAbove: anchor.top - 18, height: panel.height }
+  })
+  expect(placed.below, 'the short menu opens below its trigger').toBe(true)
+  expect(placed.roomAbove, 'more room above than below').toBeGreaterThan(placed.roomBelow)
+  const guard = await controlStability(page, { filter: page.getByRole('combobox'), sol: option(page, 'openai:sol'), opus: option(page, 'anthropic:opus'), trigger })
+  await guard.check(async () => { await older.click(); await expect(menu.locator('[data-provider="anthropic"] .opt.is-old')).toHaveCount(2) }); guard.done()
+  // The opened fold needed more room than was left below: the list scrolls inside the menu, which ends in the window.
+  expect(await menu.locator('.pm-l').evaluate(el => el.scrollHeight > el.clientHeight)).toBe(true)
+  expect(await menu.evaluate(el => el.getBoundingClientRect().bottom <= innerHeight)).toBe(true)
+  expect(state.problems).toEqual([])
+})
+
 test('many models stay calm: one option per line, older versions fold per provider and are never picked', async ({ page }) => {
   const state = await open(page, { many: true })
   await pick(page, 'all').click()

@@ -257,9 +257,10 @@ export function useModelsSimple() {
     if (draft.value === column) draft.value = null
     return done
   }
-  /** Why the ticket a person clicked runs where it does: its own resolution, read for the identity on screen. */
-  async function explain(ticket: string): Promise<WhyView | null> {
-    const current = capture()
+  /** Why the ticket a person clicked runs where it does: its own resolution, read for the identity on screen. A caller
+   *  whose link can change passes `still`, so an answer or a failure for a ticket that is no longer asked about is dropped. */
+  async function explain(ticket: string, still: () => boolean = () => true): Promise<WhyView | null> {
+    const identity = capture(), current = () => identity() && still()
     try {
       const resolution = await getTicketResolution(ticket)
       if (!current()) return null
