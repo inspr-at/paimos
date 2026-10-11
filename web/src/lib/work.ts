@@ -167,6 +167,8 @@ export const DEFAULT_SORT: SortKey[] = [{ field: 'updated_at', desc: true }]
 
 // The route key of a project: its classic key when imported (PHAROS), else the node key.
 export function projectRouteKey(nodeKey: string, fields: Record<string, unknown> | null | undefined): string {
+  const native = fields?.project_key
+  if (typeof native === 'string' && native.trim()) return native.trim()
   const classic = fields?.classic
   const key = classic && typeof classic === 'object' ? (classic as Record<string, unknown>).key : undefined
   return typeof key === 'string' && key.trim() ? key.trim() : nodeKey

@@ -120,7 +120,8 @@ test('AEON-1235: Advanced writes preserve revisions, bounds and honest repair re
   await expect(review).toHaveAttribute('aria-pressed', 'true'); world.control.failReviews = false
   await stable.check(async () => { await modeButton(page, 'queue', 'off').click(); await expect(modeButton(page, 'queue', 'off')).toHaveAttribute('aria-pressed', 'true') })
   await stable.check(async () => { await modeButton(page, 'queue', 'shadow').click(); await expect(modeButton(page, 'queue', 'shadow')).toHaveAttribute('aria-pressed', 'true') }); stable.done()
-  await page.getByRole('switch', { name: 'Freeze the queue' }).check()
+  await page.getByRole('switch', { name: 'Freeze the queue' }).click()
+  await expect(page.getByRole('switch', { name: 'Freeze the queue' })).toBeChecked()
   await expect.poll(() => world.writes.at(-1)?.body.freeze).toBe(true)
   expect(world.writes.at(-1)?.body).toMatchObject({ release_set: ['pharos-ready'], held_slugs: ['pharos-held'], held_pull_requests: [511], revision: 6 })
   await advanced(page).getByRole('button', { name: 'Edit…', exact: true }).click()
@@ -161,9 +162,9 @@ test('AEON-1235: stale project responses and missing authority cannot enable adm
   world.control.held = { path: MACHINE_PATHS.reviews, entered, until }
   await page.goto('/p/PHAROS/settings/delivery#advanced'); await expect(modeButton(page, 'reviews', 'shadow')).toBeEnabled()
   await modeButton(page, 'reviews', 'shadow').click(); await arrived
+  const aborted = page.waitForEvent('requestfailed', request => request.url().includes('/projects/p-pharos/delivery-reviews/settings') && request.method() === 'PUT')
   await navigate(page, '/p/AEON/settings/delivery#advanced'); await expect(modeButton(page, 'reviews', 'shadow')).toBeEnabled()
-  const finished = page.waitForResponse(response => response.url().includes('/projects/p-pharos/delivery-reviews/settings') && response.request().method() === 'PUT')
-  releaseHeld(); await finished
+  await aborted; releaseHeld()
   await expect(modeButton(page, 'reviews', 'off')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('.toast').filter({ hasText: 'Reviews saved.' })).toHaveCount(0)
   expect(world.writes).toHaveLength(1); expect(world.writes[0].project).toBe('p-pharos')
