@@ -374,7 +374,8 @@
         "web/src/components/agents/ChatCodeBlock.vue",
         "web/src/components/lead/LeadAdoption.vue",
         "web/src/components/agents/AgentChores.vue",
-        "web/src/components/agents/DecisionDeskPanel.vue"
+        "web/src/components/agents/DecisionDeskPanel.vue",
+        "web/src/components/settings/models/ModelOutdatedSheet.vue"
       ]
     },
     {
@@ -393,6 +394,7 @@
         "web/tests/lead-adoption.spec.ts",
         "web/tests/access-refresh-panels.unit.test.ts",
         "web/src/stores/decisionDesk.ts",
+        "web/tests/models-outdated.spec.ts",
         "web/src/lib/shortcuts.ts",
         "web/tests/shortcuts.unit.test.ts"
       ],

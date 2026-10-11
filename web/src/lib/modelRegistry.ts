@@ -16,6 +16,8 @@ export interface RegistryProfile {
   id: string; slug: string; version: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean; created_at: string
   display_name?: string; short_name?: string; model_version?: string; note?: string
   source?: 'auto' | 'manual'; origin?: 'shipped' | 'provider' | 'harness' | 'manual'; retire_at?: string | null; retired?: boolean; effort_level?: number | null; provider?: string
+  /** Canonical provider:model identity shared across routes (AEON-1145). */
+  identity?: string
 }
 export interface RefreshSettings { agent_reports_enabled: boolean; auto_add_profiles: boolean; api_enabled: boolean; interval_minutes: number }
 export interface DiscoverySourceResult { state?: string; seen?: number; vendor?: string; account_id?: string }
@@ -170,11 +172,19 @@ export function takenText(line: RegistryLine, now = new Date()): string {
   const date = shortDate(line.took.at, now)
   return line.took.was ? `was ${line.took.was}, taken on ${date}` : `taken on ${date}`
 }
+export type FactSource = NonNullable<RegistryProfile['origin']>
+export const SOURCE_NAME: Record<FactSource, string> = { shipped: 'Shipped', provider: 'From provider', harness: 'From harness', manual: 'Added by hand' }
+export const SOURCE_TIP: Record<FactSource, string> = {
+  shipped: 'In the catalog PAIMOS ships with; no provider or harness has confirmed it yet.',
+  provider: 'Read from the provider’s own model list. Read-only.',
+  harness: 'Reported by the harness that runs it. Read-only.',
+  manual: 'Added by an admin. Editable.',
+}
 export function metaParts(line: RegistryLine, now = new Date()): string[] {
   const label = routeLabel(line.route)
   // Older servers only distinguish auto/manual; that cannot identify whether
   // discovery came from a provider or a harness. Named origins stay explicit.
-  const source = line.origin ? { shipped: 'Shipped', provider: 'From provider', harness: 'From harness', manual: 'Added by hand' }[line.origin] : line.source === 'manual' ? 'Added by hand' : 'Auto-discovered'
+  const source = line.origin ? SOURCE_NAME[line.origin] : line.source === 'manual' ? 'Added by hand' : 'Auto-discovered'
   return [HARNESS_NAME[line.harness], ...(label && label !== HARNESS_NAME[line.harness] ? [label] : []), line.model, source, ...(line.took ? [takenText(line, now)] : [])]
 }
 
@@ -393,3 +403,160 @@ export function removalText(name: string, source: 'auto' | 'manual', usage: Line
 const columnName = (column: string, kinds: Record<string, string>) => column === 'other' ? 'Default · all work' : column === 'concept' ? 'Concepts' : column.startsWith('review:') ? 'Reviews' : kinds[column] ?? column
 const layerName = (use: LineUse, me: string) => use.layer === 'person' ? (use.person && use.person === me ? 'yours' : 'another person') : use.layer === 'project' ? 'a project' : 'for everyone'
 export function useText(use: LineUse, kinds: Record<string, string>, me: string) { return `${columnName(use.column, kinds)} (${layerName(use, me)})` }
+
+// ---------- outdated versions: the tray and the review sheet (AEON-1164) ----------
+
+export interface OutdatedUse { label: string; who: string; from: string; to: string | null }
+export interface OutdatedVersion {
+  version: string; line: string; state: string | null; date: string | null; successor: string | null; reason: string; source: string
+  uses: OutdatedUse[]; incomplete: boolean
+}
+export interface OutdatedDocument { versions: OutdatedVersion[]; revision: string; next_cursor: string; incomplete: boolean }
+export interface OutdatedRetired { moved: OutdatedUse[]; removed: string[]; undo_token: string }
+
+// One page is one batch: the server retires at most fifty versions in one step.
+export const OUTDATED_LIMIT = 50
+// The server reads the outdated list only while the registry holds at most 512 profiles, so eleven pages of fifty reach every version in it.
+export const OUTDATED_PAGES = 11
+const isUse = (use: unknown): use is OutdatedUse => !!use && typeof (use as OutdatedUse).label === 'string' && typeof (use as OutdatedUse).who === 'string' && typeof (use as OutdatedUse).from === 'string'
+export async function readOutdated(signal?: AbortSignal, cursor = ''): Promise<OutdatedDocument> {
+  const doc = await request<OutdatedDocument>(`/models/outdated?limit=${OUTDATED_LIMIT}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, 'GET', undefined, signal)
+  const valid = !!doc && Array.isArray(doc.versions) && doc.versions.length <= OUTDATED_LIMIT && typeof doc.revision === 'string' && doc.revision.length === 64
+    && typeof doc.next_cursor === 'string' && doc.next_cursor.length <= 200
+    && doc.versions.every(version => typeof version?.version === 'string' && Array.isArray(version.uses) && version.uses.every(isUse))
+  if (!valid) throw new RegistryError(502, 'The outdated list was not in the expected form')
+  return doc
+}
+/**
+ * Reads on past the first page until the list holds a full batch the sheet can offer, so versions without a usable
+ * successor on early pages never hide later ones. A retirement is bound to one revision: a page read at another one,
+ * or a page that cannot be read, ends the walk, and the cursor left over says more old versions exist.
+ */
+export async function readOutdatedBatch(first: OutdatedDocument, profiles: RegistryProfile[], signal?: AbortSignal): Promise<OutdatedDocument> {
+  let doc = first
+  for (let pages = 1; doc.next_cursor && pages < OUTDATED_PAGES && outdatedEntries(doc, profiles).length < OUTDATED_LIMIT; pages++) {
+    let next: OutdatedDocument
+    try { next = await readOutdated(signal, doc.next_cursor) } catch (error) { if (signal?.aborted) throw error; break }
+    if (next.revision !== first.revision) break
+    doc = { versions: [...doc.versions, ...next.versions], revision: first.revision, next_cursor: next.next_cursor, incomplete: doc.incomplete || next.incomplete }
+  }
+  return doc
+}
+/** Moves every use of the versions to their successors and removes them, in one step; the token undoes the whole step. */
+export async function retireOutdated(versions: string[], revision: string, signal?: AbortSignal): Promise<OutdatedRetired> {
+  const done = await request<OutdatedRetired>('/models/outdated/retire', 'POST', { versions, revision }, signal)
+  if (!done || !Array.isArray(done.removed) || !Array.isArray(done.moved)) throw new RegistryError(502, 'The registry did not say what was removed')
+  return done
+}
+export const undoOutdated = (token: string, signal?: AbortSignal) => request<{ event_id: number; restored: boolean }>('/models/outdated/undo', 'POST', { undo_token: token }, signal)
+/**
+ * The server answered and refused, so nothing was written. A timeout, a lost or unreadable answer and a gateway
+ * error are not refusals: the write may have happened.
+ */
+export const refused = (error: unknown): error is RegistryError => error instanceof RegistryError && error.status >= 400 && error.status < 500
+
+/** An old version as the page shows it: names instead of identities, the reason in plain words, and every use that moves. */
+export interface OutdatedEntry {
+  version: string; name: string; successor: string; successorName: string; harness: Harness | null; route: string
+  routes: string[]; why: string; source: FactSource | null; uses: OutdatedUse[]; incomplete: boolean
+}
+
+const identityOf = (profile: RegistryProfile) => profile.identity ?? ''
+const modelPart = (identity: string) => identity.slice(identity.indexOf(':') + 1)
+function nameOfIdentity(identity: string, profiles: RegistryProfile[]): string {
+  const profile = profiles.find(candidate => identityOf(candidate) === identity)
+  return profile ? fullModelName({ ...profile, label: profile.model }) : modelPart(identity)
+}
+
+/** Where a lifecycle fact came from. A version rule or a source nobody named has no badge. */
+export function lifecycleSource(source: string): FactSource | null {
+  if (/^https?:\/\//i.test(source)) return 'provider'
+  if (source.startsWith('agent-report:')) return 'harness'
+  if (source === 'offline-bootstrap') return 'shipped'
+  return null
+}
+const SAME_LINE_RULE = 'aeon_model_line/aeon_model_version_newer'
+/** Why a version is old, in one plain sentence. */
+export function outdatedWhy(version: OutdatedVersion, successorName: string, now = new Date()): string {
+  const date = version.date ? shortDate(version.date, now) : ''
+  const past = !!version.date && new Date(version.date).getTime() <= now.getTime()
+  if (version.state === 'retiring') return date ? `${past ? 'Retired' : 'Retires'} on ${date}` : 'Its source says it is retiring'
+  if (version.state === 'deprecated') return date ? `Deprecated ${past ? 'since' : 'from'} ${date}` : 'Its source marks it deprecated'
+  if (version.state === 'vanished') return 'No longer in its source’s model list'
+  if (version.source === SAME_LINE_RULE) return 'Newer version in the same line'
+  if (version.reason === 'Source reports a successor') return `Its source names ${successorName} as the next version`
+  return 'Its source marks it superseded'
+}
+
+/**
+ * The versions the tray and sheet offer: each needs a successor that is registered, and one that
+ * can run when something still uses the old version, because every use moves there first.
+ */
+export function outdatedEntries(doc: OutdatedDocument, profiles: RegistryProfile[], now = new Date()): OutdatedEntry[] {
+  const active = profiles.filter(profile => !profile.retired && isHarness(profile.harness))
+  const entries: OutdatedEntry[] = []
+  for (const version of doc.versions) {
+    if (!version.successor || version.successor === version.version) continue
+    const next = active.filter(profile => identityOf(profile) === version.successor)
+    if (!next.length || (version.uses.length > 0 && !next.some(profile => profile.enabled))) continue
+    const mine = active.filter(profile => identityOf(profile) === version.version)
+    const successorName = nameOfIdentity(version.successor, active)
+    const routes = [...new Set(mine.map(profile => `${HARNESS_NAME[profile.harness as Harness]} · ${profile.model}`))]
+    const first = mine[0]
+    entries.push({
+      version: version.version, name: nameOfIdentity(version.version, mine.length ? mine : profiles), successor: version.successor, successorName,
+      harness: first ? first.harness as Harness : null, route: first ? routeOf(first.harness as Harness, first.model) : '',
+      routes, why: outdatedWhy(version, successorName, now), source: lifecycleSource(version.source), uses: version.uses, incomplete: version.incomplete,
+    })
+  }
+  return entries
+}
+/** What the tray and the sheet offer: at most one batch the server retires in one step, and whether more old versions remain. */
+export function outdatedBatch(doc: OutdatedDocument, profiles: RegistryProfile[], now = new Date()): { entries: OutdatedEntry[]; more: boolean } {
+  const all = outdatedEntries(doc, profiles, now)
+  return { entries: all.slice(0, OUTDATED_LIMIT), more: !!doc.next_cursor || all.length > OUTDATED_LIMIT }
+}
+
+export interface OutdatedTray { named: { from: string; to: string }[]; count: string; unused: string }
+/** The tray line: the two successors that take over most uses, how many old versions there are, and whether anything uses them. */
+export function outdatedTray(entries: OutdatedEntry[], more: boolean, incomplete: boolean): OutdatedTray {
+  const named = entries.map((entry, index) => ({ entry, index })).sort((a, b) => b.entry.uses.length - a.entry.uses.length || a.index - b.index)
+    .slice(0, 2).map(({ entry }) => ({ from: entry.name, to: entry.successorName }))
+  const n = entries.length
+  const used = entries.some(entry => entry.uses.length > 0)
+  const hidden = incomplete || entries.some(entry => entry.incomplete)
+  // The number stays on the line of its noun.
+  return { named, count: `${n}${more ? '+' : ''}\u00a0old version${n === 1 && !more ? '' : 's'}`, unused: used ? '' : hidden ? ', nothing you can see uses them' : `, nothing uses ${n === 1 && !more ? 'it' : 'them'}` }
+}
+
+const SITUATION: Record<string, string> = { small: 'First build', fix: 'Fix rounds', stuck: 'Stuck', review: 'Review' }
+const kindName = (column: string, kinds: Record<string, string>) => column === 'other' ? 'all work' : column === 'concept' ? 'Concepts' : column.startsWith('review:') ? 'Reviews' : kinds[column] ?? column
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** People named in uses, so the sheet can ask for their names; Default and empty mean the workspace. */
+export const peopleInUses = (uses: OutdatedUse[]) => [...new Set(uses.map(use => use.who).filter(who => UUID.test(who)))]
+
+/**
+ * One use in plain words. The server sends its own labels ("Default · other · first",
+ * "lock · top · backend"); the page writes what a person reads. An unknown label is shown as sent.
+ */
+export function outdatedUseText(use: OutdatedUse, kinds: Record<string, string>, names: ReadonlyMap<string, string>, me: string): { title: string; who: string } {
+  const person = (id: string) => id === me ? 'yours' : names.get(id) ?? 'another person'
+  const owner = !use.who || use.who === 'Default' ? 'for everyone' : person(use.who)
+  const parts = use.label.split(' · ')
+  const [kind, a = '', b = ''] = parts
+  const row = (column: string) => column === 'other' ? 'Default · all work' : kindName(column, kinds)
+  const fallbackFor = (column: string) => `Fallback for ${column === 'other' ? 'the default' : kindName(column, kinds)}`
+  const situated = (column: string, situation: string) => `${SITUATION[situation] ?? situation} · ${column === 'other' ? 'Default' : kindName(column, kinds)}`
+  if ((kind === 'Default' || kind === 'Except for') && parts.length === 3) return b === 'first' ? { title: row(a), who: owner } : { title: situated(a, b), who: `${owner} · situation` }
+  if (kind === 'fallback' && parts.length === 3) return b === 'first' ? { title: fallbackFor(a), who: owner } : { title: `Fallback for ${situated(a, b)}`, who: `${owner} · situation` }
+  if (kind === 'never' && parts.length === 2) return { title: `Never for ${kindName(a, kinds)}`, who: `${owner} · the rule moves with it` }
+  if (kind === 'lock' && parts.length === 3) {
+    const setBy = UUID.test(use.who) ? ` · set by ${use.who === me ? 'you' : names.get(use.who) ?? 'another person'}` : ''
+    if (a === 'top') return { title: row(b), who: `locked; the lock moves with it${setBy}` }
+    if (a === 'bottom') return { title: fallbackFor(b), who: `last step; it moves with it${setBy}` }
+    if (a === 'not') return { title: `Never for ${kindName(b, kinds)}`, who: `the rule moves with it${setBy}` }
+  }
+  if (kind === 'fallback' && parts.length === 2) return { title: `Older fallback list · ${a}`, who: owner }
+  if (kind === 'pinned' && parts.length === 2) return { title: `Pinned pick · ${a}`, who: owner }
+  return { title: use.label, who: owner }
+}
