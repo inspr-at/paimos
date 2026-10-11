@@ -147,9 +147,10 @@ for (const look of ['light', 'dark'] as const) {
       const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist'), row, neighbour }
       await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content'), workers: panel(page).locator('.worker-list') }, interactions: [
         { name: 'read each clipped metadata value on hover', run: async () => {
-          for (const [selector, value] of [['.worker-execution > span', `${metadata.model} 6 · medium`], ['.worker-execution > small', `Codex · ${metadata.account}`], ['.worker-computer', metadata.computer]]) {
-            await row.locator(selector!).hover()
-            await expect(page.getByRole('tooltip')).toHaveText(value!)
+          for (const [selector, value] of [['.worker-execution > span', `${metadata.model} 6 · medium`], ['.worker-execution > small', `Codex · ${metadata.account}`], ['.worker-computer', metadata.computer]] as const) {
+            await row.locator(selector).hover()
+            await expect(page.locator('.tooltip')).toBeVisible()
+            await expect(page.locator('.tooltip')).toHaveText(value)
             await contained()
           }
         } },
@@ -157,7 +158,8 @@ for (const look of ['light', 'dark'] as const) {
           await page.keyboard.press('Tab')
           await row.focus()
           await expect(row).toBeFocused()
-          for (const value of Object.values(metadata)) await expect(page.getByRole('tooltip')).toContainText(value)
+          await expect(page.locator('.tooltip')).toBeVisible()
+          for (const value of Object.values(metadata)) await expect(page.locator('.tooltip')).toContainText(value)
           await contained()
         } },
       ] })
