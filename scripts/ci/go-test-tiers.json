@@ -5458,6 +5458,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestBriefingMigrationDoesNotBlockLogWritersRegression","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestCancelledInTenantDoesNotPoisonTheOnlyConnection","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestCatalogRefreshExpansionPreservesPublishedRoutes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestCatalogRefreshObservationsAcceptModelHarnesses","tier":"GATED-FULL"}
