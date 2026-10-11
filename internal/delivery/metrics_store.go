@@ -255,18 +255,32 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) (web
 }
 
 // suiteNeedsFlow checks the bounded suite subjects before an Actions read.
-// GitHub can omit pull_requests, so also match the projected PR/queue head.
+// GitHub can omit pull_requests, so also match the projected PR/queue head
+// and bounded verified observations of earlier heads against current linkage.
+// A full history page conservatively requires the Actions read: truncation
+// must not silently discard a linked run.
 // The eventual flow write still resolves the current ticket under its fence.
 func (m *Module) suiteNeedsFlow(ctx context.Context, head string, prs []int64) (bool, error) {
 	if len(prs) > 101 {
 		return false, errRead
 	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	var needed bool
 	service := db.AllProjects(ctx, "delivery check-suite flow consumers")
 	err := db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_items
-			WHERE repository=$1 AND project_id IS NOT NULL AND ticket_node_id IS NOT NULL
-			AND (head_sha=$2 OR observation->>'queue_head'=$2 OR pull_request=ANY($3::bigint[])))`,
+		return tx.QueryRow(ctx, `WITH history AS MATERIALIZED (
+			SELECT observations FROM delivery_github_events
+			WHERE repository=$1 AND head_sha=$2 AND jsonb_array_length(observations)>0
+			ORDER BY sequence DESC LIMIT 101
+		)
+		SELECT (SELECT count(*)>100 FROM history) OR EXISTS(SELECT 1 FROM delivery_items i
+			WHERE i.repository=$1 AND i.project_id IS NOT NULL AND i.ticket_node_id IS NOT NULL
+			AND (i.head_sha=$2 OR i.observation->>'queue_head'=$2 OR i.pull_request=ANY($3::bigint[])
+			OR EXISTS(SELECT 1 FROM history h CROSS JOIN LATERAL
+				(SELECT value FROM jsonb_array_elements(h.observations) LIMIT 100) o
+				WHERE (o.value->>'head_sha'=$2 OR o.value->>'queue_head'=$2)
+				AND o.value->'pull_request'=to_jsonb(i.pull_request))))`,
 			m.config.Repository, head, prs).Scan(&needed)
 	})
 	return needed, err

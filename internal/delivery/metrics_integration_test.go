@@ -99,14 +99,16 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 	// Risk: an unconfigured metric consumer rejects an authenticated delivery
 	// on an unnecessary Actions read, or suppresses linked checks/queue facts.
 	for _, tc := range []struct {
-		name                                                               string
-		linked, queue, projectedQueue, suiteRefs, suitePR, unrelated, fail bool
+		name                                                                                  string
+		linked, queue, projectedQueue, suiteRefs, suitePR, unrelated, delayed, unlinked, fail bool
 	}{
 		{name: "read_available"},
 		{name: "read_unavailable", fail: true},
 		{name: "unrelated_linked_pull", linked: true, unrelated: true, fail: true},
 		{name: "linked_checks_empty_suite_pulls", linked: true},
 		{name: "linked_checks_explicit_suite_pull", linked: true, suitePR: true},
+		{name: "delayed_empty_suite_after_synchronization", linked: true, delayed: true},
+		{name: "delayed_suite_current_link_removed", linked: true, delayed: true, unlinked: true, fail: true},
 		{name: "linked_queue_empty_suite_pulls", linked: true, queue: true},
 		{name: "linked_queue_refs_prefix", linked: true, queue: true, suiteRefs: true},
 		{name: "linked_queue_projected_head", linked: true, queue: true, projectedQueue: true},
@@ -137,7 +139,22 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 			if tc.projectedQueue {
 				auditSend(t, f, "merge_group", "unconfigured-queue", map[string]any{"action": "checks_requested", "merge_group": map[string]any{"head_sha": head, "base_sha": p.Base, "head_ref": "refs/heads/" + branch}}, 204)
 			}
-			needsFlow := tc.linked && !tc.unrelated
+			if tc.delayed {
+				current := p
+				current.Head = strings.Repeat("e", 40)
+				f.gh.pulls[7] = current
+				auditSend(t, f, "pull_request", "unconfigured-pr-sync", map[string]any{"action": "synchronize", "pull_request": map[string]any{"number": 7, "created_at": f.at.Add(-2 * time.Hour), "head": map[string]any{"sha": current.Head, "ref": current.Branch}, "base": map[string]any{"sha": current.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+				if item := f.item(t, 7); item.Head != current.Head || item.Head == head {
+					t.Fatal("synchronization did not replace the projected head")
+				}
+				if tc.unlinked {
+					f.tx(t, func(tx pgx.Tx) error {
+						_, err := tx.Exec(t.Context(), `UPDATE delivery_items SET project_id=NULL,ticket_node_id=NULL WHERE repository=$1 AND pull_request=7`, f.m.config.Repository)
+						return err
+					})
+				}
+			}
+			needsFlow := tc.linked && !tc.unrelated && !tc.unlinked
 			unavailable := tc.fail
 			g.respond = func(path string) (any, error) {
 				if path != "/actions/runs?check_suite_id=900&head_sha="+head+"&per_page=2" {
