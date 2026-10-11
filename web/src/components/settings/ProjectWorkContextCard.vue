@@ -83,7 +83,7 @@ function choose(event: Event) {
 
 <template>
   <div v-if="allowed" class="context-layout">
-    <SettingsCard title="Where accounts may work" icon="shield" anchor="project-work-context">
+    <SettingsCard title="Work context" icon="shield" anchor="project-work-context">
       <template #lead>The context decides which accounts may work on this project. Owners and admins choose it.</template>
       <p v-if="state === 'loading'" class="line" role="status">Loading the context…</p>
       <p v-else-if="state === 'error'" class="line" role="alert">The context could not be read. <button type="button" class="btn sm" @click="load">Try again</button></p>

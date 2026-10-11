@@ -107,8 +107,7 @@ for (const theme of ['light', 'dark'] as const) test(`ended and lost-contact pho
     await route.fulfill({ status: 503, json: { error: 'Removal unavailable in layout fixture' } })
   })
   await page.goto('/agents')
-  const accounts = page.getByRole('button', { name: 'Accounts and computers', exact: true })
-  if (await accounts.getAttribute('aria-expanded') === 'true') await accounts.click()
+  // AEON-1209: Accounts and computers is a chip in the capacity row; there is no card to fold away.
   await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(page.locator(`[data-row="s:${ended.id}"]`)).toHaveAttribute('data-state', 'stopped')
   await expect(page.locator(`[data-row="s:${silent.id}"]`)).toHaveAttribute('data-state', 'unresponsive')
@@ -212,8 +211,7 @@ test('execution kinds and person-specific host names on the real agents table', 
     } else await route.fulfill({ json: [...names].map(([host, label]) => ({ host, label })) })
   })
   await page.goto('/agents')
-  const accounts = page.getByRole('button', { name: 'Accounts and computers', exact: true })
-  if (await accounts.getAttribute('aria-expanded') === 'true') await accounts.click()
+  // AEON-1209: Accounts and computers is a chip in the capacity row; there is no card to fold away.
   await expect(page.locator(`[data-row="s:${ai.id}"]`)).toBeVisible()
   const table = page.getByRole('treegrid', { name: 'Agent sessions' })
   if (!before) {

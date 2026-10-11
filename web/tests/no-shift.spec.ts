@@ -43,7 +43,8 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await page.setViewportSize({ width, height: 1000 })
     const world = await mockDecisionDesk(page, { theme, long: true })
     world.questions[0]!.input.question = 'Welche Berechtigungen und Nachweise werden vor einer mandantenbezogenen Änderung benötigt?'
-    await page.goto('/agents')
+    // AEON-1209: the Agents page no longer carries the Desk panel; its harness keeps it covered until the header preview (AEON-1214).
+    await page.goto('/tests/desk-panel-harness.html')
     const panel = page.getByRole('region', { name: 'Decision Desk', exact: true })
     const count = panel.getByLabel('Open decisions')
     await expect(count).toHaveText('5')
@@ -62,8 +63,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       ],
     })
     await page.screenshot({ path: testInfo.outputPath(`agents-desk-${width}-${theme}.png`), fullPage: true })
-    await page.getByTestId('agents-desk-history').click()
-    await expect(page.getByRole('button', { name: /^Decided / })).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.getByTestId('agents-desk-history')).toHaveAttribute('href', '/decision-desk?view=decided')
   })
 
   test(`Decision Desk native choices, reason and failure stay still ${width} ${theme}`, async ({ page }, testInfo) => {
