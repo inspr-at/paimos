@@ -127,6 +127,60 @@ paths:
         '400': {$ref: '#/components/responses/BadRequest'}
         '401': {$ref: '#/components/responses/Unauthorized'}
         '403': {$ref: '#/components/responses/Forbidden'}
+  /models/harness-probes/claim:
+    post:
+      operationId: claimModelHarnessProbes
+      description: 'Agent with models.report claims at most 16 requests for its current enrolled daemon generation. Schedules due accounts using interval_minutes and consumes Check now requests. Requires ongoing pairing approval; disabled reporting returns no work. One-minute leases permit retry after interruption. Cursor is an account UUID; next_cursor is empty at the end. No model, account-health or routing grants are changed.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [daemon_id, daemon_generation]
+              properties:
+                daemon_id: {type: string, maxLength: 128}
+                daemon_generation: {type: string, maxLength: 128}
+                cursor: {type: string, maxLength: 36}
+      responses:
+        '200':
+          description: 'Bounded current probe requests'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, maxItems: 16, items: {$ref: '#/components/schemas/ModelHarnessProbe'}}
+                  next_cursor: {type: string}
+        '403': {description: 'Agent reporting permission required'}
+  /models/harness-probes/{accountId}:
+    parameters:
+      - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: reportModelHarnessProbe
+      description: 'Agent with models.report publishes a claimed content-free list under tenant, tree, pairing, catalog and account fences. Rechecks the exact live key, ongoing approval, account owner, binding revision, daemon generation and request. At most 500 models and 1 MiB; exact native field paths are retained as route-specific harness facts. Missing fields stay unknown. Failed and partial lists retain last good evidence; they never prove disappearance. Explicit native levels record at most 200 advertised tuples and, when auto_add_profiles permits, new inactive profiles. Identical replay is idempotent and adds nothing; different evidence or a replaced request returns 409. No model activation, account-health or allowance changes.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_id, binding_revision, daemon_id, daemon_generation, state, models]
+              properties:
+                request_id: {type: string, format: uuid}
+                binding_revision: {type: integer, minimum: 0}
+                daemon_id: {type: string, maxLength: 128}
+                daemon_generation: {type: string, maxLength: 128}
+                state: {type: string, enum: [fresh, limited, unsupported, stale, timeout]}
+                models: {type: array, maxItems: 500, items: {$ref: '#/components/schemas/ModelHarnessCatalogModel'}}
+      responses:
+        '200': {description: 'Probe outcome recorded', content: {application/json: {schema: {type: object, required: [recorded, added, proposed, profiles_truncated], properties: {recorded: {type: boolean}, added: {type: integer, minimum: 0, maximum: 200, description: 'New inactive profiles inserted by this publication; zero on replay'}, proposed: {type: integer, minimum: 0, maximum: 200}, profiles_truncated: {type: boolean, description: 'The advertised tuple bound omitted profile proposals; catalog facts remain independently bounded'}}}}}}
+        '400': {description: 'Invalid or oversized public facts'}
+        '403': {description: 'Current agent reporting authority required'}
+        '409': {description: 'Binding, generation, request or evidence changed'}
   /models/outdated:
     get:
       operationId: getOutdatedModels
@@ -189,7 +243,7 @@ paths:
         '200': {description: 'Settings, last refresh result, pending models and observations; no credentials', content: {application/json: {schema: {$ref: '#/components/schemas/ModelRefreshStatus'}}}}
     post:
       operationId: refreshModelCatalog
-      description: 'Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials. Person-triggered checks bypass interval_minutes and share a five-minute per-tenant manual cooldown; 429 includes retry_after seconds and Retry-After. Agents and the scheduler retain interval_minutes. Vendor requests run after the reservation transaction commits, with a shared 30-second deadline, at most 5 pages and 10000 identifiers per vendor, and 200 observations/profile additions per run. Accepts no profile, route, URL or credential writes. Explicit refreshes fetch public catalogs without keys; credentialed calls and scheduled public discovery require api_enabled. Every completed run writes one audit event; outages keep the last good catalog and mark that source stale.'
+      description: 'Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials and queues up to 64 approved harness accounts for asynchronous discovery on the daemon capture loop. harness_probes_queued and harness_probes_truncated report queueing; completion and failures are visible in GET refresh harness_sources. Person-triggered checks bypass interval_minutes and share a five-minute per-tenant manual cooldown; 429 includes retry_after seconds and Retry-After. Agents and the scheduler retain interval_minutes. Vendor requests run after the reservation transaction commits, with a shared 30-second deadline, at most 5 pages and 10000 identifiers per vendor, and 200 observations/profile additions per run. Accepts no profile, route, URL or credential writes. Explicit refreshes fetch public catalogs without keys; credentialed calls and scheduled public discovery require api_enabled. Every completed run writes one audit event; outages keep the last good catalog and mark that source stale.'
       security: *auth
       responses:
         '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true, properties: {new_lines: {type: array, maxItems: 200, items: {type: string}}, added: {type: integer, minimum: 0, description: 'Profiles inserted by this run, including disabled discoveries and one profile per effort.'}, accepted_models: {type: array, maxItems: 200, items: {type: string}, description: 'Distinct board line ids whose newer version was accepted because the line is already in use. Absent when acceptance was not established.'}}}}}}
@@ -375,6 +429,35 @@ components:
         fallback: {type: [object, 'null'], properties: {reason: {type: string}}}
         blocked: {type: [object, 'null'], properties: {reason: {type: string}}}
         hard_rules: {type: array, items: {type: string, enum: [cross_family, security_review, review_qualification, residency]}}
+    ModelHarnessProbe:
+      type: object
+      required: [account_id, account_key, harness, binding_revision, request_id, requested_at]
+      properties:
+        account_id: {type: string, format: uuid}
+        account_key: {type: string}
+        harness: {type: string, enum: [codex, cursor, opencode, pi, claude]}
+        binding_revision: {type: integer, minimum: 0}
+        request_id: {type: string, format: uuid}
+        requested_at: {type: string, format: date-time}
+    ModelHarnessCatalogModel:
+      type: object
+      additionalProperties: false
+      required: [model, facts]
+      properties:
+        model: {type: string, maxLength: 128}
+        provider: {type: string, maxLength: 64}
+        effort: {type: string, maxLength: 32, description: 'Only an explicitly reported native effort; never inferred from an identifier suffix.'}
+        facts:
+          type: object
+          maxProperties: 16
+          propertyNames: {enum: [display_name, model_version, line, native_levels, default_level, successor, retirement_at, lifecycle, hidden, tools, thinking]}
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            required: [value, field_path]
+            properties:
+              value: {description: 'Allowlisted public native scalar or native-level name array; null is unknown.'}
+              field_path: {type: string, minLength: 1, maxLength: 128}
     ModelCatalogProfile:
       allOf:
         - {$ref: '#/components/schemas/ModelProfile'}
@@ -492,6 +575,20 @@ components:
         last_run_at: {type: [string, 'null'], format: date-time}
         last_result: {type: object, additionalProperties: true}
         sources: {type: array, items: {type: object, required: [account_id, vendor], properties: {account_id: {type: string, format: uuid}, vendor: {type: string, enum: [openai, anthropic, xai, openrouter, google]}}}}
+        harness_sources:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+            required: [account_id, harness, requested_at, completed_at, state, seen]
+            properties:
+              account_id: {type: string, format: uuid}
+              harness: {type: string}
+              requested_at: {type: string, format: date-time}
+              completed_at: {type: [string, 'null'], format: date-time}
+              state: {type: string, enum: [pending, probing, fresh, limited, unsupported, stale, timeout]}
+              seen: {type: integer, minimum: 0}
+        harness_sources_truncated: {type: boolean}
         public_sources: {type: array, items: {type: string, enum: [openrouter, modelsdev, litellm]}, description: "Keyless sources available to explicit refreshes; scheduled fetches require api_enabled and use the existing bounded refresh interval"}
         observations: {type: array, items: {type: object, additionalProperties: true}}
     ModelResolution:

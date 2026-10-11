@@ -8,6 +8,7 @@ package authz
 // workspace grant, and project definitions a grant in their scope project.
 func init() {
 	registerRoutes("recurrences", map[string]string{
+		"GET /api/routine-guardrails":                    "nodes.read|recurrences.manage",
 		"POST /api/routine-runs/{runId}/actions":         "nodes.write|knowledge.write",
 		"GET /api/recurrences/{recurrenceId}/guardrails": "nodes.read|recurrences.manage",
 		"PUT /api/recurrences/{recurrenceId}/guardrails": "recurrences.manage",
@@ -17,6 +18,8 @@ func init() {
 		"GET /api/recurrences":                                     "nodes.read|recurrences.manage",
 		"GET /api/recurrences/{recurrenceId}":                      "nodes.read|recurrences.manage",
 		"GET /api/recurrences/{recurrenceId}/history":              "nodes.read|recurrences.manage",
+		"GET /api/recurrences/{recurrenceId}/runs":                 "nodes.read|recurrences.manage",
+		"GET /api/recurrences/{recurrenceId}/runs/{runId}":         "nodes.read|recurrences.manage",
 		"GET /api/recurrences/{recurrenceId}/preview":              "nodes.read|recurrences.manage",
 		"GET /api/recurrences/{recurrenceId}/releases":             "nodes.read|recurrences.manage",
 		"POST /api/recurrences":                                    "recurrences.manage",
@@ -30,7 +33,8 @@ func init() {
 		"GET /api/recurrences/{recurrenceId}/execution-principals": "recurrences.manage",
 	})
 	registerDeclarations("recurrences", "project_filtered", ProjectFilteredRoutes, map[string]bool{
-		"GET /api/recurrences": true,
+		"GET /api/recurrences":        true,
+		"GET /api/routine-guardrails": true,
 	})
 	registerDeclarations("recurrences", "project_decided", ProjectDecidedRoutes, map[string]bool{
 		"POST /api/recurrences":                  true,

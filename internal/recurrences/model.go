@@ -57,6 +57,7 @@ type Recurrence struct {
 	UpdatedAt       time.Time  `json:"updated_at"`
 	LastResult      *Result    `json:"last_result,omitempty"`
 	OpenPrevious    *Result    `json:"open_previous,omitempty"`
+	LastRun         *LastRun   `json:"last_run,omitempty"`
 }
 type Result struct {
 	Occurrence

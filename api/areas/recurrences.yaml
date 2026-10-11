@@ -1,6 +1,57 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # aeon:owner internal/recurrences
 paths:
+  /routine-guardrails:
+    get:
+      operationId: getDraftRoutineGuardrails
+      description: 'Read effective routine rules without saving a definition. Project scope requires current project read authority; workspace scope requires workspace read authority; personal scope uses only the signed-in canonical person and requires read authority in an accessible project. Returns the same compiled floor and applicable scope policy as a saved routine. No writes or execution grants.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: scope, in: query, required: true, schema: {type: string, enum: [personal, project, workspace]}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}, description: 'Required exactly for project scope; personal scope never accepts another owner.'}
+      responses:
+        '200': {description: 'Effective policy', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineGuardPolicy'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/runs:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listRoutineRuns
+      tags: [recurrences]
+      summary: 'Read the routine execution logbook'
+      description: 'Read-only history including retired definitions. Output-project and definition-scope authority are both required. Created means persisted intent, never execution. Descending immutable creation time and UUID keysets contain no source event payload or account details. Reading does not enable execution.'
+      security: [{session: []}]
+      parameters:
+        - {name: before, in: query, schema: {type: string, maxLength: 256}, description: 'Opaque continuation returned by this routine logbook'}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200': {description: 'Authorized run page', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineRunPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /recurrences/{recurrenceId}/runs/{runId}:
+    parameters:
+      - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getRoutineRun
+      tags: [recurrences]
+      summary: 'Read bounded routine run evidence and usage'
+      description: 'Run, attempt, action and effect evidence uses existing persisted lineage. Each evidence page has its own stable cursor. Raw assignments, process receipts, effect payloads, evaluation decisions and account identities are withheld. Evaluation and approval references require current target visibility and approval authority. Usage requires harness.read and outcome.read in its current source project. Paid settlements, estimated API price and reserved allowance are separate; missing billing, model or process evidence stays unknown or partial.'
+      security: [{session: []}]
+      parameters:
+        - {name: attempt_before, in: query, schema: {type: string, maxLength: 256}}
+        - {name: action_before, in: query, schema: {type: string, maxLength: 256}}
+        - {name: effect_before, in: query, schema: {type: string, maxLength: 256}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+      responses:
+        '200': {description: 'Authorized run evidence', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineRunHistory'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /recurrences:
     get:
       operationId: listRecurrences
@@ -311,6 +362,7 @@ components:
             updated_at: {type: string, format: date-time}
             last_result: {$ref: '#/components/schemas/RecurrenceResult'}
             open_previous: {$ref: '#/components/schemas/RecurrenceResult'}
+            last_run: {$ref: '#/components/schemas/RoutineLastRun'}
             execution_policy: {$ref: '#/components/schemas/RoutineExecutionPolicy'}
     RecurrenceHistoryEntry:
       type: object
@@ -349,14 +401,24 @@ components:
         reason: {type: string}
         created_at: {type: string, format: date-time}
         run: {$ref: '#/components/schemas/RoutineRunReceipt'}
+    RoutineLastRun:
+      type: object
+      additionalProperties: false
+      required: [id, state, reason, created_at]
+      description: 'Latest visible routine run by created_at then ID, resolved in a bounded join after recurrence paging. Omitted when no run exists. S21 states and reasons normalize legacy outcomes; successful execution requires confirmed process evidence. No assignments, accounts, host selectors or evidence payloads are exposed.'
+      properties:
+        id: {type: string, format: uuid}
+        state: {type: string, enum: [created, running, waiting_for_person, held, failed, done, skipped]}
+        reason: {type: string, description: 'S21 reason sentence; empty only for confirmed successful execution.'}
+        created_at: {type: string, format: date-time}
     RoutineRunReceipt:
       type: object
       additionalProperties: false
       required: [id, state, assignment_digest, policy_digest]
-      description: 'Optional durable execution intent for an occurrence with a saved assignment. Replay returns the same run identity. Pending intent grants no launch authority; consent, project qualification and current permissions remain required. Ticket-only and skipped occurrences omit this field.'
+      description: 'Optional durable execution intent for an occurrence with a saved assignment. Replay returns the same run identity. Created intent grants no launch authority; consent, project qualification and current permissions remain required. Ticket-only and skipped occurrences omit this field.'
       properties:
         id: {type: string, format: uuid}
-        state: {type: string}
+        state: {$ref: '#/components/schemas/RoutineRunState'}
         work_order_id: {type: string, format: uuid}
         agent_run_id: {type: string, format: uuid}
         assignment_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
@@ -535,3 +597,117 @@ components:
               scope: {$ref: '#/components/schemas/RoutineGuardScope'}
               version: {type: string}
               superseded: {type: boolean}
+    RoutineRunState:
+      type: string
+      enum: [created, running, waiting_for_person, held, failed, done, skipped]
+      description: 'Closed logbook states. Legacy pending maps to created; unknown states are held. A terminal text value without confirmed process evidence never reports successful execution.'
+    RoutineHistoryMeasure:
+      type: object
+      additionalProperties: false
+      required: [measured, known, unknown]
+      properties:
+        measured: {type: [string, 'null'], pattern: '^[0-9]+$'}
+        known: {type: integer, minimum: 0}
+        unknown: {type: integer, minimum: 0}
+    RoutineRunUsage:
+      type: object
+      additionalProperties: false
+      required: [tokens, paid_microusd, estimated_api_usd, reserved_tokens, reserved_microusd, reserved_recovery_ms, partial, truncated, gaps]
+      properties:
+        tokens: {$ref: '#/components/schemas/RoutineHistoryMeasure'}
+        paid_microusd: {type: [string, 'null'], description: 'Confirmed paid amount from settled root grants only; child receipts and replays are already included. Null means no confirmed paid settlement.'}
+        estimated_api_usd: {type: [string, 'null'], description: 'API list-price estimate from current cumulative usage; never a paid charge or subscription price.'}
+        reserved_tokens: {type: [string, 'null']}
+        reserved_microusd: {type: [string, 'null']}
+        reserved_recovery_ms: {type: [string, 'null']}
+        partial: {type: boolean}
+        truncated: {type: boolean}
+        gaps: {type: array, items: {type: string}}
+    RoutineRunHistoryEntry:
+      type: object
+      additionalProperties: false
+      required: [id, recurrence_id, definition_revision, owner_principal_id, state, reason, work_node_id, work_order_id, agent_run_id, created_at, updated_at, usage]
+      properties:
+        id: {type: string, format: uuid}
+        recurrence_id: {type: string, format: uuid}
+        definition_revision: {type: integer, minimum: 1}
+        owner_principal_id: {type: string, format: uuid}
+        state: {$ref: '#/components/schemas/RoutineRunState'}
+        reason: {type: string, description: 'One plain reason sentence for every non-done state; empty for confirmed done.'}
+        work_node_id: {type: [string, 'null'], format: uuid}
+        work_order_id: {type: [string, 'null'], format: uuid}
+        agent_run_id: {type: [string, 'null'], format: uuid}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        usage: {$ref: '#/components/schemas/RoutineRunUsage'}
+    RoutineRunPage:
+      type: object
+      additionalProperties: false
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/RoutineRunHistoryEntry'}}
+        next_cursor: {type: [string, 'null'], maxLength: 256}
+    RoutineAttemptHistory:
+      type: object
+      additionalProperties: false
+      required: [id, role, state, reason, agent_run_id, exit_confirmed, exit_code, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        role: {type: string}
+        state: {$ref: '#/components/schemas/RoutineRunState'}
+        reason: {type: string}
+        agent_run_id: {type: [string, 'null'], format: uuid}
+        exit_confirmed: {type: boolean, description: 'False also covers missing or withheld process evidence; confirmation alone never implies successful execution.'}
+        exit_code: {type: [integer, 'null'], description: 'Zero confirms a successful exit only when exit_confirmed is true; null is unknown or withheld.'}
+        created_at: {type: string, format: date-time}
+    RoutineActionHistory:
+      type: object
+      additionalProperties: false
+      required: [id, attempt_id, kind, state, target_node_id, evaluation_id, evaluation_result, approval_id, approval_state, effect_id, pull_request_number, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        attempt_id: {type: [string, 'null'], format: uuid}
+        kind: {type: string}
+        state: {type: string}
+        target_node_id: {type: [string, 'null'], format: uuid}
+        evaluation_id: {type: [string, 'null'], format: uuid}
+        evaluation_result: {type: [string, 'null'], enum: [allow, needs_person, block, null]}
+        approval_id: {type: [string, 'null'], format: uuid}
+        approval_state: {type: [string, 'null'], enum: [pending, approved, denied, revoked, expired, null]}
+        effect_id: {type: [string, 'null'], format: uuid}
+        pull_request_number: {type: [integer, 'null'], minimum: 1, description: 'Confirmed PR reference from a recorded pr.open result on a readable target; payloads, URLs and repository account details are withheld.'}
+        created_at: {type: string, format: date-time}
+    RoutineEffectHistory:
+      type: object
+      additionalProperties: false
+      required: [id, action_id, kind, state, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        action_id: {type: [string, 'null'], format: uuid}
+        kind: {type: string}
+        state: {type: string}
+        created_at: {type: string, format: date-time}
+    RoutineRunHistory:
+      type: object
+      additionalProperties: false
+      required: [run, attempts, actions, effects]
+      properties:
+        run: {$ref: '#/components/schemas/RoutineRunHistoryEntry'}
+        attempts:
+          type: object
+          required: [items, next_cursor]
+          properties:
+            items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/RoutineAttemptHistory'}}
+            next_cursor: {type: [string, 'null'], maxLength: 256}
+        actions:
+          type: object
+          required: [items, next_cursor]
+          properties:
+            items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/RoutineActionHistory'}}
+            next_cursor: {type: [string, 'null'], maxLength: 256}
+        effects:
+          type: object
+          required: [items, next_cursor]
+          properties:
+            items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/RoutineEffectHistory'}}
+            next_cursor: {type: [string, 'null'], maxLength: 256}

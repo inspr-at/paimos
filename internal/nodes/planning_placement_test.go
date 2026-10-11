@@ -109,7 +109,7 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 		tickets = append(tickets, placementNode(t, w, fmt.Sprintf("LINK-%d", i+1), fields))
 	}
 	for i := range 5 {
-		n := w.node(t, fmt.Sprintf("PERSONALHIST-%d", i+1), "work", w.root.ID, "done", nil)
+		n := w.node(t, fmt.Sprintf("PERSHIST-%d", i+1), "work", w.root.ID, "done", nil)
 		w.session(t, n.ID, "codex", "gpt-6-personal", "high", "gpt-6-personal", 60, 1_000_000, 0, 0, "api", "")
 	}
 	if _, err := testDB.Admin.Exec(t.Context(), `UPDATE harness_sessions SET created_at='2026-09-30T12:00:00Z',stopped_at='2026-09-30T13:00:00Z' WHERE tenant_id=$1`, w.admin.TenantID); err != nil {

@@ -3,7 +3,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { accountName, accountPlan } from '../../lib/accountCascade'
-import { limitSummary, nameClashes, readingSupport, setByYou } from '../../lib/accountLimits'
+import { nameClashes, readingSupport } from '../../lib/accountLimits'
 import { createGroup, deleteGroup, type AgentAccount } from '../../lib/agents'
 import { can } from '../../lib/authz'
 import { HARNESS_NAME, POOL_ORDER, accountUseCommand, clone, putSchedule, type AccountState } from '../../lib/capacity'
@@ -19,14 +19,13 @@ import AccountDetail from './AccountDetail.vue'
 import HarnessMark from './HarnessMark.vue'
 
 // Settings → Accounts (AEON-384): every vendor account, grouped by vendor,
-// with how Aeon reads it and whether agents may use it. A row opens its
-// detail inline: name, windows, last readings and the Advanced limit. There is
-// no allowance form: limits are observed, and a limit by hand is one sentence.
-// The card's header (SettingsCard) keeps its aside slot for "Add an account".
+// with how Aeon reads it. A row opens its detail inline: name, windows and last
+// readings. "Agents may use it" and the limits live in the panel's "Limits on
+// this account" (AEON-1172); limits are observed, never set by hand here.
 // `all` is every account in the workspace when this card shows a subset (one
 // shared-quota account in Settings → Accounts and computers): name clashes and
 // pool candidates are found across all of them.
-const props = defineProps<{ accounts: AgentAccount[]; all?: AgentAccount[]; state: Availability; now: number; admin: boolean; set: (account: AgentAccount, state: AgentAccount['state']) => Promise<void> }>()
+const props = defineProps<{ accounts: AgentAccount[]; all?: AgentAccount[]; state: Availability; now: number; admin: boolean }>()
 // "I'm away…" leads to the pacing editors, which the page owns (AEON-782).
 const emit = defineEmits<{ away: [] }>()
 const session = useSession()
@@ -53,18 +52,12 @@ const groups = computed(() => {
   }))
 })
 const host = (a: AgentAccount) => rowOf.value.get(a.id)?.host || a.host_label || ''
-const agentsAllowed = (a: AgentAccount) => a.state === 'available' && a.ongoing_use_approved !== false
 // Only what needs a word: a normal, usable account shows none.
 const STATE_TEXT: Partial<Record<AccountState, string>> = { signin: 'Sign in again', offline: 'Offline', unavailable: "Couldn't check", paused: 'Paused' }
 const stateOf = (a: AgentAccount): AccountState => rowOf.value.get(a.id)?.state ?? (a.state === 'draining' ? 'paused' : 'live')
 const readinessText = (a: AgentAccount) => {
   const readiness = capacity.accountLines.get(a.id)?.readiness
   return readiness ? readiness.kind === 'ready' ? '' : readiness.text : STATE_TEXT[stateOf(a)]
-}
-function limitChip(a: AgentAccount): string {
-  const rule = capacity.byAccount.get(a.id)?.limit
-  if (rule) return `Limit · ${limitSummary(rule)}`
-  return setByYou(a.windows, props.now).length ? 'Set by you' : ''
 }
 
 function toggleOpen(id: string) {
@@ -80,8 +73,6 @@ function onHead(event: MouseEvent, id: string) {
   if ((event.target as HTMLElement).closest('button, a, input, select')) return
   toggleOpen(id)
 }
-// A busy switch stays focusable (aria-disabled), so focus can return to it
-// when its confirmation closes.
 // What an account learned can be taken as its work hours (moved here from the Agents page with AEON-782).
 async function useHours(account: AgentAccount) {
   const row = rowOf.value.get(account.id), hours = row?.learning?.suggested_hours
@@ -91,13 +82,6 @@ async function useHours(account: AgentAccount) {
   busy.value = account.id; error.value = ''
   try { await putSchedule({ scope: 'account', account_id: account.id, schedule: next }); await agents.afterWrite(); toast(`Saved ${row.name}'s work hours.`) }
   catch (e) { error.value = e instanceof Error ? e.message : 'The work hours were not saved. Please try again.' }
-  finally { busy.value = '' }
-}
-async function toggleUse(account: AgentAccount) {
-  if (busy.value === account.id) return
-  busy.value = account.id; error.value = ''
-  try { await props.set(account, agentsAllowed(account) ? 'draining' : 'available') }
-  catch (e) { error.value = e instanceof Error ? e.message : 'The account did not change. Please try again.' }
   finally { busy.value = '' }
 }
 // Groups, names and limits are writes: every shared read starts over (AEON-402).
@@ -180,7 +164,6 @@ async function backInPool(account: AgentAccount) {
       <RouterLink v-if="mayManage" class="btn sm" to="/agents/register-agent"><AppIcon name="monitor" :size="14" />Connect computer</RouterLink>
     </p>
     <template v-else>
-      <p class="use-head" aria-hidden="true">Agents may use it</p>
       <section v-for="group in groups" :key="group.harness" class="group" :aria-labelledby="`accounts-${group.harness}`">
         <h3 :id="`accounts-${group.harness}`" class="group-head">
           <HarnessMark :harness="group.harness" :size="16" />
@@ -198,17 +181,12 @@ async function backInPool(account: AgentAccount) {
                 <span v-if="a.group_name" class="chip">{{ a.group_name }}</span>
                 <button v-if="mayManage && a.group_id" type="button" class="btn sm quiet-act" :disabled="busy === a.id" @click="backInPool(a)">Back in the pool</button>
                 <button v-else-if="mayManage" type="button" class="btn sm quiet-act" :disabled="busy === a.id" @click="openSeparate(a)">Keep separate…</button>
-                <span v-if="limitChip(a)" class="chip mine">{{ limitChip(a) }}</span>
                 <span class="meta">
                   <template v-if="readinessText(a)"><span class="state">{{ readinessText(a) }}</span><span class="sep"> · </span></template>
                   <template v-if="accountPlan(a)"><span class="plan">{{ accountPlan(a) }}</span><span class="sep"> · </span></template>
                   <span class="reads">{{ readingSupport(a.harness) }}</span>
                 </span>
               </div>
-              <button
-                type="button" role="switch" class="use" :aria-checked="agentsAllowed(a)" :aria-label="`Agents may use it · ${accountName(a)}`"
-                :disabled="!mayManage" :aria-disabled="busy === a.id || undefined" :data-tip="mayManage ? undefined : 'People who can manage accounts change this'" @click="toggleUse(a)"
-              ><span class="track" aria-hidden="true"><span class="thumb" /></span></button>
               <button type="button" class="icon-btn flat more" :aria-expanded="open === a.id" :aria-controls="`account-detail-${a.id}`" :aria-label="`Details for ${accountName(a)}`" @click="toggleOpen(a.id)"><AppIcon name="chevron" :size="16" /></button>
             </div>
             <p v-if="useLine(a)" class="use-line">{{ useLine(a) }}</p>
@@ -251,8 +229,6 @@ async function backInPool(account: AgentAccount) {
 
 <style scoped>
 .accounts { position: relative; display: grid; gap: 14px; }
-/* The switches' one column label, on the first vendor's line. */
-.use-head { position: absolute; top: 0; right: 58px; margin: 0; font-size: 12px; line-height: 20px; color: var(--ink-3); }
 .note { font-size: 13px; color: var(--ink-2); }
 .note.empty { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .note.error { display: flex; align-items: center; gap: 6px; color: var(--danger); }
@@ -262,7 +238,7 @@ async function backInPool(account: AgentAccount) {
 .group-head .count { font-weight: 500; color: var(--ink-3); }
 .list { margin: 0; padding: 0; list-style: none; }
 .account + .account { box-shadow: inset 0 1px 0 var(--line); }
-.head { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 34px; align-items: center; column-gap: 12px; min-height: 48px; padding: 7px 4px 7px 10px; border-radius: 10px; cursor: pointer; }
+.head { display: grid; grid-template-columns: 10px minmax(0, 1fr) 34px; align-items: center; column-gap: 12px; min-height: 48px; padding: 7px 4px 7px 10px; border-radius: 10px; cursor: pointer; }
 @media (hover: hover) { .head:hover { background: var(--row-hover); } }
 .account.open > .head { background: transparent; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
@@ -273,9 +249,7 @@ async function backInPool(account: AgentAccount) {
 .name { max-width: 24ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .account.paused .name, .account.unavailable .name { color: var(--ink-2); }
 .chip { height: 20px; padding: 0 7px; font-size: 11px; letter-spacing: 0; }
-.chip.mine { font-family: var(--font); font-size: 11.5px; }
 .chip.host { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-variant-ligatures: none; }
-.chip.mine { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .meta { font-size: 12.5px; color: var(--ink-3); }
 /* A long line breaks between its parts, never inside one. */
 .meta > span:not(.sep) { white-space: nowrap; }
@@ -285,28 +259,17 @@ async function backInPool(account: AgentAccount) {
 .sep { font-weight: 400; color: var(--ink-3); }
 .name-it { height: 22px; padding: 0 8px; border: 0; border-radius: 999px; background: var(--gold-wash); color: var(--warn-ink); font-size: 11.5px; font-weight: 600; cursor: pointer; }
 .name-it:focus-visible { box-shadow: var(--focus-ring); }
-.use { display: inline-grid; place-items: center; width: 50px; height: 32px; padding: 0; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
-@media (hover: hover) { .use:not(:disabled, [aria-disabled="true"]):hover { background: var(--row-selected); } }
-.use:focus-visible { box-shadow: var(--focus-ring); }
-.use:disabled, .use[aria-disabled="true"] { cursor: default; }
-.track { position: relative; flex: none; width: 34px; height: 20px; border-radius: 999px; background: var(--track); box-shadow: inset 0 0 0 1px var(--line-2); transition: background-color .15s ease; }
-.thumb { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--switch-knob); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-black) 25%, transparent); transition: transform .15s ease; }
-.use[aria-checked="true"] .track { background: linear-gradient(90deg, var(--primary), var(--primary-hi)); box-shadow: none; }
-.use[aria-checked="true"] .thumb { transform: translateX(14px); background: var(--switch-knob); }
-.use:disabled .track, .use[aria-disabled="true"] .track { opacity: .55; }
 .more { justify-self: end; color: var(--ink-3); }
 .more :deep(svg) { transition: transform .15s ease; }
 .more[aria-expanded="true"] :deep(svg) { transform: rotate(180deg); }
-@media (prefers-reduced-motion: reduce) { .track, .thumb, .more :deep(svg) { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .more :deep(svg) { transition: none; } }
 @media (max-width: 600px) {
-  .head { grid-template-columns: 10px minmax(0, 1fr) 50px 44px; column-gap: 8px; align-items: start; padding: 4px 0 6px 8px; }
+  .head { grid-template-columns: 10px minmax(0, 1fr) 44px; column-gap: 8px; align-items: start; padding: 4px 0 6px 8px; }
   .dot { margin-top: 18px; }
   .ident { padding-top: 10px; }
   .meta { flex-basis: 100%; }
-  .use { height: 44px; }
   .more { width: 44px; height: 44px; }
   .name { max-width: 100%; }
-  .use-head { position: static; justify-self: end; margin: 0 60px -12px 0; }
 }
 .quiet-act { height: 24px; padding: 0 8px; border-color: transparent; background: transparent; color: var(--ink-2); font-size: 12px; }
 .use-line { margin: 6px 0 0; color: var(--ink-3); font: 12px/1.4 var(--mono); overflow-wrap: anywhere; }

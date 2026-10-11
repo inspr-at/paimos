@@ -720,6 +720,8 @@
         ,
         {"file":"tests/accounts-card-fit.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/accounts-quota-bar.spec.ts","listedTests":25,"weightSeconds":62.5,"weightSource":"AEON-1172 estimate: twenty-five mocked account list and panel flows, most at three widths, two themes"}
+        ,
         {"file":"tests/activity-history.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/add-account.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
@@ -809,6 +811,8 @@
         {"file":"tests/cost-units.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/crm.spec.ts","listedTests":25,"weightSeconds":55.487805,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/dead-screens.spec.ts","listedTests":12,"weightSeconds":30,"weightSource":"unmeasured-estimate"}
         ,
         {"file":"tests/dead-sessions.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
         ,
@@ -960,7 +964,7 @@
         ,
         {"file":"tests/quota-warnings.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/quote-collaboration.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/quote-collaboration.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/quote-dock-layout.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
