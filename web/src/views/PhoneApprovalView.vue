@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
-import { onAccessChange, can } from '../lib/authz'
+import { onAccessRevalidate, can } from '../lib/authz'
 import { useIdentityScope } from '../lib/useIdentityScope'
 import { useSession } from '../stores/session'
 import { brand } from '../lib/brand'
@@ -21,9 +21,10 @@ const expires = computed(() => review.value?.approval?.expires_at ?? review.valu
 const pending = computed(() => review.value?.pending && Date.parse(expires.value) > now.value)
 const stepup = computed(() => route.params.kind === 'stepup')
 const stepupAllowed = computed(() => !!review.value?.stepup && can(review.value.stepup.permission, review.value.stepup.project_id))
-function load() {
+function load(retain = false) {
   if (busy.value) return
-  review.value = null; error.value = ''; outcome.value = ''; reason.value = ''
+  error.value = ''
+  if (!retain) { review.value = null; outcome.value = ''; reason.value = '' }
   const kind = String(route.params.kind), id = String(route.params.requestId)
   if (!['approval', 'attach', 'stepup'].includes(kind) || !/^[\da-f]{8}(-[\da-f]{4}){3}-[\da-f]{12}$/i.test(id)) { error.value = 'This approval link is unavailable.'; return }
   void reads.run(({ after, signal }) => after(phoneRequest<PhoneReview>(reviewPath(kind as PhoneKind, id), 'GET', undefined, signal), value => {
@@ -60,13 +61,13 @@ watch([() => route.fullPath, scope.owner], () => { scope.reset(); busy.value = f
 // Leaving starts before session refresh and the next view's bundle have loaded.
 // End the proof now; waiting for the route watcher leaves time for a late approve.
 onBeforeRouteLeave(() => { scope.reset(); busy.value = false })
-const stopAccess = onAccessChange(() => { scope.reset(); busy.value = false; load() })
+const stopAccess = onAccessRevalidate({ reset: () => { scope.reset(); review.value = null; busy.value = false; reason.value = ''; outcome.value = ''; error.value = '' }, refresh: () => { load(true) } })
 onBeforeUnmount(() => { clearInterval(tick); stopAccess() })
 </script>
 
 <template>
   <main class="phone-review" :class="{ 'stepup-review': stepup }" aria-labelledby="phone-review-title">
-    <nav class="phone-nav"><RouterLink to="/agents" class="back">Back to Agents</RouterLink><button v-if="stepup" class="review-again" type="button" :disabled="busy" @click="load">Review again</button></nav>
+    <nav class="phone-nav"><RouterLink to="/agents" class="back">Back to Agents</RouterLink><button v-if="stepup" class="review-again" type="button" :disabled="busy" @click="load()">Review again</button></nav>
     <header><AppIcon name="shield" :size="24" /><h1 id="phone-review-title">{{ stepup ? 'Step-up approval' : 'Review approval' }}</h1></header>
     <template v-if="stepup">
       <div class="stepup-body" data-testid="stepup-phone-body">
@@ -91,7 +92,7 @@ onBeforeUnmount(() => { clearInterval(tick); stopAccess() })
     <p v-if="session.identity?.principal.kind !== 'person'" role="alert">Sign in as a person to review and decide.</p>
     <p v-else-if="!review && !error" role="status">Loading the request…</p>
     <p v-if="error" class="error" role="alert">{{ error }}</p>
-    <button v-if="error && !busy" class="btn" @click="load">Review again</button>
+    <button v-if="error && !busy" class="btn" @click="load()">Review again</button>
     <article v-if="review" class="glass-card context">
       <template v-if="review.approval">
         <h2>{{ scopeLabel(review.approval.scope) }}</h2>

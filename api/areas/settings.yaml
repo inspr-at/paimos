@@ -592,7 +592,19 @@ components:
       required: [name, icon]
       properties:
         name: {type: string, maxLength: 60, description: 'Empty uses Ticket, Epic, Story or Level N.'}
-        icon: {type: string, enum: ['', ticket, epic, task, layers, tree, folder, check, box]}
+        icon:
+          type: string
+          description: 'Blank draws the level default. The list is internal/nodes/work_icons.json.'
+          enum: ['', ticket, task, epic, bolt, layers, tree, folder, folders, folder-kanban, folder-tree, list-tree,
+            network, workflow, component, blocks, kanban, box, package, package-check, check, check-check,
+            square-check-big, circle-check, circle-dot, list-checks, list-todo, clipboard-list, clipboard-check, flag,
+            flag-triangle-right, milestone, target, goal, rocket, mountain, trophy, award, gem, star, sparkle, diamond,
+            hexagon, bug, code, terminal, server, database, git-branch, git-pull-request, merge, wrench, hammer, gear,
+            book, book-open, runbook, file-text, notebook-pen, sticky-note, scroll-text, presentation, bookmark, tag,
+            palette, pen-tool, brush, shapes, puzzle, beaker, flask-conical, telescope, lightbulb, compass, search,
+            alert, triangle-alert, siren, flame, shield, shield-alert, lock, users, message, messages-square, handshake,
+            megaphone, gavel, scale, vote, calendar, calendar-check, clock, timer, hourglass, gauge, trending-up,
+            sprout, leaf, journey, coin]
     WorkVocabulary:
       type: object
       additionalProperties: false

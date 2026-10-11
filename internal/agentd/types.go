@@ -68,6 +68,8 @@ type Run struct {
 	AccountID                 string          `json:"account_id"`
 	RequestedAccountID        string          `json:"requested_account_id"`
 	Status                    string          `json:"status"`
+
+	RoutineBudget *RoutineProviderBudget `json:"routine_budget,omitempty"`
 }
 
 // requestedAccount retains the approved enrollment before Route fills AccountID.
@@ -282,8 +284,9 @@ type StartRequest struct {
 }
 
 type RunTools struct {
-	URL   string `json:"url"`
-	Token string `json:"token"`
+	URL     string `json:"url"`
+	Token   string `json:"token"`
+	Routine bool   `json:"routine,omitempty"`
 }
 
 type AdapterEvent struct {

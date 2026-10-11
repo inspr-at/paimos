@@ -11,7 +11,7 @@
 // longer answered turn plain), and with nothing on screen they are dropped.
 import { reactive } from 'vue'
 import { lookupNodeKeys } from './api.ts'
-import { onAccessChange } from './authz.ts'
+import { onAccessRevalidate } from './authz.ts'
 
 export interface TicketRef { key: string; id: string; title: string; state: string; projectId: string }
 
@@ -102,6 +102,8 @@ export function showingTicketKeys(key: string): () => void {
 export function forgetTicketKeys() { epoch++; known.clear(); pending.clear(); queued = [] }
 
 async function reaskTicketKeys() {
+  // Evict an entirely off-screen cache without changing any mounted link.
+  if (!shown.size) { forgetTicketKeys(); return }
   const keys = [...known.keys()]
   epoch++
   pending.clear()
@@ -120,7 +122,4 @@ async function reaskTicketKeys() {
   }
 }
 
-onAccessChange(change => {
-  if (change === 'reset' || !shown.size) forgetTicketKeys()
-  else void reaskTicketKeys()
-})
+onAccessRevalidate({ reset: forgetTicketKeys, refresh: () => { void reaskTicketKeys() } })

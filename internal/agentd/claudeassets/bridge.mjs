@@ -23,6 +23,7 @@ const CONTROL_INPUT_TIMEOUT_MS = 30 * 1000;
 const AEON_TOOLS = ["aeon_comment", "aeon_status", "aeon_check_criterion", "aeon_evidence",
   "aeon_request_approval", "aeon_reply", "aeon_terminal", "aeon_read", "aeon_write",
   "aeon_edit", "aeon_glob", "aeon_grep", "aeon_activity"];
+const ROUTINE_TOOLS = ["aeon_terminal", "aeon_read", "aeon_write", "aeon_edit", "aeon_glob", "aeon_grep"];
 
 function managedToolHook(allowedTools) {
   return async (input) => allowedTools.includes(input?.tool_name) ? {} : {
@@ -403,12 +404,14 @@ try {
   const toolBinding = start.tools ?? undefined;
   if (toolBinding !== undefined &&
       (typeof toolBinding?.url !== "string" || !/^http:\/\/127\.0\.0\.1:[0-9]+$/u.test(toolBinding.url) ||
-       typeof toolBinding?.token !== "string" || !/^[0-9a-f]{64}$/u.test(toolBinding.token))) {
+       typeof toolBinding?.token !== "string" || !/^[0-9a-f]{64}$/u.test(toolBinding.token) ||
+       (toolBinding.routine !== undefined && typeof toolBinding.routine !== "boolean"))) {
     throw new Error("invalid managed tool binding");
   }
   const mcpServers = toolBinding ? { aeon: { type: "http", url: toolBinding.url,
     headers: { Authorization: `Bearer ${toolBinding.token}` } } } : {};
-  const allowedTools = !verification && toolBinding ? AEON_TOOLS.map((name) => `mcp__aeon__${name}`) : [];
+  const toolInventory = toolBinding?.routine === true ? ROUTINE_TOOLS : AEON_TOOLS;
+  const allowedTools = !verification && toolBinding ? toolInventory.map((name) => `mcp__aeon__${name}`) : [];
   start.tools = undefined;
   input = new InputStream(userMessage(start.prompt));
   start.prompt = "";
@@ -475,6 +478,31 @@ const handleControlLine = (line) => {
       request = JSON.parse(line);
     } catch {
       fail();
+      return;
+    }
+    // Catalog reads reuse this already-owned SDK Query. They never submit a
+    // prompt, change settings or create an idle Claude process.
+    if (request?.method === "aeon/catalog" && Number.isSafeInteger(request.id)) {
+      try {
+        if (!sessionStarted || typeof queryHandle.supportedModels !== "function") throw new Error("unavailable");
+        const models = await queryHandle.supportedModels();
+        if (!Array.isArray(models) || models.length > 500) throw new Error("bound");
+        const projected = models.map(model => {
+          if (!validDispatchValue(model.value)) throw new Error("model");
+          const result = { value: model.value };
+          if (typeof model.displayName === "string" && model.displayName.length <= 256) result.displayName = model.displayName;
+          if (typeof model.supportsEffort === "boolean") result.supportsEffort = model.supportsEffort;
+          if (Array.isArray(model.supportedEffortLevels)) {
+            if (model.supportedEffortLevels.length > 32 || !model.supportedEffortLevels.every(level => validDispatchValue(level, 32))) throw new Error("levels");
+            result.supportedEffortLevels = model.supportedEffortLevels;
+          }
+          return result;
+        });
+        if (Buffer.byteLength(JSON.stringify(projected)) > 1024 * 1024) throw new Error("bound");
+        emit({ jsonrpc: "2.0", id: request.id, result: projected });
+      } catch {
+        emit({ jsonrpc: "2.0", id: request.id, error: { code: -32601, message: "catalog unavailable" } });
+      }
       return;
     }
     const correlationID = request?.correlation_id;

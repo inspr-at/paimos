@@ -45,14 +45,25 @@ function identityScope() {
   Vue.onScopeDispose(() => scope.dispose())
   return { ...scope, owner: Vue.computed(() => 'tenant/person') }
 }
+// AEON-1182: the routine editor and box also read the session, projects, kinds and settings.
+const session = { useSession: () => ({ identity: { principal: { id: 'person', name: 'Markus', kind: 'person' }, tenant: { id: 'tenant' } } }) }
+const projectsStore = { useProjects: () => ({ byId: () => undefined, projects: [], load: async () => {} }) }
+const switchOff = async () => ({ revision: 0, automatic_launch_enabled: false, consent_enabled: false, qualification_id: null, wait_reason: 'automatic_launch_disabled' })
+const editorModules = () => ({
+  '../../lib/access': { getMembers: vi.fn(), getProjectMembers: vi.fn() }, '../../lib/displayLanguage': { displayLanguage: () => 'en' }, '../../lib/toast': { toast: vi.fn() },
+  '../../lib/workKinds': { activeKinds: (items: unknown[]) => items }, '../../stores/projects': projectsStore, '../../stores/session': session, '../../lib/agentState': { HARNESS_LABEL: {} },
+})
+const editorApi = { getRecurrence: vi.fn(), getRoutineExecutionSettings: switchOff, getRoutineGuardrails: vi.fn(), listRoutineWorkKinds: vi.fn(), pauseRecurrence: vi.fn(), putRoutineConsent: vi.fn(), recurrenceHistory: vi.fn(), resolveRoutineRoute: vi.fn() }
+const editorAuthz = { can: () => true, myProjectRole: () => null, myWorkspaceRole: () => ({ key: 'admin' }) }
 function card(getRecurrence: (id: string) => Promise<Recurrence>, selectedId = 'source') {
   const props = Vue.reactive({ project, selectedId })
   const page = Array.from({ length: 100 }, (_, index) => definition(`first-${index}`))
   const get = vi.fn(getRecurrence)
   const state = setup<{ chosen: Vue.ComputedRef<Recurrence | undefined>; selected: Vue.Ref<string>; linkFailure?: Vue.Ref<string>; load: (older?: boolean) => void }>(source('components/recurrences/RecurringWorkCard.vue'), props, {
     vue: { ...Vue, onMounted: () => {}, onBeforeUnmount: () => {} },
-    '../../lib/api': { getRecurrence: get, listRecurrences: async (_project: string, after?: string) => ({ items: after ? [definition()] : page, next_cursor: after ? null : 'second' }) },
-    '../../lib/authz': { can: () => true, onAccessChange: () => () => {} },
+    '../../lib/api': { getRecurrence: get, listRoutines: async (filter: { after?: string }) => ({ items: filter.after ? [definition()] : page, next_cursor: filter.after ? null : 'second' }), getRoutineExecutionSettings: switchOff, putRoutineExecutionSettings: vi.fn() },
+    '../../lib/authz': { can: () => true, onAccessRevalidate: () => () => {}, myProjectRole: () => null, myWorkspaceRole: () => null },
+    '../../stores/projects': projectsStore, '../../stores/session': session,
     '../../lib/confirm': { confirmAction: vi.fn() }, '../../lib/toast': { toast: vi.fn() },
     '../../lib/useIdentityScope': { useIdentityScope: identityScope },
     '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
@@ -75,7 +86,7 @@ it('rejects a source from another project without choosing the first row', async
   const { state } = card(async () => definition('source', 'other-project'))
   await settle()
   expect(state.chosen.value).toBeUndefined()
-  expect(state.linkFailure?.value).toBe('This recurrence belongs to another project.')
+  expect(state.linkFailure?.value).toBe('This routine belongs to another project.')
 })
 
 it('drops a late source response when the selected source changes', async () => {
@@ -221,8 +232,8 @@ it('Repeat creates children of a canonical parent and siblings of a canonical le
     const sourceItem = { id: 'work-source', key: 'WORK-1', title: 'Recurring work', kind_slug: 'work', parent_id: 'existing-parent', is_leaf, work_children_count: is_leaf ? 0 : 2, fields: {}, body: '', priority: 'medium' } as ListItem
     const state = setup<{ parent: Vue.Ref<string>; parentLabel: Vue.Ref<string>; input: Vue.ComputedRef<Recurrences.RecurrenceInput> }>(source('components/recurrences/RecurrenceEditor.vue'), { project, source: sourceItem }, {
       vue: { ...Vue, onMounted: () => {}, onBeforeUnmount: Vue.onScopeDispose },
-      '../../lib/api': { createRecurrence: vi.fn(), updateRecurrence: vi.fn(), getNode: vi.fn(), previewRecurrenceDraft: async () => ({ times: [] }) },
-      '../../lib/authz': { can: () => true }, '../../lib/useIdentityScope': { useIdentityScope: identityScope }, '../../lib/recurrences': Recurrences,
+      '../../lib/api': { ...editorApi, createRecurrence: vi.fn(), updateRecurrence: vi.fn(), getNode: vi.fn(), previewRecurrenceDraft: async () => ({ times: [] }) },
+      '../../lib/authz': editorAuthz, '../../lib/useIdentityScope': { useIdentityScope: identityScope }, '../../lib/recurrences': Recurrences, ...editorModules(),
       '../../stores/workVocabulary': { useWorkVocabulary: () => ({ leaf: { name: 'Arbeitsschritt', icon: 'check' } }) }, '../../lib/workVocabulary': workVocabulary,
     })
     expect(state.parent.value).toBe(is_leaf ? 'existing-parent' : 'work-source')
@@ -240,8 +251,8 @@ it('preserves non-release triggers through edits and manual runs', async () => {
     recurrence.trigger = { kind: 'event', event, ...(event.startsWith('external.') ? { external: { principal_id: 'sender', public_key: 'public' } } : { filter: { project_ids: ['watched-project'], tag: event === 'knowledge.changed' ? 'website' : undefined } }) }
     const draft = setup<{ schedule: { start: string }; input: Vue.ComputedRef<Recurrences.RecurrenceInput> }>(source('components/recurrences/RecurrenceEditor.vue'), { project, recurrence }, {
       vue: { ...Vue, useId: () => 'event-editor', onMounted: () => {}, onBeforeUnmount: Vue.onScopeDispose },
-      '../../lib/api': { createRecurrence: vi.fn(), updateRecurrence: vi.fn(), getNode: vi.fn(), previewRecurrenceDraft: async () => ({ times: [] }) },
-      '../../lib/authz': { can: () => true }, '../../lib/useIdentityScope': { useIdentityScope: identityScope }, '../../lib/recurrences': Recurrences,
+      '../../lib/api': { ...editorApi, createRecurrence: vi.fn(), updateRecurrence: vi.fn(), getNode: vi.fn(), previewRecurrenceDraft: async () => ({ times: [] }) },
+      '../../lib/authz': editorAuthz, '../../lib/useIdentityScope': { useIdentityScope: identityScope }, '../../lib/recurrences': Recurrences, ...editorModules(),
       '../../stores/workVocabulary': { useWorkVocabulary: () => ({ leaf: { name: 'Work', icon: 'check' } }) }, '../../lib/workVocabulary': workVocabulary,
     })
     draft.schedule.start = 'hour'

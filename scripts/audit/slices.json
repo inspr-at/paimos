@@ -95,6 +95,8 @@
       "title": "Agent runtime, harnesses and runs",
       "paths": [
         "internal/agentd/**",
+        "internal/agentd/routine_budget.go",
+        "internal/agentd/routine_budget_test.go",
         "internal/agentsetup/**",
         "internal/harness/**",
         "internal/harness/lead_remove_test.go",
@@ -154,11 +156,26 @@
         "internal/agentsetup/routine_launch.go",
         "internal/agentruns/routine_launch.go",
         "internal/agentd/probe_batch.go",
+        "internal/agentd/catalog_probes.go",
+        "internal/agentd/catalog_parsers.go",
+        "internal/agentd/catalog_probes_test.go",
+        "internal/agentd/claudeassets/bridge.mjs",
+        "internal/modelregistry/harness_probes.go",
+        "internal/modelregistry/harness_probes_test.go",
+        "internal/modelreport/catalog.go",
         "internal/agentd/queue_cadence.go",
         "internal/agentd/queue_cadence_test.go",
         "internal/agentruns/queue_notifications.go",
         "internal/agentruns/queue_notifications_test.go",
-        "internal/runisolation/**"
+        "internal/runisolation/**",
+        "internal/agentd/routine_tools.go",
+        "internal/agentd/routine_tools_test.go",
+        "internal/routineexec/**",
+        "internal/harness/lead_runtime.go",
+        "internal/harness/lead_runtime_test.go",
+        "internal/agentd/lead_runtime.go",
+        "internal/agentd/lead_runtime_test.go",
+        "internal/modelregistry/routine_reads.go"
       ]
     },
     {
@@ -255,13 +272,25 @@
         "internal/questions/lock_order_test.go",
         "internal/recurrences/consent.go",
         "internal/recurrences/consent_test.go",
+        "internal/recurrences/execution_principals.go",
+        "internal/recurrences/execution_principals_test.go",
         "internal/routineguard/**",
+        "internal/routineguard/pathpolicy/path.go",
         "internal/routineguard/evaluation.go",
         "internal/routineguard/evaluation_test.go",
         "internal/routineguard/evaluation_tx_test.go",
+        "internal/routineactions/**",
         "internal/recurrences/runs.go",
         "internal/recurrences/runs_test.go",
-        "internal/routinebudget/**"
+        "internal/recurrences/templates.go",
+        "internal/recurrences/templates_test.go",
+        "internal/routinebudget/**",
+        "internal/recurrences/reads.go",
+        "internal/recurrences/consent_reads.go",
+        "internal/recurrences/reads_test.go",
+        "internal/decisiondesk/routine_consent_test.go",
+        "internal/recurrences/run_history.go",
+        "internal/recurrences/run_history_test.go"
       ]
     },
     {
@@ -332,6 +361,7 @@
         "web/src/lib/displayLanguage.ts",
         "web/tests/lead-adoption.unit.test.ts",
         "web/tests/lead-adoption.spec.ts",
+        "web/tests/access-refresh-panels.unit.test.ts",
         "web/src/stores/decisionDesk.ts",
         "web/tests/models-outdated.spec.ts"
       ],

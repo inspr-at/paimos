@@ -5,10 +5,11 @@ import ts from 'typescript'
 import * as Vue from 'vue'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import * as links from '../src/lib/ticketLinks'
+import { ticketPath } from '../src/lib/work'
 
 const mocks = vi.hoisted(() => ({ lookup: vi.fn(), access: (_change: 'reset' | 'refresh') => {} }))
 vi.mock('../src/lib/api.ts', () => ({ lookupNodeKeys: mocks.lookup }))
-vi.mock('../src/lib/authz.ts', () => ({ onAccessChange: (callback: typeof mocks.access) => { mocks.access = callback } }))
+vi.mock('../src/lib/authz.ts', () => ({ onAccessRevalidate: (actions: { reset: () => void; refresh: () => void }) => { mocks.access = change => change === 'reset' ? actions.reset() : actions.refresh(); return () => {} } }))
 
 type Node = { tag: string; text: string; props: Record<string, unknown>; children: Node[]; parent: Node | null }
 const node = (tag: string): Node => ({ tag, text: '', props: {}, children: [], parent: null })
@@ -35,6 +36,7 @@ const modules: Record<string, unknown> = {
   vue: Vue, 'vue-router': { useRouter: () => ({ push: vi.fn() }) },
   '../../lib/brand': { brand: Vue.ref({ short_name: 'AEON' }) },
   '../../lib/ticketPeek': { TICKET_PEEK: Symbol('peek') }, '../../lib/ticketLinks': links,
+  '../../lib/work': { ticketPath },
   '../../stores/projects': { useProjects: () => ({ load: async () => {}, byId: () => ({ routeKey: 'AEON' }) }) },
 }
 const compiled: { default?: Vue.Component } = {}

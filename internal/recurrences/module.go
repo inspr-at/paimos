@@ -24,6 +24,7 @@ import (
 type Module struct {
 	pool             *pgxpool.Pool
 	executionRuntime ExecutionRuntimeReader
+	actionEvaluator  ActionEvaluatorTx
 	// now is an injected database-clock substitute for deterministic tests only.
 	now     func(context.Context, pgx.Tx) (time.Time, error)
 	history []Publication
@@ -49,6 +50,10 @@ func (m *Module) WithHistory(publications []Publication) *Module {
 	return m
 }
 func (m *Module) Mount(mux *http.ServeMux) {
+	m.mountTemplates(mux)
+	mux.HandleFunc("GET /api/routine-guardrails", m.getDraftGuardrails)
+	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/runs", m.listRuns)
+	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/runs/{runId}", m.getRun)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/guardrails", m.getGuardrails)
 	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}/guardrails", m.putGuardrails)
 	mux.HandleFunc("GET /api/recurrences", m.list)
@@ -56,6 +61,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/recurrences/preview", m.previewDraft)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}", m.get)
 	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}", m.update)
+	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/execution-principals", m.listExecutionPrincipals)
 	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}/execution-consent", m.writeExecutionConsent)
 	mux.HandleFunc("DELETE /api/recurrences/{recurrenceId}", m.remove)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/history", m.listHistory)
@@ -185,38 +191,47 @@ func (m *Module) create(w http.ResponseWriter, r *http.Request) {
 		if err = validateTarget(r.Context(), tx, in, true); err != nil {
 			return err
 		}
-		next, err := nextTime(in.Trigger, now)
-		if err != nil {
-			return err
-		}
-		var id string
-		if err = tx.QueryRow(r.Context(), `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
-			return err
-		}
-		if err = saveDefinition(r.Context(), tx, p, id, in); err != nil {
-			return err
-		}
-		var scope any
-		if in.Definition != nil {
-			scope = in.Definition.Scope.Kind
-		}
-		template, _ := json.Marshal(in.Template)
-		trigger, _ := json.Marshal(in.Trigger)
-		out, err = scanRecurrence(tx.QueryRow(r.Context(), `INSERT INTO recurrences(tenant_id,project_id,parent_id,template,trigger,queue_each,overlap_policy,catch_up_policy,next_at,event_cursor,created_by_principal_id,created_at,updated_at,active_since,id,definition_scope,paused)
-   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,(SELECT coalesce(max(id),0) FROM events WHERE ($5::jsonb->>'kind'='event' AND $5::jsonb->>'event'<>'release.published') OR type='release.published'),$10,$11,$11,$11,$12,$13,$13::text IS NOT NULL) RETURNING `+recurrenceColumns, p.TenantID, in.ProjectID, in.ParentID, template, trigger, in.QueueEach, in.OverlapPolicy, in.CatchUpPolicy, next, p.ID, now, id, scope))
-		if err != nil {
-			return err
-		}
-		out.Definition = in.Definition
-		if err := m.projectExecutionPolicy(r.Context(), tx, p.TenantID, &out); err != nil {
-			return err
-		}
-		if err = saveGuardrails(r.Context(), tx, p, out); err != nil {
-			return err
-		}
-		return record(r.Context(), tx, p, out.ProjectID, "recurrence.created", nil, out)
+		out, err = m.insertRecurrenceTx(r.Context(), tx, p, in, now, "")
+		return err
 	})
 	reply(w, 201, out, m.recordGuardrailDenial(r.Context(), p, err))
+}
+
+// insertRecurrenceTx is shared by ordinary creation and explicit template apply.
+// The caller holds the tenant/tree fence and has normalized and authorized the
+// input and locked its current target. The append-only event is always last.
+func (m *Module) insertRecurrenceTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Input, now time.Time, id string) (Recurrence, error) {
+	next, err := nextTime(in.Trigger, now)
+	if err != nil {
+		return Recurrence{}, err
+	}
+	if id == "" {
+		if err = tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&id); err != nil {
+			return Recurrence{}, err
+		}
+	}
+	if err = saveDefinition(ctx, tx, p, id, in); err != nil {
+		return Recurrence{}, err
+	}
+	var scope any
+	if in.Definition != nil {
+		scope = in.Definition.Scope.Kind
+	}
+	template, _ := json.Marshal(in.Template)
+	trigger, _ := json.Marshal(in.Trigger)
+	out, err := scanRecurrence(tx.QueryRow(ctx, `INSERT INTO recurrences(tenant_id,project_id,parent_id,template,trigger,queue_each,overlap_policy,catch_up_policy,next_at,event_cursor,created_by_principal_id,created_at,updated_at,active_since,id,definition_scope,paused)
+   VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,(SELECT coalesce(max(id),0) FROM events WHERE ($5::jsonb->>'kind'='event' AND $5::jsonb->>'event'<>'release.published') OR type='release.published'),$10,$11,$11,$11,$12,$13,$13::text IS NOT NULL) RETURNING `+recurrenceColumns, p.TenantID, in.ProjectID, in.ParentID, template, trigger, in.QueueEach, in.OverlapPolicy, in.CatchUpPolicy, next, p.ID, now, id, scope))
+	if err != nil {
+		return Recurrence{}, err
+	}
+	out.Definition = in.Definition
+	if err := m.projectExecutionPolicy(ctx, tx, p.TenantID, &out); err != nil {
+		return Recurrence{}, err
+	}
+	if err = saveGuardrails(ctx, tx, p, out); err != nil {
+		return Recurrence{}, err
+	}
+	return out, record(ctx, tx, p, out.ProjectID, "recurrence.created", nil, out)
 }
 func nextTime(t Trigger, now time.Time) (*time.Time, error) {
 	if t.Kind == "event" {
@@ -230,12 +245,18 @@ func nextTime(t Trigger, now time.Time) (*time.Time, error) {
 	return &at, err
 }
 func (m *Module) get(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	p, ok := principal(w, r)
 	if !ok {
 		return
 	}
 	var out Recurrence
-	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenantReadSnapshot(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.SetLocalStatementTimeout(r.Context(), tx, 5*time.Second); err != nil {
+			return err
+		}
 		var err error
 		out, err = load(r.Context(), tx, r.PathValue("recurrenceId"), false)
 		if err != nil {
@@ -252,6 +273,9 @@ func (m *Module) get(w http.ResponseWriter, r *http.Request) {
 	reply(w, 200, out, err)
 }
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	p, ok := principal(w, r)
 	if !ok {
 		return
@@ -269,7 +293,7 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	}
 	items := []Recurrence{}
 	var next *string
-	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenantReadSnapshot(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := db.SetLocalStatementTimeout(r.Context(), tx, 5*time.Second); err != nil {
 			return err
 		}

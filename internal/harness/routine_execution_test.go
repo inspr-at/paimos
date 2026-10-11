@@ -45,6 +45,8 @@ func TestRoutineExecutionSettingsRequirePersonAndExactQualification(t *testing.T
 	}
 	if got := decode(t, f.call(f.person, "GET", path, nil, "")); got["automatic_launch_enabled"] != false || got["revision"] != float64(0) {
 		t.Fatal(got)
+	} else if got["latest_qualification"] != nil {
+		t.Fatal("unqualified project advertised accepted evidence", got)
 	}
 	request(f.agent, 0, true, uid(), 403)
 	bearer := f.person
@@ -65,6 +67,42 @@ func TestRoutineExecutionSettingsRequirePersonAndExactQualification(t *testing.T
 		t.Fatalf("routine agent recorded qualification: %v", err)
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error { return modelregistry.RecordQualificationTx(t.Context(), tx, f.person, q) })
+	// Read-only summary supports Turn on while the switch is still off. Only
+	// accepted display fields leave the server; account selectors and pins do not.
+	checkSummary := func(want string) {
+		t.Helper()
+		w := f.call(f.person, "GET", path, nil, "")
+		expect(t, w, 200)
+		got := decode(t, w)
+		summary, ok := got["latest_qualification"].(map[string]any)
+		if !ok || len(summary) != 5 || summary["id"] != want || summary["accepted_at"] == "" || summary["accepted_at"] == nil || summary["host_label"] != nil {
+			t.Fatal("incorrect redacted qualification", got)
+		}
+		if strings.Contains(w.Body.String(), q.PolicyDigest) || strings.Contains(w.Body.String(), q.OPSAttestation) || strings.Contains(w.Body.String(), "account_id") || strings.Contains(w.Body.String(), "host_mapping_digest") {
+			t.Fatal("qualification summary leaked private details")
+		}
+		if modes, ok := summary["budget_modes"].([]any); !ok || len(modes) != 1 || modes[0] != "off" {
+			t.Fatal(summary)
+		}
+		if capabilities, ok := summary["capabilities"].([]any); !ok || len(capabilities) != 1 || capabilities[0] != "routine_native_coding_v1" {
+			t.Fatal(summary)
+		}
+	}
+	checkSummary(q.ID)
+	newer := q
+	newer.ID = uid()
+	f.tx(t, f.person, func(tx pgx.Tx) error { return modelregistry.RecordQualificationTx(t.Context(), tx, f.person, newer) })
+	checkSummary(newer.ID)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE routine_execution_qualifications SET ops_attestation='' WHERE id=$1`, newer.ID)
+		return err
+	})
+	checkSummary(q.ID)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE routine_execution_qualifications SET ops_attestation=$2,revoked_at=clock_timestamp() WHERE id=$1`, newer.ID, newer.OPSAttestation)
+		return err
+	})
+	checkSummary(q.ID)
 	// Neither body fields nor bearer headers can supply acceptance.
 	w := f.call(f.person, "PUT", path, map[string]any{"expected_revision": 0, "automatic_launch_enabled": true, "qualification_id": q.ID, "ops_attestation": q.OPSAttestation}, "")
 	expect(t, w, 400)

@@ -74,7 +74,7 @@ const action = computed(() => {
     case 'pause': return { label: b.actionLabel, icon: b.state === 'starting' ? null : 'pause' as const, primary: false, disabled: !mayControl.value || !canPause(l), tip: mayControl.value ? 'Stops new work now; running workers finish their step' : 'Only its owner can pause it' }
     case 'resume': return { label: b.actionLabel, icon: 'play' as const, primary: true, disabled: !mayStart.value || !canResume(l) || !canLaunchLead(l), tip: !canLaunchLead(l) ? leadLaunchReason(l) : canResume(l) ? `Restarts the ${w.l} through the usual start checks` : `Waits until the ${w.l}’s session has stopped` }
     case 'dial': return { label: b.actionLabel, icon: 'gauge' as const, primary: false, disabled: false, tip: 'The dial and its limits on the Agents page' }
-    case 'computers': return { label: b.actionLabel, icon: 'monitor' as const, primary: true, disabled: false, tip: 'Accounts and computers on the Agents page' }
+    case 'computers': return { label: b.actionLabel, icon: 'monitor' as const, primary: true, disabled: false, tip: 'Computers in Settings' }
     default: return null
   }
 })
@@ -87,7 +87,7 @@ async function act(event: MouseEvent) {
   else if (a === 'pause' || a === 'cancel') await control('cancel')
   else if (a === 'resume') await control('resume')
   else if (a === 'dial') void router.push('/agents')
-  else if (a === 'computers') void router.push({ path: '/agents', hash: '#ac-title' })
+  else if (a === 'computers') void router.push('/settings/computers')
 }
 async function control(kind: 'cancel' | 'resume' | 'cancel-adoption') {
   const project = props.projectId, who = session.identity?.principal.id

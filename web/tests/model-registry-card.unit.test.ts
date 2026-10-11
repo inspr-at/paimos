@@ -68,7 +68,7 @@ const session = Vue.reactive({ identity: { tenant: { id: 'tenant' }, principal: 
 const modules: Record<string, unknown> = {
   vue: { ...Vue, onBeforeUnmount: () => {} },
   '../../AppIcon.vue': {}, '../../agents/HarnessMark.vue': {}, './ModelRegistryEditor.vue': {}, './ModelOutdatedSheet.vue': {},
-  '../../../lib/authz': { can: () => true, onAccessChange: () => () => {} },
+  '../../../lib/authz': { can: () => true, onAccessRevalidate: () => () => {} },
   '../../../lib/identityScope': identityScope,
   '../../../lib/toast': { toast: (message: string, options?: Toasted['options']) => { toasts.push({ message, options }) } },
   '../../../lib/workKinds': { listWorkKinds: async () => ({ items: [] }) },

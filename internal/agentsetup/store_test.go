@@ -4,9 +4,11 @@ package agentsetup
 
 import (
 	"errors"
+	"fmt"
 	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -136,6 +138,169 @@ func TestStoreRejectsLinksTraversalAndPublicState(t *testing.T) {
 	b, _ := os.ReadFile(foreign)
 	if string(b) != "preserve unrelated bytes" {
 		t.Fatal("foreign bytes changed")
+	}
+}
+
+// Risk: competing creators can fail a safe shared repository fence, while an
+// EEXIST retry must never adopt a public directory, link or non-directory.
+// The injected mkdir runs only after openat observed ENOENT; the competing
+// artifact is installed before the real mkdirat, proving that exact race.
+func TestStoreConcurrentDirectoryCreationKeepsPrivateBoundary(t *testing.T) {
+	for _, nested := range []bool{false, true} {
+		for _, kind := range []string{"private", "public", "symlink", "file", "denied"} {
+			t.Run(fmt.Sprintf("nested=%t/%s", nested, kind), func(t *testing.T) {
+				root := physicalTemp(t)
+				component := filepath.Join(root, "state")
+				path := component
+				if nested {
+					path = filepath.Join(component, "child")
+				}
+				var winner *Store
+				calls := 0
+				store, err := openDirectoryWithMkdirat(path, true, true, func(fd int, name string, mode uint32) error {
+					calls++
+					if calls != 1 || name != "state" || mode != 0700 {
+						t.Fatalf("unexpected creation: calls=%d name=%q mode=%o", calls, name, mode)
+					}
+					switch kind {
+					case "private":
+						var err error
+						winner, err = OpenStore(path, true)
+						if err != nil {
+							t.Fatal(err)
+						}
+						t.Cleanup(func() { winner.Close() })
+						if err := winner.Lock(); err != nil {
+							t.Fatal(err)
+						}
+					case "public":
+						if err := os.Mkdir(component, 0700); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.Chmod(component, 0777); err != nil {
+							t.Fatal(err)
+						}
+					case "symlink":
+						if err := os.Symlink(physicalTemp(t), component); err != nil {
+							t.Fatal(err)
+						}
+					case "file":
+						if err := os.WriteFile(component, []byte("preserve competing file"), 0600); err != nil {
+							t.Fatal(err)
+						}
+					case "denied":
+						return unix.EACCES
+					}
+					return unix.Mkdirat(fd, name, mode)
+				})
+				if store != nil {
+					t.Cleanup(func() { store.Close() })
+				}
+				if calls != 1 {
+					t.Fatalf("creation interleaving did not occur: %d", calls)
+				}
+				if kind == "private" {
+					if err != nil || store == nil {
+						t.Fatalf("private competing directory rejected: %v", err)
+					}
+					if err := store.Lock(); !errors.Is(err, ErrBusy) {
+						t.Fatalf("competing store's fence was lost: %v", err)
+					}
+					if err := store.Write("shared", []byte("same directory"), true); err != nil {
+						t.Fatal(err)
+					}
+					if raw, err := winner.Read("shared", 128); err != nil || string(raw) != "same directory" {
+						t.Fatalf("stores do not share the validated directory: %q %v", raw, err)
+					}
+					return
+				}
+				context := "open directory " + component
+				if kind == "public" {
+					context = "validate directory " + component
+				} else if kind == "denied" {
+					context = "create directory " + component
+				}
+				if store != nil || !errors.Is(err, ErrUnsafePath) || errors.Is(err, unix.EEXIST) || !strings.Contains(err.Error(), context) {
+					t.Fatalf("wrong unsafe competitor rejection: %v", err)
+				}
+				if kind == "denied" && !errors.Is(err, unix.EACCES) {
+					t.Fatalf("creation error was lost: %v", err)
+				}
+				if kind == "public" {
+					info, err := os.Lstat(component)
+					if err != nil || info.Mode().Perm() != 0777 {
+						t.Fatalf("public competitor was repaired: %v", err)
+					}
+				}
+				if kind == "file" {
+					if raw, err := os.ReadFile(component); err != nil || string(raw) != "preserve competing file" {
+						t.Fatalf("competing file was changed: %q %v", raw, err)
+					}
+				}
+			})
+		}
+	}
+}
+
+// Two daemons or routines sharing a repository create the same fence directory.
+// The loser of the mkdir race opens the winner's valid private entry; an entry
+// OpenStore would never create is still refused by validation, not adopted.
+func TestStoreCreateAdoptsOnlyValidConcurrentlyCreatedDirectory(t *testing.T) {
+	root := physicalTemp(t)
+	raced := 0
+	rival := func(fd int, name string, mode uint32) error {
+		raced++
+		if err := unix.Mkdirat(fd, name, 0700); err != nil {
+			return err
+		}
+		return unix.Mkdirat(fd, name, mode)
+	}
+	path := filepath.Join(root, "repository", "aeon-routine-worktrees")
+	s, err := openDirectoryWithMkdirat(path, true, true, rival)
+	if err != nil {
+		t.Fatalf("lost mkdir race refused a valid private directory: %v", err)
+	}
+	defer s.Close()
+	if raced != 2 || s.Path() != path {
+		t.Fatalf("race not exercised for every missing component: %d", raced)
+	}
+	if err := s.Write("fence", []byte("owned"), false); err != nil {
+		t.Fatal(err)
+	}
+	for name, plant := range map[string]func(int, string) error{
+		"public": func(fd int, name string) error {
+			if err := unix.Mkdirat(fd, name, 0700); err != nil {
+				return err
+			}
+			return unix.Fchmodat(fd, name, 0755, 0)
+		},
+		"symlink": func(fd int, name string) error { return unix.Symlinkat(path, fd, name) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			target := filepath.Join(root, name)
+			planted := func(fd int, part string, mode uint32) error {
+				if err := plant(fd, part); err != nil {
+					return err
+				}
+				return unix.Mkdirat(fd, part, mode)
+			}
+			s, err := openDirectoryWithMkdirat(target, true, true, planted)
+			if s != nil {
+				s.Close()
+				t.Fatal("rival entry adopted")
+			}
+			reason := map[string]string{"public": "validate directory ", "symlink": "open directory "}[name] + target
+			if !errors.Is(err, ErrUnsafePath) || strings.Contains(err.Error(), "create directory") || !strings.Contains(err.Error(), reason) {
+				t.Fatalf("rival entry refused for the wrong reason: %v", err)
+			}
+			var st unix.Stat_t
+			if err := unix.Lstat(target, &st); err != nil {
+				t.Fatal(err)
+			}
+			if kind := st.Mode & unix.S_IFMT; name == "public" && (kind != unix.S_IFDIR || st.Mode&0777 != 0755) || name == "symlink" && kind != unix.S_IFLNK {
+				t.Fatal("rival entry repaired or replaced")
+			}
+		})
 	}
 }
 

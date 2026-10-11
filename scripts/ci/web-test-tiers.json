@@ -70,6 +70,60 @@
   "postGateCases": [
     "browser:tests/account-use-matrix.spec.ts:screenshots of the matrix, light and dark"
     ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: Remove and End now leave “Agents may use it” and everything below in place"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: a floor save and its Undo move no control in the panel"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: the design's checks hold on the built page"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: Remove and End now leave “Agents may use it” and everything below in place"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: the design's checks hold on the built page"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: Remove and End now leave “Agents may use it” and everything below in place"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: the design's checks hold on the built page"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: Remove and End now leave “Agents may use it” and everything below in place"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: the design's checks hold on the built page"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: Remove and End now leave “Agents may use it” and everything below in place"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: the design's checks hold on the built page"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: Remove and End now leave “Agents may use it” and everything below in place"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: a floor save and its Undo move no control in the panel"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: the design's checks hold on the built page"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:End now and Remove keep their rows while the reads after them are still out"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:a plan that could not refresh says so, and its bars stop promising room after two minutes"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:a reading nearly two minutes old stops promising room when the server stops trusting it"
+    ,
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
     "browser:tests/aeon-1028-projheader.spec.ts:collapsed header: the menu never scrolls › keeps sort actions and the other blocks still when a sort key is added or removed (±0.5px)"
@@ -125,6 +179,22 @@
     "browser:tests/aeon-1062-qapolish.spec.ts:chat header light 390: actions wrap without overlap, stay put, and Stop reads in the theme"
     ,
     "browser:tests/aeon-1062-qapolish.spec.ts:chat header light 620: actions wrap without overlap, stay put, and Stop reads in the theme"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:Outline on a phone: Expand all from the Display sheet closes it and returns to Filters"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px dark"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px light"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px dark"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px light"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px dark"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px light"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:with the header folded on a phone, the link opens the Display menu beside New"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
@@ -357,6 +427,30 @@
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 390"
     ,
     "browser:tests/business.spec.ts:the overview includes open periods older than a year in its waiting count"
+    ,
+    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1024 dark"
+    ,
+    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1024 light"
+    ,
+    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1440 dark"
+    ,
+    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 1440 light"
+    ,
+    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 390 dark"
+    ,
+    "browser:tests/dead-screens.spec.ts:Check computers reaches Computers settings at 390 light"
+    ,
+    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1024 dark"
+    ,
+    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1024 light"
+    ,
+    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1440 dark"
+    ,
+    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 1440 light"
+    ,
+    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 390 dark"
+    ,
+    "browser:tests/dead-screens.spec.ts:approval evidence reaches the Decision Desk at 390 light"
     ,
     "browser:tests/delivery-polish.spec.ts:Delivery screenshots at 1024 dark"
     ,
@@ -916,6 +1010,20 @@
     ,
     "browser:tests/role-picker-layout.spec.ts:touch and keyboard expose complete role names, descriptions and refusal reasons"
     ,
+    "browser:tests/routines-editor.spec.ts:an agent routine is created paused, then let run as the picked agent, with every control anchored"
+    ,
+    "browser:tests/routines-editor.spec.ts:closing after a failed consent says the routine is not paused, never “Kept paused”"
+    ,
+    "browser:tests/routines-editor.spec.ts:someone else’s routine says who decides, a stale save keeps unsaved text, and revocation closes the sheet"
+    ,
+    "browser:tests/routines-editor.spec.ts:the Routines box and editor render in dark at 1440px"
+    ,
+    "browser:tests/routines-editor.spec.ts:the Routines box and editor render in light at 390px"
+    ,
+    "browser:tests/routines-editor.spec.ts:the phone sheet scrolls under a pinned footer, and switching who moves nothing"
+    ,
+    "browser:tests/routines-editor.spec.ts:your routines need the right only in their own project, and losing it there closes the sheet"
+    ,
     "browser:tests/service-tier.spec.ts:1440: compact Default tier control keeps its box through confirmation and Undo"
     ,
     "browser:tests/service-tier.spec.ts:320: phone Change tier menu opens and restores its actual trigger"
@@ -940,9 +1048,11 @@
     ,
     "browser:tests/settings-account-pacing.spec.ts:Capacity and load: work days, nights and the editors, with controls that stay put"
     ,
-    "browser:tests/settings-account-pacing.spec.ts:a failed Sprint is said as a failure, not as saved"
+    "browser:tests/settings-account-pacing.spec.ts:a failed End now is said as a failure, and the hold stays"
     ,
-    "browser:tests/settings-account-pacing.spec.ts:a menu opened before the pool changed acts on nothing and says so"
+    "browser:tests/settings-account-pacing.spec.ts:an older Hold shows until it ends; End now ends it with the same write"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:no menu offers Sprint, Hold or Back to the plan, not even while an older Sprint runs"
     ,
     "browser:tests/settings-account-pacing.spec.ts:people without account management get no account menu and read-only pacing"
     ,
@@ -979,6 +1089,12 @@
     "browser:tests/settings-account-parts.spec.ts:the one-time plan: Needs you only in its own part, and the nav counts match"
     ,
     "browser:tests/settings-account-parts.spec.ts:without a paired computer Accounts offers Connect a computer where Add an account would be"
+    ,
+    "browser:tests/settings-accounts.spec.ts:an API key shows money, and no account offers a limit by hand"
+    ,
+    "browser:tests/settings-accounts.spec.ts:an older rule shows as Set by you; Remove asks in place and removes it for good"
+    ,
+    "browser:tests/settings-accounts.spec.ts:old windows set by hand show as Set by you with Remove, and never repeat"
     ,
     "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
     ,
@@ -1479,6 +1595,18 @@
     "vitest:tests/role-picker.unit.test.ts:modified Enter (metaKey) stays native"
     ,
     "vitest:tests/role-picker.unit.test.ts:modified Enter (shiftKey) stays native"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:routine wait reasons > derives one row state: never-consented waits, a consented pause stops, ticket-only stays scheduled"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:routine wait reasons > says every server wait reason in words, naming the owner and the project"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:save, then consent > consents to the revision the resume returned; personal routines run as their owner"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:save, then consent > saves an assignment the server accepts: consistent runtime and no ceilings when off"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:stale and late answers > applies an answer only to the open record at a revision at least the one shown"
+    ,
+    "vitest:tests/routines-editor.unit.test.ts:stale and late answers > names exactly the fields the server changed since the shown revision"
     ,
     "vitest:tests/row-store.unit.test.ts:RowStore: revisions only move forward > an authoritative GET clears withheld provenance even at the same revision and while editing"
     ,
@@ -4900,6 +5028,60 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the wide status scan encounters Away beside Verify again","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"End now and Remove keep their rows while the reads after them are still out","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"a plan that could not refresh says so, and its bars stop promising room after two minutes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"a reading nearly two minutes old stops promising room when the server stops trusting it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/activity-history.spec.ts","name":"automatic history is Aeon, and a person named System stays a person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/activity-history.spec.ts","name":"history screenshots at 390 and 1600, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -5085,6 +5267,22 @@
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"Outline on a phone: Expand all from the Display sheet closes it and returns to Filters","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"with the header folded on a phone, the link opens the Display menu beside New","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -5453,6 +5651,8 @@
     {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"large budget and per-client delivery 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"pending budget saves preserve button positions and submit only once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"AEON-1195: focus replaces the proposal state and approval commit in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"a manager retries a source that could not be read","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6833,6 +7033,30 @@
     {"kind":"browser","file":"tests/crm.spec.ts","name":"the customer page: number, primary contact, contacts, related work and an honest CRM state","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/crm.spec.ts","name":"the list: numbers as the server writes them, search, sort, filters and the keyboard","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"Check computers reaches Computers settings at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/dead-screens.spec.ts","name":"approval evidence reaches the Decision Desk at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/dead-sessions.spec.ts","name":"Lost contact is an ended row with a bin; one click removes, Undo brings it back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -8890,6 +9114,8 @@
     ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"AEON-1195: focus cycles retain the same lead DOM rows, order and controls during delayed refresh","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -9397,6 +9623,8 @@
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"an unavailable queue shows an honest error and Retry without moving its controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"attention keys select a range, preserve native field shortcuts, skip inapplicable Apply and retain confirmed Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"attention row links and both open actions use imported and native canonical ticket routes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply has no glow and keeps visible keyboard focus at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10358,12 +10586,6 @@
     ,
     {"kind":"browser","file":"tests/quota-warnings.spec.ts","name":"quota thresholds retain controls through edits, errors and save at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"collaboration status contrast is AA in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"collaboration status contrast is AA in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"collaborator list combines tabs, labels idle people and clears expired sessions","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"dirty reload preserves local text, page reload recovers it, and a lost ACK replays after reconnect","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"loading cannot save and a late reload never replaces an edit made while it waited","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10373,8 +10595,6 @@
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"revision watch backs off after outages and rechecks immediately on focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"same-person tabs keep distinct mutation sessions after window.open clones storage","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"save status keeps remote updates separate and offers keyboard-accessible actions","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/quote-collaboration.spec.ts","name":"two browser contexts preserve both concurrent edits through CAS and reviewed merge","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10994,6 +11214,8 @@
     ,
     {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"ppm 390 version: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/release-ticket-links.spec.ts","name":"AEON-1195: focus during ticket lookup keeps the panel controls and resolves the ticket","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/release-ticket-links.spec.ts","name":"a lost project access takes the link and the open ticket away at the next access check","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-ticket-links.spec.ts","name":"a modified click keeps the link: the ticket opens in a new tab, not the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11291,6 +11513,20 @@
     {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"role choices use the screen and stay still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/role-picker-layout.spec.ts","name":"touch and keyboard expose complete role names, descriptions and refusal reasons","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"an agent routine is created paused, then let run as the picked agent, with every control anchored","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"closing after a failed consent says the routine is not paused, never “Kept paused”","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"someone else’s routine says who decides, a stale save keeps unsaved text, and revocation closes the sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the Routines box and editor render in dark at 1440px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the Routines box and editor render in light at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the phone sheet scrolls under a pinned footer, and switching who moves nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"your routines need the right only in their own project, and losing it there closes the sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/row-actions.spec.ts","name":"PDF from the list opens the quote on its page and prints it once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11762,15 +11998,15 @@
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Remove account… says what stays untouched, and only Remove account removes it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a failed Sprint is said as a failure, not as saved","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a failed End now is said as a failure, and the hold stays","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a menu opened before the pool changed acts on nothing and says so","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"an older Hold shows until it ends; End now ends it with the same write","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"no menu offers Sprint, Hold or Back to the plan, not even while an older Sprint runs","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"people without account management get no account menu and read-only pacing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"phone: the editor is a full-height sheet and nothing scrolls sideways","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the account menu sprints, holds until the time it showed, and goes back to the plan","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the plan card for an existing schedule: Turn off keeps nothing for you","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11812,9 +12048,9 @@
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"accounts are a list by vendor with how each is read, and no allowance form","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"accounts without priced run usage never offer dollar limits","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an API key shows money, and no account offers a limit by hand","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an API key shows money, and a dollar limit reads back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an older rule shows as Set by you; Remove asks in place and removes it for good","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an unpooled account joins every existing member and can leave them sharing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11822,7 +12058,7 @@
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"names that clash ask to be named, and a rename changes only the name","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"old limits set by hand show as Set by you, with Make this repeat and Remove","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"old windows set by hand show as Set by you with Remove, and never repeat","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"owner login usage switch stays put and failed saves preserve consent","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -11851,8 +12087,6 @@
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"sheet: drain and pool confirmations keep Tab and Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"side: drain and pool confirmations keep Tab and Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"the Advanced sentence round-trips and caps on top of the plan","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"without account.manage the list is read-only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13242,23 +13476,15 @@
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"the last active owner comes from the server, never from role keys","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/account-limits.test.ts","name":"a bad amount names the one thing to fix","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/account-limits.test.ts","name":"Remove and rename use the account routes; nothing creates or repeats a limit","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/account-limits.test.ts","name":"how an account is read, and its windows and last readings","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/account-limits.test.ts","name":"limits read as a person says them","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/account-limits.test.ts","name":"limits set by hand before the sentence show while they still apply","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/account-limits.test.ts","name":"names that repeat within one vendor ask to be named","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/account-limits.test.ts","name":"the sentence binds before the plan only when it leaves less for today","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/account-limits.test.ts","name":"the sentence round-trips through its draft for every unit","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/account-limits.test.ts","name":"the sentence, Remove, Make this repeat and rename use the account routes","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/account-limits.test.ts","name":"the unit menu offers what the account can count, likeliest first","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/account-limits.test.ts","name":"older limits read as a person says them","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/account-link.test.ts","name":"account code accepts the one-line format without URL or command parsing","tier":"GATED-FULL"}
     ,
@@ -14452,6 +14678,28 @@
     ,
     {"kind":"node","file":"tests/queue-filter.test.ts","name":"Queued reads all projection IDs in batches of 200 and pages without truncating membership","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"Boost today sets today’s limit and names the tick","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"Keep for you binds before today’s limit while you work","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"a Hold from before or the switch off leaves the account alone","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"a plan that could not refresh goes stale on time and claims no room","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"a reading nearly two minutes old goes stale when the server stops trusting it, not two minutes after the plan arrived","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"a used-up older limit stops agents in any unit, runs, tokens or money as much as percent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"an older limit set by hand binds when it leaves less than today’s limit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"at the limit: no room, and new work follows the harness’s own choice","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"no reading: a dashed track and “Quota not reported”, never a guess","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"room: agents may use the points up to today’s limit, and the tick sits there","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/quota-bar.test.ts","name":"the floor binds when today’s limit is capped at it, and a low warning says so first","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/quotaWarnings.test.ts","name":"quota thresholds accept whole percentages only, with urgent below early","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/relations.test.ts","name":"a relation reads from the open ticket: outgoing, incoming, and relates both ways","tier":"GATED-FULL"}
@@ -14802,8 +15050,6 @@
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"5000 deterministic colours satisfy ink, line and fill-label contrast in both modes","tier":"ESSENTIAL"}
     ,
-    {"kind":"node","file":"tests/theme-colours.test.ts","name":"AEON-644: the filled approval count badge uses contrast-safe waiting ink in both modes","tier":"ESSENTIAL"}
-    ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"OKLCH round trips sRGB and maps excessive chroma without changing hue","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"Porcelain generated accent blocks cannot drift from the engine in CI","tier":"ESSENTIAL"}
@@ -14932,6 +15178,10 @@
     ,
     {"kind":"node","file":"tests/work-aggregates.test.ts","name":"weighted progress rounded by the server to 100% retains ETA and staleness in every mode","tier":"NIGHTLY"}
     ,
+    {"kind":"node","file":"tests/work-icons.test.ts","name":"picker search matches names first, then search words, and keeps list order on ties","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/work-icons.test.ts","name":"the web offers the shared icon list, and AppIcon draws every icon in it","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/work-queue.test.ts","name":"adapts Part A ticket projection without retaining an unadmitted run or inventing capacity","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/work-queue.test.ts","name":"canonical work leaves retain release membership, cadence, ETA and queue predictions","tier":"GATED-FULL"}
@@ -14999,6 +15249,14 @@
     {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"drops a stale key read and keeps the last keys when the newest read fails","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"refreshes the shared key cache when access settles after a key change","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/access-refresh-panels.unit.test.ts","name":"AEON-1195: focus during a held ticket-key lookup retries it and never reports a false missing ticket","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/access-refresh-panels.unit.test.ts","name":"AEON-1195: proposal refresh replaces state and approval head, removes server entries and retains only unlisted local upserts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/access-revalidate.unit.test.ts","name":"AEON-1195: access listeners use the shared boundary and cannot clear state in their refresh callback","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/access-revalidate.unit.test.ts","name":"AEON-1195: every audited store retains rows through refresh and fences delayed reads after sign-out, person switch and 401","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > accepts percent readings and structured first-run waits without inventing headroom","tier":"GATED-FULL"}
     ,
@@ -15418,18 +15676,6 @@
     ,
     {"kind":"vitest","file":"tests/appearance-theme.unit.test.ts","name":"reset invalidates pending reads and the shared editor before another sign-in","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"a failed call returns the card to pending, actionable, and passes the error on","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"moves pending → confirming → success → collapsing → collapsed, with success only after the server","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"says the outcome with the human-readable scope","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"shows the server’s decision, not the one asked for, and ignores a second submit in flight","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"stop cancels the timers of a card that is still showing","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/approval-settle.unit.test.ts","name":"with reduced motion the success state is replaced without a fold","tier":"GATED-FULL"}
-    ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: a mutation between rows and digest retries the entire snapshot","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
@@ -15444,6 +15690,8 @@
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"binds undo from undo_of on the resolution-type page","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"builds canonical ticket links for imported, native and escaped project keys","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"builds capped groups from the list cursor and stops at the page cap","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"fills kind totals from the list counts and project names from facets","tier":"ESSENTIAL"}
@@ -15451,6 +15699,8 @@
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"ignores failed or incomplete release receipts","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"keeps server order across a live cursor and sorts the loaded window only when the cursor ends","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"opens attention rows in the same tab and a new tab with their canonical project route key","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"orders every group by open flags and every row by kind then newest without mutating the visit","tier":"ESSENTIAL"}
     ,
@@ -15588,6 +15838,14 @@
     ,
     {"kind":"vitest","file":"tests/crm-undo-receipt.unit.test.ts","name":"S9-002: missing receipts and receipts from a previous sign-in refuse Undo","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"Check computers opens the real Computers settings section without the retired anchor","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"approval evidence opens the canonical Decision Desk route","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"both production roots have no imports of the named retired UI and retain live glob and collaboration dependencies","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/dead-screens.unit.test.ts","name":"retired Business and compatibility URLs still resolve to their canonical owners, and external account links remain","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"connection chores preserve consent scope, exact expiry and readable history","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-cutover.unit.test.ts","name":"drops a previous person read even if transport ignores abort, and resets the count synchronously","tier":"ESSENTIAL"}
@@ -15605,6 +15863,8 @@
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"retains outcome failure, retryability, exact effect references and required review independently of a handed-off answer","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix2.unit.test.ts","name":"uses server permission reasons and refuses doctrine without a confirmed mapping","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"allows routine consent link-outs only for the three approved settings paths","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/decision-desk-fix3.unit.test.ts","name":"hydrates and approves a first tier request with native revision zero","tier":"ESSENTIAL"}
     ,
@@ -15883,6 +16143,10 @@
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"family eligibility comes from the server; empty allowlists never save and failed writes keep the draft","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"the paused step and configured check progress are shown without inventing a completed step","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"only the Display menu mounts the display editors","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"the Filters sheet filters and links to the Display menu instead of holding display settings","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"has no app locale switches outside the shared helper","tier":"ESSENTIAL"}
     ,
@@ -16602,18 +16866,6 @@
     ,
     {"kind":"vitest","file":"tests/model-estimates.unit.test.ts","name":"model picker history > shows nothing for insufficient or invalid history","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/model-prefs-editor.unit.test.ts","name":"captures the row, project and revision; saves one row optimistically and rolls back a rejected write","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs-editor.unit.test.ts","name":"drops a held load and held mutation when its person or project context is disposed","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs-editor.unit.test.ts","name":"loads preference evidence with one request and no independent review ladder","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs-editor.unit.test.ts","name":"preserves section locks on provider changes and snapshots inherited residency when locking","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs-editor.unit.test.ts","name":"refreshes a revision conflict without claiming that the write succeeded","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/model-prefs-editor.unit.test.ts","name":"reports a successful write followed by failed refresh and prevents further edits","tier":"GATED-FULL"}
-    ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > never removes system kinds and scopes add and project-only kinds correctly","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > supports freeze, tighten-only and the approved warn mode under locks","tier":"GATED-FULL"}
@@ -16708,15 +16960,11 @@
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > stops the next request when the captured person or workspace is gone","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"binds every legacy person write to the captured canonical person","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"legacy refusal 409 gives a sentence and preserves the HTTP status","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"legacy refusal 428 gives a sentence and preserves the HTTP status","tier":"ESSENTIAL"}
-    ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"preserves project, kind and ticket context when entry points navigate to Models","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the account reset switch discards a held save after switching records and keeps failures honest","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the floor saves on change with an Undo bound to the record it was made on","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"orders and locks > keeps a locked line and a fallback the resolved list omitted","tier":"ESSENTIAL"}
     ,
@@ -17269,6 +17517,20 @@
     {"kind":"vitest","file":"tests/role-picker.unit.test.ts","name":"modified Enter (metaKey) stays native","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/role-picker.unit.test.ts","name":"modified Enter (shiftKey) stays native","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"routine wait reasons > derives one row state: never-consented waits, a consented pause stops, ticket-only stays scheduled","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"routine wait reasons > says every server wait reason in words, naming the owner and the project","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"save, then consent > consents to the revision the resume returned; personal routines run as their owner","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"save, then consent > saves an assignment the server accepts: consistent runtime and no ceilings when off","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"stale and late answers > applies an answer only to the open record at a revision at least the one shown","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"stale and late answers > names exactly the fields the server changed since the shown revision","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"today’s route > reads as the Models page does: registry name and harness label, never a model or profile id","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/row-actions.unit.test.ts","name":"customer row actions > offers open, a new quote, the number and archive","tier":"GATED-FULL"}
     ,
@@ -20866,7 +21128,7 @@
     ,
     {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"serializes a deferred Reload with Save and leaves the saved revision visible","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"the icon picker shows every icon with its name and chooses one","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"the icon picker lists every icon after Default, finds them by word and chooses one","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/workspace-activity.unit.test.ts","name":"drops another person’s history and binds every delayed Undo result to the exact displayed event, ticket and revision","tier":"GATED-FULL"}
   ]
