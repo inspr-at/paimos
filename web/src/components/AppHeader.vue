@@ -28,6 +28,8 @@ import BizIcon from './business/BizIcon.vue'
 import CommandPalette from './CommandPalette.vue'
 import AccountMenu from './header/AccountMenu.vue'
 import AppMenu from './header/AppMenu.vue'
+import DeskPreview from './header/DeskPreview.vue'
+import HeaderMenu from './header/HeaderMenu.vue'
 import HeaderDensitySwitch from './work/HeaderDensitySwitch.vue'
 import { projectSection } from './work/projectNavigation'
 import { headerShortcut } from '../lib/projectHeader'
@@ -74,9 +76,11 @@ const allTickets = computed(() => route.path === '/tickets')
 const ticketScope = computed(() => typeof route.query.project_id === 'string' ? projects.byId(route.query.project_id) : undefined)
 const allKnowledge = computed(() => route.path === '/knowledge')
 const pageTitle = computed(() => !activePlace.value && !route.path.startsWith('/settings') && route.path !== '/signin' ? String(route.meta.title ?? '') : '')
-// The three places, in order of use; the active one is where this page lives.
+// The places, the Decision Desk last; the active one is where this page lives.
 // The breadcrumb continues from it: Projects / PHAROS Pharos / PHAROS-11.
 const places = computed(() => visiblePlaces({ signedIn: !!session.identity, business: business.placeOpen }))
+// AEON-1214: for people the Desk is a split place; its chevron previews the Desk.
+const deskPreview = computed(() => session.identity?.principal.kind === 'person')
 // The places and the trail appear together once it is known whether Business is one
 // of the places (read, or remembered from this browser's last visit), so the trail
 // never slides sideways when Business turns up a moment after the first paint.
@@ -96,6 +100,8 @@ const businessCrumbs = computed(() => {
 const profilesPage = computed(() => route.path.startsWith('/settings/business/profiles'))
 const settingsSection = computed(() => route.path.startsWith('/settings') ? SETTINGS_SECTIONS.find(section => section.id === (profilesPage.value ? 'business' : sectionOf(route.params.section))) ?? null : null)
 const placeLabel = (id: PlaceId) => id === 'desk' ? `Decision Desk, ${desk.count === null ? 'count unavailable' : `${desk.count} open`}` : undefined
+const deskTip = computed(() => `${desk.error || (desk.count === null ? 'Reading Decision Desk' : `${desk.count} open in Decision Desk`)} · g then d`)
+const deskBadge = computed(() => desk.count === null ? '?' : desk.count > 99 ? '99+' : String(desk.count))
 
 watch(command, value => { if (value?.command.name === 'palette') { consume(); palette.value?.open() } })
 function typing(target: EventTarget | null) {
@@ -182,63 +188,77 @@ watch(() => session.identity?.principal.id, id => {
   void agents.loadNeeds(true)
   void business.loadPlugins(true)
 }, { immediate: true })
-// Phones: the moon steps aside only when the breadcrumb's page (a ticket key) would
-// otherwise clip, and comes back as soon as the free room holds it (AEON-312). The
-// decision is measured, never guessed from the number of places; its quick toggle
-// then leads the avatar sheet. Room within a tenth of a pixel counts as enough, so
-// subpixel noise never keeps it away; should its return clip the key anyway, it
-// stays away at that width until the width, the page or the fonts change.
+// Phones: when the breadcrumb's page (a ticket key) would otherwise clip, the
+// Desk preview's chevron steps aside first, then the moon (AEON-312, AEON-1214);
+// they come back, the moon first, as soon as the free room holds them. The
+// decision is measured, never guessed from the number of places: each step is
+// tried and measured before paint. The moon's quick toggle then leads the avatar
+// sheet; the Desk itself stays one tap away on its place. Half a pixel of
+// subpixel noise never sends either away, and neither returns into less room
+// than it needs, so the header never toggles at the same width.
 const header = ref<HTMLElement>()
-const moonAway = ref(false)
+const steps = computed(() => deskPreview.value ? ['desk', 'moon'] : ['moon'])
+const awaySteps = ref(0)
+const away = computed(() => steps.value.slice(0, awaySteps.value).join(' ') || undefined)
 const narrow = window.matchMedia('(max-width: 600px)')
-let returnedAt = -1
-let heldAt = -1
-function fitMoon() {
-  const el = header.value
-  if (!el || !narrow.matches) { moonAway.value = false; return }
+// How far the header's row runs past its end padding, or its page past the trail.
+function overflow(el: HTMLElement) {
   const crumb = el.querySelector<HTMLElement>('.crumbs > .crumb.current')
   const trail = el.querySelector<HTMLElement>('.crumbs')
-  const overflow = Math.max(el.scrollWidth - el.clientWidth, trail ? trail.scrollWidth - trail.clientWidth : 0, crumb ? crumb.scrollWidth - crumb.clientWidth : 0)
-  const width = el.clientWidth
-  if (!moonAway.value) {
-    if (overflow > 0.5) { moonAway.value = true; if (returnedAt === width) heldAt = width }
-    return
+  const end = el.getBoundingClientRect().right - (parseFloat(getComputedStyle(el).paddingRight) || 0)
+  const reach = Math.max(0, ...[...el.children].map(child => child.getBoundingClientRect().right))
+  return Math.max(reach - end, el.scrollWidth - el.clientWidth, trail ? trail.scrollWidth - trail.clientWidth : 0, crumb ? crumb.scrollWidth - crumb.clientWidth : 0)
+}
+function fitHeader() {
+  const el = header.value
+  if (!el) return
+  const order = steps.value
+  const show = (n: number) => { const value = order.slice(0, n).join(' '); if (value) el.dataset.away = value; else delete el.dataset.away }
+  if (!narrow.matches) { show(0); awaySteps.value = 0; return }
+  const over = (n: number) => { show(n); return overflow(el) }
+  let n = Math.min(awaySteps.value, order.length)
+  if (over(n) > 0.5) { while (n < order.length && over(++n) > 0.5) { /* the next one steps aside too */ } }
+  else {
+    // Coming back needs the free room for its 44 px (the moon also its gap), within
+    // a tenth of a pixel: a crumb that would shrink by less never shows as overflow.
+    const spacer = el.querySelector<HTMLElement>('.spacer'), gap = parseFloat(getComputedStyle(el).columnGap) || 0
+    while (n > 0 && spacer && spacer.getBoundingClientRect().width - Math.max(0, overflow(el)) >= 44 + (order[n - 1] === 'moon' ? gap : 0) - 0.1) {
+      if (over(n - 1) > 0.5) break
+      n--
+    }
   }
-  if (heldAt === width) return
-  const spacer = el.querySelector<HTMLElement>('.spacer')
-  const gap = parseFloat(getComputedStyle(el).columnGap) || 0
-  if (spacer && spacer.getBoundingClientRect().width - Math.max(0, overflow) >= 44 + gap - 0.1) { moonAway.value = false; returnedAt = width }
+  show(n)
+  awaySteps.value = n
 }
 let fitFrame = 0
 function refit() {
   cancelAnimationFrame(fitFrame)
-  // Fit the updated navigation before paint. Deferring the first measurement
-  // lets a newly rendered ticket key clip while the moon still takes its room.
-  fitMoon()
-  fitFrame = requestAnimationFrame(fitMoon)
+  // Fit the updated navigation before paint, and once more after it: a newly
+  // rendered ticket key may only reach its width in the next frame.
+  fitHeader()
+  fitFrame = requestAnimationFrame(fitHeader)
 }
-function remeasure() { heldAt = -1; refit() }
 const resized = new ResizeObserver(refit)
 const crumbsChanged = new MutationObserver(refit)
 // A web font swapping in changes the room without resizing the header.
 const fonts = 'fonts' in document ? document.fonts : undefined
-watch([() => route.fullPath, () => places.value.length, navReady], () => { heldAt = -1; refit() }, { flush: 'post' })
+watch([() => route.fullPath, () => places.value.length, navReady, deskPreview], refit, { flush: 'post' })
 onMounted(() => {
   if (header.value) { resized.observe(header.value); crumbsChanged.observe(header.value, { childList: true, subtree: true, characterData: true }) }
-  narrow.addEventListener('change', remeasure)
-  fonts?.addEventListener('loadingdone', remeasure)
-  void fonts?.ready.then(remeasure)
+  narrow.addEventListener('change', refit)
+  fonts?.addEventListener('loadingdone', refit)
+  void fonts?.ready.then(refit)
   refit()
   window.addEventListener('keydown', headerKeys, true); window.addEventListener('keydown', shortcut, true); window.addEventListener('keydown', placeKeys, true)
   window.addEventListener('pointerdown', chordPointer, true); window.addEventListener('focusin', chordFocus, true)
   needsPoll.start()
   doctrinePoller.start()
 })
-onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', headerKeys, true); window.removeEventListener('keydown', shortcut, true); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop(); doctrinePoller.stop() })
+onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', refit); fonts?.removeEventListener('loadingdone', refit); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', headerKeys, true); window.removeEventListener('keydown', shortcut, true); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop(); doctrinePoller.stop() })
 </script>
 
 <template>
-  <header ref="header" class="app-header">
+  <header ref="header" class="app-header" :data-away="away">
     <RouterLink class="lockup" to="/" :aria-label="`${lockupName} home`" :class="{ compact: !!projectKey || !!pageTitle || !!settingsSection || businessCrumbs.length > 0, tenant: !!tenantMark, 'has-logo': !!tenantMark?.logo, squarish: !!tenantMark?.logo && tenantMark.logo.width <= tenantMark.logo.height * 1.5 }">
       <template v-if="tenantMark">
         <span v-if="tenantMark.logo" class="tenant-logo" :class="{ plate: tenantMark.plate }">
@@ -252,16 +272,33 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
       </template>
     </RouterLink>
     <nav v-if="places.length && !fatal && navReady" class="places" aria-label="Places">
-      <RouterLink
-        v-for="place in places" :key="place.id" :to="place.to" class="place" :class="{ active: activePlace === place.id }"
-        :aria-current="activePlace === place.id ? (atPlaceRoot ? 'page' : 'true') : undefined" :aria-label="placeLabel(place.id)" :data-place="place.id"
-        :data-tip="place.id === 'desk' ? `${desk.error || (desk.count === null ? 'Reading Decision Desk' : `${desk.count} open in Decision Desk`)} · g then d` : `g then ${place.key}`"
-      >
-        <BizIcon v-if="place.id === 'business'" name="briefcase" :size="16" />
-        <AppIcon v-else :name="place.id === 'agents' ? 'agent' : place.id === 'desk' ? 'check' : 'folder'" :size="16" />
-        <span class="place-text">{{ place.label }}</span>
-        <span v-if="place.id === 'desk'" class="needs-badge" :class="{ empty: desk.count === 0 }" aria-hidden="true">{{ desk.count === null ? '?' : desk.count > 99 ? '99+' : desk.count }}</span>
-      </RouterLink>
+      <template v-for="place in places" :key="place.id">
+        <!-- The Desk is a split place (AEON-1214): its name goes to the Desk, the chevron previews it. -->
+        <span v-if="place.id === 'desk' && deskPreview" class="place split" :class="{ active: activePlace === 'desk' }" data-place="desk" role="group" aria-label="Decision Desk">
+          <RouterLink :to="place.to" class="place-main" :aria-current="activePlace === 'desk' ? (atPlaceRoot ? 'page' : 'true') : undefined" :aria-label="placeLabel('desk')" :data-tip="deskTip">
+            <AppIcon name="check" :size="16" />
+            <span class="place-text">{{ place.label }}</span>
+            <span class="needs-badge" :class="{ empty: desk.count === 0 }" aria-hidden="true">{{ deskBadge }}</span>
+          </RouterLink>
+          <HeaderMenu
+            id="desk-preview" class="desk-more" role="dialog" popup="dialog" align="start" trigger-class="place-more" panel-class="desk-panel"
+            label="Decision Desk preview" trigger-label="Preview the Decision Desk" tip="Preview"
+          >
+            <template #trigger><AppIcon name="chevron" :size="14" /></template>
+            <template #default="{ close }"><DeskPreview @navigate="close()" /></template>
+          </HeaderMenu>
+        </span>
+        <RouterLink
+          v-else :to="place.to" class="place" :class="{ active: activePlace === place.id }"
+          :aria-current="activePlace === place.id ? (atPlaceRoot ? 'page' : 'true') : undefined" :aria-label="placeLabel(place.id)" :data-place="place.id"
+          :data-tip="place.id === 'desk' ? deskTip : `g then ${place.key}`"
+        >
+          <BizIcon v-if="place.id === 'business'" name="briefcase" :size="16" />
+          <AppIcon v-else :name="place.id === 'agents' ? 'agent' : place.id === 'desk' ? 'check' : 'folder'" :size="16" />
+          <span class="place-text">{{ place.label }}</span>
+          <span v-if="place.id === 'desk'" class="needs-badge" :class="{ empty: desk.count === 0 }" aria-hidden="true">{{ deskBadge }}</span>
+        </RouterLink>
+      </template>
     </nav>
     <nav v-if="session.identity && !fatal && navReady && (projectKey || businessCrumbs.length || settingsSection || pageTitle || allKnowledge || allTickets)" class="crumbs" :class="{ lead: !activePlace }" aria-label="Breadcrumb">
       <template v-if="projectKey">
@@ -325,7 +362,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
       <span class="pill-keys"><KeyCap k="mod" /><KeyCap k="K" /></span>
     </button>
     <!-- Quick light or dark; the avatar menu has the full choice, System included. -->
-    <button class="icon-btn header-btn theme-btn" :class="{ away: moonAway }" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme()">
+    <button class="icon-btn header-btn theme-btn" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme()">
       <AppIcon :name="dark ? 'sun' : 'moon'" />
     </button>
     <AppMenu />
@@ -360,12 +397,25 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap;
 }
 .place svg { color: var(--ink-3); }
-@media (hover: hover) { .place:hover { color: var(--teal-ink); background: var(--row-hover); } .place:hover svg { color: var(--teal-ink); } }
-.place:active { background: var(--row-selected); }
-.place:focus-visible { box-shadow: var(--focus-ring); }
+@media (hover: hover) {
+  .place:not(.split):hover, .place-main:hover, .places :deep(.place-more:hover) { color: var(--teal-ink); background: var(--row-hover); }
+  .place:not(.split):hover svg, .place-main:hover svg { color: var(--teal-ink); }
+}
+.place:not(.split):active, .place-main:active, .places :deep(.place-more:active) { background: var(--row-selected); }
+.place:focus-visible, .place-main:focus-visible, .places :deep(.place-more:focus-visible) { box-shadow: var(--focus-ring); }
 .place.active { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); }
 .place.active svg { color: var(--teal); }
 .place .needs-badge { margin: 0 -4px 0 1px; }
+/* The Desk is a split place (AEON-1214): the name goes to the Desk, the chevron
+   opens its preview. One segment, a hairline between the halves; the preview
+   overlays the page and moves nothing. */
+.place.split { gap: 0; padding: 0; }
+.place-main { position: relative; display: inline-flex; align-items: center; gap: 7px; height: 100%; padding: 0 8px 0 10px; border-radius: 999px 0 0 999px; color: inherit; text-decoration: none; }
+.places :deep(.place-more) { position: relative; display: grid; place-items: center; width: 26px; height: 100%; padding: 0; border: 0; border-radius: 0 999px 999px 0; background: transparent; color: var(--ink-3); }
+.places :deep(.place-more)::before { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 1px; background: var(--line-2); }
+.places :deep(.place-more) svg { color: inherit; }
+.places .split :deep(.place-more[aria-expanded="true"]) { color: var(--teal-ink); background: var(--row-hover); box-shadow: none; }
+.desk-more { height: 100%; }
 /* The breadcrumb continues from the active place; pages outside a place start it. */
 .crumbs { display: flex; align-items: center; gap: 10px; flex: 0 1 auto; min-width: 0; overflow: hidden; height: 30px; font-size: 13.5px; }
 .crumbs.lead { padding-left: 14px; }
@@ -408,6 +458,10 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .place { width: 36px; padding: 0; justify-content: center; }
   .place-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .place .needs-badge { position: absolute; top: -4px; right: -6px; margin: 0; }
+  /* The split keeps its count inline: the chevron sits where a corner badge would. */
+  .place.split { width: auto; }
+  .place-main { padding: 0 6px 0 10px; }
+  .place.split .needs-badge { position: static; }
 }
 /* The search pill gives up width before a breadcrumb has to clip. */
 @media (max-width: 1100px) { .search-pill { width: 200px; } }
@@ -440,6 +494,15 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .place:not(.active) { border: 1px solid var(--glass-edge); background: var(--btn-bg); box-shadow: var(--shadow-btn); }
   .place.active { box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--chip-teal-line); }
   .place .needs-badge { top: 2px; right: 0; }
+  /* The Desk's two halves are full 44 px targets; the outline is drawn inside, so it takes no room. */
+  .place.split { width: auto; }
+  .place.split:not(.active) { border: 0; box-shadow: inset 0 0 0 1px var(--glass-edge), var(--shadow-btn); }
+  .place-main { width: 44px; padding: 0; justify-content: center; }
+  .place.split .needs-badge { position: absolute; }
+  .places :deep(.place-more) { width: 44px; }
+  .places :deep(.place-more)::before { top: 12px; bottom: 12px; }
+  .app-header[data-away~="desk"] .desk-more { display: none; }
+  .app-header[data-away~="desk"] .place-main { border-radius: 999px; }
   /* The breadcrumb keeps only where you are. */
   .crumbs { gap: 6px; }
   /* The fold button's full touch target and focus ring must clear its trail. */
@@ -467,7 +530,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .app-header .crumbs > .phone-header-fold { min-inline-size: 44px; }
   .phone-header-fold .key-badge { display: none; }
 }
-@media (max-width: 600px) { .theme-btn.away { display: none; } }
+@media (max-width: 600px) { .app-header[data-away~="moon"] .theme-btn { display: none; } }
 /* A square workspace logo leads the places at a place's root; wide logos and inner pages leave the room to them. */
 @media (min-width: 380px) and (max-width: 600px) {
   .app-header:has(.places) .lockup.tenant.squarish:not(.compact) { display: inline-flex; min-width: 40px; }

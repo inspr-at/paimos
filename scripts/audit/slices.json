@@ -343,7 +343,8 @@
         "web/src/components/agents/ChatCodeBlock.vue",
         "web/src/components/lead/LeadAdoption.vue",
         "web/src/components/agents/AgentChores.vue",
-        "web/src/components/agents/DecisionDeskPanel.vue"
+        "web/src/components/agents/DecisionDeskPanel.vue",
+        "web/src/components/header/DeskPreview.vue"
       ]
     },
     {

@@ -4,6 +4,8 @@
 // avatar share it. A popover under the button on wide screens, a bottom sheet on
 // phones. Up and down walk the items, Home and End jump, Escape closes and gives
 // focus back to the button; Tab or a click elsewhere closes it quietly.
+// The Decision Desk preview (AEON-1214) reuses it from the header's places:
+// its own trigger, a dialog, opening from the trigger's start edge.
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 
 const props = withDefaults(defineProps<{
@@ -14,7 +16,14 @@ const props = withDefaults(defineProps<{
   tip?: string
   // A pane that holds a form (Help & feedback) is a dialog, not a menu.
   role?: 'menu' | 'dialog'
-}>(), { tip: undefined, role: 'menu' })
+  // What the button opens, when that is a dialog from the start.
+  popup?: 'menu' | 'dialog'
+  // 'start' opens from the trigger's start edge at the header's lower edge,
+  // kept inside the window, for a trigger that is not at the header's end.
+  align?: 'end' | 'start'
+  triggerClass?: string
+  panelClass?: string
+}>(), { tip: undefined, role: 'menu', popup: 'menu', align: 'end', triggerClass: 'icon-btn header-btn', panelClass: undefined })
 const emit = defineEmits<{ open: []; close: [] }>()
 
 const open = ref(false)
@@ -39,17 +48,28 @@ async function focusFirst(selector?: string) {
   else focusAt(0)
 }
 
+// Decided when the panel opens and when the window resizes, never while it is used.
+const offset = ref<Record<string, string>>({})
+function place() {
+  const box = root.value?.getBoundingClientRect(), width = panel.value?.offsetWidth ?? 0
+  if (props.align !== 'start' || phone.value || !open.value || !box) { offset.value = {}; return }
+  const edge = root.value?.closest('header')?.getBoundingClientRect().bottom ?? box.bottom + 11
+  const left = Math.max(12, Math.min(box.left, document.documentElement.clientWidth - 12 - width))
+  offset.value = { left: `${left - box.left}px`, top: `${edge - 1 - box.top}px` }
+}
 async function show(at: 'first' | 'last' = 'first') {
   if (open.value) return
   open.value = true
   emit('open')
   await nextTick()
+  place()
   if (at === 'last') focusAt(-1)
   else focusAt(0)
 }
 function close(restoreFocus = false) {
   if (!open.value) return
   open.value = false
+  offset.value = {}
   emit('close')
   if (restoreFocus) trigger.value?.focus()
 }
@@ -84,15 +104,15 @@ function outside(event: PointerEvent) {
 function focusOut(event: FocusEvent) {
   if (event.relatedTarget instanceof Node && !inside(event.relatedTarget)) close()
 }
-onMounted(() => { document.addEventListener('pointerdown', outside); narrow.addEventListener('change', onNarrow) })
-onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); narrow.removeEventListener('change', onNarrow) })
+onMounted(() => { document.addEventListener('pointerdown', outside); narrow.addEventListener('change', onNarrow); window.addEventListener('resize', place) })
+onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); narrow.removeEventListener('change', onNarrow); window.removeEventListener('resize', place) })
 defineExpose({ close, focusFirst, open })
 </script>
 
 <template>
   <div ref="root" class="header-menu" @focusout="focusOut">
     <button
-      ref="trigger" class="icon-btn header-btn hm-trigger" type="button" aria-haspopup="menu" :aria-expanded="open" :aria-controls="open ? id : undefined"
+      ref="trigger" class="hm-trigger" :class="triggerClass" type="button" :aria-haspopup="popup" :aria-expanded="open" :aria-controls="open ? id : undefined"
       :aria-label="triggerLabel" :data-tip="open ? undefined : tip" @click="toggle" @keydown="triggerKeys"
     >
       <slot name="trigger" :phone="phone" />
@@ -100,7 +120,7 @@ defineExpose({ close, focusFirst, open })
     <Teleport to="body" :disabled="!phone">
       <div v-if="open && phone" class="hm-scrim" aria-hidden="true" />
       <div
-        v-if="open" :id="id" ref="panel" class="hm-panel pop" :class="{ sheet: phone }" :role="role" :aria-label="label"
+        v-if="open" :id="id" ref="panel" class="hm-panel pop" :class="[panelClass, { sheet: phone, start: align === 'start' && !phone }]" :style="offset" :role="role" :aria-label="label"
         :aria-modal="phone && role === 'dialog' ? 'true' : undefined" @keydown="panelKeys" @focusout="focusOut"
       >
         <span v-if="phone" class="hm-grabber" aria-hidden="true" />
@@ -114,8 +134,10 @@ defineExpose({ close, focusFirst, open })
 .header-menu { position: relative; flex-shrink: 0; }
 .hm-trigger[aria-expanded="true"] { color: var(--teal-ink); background: var(--seg-on); box-shadow: 0 0 0 1px var(--chip-teal-line), var(--shadow-btn); }
 .hm-panel { position: absolute; right: 0; top: 44px; z-index: 30; width: min(320px, calc(100vw - 24px)); padding: 6px; }
+.hm-panel.start { right: auto; left: 0; }
 @media (prefers-reduced-motion: no-preference) {
   .hm-panel { animation: hm-in .14s ease-out; transform-origin: top right; }
+  .hm-panel.start { transform-origin: top left; }
   .hm-panel.sheet { animation: hm-up .2s cubic-bezier(.2, .8, .2, 1); }
   .hm-scrim { animation: hm-fade .2s ease-out; }
 }
