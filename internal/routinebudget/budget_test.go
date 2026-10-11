@@ -418,11 +418,13 @@ func TestRoutineBudgetAdmissionAndOwnership(t *testing.T) {
 		wantError(t, err, "host_inputs_unreadable")
 	}
 	f.exec(`UPDATE agent_pairing_computers SET capacity_reported_at=clock_timestamp() WHERE id=$1`, f.computer)
-	for _, reading := range []string{"NULL", "clock_timestamp()+interval '1 minute'"} {
-		f.exec(`UPDATE agent_accounts SET last_probe_at=`+reading+` WHERE id=$1`, f.account)
-		_, err = reserve(t, f, f.d.App, t.Context(), in)
-		wantError(t, err, "account_inputs_unreadable")
-	}
+	// A missing probe keeps the schema's all-or-none observation tuple intact.
+	f.exec(`UPDATE agent_accounts SET last_probe_at=NULL,last_probe_ok=NULL,last_daemon_generation=NULL WHERE id=$1`, f.account)
+	_, err = reserve(t, f, f.d.App, t.Context(), in)
+	wantError(t, err, "account_inputs_unreadable")
+	f.exec(`UPDATE agent_accounts SET last_probe_at=clock_timestamp()+interval '1 minute',last_probe_ok=true,last_daemon_generation='budget-generation' WHERE id=$1`, f.account)
+	_, err = reserve(t, f, f.d.App, t.Context(), in)
+	wantError(t, err, "account_inputs_unreadable")
 	f.exec(`UPDATE agent_accounts SET last_probe_at=clock_timestamp() WHERE id=$1`, f.account)
 	f.exec(`UPDATE account_allowance_windows SET capacity_read_at=clock_timestamp()-interval '11 minutes' WHERE account_id=$1`, f.account)
 	_, err = reserve(t, f, f.d.App, t.Context(), in)

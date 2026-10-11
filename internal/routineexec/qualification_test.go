@@ -291,6 +291,7 @@ func TestRoutineControlledQualification(t *testing.T) {
 		})
 		must(t, d.e.Bind(runs))
 		runs.Mount(f.mux)
+		workorders.New(f.d.App).Mount(f.mux)
 		approvals.New(f.d.App).Mount(f.mux)
 	}
 	restart()
@@ -398,6 +399,7 @@ func TestRoutineControlledQualification(t *testing.T) {
 			must(t, f.tx(func(tx pgx.Tx) error { _, err := f.broker.SettleTx(ctx, tx, f.owner, f.run, grant, in); return err }))
 		}
 	}
+	var finalHandoff bool
 	advance := func(run, reason string) map[string]any {
 		t.Helper()
 		var receipt string
@@ -420,6 +422,10 @@ func TestRoutineControlledQualification(t *testing.T) {
 			return out
 		}
 		if !advanced {
+			if finalHandoff {
+				t.Errorf("settled final review could not hand off: %+v", out)
+				return out
+			}
 			t.Fatalf("continuation remained pending: %+v", out)
 		}
 		must(t, f.tx(func(tx pgx.Tx) error {
@@ -438,6 +444,15 @@ func TestRoutineControlledQualification(t *testing.T) {
 		var model string
 		must(t, f.d.Admin.QueryRow(ctx, `SELECT p.model FROM agent_runs r JOIN model_profiles p ON p.id=r.model_profile_id WHERE r.id=$1`, run).Scan(&model))
 		report(run, g, agentruns.Telemetry{Sequence: 1, Kind: "started", Model: model, Evidence: "vendor_reported"})
+		var runState, attemptState string
+		must(t, f.d.Admin.QueryRow(ctx, `SELECT r.state,a.state FROM routine_runs r JOIN routine_attempts a ON a.run_id=r.id WHERE a.agent_run_id=$1`, run).Scan(&runState, &attemptState))
+		if runState != "running" || attemptState != "running" {
+			t.Errorf("accepted start did not activate action grant: routine=%s attempt=%s", runState, attemptState)
+			// Counterfactual overlay after the retained failure: continue testing
+			// the other owners without certifying the missing start transition.
+			f.exec(`UPDATE routine_runs SET state='running' WHERE id=$1`, f.run)
+			f.exec(`UPDATE routine_attempts SET state='running' WHERE agent_run_id=$1`, run)
+		}
 		if count(`SELECT count(*) FROM routine_launch_intents WHERE id=$1 AND state='exit_observed'`, g.LaunchID) != 0 {
 			t.Fatal("start fabricated exit")
 		}
@@ -571,8 +586,48 @@ func TestRoutineControlledQualification(t *testing.T) {
 	rereview := advance(fixRun, "")
 	rereviewRun := rereview["agent_run_id"].(string)
 	runActor(rereviewRun, "exit", "VERDICT: ok", nil)
-	if handoff := advance(rereviewRun, ""); handoff["state"] != "awaiting_pipeline" || handoff["head_sha"] != fixedRange.HeadSHA {
-		t.Fatalf("wrong coordinator handoff: %+v", handoff)
+	// The fix reuses the builder's order. The owning person completes each
+	// distinct order only after the whole series exits, using the normal API.
+	rows, err := f.d.Admin.Query(ctx, `SELECT DISTINCT r.work_order_id::text FROM agent_runs r JOIN routine_attempts a ON a.agent_run_id=r.id WHERE a.run_id=$1 ORDER BY r.work_order_id::text LIMIT 33`, f.run)
+	must(t, err)
+	orders := []string{}
+	for rows.Next() {
+		var id string
+		must(t, rows.Scan(&id))
+		orders = append(orders, id)
+	}
+	must(t, rows.Err())
+	rows.Close()
+	for _, id := range orders {
+		var order workorders.Order
+		must(t, f.tx(func(tx pgx.Tx) error {
+			var err error
+			order, err = workorders.Load(ctx, tx, id, false)
+			return err
+		}))
+		if order.Kind != "review" {
+			var lastRun string
+			must(t, f.d.Admin.QueryRow(ctx, `SELECT r.id::text FROM agent_runs r JOIN routine_attempts a ON a.agent_run_id=r.id WHERE r.work_order_id=$1 AND a.run_id=$2 ORDER BY r.created_at DESC,r.id DESC LIMIT 1`, id, f.run).Scan(&lastRun))
+			call(f.owner, "POST", "/api/work-orders/"+id+"/evidence", map[string]any{"kind": "text", "reference": "Validated controlled commit " + fixedRange.HeadSHA, "run_id": lastRun}, nil, 201)
+		}
+		for _, criterion := range order.Criteria {
+			call(f.owner, "POST", "/api/work-orders/"+id+"/criteria/"+criterion.ID+"/check", map[string]bool{"checked": true}, nil, 200)
+		}
+		must(t, f.d.Admin.QueryRow(ctx, `SELECT revision FROM work_orders WHERE node_id=$1`, id).Scan(&order.Revision))
+		call(f.owner, "PATCH", "/api/work-orders/"+id, map[string]any{"expected_revision": order.Revision, "status": "done"}, nil, 200)
+	}
+	finalHandoff = true
+	handoff := advance(rereviewRun, "")
+	finalHandoff = false
+	if handoff["state"] != "awaiting_pipeline" || handoff["head_sha"] != fixedRange.HeadSHA {
+		t.Errorf("wrong coordinator handoff: %+v", handoff)
+		// Keep the failed real receipt intact. A separate, explicitly synthetic
+		// coordinator seam lets the other owners run; it never makes this test
+		// green or supplies any approval, merge or Done observation.
+		var reviewOrder string
+		must(t, f.d.Admin.QueryRow(ctx, `SELECT work_order_id::text FROM agent_runs WHERE id=$1`, rereviewRun).Scan(&reviewOrder))
+		f.exec(`INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,state,payload,result) VALUES($1,$2,'qualification:handoff-overlay','routine.continue','succeeded',jsonb_build_object('agent_run_id',$3::text),jsonb_build_object('state','awaiting_pipeline','review_order_id',$4::text,'head_sha',$5::text,'qualification_overlay',true))`, f.owner.TenantID, f.run, rereviewRun, reviewOrder, fixedRange.HeadSHA)
+		f.exec(`UPDATE routine_runs SET state='awaiting_pipeline' WHERE id=$1`, f.run)
 	}
 	finish(lead, "exit")
 	gh := &qualificationGitHub{}
@@ -641,4 +696,5 @@ func TestRoutineControlledQualification(t *testing.T) {
 	if got := qualificationGit(t, tree, "rev-parse", "HEAD"); got != fixedRange.HeadSHA {
 		t.Fatal("recovery replaced the preserved worktree")
 	}
+	t.Log("Reached real Done: one PR, four settled actors, six observed child exits and retained checkout; upstream qualification assertions remain binding.")
 }

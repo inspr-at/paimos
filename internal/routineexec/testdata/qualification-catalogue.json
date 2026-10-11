@@ -17,7 +17,8 @@
       "adopted lead session binding",
       "vendor model/usage observations",
       "pre-recorded independent evaluation verdict seam",
-      "read-only PR/CI/artifact/merge observations"
+      "read-only PR/CI/artifact/merge observations",
+      "counterfactual running phases and separately labelled coordinator handoff after retained qualification failures; original failed receipt stays intact"
     ]
   },
   "excluded": [
@@ -170,5 +171,29 @@
         "internal/agentd:TestRoutineToolsRefuseUnqualifiedNativeStartup"
       ]
     }
-  ]
+  ],
+  "assessment": {
+    "date": "2026-10-11",
+    "productionBase": "eec3b2672",
+    "status": "failed",
+    "enablement": "automatic execution must remain OFF; controlled passing is also insufficient for native OPS qualification",
+    "observedFailures": [
+      {
+        "id": "claimed-run-replay",
+        "owner": "internal/routineexec/dispatch.go:LaunchChecks; internal/agentaccounts/routine_admission.go:requireRoutineCapacityInputs",
+        "evidence": "A committed starting run receives 409 routine_account_unbound on identical claim replay because account admission still requires queued status."
+      },
+      {
+        "id": "started-action-grant",
+        "owner": "internal/routineexec/review.go:recordCompletion; internal/routineactions/catalog.go:loadBinding",
+        "evidence": "Accepted started telemetry leaves routine=dispatched and attempt=pending; the typed action broker requires running/running."
+      },
+      {
+        "id": "completed-review-handoff",
+        "owner": "internal/routineexec/review.go:continuationFacts; internal/agentaccounts/engine_admission.go:EngineRunCapacityTx",
+        "evidence": "The completed, settled final review cannot hand off: routine_account_unbound, because final fact admission still requires a queued actor."
+      }
+    ],
+    "conditionalDownstreamProof": "With labelled running/coordinator seams after retained failing assertions, the real PR, review/fix, person approval, work-order completion and authenticated merge-to-Done owners compose. The failed real handoff receipt remains intact. One PR, four settlements, six observed owned child exits and retained checkout are checked."
+  }
 }
