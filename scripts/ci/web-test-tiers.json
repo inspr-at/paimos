@@ -846,6 +846,8 @@
     ,
     "browser:tests/project-header.spec.ts:three densities preserve controls at 390px light"
     ,
+    "browser:tests/project-settings.spec.ts:AEON-1233: approved P1 reference states and check.mjs audit against the build"
+    ,
     "browser:tests/record-ownership.spec.ts:S8-001: accepted discard clears description and comment drafts before opening B"
     ,
     "browser:tests/record-ownership.spec.ts:the same ticket keeps its comment draft when expanding and returning"
@@ -10724,6 +10726,10 @@
     ,
     {"kind":"browser","file":"tests/project-sections.spec.ts","name":"ticket side panel retains tickets/outline through reload, expand, collapse and close","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1233: General edits, lifecycle and legacy links stay on the acted-on project and revision","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/project-settings.spec.ts","name":"AEON-1233: approved P1 reference states and check.mjs audit against the build","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/project-sort.spec.ts","name":"Alt and the arrow keys move a card, announced; the card menu moves it too; the list moves with Alt up and down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-sort.spec.ts","name":"a blur before the drag starts forgets the press, so the next drag works","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -18277,6 +18283,8 @@
     {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"installed dispatcher respects chat Escape ownership and app capture priority","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"installed dispatcher respects stepper arrows ownership and app capture priority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"project settings owns only its focused form or overlay and retains native shortcuts","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"rejects shared keys in overlapping scopes and permits disjoint row/divider bindings","tier":"ESSENTIAL"}
     ,

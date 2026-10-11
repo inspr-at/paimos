@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
-import { getProjects, listNodes, updateNode, type ProjectPerson, type ProjectSummary } from '../lib/api'
+import { getProjects, listNodes, updateNode, type ProjectPerson, type ProjectSummary, type WorkNode } from '../lib/api'
 import { projectProgressPercent } from '../lib/projectColumns'
 import { projectDescription, projectRouteKey } from '../lib/work'
 
@@ -80,6 +80,15 @@ export const useProjects = defineStore('projects', () => {
     return projects.value.find(project => project.id === id)
   }
 
+  // Settings applies only a confirmed, revision-checked node write. Keep the
+  // header and the Projects page on that same returned revision.
+  function applyNode(node: WorkNode): void {
+    summaries.value = summaries.value.map(summary => summary.id === node.id ? { ...summary, title: node.title, state: node.state } : summary)
+    details.value = new Map(details.value).set(node.id, {
+      routeKey: projectRouteKey(node.key, node.fields), description: projectDescription(node.body, node.fields), updatedAt: node.updated_at,
+    })
+  }
+
   // Archives or restores a project (its node state). The summary shows the new
   // state at once; a failure puts the old one back and rethrows.
   async function setState(id: string, state: string): Promise<void> {
@@ -98,5 +107,5 @@ export const useProjects = defineStore('projects', () => {
     }
   }
 
-  return { projects, loaded, loading, error, load, byRouteKey, byId, setState }
+  return { projects, loaded, loading, error, load, byRouteKey, byId, setState, applyNode }
 })

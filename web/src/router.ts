@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { defineComponent } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
+import { legacyProjectSettingsSection, projectSettingsPath, projectSettingsSection } from './lib/projectSettings'
 import { setPageTitle } from './lib/brand'
 import { useProjects } from './stores/projects'
 import { useSession } from './stores/session'
@@ -36,7 +37,7 @@ export const router = createRouter({
       children: [
         { path: 'tickets', component: RouteMarker, meta: { projectSection: 'tickets' } },
         { path: 'journey', redirect: to => ({ path: `/p/${encodeURIComponent(String(to.params.projectKey))}/tickets`, hash: to.hash }) },
-        { path: 'settings', component: RouteMarker, meta: { title: 'Project settings', projectSection: 'settings' } },
+        { path: 'settings/:settingsSection(general|delivery|agents|access|routines)?', component: RouteMarker, meta: { title: 'Project settings', projectSection: 'settings' } },
         { path: 'delivery', component: RouteMarker, meta: { title: 'Delivery', projectSection: 'delivery' } },
         // A docked entry (?entry=<type>/<slug>) on a screen too narrow to dock it opens the entry's own page.
         { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge', projectSection: 'knowledge' }, beforeEnter: to => {
@@ -142,6 +143,12 @@ function refreshSession() {
 // A code held for a session that is gone is dropped, and the return path never carries it.
 function signInAgain(fullPath: string) { dropAttachCode(); return expiredSignIn(fullPath) }
 router.beforeEach(async (to, from) => {
+  if (to.meta.projectSection === 'settings') {
+    const section = legacyProjectSettingsSection(to.hash, to.query)
+    if (section && section !== projectSettingsSection(to.params.settingsSection)) {
+      return { path: projectSettingsPath(String(to.params.projectKey), section), query: to.query, hash: to.hash, replace: true }
+    }
+  }
   // The terminal's attach link carries a one-time code in its fragment. It leaves the
   // address bar before any other rule runs, so no redirect, return path or report can
   // copy it; the page that opens the review picks it up from memory (AEON-440).
