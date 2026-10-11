@@ -18,7 +18,8 @@ import (
 )
 
 // Risk: a consent pointer could leak private routines, offer a person a PUT
-// that current policy rejects, survive revocation, or escape keyset bounds.
+// that current policy rejects, miss expired consent after project changes,
+// survive revocation, or escape keyset bounds.
 func TestRoutineConsentProjectionMatchesNativePolicyAndPages(t *testing.T) {
 	f := setup(t)
 	f.person.BrowserSession = true
@@ -176,11 +177,97 @@ func TestRoutineConsentProjectionMatchesNativePolicyAndPages(t *testing.T) {
 		t.Fatal("wrong policy rejection", string(raw))
 	}
 	runtime = q.Runtime
-	request(f.person, "PUT", path, map[string]any{"expected_revision": r.Revision, "execute_consent": true, "execution_principal_id": nil}, 200)
+	if err := json.Unmarshal(request(f.person, "PUT", path, map[string]any{"expected_revision": r.Revision, "execute_consent": true, "execution_principal_id": nil}, 200), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.ExecutionPolicy == nil || !r.ExecutionPolicy.Eligible {
+		t.Fatal("consent did not establish eligible execution", r.ExecutionPolicy)
+	}
 	if got := consents(read(f.person)); len(got) != 2 {
 		t.Fatal("consented routine stayed projected", got)
 	}
-	request(f.person, "POST", "/api/recurrences/"+r.ID+"/resume", map[string]any{"expected_revision": r.Revision + 1}, 200)
+	writeSettings := func(enabled bool, qualification string) {
+		t.Helper()
+		seed(func(tx pgx.Tx) error {
+			var revision int64
+			if err := tx.QueryRow(t.Context(), `SELECT revision FROM project_routine_execution_settings WHERE project_id=$1`, f.project).Scan(&revision); err != nil {
+				return err
+			}
+			settings, err := modelregistry.WriteExecutionSettingsTx(t.Context(), tx, f.person, f.project, modelregistry.ExecutionSettingsInput{ExpectedRevision: &revision, AutomaticLaunchEnabled: &enabled, QualificationID: &qualification}, reader)
+			if err == nil && settings.AutomaticLaunchEnabled != enabled {
+				t.Fatalf("project switch did not change: %+v", settings)
+			}
+			return err
+		})
+	}
+	// Project changes preserve the consent bit and routine revision. The live
+	// fingerprint must still renew the Desk request, just as GET and PUT do.
+	for _, change := range []string{"project off/on", "new runtime qualification"} {
+		if change == "project off/on" {
+			writeSettings(false, q.ID)
+			if got := consents(read(f.person)); len(got) != 0 {
+				t.Fatal("disabled project projected renewal requests", got)
+			}
+		} else {
+			q.ID = "10000000-0000-4000-8000-000000000085"
+			q.Runtime.ServerDigest = strings.Repeat("1", 64)
+			runtime = q.Runtime
+			seed(func(tx pgx.Tx) error { return modelregistry.RecordQualificationTx(t.Context(), tx, f.person, q) })
+		}
+		writeSettings(true, q.ID)
+		seed(func(tx pgx.Tx) error {
+			var saved bool
+			if err := tx.QueryRow(t.Context(), `SELECT execute_consent AND consent_revision=$2 FROM recurrence_definitions WHERE recurrence_id=$1`, r.ID, r.Revision).Scan(&saved); err != nil {
+				return err
+			}
+			if !saved {
+				t.Fatalf("%s discarded the stored consent fixture", change)
+			}
+			return nil
+		})
+		var listed struct {
+			Items []recurrences.Recurrence `json:"items"`
+		}
+		if err := json.Unmarshal(request(f.person, "GET", "/api/recurrences", nil, 200), &listed); err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, item := range listed.Items {
+			if item.ID == r.ID {
+				found = true
+				if item.Revision != r.Revision || item.ExecutionPolicy == nil || item.ExecutionPolicy.Eligible || item.ExecutionPolicy.WaitReason != "execution_consent_required" || item.ExecutionPolicy.ConsentRevision != r.Revision {
+					t.Fatalf("%s: GET did not require renewed consent at the unchanged routine revision: %+v", change, item)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s: GET lost the consented routine", change)
+		}
+		found = false
+		for _, item := range consents(read(f.person)) {
+			if item.ID == r.ID {
+				found = true
+				if item.Revision != r.Revision || !item.CanDecide || item.Held || item.Href != "/settings/personal?recurrence="+r.ID+"&consent=1" {
+					t.Fatalf("%s: incorrect renewal pointer: %+v", change, item)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("%s: Desk omitted consent required by GET", change)
+		}
+		if err := json.Unmarshal(request(f.person, "PUT", path, map[string]any{"expected_revision": r.Revision, "execute_consent": true, "execution_principal_id": nil}, 200), &r); err != nil {
+			t.Fatal(err)
+		}
+		if r.ExecutionPolicy == nil || !r.ExecutionPolicy.Eligible || r.ExecutionPolicy.WaitReason != "" || r.ExecutionPolicy.ConsentRevision != r.Revision {
+			t.Fatalf("%s: renewed consent did not restore eligibility: %+v", change, r)
+		}
+		if got := consents(read(f.person)); len(got) != 2 {
+			t.Fatalf("%s: renewed consent stayed projected: %+v", change, got)
+		}
+	}
+	if err := json.Unmarshal(request(f.person, "POST", "/api/recurrences/"+r.ID+"/resume", map[string]any{"expected_revision": r.Revision}, 200), &r); err != nil {
+		t.Fatal(err)
+	}
 	if len(consents(read(f.person))) != 3 {
 		t.Fatal("new control revision did not renew consent request")
 	}
@@ -209,7 +296,7 @@ func TestRoutineConsentProjectionMatchesNativePolicyAndPages(t *testing.T) {
 	if len(consents(read(f.person))) != 1 {
 		t.Fatal("shared consent did not disappear")
 	}
-	request(f.person, "DELETE", "/api/recurrences/"+r.ID, map[string]any{"expected_revision": r.Revision + 2}, 204)
+	request(f.person, "DELETE", "/api/recurrences/"+r.ID, map[string]any{"expected_revision": r.Revision}, 204)
 	if len(consents(read(f.person))) != 0 {
 		t.Fatal("retired routine stayed projected")
 	}
