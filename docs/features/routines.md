@@ -113,6 +113,9 @@ person/OPS flow.
 and validates a configuration.
 `POST /api/recurrences/templates/{templateId}/{templateVersion}/apply` explicitly
 installs it. Unknown IDs/versions return 404; invalid configuration returns 400.
+Discovery uses `nodes.read` for people and an explicit `recurrences.manage` key
+scope and grant for agents. Preview and apply require `recurrences.manage` in the
+supplied output project; owner and source permissions are checked separately.
 
 Apply returns 201 for creation and 200 for an existing matching configuration.
 The identity binds the tenant, pinned template version and normalized definition.
