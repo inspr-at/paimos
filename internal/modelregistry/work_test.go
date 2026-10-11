@@ -371,7 +371,8 @@ func TestPreferenceStoreCanonicalPeopleAndGuards(t *testing.T) {
 }
 
 // Risk: queued rounds lose their previous-family fallback or saved review row
-// while the Models migration is pending, or bypass an explicit order or lock.
+// while the Models migration is pending, misreport a plan-off cause, or bypass
+// an explicit order or lock.
 func TestModelsV2RoundRoutingCompatibility(t *testing.T) {
 	admin, _ := boardFixture(t)
 	boardDecode[boardDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/board", nil, ""), 200)
@@ -387,6 +388,7 @@ func TestModelsV2RoundRoutingCompatibility(t *testing.T) {
 		}
 		for column, rank := range map[string][]string{
 			"backend":       {"openai:sol", "anthropic:opus"},
+			"design":        {"anthropic:opus", "openai:sol"},
 			"review:openai": {"anthropic:opus", "openai:sol"},
 		} {
 			if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank)
@@ -435,6 +437,16 @@ func TestModelsV2RoundRoutingCompatibility(t *testing.T) {
 				}
 			})
 		}
+		t.Run("plan off cause", func(t *testing.T) {
+			q := WorkQuery{TicketID: ticket, ProjectID: project, OffHarnesses: []string{"claude"}}
+			got, _, err := ResolveRound(ctx, tx, admin, q, "design", true, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Profile == nil || got.Profile.Harness != "codex" || len(got.Trace.Held) == 0 || got.Trace.Held[0].Line != "anthropic:opus" || !strings.Contains(got.Trace.Held[0].Reason, "off in the plan") {
+				t.Fatalf("plan-off fallback lost its cause: %+v", got)
+			}
+		})
 		q := WorkQuery{TicketID: ticket, ProjectID: project, FixRound: 4}
 		checkStuck := func() {
 			t.Helper()
