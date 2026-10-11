@@ -200,7 +200,7 @@ func (e *Executor) RunTenant(ctx context.Context, tenantID string) (Pass, error)
  JOIN routine_runs r ON r.tenant_id=o.tenant_id AND r.id=o.run_id
  JOIN project_routine_execution_settings s ON s.tenant_id=r.tenant_id AND s.project_id=r.output_project_id
  WHERE s.automatic_launch_enabled AND o.effect_key='execute' AND o.kind='routine.execute' AND o.state='pending'
- AND r.state='pending' AND o.reconcile_after<=clock_timestamp()
+ AND r.state IN ('created','pending') AND o.reconcile_after<=clock_timestamp()
  ORDER BY o.reconcile_after,o.id LIMIT 33`)
 		if err != nil {
 			return err
@@ -426,14 +426,14 @@ func (e *Executor) dispatch(ctx context.Context, tx pgx.Tx, tenantID string, r i
 	if err != nil {
 		return out, err
 	}
-	if r.state != "pending" && r.state != "dispatched" {
+	if r.state != "created" && r.state != "pending" && r.state != "dispatched" {
 		return out, workorders.Fail(409, "routine_run_unavailable")
 	}
 	var a recurrences.Assignment
 	if json.Unmarshal(r.assignment, &a) != nil {
 		return out, workorders.Fail(409, "assignment_unavailable")
 	}
-	if r.state == "pending" {
+	if r.state == "created" || r.state == "pending" {
 		prep, err := agentruns.PrepareRoutineWorkTx(ctx, tx, owner, agentruns.RoutinePreparationInput{RecurrenceID: r.recurrence, DefinitionRevision: r.revision}, e.options.Runtime)
 		if err != nil {
 			return out, err

@@ -331,6 +331,13 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	wait("lead admission wait: host_unavailable", "", 0)
 	mode.Store(2)
 	wait("main_red", "", 0)
+	// Main creates new intent as created; released pending intent keeps the
+	// same admission checks, while an unknown state must still refuse dispatch.
+	f.exec(`UPDATE routine_runs SET state='pending' WHERE id=$1`, f.run)
+	wait("main_red", "", 0)
+	f.exec(`UPDATE routine_runs SET state='future_state' WHERE id=$1`, f.run)
+	wait("routine_run_unavailable", "", 0)
+	f.exec(`UPDATE routine_runs SET state='created' WHERE id=$1`, f.run)
 	mode.Store(3)
 	wait("ci_admission_wait", "", 0)
 	mode.Store(4)
@@ -462,6 +469,18 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT binding FROM routine_launch_intents WHERE routine_run_id=$1 AND kind='worker'`, f.run).Scan(&raw))
 	must(t, json.Unmarshal(raw, &grant))
 	must(t, f.tx(func(tx pgx.Tx) error { return d.e.LaunchChecks().Admission(t.Context(), tx, f.owner, grant) }))
+	// The known dispatched state retains its held grant; unknown states never
+	// inherit that allowance merely because dispatch already succeeded.
+	f.exec(`UPDATE routine_runs SET state='future_state' WHERE id=$1`, f.run)
+	if err := f.tx(func(tx pgx.Tx) error { return d.e.LaunchChecks().Admission(t.Context(), tx, f.owner, grant) }); err != nil {
+		var refusal *workorders.Error
+		if !errors.As(err, &refusal) || refusal.Status != 409 || refusal.Message != "routine_run_unavailable" {
+			t.Fatalf("unknown routine state refused for the wrong reason: %v", err)
+		}
+	} else {
+		t.Fatal("unknown routine state allowed daemon admission")
+	}
+	f.exec(`UPDATE routine_runs SET state='dispatched' WHERE id=$1`, f.run)
 	// The ordinary advisory can see a spare owned account; the run-bound gate
 	// must still refuse its selected account when that account is unavailable.
 	var spare string
