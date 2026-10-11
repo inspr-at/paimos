@@ -147,7 +147,8 @@
     {
       "classification": "personal",
       "columns": {
-        "routine_launch_id": "metadata"
+        "routine_launch_id": "metadata",
+        "trace": "personal"
       },
       "locator": {
         "tenant_column": "tenant_id"

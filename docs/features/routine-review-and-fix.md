@@ -26,3 +26,7 @@ completion cannot start an immediate retry loop.
 Execution remains default-off. Production still needs accepted exact-artifact
 runtime, admission and provider-budget bindings plus the separate person-owned
 project enablement. Missing capabilities remain explicit waits or launch refusals.
+Review/fix continuations require the qualified provider-budget transport even
+when the financial budget mode is off; the finite recovery envelope still applies.
+The daemon journal uses schema 7, with forward recovery preserving earlier
+checkout evidence without adding continuation authority to older records.
