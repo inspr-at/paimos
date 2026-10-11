@@ -6,6 +6,8 @@ import { expectStableControls } from './helpers/stable'
 import { mockEffectivePermissions } from './authz-fixtures'
 import type { TierReport } from '../src/lib/serviceTier'
 
+test.use({ screenshot: 'only-on-failure' })
+
 const sessionId = '5e000000-0000-4000-8000-000000000001'
 const longName = 'Berechtigungsprüfung für die österreichische Unternehmensverwaltung und Wiederherstellungskoordination'
 const report: TierReport = {
@@ -124,7 +126,7 @@ for (const { width, coarse } of [
   { width: 768, coarse: false }, { width: 768, coarse: true }, { width: 1024, coarse: true }, { width: 1440, coarse: false },
 ]) for (const theme of ['light', 'dark'] as const) for (const density of ['comfortable', 'compact'] as const) {
   test.describe(`${width}px ${coarse ? 'coarse' : 'fine'} ${theme} ${density}`, () => {
-    test.use({ viewport: { width, height: 1100 }, hasTouch: coarse, screenshot: 'only-on-failure' })
+    test.use({ viewport: { width, height: 1100 }, hasTouch: coarse })
     test('ticket and tier controls keep their visuals, reach and position', async ({ page }) => {
       const expanded = width <= 720 || coarse
       const phone = width <= 720
