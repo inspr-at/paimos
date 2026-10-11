@@ -68,6 +68,10 @@
   "policy": "ESSENTIAL runs on PRs and merge groups plus changed-area cases. GATED-FULL preserves the prior Go/unit/browser gate. NIGHTLY includes never-gated browser cases. Runtime reconciliation warns, defaults new cases to NIGHTLY and drops stale entries. Known-flaky cases and deletion candidates cannot be ESSENTIAL; AEON-679 rule B removes reviewed low-value categories; protected candidates stay available."
   ,
   "postGateCases": [
+    "browser:tests/a11y.spec.ts:axe: business parts status in dark"
+    ,
+    "browser:tests/a11y.spec.ts:axe: business parts status in light"
+    ,
     "browser:tests/account-use-matrix.spec.ts:screenshots of the matrix, light and dark"
     ,
     "browser:tests/account-use-matrix.spec.ts:where 1024 dark › where 1024 dark: the design's checks hold on the built page"
@@ -437,6 +441,12 @@
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 1440"
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls light 390"
+    ,
+    "browser:tests/business.spec.ts:a partly set up overview shows status only, and its one link to Settings › Business stays put"
+    ,
+    "browser:tests/business.spec.ts:a role that manages plugins but not settings switches the parts in Settings › Business"
+    ,
+    "browser:tests/business.spec.ts:members see a partly set up overview without the parts status or the settings link"
     ,
     "browser:tests/business.spec.ts:the overview includes open periods older than a year in its waiting count"
     ,
@@ -4724,6 +4734,10 @@
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business overview in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business parts status in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business parts status in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business setup in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: business setup in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
@@ -6608,9 +6622,15 @@
     ,
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"the bulk bar and its menus have no axe violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/business.spec.ts","name":"a partly set up overview shows status only, and its one link to Settings › Business stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/business.spec.ts","name":"a role that manages plugins but not settings switches the parts in Settings › Business","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"an admin enables Business: every part with the compiled digests","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"disabling a part asks first and closes its page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/business.spec.ts","name":"members see a partly set up overview without the parts status or the settings link","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"the header offers Business once a business plugin is enabled","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13856,6 +13876,12 @@
     ,
     {"kind":"node","file":"tests/brandMarks.test.ts","name":"known harnesses and providers use distinct vendored silhouettes","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/business-setup-owner.test.ts","name":"every setup link on the Business pages ends in Settings › Business","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/business-setup-owner.test.ts","name":"only Settings › Business mounts the business parts switches","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/business-setup-owner.test.ts","name":"the overview and its parts status only read the parts","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/business.test.ts","name":"amounts display exactly with en-GB grouping and the currency scale","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/business.test.ts","name":"duration uses whole seconds","tier":"GATED-FULL"}
@@ -14987,6 +15013,8 @@
     {"kind":"node","file":"tests/sessionRow.test.ts","name":"media and terminal use their execution label and never infer an AI vendor","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/settings.test.ts","name":"Accounts, Computers and Capacity are three sections, each for people who may read accounts (AEON-1171)","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/settings.test.ts","name":"Business opens to people who may manage plugins, for its parts card (AEON-1189)","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/settings.test.ts","name":"Personal, Developer and Policies are for everyone; workspace sections follow their grants","tier":"GATED-FULL"}
     ,
