@@ -11,6 +11,43 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Risk: a lead response addition changes an existing field or is not pinned,
+// leaving strict consumers unaware of an incompatible response contract.
+func TestProjectLeadReadContractAdditionIsMinor(t *testing.T) {
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := Current(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now, ok := current["project-lead"]
+	if !ok || now.Version != HarnessSession {
+		t.Fatal("lead read is missing its declared contract pin")
+	}
+	var shape map[string]any
+	if err = json.Unmarshal(now.Shape, &shape); err != nil {
+		t.Fatal(err)
+	}
+	body := shape["GET /projects/{projectId}/lead 200"].(map[string]any)
+	props := body["properties"].(map[string]any)
+	for _, field := range []string{"actions", "automatic_launch_enabled"} {
+		if _, exists := props[field]; !exists || isRequired(body["required"], field) {
+			t.Fatalf("lead %s must remain an optional response addition", field)
+		}
+		delete(props, field)
+	}
+	before, err := json.Marshal(shape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bump, err := RequiredBump(Pin{Version: "harness-session/3.0", SHA256: "before-lead-actions", Shape: before}, now)
+	if err != nil || bump != "minor" {
+		t.Fatalf("lead actions: got %q, %v; want minor", bump, err)
+	}
+}
+
 // Status and heartbeat share HarnessSession. Callers that never send an estimate
 // must keep the attention-reason enum and the required payload unchanged; ETA
 // fields stay optional and eta_stale is not an attention kind.
