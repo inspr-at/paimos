@@ -195,7 +195,7 @@ func ladderHasHarness(steps []ladderStep, harness string) bool {
 func skipReasons(step ladderStep, role roleDef, q resolveQuery, now time.Time, health map[string]agentaccounts.HarnessHealth) []string {
 	var reasons []string
 	if slices.Contains(q.OffHarnesses, step.Profile.Harness) {
-		reasons = append(reasons, "harness off in the plan")
+		reasons = append(reasons, "harness unavailable in the plan")
 	}
 	// Immutable legacy mislabels remain in history, but are retired from
 	// dispatch. The same check guards ordinary resolution and managed reviews.

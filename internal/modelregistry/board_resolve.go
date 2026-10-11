@@ -192,6 +192,11 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				return nil, err
 			}
 			reasons := skipReasons(step, role, resolveQuery{Role: roleName, AuthorFamily: q.AuthorFamily, Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, health)
+			if slices.Contains(q.OffHarnesses, profile.Harness) {
+				// Models handles admission below; this caller-supplied exclusion
+				// is the plan's Off switch, which skipReasons reports first.
+				reasons[0] = "harness off in the plan"
+			}
 			availabilityReasons := len(reasons)
 			policyAllowed := len(skipReasons(step, role, resolveQuery{Role: roleName, AuthorFamily: q.AuthorFamily, Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, nil)) == 0
 			if order.Stage == "quick" && profile.Tier != "fast" {
