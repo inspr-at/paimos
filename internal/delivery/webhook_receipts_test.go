@@ -130,12 +130,13 @@ func TestDeliveryWebhookInternalRetry(t *testing.T) {
 						return err
 					})
 				}
+				created := f.at.Add(-time.Hour)
 				g.respond = func(path string) (any, error) {
 					if step == "metrics" && unavailable {
 						return nil, crossreview.ErrUnavailable
 					}
 					if strings.HasPrefix(path, "/actions/runs?check_suite_id=900&") {
-						run := githubRunBody(501, 1, defaultCIWorkflow, "pull_request", p.Branch, p.Head, f.at.Add(-time.Hour), 10*time.Minute, "success", 900)
+						run := githubRunBody(501, 1, defaultCIWorkflow, "pull_request", p.Branch, p.Head, created, 10*time.Minute, "success", 900)
 						run["pull_requests"] = []any{map[string]any{"number": 7}}
 						return map[string]any{"total_count": 1, "workflow_runs": []any{run}}, nil
 					}
