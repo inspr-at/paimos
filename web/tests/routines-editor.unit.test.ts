@@ -77,14 +77,14 @@ describe('stale and late answers', () => {
 describe('today’s route', () => {
   it('reads as the Models page does: registry name and harness label, never a model or profile id', () => {
     const opus: RegistryProfile = { id: '57000000-0000-4000-8000-000000000001', harness: 'claude', family: 'anthropic', model: 'claude-opus-5-5', effort: 'xhigh', tier: 'frontier', enabled: true, display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5' }
-    expect(routeWords(opus)).toBe('Opus 5.5 via Claude')
+    expect(routeWords(opus)).toBe('Opus 5.5 via Claude Code')
     // The name the Models page lists for this line, with its harness label.
     expect(routeWords(opus)).toBe(`${buildEntries([opus])[0]!.name} via ${harnessLabel('claude')}`)
     const sol: RegistryProfile = { id: '57000000-0000-4000-8000-000000000002', harness: 'codex', family: 'openai', model: 'gpt-6.1-sol', effort: 'xhigh', tier: 'frontier', enabled: true }
     expect(routeWords(sol)).toBe('GPT-6.1 Sol via Codex')
     // A profile the registry has no name for still reads as one.
     const bare: RegistryProfile = { ...opus, display_name: undefined, short_name: undefined }
-    expect(routeWords(bare)).toBe('Claude Opus 5 5 via Claude')
+    expect(routeWords(bare)).toBe('Claude Opus 5 5 via Claude Code')
     for (const profile of [opus, sol, bare]) {
       expect(routeWords(profile)).not.toContain(profile.model)
       expect(routeWords(profile)).not.toContain(profile.id)
