@@ -15,6 +15,9 @@ import (
 )
 
 type WorkQuery struct {
+	// routineEval applies the mandatory family floor to board routing
+	// only for the internal routine resolver; ordinary routes retain their API.
+	routineEval      bool
 	TicketID         string
 	Role             string
 	TicketRole       string

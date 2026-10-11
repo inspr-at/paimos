@@ -286,9 +286,14 @@ func telemetryAuthority(ctx context.Context, tx pgx.Tx, r *http.Request, p tenan
 	if err != nil {
 		return v, o, false, err
 	}
-	// Queued runs stay refused. A terminal run is refused unless this same
-	// daemon is reconciling an unconfirmed ownership_lost assignment.
-	reconciling := v.Status == "ownership_lost" && handoff != nil && handoff.State != "completed" && t.Kind == "finished" && t.ProcessState == "exited"
+	staleHold, err := staleWorkHoldUnconfirmed(v)
+	if err != nil {
+		return v, o, false, err
+	}
+	// Queued runs stay refused. The same owned daemon may reconcile a stale
+	// lifecycle release, routine launch or unconfirmed assignment only with
+	// actual exit evidence.
+	reconciling := v.Status == "ownership_lost" && (handoff != nil && handoff.State != "completed" || staleHold || v.RoutineLaunchID != nil) && t.Kind == "finished" && t.ProcessState == "exited"
 	if v.Status == "queued" || (terminal(v.Status) && !reconciling) {
 		return v, o, false, workorders.Fail(409, "run is not live")
 	}
@@ -366,6 +371,9 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (out 
 	if err = reportHandoff(ctx, tx, p, v, t, status); err != nil {
 		return nil, err
 	}
+	if err = reportRoutineExit(ctx, tx, v, t, status); err != nil {
+		return nil, err
+	}
 	var pending []events.Change
 	before := v
 	model, evidence := v.EffectiveModel, v.ModelEvidence
@@ -393,7 +401,7 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (out 
 			return nil, err
 		}
 	}
-	if terminal(v.Status) && v.AccountID != nil {
+	if terminal(v.Status) && v.AccountID != nil && !(v.RoutineLaunchID != nil && t.ProcessState == "unconfirmed") {
 		if err = agentpairing.FinishDrainDeferred(ctx, tx, *v.AccountID, &pending); err != nil {
 			return nil, err
 		}

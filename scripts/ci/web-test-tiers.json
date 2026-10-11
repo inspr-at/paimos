@@ -936,6 +936,32 @@
     ,
     "browser:tests/settings-account-pacing.spec.ts:the plan card: Change leads to Capacity and load without saving"
     ,
+    "browser:tests/settings-account-parts.spec.ts:Verify again keeps its calm row; the count leaves and nothing in the nav or the part moves"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:a low quota: Needs you only in its own part, and the nav counts match"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:a new account that asks first: Needs you only in its own part, and the nav counts match"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:a project waiting in Unassigned: Needs you only in its own part, and the nav counts match"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:a sign-in to verify: Needs you only in its own part, and the nav counts match"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:every part at 1440 and 390, light and dark, without sideways scrolling: nothing needs you"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:every part at 1440 and 390, light and dark, without sideways scrolling: things need you"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:everything at once: Needs you only in its own part, and the nav counts match"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:nothing to do: no Needs-you block in any part, no nav count and nothing in the footer"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:pending cleanup: Needs you only in its own part, and the nav counts match"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:the new-account and Unassigned items lead to where they are decided"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:the one-time plan: Needs you only in its own part, and the nav counts match"
+    ,
+    "browser:tests/settings-account-parts.spec.ts:without a paired computer Accounts offers Connect a computer where Add an account would be"
+    ,
     "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 dark"
@@ -11716,6 +11742,34 @@
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the plan card: Change leads to Capacity and load without saving","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"Verify again keeps its calm row; the count leaves and nothing in the nav or the part moves","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"a low quota: Needs you only in its own part, and the nav counts match","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"a new account that asks first: Needs you only in its own part, and the nav counts match","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"a project waiting in Unassigned: Needs you only in its own part, and the nav counts match","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"a sign-in to verify: Needs you only in its own part, and the nav counts match","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"every old link lands in the right part with the same panel open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"every part at 1440 and 390, light and dark, without sideways scrolling: nothing needs you","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"every part at 1440 and 390, light and dark, without sideways scrolling: things need you","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"everything at once: Needs you only in its own part, and the nav counts match","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"nothing to do: no Needs-you block in any part, no nav count and nothing in the footer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"pending cleanup: Needs you only in its own part, and the nav counts match","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"the new-account and Unassigned items lead to where they are decided","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"the one-time plan: Needs you only in its own part, and the nav counts match","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-parts.spec.ts","name":"without a paired computer Accounts offers Connect a computer where Add an account would be","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"a reader cannot confirm matching login hints","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"a row opens its detail: windows with source and freshness, and the last three readings","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14654,6 +14708,8 @@
     ,
     {"kind":"node","file":"tests/sessionRow.test.ts","name":"media and terminal use their execution label and never infer an AI vendor","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/settings.test.ts","name":"Accounts, Computers and Capacity are three sections, each for people who may read accounts (AEON-1171)","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/settings.test.ts","name":"Personal, Developer and Policies are for everyone; workspace sections follow their grants","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/settings.test.ts","name":"agent keys read as active, expired or revoked","tier":"GATED-FULL"}
@@ -14955,6 +15011,22 @@
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > rejects an estimated quota, a reading older than ten minutes, and a window that already reset","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > says all ready with the computers online when nothing blocks agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"uses the same readiness words and ready count for unknown quota and a measured cap","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-needs.unit.test.ts","name":"counts and where the footer leads > count each part, calm rows as zero","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-needs.unit.test.ts","name":"counts and where the footer leads > lead to the open part when it has items, else the first part that has some","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-needs.unit.test.ts","name":"counts and where the footer leads > open a waiting project at its Work context card","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-needs.unit.test.ts","name":"matrix facts > count nothing while the server does not report them, and nothing for a malformed answer","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-needs.unit.test.ts","name":"matrix facts > read awaiting accounts and at most the bound of projects waiting in Unassigned","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-needs.unit.test.ts","name":"the Accounts part > lists a low quota by the workspace thresholds, and nothing else when the matrix reports nothing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-needs.unit.test.ts","name":"the Accounts part > lists a new account that asks first and one row for projects in Unassigned","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agent-appearance.unit.test.ts","name":"personal behaviour writes preserve stored accessibility choices while a theme is active","tier":"GATED-FULL"}
     ,
@@ -16008,6 +16080,8 @@
     ,
     {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"a candidate read cannot restore another person’s choices and reopening after a cancelled read works","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"an empty adoption list explains missing person ownership without offering the session","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"an unmanaged lead card offers cooperative pause and hides restart controls after exit","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/lead-adoption.unit.test.ts","name":"candidate errors and empty lists are explicit and a changed lead cannot be confirmed","tier":"ESSENTIAL"}
@@ -16539,6 +16613,8 @@
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > describes a line as harness, route (when it adds something), id, source and what was taken on","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > groups profiles into one line per model, levels in the model's own order, retired profiles left out","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > keeps legacy auto provenance generic until the server names its origin","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > marks a discovered, disabled line New and shows a scheduled retirement, never both","tier":"GATED-FULL"}
     ,

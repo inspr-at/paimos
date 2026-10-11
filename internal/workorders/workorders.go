@@ -43,13 +43,15 @@ type Order struct {
 	UpdatedAt   time.Time           `json:"updated_at"`
 }
 type CreateInput struct {
-	Title       string   `json:"title"`
-	Body        string   `json:"body"`
-	Parent      *string  `json:"parent_id"`
-	Assignee    *string  `json:"assignee_principal_id"`
-	MaxCost     *int64   `json:"max_cost_micros"`
-	MaxDuration *int64   `json:"max_duration_seconds"`
-	Criteria    []string `json:"criteria"`
+	// RoutineRunID is an internal broker binding, never accepted by HTTP JSON.
+	RoutineRunID string   `json:"-"`
+	Title        string   `json:"title"`
+	Body         string   `json:"body"`
+	Parent       *string  `json:"parent_id"`
+	Assignee     *string  `json:"assignee_principal_id"`
+	MaxCost      *int64   `json:"max_cost_micros"`
+	MaxDuration  *int64   `json:"max_duration_seconds"`
+	Criteria     []string `json:"criteria"`
 }
 type patch struct {
 	Revision    int64           `json:"expected_revision"`
@@ -278,6 +280,9 @@ func CreateDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Creat
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
 		return Order{}, nil, err
 	}
+	if err := requireRoutineChild(ctx, tx, p, in); err != nil {
+		return Order{}, nil, err
+	}
 	var id string
 	err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,kind_id,title,body,parent_id,position)
 	 SELECT $1,aeon_next_node_key($1,k.short_prefix),k.id,$2,$3,$4,
@@ -288,6 +293,11 @@ func CreateDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Creat
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,assignee_principal_id,max_cost_micros,max_duration_seconds) VALUES($1,$2,$3,$4,$5,$6)`, p.TenantID, id, p.ID, in.Assignee, in.MaxCost, in.MaxDuration); err != nil {
 		return Order{}, nil, err
+	}
+	if in.RoutineRunID != "" {
+		if _, err = tx.Exec(ctx, `INSERT INTO routine_budget_orders(tenant_id,run_id,work_order_id) VALUES($1,$2,$3)`, p.TenantID, in.RoutineRunID, id); err != nil {
+			return Order{}, nil, err
+		}
 	}
 	for i, c := range in.Criteria {
 		if _, err = tx.Exec(ctx, `INSERT INTO work_criteria(tenant_id,work_order_id,position,description) VALUES($1,$2,$3,$4)`, p.TenantID, id, i, c); err != nil {

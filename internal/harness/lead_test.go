@@ -672,6 +672,79 @@ func TestProjectLeadAdoptionNeedsPersonAndExactLease(t *testing.T) {
 	}
 }
 
+// Risk: an empty adoption list hides the missing key-creator ownership, or its
+// explanation accidentally grants eligibility or reveals proof/another owner.
+func TestProjectLeadEmptyCandidatesExplainMissingPersonOwnership(t *testing.T) {
+	f := projectLeadFixture(t, nil)
+	base := "/api/projects/" + f.project + "/lead"
+	lease, ref := "fixture-unowned-lease-"+uid(), "fixture-unowned-ref-"+uid()
+	body := map[string]any{"agent_principal_id": f.agent.ID, "harness": "claude", "host": "build-7", "display_label": "AEON-LEAD", "management_mode": "unmanaged", "role": "coordinator", "harness_session_ref": ref, "worker_lease": lease}
+	w := f.call(f.agent, "POST", "/api/projects/"+f.project+"/harness-sessions", body, "")
+	expect(t, w, 201)
+	session := decode(t, w)["id"].(string)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var owner *string
+		if err := tx.QueryRow(t.Context(), `SELECT owner_principal_id::text FROM harness_sessions WHERE id=$1`, session).Scan(&owner); err != nil {
+			return err
+		}
+		if owner != nil {
+			t.Fatal("fixture did not register with a key lacking a person creator")
+		}
+		return nil
+	})
+	w = f.call(f.person, "GET", base+"/candidates", nil, "")
+	expect(t, w, 200)
+	page := decode(t, w)
+	if len(page["items"].([]any)) != 0 || page["next_cursor"] != nil {
+		t.Fatal("unowned coordinator became eligible")
+	}
+	reason, ok := page["empty_reason"].(map[string]any)
+	if !ok || len(reason) != 4 || reason["code"] != "person_owner_missing" || reason["display_label"] != "AEON-LEAD" || reason["harness"] != "claude" || reason["host"] != "build-7" {
+		t.Fatalf("missing ownership explanation: %v", reason)
+	}
+	if strings.Contains(w.Body.String(), ref) || strings.Contains(w.Body.String(), lease) || strings.Contains(w.Body.String(), session) {
+		t.Fatal("ownership explanation exposed private proof or offered a session id")
+	}
+	w = f.call(f.person, "POST", base+"/adopt", map[string]any{"expected_revision": 0, "session_id": session}, "")
+	leadStatus(t, w, 409, "eligible owned reporting root coordinator required")
+	for _, mode := range []string{"stale", "worker", "other_owner", "owned"} {
+		t.Run(mode, func(t *testing.T) {
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				role, at, owner := "coordinator", "clock_timestamp()", (*string)(nil)
+				switch mode {
+				case "stale":
+					at = "clock_timestamp()-interval '3 minutes'"
+				case "worker":
+					role = "worker"
+				case "other_owner":
+					other := uid()
+					if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','other')`, f.person.TenantID, other); err != nil {
+						return err
+					}
+					owner = &other
+				case "owned":
+					owner = &f.person.ID
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET role=$2,heartbeat_at=`+at+`,owner_principal_id=$3 WHERE id=$1`, session, role, owner)
+				return err
+			})
+			w := f.call(f.person, "GET", base+"/candidates", nil, "")
+			expect(t, w, 200)
+			page := decode(t, w)
+			if _, exists := page["empty_reason"]; exists {
+				t.Fatal("ownership reason misrepresented a stale/worker/owned session")
+			}
+			want := 0
+			if mode == "owned" {
+				want = 1
+			}
+			if len(page["items"].([]any)) != want {
+				t.Fatal("ownership explanation changed candidate eligibility")
+			}
+		})
+	}
+}
+
 func TestProjectLeadAdoptionRejectsChangedEligibility(t *testing.T) {
 	for _, mode := range []string{"worker", "child", "unowned", "other_owner", "stale", "future", "archived", "stopped", "pausing", "revoked", "stale_after_confirmation", "pausing_after_confirmation", "revoked_after_confirmation"} {
 		t.Run(mode, func(t *testing.T) {

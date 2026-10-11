@@ -146,7 +146,7 @@ func loadLadderSnapshot(ctx context.Context, tx pgx.Tx, role string, limit int) 
   SELECT (to_jsonb(r) - 'tenant_id') || jsonb_build_object('profile',
    (to_jsonb(p) - 'tenant_id') || jsonb_build_object(
     'display_name', d.model_display->>'display_name', 'short_name', d.model_display->>'short_name',
-    'model_version', d.model_display->>'model_version', 'effort_level', coalesce(p.registered_effort_level,d.effort_level), 'provider', d.provider, 'source', coalesce(p.source,'auto'), 'note', coalesce(p.note,''), 'retire_at', (SELECT x.retire_at FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id), 'retired', EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id AND (x.retire_at IS NULL OR x.retire_at<=now()))),
+    'model_version', d.model_display->>'model_version', 'effort_level', coalesce(p.registered_effort_level,d.effort_level), 'provider', d.provider, 'source', coalesce(p.source,'auto'), 'origin', coalesce(p.display_overrides->>'origin',''), 'note', coalesce(p.note,''), 'retire_at', (SELECT x.retire_at FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id), 'retired', EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id AND (x.retire_at IS NULL OR x.retire_at<=now()))),
    'suppressed_until', o.suppressed_until, 'retire_at', (SELECT x.retire_at FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id), 'retired', EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id AND x.retire_at IS NULL)) AS value,
    r.priority, r.profile_id
   FROM (` + agentaccounts.ModelRoleRoutesSQL + `) r
@@ -175,6 +175,8 @@ func loadLadderSnapshot(ctx context.Context, tx pgx.Tx, role string, limit int) 
 			if step.Profile.Harness == "gemini" {
 				step.Profile.EffortLevel = harnesslaunch.GeminiEffortLevel(step.Profile.Effort)
 			}
+			step.Profile.Origin = profileOrigin(step.Profile, step.Profile.Origin)
+			step.Profile.Source = profileSource(step.Profile.Source)
 			out = append(out, *step)
 		}
 	}
@@ -231,10 +233,12 @@ func skipReasons(step ladderStep, role roleDef, q resolveQuery, now time.Time, h
 	if h.Accounts > 0 && h.ContextDenied == h.Accounts {
 		reasons = append(reasons, agentaccounts.ContextSkipReason)
 	} else if h.Accounts > 0 {
-		if h.Available == 0 {
-			reasons = append(reasons, "account availability")
-		} else if h.Dispatchable == 0 {
-			reasons = append(reasons, "allowance")
+		if h.Dispatchable == 0 {
+			if len(h.Reasons) > 0 {
+				reasons = append(reasons, h.Reasons...)
+			} else {
+				reasons = append(reasons, "No account has a free agent slot")
+			}
 		}
 	}
 	if reasons == nil {

@@ -164,8 +164,13 @@ func TestRoutineIntentAtomicReplayAndAuthority(t *testing.T) {
 	})
 	t.Run("scheduler and manual replay contend on one publication", func(t *testing.T) {
 		f := setup(t)
+		source := f.node("project", nil, "Source project")
+		f.tx(func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"project_key":"SRC"}'::jsonb WHERE id=$1`, source)
+			return err
+		})
 		in := intentInput(f)
-		in.Trigger = Trigger{Kind: "event", Event: "release.published"}
+		in.Trigger = Trigger{Kind: "event", Event: "release.published", Filter: &EventFilter{ProjectIDs: []string{source}}}
 		r := f.create(in)
 		f.tx(func(tx pgx.Tx) error {
 			// Synthetic active schedule only. This is not person consent or enable.
@@ -173,13 +178,13 @@ func TestRoutineIntentAtomicReplayAndAuthority(t *testing.T) {
 			return err
 		})
 		f.now = f.now.Add(time.Hour)
-		pub := Publication{ProjectKey: "REC", ProjectID: f.project, Name: "Routine fixture", Version: "261010120000.0.0", PublishedAt: f.now}
+		pub := Publication{ProjectKey: "SRC", ProjectID: source, Name: "Routine fixture", Version: "261010120000.0.0", PublishedAt: f.now}
 		f.m.WithHistory([]Publication{pub})
 		if _, err := ensureActor(t.Context(), f.m, f.p.TenantID); err != nil {
 			t.Fatal(err)
 		}
 		pool, barrier, ctx := dbtest.BarrierPool(t, f.d.App, func(sql string) bool { return strings.Contains(sql, "INSERT INTO routine_effect_outbox") })
-		scheduler := New(pool).WithHistory([]Publication{pub})
+		scheduler := New(pool).WithHistory([]Publication{pub}).WithReleaseSubscriptionGate(func(context.Context, pgx.Tx, string) (bool, error) { return true, nil })
 		scheduler.now = f.m.now
 		scheduled := make(chan error, 1)
 		go func() { scheduled <- scheduler.RunTenant(ctx, f.p.TenantID) }()

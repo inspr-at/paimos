@@ -435,6 +435,12 @@ func (rt *runtime) runHeartbeat(ctx context.Context, o heartbeatOptions, dep hea
 
 // heartbeatLoop serves both the PID observer and a one-shot child process.
 func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep heartbeatDeps, session *heartbeatSession) error {
+	defer func() {
+		if session.subagentScan != nil {
+			session.subagentScan.Close()
+			session.subagentScan = nil
+		}
+	}()
 	if dep.alive == nil {
 		pid, start := session.disk.OwnerPID, session.disk.OwnerStart
 		dep.alive = func(int) bool { return ownerAlive(pid, start) }
@@ -483,6 +489,7 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 		case err != nil:
 			fmt.Fprintf(rt.stderr, "heartbeat: beat failed: %s\n", err.Error())
 		default:
+			rt.heartbeatSubagents(ctx, session, false)
 			if serr := saveHeartbeatSession(session); serr != nil {
 				fmt.Fprintf(rt.stderr, "heartbeat: state save failed\n")
 			}
@@ -564,6 +571,16 @@ func waitHeartbeat(ctx context.Context, pid int, alive func(int) bool, interval 
 }
 
 func (rt *runtime) finishHeartbeat(o heartbeatOptions, session *heartbeatSession) error {
+	if session.subagentScan != nil {
+		session.subagentScan.Close()
+		session.subagentScan = nil
+	}
+	session.subagentNames = nil
+	rt.heartbeatSubagents(context.Background(), session, true)
+	if session.subagentScan != nil {
+		session.subagentScan.Close()
+		session.subagentScan = nil
+	}
 	if !session.disk.Terminal {
 		usageCtx, cancel := context.WithTimeout(context.Background(), heartbeatUsageFlushTimeout)
 		rt.drainHeartbeatUsage(usageCtx, o, session)
@@ -890,10 +907,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if err != nil {
 		return heartbeatSession{}, false, err
 	}
-	// A native coordinator session survives a helper process restart.
-	if o.Role == "coordinator" && o.SourceSession != "" {
-		ref = o.Harness + ":" + strings.ToLower(o.SourceSession)
-	}
+	ref = heartbeatRegistrationRef(o, ref)
 	label, haveLabel := resolveHeartbeatLabel(ctx, o, dep, true)
 	body := map[string]any{
 		"max_session_file_bytes": rules.SessionFileLimit(o.Harness), "rules_client_version": version.Version,
@@ -953,7 +967,7 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	}
 	// Capture the owner before registration: a long predecessor timeout must
 	// not attach the new generation to a process that reused the owner's PID.
-	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID, BoundTicket: boundTicket}
+	disk := heartbeatDisk{Schema: heartbeatSchema, OwnerPID: o.OwnerPID, ProjectID: projectID, BoundTicket: boundTicket, RegisteredRef: ref}
 	if proved.Start != "" {
 		disk.OwnerPID = proved.PID
 		disk.OwnerStart = proved.Start
@@ -1011,6 +1025,15 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		disk.SentLabel = label
 	}
 	return heartbeatSession{id: disk.SessionID, lease: lease, disk: disk, hold: session.hold}, true, nil
+}
+
+// A native coordinator session survives a helper process restart. Claim uses
+// the same rule for state written before the registered reference was saved.
+func heartbeatRegistrationRef(o heartbeatOptions, fallback string) string {
+	if o.Role == "coordinator" && o.SourceSession != "" {
+		return o.Harness + ":" + strings.ToLower(o.SourceSession)
+	}
+	return fallback
 }
 
 func (rt *runtime) recoverStopIntent(o heartbeatOptions, session *heartbeatSession) error {

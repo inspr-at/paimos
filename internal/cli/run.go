@@ -70,6 +70,9 @@ type runtime struct {
 	personClient       *client.Client
 	// pairedHook is a test seam. Production leaves it nil and dials agentd.
 	pairedHook hookPeerExchange
+	// subagentLocked observes child-lock ownership in barrier tests. Production
+	// leaves it nil; it never supplies lifecycle metadata or changes lock order.
+	subagentLocked func()
 }
 
 func (rt *runtime) execute(args []string) error {

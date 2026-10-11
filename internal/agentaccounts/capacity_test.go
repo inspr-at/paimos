@@ -161,6 +161,8 @@ func TestCapacityStaleManualOverrideAndSchedules(t *testing.T) {
 	foreign := makePrincipal(t, "schedule-other", "person", "Other", []string{"admin"})
 	token := issueKey(t, runner, []string{"account.manage", "account.probe"})
 	mod := accountsMod()
+	// Registration grants existing models, as the real enrollment path does.
+	codexProfile(t, admin)
 	var a Account
 	callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts", `{"account_key":"quota","harness":"codex","daemon_id":"daemon-a","label":"Codex"}`, 201, &a)
 	ownFixtureAccount(t, admin, &a)

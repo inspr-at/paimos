@@ -445,7 +445,10 @@ case "$1" in
     printf 'CGO_ENABLED=%s\nGOOS=%s\nGOARCH=%s\n' "$CGO_ENABLED" "$GOOS" "$GOARCH" > "$out"
     if [ -n "${GOCACHE:-}" ]; then mkdir -p "$GOCACHE" && : > "$GOCACHE/compiled"; fi
     ;;
-  version) cat "$3" ;;
+  version)
+    cat "$3"
+    if [ "${AEON_RELEASE_TEST_LONG_BUILDINFO:-}" = true ]; then printf '%131072s\n' ''; fi
+    ;;
 esac
 `
 	run := func(t *testing.T, mode string, vars ...string) (string, string, error) {
@@ -471,7 +474,7 @@ esac
 		for _, entry := range os.Environ() {
 			key, _, _ := strings.Cut(entry, "=")
 			switch key {
-			case "GITHUB_ACTIONS", "RUNNER_TEMP", "GOCACHE", "GOMODCACHE", "GOFLAGS", "VERSION", "AEON_DEVELOPER_ID_TEAM", "AEON_DARWIN_ARCH", "PATH":
+			case "GITHUB_ACTIONS", "RUNNER_TEMP", "GOCACHE", "GOMODCACHE", "GOFLAGS", "VERSION", "AEON_DEVELOPER_ID_TEAM", "AEON_DARWIN_ARCH", "AEON_RELEASE_TEST_LONG_BUILDINFO", "PATH":
 			default:
 				cmd.Env = append(cmd.Env, entry)
 			}
@@ -506,6 +509,26 @@ esac
 		}
 		if builds != 4 {
 			t.Fatalf("want four CLI builds, got %d: %q", builds, lines)
+		}
+	})
+	// Risk: grep -q exits as soon as it finds metadata. With pipefail, a
+	// printf writer receiving SIGPIPE can then reject a correctly built binary.
+	// Force unread output beyond the pipe buffer; no scheduling or sleep needed.
+	t.Run("long build info keeps strict metadata checks", func(t *testing.T) {
+		vars := append(append([]string{}, hosted...), "AEON_RELEASE_TEST_LONG_BUILDINFO=true")
+		calls, output, err := run(t, "cli", vars...)
+		if err != nil {
+			t.Fatalf("%v: %s", err, output)
+		}
+		lines := strings.Split(strings.TrimSpace(calls), "\n")
+		const settings = "|$TEMP/runner/go-build-cli|$TEMP/runner/go-mod|-mod=readonly"
+		if len(lines) != 10 || lines[0] != "mod download"+settings || lines[1] != "mod verify"+settings {
+			t.Fatalf("all four builds and metadata checks must follow module verification: %q", lines)
+		}
+		for i := 2; i < len(lines); i += 2 {
+			if !strings.HasPrefix(lines[i], "build ") || !strings.HasPrefix(lines[i+1], "version -m ") || !strings.HasSuffix(lines[i], settings) || !strings.HasSuffix(lines[i+1], settings) {
+				t.Fatalf("each cold build must pass its metadata check: %q", lines[i:i+2])
+			}
 		}
 	})
 	for _, tc := range []struct {
