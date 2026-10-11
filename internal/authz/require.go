@@ -489,3 +489,39 @@ func Handle(mux *http.ServeMux, pool *pgxpool.Pool, pattern, permission string, 
 		handler(w, r.WithContext(ctx))
 	})
 }
+
+// ProjectStartReasonTx reads the current lifecycle under the caller's mutation
+// fence. Frozen/archived projects remain editable, but automation starts close.
+func ProjectStartReasonTx(ctx context.Context, tx pgx.Tx, project string) (string, error) {
+	var state string
+	var deleted bool
+	if err := tx.QueryRow(ctx, `SELECT n.state,n.deleted_at IS NOT NULL FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND k.slug='project'`, project).Scan(&state, &deleted); err != nil {
+		return "", err
+	}
+	if deleted || state == "archived" {
+		return "project_archived", nil
+	}
+	if state == "frozen" {
+		return "project_frozen", nil
+	}
+	return "", nil
+}
+
+// RequireProjectAdminTx supplements nodes.write for project deletion. Grants
+// are live; a project Admin or workspace Owner/Admin supplies the admin role.
+func RequireProjectAdminTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string) error {
+	if err := RequireTx(ctx, tx, p, "nodes.write", Scope{ProjectID: project}); err != nil {
+		return err
+	}
+	grants, err := loadTx(ctx, tx, p, project)
+	if err != nil {
+		return err
+	}
+	if role := grants.Workspace.Role; role != nil && (role.Key == "owner" || role.Key == "admin") {
+		return nil
+	}
+	if grants.Project != nil && grants.Project.Role != nil && grants.Project.Role.Key == "admin" {
+		return nil
+	}
+	return ErrForbidden
+}

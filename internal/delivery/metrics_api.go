@@ -21,15 +21,24 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+type MetricReadError struct {
+	Reason     string    `json:"reason"`
+	Permission *string   `json:"permission"`
+	At         time.Time `json:"at"`
+}
+
 type MetricSource struct {
-	Repository      string     `json:"repository"`
-	CIWorkflow      string     `json:"ci_workflow"`
-	NightlyWorkflow string     `json:"nightly_workflow"`
-	AppConnected    bool       `json:"app_connected"`
-	Backfill        string     `json:"backfill"`
-	BackfillSince   *time.Time `json:"backfill_since"`
-	BackfillDoneAt  *time.Time `json:"backfill_done_at"`
-	CoveredSince    *time.Time `json:"covered_since"`
+	LastReadError   *MetricReadError `json:"last_read_error"`
+	LastEventAt     *time.Time       `json:"last_event_at"`
+	RetryAt         *time.Time       `json:"retry_at"`
+	Repository      string           `json:"repository"`
+	CIWorkflow      string           `json:"ci_workflow"`
+	NightlyWorkflow string           `json:"nightly_workflow"`
+	AppConnected    bool             `json:"app_connected"`
+	Backfill        string           `json:"backfill"`
+	BackfillSince   *time.Time       `json:"backfill_since"`
+	BackfillDoneAt  *time.Time       `json:"backfill_done_at"`
+	CoveredSince    *time.Time       `json:"covered_since"`
 }
 
 type DeliveryMetrics struct {
@@ -40,6 +49,7 @@ type DeliveryMetrics struct {
 }
 
 type metricSourceInput struct {
+	Days            *int    `json:"days"`
 	Repository      string  `json:"repository"`
 	CIWorkflow      *string `json:"ci_workflow"`
 	NightlyWorkflow *string `json:"nightly_workflow"`
@@ -112,6 +122,7 @@ func (m *Module) mountMetrics(mux *http.ServeMux) {
 	mount("GET /api/projects/{projectId}/delivery/metrics", 15*time.Second, m.getMetrics)
 	mount("PUT /api/projects/{projectId}/delivery/metrics/source", 10*time.Second, m.putMetricSource)
 	mount("POST /api/projects/{projectId}/delivery/metrics/backfill", 2*time.Minute, m.backfillMetrics)
+	mount("POST /api/projects/{projectId}/delivery/metrics/check-again", 2*time.Minute, m.checkMetricSource)
 	mount("POST /api/projects/{projectId}/delivery/metrics/facts", 10*time.Second, m.reportMetricFacts)
 }
 
@@ -197,7 +208,7 @@ func githubCoverageEnd(s metricSourceRow, in metricInput, now time.Time) time.Ti
 }
 
 func (m *Module) sourceView(tenantID string, s metricSourceRow, covered *time.Time) *MetricSource {
-	out := &MetricSource{Repository: s.Repository, CIWorkflow: s.CIWorkflow, NightlyWorkflow: s.NightlyWorkflow, AppConnected: m.appConnected(tenantID, s.Repository), Backfill: "not_started", BackfillSince: s.Since, BackfillDoneAt: s.DoneAt, CoveredSince: covered}
+	out := &MetricSource{Repository: s.Repository, CIWorkflow: s.CIWorkflow, NightlyWorkflow: s.NightlyWorkflow, AppConnected: m.appConnected(tenantID, s.Repository), Backfill: "not_started", BackfillSince: s.Since, BackfillDoneAt: s.DoneAt, CoveredSince: covered, LastReadError: s.LastReadError, LastEventAt: s.LastEventAt, RetryAt: s.RetryAt}
 	if s.DoneAt != nil {
 		out.Backfill = "done"
 	} else if s.Cursor != nil {
@@ -291,6 +302,10 @@ func (m *Module) putMetricSource(w http.ResponseWriter, r *http.Request) {
 	if in.NightlyWorkflow != nil {
 		nightly = *in.NightlyWorkflow
 	}
+	if in.Days != nil && (*in.Days < 1 || *in.Days > 90) {
+		respondError(w, fail(400, "backfill days must be 1 to 90"))
+		return
+	}
 	if !reviewgate.ValidRepository(in.Repository) || !metricWorkflow.MatchString(ci) || !metricWorkflow.MatchString(nightly) {
 		respondError(w, fail(400, "invalid metrics source"))
 		return
@@ -309,13 +324,18 @@ func (m *Module) putMetricSource(w http.ResponseWriter, r *http.Request) {
 		// A new repository or workflow starts its history over: the stored
 		// backfill position would claim coverage it never read.
 		now := m.now()
-		if _, err := tx.Exec(r.Context(), `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at) VALUES($1,$2,$3,$4,$5,$6)
+		if _, err := tx.Exec(r.Context(), `INSERT INTO delivery_metric_sources(tenant_id,project_id,repository,ci_workflow,nightly_workflow,updated_at,backfill_pending,backfill_actor_id,backfill_key_id,backfill_days) VALUES($1,$2,$3,$4,$5,$6,true,$7,NULLIF($8,'')::uuid,$9)
 			ON CONFLICT(tenant_id,project_id) DO UPDATE SET repository=EXCLUDED.repository,ci_workflow=EXCLUDED.ci_workflow,nightly_workflow=EXCLUDED.nightly_workflow,updated_at=EXCLUDED.updated_at,
 			backfill_cursor=CASE WHEN (delivery_metric_sources.repository,delivery_metric_sources.ci_workflow,delivery_metric_sources.nightly_workflow)=(EXCLUDED.repository,EXCLUDED.ci_workflow,EXCLUDED.nightly_workflow) THEN delivery_metric_sources.backfill_cursor END,
 			backfill_since=CASE WHEN (delivery_metric_sources.repository,delivery_metric_sources.ci_workflow,delivery_metric_sources.nightly_workflow)=(EXCLUDED.repository,EXCLUDED.ci_workflow,EXCLUDED.nightly_workflow) THEN delivery_metric_sources.backfill_since END,
 			backfill_done_at=CASE WHEN (delivery_metric_sources.repository,delivery_metric_sources.ci_workflow,delivery_metric_sources.nightly_workflow)=(EXCLUDED.repository,EXCLUDED.ci_workflow,EXCLUDED.nightly_workflow) THEN delivery_metric_sources.backfill_done_at END,
+			backfill_pending=CASE WHEN (delivery_metric_sources.repository,delivery_metric_sources.ci_workflow,delivery_metric_sources.nightly_workflow)=(EXCLUDED.repository,EXCLUDED.ci_workflow,EXCLUDED.nightly_workflow) THEN coalesce(delivery_metric_sources.backfill_pending,true) ELSE true END,
+			last_read_error=CASE WHEN (delivery_metric_sources.repository,delivery_metric_sources.ci_workflow,delivery_metric_sources.nightly_workflow)=(EXCLUDED.repository,EXCLUDED.ci_workflow,EXCLUDED.nightly_workflow) THEN delivery_metric_sources.last_read_error END,
+			last_event_at=CASE WHEN delivery_metric_sources.repository=EXCLUDED.repository THEN delivery_metric_sources.last_event_at END,
+			backfill_retry_at=CASE WHEN (delivery_metric_sources.repository,delivery_metric_sources.ci_workflow,delivery_metric_sources.nightly_workflow)=(EXCLUDED.repository,EXCLUDED.ci_workflow,EXCLUDED.nightly_workflow) THEN delivery_metric_sources.backfill_retry_at END,
+			backfill_actor_id=EXCLUDED.backfill_actor_id,backfill_key_id=EXCLUDED.backfill_key_id,backfill_days=EXCLUDED.backfill_days,
 			backfill_revision=delivery_metric_sources.backfill_revision+1`,
-			p.TenantID, project, in.Repository, ci, nightly, now); err != nil {
+			p.TenantID, project, in.Repository, ci, nightly, now, p.ID, p.KeyID, historyDays(in.Days)); err != nil {
 			return err
 		}
 		s, err := loadMetricSourceTx(r.Context(), tx, project, false)
@@ -332,6 +352,7 @@ func (m *Module) putMetricSource(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	m.wakeMetrics()
 	httpapi.WriteJSON(w, 200, out)
 }
 
@@ -345,39 +366,55 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	if err := m.scheduleMetricBackfill(r.Context(), p, project, in, false); err != nil {
+		respondError(w, err)
+		return
+	}
+	result, err := m.metricBackfillStep(r.Context(), p, project, backfillInput{})
+	m.wakeMetrics()
+	if err != nil {
+		respondError(w, err)
+		return
+	}
+	httpapi.WriteJSON(w, 200, result)
+}
+
+func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, project string, in backfillInput) (BackfillResult, error) {
 	days := metricDays
 	if in.Days != nil {
 		days = *in.Days
 	}
 	if days < 1 || days > 90 {
-		respondError(w, fail(400, "backfill days must be 1 to 90"))
-		return
+		return BackfillResult{}, fail(400, "backfill days must be 1 to 90")
 	}
 	reader, readable := m.github.(metricsReader)
 	now := m.now().UTC()
 	var source *metricSourceRow
-	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if _, err := projectSettings(r.Context(), tx, project); err != nil {
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := projectSettings(ctx, tx, project); err != nil {
 			return err
 		}
-		if err := requireMetrics(r.Context(), tx, p, "delivery.manage", project); err != nil {
+		if err := requireMetrics(ctx, tx, p, "delivery.manage", project); err != nil {
 			return err
 		}
 		var err error
-		source, err = loadMetricSourceTx(r.Context(), tx, project, false)
+		source, err = loadMetricSourceTx(ctx, tx, project, false)
 		return err
 	})
 	if err != nil {
-		respondError(w, err)
-		return
+		return BackfillResult{}, err
 	}
 	if source == nil {
-		respondError(w, fail(409, "link a repository to this project first"))
-		return
+		return BackfillResult{}, fail(409, "link a repository to this project first")
+	}
+	if source.RetryAt != nil && source.RetryAt.After(now) {
+		return backfillPosition(source, now), nil
 	}
 	if !readable || !m.appConnected(p.TenantID, source.Repository) {
-		respondError(w, fail(409, "the GitHub App is not connected to this repository"))
-		return
+		if err := m.metricReadFailed(ctx, p, project, source, errNotConfigured); err != nil {
+			return BackfillResult{}, err
+		}
+		return BackfillResult{}, fail(409, "the GitHub App is not connected to this repository")
 	}
 	cursor := source.Cursor
 	if cursor == nil || in.Restart {
@@ -396,40 +433,39 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 		// The runs and pulls are in. The jobs pass reads what the check suites
 		// did not bring, including a legacy map that is not complete, until
 		// nothing unfinished remains. A deferred failure stays phase jobs.
-		result, err = m.fillJobs(r.Context(), p, project, source, reader, cursor, now)
+		result, err = m.fillJobs(ctx, p, project, source, reader, cursor, now)
 		if err != nil {
-			respondError(w, err)
-			return
+			return BackfillResult{}, err
 		}
-		httpapi.WriteJSON(w, 200, result)
-		return
+		return result, nil
 	}
 	workflows := backfillWorkflowList(source, cursor)
 	next := *cursor
 	var batch backfillBatch
-	err = reader.MetricsRead(r.Context(), p.TenantID, func(get func(string, any) error) error {
+	err = reader.MetricsRead(ctx, p.TenantID, func(get func(string, any) error) error {
 		var err error
 		next, batch, err = backfillStep(get, source.Repository, workflows, *cursor, now)
 		return err
 	})
 	if err != nil {
-		// Nothing is written: the stored cursor stays, and a retry repeats
-		// the same pages.
-		respondError(w, fail(502, "GitHub could not be read; the backfill resumes from its last stored position"))
-		return
+		// Preserve the cursor while recording the failed read and next retry.
+		if saveErr := m.metricReadFailed(ctx, p, project, source, err); saveErr != nil {
+			return BackfillResult{}, saveErr
+		}
+		return BackfillResult{}, fail(502, "GitHub could not be read; the backfill resumes from its last stored position")
 	}
 	var retryAt *time.Time
-	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if err := db.LockTenant(r.Context(), tx, p.TenantID); err != nil {
+	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
 			return err
 		}
-		if _, err := projectSettings(r.Context(), tx, project); err != nil {
+		if _, err := projectSettings(ctx, tx, project); err != nil {
 			return err
 		}
-		if err := requireMetrics(r.Context(), tx, p, "delivery.manage", project); err != nil {
+		if err := requireMetrics(ctx, tx, p, "delivery.manage", project); err != nil {
 			return err
 		}
-		current, err := loadMetricSourceTx(r.Context(), tx, project, true)
+		current, err := loadMetricSourceTx(ctx, tx, project, true)
 		if err != nil {
 			return err
 		}
@@ -437,10 +473,10 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 			return fail(409, "the backfill moved or the source changed meanwhile; call again to continue")
 		}
 		at := m.now()
-		if err = upsertRunsTx(r.Context(), tx, p.TenantID, source.Repository, "backfill", batch.Runs, at); err != nil {
+		if err = upsertRunsTx(ctx, tx, p.TenantID, source.Repository, "backfill", batch.Runs, at); err != nil {
 			return err
 		}
-		if err = upsertPullsTx(r.Context(), tx, p.TenantID, source.Repository, "backfill", batch.Pulls, at); err != nil {
+		if err = upsertPullsTx(ctx, tx, p.TenantID, source.Repository, "backfill", batch.Pulls, at); err != nil {
 			return err
 		}
 		// Runs and pulls are in. Stay on the jobs phase while any first
@@ -448,11 +484,11 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 		// failed and is waiting out its hour. The cursor records that, so a
 		// caller that stops at done cannot stop early.
 		if next.Phase == "done" {
-			pending, err := jobWorklistTx(r.Context(), tx, current, now, 1)
+			pending, err := jobWorklistTx(ctx, tx, current, now, 1)
 			if err != nil {
 				return err
 			}
-			unfinished, err := jobDeferredSinceTx(r.Context(), tx, current, now)
+			unfinished, err := jobDeferredSinceTx(ctx, tx, current, now)
 			if err != nil {
 				return err
 			}
@@ -480,12 +516,11 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 			// A preflight catch-up still walking days keeps the finished time.
 			done = current.DoneAt
 		}
-		_, err = tx.Exec(r.Context(), `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1,backfill_since=$3,backfill_done_at=$4 WHERE project_id=$1`, project, raw, next.Since, done)
+		_, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1,backfill_since=$3,backfill_done_at=$4,last_read_error=NULL,backfill_retry_at=$5,backfill_pending=$6 WHERE project_id=$1`, project, raw, next.Since, done, retryAt, next.Phase != "done")
 		return err
 	})
 	if err != nil {
-		respondError(w, err)
-		return
+		return BackfillResult{}, err
 	}
 	result = BackfillResult{State: "running", Since: next.Since, Phase: next.Phase, Calls: batch.Calls, Runs: len(batch.Runs), Pulls: len(batch.Pulls), Truncated: next.Truncated, RetryAt: retryAt}
 	if next.Phase == "runs" {
@@ -495,7 +530,7 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 	if next.Phase == "done" {
 		result.State = "done"
 	}
-	httpapi.WriteJSON(w, 200, result)
+	return result, nil
 }
 
 // validFact checks one reported fact. Timing facts become marks; review audits
@@ -721,7 +756,7 @@ func jobWorklistTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now 
 	rows, err := tx.Query(ctx, `SELECT run_id FROM delivery_metric_runs
 		WHERE repository=$1 AND attempt=1 AND event IN ('pull_request','merge_group') AND completed_at>=$2
 		AND regexp_replace(workflow_path,'^.*/','')=$3 AND `+jobFactsMissing+`
-		AND (jobs_failed_at IS NULL OR jobs_failed_at<$4)
+		AND (jobs_failed_at IS NULL OR jobs_failed_at<=$4)
 		ORDER BY completed_at DESC LIMIT $5`, source.Repository, from, path.Base(source.CIWorkflow), now.Add(-jobFillRetry), limit)
 	if err != nil {
 		return nil, err
@@ -746,7 +781,7 @@ func jobDeferredSinceTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow,
 	err := tx.QueryRow(ctx, `SELECT min(jobs_failed_at) FROM delivery_metric_runs
 		WHERE repository=$1 AND attempt=1 AND event IN ('pull_request','merge_group') AND completed_at>=$2
 		AND regexp_replace(workflow_path,'^.*/','')=$3 AND `+jobFactsMissing+`
-		AND jobs_failed_at IS NOT NULL AND jobs_failed_at>=$4`,
+		AND jobs_failed_at IS NOT NULL AND jobs_failed_at>$4`,
 		source.Repository, from, path.Base(source.CIWorkflow), now.Add(-jobFillRetry)).Scan(&at)
 	return at, err
 }
@@ -767,6 +802,7 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 	}
 	facts := map[int64]jobFacts{}
 	var failedRuns []int64
+	var readFailure error
 	calls := 0
 	if len(runs) > 0 {
 		err = reader.MetricsRead(ctx, p.TenantID, func(get func(string, any) error) error {
@@ -778,6 +814,7 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 				f, err := readJobFacts(counted, id, 1)
 				if err != nil {
 					failedRuns = append(failedRuns, id)
+					readFailure = err
 					continue
 				}
 				facts[id] = f
@@ -787,6 +824,15 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 		// Nothing read at all is GitHub's fault, not the runs': report it and keep
 		// every run eligible. Failures among successes mark only those runs.
 		if err != nil || len(facts) == 0 {
+			if err == nil {
+				err = readFailure
+			}
+			if err == nil {
+				err = errRead
+			}
+			if saveErr := m.metricReadFailed(ctx, p, project, source, err); saveErr != nil {
+				return result, saveErr
+			}
 			return result, fail(502, "GitHub could not be read; the jobs pass resumes from the runs that still lack job facts")
 		}
 		result.Calls = calls
@@ -850,7 +896,11 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 		if err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1 WHERE project_id=$1`, project, raw); err != nil {
+		var readError []byte
+		if readFailure != nil {
+			readError, _ = json.Marshal(metricError(readFailure, at))
+		}
+		if _, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1,last_read_error=$3,backfill_retry_at=$4,backfill_pending=$5 WHERE project_id=$1`, project, raw, readError, result.RetryAt, result.State != "done"); err != nil {
 			return err
 		}
 		result.Jobs = len(facts)

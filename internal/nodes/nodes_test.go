@@ -615,3 +615,42 @@ func mustNode(t *testing.T, p tenant.Principal, body string) nodeJSON {
 	status, raw := call(t, &p, http.MethodPost, "/api/nodes", body)
 	return decode[nodeJSON](t, status, raw, http.StatusCreated)
 }
+
+func TestProjectKeyConflictNamesHolderAndDeleteRequiresAdmin(t *testing.T) {
+	// Risk: duplicate ticket prefixes are created concurrently, deletion permits
+	// ordinary editors, or reserved keys leak across tenant boundaries.
+	p := newPrincipal(t, "project-lifecycle")
+	kind := kindBySlug(t, p, "project")
+	body := fmt.Sprintf(`{"kind_id":%q,"title":"Named project","fields":{"project_key":"UNIQ"}}`, kind.ID)
+	first := mustNode(t, p, body)
+	mod := New(appPool, nil)
+	status, raw := callAs(t, mod, &p, "POST", "/api/nodes", body)
+	if status != 409 || !strings.Contains(string(raw), "Named project") {
+		t.Fatalf("duplicate: %d %s", status, raw)
+	}
+	// The same prefix in another tenant is independent.
+	foreign := addPrincipal(t, "project-lifecycle-foreign")
+	mustNode(t, foreign, fmt.Sprintf(`{"kind_id":%q,"title":"Other tenant","fields":{"project_key":"UNIQ"}}`, kindBySlug(t, foreign, "project").ID))
+	if _, err := testDB.Admin.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='member') WHERE tenant_id=$1 AND principal_id=$2`, p.TenantID, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, raw = callAs(t, mod, &p, "PATCH", "/api/nodes/"+first.ID, `{"title":"Still editable"}`)
+	if status != 200 {
+		t.Fatalf("member edit: %d %s", status, raw)
+	}
+	status, raw = callAs(t, mod, &p, "DELETE", "/api/nodes/"+first.ID, "")
+	if status != 403 {
+		t.Fatalf("member deleted project: %d %s", status, raw)
+	}
+	if _, err := testDB.Admin.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE tenant_id=$1 AND key='admin') WHERE tenant_id=$1 AND principal_id=$2`, p.TenantID, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	status, raw = callAs(t, mod, &p, "DELETE", "/api/nodes/"+first.ID, "")
+	if status != 204 {
+		t.Fatalf("admin delete: %d %s", status, raw)
+	}
+	status, _ = callAs(t, mod, &p, "POST", "/api/nodes", body)
+	if status != 409 {
+		t.Fatal("deleted project's key was reused")
+	}
+}

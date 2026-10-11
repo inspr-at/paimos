@@ -982,3 +982,26 @@ func TestRecurrenceTenantBeforeTree(t *testing.T) {
 		})
 	})
 }
+
+func TestRoutineProjectLifecyclePreventsNewOccurrences(t *testing.T) {
+	// Risk: a frozen or archived routine creates a ticket and queues execution.
+	f := setup(t)
+	r := f.create(f.input())
+	for _, state := range []string{"frozen", "archived"} {
+		f.tx(func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE nodes SET state=$2 WHERE id=$1`, f.project, state)
+			return err
+		})
+		o := f.manual(r.ID, state)
+		if o.Outcome != "skipped" || o.Reason != "project_"+state || o.NodeID != nil {
+			t.Fatalf("lifecycle occurrence: %+v", o)
+		}
+	}
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='open' WHERE id=$1`, f.project)
+		return err
+	})
+	if o := f.manual(r.ID, "restored"); o.Outcome != "created" || o.NodeID == nil {
+		t.Fatalf("restore did not admit: %+v", o)
+	}
+}

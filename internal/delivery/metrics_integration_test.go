@@ -226,7 +226,8 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 		t.Fatalf("failed step wrote %d pulls", pullsBefore)
 	}
 	failOn = ""
-	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
+	// Explicit Check again bypasses the new server retry delay.
+	f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/check-again", nil, 200, &step)
 	// The runs and pulls are in, but two first attempts still lack their jobs:
 	// the backfill is not done until the jobs pass has read them.
 	if step.State != "running" || step.Phase != "jobs" {

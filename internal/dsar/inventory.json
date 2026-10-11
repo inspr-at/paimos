@@ -513,13 +513,20 @@
       "table": "delivery_metric_runs"
     },
     {
-      "classification": "metadata",
+      "classification": "personal",
       "columns": {
+        "backfill_actor_id": "personal",
         "backfill_cursor": "metadata",
+        "backfill_days": "metadata",
         "backfill_done_at": "metadata",
+        "backfill_key_id": "personal",
+        "backfill_pending": "metadata",
+        "backfill_retry_at": "metadata",
         "backfill_revision": "metadata",
         "backfill_since": "metadata",
         "ci_workflow": "metadata",
+        "last_event_at": "metadata",
+        "last_read_error": "metadata",
         "nightly_workflow": "metadata",
         "project_id": "metadata",
         "repository": "metadata",
@@ -527,7 +534,8 @@
         "updated_at": "metadata"
       },
       "locator": {
-        "tenant_column": "tenant_id"
+        "tenant_column": "tenant_id",
+        "person_column": "backfill_actor_id"
       },
       "table": "delivery_metric_sources"
     },

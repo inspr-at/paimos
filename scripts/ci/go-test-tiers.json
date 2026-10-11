@@ -5352,6 +5352,8 @@
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestGitHubPublishPostsGateReason","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestGitHubReadRetainsMissingActionsPermission","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestGitHubStatusExactHeadAndNarrowAuthority","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestLegacyDaemonCannotSeeOrClaimAReview","tier":"GATED-FULL"}
@@ -5744,6 +5746,12 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowWorkflowRunShowsRunningChecks","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryPermissionRetryCheckAgainAndTenantIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistorySourceChangeRejectsOldStepAndResumesAfterRestart","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryWorkerRechecksRevokedAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryLegacyCatchupLeavesAbsentPreflightUncovered","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryLegacyJobMapIsRefreshedOnce","tier":"ESSENTIAL"}
@@ -5811,6 +5819,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryPreflightRedRateIsItsOwnLine","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryQueueEjectionsAndUnclassifiedRunsPerHundredMergedPRs","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryQueueProjectLifecycleClosesStarts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryReconciliationHealsMissedWebhooksAndFanoutRetry","tier":"ESSENTIAL"}
     ,
@@ -5985,6 +5995,8 @@
     {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionDailyLimitUnknownAndMidnightWait","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionExplicitAuthorityFinalWriteAndIdempotentReplay","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionProjectLifecycleDeniesBeforeOtherInputs","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionShadowLimitsFloorsFreshnessAndTenantIsolation","tier":"ESSENTIAL"}
     ,
@@ -6403,6 +6415,8 @@
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadCompetingStartsClaimsAndRevocation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadEmptyCandidatesExplainMissingPersonOwnership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestProjectLeadFrozenBlocksStartAndDispatch","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadLegacyUnclaimedStartStaysCancellable","tier":"GATED-FULL"}
     ,
@@ -7876,6 +7890,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestProjectCountsWorkKindsAndStateGroups","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestProjectKeyConflictNamesHolderAndDeleteRequiresAdmin","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","file":"internal/nodes/project_lookup_test.go","name":"TestProjectLookupAliasesVisibilityAndZeroAggregates","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","file":"internal/nodes/project_lookup_test.go","name":"TestProjectLookupCancellation","tier":"ESSENTIAL"}
@@ -8517,6 +8533,8 @@
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineIntentAtomicReplayAndAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineInvalidDefinitionPreservesSafetyControls","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineProjectLifecyclePreventsNewOccurrences","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineRunHistoryPrivacyUsageAndPagination","tier":"ESSENTIAL"}
     ,

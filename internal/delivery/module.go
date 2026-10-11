@@ -15,16 +15,18 @@ import (
 )
 
 type Module struct {
-	pool             *pgxpool.Pool
-	config           crossreview.AppConfig
-	secret           []byte
-	github           GitHub
-	fanout           func(context.Context, []byte) error
-	now              func() time.Time
-	queueAdmission   QueueAdmission
-	routineArtifacts RoutineArtifactReader
-	routineReviews   *crossreview.Module
-	flowSlots        chan struct{}
+	pool                *pgxpool.Pool
+	config              crossreview.AppConfig
+	secret              []byte
+	github              GitHub
+	fanout              func(context.Context, []byte) error
+	now                 func() time.Time
+	queueAdmission      QueueAdmission
+	routineArtifacts    RoutineArtifactReader
+	routineReviews      *crossreview.Module
+	flowSlots           chan struct{}
+	metricsWake         chan struct{}
+	metricsTenantCursor string
 	// flowStreamNow is the live stream's authorization clock. Nil uses the
 	// wall clock, so a frozen business clock cannot expire every heartbeat.
 	flowStreamNow   func() time.Time
@@ -32,7 +34,7 @@ type Module struct {
 }
 
 func New(pool *pgxpool.Pool, config crossreview.AppConfig, secret []byte, github GitHub, fanout func(context.Context, []byte) error) *Module {
-	return &Module{pool: pool, config: config, secret: append([]byte(nil), secret...), github: github, fanout: fanout, now: func() time.Time { return time.Now().UTC() }, flowSlots: make(chan struct{}, flowStreamSlots)}
+	return &Module{pool: pool, config: config, secret: append([]byte(nil), secret...), github: github, fanout: fanout, now: func() time.Time { return time.Now().UTC() }, flowSlots: make(chan struct{}, flowStreamSlots), metricsWake: make(chan struct{}, 1)}
 }
 func (m *Module) Mount(mux *http.ServeMux) {
 	m.mountWorkQueue(mux)
