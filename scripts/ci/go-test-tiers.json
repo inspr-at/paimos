@@ -3142,6 +3142,8 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestStoreCleanupRequiresRecordedDigest","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestStoreConcurrentDirectoryCreationKeepsPrivateBoundary","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestStoreConcurrentLockAcquisition","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestStoreExclusiveCommitInterruptedAfterRename","tier":"GATED-FULL"}

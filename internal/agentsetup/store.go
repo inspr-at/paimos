@@ -80,7 +80,13 @@ func ReadPrivateFile(path string, max int64) ([]byte, error) {
 
 // openDirectory also anchors user-service directories, which may conventionally
 // be 0755. Their ancestors still cannot be writable by any other user.
-func openDirectory(path string, create, private bool) (_ *Store, resultErr error) {
+func openDirectory(path string, create, private bool) (*Store, error) {
+	return openDirectoryWithMkdir(path, create, private, unix.Mkdirat)
+}
+
+// Inject creation to establish a competing creator after ENOENT in tests,
+// without a process-global hook or timing-dependent race.
+func openDirectoryWithMkdir(path string, create, private bool, mkdir func(int, string, uint32) error) (_ *Store, resultErr error) {
 	defer func() {
 		if resultErr != nil {
 			resultErr = fmt.Errorf("open state directory %s: %w", path, resultErr)
@@ -102,7 +108,9 @@ func openDirectory(path string, create, private bool) (_ *Store, resultErr error
 		}
 		next, e := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		if errors.Is(e, unix.ENOENT) && create {
-			if e = unix.Mkdirat(fd, part, 0700); e == nil {
+			// Another creator may win after ENOENT. Reopen without following
+			// links and apply the same owner/mode checks below; never repair it.
+			if e = mkdir(fd, part, 0700); e == nil || errors.Is(e, unix.EEXIST) {
 				e = unix.Fsync(fd)
 			}
 			if e != nil {
