@@ -417,8 +417,8 @@ function pauseSelected(action: 'pause' | 'resume') {
   pause.open(action, [view.session])
 }
 const shortcutDisposers = [
-  onAction('agents.search.focus', () => sessionList.value?.focusSearch() ?? false, actionScope),
-  onAction('agents.filter.add', () => sessionList.value?.openFilter() ?? false, actionScope),
+  onAction('agents.search.focus', () => { if (!sessionList.value?.focusSearch()) return false }, actionScope),
+  onAction('agents.filter.add', () => { if (!sessionList.value?.openFilter()) return false }, actionScope),
   onAction('agents.layout.preset', () => { void cycleLayout() }, { ...actionScope, enabled: () => layoutEnabled.value }),
   ...(['left', 'right', 'min', 'max'] as const).map(direction => onAction(`agents.divider.${direction}`, () => {
     moveHandle(direction === 'min' ? LIST_MIN : direction === 'max' ? maxHandle.value : handle.value + (direction === 'left' ? -16 : 16))
