@@ -114,7 +114,9 @@ func TestCancelledConnectionContextClosesConnection(t *testing.T) {
 			if mode != "header before cancel" && mode != "flush before cancel" && !first.Close {
 				t.Fatal("response committed after cancellation has no Connection: close")
 			}
-			_, _ = io.WriteString(conn, "GET /api/probe HTTP/1.1\r\nHost: aeon.test\r\n\r\n")
+			// Observe the server's EOF before sending any more bytes. A probe
+			// racing the server's close can turn that close into a TCP reset on
+			// macOS; reading here proves the server closes without client input.
 			_, err = http.ReadResponse(responses, nil)
 			if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 				t.Fatalf("cancelled connection was not closed: %v", err)
