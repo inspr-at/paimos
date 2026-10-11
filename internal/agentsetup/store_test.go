@@ -7,6 +7,7 @@ import (
 	"golang.org/x/sys/unix"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -136,6 +137,68 @@ func TestStoreRejectsLinksTraversalAndPublicState(t *testing.T) {
 	b, _ := os.ReadFile(foreign)
 	if string(b) != "preserve unrelated bytes" {
 		t.Fatal("foreign bytes changed")
+	}
+}
+
+// Two daemons or routines sharing a repository create the same fence directory.
+// The loser of the mkdir race opens the winner's valid private entry; an entry
+// OpenStore would never create is still refused by validation, not adopted.
+func TestStoreCreateAdoptsOnlyValidConcurrentlyCreatedDirectory(t *testing.T) {
+	root := physicalTemp(t)
+	raced := 0
+	rival := func(fd int, name string, mode uint32) error {
+		raced++
+		if err := unix.Mkdirat(fd, name, 0700); err != nil {
+			return err
+		}
+		return unix.Mkdirat(fd, name, mode)
+	}
+	path := filepath.Join(root, "repository", "aeon-routine-worktrees")
+	s, err := openDirectoryWithMkdirat(path, true, true, rival)
+	if err != nil {
+		t.Fatalf("lost mkdir race refused a valid private directory: %v", err)
+	}
+	defer s.Close()
+	if raced != 2 || s.Path() != path {
+		t.Fatalf("race not exercised for every missing component: %d", raced)
+	}
+	if err := s.Write("fence", []byte("owned"), false); err != nil {
+		t.Fatal(err)
+	}
+	for name, plant := range map[string]func(int, string) error{
+		"public": func(fd int, name string) error {
+			if err := unix.Mkdirat(fd, name, 0700); err != nil {
+				return err
+			}
+			return unix.Fchmodat(fd, name, 0755, 0)
+		},
+		"symlink": func(fd int, name string) error { return unix.Symlinkat(path, fd, name) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			target := filepath.Join(root, name)
+			planted := func(fd int, part string, mode uint32) error {
+				if err := plant(fd, part); err != nil {
+					return err
+				}
+				return unix.Mkdirat(fd, part, mode)
+			}
+			s, err := openDirectoryWithMkdirat(target, true, true, planted)
+			if s != nil {
+				s.Close()
+				t.Fatal("rival entry adopted")
+			}
+			reason := map[string]string{"public": "validate directory ", "symlink": "open directory "}[name] + target
+			if !errors.Is(err, ErrUnsafePath) || strings.Contains(err.Error(), "create directory") || !strings.Contains(err.Error(), reason) {
+				t.Fatalf("rival entry refused for the wrong reason: %v", err)
+			}
+			var st unix.Stat_t
+			if err := unix.Lstat(target, &st); err != nil {
+				t.Fatal(err)
+			}
+			if kind := st.Mode & unix.S_IFMT; name == "public" && (kind != unix.S_IFDIR || st.Mode&0777 != 0755) || name == "symlink" && kind != unix.S_IFLNK {
+				t.Fatal("rival entry repaired or replaced")
+			}
+		})
 	}
 }
 

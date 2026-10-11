@@ -3136,6 +3136,8 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestStoreConcurrentLockAcquisition","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestStoreCreateAdoptsOnlyValidConcurrentlyCreatedDirectory","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestStoreExclusiveCommitInterruptedAfterRename","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestStoreLockMissingDirectoryIsNotBusy","tier":"GATED-FULL"}
