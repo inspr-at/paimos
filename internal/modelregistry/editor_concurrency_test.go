@@ -223,12 +223,17 @@ func TestEditorArchiveWaitsBehindFencedRowUndo(t *testing.T) {
 	}
 }
 
+// Risk: a write to the retired ladder writer waits behind an additive
+// catalog preparation, or prepares the catalog itself, instead of answering
+// 410 while that preparation holds its fence; the preparation still commits.
 func TestEditorConditionalWriteWaitsForAdditivePreparation(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "editor-upgrade", "person", "Owner", []string{"admin"})
 	incompleteCatalogFixture(t, p)
 	h := newEditorHTTP(t, &Module{pool: appPool})
-	old := h.ladder(t, p, "build")
+	if old := h.ladder(t, p, "build"); old.EditToken != nil || old.CanEdit {
+		t.Fatal("compatibility read still grants editing")
+	}
 	held, release := make(chan int, 1), make(chan struct{})
 	defer close(release)
 	calls := 0
@@ -249,26 +254,22 @@ func TestEditorConditionalWriteWaitsForAdditivePreparation(t *testing.T) {
 					return time.Time{}, ctx.Err()
 				}
 				// The concurrent change is an explicit fixture write under
-				// the held fence; ID bootstrap must not invent extra routes.
-				pin, err := insertProfile(ctx, tx, p.TenantID, profileWrite{Slug: "explicit-addition", Version: "fixture", Harness: "claude", Family: "anthropic", Model: "sonnet", Effort: "high", Tier: "standard"})
-				if err != nil {
-					return time.Time{}, err
-				}
-				if err := insertRoute(ctx, tx, p.TenantID, Route{Role: "build", Priority: 18, ProfileID: pin.ID, State: "available"}); err != nil {
+				// the held fence; ID bootstrap must not invent extra pins.
+				if _, err := insertProfile(ctx, tx, p.TenantID, profileWrite{Slug: "explicit-addition", Version: "fixture", Harness: "claude", Family: "anthropic", Model: "sonnet", Effort: "high", Tier: "standard"}); err != nil {
 					return time.Time{}, err
 				}
 			}
 			return validationNow(ctx, tx)
 		}})
 	}()
-	var pid int
 	select {
-	case pid = <-held:
+	case <-held:
 	case <-time.After(10 * time.Second):
 		t.Fatal("preparation did not hold fence")
 	}
-	write := startEditorRequest(t, h, p, "PUT", "/api/models/routes?role=build", "[]", map[string]string{"If-Match": *old.EditToken})
-	waitEditorBlocked(t, pid)
+	// Preparation still holds its fence: a writer that waited for it would
+	// hang until the bounded finish fails.
+	editorRetired(t, finishEditorRequest(t, startEditorRequest(t, h, p, "PUT", "/api/models/routes?role=build", "[]", map[string]string{"If-Match": `"` + strings.Repeat("c", 64) + `"`})))
 	release <- struct{}{}
 	select {
 	case err := <-done:
@@ -278,9 +279,16 @@ func TestEditorConditionalWriteWaitsForAdditivePreparation(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("preparation hung")
 	}
-	editorError(t, finishEditorRequest(t, write), 409, "stale_revision")
-	current := h.ladder(t, p, "build")
-	if *current.EditToken == *old.EditToken || len(current.Routes) <= len(old.Routes) || current.Routes[0].ProfileID != old.Routes[0].ProfileID || current.Routes[0].Priority != 17 {
-		t.Fatal("upgrade overwrote saved priority or snapshot missed additions")
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		var added int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_profiles WHERE slug='explicit-addition'`).Scan(&added); err != nil {
+			return err
+		}
+		if added != 1 {
+			t.Fatal("preparation lost its explicit addition")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
