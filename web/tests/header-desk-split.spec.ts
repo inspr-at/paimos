@@ -251,6 +251,113 @@ for (const width of [601, 640, 721, 768, 1024]) test(`on a project's tickets at 
   }
 })
 
+// AEON-1214 fix round 4 (Tick's recheck): between phone width and about 720 px the
+// wider split place left the trail a few pixels, and it showed a project key cut
+// mid-chip ('PH', or a teal sliver after '/'). The trail drops whole segments, a
+// separator with its crumb, and never cuts a chip. Probe: every separator, key,
+// icon and text run still shown lies whole inside each box that clips it, up to the
+// header's padding; a name that ends in an ellipsis keeps three characters' room;
+// no separator stands alone.
+const trailFit = (page: Page) => page.locator('.app-header').evaluate(header => {
+  const shown = (el: Element) => { const box = el.getBoundingClientRect(), style = getComputedStyle(el); return box.width > 1 && box.height > 1 && style.display !== 'none' && style.visibility !== 'hidden' }
+  const trail = header.querySelector<HTMLElement>('.crumbs')
+  if (!trail || !shown(trail)) return { parts: [] as string[], cut: [] as string[] }
+  const own = header.getBoundingClientRect(), pad = getComputedStyle(header)
+  // The room a node is seen in: the header inside its padding, narrowed by every box up from the node that hides its overflow.
+  const room = (node: Node) => {
+    let left = own.left + parseFloat(pad.paddingLeft), right = own.right - parseFloat(pad.paddingRight)
+    for (let el = node.parentElement; el && el !== header; el = el.parentElement) {
+      if (getComputedStyle(el).overflowX === 'visible') continue
+      const box = el.getBoundingClientRect()
+      left = Math.max(left, box.left); right = Math.min(right, box.right)
+    }
+    return { left, right }
+  }
+  const outside = (box: { left: number; right: number }, node: Node) => { const r = room(node); return box.left < r.left - 0.5 || box.right > r.right + 0.5 }
+  const label = (el: Element) => el.matches('.sep') ? '/' : [...el.childNodes].filter(node => node.nodeType === Node.TEXT_NODE || shown(node as Element)).map(node => node.textContent!.trim()).filter(Boolean).join(' ')
+  const cut: string[] = []
+  const parts = [...trail.children].filter(shown)
+  const range = document.createRange()
+  for (const el of [trail, ...trail.querySelectorAll('*')].filter(el => shown(el) && !el.matches('svg *'))) {
+    const style = getComputedStyle(el), box = el.getBoundingClientRect()
+    const ellipsis = style.textOverflow === 'ellipsis' && style.overflowX !== 'visible'
+    if (el.matches('.sep, .key-badge, svg') && (outside(box, el) || (el instanceof HTMLElement && el.scrollWidth > el.clientWidth))) cut.push(`chip ${label(el) || el.tagName}`)
+    if (ellipsis && el instanceof HTMLElement) {
+      const inner = { left: box.left + parseFloat(style.paddingLeft), right: box.right - parseFloat(style.paddingRight) }
+      if (outside(inner, el)) cut.push(`ellipsis box ${label(el)}`)
+      if (el.scrollWidth > el.clientWidth && el.clientWidth < 3 * parseFloat(style.fontSize)) cut.push(`sliver ${label(el)} ${el.clientWidth}px`)
+      continue
+    }
+    for (const node of el.childNodes) {
+      if (node.nodeType !== Node.TEXT_NODE || !node.textContent!.trim()) continue
+      range.selectNodeContents(node)
+      if (outside(range.getBoundingClientRect(), node)) cut.push(`text ${node.textContent!.trim()}`)
+    }
+  }
+  parts.forEach((part, index) => {
+    if (part.matches('.sep') && !parts[index + 1]?.matches('.crumb')) cut.push('a separator without its crumb')
+  })
+  if (!parts.some(part => part.matches('.crumb'))) cut.push('a trail without a crumb')
+  return { parts: parts.map(label), cut }
+})
+const settle = (page: Page) => page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+const TRAILS = [
+  { slug: 'tickets', path: '/p/PHAROS/tickets', ready: (page: Page) => expect(page.locator('.app-header .app-density')).toBeVisible() },
+  { slug: 'ticket', path: '/p/PHAROS/PHAROS-11?view=full', ready: (page: Page) => expect(page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')).toHaveText('PHAROS-11') },
+  { slug: 'profiles', path: '/settings/business/profiles', ready: (page: Page) => expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Document profiles') },
+]
+for (const width of [601, 640, 721]) for (const theme of ['light', 'dark'] as const) {
+  test(`at ${width} ${theme} the trail drops whole segments and never cuts a chip`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    await setup(page, { theme })
+    const dir = testInfo.outputPath('AEON-1214')
+    await mkdir(dir, { recursive: true })
+    for (const trail of TRAILS) {
+      await page.goto(trail.path)
+      await trail.ready(page)
+      await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText(trail.slug === 'profiles' ? 'Settings' : 'Pharos')
+      await expect(chevron(page)).toBeVisible()
+      await page.evaluate(() => document.fonts.ready.then(() => undefined))
+      await settle(page)
+      const fit = await trailFit(page)
+      expect(fit.cut, `${trail.path}: ${fit.parts.join(' ')}`).toEqual([])
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 'no sideways scroll').toBeLessThanOrEqual(0)
+      await page.screenshot({ path: join(dir, `trail-${trail.slug}-${width}-${theme}.png`), clip: { x: 0, y: 0, width, height: 120 } })
+    }
+  })
+}
+
+// Every width from just above phone width to where the places show their labels:
+// the trail never shows a cut chip, and it returns whole when the window widens.
+test('from 601 to 1180 px the trail never cuts a chip and returns whole when the window widens', async ({ page }) => {
+  await page.setViewportSize({ width: 1180, height: 900 })
+  await page.emulateMedia({ colorScheme: 'light' })
+  await setup(page)
+  for (const trail of TRAILS.slice(0, 2)) {
+    await page.setViewportSize({ width: 1180, height: 900 })
+    await page.goto(trail.path)
+    await trail.ready(page)
+    await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toContainText('Pharos')
+    await page.evaluate(() => document.fonts.ready.then(() => undefined))
+    const seen: string[] = []
+    for (let width = 1180; width >= 601; width -= 7) {
+      await page.setViewportSize({ width, height: 900 })
+      await settle(page)
+      const fit = await trailFit(page)
+      expect(fit.cut, `${trail.path} at ${width}: ${fit.parts.join(' ')}`).toEqual([])
+      seen.push(fit.parts.join(' '))
+    }
+    // Narrow enough, whole segments went; they come back with the room.
+    expect(seen.at(-1), `${trail.path} at 601`).not.toBe(seen[0])
+    await page.setViewportSize({ width: 1024, height: 900 })
+    await settle(page)
+    const back = await trailFit(page)
+    expect(back.cut).toEqual([])
+    expect(back.parts[0]).toBe('/')
+    expect(back.parts, `${trail.path} at 1024 after the sweep`).toContain(trail.slug === 'tickets' ? 'PHAROS Pharos' : 'PHAROS-11')
+  }
+})
+
 // AEON-1214 fix round 2: inside the Desk place the preview must not inherit the
 // place's one-line label, so a long request wraps beside its Open, never under it.
 const LONG_TITLE = 'Decide whether the release train may ship the tenant isolation migration together with the reporter contract bump before Monday: https://github.com/inspr-at/paimos/pull/181/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef'
