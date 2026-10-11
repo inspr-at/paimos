@@ -41,6 +41,10 @@ controller; a login must remain selected until its approval and local enrollment
 finish. The quota guard must be resumed afterwards. No worker changes that
 controller or takes over the service.
 
+If a command times out or loses its connection, keep that login selected and
+retry the same `add-harness` command. A matching pending enrollment resumes;
+selecting another login before the current approval finishes is refused.
+
 After the service owner has activated the released daemon and matching CLI,
 run the following on the paired Mac. Keep the service running:
 
