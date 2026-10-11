@@ -4,6 +4,7 @@ package routineexec
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/engineadmission"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/recurrences"
@@ -40,6 +42,7 @@ type fixture struct {
 	d                                                              *dbtest.DB
 	owner, agent                                                   tenant.Principal
 	project, parent, work, account, computer, profile, run, action string
+	token                                                          string
 	routine                                                        recurrences.Recurrence
 	broker                                                         routinebudget.Broker
 	gate                                                           agentaccounts.RoutineGateContract
@@ -158,10 +161,14 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	if paid {
 		f.gate.PaidAccountIDs = []string{f.account}
 	}
-	var request, key string
-	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,created_by_principal_id) VALUES($1,$2,'Fixture',gen_random_uuid()::text,'fixture-not-a-credential',$3) RETURNING id::text`, f.owner.TenantID, f.agent.ID, f.owner.ID).Scan(&key))
+	var request, key, prefix string
+	// The daemon's claim re-reads its exact scoped key from the bearer token.
+	secret := "routine-dispatch-fixture-not-a-credential"
+	sum := sha256.Sum256([]byte(secret))
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'Fixture',replace(gen_random_uuid()::text,'-',''),$3,$4,$5) RETURNING id::text,prefix`, f.owner.TenantID, f.agent.ID, hex.EncodeToString(sum[:]), f.agent.Scopes, f.owner.ID).Scan(&key, &prefix))
+	f.token = "aeon_" + prefix + "_" + secret
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,gen_random_uuid(),'887887887',repeat('a',64),repeat('b',64),repeat('c',64),'{"platform":"darwin","arch":"arm64"}','fixture','redeemed',$2) RETURNING id::text`, f.owner.TenantID, f.owner.ID).Scan(&request))
-	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,capacity_signals,capacity_reported_at) VALUES($1,gen_random_uuid(),$2,$3,$4,'budget-daemon',repeat('c',64),'{"load":5,"cores":18,"memory_pressure":"normal","power":"plugged_in","thermal":"normal","unattended":{"login_session":"ready","idle_sleep":"disabled","filevault":"on"}}',clock_timestamp()) RETURNING id::text`, f.owner.TenantID, request, f.agent.ID, key).Scan(&f.computer))
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,capacity_signals,capacity_reported_at,ledger_generation,ledger_enrolled_at) VALUES($1,gen_random_uuid(),$2,$3,$4,'budget-daemon',repeat('c',64),'{"load":5,"cores":18,"memory_pressure":"normal","power":"plugged_in","thermal":"normal","unattended":{"login_session":"ready","idle_sleep":"disabled","filevault":"on"}}',clock_timestamp(),gen_random_uuid()::text,clock_timestamp()) RETURNING id::text`, f.owner.TenantID, request, f.agent.ID, key).Scan(&f.computer))
 	f.exec(`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) VALUES($1,$2,$3,$4,$5,clock_timestamp()+interval '1 hour',clock_timestamp())`, f.owner.TenantID, f.account, f.computer, request, f.profile)
 	f.exec(`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model,capacity_read_at,capacity_allowed,capacity_kind,capacity_bucket,capacity_source) VALUES($1,$2,clock_timestamp()-interval '1 minute',clock_timestamp()+interval '7 days','percent',100,20,'unrestricted',clock_timestamp(),true,'weekly','codex','harness')`, f.owner.TenantID, f.account)
 	f.exec(`INSERT INTO account_capacity_readings(tenant_id,account_id,window_kind,bucket,window_minutes,used_percent,resets_at,read_at,source) VALUES($1,$2,'weekly','codex',10080,20,clock_timestamp()+interval '7 days',clock_timestamp(),'harness')`, f.owner.TenantID, f.account)
@@ -326,6 +333,13 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	wait("lead admission wait: host_unavailable", "", 0)
 	mode.Store(2)
 	wait("main_red", "", 0)
+	// Main creates new intent as created; released pending intent keeps the
+	// same admission checks, while an unknown state must still refuse dispatch.
+	f.exec(`UPDATE routine_runs SET state='pending' WHERE id=$1`, f.run)
+	wait("main_red", "", 0)
+	f.exec(`UPDATE routine_runs SET state='future_state' WHERE id=$1`, f.run)
+	wait("routine_run_unavailable", "", 0)
+	f.exec(`UPDATE routine_runs SET state='created' WHERE id=$1`, f.run)
 	mode.Store(3)
 	wait("ci_admission_wait", "", 0)
 	mode.Store(4)
@@ -344,6 +358,13 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	f.exec(`UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE id=$1`, key)
 	wait("owner_or_dispatch_authority_revoked", "", 0)
 	f.exec(`UPDATE agent_keys SET revoked_at=NULL WHERE id=$1`, key)
+	// A daemon without ledger enrolment cannot satisfy the launch binding; the
+	// pass waits with that reason instead of failing on the missing generation.
+	var ledger string
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT ledger_generation FROM agent_pairing_computers WHERE id=$1`, f.computer).Scan(&ledger))
+	f.exec(`UPDATE agent_pairing_computers SET ledger_generation=NULL,ledger_enrolled_at=NULL WHERE id=$1`, f.computer)
+	wait("routine_ledger_enrollment_required", "", 0)
+	f.exec(`UPDATE agent_pairing_computers SET ledger_generation=$2,ledger_enrolled_at=clock_timestamp() WHERE id=$1`, f.computer, ledger)
 	// An absent lead keeps one generation-bound demand and never a worker hold.
 	f.exec(`UPDATE project_leads SET session_id=NULL,state='waiting_for_room' WHERE project_id=$1`, f.project)
 	wait("lead_demand_pending", "", 0)
@@ -450,6 +471,18 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT binding FROM routine_launch_intents WHERE routine_run_id=$1 AND kind='worker'`, f.run).Scan(&raw))
 	must(t, json.Unmarshal(raw, &grant))
 	must(t, f.tx(func(tx pgx.Tx) error { return d.e.LaunchChecks().Admission(t.Context(), tx, f.owner, grant) }))
+	// The known dispatched state retains its held grant; unknown states never
+	// inherit that allowance merely because dispatch already succeeded.
+	f.exec(`UPDATE routine_runs SET state='future_state' WHERE id=$1`, f.run)
+	if err := f.tx(func(tx pgx.Tx) error { return d.e.LaunchChecks().Admission(t.Context(), tx, f.owner, grant) }); err != nil {
+		var refusal *workorders.Error
+		if !errors.As(err, &refusal) || refusal.Status != 409 || refusal.Message != "routine_run_unavailable" {
+			t.Fatalf("unknown routine state refused for the wrong reason: %v", err)
+		}
+	} else {
+		t.Fatal("unknown routine state allowed daemon admission")
+	}
+	f.exec(`UPDATE routine_runs SET state='dispatched' WHERE id=$1`, f.run)
 	// The ordinary advisory can see a spare owned account; the run-bound gate
 	// must still refuse its selected account when that account is unavailable.
 	var spare string
@@ -496,7 +529,9 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 		t.Fatalf("spare account admitted selected unavailable account: %v", err)
 	}
 	f.exec(`UPDATE agent_accounts SET state='available' WHERE id=$1`, f.account)
-	module := agentruns.NewWithLeadAdmission(f.d.App, d.options.LeadAdmission)
+	module := agentruns.NewWithLeadAdmission(f.d.App, d.options.LeadAdmission, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry, pending *[]events.Change) error {
+		return agentaccounts.SettleDeferred(ctx, tx, p, run.ID, pending)
+	})
 	must(t, d.e.Bind(module))
 	mux := http.NewServeMux()
 	module.Mount(mux)
@@ -522,6 +557,7 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 		"handoff": agentruns.WorkerPickup{TicketRevision: handoff.TicketRevision, WorkOrderRevision: handoff.WorkOrderRevision, BriefSHA256: handoff.BriefSHA256, WorktreeID: worktree}})
 	must(t, err)
 	req := httptest.NewRequest("POST", "/api/runs/"+d.agentRun+"/claim", strings.NewReader(string(body))).WithContext(tenant.WithPrincipal(t.Context(), f.agent))
+	req.Header.Set("Authorization", "Bearer "+f.token)
 	req.Header.Set(agentpairing.LedgerGenerationHeader, grant.LedgerGeneration)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -532,6 +568,30 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT (SELECT status='starting' AND account_id=$2::uuid FROM agent_runs WHERE id=$1) AND (SELECT state='claimed' FROM routine_launch_intents WHERE agent_run_id=$1)`, d.agentRun, f.account).Scan(&claimed))
 	if !claimed {
 		t.Fatal("daemon claim did not retain the selected account and launch")
+	}
+	// The owner's personal routine stays hidden from the daemon's own view,
+	// yet its exact launch and exit evidence must record and release holds.
+	telemetry := func(body string) {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/api/runs/"+d.agentRun+"/telemetry", strings.NewReader(body)).WithContext(tenant.WithPrincipal(t.Context(), f.agent))
+		req.Header.Set("Authorization", "Bearer "+f.token)
+		req.Header.Set(agentpairing.LedgerGenerationHeader, grant.LedgerGeneration)
+		req.Header.Set(agentruns.DaemonHeader, grant.DaemonID)
+		req.Header.Set(agentruns.GenerationHeader, grant.DaemonGeneration)
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != 200 {
+			t.Fatalf("routine telemetry %s=%d %s", body, w.Code, w.Body.String())
+		}
+	}
+	telemetry(`{"sequence":1,"kind":"started"}`)
+	telemetry(`{"sequence":2,"kind":"finished","status":"failed","process_state":"exited"}`)
+	var exited, evidence, settled bool
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT (SELECT state='exit_observed' AND exit_observed_at IS NOT NULL FROM routine_launch_intents WHERE agent_run_id=$1),
+ (SELECT count(*)=2 FROM routine_launch_evidence e JOIN routine_launch_intents l ON l.id=e.launch_id WHERE l.agent_run_id=$1 AND e.kind IN ('launched','exit_observed')),
+ NOT EXISTS(SELECT 1 FROM account_reservations WHERE run_id=$1 AND state='active')`, d.agentRun).Scan(&exited, &evidence, &settled))
+	if !exited || !evidence || !settled {
+		t.Fatalf("personal routine exit observed=%v evidence=%v settled=%v", exited, evidence, settled)
 	}
 }
 

@@ -78,7 +78,7 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     })
     await page.goto('/settings/accounts')
     await appearance(page, theme)
-    // AEON-686: the switch lives in the account's panel under Use and limits.
+    // AEON-686: the switch lives in the account's panel, under Limits on this account (AEON-1172).
     await page.locator(`.list-row[data-accounts~="${mock.account.id}"]`).click()
     const toggle = page.locator('section.pane').getByRole('switch', { name: /Agents may use it/ })
     await expect(toggle).toHaveAttribute('aria-checked', 'false')

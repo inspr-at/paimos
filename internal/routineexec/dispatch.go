@@ -210,7 +210,7 @@ func (e *Executor) RunTenant(ctx context.Context, tenantID string) (Pass, error)
  JOIN routine_runs r ON r.tenant_id=o.tenant_id AND r.id=o.run_id
  JOIN project_routine_execution_settings s ON s.tenant_id=r.tenant_id AND s.project_id=r.output_project_id
  WHERE s.automatic_launch_enabled AND o.effect_key='execute' AND o.kind='routine.execute' AND o.state='pending'
- AND r.state='pending' AND o.reconcile_after<=clock_timestamp()
+ AND r.state IN ('created','pending') AND o.reconcile_after<=clock_timestamp()
  ORDER BY o.reconcile_after,o.id LIMIT 33`)
 		if err != nil {
 			return err
@@ -436,14 +436,14 @@ func (e *Executor) dispatch(ctx context.Context, tx pgx.Tx, tenantID string, r i
 	if err != nil {
 		return out, err
 	}
-	if r.state != "pending" && r.state != "dispatched" {
+	if r.state != "created" && r.state != "pending" && r.state != "dispatched" {
 		return out, workorders.Fail(409, "routine_run_unavailable")
 	}
 	var a recurrences.Assignment
 	if json.Unmarshal(r.assignment, &a) != nil {
 		return out, workorders.Fail(409, "assignment_unavailable")
 	}
-	if r.state == "pending" {
+	if r.state == "created" || r.state == "pending" {
 		prep, err := agentruns.PrepareRoutineWorkTx(ctx, tx, owner, agentruns.RoutinePreparationInput{RecurrenceID: r.recurrence, DefinitionRevision: r.revision}, e.options.Runtime)
 		if err != nil {
 			return out, err
@@ -541,7 +541,8 @@ func (e *Executor) leadDemand(ctx context.Context, tx pgx.Tx, owner tenant.Princ
 }
 
 func (e *Executor) finish(ctx context.Context, tx pgx.Tx, owner tenant.Principal, r intent, a recurrences.Assignment, run agentruns.Run, target workqueue.RouteTarget) ([]events.Change, error) {
-	var account, computer, daemon, daemonGeneration, ledger, harnessName string
+	var account, computer, daemon, daemonGeneration, harnessName string
+	var ledger *string
 	// Exact account/host selection stays bounded. Multiple accounts require the
 	// current registry/person route to select one; never guess an account.
 	rows, err := tx.Query(ctx, `SELECT a.id::text,c.id::text,a.daemon_id,a.last_daemon_generation,c.ledger_generation::text,m.harness
@@ -571,6 +572,11 @@ func (e *Executor) finish(ctx context.Context, tx pgx.Tx, owner tenant.Principal
 	}
 	if count != 1 {
 		return nil, workorders.Fail(409, "routine_account_selection_required")
+	}
+	// The launch binds the computer's ledger generation; an unenrolled daemon
+	// waits with its reason rather than failing the whole pass.
+	if ledger == nil {
+		return nil, workorders.Fail(409, "routine_ledger_enrollment_required")
 	}
 	worker := tenant.Principal{ID: target.Agent, TenantID: owner.TenantID, Kind: tenant.Agent, Scopes: []string{"run.claim"}}
 	if _, err = tx.Exec(ctx, `UPDATE agent_runs SET requested_account_id=$2 WHERE id=$1`, run.ID, account); err != nil {
@@ -631,7 +637,7 @@ func (e *Executor) finish(ctx context.Context, tx pgx.Tx, owner tenant.Principal
 	if a.RuntimeRequirements.NeedsBrowser {
 		capability = "routine_native_browser_v1"
 	}
-	g := agentsetup.RoutineGrant{LedgerGeneration: ledger, LaunchID: launch, TenantID: owner.TenantID, OwnerID: owner.ID, ProjectID: r.project, RoutineRunID: r.id, AgentRunID: run.ID, ExecutionPrincipalID: r.principal, PrincipalID: target.Agent, AccountID: account, ComputerID: computer, DaemonID: daemon, DaemonGeneration: daemonGeneration, AssignmentDigest: r.digest, DefinitionRevision: r.revision, ConsentRevision: r.consentRevision, ExecutionRevision: settings.Revision, QualificationID: q.ID, DaemonDigest: q.Runtime.DaemonDigest, CapabilityDigest: q.Runtime.CapabilityDigest, HostMappingDigest: q.Runtime.HostMappingDigest, Capability: agentsetup.RoutineExecutionCapability, RuntimeCapability: capability, BudgetMode: a.Budget.Mode, BudgetGrantID: held.ID, RemainingTokens: a.Budget.TokenCeiling, RemainingCostMicros: a.Budget.MoneyCeilingMicroUSD, ExpiresAt: now.Add(90 * time.Second)}
+	g := agentsetup.RoutineGrant{LedgerGeneration: *ledger, LaunchID: launch, TenantID: owner.TenantID, OwnerID: owner.ID, ProjectID: r.project, RoutineRunID: r.id, AgentRunID: run.ID, ExecutionPrincipalID: r.principal, PrincipalID: target.Agent, AccountID: account, ComputerID: computer, DaemonID: daemon, DaemonGeneration: daemonGeneration, AssignmentDigest: r.digest, DefinitionRevision: r.revision, ConsentRevision: r.consentRevision, ExecutionRevision: settings.Revision, QualificationID: q.ID, DaemonDigest: q.Runtime.DaemonDigest, CapabilityDigest: q.Runtime.CapabilityDigest, HostMappingDigest: q.Runtime.HostMappingDigest, Capability: agentsetup.RoutineExecutionCapability, RuntimeCapability: capability, BudgetMode: a.Budget.Mode, BudgetGrantID: held.ID, RemainingTokens: a.Budget.TokenCeiling, RemainingCostMicros: a.Budget.MoneyCeilingMicroUSD, ExpiresAt: now.Add(90 * time.Second)}
 	if err := agentruns.PrepareRoutineLaunchTx(ctx, tx, owner, g, e.LaunchChecks()); err != nil {
 		return nil, err
 	}
@@ -644,7 +650,8 @@ func (e *Executor) finish(ctx context.Context, tx pgx.Tx, owner tenant.Principal
 // LaunchChecks repeats all mandatory predicates at daemon claim; the outbox's
 // previous dispatch result is not a start grant. Unknown exit/usage keeps holds.
 func (e *Executor) LaunchChecks() agentruns.RoutineLaunchChecks {
-	return agentruns.RoutineLaunchChecks{Runtime: e.options.Runtime, Admission: func(ctx context.Context, tx pgx.Tx, p tenant.Principal, g agentsetup.RoutineGrant) error {
+	starts := routinebudget.Broker{Runtime: e.options.Runtime, Gates: e.options.Gates}
+	return agentruns.RoutineLaunchChecks{Runtime: e.options.Runtime, Start: starts.StartCheck, Admission: func(ctx context.Context, tx pgx.Tx, p tenant.Principal, g agentsetup.RoutineGrant) error {
 		worker := tenant.Principal{ID: g.PrincipalID, TenantID: p.TenantID, Kind: tenant.Agent, Scopes: []string{"run.claim"}}
 		var bound bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_budget_grants WHERE id=$1 AND run_id=$2 AND agent_run_id=$3 AND account_id=$4 AND parent_id IS NULL AND state='held' AND ($5::bigint IS NULL OR maximum_tokens=$5) AND ($6::bigint IS NULL OR maximum_microusd=$6))`, g.BudgetGrantID, g.RoutineRunID, g.AgentRunID, g.AccountID, g.RemainingTokens, g.RemainingCostMicros).Scan(&bound); err != nil {

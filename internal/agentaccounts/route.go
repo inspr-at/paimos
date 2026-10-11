@@ -46,8 +46,20 @@ func routineExitObservedTx(ctx context.Context, tx pgx.Tx, run runRow) (bool, er
 	if run.RoutineLaunchID == nil {
 		return true, nil
 	}
+	// A personal routine's intent is hidden from its daemon's projection; this
+	// internal read returns only whether the exact launch exit was observed.
+	var visibility, system string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),''),coalesce(current_setting('aeon.system',true),'')`).Scan(&visibility, &system); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
+		return false, err
+	}
 	var observed bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_intents WHERE id=$1 AND agent_run_id=$2 AND state='exit_observed' AND exit_observed_at IS NOT NULL)`, *run.RoutineLaunchID, run.ID).Scan(&observed)
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_intents WHERE id=$1 AND agent_run_id=$2 AND state='exit_observed' AND exit_observed_at IS NOT NULL)`, *run.RoutineLaunchID, run.ID).Scan(&observed); err != nil {
+		return false, err // caller rolls back, including visibility
+	}
+	_, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.system',$2,true)`, visibility, system)
 	return observed, err
 }
 
@@ -200,7 +212,7 @@ func ReserveRoutineAccountTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	}
 	var bound bool
 	var project string
-	if err := tx.QueryRow(ctx, `SELECT r.output_project_id::text,r.execute_consent AND r.consent_revision=r.definition_revision AND r.state='pending' AND ar.agent_principal_id=$3
+	if err := tx.QueryRow(ctx, `SELECT r.output_project_id::text,r.execute_consent AND r.consent_revision=r.definition_revision AND r.state IN ('created','pending') AND ar.agent_principal_id=$3
  FROM routine_runs r JOIN agent_runs ar ON ar.tenant_id=r.tenant_id AND ar.id=r.agent_run_id WHERE r.id=$1 AND r.agent_run_id=$2`, routine, runID, p.ID).Scan(&project, &bound); err != nil {
 		return RouteResult{}, events.Change{}, err
 	}
@@ -232,14 +244,27 @@ func ReserveRoutineAccountTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	if err != nil {
 		return RouteResult{}, events.Change{}, err
 	}
-	account, windows, limits, err := selectAccount(ctx, tx, run, p.ID, harness, *run.ProfileID, daemon, []string{accountID}, nil, now)
+	// No daemon request supplies estimates here. Hold the account's learned
+	// per-unit usage, which its limit rules already project, so hand-set
+	// windows admit and hold the routine like any other run.
+	learned, err := learnedLimitEstimates(ctx, tx, accountID, nil)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	estimates := map[string]int64{}
+	for unit, n := range learned {
+		if validUnit(unit) {
+			estimates[unit] = n
+		}
+	}
+	account, windows, limits, err := selectAccount(ctx, tx, run, p.ID, harness, *run.ProfileID, daemon, []string{accountID}, estimates, now)
 	if err != nil {
 		return RouteResult{}, events.Change{}, err
 	}
 	if err = agentpairing.RunFence(ctx, tx, account.ID, run.ID, false); err != nil {
 		return RouteResult{}, events.Change{}, err
 	}
-	result, err = persistReservation(ctx, tx, p, run, account, windows, limits, nil, now)
+	result, err = persistReservation(ctx, tx, p, run, account, windows, limits, estimates, now)
 	return result, events.Change{Type: evReserved, After: result}, err
 }
 

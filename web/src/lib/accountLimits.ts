@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Settings → Accounts (AEON-384): the words for how an account is read, its
-// windows and last readings, inline rename, and the one Advanced sentence
-// ("Let agents use at most 20% of this account per day") that replaced the
-// allowance form. Limits set by hand before it show as "Set by you" with
-// Remove and Make this repeat. A limit caps on top of the readings; it never
-// replaces them.
+// windows and last readings, and inline rename. Limits by hand are retired
+// (AEON-1149): nobody sets a new one. An older rule ("at most 20 % a day") and
+// windows set by hand before it show as "Set by you" with Remove until they go;
+// they still cap on top of the readings while they exist.
 import { api, APIError } from './api.ts'
 import type { AgentAccount, AllowanceWindow } from './agents.ts'
 import { ago, HARNESS_NAME, pct, when, type CapacityReading, type CapacityWindow } from './capacity.ts'
@@ -27,10 +26,8 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 }
 const enc = encodeURIComponent
 const base = (id: string) => `/agent-accounts/${enc(id)}`
-export const putLimit = (id: string, body: LimitWrite) => request<LimitRule>(`${base(id)}/limit`, 'PUT', body)
 export const removeLimit = (id: string) => request<void>(`${base(id)}/limit`, 'DELETE')
 export const removeWindow = (id: string, windowId: string) => request<void>(`${base(id)}/windows/${enc(windowId)}`, 'DELETE')
-export const repeatWindow = (id: string, windowId: string) => request<LimitRule>(`${base(id)}/windows/${enc(windowId)}/repeat`, 'POST')
 /** Changes the display name only; plan and model grants stay as they are. */
 export const renameAccount = (id: string, label: string) => request<AgentAccount>(`${base(id)}/label`, 'PUT', { label })
 export const listReadings = (id: string) => request<CapacityReading[]>(`${base(id)}/readings`)
@@ -120,76 +117,10 @@ export function amountText(amount: number, unit: LimitUnit | AllowanceWindow['un
   }
 }
 const PERIOD_EACH: Record<LimitPeriod, string> = { day: 'a day', week: 'a week', month: 'a month' }
-const PERIOD_THIS: Record<LimitPeriod, string> = { day: 'today', week: 'this week', month: 'this month' }
-/** "20% a day": the rule in a few words, for chips and tooltips. */
-export const limitSummary = (rule: LimitWrite) => `${amountText(rule.amount, rule.unit)} ${PERIOD_EACH[rule.period]}`
-/**
- * How far the rule got this period: "12% used today", "1 of 5 runs this week",
- * "$12.40 of $50 this month", then "reached until tomorrow 00:00" when used up.
- */
-export function limitUseLine(use: LimitUse, now: number, timezone?: string): string {
-  const reached = use.used >= use.amount
-  const head = use.unit === 'percent' ? `${pct(use.used)} used ${PERIOD_THIS[use.period]}`
-    : `${use.unit === 'cost_micros' ? dollars(use.used) : count(use.used)} of ${amountText(use.amount, use.unit)} ${PERIOD_THIS[use.period]}`
-  return reached ? `${head} · reached until ${when(use.period_end, now, timezone)}` : head
-}
-/**
- * Whether the limit leaves agents less today than the plan would: the percent
- * left under the rule against today's share left on the bar's window.
- */
-export function limitBinds(use: LimitUse | undefined, primary: CapacityWindow | null): boolean {
-  if (!use || use.unit !== 'percent' || !primary) return false
-  const p = primary.pacing
-  const planLeft = Math.max(0, (p.budget_percent ?? p.suggested_today_percent) - (p.used_today_percent ?? 0))
-  const ruleLeft = Math.max(0, use.amount - use.used)
-  return ruleLeft < planLeft - 0.5
-}
+/** "at most 20 % a day": an older rule in the panel's words. */
+export const ruleWords = (rule: LimitWrite) => `at most ${rule.unit === 'percent' ? `${Math.round(rule.amount)} %` : amountText(rule.amount, rule.unit)} ${PERIOD_EACH[rule.period]}`
 
-// ---------- The Advanced sentence ----------
-/** The sentence's menu: "%" of the account, runs, dollars; requests or tokens only for a repeated old window. */
-export type DraftUnit = 'percent' | 'runs' | 'dollars' | 'requests' | 'tokens'
-export interface LimitDraft { amount: string; unit: DraftUnit; period: LimitPeriod }
-export const UNIT_WORD: Record<DraftUnit, string> = { percent: '%', runs: 'runs', dollars: 'dollars', requests: 'requests', tokens: 'tokens' }
-export const PERIODS: LimitPeriod[] = ['day', 'week', 'month']
-const toDraftUnit = (unit: LimitUnit): DraftUnit => (unit === 'cost_micros' ? 'dollars' : unit)
-/**
- * What the menu offers an account, the likeliest first: a percent when Aeon
- * reads its limit, dollars when it is billed by API key, runs always, and a
- * repeated old unit.
- */
-export function unitChoices(input: { harness: string; measured: boolean; money: boolean; current?: LimitUnit }): DraftUnit[] {
-  const out: DraftUnit[] = []
-  if (input.measured || input.harness === 'codex' || input.harness === 'claude') out.push('percent')
-  if (input.money) out.push('dollars')
-  out.push('runs')
-  const current = input.current ? toDraftUnit(input.current) : null
-  if (current && (current !== 'dollars' || input.money) && !out.includes(current)) out.push(current)
-  return out
-}
-export function draftFor(rule: LimitWrite | null | undefined, choices: DraftUnit[]): LimitDraft {
-  if (!rule) return { amount: '', unit: choices[0] ?? 'runs', period: 'day' }
-  const unit = toDraftUnit(rule.unit)
-  // Dollars keep every micro a repeated old limit had, so an untouched draft is no change.
-  const amount = unit === 'dollars' ? String(rule.amount / 1e6) : String(rule.amount)
-  return { amount, unit, period: rule.period }
-}
-/** The draft as the server's sentence, or the one thing to fix. */
-export function draftWrite(d: LimitDraft): { ok: true; body: LimitWrite } | { ok: false; message: string } {
-  const text = d.amount.trim().replace(/^\$/, '')
-  if (d.unit === 'dollars') {
-    if (!/^\d+(\.\d{1,6})?$/.test(text) || Number(text) <= 0) return { ok: false, message: 'Enter an amount in dollars, like 50.' }
-    return { ok: true, body: { amount: Math.round(Number(text) * 1e6), unit: 'cost_micros', period: d.period } }
-  }
-  if (!/^\d+$/.test(text) || Number(text) < 1) return { ok: false, message: d.unit === 'percent' ? 'Enter a whole number from 1 to 100.' : 'Enter a whole number above 0.' }
-  const amount = Number(text)
-  if (d.unit === 'percent' && amount > 100) return { ok: false, message: 'Enter a whole number from 1 to 100.' }
-  if (!Number.isSafeInteger(amount)) return { ok: false, message: 'Enter a smaller number.' }
-  return { ok: true, body: { amount, unit: d.unit, period: d.period } }
-}
-export const sameLimit = (a: LimitWrite | null | undefined, b: LimitWrite | null | undefined) =>
-  !!a && !!b && a.amount === b.amount && a.unit === b.unit && a.period === b.period
-
-// ---------- Limits set by hand before the sentence ----------
+// ---------- Windows set by hand before AEON-384 ----------
 /** The old manual windows still in force or still to come. */
 export const setByYou = (windows: AllowanceWindow[] | undefined, now: number) =>
   (windows ?? []).filter(w => w.set_by_you && Date.parse(w.ends_at) > now).sort((a, b) => Date.parse(a.starts_at) - Date.parse(b.starts_at))

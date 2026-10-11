@@ -575,7 +575,7 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 			// Its rolled-back refusal must not hide a later owned route. Global
 			// consent, CI, budget and authority failures retain their reason.
 			var refusal *workorders.Error
-			if errors.As(err, &refusal) && refusal.Status == 409 && (refusal.Message == "routine_account_selection_required" || refusal.Message == "routine_account_unavailable" || refusal.Message == "own_account_required" || refusal.Message == "owner_policy_mismatch" || refusal.Message == "execution_account_unqualified") {
+			if errors.As(err, &refusal) && refusal.Status == 409 && (refusal.Message == "routine_account_selection_required" || refusal.Message == "routine_account_unavailable" || refusal.Message == "routine_ledger_enrollment_required" || refusal.Message == "own_account_required" || refusal.Message == "owner_policy_mismatch" || refusal.Message == "execution_account_unqualified") {
 				out.WaitReason = refusal.Message
 				continue
 			}

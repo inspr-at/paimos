@@ -755,7 +755,11 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			return nil, workorders.Fail(409, "escalation waits for fresh measured account room")
 		}
 	}
-	if err := agentaccounts.ValidateReservedCapacity(ctx, tx, v.ID, *v.AccountID); err != nil {
+	var starts []agentaccounts.RoutineStartCheck
+	if v.RoutineLaunchID != nil && m.routines.Start != nil {
+		starts = append(starts, m.routines.Start(p))
+	}
+	if err := agentaccounts.ValidateReservedCapacity(ctx, tx, v.ID, *v.AccountID, starts...); err != nil {
 		if v.Purpose == "managed" && agentaccounts.ReservedRouteChanged(err) {
 			return releaseObsoleteClaim(ctx, tx, p, v, "account_moved_out_of_group")
 		}

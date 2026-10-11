@@ -3,9 +3,8 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { accountName } from '../../lib/accountCascade'
 import {
-  amountText, dateRange, draftFor, draftWrite, limitBinds, limitSummary, limitUseLine, listReadings, noWindowLine, PERIODS, readingWho,
-  recentReadings, removeLimit, removeWindow, renameAccount, renameProblem, repeatWindow, putLimit, sameLimit, setByYou, setByYouText,
-  sortWindows, sourceText, spendLine, UNIT_WORD, unitChoices, windowFacts, windowLabel, type LimitDraft,
+  amountText, dateRange, listReadings, noWindowLine, readingWho, recentReadings, removeWindow, renameAccount, renameProblem, setByYou, setByYouText,
+  sortWindows, sourceText, spendLine, windowFacts, windowLabel,
 } from '../../lib/accountLimits'
 import { putQuotaPool, type AgentAccount, type AllowanceWindow } from '../../lib/agents'
 import { pct, when, type AccountCapacity, type AccountRow, type CapacityReading } from '../../lib/capacity'
@@ -18,9 +17,11 @@ import UsageProbeToggle from '../settings/UsageProbeToggle.vue'
 import { useSession } from '../../stores/session'
 
 // The inline detail of one account in Settings → Accounts (AEON-384): its
-// name, each window with source and freshness, the last three readings,
-// money for an API key, and the Advanced sentence. Limits set by hand before
-// the sentence stay as "Set by you" with Remove and Make this repeat.
+// name, each window with source and freshness, the last three readings and
+// money for an API key. Limits are no longer set by hand (AEON-1149): the
+// Advanced sentence and Make this repeat are gone; windows set by hand before
+// stay as "Set by you" with Remove until they end, and an older rule shows in
+// the panel's "Limits on this account".
 const props = defineProps<{
   account: AgentAccount; accounts?: AgentAccount[]; row?: AccountRow; cap?: AccountCapacity; now: number; timezone: string; mayManage: boolean; rename?: number; renameTrigger?: HTMLElement | null
 }>()
@@ -36,7 +37,6 @@ const windows = computed(() => sortWindows(props.cap?.windows ?? []))
 const learnedSpend = computed(() => props.row ? learnedUseText(props.row) : '')
 const primary = computed(() => windows.value[0] ?? null)
 const offline = computed(() => props.row?.state === 'offline')
-const use = computed(() => props.cap?.limit)
 const mine = computed(() => setByYou(props.account.windows, props.now))
 
 const poolBusy = ref(false)
@@ -126,64 +126,10 @@ async function saveName() {
   } finally { nameBusy.value = false }
 }
 
-// ---------- The Advanced sentence ----------
-const choices = computed(() => unitChoices({ harness: props.account.harness, measured: windows.value.length > 0, money: props.cap?.cost_limit_supported === true, current: use.value?.unit }))
-const draft = ref<LimitDraft>(draftFor(use.value, choices.value))
-const sentenceOpen = ref(false)
-const showSentence = computed(() => !!use.value || sentenceOpen.value)
-const limitBusy = ref(false)
-const limitError = ref('')
-const limitStatus = ref('')
-const amountInput = ref<HTMLInputElement | null>(null)
-// A saved change from elsewhere (or this Apply) resets the draft to the server's sentence.
-watch(() => use.value && `${use.value.id}`, () => { draft.value = draftFor(use.value, choices.value) })
-const parsed = computed(() => draftWrite(draft.value))
-const dirty = computed(() => !parsed.value.ok || !sameLimit(parsed.value.body, use.value))
-async function openSentence() {
-  sentenceOpen.value = true
-  limitStatus.value = ''
-  await nextTick()
-  amountInput.value?.focus()
-}
-function closeSentence() { sentenceOpen.value = false; limitError.value = ''; draft.value = draftFor(use.value, choices.value) }
-async function apply() {
-  const result = parsed.value
-  if (!result.ok) { limitError.value = result.message; return }
-  limitBusy.value = true; limitError.value = ''; limitStatus.value = ''
-  try {
-    await putLimit(props.account.id, result.body)
-    limitStatus.value = `Saved: at most ${limitSummary(result.body)}.`
-    emit('changed')
-  } catch (e) {
-    limitError.value = e instanceof Error ? e.message : 'The limit did not change. Please try again.'
-  } finally { limitBusy.value = false }
-}
-async function clearLimit() {
-  limitBusy.value = true; limitError.value = ''; limitStatus.value = ''
-  try {
-    await removeLimit(props.account.id)
-    sentenceOpen.value = false
-    limitStatus.value = 'Limit removed. Agents follow your plan.'
-    emit('changed')
-  } catch (e) {
-    limitError.value = e instanceof Error ? e.message : 'The limit did not change. Please try again.'
-  } finally { limitBusy.value = false }
-}
-
-// ---------- Set by you (before the sentence) ----------
+// ---------- Set by you: windows set by hand before AEON-384, until they end ----------
 const windowBusy = ref('')
 const windowError = ref('')
 const windowTip = (w: AllowanceWindow) => `${amountText(w.used, w.unit)} used of ${amountText(w.allowance, w.unit)}, ${dateRange(w.starts_at, w.ends_at, props.timezone)}`
-async function repeat(w: AllowanceWindow) {
-  windowBusy.value = w.id; windowError.value = ''; limitStatus.value = ''
-  try {
-    const rule = await repeatWindow(props.account.id, w.id)
-    limitStatus.value = `Now repeats: at most ${limitSummary(rule)}.`
-    emit('changed')
-  } catch (e) {
-    windowError.value = e instanceof Error ? e.message : 'The limit did not change. Please try again.'
-  } finally { windowBusy.value = '' }
-}
 async function drop(w: AllowanceWindow) {
   const ok = await confirmAction({ title: `Remove ${amountText(w.allowance, w.unit)} on ${name.value}?`, body: `Agents follow your plan and the vendor's readings on ${name.value}. Its history stays.`, confirmLabel: 'Remove limit' })
   if (!ok) return
@@ -265,40 +211,7 @@ async function drop(w: AllowanceWindow) {
 
       <div v-if="cap?.spend_month_usd" class="fact">
         <dt>Spend</dt>
-        <dd>{{ spendLine(cap.spend_month_usd, use, now, timezone) }} <span class="quiet">· list prices</span></dd>
-      </div>
-
-      <div class="fact limit">
-        <dt>Limit</dt>
-        <dd>
-          <template v-if="!mayManage">
-            <span v-if="use">At most {{ limitSummary(use) }}</span>
-            <span v-else class="quiet">None · agents follow your plan</span>
-          </template>
-          <button v-else-if="!showSentence" type="button" class="btn sm ghost set-limit" @click="openSentence"><AppIcon name="sliders" :size="14" />Set a limit by hand</button>
-          <form v-else class="sentence" @submit.prevent="apply">
-            <span>Let agents use at most</span>
-            <span class="keep">
-              <input ref="amountInput" v-model="draft.amount" class="field amount" :inputmode="draft.unit === 'dollars' ? 'decimal' : 'numeric'" aria-label="At most" :aria-invalid="!!limitError" :disabled="limitBusy">
-              <select v-model="draft.unit" class="field pick" aria-label="Counted in" :disabled="limitBusy">
-                <option v-for="u in choices" :key="u" :value="u">{{ UNIT_WORD[u] }}</option>
-              </select>
-            </span>
-            <span class="keep">of this account per
-              <select v-model="draft.period" class="field pick" aria-label="Per" :disabled="limitBusy">
-                <option v-for="p in PERIODS" :key="p" :value="p">{{ p }}</option>
-              </select>
-            </span>
-            <span class="actions">
-              <button type="submit" class="btn sm" :disabled="limitBusy || !dirty || !draft.amount.trim()">Apply</button>
-              <button v-if="use" type="button" class="btn sm ghost" :disabled="limitBusy" @click="clearLimit">Remove</button>
-              <button v-else type="button" class="btn sm ghost" :disabled="limitBusy" @click="closeSentence">Cancel</button>
-            </span>
-          </form>
-          <p v-if="use" class="use">{{ limitUseLine(use, now, timezone) }}<template v-if="limitBinds(use, primary)"> · binds before the plan today</template></p>
-          <p v-if="limitError" class="problem" role="alert">{{ limitError }}</p>
-          <p v-if="limitStatus" class="status" role="status">{{ limitStatus }}</p>
-        </dd>
+        <dd>{{ spendLine(cap.spend_month_usd, cap.limit, now, timezone) }} <span class="quiet">· list prices</span></dd>
       </div>
 
       <div v-if="mine.length" class="fact mine-fact">
@@ -308,7 +221,6 @@ async function drop(w: AllowanceWindow) {
             <li v-for="w in mine" :key="w.id">
               <span class="what" :data-tip="windowTip(w)">{{ setByYouText(w, timezone) }}</span>
               <span v-if="mayManage" class="actions">
-                <button v-if="w.unit !== 'percent'" type="button" class="btn sm ghost" :disabled="!!windowBusy" @click="repeat(w)"><AppIcon name="refresh" :size="14" />Make this repeat</button>
                 <button type="button" class="btn sm ghost" :disabled="!!windowBusy" @click="drop(w)"><AppIcon name="trash" :size="14" />Remove</button>
               </span>
             </li>
@@ -340,18 +252,9 @@ b.num { font-weight: 650; }
 .readings { display: flex; flex-wrap: wrap; gap: 2px 14px; margin: 0; padding: 0; list-style: none; }
 .readings time { font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .by { font-size: 12.5px; }
-.set-limit { margin: -2px 0 0 -10px; }
 /* Labels sit on the text line of a 30 px control row. */
-.limit:has(.sentence) dt, .mine-fact dt { padding-top: 10px; }
-.sentence { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.sentence .keep { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
-.sentence .field { height: 30px; width: auto; padding: 0 8px; }
-.sentence .amount { width: 72px; text-align: right; font-variant-numeric: tabular-nums; }
-.sentence .pick { padding-right: 4px; }
-.sentence .actions, .mine .actions { display: inline-flex; gap: 4px; }
-.sentence .actions { margin-left: 4px; }
-.use { margin-top: 4px; font-size: 12.5px; color: var(--ink-2); }
-.status { margin-top: 4px; font-size: 12.5px; color: var(--teal-ink); }
+.mine-fact dt { padding-top: 10px; }
+.mine .actions { display: inline-flex; gap: 4px; }
 .problem { margin-top: 4px; font-size: 12.5px; color: var(--danger); }
 .mine { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .mine li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 16px; min-height: 30px; }
@@ -361,11 +264,10 @@ b.num { font-weight: 650; }
 .detail { container: account-detail / inline-size; }
 @container account-detail (max-width: 420px) {
   .account-facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  dt, .limit:has(.sentence) dt, .mine-fact dt { padding-top: 10px; }
+  dt, .mine-fact dt { padding-top: 10px; }
   .fact:first-child dt { padding-top: 0; }
   dd { padding-top: 0; }
-  .sentence .actions, .mine .actions { margin-left: -10px; }
-  .sentence .actions { flex-basis: 100%; }
+  .mine .actions { margin-left: -10px; }
 }
 @media (max-width: 600px) {
   .detail { margin: 0 0 10px; padding: 12px; }
@@ -375,10 +277,9 @@ b.num { font-weight: 650; }
   dd { padding-top: 0; }
   .src { display: block; }
   .src .sep { display: none; }
-  .sentence .field, .rename .field { height: 44px; font-size: 16px; }
+  .rename .field { height: 44px; font-size: 16px; }
   .rename .field { flex-basis: 100%; max-width: none; }
-  .sentence .actions, .mine .actions { margin-left: -10px; }
-  .sentence .actions { flex-basis: 100%; }
+  .mine .actions { margin-left: -10px; }
   .btn.sm { min-height: 44px; }
   .icon-btn.sm { width: 44px; height: 44px; }
 }
