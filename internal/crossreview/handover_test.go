@@ -90,20 +90,35 @@ func TestCompletedBuilderDuringWorkHandover(t *testing.T) {
 				if waiting.State != "waiting" || waiting.WaitingCount != 1 || len(waiting.Result) != 0 {
 					t.Fatalf("action did not wait for builder handover: %+v", waiting)
 				}
-				// Confirm the original generation stopped, leaving the live run as
-				// the only blocker. A terminal report must still be able to commit.
+				// Confirm the original generation stopped, then report fresh run
+				// activity. A stopped session without later activity deliberately
+				// releases the ticket hold; this live builder must still block it
+				// and remain able to commit its terminal report during handover.
 				f.tx(t, func(tx pgx.Tx) error {
 					_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET stopped_at=clock_timestamp(),stop_reason='completed',phase='stopped' WHERE id=$1`, session)
 					return err
+				})
+				telemetryPath := "/api/runs/" + run + "/telemetry"
+				f.call(t, f.agent, "POST", telemetryPath, agentruns.Telemetry{Sequence: 1, Kind: "heartbeat"}, 200, nil)
+				f.tx(t, func(tx pgx.Tx) error {
+					var live bool
+					if err := tx.QueryRow(t.Context(), `SELECT r.status='running' AND t.at>s.stopped_at AND NOT aeon_work_run_releasable(r.id)
+ FROM agent_runs r JOIN run_telemetry t ON t.run_id=r.id AND t.sequence=1
+ JOIN harness_sessions s ON s.id=$2 WHERE r.id=$1`, run, session).Scan(&live); err != nil {
+						return err
+					}
+					if !live {
+						t.Fatal("fixture did not establish fresh builder activity after session closure")
+					}
+					return nil
 				})
 				continuePath := path + "/" + request + "/continue"
 				f.call(t, f.person, "POST", continuePath, nil, 200, &waiting)
 				if waiting.State != "waiting" || waiting.WaitingCount != 1 {
 					t.Fatal("action completed before the builder reported terminal")
 				}
-				report := agentruns.Telemetry{Sequence: 1, Kind: "finished", Status: "completed", Input: 17, Output: 9, Cost: 123,
+				report := agentruns.Telemetry{Sequence: 2, Kind: "finished", Status: "completed", Input: 17, Output: 9, Cost: 123,
 					ReviewRange: &reviewgate.CommitRange{Repository: "example/review-fixture", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40)}}
-				telemetryPath := "/api/runs/" + run + "/telemetry"
 				f.call(t, f.agent, "POST", telemetryPath, report, 200, nil)
 				f.call(t, f.agent, "POST", telemetryPath, report, 200, nil)
 				var finished action
@@ -137,14 +152,16 @@ func TestCompletedBuilderDuringWorkHandover(t *testing.T) {
 					if status != "completed" || !ended || input != report.Input || output != report.Output || cost != report.Cost || parent != f.ticket {
 						t.Fatalf("completion, usage or original binding lost: status=%s ended=%v usage=%d/%d/%d parent=%s", status, ended, input, output, cost, parent)
 					}
-					var telemetry, unavailable, orders int
+					var telemetry, finishedTelemetry, heartbeats, unavailable, orders int
 					if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM run_telemetry WHERE run_id=$1),
+ (SELECT count(*) FROM run_telemetry WHERE run_id=$1 AND kind='finished'),
+ (SELECT count(*) FROM run_telemetry WHERE run_id=$1 AND kind='heartbeat'),
  (SELECT count(*) FROM events WHERE node_id=$2 AND type='review.unavailable' AND after->>'author_run_id'=$1::text),
- (SELECT count(*) FROM work_orders)`, run, f.ticket).Scan(&telemetry, &unavailable, &orders); err != nil {
+ (SELECT count(*) FROM work_orders)`, run, f.ticket).Scan(&telemetry, &finishedTelemetry, &heartbeats, &unavailable, &orders); err != nil {
 						return err
 					}
-					if telemetry != 1 || unavailable != 1 || orders != 1 {
-						t.Fatalf("replay or partial review writes: telemetry=%d unavailable=%d orders=%d", telemetry, unavailable, orders)
+					if telemetry != 2 || finishedTelemetry != 1 || heartbeats != 1 || unavailable != 1 || orders != 1 {
+						t.Fatalf("replay or partial review writes: telemetry=%d terminal=%d heartbeats=%d unavailable=%d orders=%d", telemetry, finishedTelemetry, heartbeats, unavailable, orders)
 					}
 					if err := tx.QueryRow(t.Context(), `SELECT after->>'reason' FROM events WHERE node_id=$1 AND type='review.unavailable' AND after->>'author_run_id'=$2`, f.ticket, run).Scan(&reason); err != nil {
 						return err
