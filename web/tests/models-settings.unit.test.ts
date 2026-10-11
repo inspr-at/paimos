@@ -22,7 +22,7 @@ it('the account reset switch discards a held save after switching records and ke
   const held = deferred<any>(), write = vi.fn((..._args: unknown[]) => held.promise), read = vi.fn(async () => ({ accounts: [{ account_id: 'a', harness: 'codex', usage_policy: first, resets: credits, reset_policy: 'suggest' as const, reset_plan: null }, { account_id: 'b', harness: 'claude', usage_policy: second, resets: credits, reset_policy: 'suggest' as const, reset_plan: null }], has_more: false }))
   const props = reactive({ accountId: 'a', german: false }), session = { identity: { tenant: { id: 'tenant' }, principal: { id: 'owner', kind: 'person' } }, authenticationCurrent: () => true }
   const toast = vi.fn()
-  const view = setupSource('components/settings/AccountUsagePosture.vue', props, { '../../stores/session': { useSession: () => session }, '../../lib/authz': { can: () => true, onAccessChange: () => () => {} }, '../../lib/identityScope': await import('../src/lib/identityScope'), '../../lib/accountUsage': { ...accountUsage, getUsageOverview: read, putResetPolicy: write }, '../../lib/toast': { toast } })
+  const view = setupSource('components/settings/AccountUsagePosture.vue', props, { '../../stores/session': { useSession: () => session }, '../../lib/authz': { can: () => true, onAccessRevalidate: () => () => {} }, '../../lib/identityScope': await import('../src/lib/identityScope'), '../../lib/accountUsage': { ...accountUsage, getUsageOverview: read, putResetPolicy: write }, '../../lib/toast': { toast } })
   await flush(); expect(view.state.resets.value).toMatchObject({ harness: 'codex', policy: 'suggest', credits })
   view.state.setResets('auto_before_expiry'); expect(write.mock.calls[0]!.slice(0, 2)).toEqual([first, 'auto_before_expiry'])
   // Record B is on screen when A's save lands: A's result must not touch B.
@@ -44,7 +44,7 @@ it('the floor saves on change with an Undo bound to the record it was made on', 
   const read = vi.fn(async () => ({ accounts: [{ account_id: 'a', harness: 'codex', usage_policy: first }], has_more: false }))
   const write = vi.fn(async (before: typeof first, value: { floor_percent: number }) => ({ ...before, floor_percent: value.floor_percent, own_floor_percent: value.floor_percent, revision: before.revision + 1 }))
   const toast = vi.fn(), props = reactive({ accountId: 'a', german: false }), session = { identity: { tenant: { id: 'tenant' }, principal: { id: 'owner', kind: 'person' } }, authenticationCurrent: () => true }
-  const view = setupSource('components/settings/AccountUsagePosture.vue', props, { '../../stores/session': { useSession: () => session }, '../../lib/authz': { can: () => true, onAccessChange: () => () => {} }, '../../lib/identityScope': await import('../src/lib/identityScope'), '../../lib/accountUsage': { ...accountUsage, getUsageOverview: read, putAccountUsage: write }, '../../lib/toast': { toast } })
+  const view = setupSource('components/settings/AccountUsagePosture.vue', props, { '../../stores/session': { useSession: () => session }, '../../lib/authz': { can: () => true, onAccessRevalidate: () => () => {} }, '../../lib/identityScope': await import('../src/lib/identityScope'), '../../lib/accountUsage': { ...accountUsage, getUsageOverview: read, putAccountUsage: write }, '../../lib/toast': { toast } })
   await flush()
   // Unchanged and out-of-range values never write; the saved value comes back.
   view.state.commitFloor(); view.state.floor.value = 95; view.state.commitFloor(); await flush()

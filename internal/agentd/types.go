@@ -284,8 +284,9 @@ type StartRequest struct {
 }
 
 type RunTools struct {
-	URL   string `json:"url"`
-	Token string `json:"token"`
+	URL     string `json:"url"`
+	Token   string `json:"token"`
+	Routine bool   `json:"routine,omitempty"`
 }
 
 type AdapterEvent struct {

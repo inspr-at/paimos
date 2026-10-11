@@ -9,7 +9,7 @@ import { arrivals, deskItemID, deskLinkItem, deskProject, kindLabels, newRound, 
 import { approvalItem, commitDesk, decisionPermission, emptySources, loadDesk, loadMoreQuestions, nativeTierAdapter, questionItem, readApproval, readQuestion, MAX_QUESTION_PAGES, type DeskRead, type DeskSources } from '../lib/decisionDeskApi'
 import { phoneCapability } from '../lib/deskPhoneApproval'
 import { settledElsewhere } from '../lib/stepup'
-import { can, onAccessChange } from '../lib/authz'
+import { can, onAccessRevalidate } from '../lib/authz'
 import { useSession } from '../stores/session'
 import { useAgents } from '../stores/agents'
 import type { KeyTrimCursors } from '../lib/keyTrim'
@@ -43,6 +43,7 @@ const stepupMethod = ref('Passkey or sign-in')
 const trimCursors = ref<KeyTrimCursors>({}), nextKeyTrims = ref<KeyTrimCursors>({})
 const trimState = computed(() => filter.value === 'open' ? 'pending' : 'decided')
 let sources: DeskSources = emptySources(), generation = 0, alive = true
+let capabilityGeneration = 0
 let currentRead: DeskRead | undefined
 const linkError = ref(''), revoked = ref(new Set<string>())
 const ruleEdit = ref<{ item: DeskItem; draft: DoctrineInboxItem; source: DoctrineSource; file: DoctrineFile; rule: DoctrineRule; owner: string }>()
@@ -54,6 +55,7 @@ const reviewable = computed(() => visible.value.filter(item => !item.linkOut))
 const person = computed(() => session.identity?.principal.kind === 'person')
 function allowed(item: DeskItem) { return person.value && decisionPermission(item, sources, can, adapters) }
 async function refresh() {
+  if (!session.authenticationCurrent()) return
   const turn = ++generation, identity = owner.value
   loading.value = true
   try {
@@ -208,7 +210,8 @@ function recorded(item: DeskItem) {
   roundItems.value = roundItems.value.map(row => row.id === item.id ? item : row)
   void desk.refresh()
 }
-watch(owner, () => {
+function resetDesk() {
+  capabilityGeneration++
   ruleEdit.value = undefined
   generation++; opened.value = false; items.value = []; roundItems.value = []; round.value = []; roundBaseline.value = []
   followed = ''; linkError.value = ''; revoked.value = new Set()
@@ -216,14 +219,18 @@ watch(owner, () => {
   trimCursors.value = {}; nextKeyTrims.value = {}
   currentRead = undefined
   phoneVerification.value = undefined; capabilityError.value = ''; stepupMethod.value = 'Passkey or sign-in'
-  const identity = owner.value
-  void phoneCapability().then(capability => { if (alive && identity === owner.value) { phoneVerification.value = capability.available; stepupMethod.value = capability.passkeys ? 'Passkey' : 'Sign in again' } })
-    .catch(() => { if (alive && identity === owner.value) capabilityError.value = 'Approval verification availability could not be confirmed. Refresh the page before deciding.' })
+  warnings.value = []; more.value = { open: false, answered: false }; loading.value = false
+}
+watch(owner, () => {
+  resetDesk()
+  const identity = owner.value, turn = capabilityGeneration
+  void phoneCapability().then(capability => { if (alive && identity === owner.value && turn === capabilityGeneration) { phoneVerification.value = capability.available; stepupMethod.value = capability.passkeys ? 'Passkey' : 'Sign in again' } })
+    .catch(() => { if (alive && identity === owner.value && turn === capabilityGeneration) capabilityError.value = 'Approval verification availability could not be confirmed. Refresh the page before deciding.' })
   void refresh()
 }, { immediate: true, flush: 'sync' })
 // A refresh signal arrives before the permission response. Only an actual
 // reset invalidates the frozen source; can() reacts to the completed refresh.
-const stopAccess = onAccessChange(change => { if (change === 'reset') { ruleEdit.value = undefined; if (opened.value) roundItems.value = roundItems.value.map(item => allowed(item) ? item : { ...item, unavailable: 'Access changed. Reopen the desk to confirm this source.' }) } })
+const stopAccess = onAccessRevalidate({ reset: resetDesk })
 let poll: ReturnType<typeof setInterval> | undefined
 const focus = () => { if (!loading.value) void refresh() }
 onMounted(() => { window.addEventListener('focus', focus); poll = setInterval(() => { if (!document.hidden && !loading.value) void refresh() }, 30_000) })

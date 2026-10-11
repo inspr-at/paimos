@@ -4,6 +4,8 @@ package routineguard
 import (
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/routineguard/pathpolicy"
 )
 
 // Risks R1/R12/R15: silent scope loosening, mutable hard rules/script hashes,
@@ -83,5 +85,59 @@ func TestGuardrailFloorScopeEvidenceAndBoundedCheckpoints(t *testing.T) {
 	}
 	if (Decision{Result: Allow}).CanExecute() {
 		t.Fatal("absent hard evidence authorized execution")
+	}
+}
+
+// Risk R15: separating the daemon's path checks from server evaluation could
+// silently widen local edits to runtime/gate or sensitive paths. The daemon's
+// compiled predicate must retain the default server's deterministic decision;
+// even allowed files still require independent evaluation for outward effects.
+func TestLocalArtifactPathPolicyMatchesServerFloor(t *testing.T) {
+	for _, tc := range []struct {
+		path    string
+		allowed bool
+	}{
+		{"source.txt", true},
+		{"web/src/components/Ordinary.vue", true},
+		{"docs/Überblick.md", true},
+		{strings.Repeat("x", MaxPathBytes), true},
+		{strings.Repeat("x", MaxPathBytes+1), false},
+		{"internal/routineguard/pathpolicy/path.go", false},
+		{"internal/agentd/routine_tools.go", false},
+		{"internal/auth/token.go", false},
+		{"internal/authz/check.go", false},
+		{"internal/db/migrations/1234_example.sql", false},
+		{"scripts/ci-static.mjs", false},
+		{".github/workflows/ci.yml", false},
+		{"docs/AGENTS.md", false},
+		{"nested/Guardrail.go", false},
+		{"nested/rules.json", false},
+		{"docs/Password.md", false},
+		{"docs/credential.md", false},
+		{"docs/secret.md", false},
+		{"docs/passwort.md", false},
+		{"docs/zugangsdaten.md", false},
+		{"../outside.go", false},
+		{"nested/../source.txt", false},
+		{".git/config", false},
+		{"nested/.GIT/config", false},
+		{"nested\\source.txt", false},
+		{"source.txt?query", false},
+		{"invalid\xff.txt", false},
+	} {
+		decision, err := Evaluate(nil, Context{Checkpoint: "action", Action: "artifact.validate", Paths: []string{tc.path}})
+		serverAllows := err == nil && decision.DeterministicResult == Allow
+		localAllows := pathpolicy.LocalWriteAllowed(tc.path)
+		if serverAllows != tc.allowed || localAllows != tc.allowed {
+			t.Errorf("path %q: server=%v local=%v want=%v error=%v", tc.path, serverAllows, localAllows, tc.allowed, err)
+		}
+		if decision.CanExecute() {
+			t.Errorf("path %q granted outward execution without evaluation", tc.path)
+		}
+	}
+	words := pathpolicy.SensitiveWords()
+	words[0] = "ordinary"
+	if pathpolicy.LocalWriteAllowed("Password.txt") || !pathpolicy.LocalWriteAllowed("ordinary.txt") {
+		t.Fatal("caller mutated the compiled sensitive-path predicate")
 	}
 }
