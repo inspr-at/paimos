@@ -750,7 +750,7 @@
         ,
         {"file":"tests/agent-rules-budget-clients.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/agent-rules-doctrine.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agent-rules-doctrine.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/agent-rules-flow.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1012,7 +1012,7 @@
         ,
         {"file":"tests/release-tenant-notes.spec.ts","listedTests":20,"weightSeconds":44.390244,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/release-ticket-links.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/release-ticket-links.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/release-update-notice.spec.ts","listedTests":16,"tierTiming":{"caseSeconds":{"max":1.481,"median":1.481,"min":1.481},"seconds":2.918008,"selectedTests":1},"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1369,7 +1369,7 @@
         ,
         {"file":"tests/lead-card.spec.ts","listedTests":18,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
         ,
-        {"file":"tests/lead-flow.spec.ts","listedTests":14,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
+        {"file":"tests/lead-flow.spec.ts","listedTests":15,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
         ,
         {"file":"tests/lead-remove.spec.ts","listedTests":7,"weightSeconds":25.5,"weightSource":"measured-local-targeted"}
         ,
