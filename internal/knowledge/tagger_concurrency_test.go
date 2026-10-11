@@ -4,6 +4,7 @@ package knowledge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -47,8 +51,34 @@ func (p *taggerRowPause) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, q pg
 func TestTaggerAndStatusAutopilotDoNotDeadlock(t *testing.T) {
 	f := setup(t)
 	ticket := addNode(t, f, "DONE-534", "work", "Concurrent startup jobs", &f.project)
+	release := addNode(t, f, "REL-534", "release", "Next release", &f.project)
 	setFields(t, f, ticket, map[string]any{"priority": "high", "tags": []any{"ops"}})
 	closeAged(t, f, ticket, "done", "1 hour")
+	// Risk: a Done-only fixture lets autopilot skip its write, losing coverage
+	// of concurrent field preservation. Supply recorded merge evidence and a
+	// release-using project, with the ticket still outside any release.
+	mergedAt := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_projects(tenant_id,project_node_id) VALUES($1,$2)`, f.a.TenantID, f.project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number) VALUES($1,$2,$3,1)`, f.a.TenantID, release, f.project); err != nil {
+			return err
+		}
+		var snapshot json.RawMessage
+		if err := tx.QueryRow(t.Context(), `SELECT to_jsonb(n) FROM nodes n WHERE tenant_id=$1 AND id=$2`, f.a.TenantID, ticket).Scan(&snapshot); err != nil {
+			return err
+		}
+		meta, err := json.Marshal(map[string]any{"merged_at": mergedAt, "merge_sha": strings.Repeat("a", 40), "pull_request": 534})
+		if err != nil {
+			return err
+		}
+		_, err = events.Append(t.Context(), tx, f.a, events.Change{NodeID: &ticket, Type: "delivery.merge_done", Before: snapshot, After: snapshot, Metadata: meta})
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	pause := &taggerRowPause{locked: make(chan uint32, 1), resume: make(chan struct{})}
 	cfg := f.db.App.Config()
 	cfg.ConnConfig.Tracer = pause
@@ -85,7 +115,7 @@ func TestTaggerAndStatusAutopilotDoNotDeadlock(t *testing.T) {
 	}
 	autopilotDone := make(chan error, 1)
 	go func() {
-		autopilotDone <- statusautopilot.New(f.db.App).RunTenant(ctx, f.a.TenantID, time.Now().Add(20*24*time.Hour))
+		autopilotDone <- statusautopilot.New(f.db.App).RunTenant(ctx, f.a.TenantID, mergedAt.Add(20*24*time.Hour))
 	}()
 	for {
 		var waiting, onTree bool
