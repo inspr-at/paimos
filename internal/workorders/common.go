@@ -202,10 +202,10 @@ func workBindingMutation(r *http.Request) bool {
 	return false
 }
 
-// BufferEndpointBody finishes bounded network reads before preparation or
-// transaction admission, preserving the request's earlier context deadline.
+// BufferEndpointBody finishes network reads within the 30-second endpoint budget
+// before preparation or transaction admission, preserving earlier caller deadlines.
 func BufferEndpointBody(w http.ResponseWriter, r *http.Request) error {
-	if err := httpapi.BufferRequestBody(w, r, 1<<20); err != nil {
+	if err := httpapi.BufferRequestBodyTimeout(w, r, 1<<20, 30*time.Second); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			return Fail(http.StatusRequestEntityTooLarge, "request body too large")
