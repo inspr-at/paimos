@@ -370,9 +370,30 @@ func TestCatalogOutdatedCompleteListingPresence(t *testing.T) {
 		}
 		return recordCatalogPresence(t.Context(), tx, admin.TenantID, "anthropic", at.Add(2*time.Hour), complete)
 	})
-	got := requireOutdated(t, outdatedPreview(t, admin), "anthropic:claude-opus-5")
-	if got.State == nil || *got.State != "active" {
-		t.Fatal("returned source model stayed vanished", got)
+	found := false
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		models, err := loadLifecycleCatalog(t.Context(), tx, at.Add(2*time.Hour))
+		if err != nil {
+			return err
+		}
+		for _, model := range models {
+			if model.Identity != "anthropic:claude-opus-5" {
+				continue
+			}
+			found = true
+			if model.Lifecycle.State == nil || *model.Lifecycle.State != "active" {
+				t.Fatal("returned source model stayed vanished", model.Lifecycle)
+			}
+		}
+		return nil
+	})
+	if !found {
+		t.Fatal("returned source model missing from lifecycle projection")
+	}
+	for _, version := range outdatedPreview(t, admin).Versions {
+		if version.Version == "anthropic:claude-opus-5" {
+			t.Fatal("returned active model remains in outdated tray", version)
+		}
 	}
 }
 

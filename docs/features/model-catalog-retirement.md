@@ -27,8 +27,9 @@ canonical `provider:model_id` identity. A person with `models.manage` can retire
 up to 50 versions atomically. Moving preferences additionally requires workspace
 `model_prefs.manage` and current project authority. The write checks permissions
 under the tenant/catalog fences and rejects stale previews, unknown versions,
-selected successors, conflicting rules/routes and used versions without a
-registered successor on their existing harness. It reuses the line-reference
+selected successors, conflicting rules or role holds, and used versions without
+a registered successor on their existing harness. Equal role policies merge at
+their earliest priority. It reuses the line-reference
 transfer and account successor policy without widening account grants. It
 returns `{moved,removed,undo_token}`. Existing runs retain their immutable pins.
 
@@ -40,7 +41,7 @@ references and previous retirement schedules in one transaction. Revision
 numbers increase. Later edits to those references or a repeated Undo return 409;
 unrelated references are preserved. One compensating event names the original.
 
-No migration is required. Both endpoints use the existing tenant-scoped facts,
+No migration is required. These endpoints use the existing tenant-scoped facts,
 retirement rows and append-only events. Recorded source fixtures and controlled
 lifecycle/version vectors test precedence, unknown evidence, successful batch
 moves, Undo, stale writes, privacy, event-failure rollback and fenced revocation.
