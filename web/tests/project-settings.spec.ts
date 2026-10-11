@@ -70,11 +70,31 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
   const name = page.getByLabel('Name', { exact: true }), description = page.getByLabel('Description', { exact: true })
   await expect(name).toBeEnabled(); await expect(name).toBeFocused()
   const initialRevision = world.nodes.get('p-pharos')!.updated_at
+  // A list response snapshots the old revision before the edit, then returns
+  // only after the confirmed write. It must not put the old header back.
+  const staleNodes = structuredClone([...world.nodes.values()])
+  let refreshEntered!: () => void, releaseRefresh!: () => void
+  const reading = new Promise<void>(resolve => { refreshEntered = resolve }), reply = new Promise<void>(resolve => { releaseRefresh = resolve })
+  const staleReader = async (route: import('@playwright/test').Route) => {
+    if (new URL(route.request().url()).searchParams.get('kind') !== 'project') return route.fallback()
+    refreshEntered(); await reply
+    await route.fulfill({ json: { items: staleNodes, next_cursor: null } })
+  }
+  await page.route('**/api/nodes?**', staleReader)
+  await page.evaluate(() => {
+    const app = (document.querySelector('#app') as unknown as { __vue_app__: { config: { globalProperties: { $pinia: { _s: Map<string, { load(force: boolean): Promise<void> }> } } } } }).__vue_app__
+    Reflect.set(window, '__projectSettingsRefresh', app.config.globalProperties.$pinia._s.get('projects')!.load(true))
+  })
+  await reading
   const stable = await controlStability(page, { name, description, group: page.getByLabel('Group', { exact: true }), key: page.locator('.project-settings .key-show') })
   await stable.check(() => name.fill('Pharos renamed'))
   await name.press('Enter')
   await expect(page.locator('#project-title')).toHaveText('Pharos renamed')
   expect(world.writes[0]).toEqual({ id: 'p-pharos', body: { title: 'Pharos renamed' }, expected: initialRevision })
+  releaseRefresh(); await page.evaluate(() => Reflect.get(window, '__projectSettingsRefresh'))
+  await page.unroute('**/api/nodes?**', staleReader)
+  await expect(page.locator('#project-title')).toHaveText('Pharos renamed')
+  await expect(name).toHaveValue('Pharos renamed')
   await page.getByRole('button', { name: 'Undo', exact: true }).click()
   await expect(name).toHaveValue('Pharos')
   await stable.check(() => description.fill('A complete description.\nA second line stays in the editor.'))
@@ -140,6 +160,9 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
   release(); await replied
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Aeon')
   expect(world.nodes.get('p-aeon')!.title).toBe('Aeon')
+  await navigate(page, '/p/PHAROS/settings')
+  await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Pharos slow save')
+  await expect(page.locator('#project-title')).toHaveText('Pharos slow save')
   await navigate(page, '/p/AEON/settings#project-work-context'); await expect(page).toHaveURL('/p/AEON/settings/agents#project-work-context')
   await expect(page.locator('#project-work-context')).toBeVisible()
   await navigate(page, '/p/AEON/settings#recurring-work'); await expect(page).toHaveURL('/p/AEON/settings/routines#recurring-work')
