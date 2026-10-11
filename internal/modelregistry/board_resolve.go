@@ -280,6 +280,9 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		if out.Profile != nil {
 			break
 		}
+		if order.Stage == "default" {
+			firstCause = "default: " + firstCause
+		}
 		d.Held = append(d.Held, modelprefs.HeldLine{Line: order.Line, Reason: firstCause})
 		waitCode = dailyWait
 	}
