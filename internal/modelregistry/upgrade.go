@@ -10,16 +10,6 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// The historical v2 default is deliberately frozen. Custom routes and profile
-// versions are never mistaken for defaults, including an intentionally empty role.
-var v2Ladders = map[string][]string{
-	"scout":       {"codex-luna-medium", "claude-haiku-medium"},
-	"mechanical":  {"codex-luna-high", "claude-haiku-high"},
-	"build":       {"codex-terra-high", "claude-sonnet-high", "pi-anthropic-sonnet-high"},
-	"build-hard":  {"codex-sol-xhigh", "claude-opus-xhigh", "pi-anthropic-opus-xhigh"},
-	"review-gate": {"codex-astra-xhigh", "claude-fable-xhigh", "claude-opus-xhigh", "cursor-grok-xhigh"},
-}
-
 func catalogLock(ctx context.Context, tx pgx.Tx) error {
 	return modelactivation.Lock(ctx, tx)
 }

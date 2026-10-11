@@ -274,11 +274,11 @@ func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		if _, err := tx.Exec(ctx, `UPDATE model_rules SET line=$2 WHERE line=$1 AND NOT EXISTS(SELECT 1 FROM model_rules n WHERE n.tenant_id=model_rules.tenant_id AND n.scope=model_rules.scope AND n.project_id IS NOT DISTINCT FROM model_rules.project_id AND n.column_key=model_rules.column_key AND n.line=$2)`, oldLine, newLine); err != nil {
 			return err
 		}
-		var collision bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_row_constraints a JOIN model_row_constraints b ON b.tenant_id=a.tenant_id AND b.scope=a.scope AND b.project_id IS NOT DISTINCT FROM a.project_id AND b.column_key=a.column_key WHERE a.line=$1 AND b.line=$2)`, oldLine, newLine).Scan(&collision); err != nil {
+		var modelsCollision bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_row_constraints a JOIN model_row_constraints b ON b.tenant_id=a.tenant_id AND b.scope=a.scope AND b.project_id IS NOT DISTINCT FROM a.project_id AND b.column_key=a.column_key WHERE a.line=$1 AND b.line=$2)`, oldLine, newLine).Scan(&modelsCollision); err != nil {
 			return err
 		}
-		if collision {
+		if modelsCollision {
 			return fail(409, "replacement line has a conflicting Models constraint")
 		}
 		if _, err := tx.Exec(ctx, `UPDATE model_row_constraints SET line=$2 WHERE line=$1`, oldLine, newLine); err != nil {

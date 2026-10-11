@@ -167,3 +167,19 @@ func matchesV2(role string, steps []ladderStep) bool {
 	}
 	return true
 }
+
+// The historical v2 default is deliberately frozen. Custom routes and profile
+// versions are never mistaken for defaults, including an intentionally empty role.
+var v2Ladders = map[string][]string{
+	"scout":       {"codex-luna-medium", "claude-haiku-medium"},
+	"mechanical":  {"codex-luna-high", "claude-haiku-high"},
+	"build":       {"codex-terra-high", "claude-sonnet-high", "pi-anthropic-sonnet-high"},
+	"build-hard":  {"codex-sol-xhigh", "claude-opus-xhigh", "pi-anthropic-opus-xhigh"},
+	"review-gate": {"codex-astra-xhigh", "claude-fable-xhigh", "claude-opus-xhigh", "cursor-grok-xhigh"},
+}
+
+type seedRoute struct {
+	Role     string
+	Priority int
+	Slug     string
+}
