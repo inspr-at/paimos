@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -364,7 +365,7 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	go func() { _, err := dispatch(ctx, pool, f.run, "", 0); first <- err }()
 	pid := barrier.Wait(t, ctx)
 	mux := http.NewServeMux()
-	module := agentruns.NewWithLeadAdmission(f.d.App, admission)
+	module := agentruns.NewWithLeadAdmission(f.d.App, options.LeadAdmission)
 	must(t, e.Bind(module))
 	module.Mount(mux)
 	second := make(chan *httptest.ResponseRecorder, 1)
@@ -473,7 +474,45 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 	})
 	var refusal *workorders.Error
 	if !errors.As(err, &refusal) || refusal.Status != 409 || refusal.Message != "account_state" {
-		t.Fatalf("spare account admitted selected offline account: %v", err)
+		t.Fatalf("spare account admitted selected unavailable account: %v", err)
+	}
+	f.exec(`UPDATE agent_accounts SET state='available' WHERE id=$1`, f.account)
+	module := agentruns.NewWithLeadAdmission(f.d.App, d.options.LeadAdmission)
+	must(t, d.e.Bind(module))
+	mux := http.NewServeMux()
+	module.Mount(mux)
+	var handoff agentruns.WorkerHandoff
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT trace->'worker_assignment' FROM agent_runs WHERE id=$1`, d.agentRun).Scan(&raw))
+	must(t, json.Unmarshal(raw, &handoff))
+	rows, err := f.d.Admin.Query(t.Context(), `SELECT id::text FROM account_reservations WHERE run_id=$1 AND state='active' ORDER BY id`, d.agentRun)
+	must(t, err)
+	var reservations []string
+	for rows.Next() {
+		var id string
+		must(t, rows.Scan(&id))
+		reservations = append(reservations, id)
+	}
+	must(t, rows.Err())
+	rows.Close()
+	if len(reservations) != 2 {
+		t.Fatalf("expected measured and manual holds, got %v", reservations)
+	}
+	worktree := strings.Repeat("7", 64)
+	body, err := json.Marshal(map[string]any{"daemon_id": grant.DaemonID, "daemon_generation": grant.DaemonGeneration, "reservation_ids": reservations,
+		"routine": agentsetup.RoutinePickup{LaunchID: grant.LaunchID, WorktreeID: worktree, Capability: grant.Capability, DaemonDigest: grant.DaemonDigest, CapabilityDigest: grant.CapabilityDigest, ComputerID: grant.ComputerID},
+		"handoff": agentruns.WorkerPickup{TicketRevision: handoff.TicketRevision, WorkOrderRevision: handoff.WorkOrderRevision, BriefSHA256: handoff.BriefSHA256, WorktreeID: worktree}})
+	must(t, err)
+	req := httptest.NewRequest("POST", "/api/runs/"+d.agentRun+"/claim", strings.NewReader(string(body))).WithContext(tenant.WithPrincipal(t.Context(), f.agent))
+	req.Header.Set(agentpairing.LedgerGenerationHeader, grant.LedgerGeneration)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("reserved one-slot daemon claim=%d %s", w.Code, w.Body.String())
+	}
+	var claimed bool
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT (SELECT status='starting' AND account_id=$2::uuid FROM agent_runs WHERE id=$1) AND (SELECT state='claimed' FROM routine_launch_intents WHERE agent_run_id=$1)`, d.agentRun, f.account).Scan(&claimed))
+	if !claimed {
+		t.Fatal("daemon claim did not retain the selected account and launch")
 	}
 }
 
@@ -531,11 +570,35 @@ func TestRoutineQueueWaitsDoNotBlockLaterWork(t *testing.T) {
 	if node, reason := pickup(fmt.Sprintf(`{"agent_principal_id":%q,"model_profile_id":%q}`, f.agent.ID, f.profile)); node != "" || reason != "routine_registry_route_required" {
 		t.Fatalf("registry wait not reported: node=%s wait=%s", node, reason)
 	}
-	// A second definition keeps live consent while the earlier definition waits.
-	var later recurrences.Occurrence
-	f.call("POST", "/api/recurrences/"+f.routine.ID+"/run-now", map[string]string{"idempotency_key": "later"}, &later)
-	f.exec(`UPDATE routine_runs SET execute_consent=false WHERE id=$1`, f.run)
+	// A second definition keeps live consent while the earlier one waits.
 	f.exec(`UPDATE project_routine_execution_settings SET automatic_launch_enabled=true WHERE project_id=$1`, f.project)
+	var definition recurrences.Recurrence
+	f.call("POST", "/api/recurrences", f.routine.Input, &definition)
+	path := "/api/recurrences/" + definition.ID
+	f.call("POST", path+"/resume", map[string]any{"expected_revision": definition.Revision}, nil)
+	f.call("GET", path, nil, &definition)
+	f.call("PUT", path+"/execution-consent", map[string]any{"expected_revision": definition.Revision, "execute_consent": true}, nil)
+	var later recurrences.Occurrence
+	f.call("POST", path+"/run-now", map[string]string{"idempotency_key": "later"}, &later)
+	// A dispatchable earlier routine retains its turn, but the eligibility
+	// probe cannot leave a route, hold, event or launch behind.
+	var beforeEvents int
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, f.owner.TenantID).Scan(&beforeEvents))
+	var waiting agentruns.RoutineQueueResult
+	must(t, f.tx(func(tx pgx.Tx) error {
+		var err error
+		waiting, err = d.e.DispatchTx(t.Context(), tx, f.owner.TenantID, later.Run.ID, d.session, 1)
+		return err
+	}))
+	if waiting.Routed || waiting.WaitReason != "queue_order_wait" {
+		t.Fatalf("eligible earlier routine lost its turn: %+v", waiting)
+	}
+	var clean bool
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT NOT EXISTS(SELECT 1 FROM routine_budget_grants WHERE run_id IN($1,$2)) AND NOT EXISTS(SELECT 1 FROM routine_launch_intents WHERE routine_run_id IN($1,$2)) AND NOT EXISTS(SELECT 1 FROM agent_runs WHERE id IN($3,$4) AND (queue_routed_at IS NOT NULL OR account_id IS NOT NULL)) AND (SELECT count(*)=$5 FROM events WHERE tenant_id=$6)`, f.run, later.Run.ID, d.agentRun, *later.Run.AgentRunID, beforeEvents, f.owner.TenantID).Scan(&clean))
+	if !clean {
+		t.Fatal("rollback-only earlier routine probe committed dispatch artifacts")
+	}
+	f.exec(`UPDATE recurrence_definitions SET execute_consent=false WHERE recurrence_id=$1`, f.routine.ID)
 	var out agentruns.RoutineQueueResult
 	must(t, f.tx(func(tx pgx.Tx) error {
 		var err error
