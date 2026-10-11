@@ -24,6 +24,7 @@ type catalogModelView struct {
 	Identity  string                 `json:"identity"`
 	Provider  string                 `json:"provider"`
 	ModelID   string                 `json:"model_id"`
+	Lifecycle CatalogLifecycle       `json:"lifecycle"`
 	Facts     map[string]CatalogFact `json:"facts"`
 	Routes    []catalogRouteView     `json:"routes"`
 	Evidence  []CatalogFact          `json:"evidence"`
@@ -110,6 +111,18 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 			raw, _ := json.Marshal(ids[len(ids)-1])
 			out.NextCursor = base64.RawURLEncoding.EncodeToString(raw)
 		}
+		now, err := dbNow(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		lifecycle, err := loadLifecycleCatalog(r.Context(), tx, now)
+		if err != nil {
+			return err
+		}
+		byIdentity := map[string]CatalogLifecycle{}
+		for _, model := range lifecycle {
+			byIdentity[model.Identity] = model.Lifecycle
+		}
 		remaining := 4 << 20
 		for _, id := range ids {
 			model := catalogModelView{Identity: id[0] + ":" + id[1], Provider: id[0], ModelID: id[1], Evidence: []CatalogFact{}, Routes: []catalogRouteView{}}
@@ -138,6 +151,7 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
+			model.Lifecycle = byIdentity[model.Identity]
 			model.Facts = ResolveCatalogFacts(model.Evidence, "")
 			routes := map[string]bool{}
 			for _, f := range model.Evidence {

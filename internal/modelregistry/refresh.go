@@ -310,6 +310,9 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 				if err := RecordCatalogFacts(ctx, tx, p.TenantID, fetched.catalog.Facts); err != nil {
 					return err
 				}
+				if err := recordCatalogPresence(ctx, tx, p.TenantID, input.Vendor, out.At, fetched.catalog); err != nil {
+					return err
+				}
 				observations := catalogObservations(fetched.catalog, out.At.UTC().Format(time.RFC3339Nano)+"/"+input.Vendor+"/"+input.AccountID)
 				models := map[string]bool{}
 				for _, f := range fetched.catalog.Facts {

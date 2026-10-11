@@ -7142,6 +7142,16 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogNewPinsKeepUnknownAndLegacyMetadataReadable","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedBulkRetireAndUndo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedCompleteListingPresence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedLifecycleEvidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedRetireRevocationFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedRetireSafetyAndPrivacy","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogSourcesPreserveNativePrecedenceAndUnknown","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogV3Ladders","tier":"GATED-FULL"}

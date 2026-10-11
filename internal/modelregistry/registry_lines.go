@@ -272,8 +272,19 @@ func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		return err
 	}
 	for _, old := range before {
-		replacement := nearestProfile(after, old.Effort, old.EffortLevel)
+		candidates := sameRouteProfiles(after, old)
+		if len(candidates) == 0 {
+			continue
+		}
+		replacement := nearestProfile(candidates, old.Effort, old.EffortLevel)
 		for _, table := range []string{"model_role_routes", "model_security_role_routes"} {
+			var collision bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM `+table+` a JOIN `+table+` b ON b.tenant_id=a.tenant_id AND b.role=a.role WHERE a.profile_id=$1 AND b.profile_id=$2)`, old.ID, replacement.ID).Scan(&collision); err != nil {
+				return err
+			}
+			if collision {
+				return fail(409, "successor has a conflicting role route")
+			}
 			if _, err := tx.Exec(ctx, `UPDATE `+table+` SET profile_id=$2 WHERE profile_id=$1 AND NOT EXISTS(SELECT 1 FROM `+table+` n WHERE n.tenant_id=`+table+`.tenant_id AND n.role=`+table+`.role AND n.profile_id=$2)`, old.ID, replacement.ID); err != nil {
 				return err
 			}

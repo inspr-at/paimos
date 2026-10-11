@@ -84,6 +84,9 @@ func (m *Module) mount(mux *http.ServeMux, legacy http.HandlerFunc) {
 	mux.HandleFunc("PUT /api/models/refresh/settings", m.putSettings)
 	mux.HandleFunc("PUT /api/models/refresh/credentials/{accountId}", m.putCredential)
 	mux.HandleFunc("GET /api/models/catalog", m.catalog)
+	mux.HandleFunc("GET /api/models/outdated", boundedPreferenceHandler(m.outdatedModels))
+	mux.HandleFunc("POST /api/models/outdated/retire", boundedPreferenceHandler(m.retireOutdated))
+	mux.HandleFunc("POST /api/models/outdated/undo", boundedPreferenceHandler(m.undoOutdated))
 	mux.HandleFunc("GET /api/models", m.list)
 	mux.HandleFunc("POST /api/models", m.create)
 	mux.HandleFunc("PUT /api/models/routes", m.replace)
@@ -127,7 +130,27 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		}
 
 		items, err = listProfiles(r.Context(), tx)
-		return err
+		if err != nil {
+			return err
+		}
+		now, err := dbNow(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		models, err := loadLifecycleCatalog(r.Context(), tx, now)
+		if err != nil {
+			return err
+		}
+		byIdentity := map[string]CatalogLifecycle{}
+		for _, model := range models {
+			byIdentity[model.Identity] = model.Lifecycle
+		}
+		for i := range items {
+			provider, id := CatalogIdentity(items[i].Family, items[i].Harness, items[i].Model, items[i].Effort)
+			items[i].Identity = provider + ":" + id
+			items[i].Lifecycle = byIdentity[items[i].Identity]
+		}
+		return nil
 	})
 	if err != nil {
 		writeErr(w, err)
