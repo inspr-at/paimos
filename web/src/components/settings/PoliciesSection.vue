@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useSession } from '../../stores/session'
-import { can, onAccessChange, permissionsAvailable, permissionsKnown } from '../../lib/authz'
+import { can, onAccessRevalidate, permissionsAvailable, permissionsKnown } from '../../lib/authz'
 import { permissionLabel } from '../../lib/access'
 import { scopeOwner } from '../../lib/identityScope'
 import { createPoliciesReader, deniedPolicy, ELSEWHERE_RULES, keyLimits, ownerLinks, POLICY_ROLES, POLICY_TABS, truncatedLadder, type PolicyRole, type PolicyTab } from '../../lib/policies'
@@ -36,11 +36,11 @@ function load() {
 // Compare each authority/source value, rather than a newly allocated tuple on
 // every permission-cache revision (including unchanged focus answers).
 watch([() => scopeOwner(session.identity), tab, role, ready, permitted, permissionsAvailable], load, { immediate: true, flush: 'sync' })
-const stopAccess = onAccessChange(change => {
-  // Same-person refresh belongs to the mounted editor. Resetting the parent
-  // would unmount it and discard its captured draft, write and confirmed Undo.
-  if (change === 'reset' || tab.value !== 'ladders' || state.value !== 'loaded') { reader.reset(); sheet.value?.close(); load() }
-})
+const stopAccess = onAccessRevalidate({ reset: () => { reader.reset(); sheet.value?.close() }, refresh: () => {
+  // Same-person refresh belongs to the mounted ladder editor. Other tabs
+  // replace their read in place without unmounting controls or details.
+  if (tab.value !== 'ladders' || state.value !== 'loaded') void reader.load(tab.value, role.value, permitted.value, true)
+} })
 onBeforeUnmount(() => { stopAccess(); reader.dispose() })
 function tabKey(event: KeyboardEvent, index: number) {
   if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return

@@ -25,7 +25,7 @@ import ReleaseStats from './ReleaseStats.vue'
 import ReleaseTicketPanel from './ReleaseTicketPanel.vue'
 import ReleaseVersionCopy from './ReleaseVersionCopy.vue'
 import TicketLink from './TicketLink.vue'
-import { onAccessChange, permissionsRevoked } from '../../lib/authz'
+import { onAccessRevalidate, permissionsRevoked } from '../../lib/authz'
 import { appendPendingChanges, getPendingChanges, pendingLine, type PendingChanges } from '../../lib/releasePending'
 import { plainSubject, shortCommit } from '../../lib/releases'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
@@ -390,10 +390,7 @@ function resetWaiting(keepOpen = false) {
   if (current.value && session.identity) void loadWaiting()
 }
 watch(() => [current.value, session.identity?.tenant.id, session.identity?.principal.id], () => resetWaiting(), { immediate: true })
-const stopWaitingAccess = onAccessChange(change => {
-  resetWaiting(change === 'refresh')
-  if (change === 'reset') peekKey.value = null
-})
+const stopWaitingAccess = onAccessRevalidate({ reset: () => { resetWaiting(); peekKey.value = null }, refresh: () => { void loadWaiting() } })
 
 // ---------- A ticket beside the history ----------
 const peekKey = ref<string | null>(null)
