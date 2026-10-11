@@ -402,7 +402,8 @@
         "web/tests/shortcuts.unit.test.ts",
         "web/src/lib/leadPanel.ts",
         "web/tests/aeon-1212-lead-panel.spec.ts",
-        "web/tests/lead-panel.test.ts"
+        "web/tests/lead-panel.test.ts",
+        "web/tests/fixtures/aeon-1212-ag-approved/**"
       ],
       "exclude": [
         "web/src/views/**",

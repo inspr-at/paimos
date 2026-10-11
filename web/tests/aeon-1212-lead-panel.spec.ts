@@ -4,25 +4,35 @@
 // English, 44px phone targets, keys and no sideways scrolling, both themes.
 // Risk: a chat send closes a question; a late decision lands on another person
 // or session; a historical gate passes as current; tab/header controls move.
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, chromium, type Page } from '@playwright/test'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { mockLeadFlow, LEAD_SESSION, LEAD_AGENT, NOW } from './lead-flow-fixtures'
 import { me, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { Question } from '../src/lib/decisionDeskApi'
 import type { ProjectMessage } from '../src/lib/agents'
+import type { LeadDecision } from '../src/lib/lead'
 
 const Q = '6e000000-0000-4000-8000-000000000001'
+const makeAdmission = (): LeadDecision => ({ event_id: 12, project_id: 'p-pharos', session_id: LEAD_SESSION, recorded_at: '2026-10-06T09:02:00Z', outcome: 'selected', reason_codes: ['gates_ready'], results: [],
+  request: { stage: 'admission', outcome: 'selected', reason_codes: ['gates_ready'], attempt: 1 },
+  gate_freshness: ['dial', 'harness', 'account_room', 'host_load'].map(kind => ({ kind: kind as 'dial', freshness: 'fresh' })),
+})
 const makeQuestion = (): Question => ({
   id: Q, project_id: 'p-pharos', revision: 1, state: 'open', input: { request_id: 'ask-one', session_id: LEAD_SESSION,
-    question: 'Merge the reviewed change now, or wait for the release train?', meanwhile: 'parked', recommend: 'yes',
+    question: 'Merge AEON-1182 now, or wait for the 14:00 release train?', meanwhile: 'parked', recommend: 'yes',
     options: [{ id: 'yes', title: 'Yes, merge now', description: 'Merge the reviewed change.', answer: 'Yes' }, { id: 'later', title: 'Not now', description: 'Wait for the release train.', answer: 'Not now' }] },
   suggested_outcome: 'once', suggestion_reason: 'agent_suggestion', askers: [{ id: 'asker', principal_id: 'lead-agent', session_id: LEAD_SESSION, reply_root_id: '', comment_node_id: '', input: { request_id: 'ask-one', question: 'Merge?', options: [], meanwhile: 'parked' } }],
   pending: [], created_at: '2026-10-06T09:39:00Z', updated_at: '2026-10-06T09:39:00Z',
 })
 async function setup(page: Page, options: { denied?: boolean; question?: boolean; german?: boolean; pinned?: string; last?: string; actions?: boolean } = {}) {
   await page.clock.setSystemTime(NOW)
-  const world = await mockLeadFlow(page, { lead: 'working', longText: options.german })
+  const world = await mockLeadFlow(page, { lead: 'working', longText: options.german, accountLabels: { claude: 'Claude Max', codex: 'ChatGPT Pro' } })
   const lead = world.state.leads['p-pharos']!
   lead.actions = Object.fromEntries(['start', 'resume', 'pause', 'adopt', 'cancel_adoption', 'remove'].map(action => [action, { available: action === 'pause', blocked_reason: action === 'pause' ? '' : 'ordinary_succession_required' }]))
   if (options.actions === false) delete lead.actions
@@ -30,12 +40,12 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
   // The approved lead-chat reference has four ordinary messages before its ask.
   // These remain messages; the independent question below has its own API record.
   const messages: ProjectMessage[] = [
-    'Dispatched PHAROS-11 to Codex Sol. Next: the next queued item once a slot frees.',
-    'Hold the next item until the reviewed change lands.',
-    'Done. The next item waits behind the reviewed change.',
-    'The reviewed change passed review and is in the gate.',
+    'Dispatched AEON-1160 · Grouped picker to Codex Sol xhigh on mbp2606. Next: AEON-1199 once a slot frees.',
+    'Hold AEON-1199 until AEON-1195 lands.',
+    'Done. AEON-1199 waits behind AEON-1195; next up is AEON-1205.',
+    'AEON-1176 passed review and is in the gate.',
   ].map((body, index) => ({ id: `8e000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, sender_principal_id: index === 1 ? me.id : LEAD_AGENT, recipient_principal_id: index === 1 ? LEAD_AGENT : me.id, sender_session_id: index === 1 ? undefined : LEAD_SESSION, recipient_session_id: index === 1 ? LEAD_SESSION : undefined, sender_label: index === 1 ? 'Markus' : 'Claude lead', to: index === 1 ? 'claude:lead' : 'paimos:markus', body, sent_event_id: 100 + index, is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none', created_at: `2026-10-06T09:${[31,33,33,38][index]}:00Z` }))
-  const state = { question: makeQuestion(), calls: [] as Record<string, unknown>[], hold: false, fail: false, messages }
+  const state = { question: makeQuestion(), calls: [] as Record<string, unknown>[], hold: false, fail: false, messages, denied: !!options.denied, admission: [makeAdmission()], historyUnreadable: false }
   const readMarkers = new Map<string, { last_read_message_id: string | null; last_read_event_id: number }>()
   let release: () => void = () => {}, arrived: () => void = () => {}
   let barrier = Promise.resolve(), started = Promise.resolve()
@@ -43,13 +53,16 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
   await page.route('**/api/me/permissions*', route => {
     const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
     answer.workspace.permissions.push('questions.read', 'questions.decide', 'run.create', 'harness.read', 'harness.control', 'inbox.read', 'inbox.write')
-    if (options.denied) {
+    if (state.denied) {
       answer.workspace.permissions = answer.workspace.permissions.filter(p => p !== 'questions.decide')
       if (answer.project) answer.project.permissions = answer.project.permissions.filter(p => p !== 'questions.decide')
     }
     return route.fulfill({ json: answer })
   })
   await page.route('**/api/decision-desk?*', route => route.fulfill({ json: { items: options.question === false || state.question.state !== new URL(route.request().url()).searchParams.get('state') ? [] : [state.question], has_more: false } }))
+  await page.route('**/api/projects/p-pharos/lead-decisions*', route => state.historyUnreadable
+    ? route.fulfill({ status: 503, json: { error: 'The admission history is temporarily unavailable.' } })
+    : route.fulfill({ json: { items: state.admission.filter(item => item.event_id > Number(new URL(route.request().url()).searchParams.get('after') ?? 0)), next_after: null } }))
   await page.route(url => url.pathname === `/api/questions/${Q}` || url.pathname === `/api/questions/${Q}/decision`, async route => {
     if (route.request().method() === 'GET') return route.fulfill({ json: state.question })
     const body = route.request().postDataJSON() as Record<string, unknown>
@@ -62,6 +75,10 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
   })
   await page.route('**/api/**', route => {
     const request = route.request(), url = new URL(request.url()), path = url.pathname
+    if (path === '/api/models') return route.fulfill({ json: [
+      { id: 'sol', slug: 'sol-medium', model: 'gpt-6-sol', display_name: 'Sol', model_version: '6', harness: 'codex', family: 'openai', effort: 'medium', tier: 'standard', enabled: true },
+      { id: 'opus', slug: 'opus-high', model: 'Claude Opus 5.5', display_name: 'Opus', model_version: '5.5', harness: 'claude', family: 'anthropic', effort: 'high', tier: 'standard', enabled: true },
+    ] })
     // Full-viewport evidence also renders the predecessor's background reads.
     if (['/api/approvals', '/api/agent-accounts', '/api/agent-accounts/capacity', '/api/agent-accounts/capacity/schedule'].includes(path)) return route.fulfill({ json: [] })
     if (path === '/api/projects/p-pharos/message-targets') return route.fulfill({ json: [{ id: 'lead-target', principal_id: LEAD_AGENT, address: 'claude:lead', adapter: 'claude', target_kind: 'agent', maximum_level: 'simple', role: 'coordinator', enabled: true }] })
@@ -216,9 +233,10 @@ for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','d
     await expect(tab(page, 'Chat')).toHaveAttribute('aria-selected', 'true')
     await expect(panel(page).locator('.why')).toContainText('it asks you something')
     await expect(question(page)).toContainText('Asks you')
+    if (width === 1000) await page.screenshot({ path: info.outputPath(`AEON-1212/1000-sheet-${width}-${look}.png`) })
     const stable = { frame: panel(page), header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist'), pin: panel(page).getByRole('button', { name: 'Make this your default tab' }), close: panel(page).getByRole('button', { name: 'Close session details' }) }
     await expectStableControls({ controls: stable, scrollAreas: { panel: panel(page) }, interactions: [
-      { name: 'Lead', run: async () => { await tab(page, 'Lead').click(); await expect(panel(page).locator('#lp-checks')).toHaveText('Before every start'); await expect(panel(page).locator('.admission-caption')).toContainText('All passed at the last start'); await expect(panel(page).locator('[data-check]')).toHaveCount(4); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/${width === 1000 ? "1000-sheet" : "lead-sheet"}-${width}-${look}.png`) }) } },
+      { name: 'Lead', run: async () => { await tab(page, 'Lead').click(); await expect(panel(page).locator('#lp-checks')).toHaveText('Before every start'); await expect(panel(page).locator('.admission-caption')).toContainText('All passed at the last start'); await expect(panel(page).locator('[data-check]')).toHaveCount(4); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-sheet-${width}-${look}.png`) }) } },
       { name: 'Session', run: async () => { await tab(page, 'Session').click(); await expect(panel(page).locator('#session-panel-overview')).toBeVisible(); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/session-${width}-${look}.png`) }) } },
       { name: 'Chat', run: async () => { await tab(page, 'Chat').click(); await expect(question(page)).toBeVisible(); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-chat-${width}-${look}.png`) }) } },
     ] })
@@ -353,4 +371,173 @@ test('AEON-1212: pinned and last-used tabs belong to the person; queue links for
   await expect(tab(page, 'Lead')).toHaveAttribute('aria-selected', 'true')
   await expect(panel(page).locator('#next-up')).toBeFocused()
   await expect(panel(page).locator('.why')).toContainText('Next up')
+})
+
+for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as const) {
+  test(`AEON-1212 fix3: ${width} ${look} G3 results and G6 admission evidence stay honest and the owned worker row stays put`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
+    const errors = watchErrors(page), world = await setup(page)
+    const shot = async (state: string) => {
+      await checkPanel(page, width === 400)
+      await page.screenshot({ path: info.outputPath(`AEON-1212/${state}-${width}-${look}.png`) })
+    }
+    await page.goto(`/agents/${LEAD_SESSION}?tab=chat`)
+    await expect(question(page)).toContainText('Asks you')
+    await expect(panel(page).locator('.pt-sub')).toContainText('Opus 5.5 · high')
+    const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist') }
+    world.hold()
+    try {
+      await expectStableControls({ controls: { ...controls, card: question(page), answer: question(page).locator('.answer-slot'), composer: panel(page).locator('.composer') }, scrollAreas: { chat: panel(page).locator('.thread-scroll') }, interactions: [
+        { name: 'pending', run: async () => {
+          await expectStableControls({ controls: { options: question(page).locator('.question-options'), pressed: question(page).locator('.question-options button').first(), other: question(page).locator('.question-options button').last() }, interactions: [
+            { name: 'choose the real server option', run: async () => {
+              await question(page).getByRole('button', { name: 'Yes, merge now', exact: true }).click()
+              await world.started()
+              await expect(question(page).getByRole('button', { name: 'Recording…', exact: true })).toBeDisabled()
+            } },
+          ] })
+          await shot('g3-pending')
+        } },
+        { name: 'recorded', run: async () => {
+          world.release()
+          await expect(question(page)).toContainText('Answered: Yes, merge now')
+          await expect(question(page)).toContainText('by you')
+          await expect(question(page).getByRole('button')).toHaveCount(0)
+          await shot('g3-recorded')
+        } },
+      ] })
+    } finally { world.release() }
+    world.state.question = makeQuestion()
+    await page.reload()
+    await expect(question(page).getByRole('button', { name: 'Not now', exact: true })).toBeVisible()
+    world.state.fail = true
+    await question(page).getByRole('button', { name: 'Not now', exact: true }).click()
+    await expect(question(page)).toContainText('Not recorded. Try again')
+    await expect(question(page).getByRole('button', { name: 'Retry', exact: true })).toBeEnabled()
+    await shot('g3-failed')
+    world.state.question = { ...world.state.question, revision: 2, state: 'answered', answer: { id: 'desk-answer', revision: 2, option_id: 'later', answer: 'Not now', outcome: 'once', decided_by: 'another-person', created_at: NOW, deliver_after: NOW } }
+    await page.evaluate(async () => { await (await import('/src/stores/agentProjection.ts' /* @vite-ignore */)).useAgentProjection().refresh() })
+    await expect(question(page)).toContainText('Answered on the Desk: Not now')
+    await expect(question(page).getByRole('button')).toHaveCount(0)
+    await shot('g3-decided-elsewhere')
+    world.state.question = makeQuestion(); world.state.denied = true
+    await page.reload()
+    await expect(question(page)).toContainText('Waits for a project admin')
+    await expect(question(page).getByRole('button')).toHaveCount(0)
+    await expect(question(page).getByRole('link', { name: 'Open on the Desk' })).toHaveAttribute('href', `/decision-desk?item=q:${Q}`)
+    expect(world.state.calls).toHaveLength(2)
+    await shot('g3-no-permission')
+
+    await page.goto(`/agents/${LEAD_SESSION}?tab=lead`)
+    const caption = panel(page).locator('.admission-caption')
+    const checks = panel(page).locator('[data-check]')
+    const admissionShot = async (state: string) => {
+      await panel(page).locator('#lp-checks').scrollIntoViewIfNeeded()
+      await shot(`g6-${state}`)
+    }
+    await expect(caption).toContainText('All passed at the last start')
+    await expect(checks).toHaveCount(4)
+    await admissionShot('all-passed')
+    const row = panel(page).locator('.worker').first()
+    await expect(row.locator('.worker-name')).toHaveText('PHAROS-11 · Connect Hetzner Cloud for managed provisioning')
+    await expect(row.locator('.worker-name')).not.toContainText('imac0')
+    await expect(row.locator('.worker-execution')).toContainText('Sol 6 · medium')
+    await expect(row.locator('.worker-execution')).toContainText('Codex')
+    await expect(row.locator('.worker-execution')).toContainText('ChatGPT Pro')
+    await expect(row.locator('.worker-computer')).toHaveText('imac0')
+    await expect(row.locator('.worker-beat')).not.toHaveText('Not reported')
+    await expect(row.locator('.listening-label')).toHaveCount(0)
+    await expect(panel(page).locator('.worker-columns [role="columnheader"]')).toHaveText(['Session', 'Time', 'Execution', 'Computer', 'Beat'])
+    // The current P4 branch has the predecessor's fixed side panel; Focus and
+    // Overview are P5 layouts. Its own rows must also behave in a wide panel.
+    if (width === 1440) {
+      await panel(page).evaluate(element => (element as HTMLElement).style.setProperty('--panel-w', '760px'))
+      await expect(row.locator('.worker-execution')).toBeVisible()
+    }
+    await row.scrollIntoViewIfNeeded()
+    await expectStableControls({ controls: { ...controls, row }, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
+      { name: 'hover the owned worker row', run: async () => { await row.hover(); await expect(row).toBeVisible() } },
+    ] })
+    await shot('worker-row')
+    if (width === 1440) await panel(page).evaluate(element => (element as HTMLElement).style.removeProperty('--panel-w'))
+    await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.lead-content') }, interactions: [
+      { name: 'held history', run: async () => {
+        world.state.admission = [{ ...makeAdmission(), reason_codes: ['dial_full'] }]
+        await page.reload()
+        await expect(caption).toContainText('1 held the last start')
+        await expect(checks).toHaveCount(4)
+        await expect(checks.first()).toHaveText('Dial held it: dial_full')
+        await admissionShot('held')
+      } },
+      { name: 'no start yet', run: async () => {
+        world.state.admission = []
+        await page.reload()
+        await expect(caption).toHaveText('No start yet')
+        await expect(checks).toHaveCount(0)
+        await expect(panel(page)).toContainText('The checks run when this lead starts its next worker.')
+        await admissionShot('no-start-yet')
+      } },
+      { name: 'unreadable history', run: async () => {
+        world.state.historyUnreadable = true
+        await page.reload()
+        await expect(caption).toHaveText("Couldn't read the last start")
+        await expect(checks).toHaveCount(0)
+        await expect(panel(page).getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
+        await admissionShot('unreadable')
+      } },
+      { name: 'stale history', run: async () => {
+        world.state.historyUnreadable = false
+        world.state.admission = [{ ...makeAdmission(), recorded_at: '2026-10-04T09:02:00Z' }]
+        await page.reload()
+        await expect(caption).toContainText('may be out of date')
+        await expect(checks).toHaveCount(4)
+        await admissionShot('stale')
+      } },
+    ] })
+    if (width === 1440) {
+      await panel(page).getByRole('button', { name: 'Close session details' }).click()
+      await page.locator('.sessions .row[data-row^="s:"] .agent-link').last().click()
+      await expect(tab(page, 'Overview')).toHaveAttribute('aria-selected', 'true')
+      await page.screenshot({ path: info.outputPath(`AEON-1212/pick-last-row-${width}-${look}.png`) })
+    }
+    expect(errors).toEqual([])
+  })
+}
+
+test('AEON-1212 approved check.mjs: the exact round-7 design passes and supplies the reference screenshots', async ({}, info) => {
+  test.setTimeout(240_000)
+  const fixture = fileURLToPath(new URL('./fixtures/aeon-1212-ag-approved/', import.meta.url))
+  const output = info.outputPath('AEON-1212/approved-reference')
+  await mkdir(output, { recursive: true })
+  const units = await promisify(execFile)(process.execPath, ['--experimental-strip-types', '--test', fileURLToPath(new URL('./lead-panel.test.ts', import.meta.url))], { timeout: 30_000, maxBuffer: 1024 * 1024 })
+  expect(units.stdout).toMatch(/# pass 3\b/)
+  console.log('AEON-1212 panel units: 3 passed')
+  await copyFile(resolve(fixture, 'agents-page-approved.html'), resolve(output, 'fragment.html'))
+  // No Playwright browser fixture is requested: the original check owns its
+  // one headless browser, exits, then the extra reference capture owns one.
+  await promisify(execFile)(process.execPath, [resolve(fixture, 'check.mjs')], { cwd: output, timeout: 180_000, maxBuffer: 1024 * 1024 })
+  const result = await readFile(resolve(output, 'check.txt'), 'utf8')
+  await writeFile(resolve(output, 'check.md'), result)
+  expect(result).toMatch(/\nALL PASS \(\d+ checks\)\n$/)
+  const shots = resolve(output, 'shots-r7/check')
+  for (const name of await readdir(shots)) {
+    const parsed = /^(\d+)-(light|dark)-(.+)\.png$/.exec(name)
+    if (parsed) await copyFile(resolve(shots, name), resolve(output, `${parsed[3]}-${parsed[1]}-${parsed[2]}.png`))
+  }
+  const browser = await chromium.launch({ headless: true })
+  try {
+    for (const width of [1440, 400, 1000]) for (const look of ['light', 'dark']) {
+      const reference = await browser.newPage({ viewport: { width, height: 1000 }, deviceScaleFactor: 1 })
+      await reference.goto(`${pathToFileURL(resolve(output, 'fragment.html')).href}?state=busy&theme=${look}&width=${width === 400 ? 'phone' : 'desktop'}&open=AEON-LEAD`)
+      await expect(reference.locator('[data-tab="chat"][aria-selected="true"]')).toBeVisible()
+      await reference.locator('#stage').scrollIntoViewIfNeeded()
+      if (width === 1000) await reference.screenshot({ path: resolve(output, `1000-sheet-${width}-${look}.png`) })
+      await reference.locator('[data-tab="lead"]').click()
+      await expect(reference.locator('#lp-now')).toBeVisible()
+      await reference.screenshot({ path: resolve(output, `lead-sheet-${width}-${look}.png`) })
+      await reference.close()
+    }
+  } finally { await browser.close() }
+  console.log(`AEON-1212 approved check.mjs: ${result.trim().split('\n').at(-1)}`)
 })

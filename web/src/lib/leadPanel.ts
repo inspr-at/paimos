@@ -2,6 +2,18 @@
 // AEON-1212: opening is a choice made once, from the shared projection. Admission
 // is history of a real start, never a preflight or a promise of current capacity.
 import type { GateKind, LeadDecision } from './lead.ts'
+import type { HarnessSession, ModelProfile } from './agents.ts'
+import { fullModelName, type ModelDisplay } from './planning.ts'
+
+// The panel consumes the registry already read by Agents. Missing display
+// metadata stays explicit rather than presenting a provider identity as a name.
+export function panelModelLine(session: Pick<HarnessSession, 'harness' | 'model' | 'reasoning_effort'>, profiles: readonly (ModelProfile & ModelDisplay)[], fallback = ''): string {
+  const identity = session.model?.trim() || fallback.trim()
+  if (!identity) return ''
+  const profile = profiles.find(p => p.harness === session.harness && [p.model, p.slug, p.display_name, [p.display_name, p.model_version].filter(Boolean).join(' ')].includes(identity))
+  const name = profile?.display_name?.trim() ? fullModelName({ ...profile, label: '' }) : 'Model name unavailable'
+  return [name, session.reasoning_effort?.trim()].filter(Boolean).join(' · ')
+}
 
 export type LeadTab = 'lead' | 'session' | 'chat'
 export type PanelTab = LeadTab | 'overview'

@@ -125,6 +125,11 @@ decision permission the card explains who may decide. A plain chat message
 never decides or closes a question. Selection and identity changes discard
 late results.
 
+The panel's own worker rows use Session, Time, Execution, Computer and Beat.
+Compact rows keep the name and time together; the Session tab carries the
+remaining details. Model names come from the matching harness registry, with
+an explicit unavailable label when display metadata cannot be read.
+
 Before every start displays the last admission report, with its timestamp and
 one row per reported gate. It never promises current availability. An absent
 report says No start yet, unreadable history offers Try again without check

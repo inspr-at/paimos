@@ -738,7 +738,7 @@
         ,
         {"file":"tests/aeon-1210-agents-tree.spec.ts","listedTests":18,"weightSeconds":51,"weightSource":"remote-one-worker-AEON-1210-24s-plus-margin"}
         ,
-        {"file":"tests/aeon-1212-lead-panel.spec.ts","listedTests":23,"weightSeconds":90,"weightSource":"AEON-1212 estimate: six width/theme gate flows and three behaviour flows"}
+        {"file":"tests/aeon-1212-lead-panel.spec.ts","listedTests":30,"weightSeconds":240,"weightSource":"AEON-1212 fix3 estimate: viewport acceptance, six G3/G6 evidence flows and the original approved check"}
         ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,

@@ -2,12 +2,22 @@
 // AEON-1212 risk: a preference hides an urgent ask, or past admission is claimed as current.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { admissionHistory, openingTab, panelQueryTab } from '../src/lib/leadPanel.ts'
+import { admissionHistory, openingTab, panelModelLine, panelQueryTab } from '../src/lib/leadPanel.ts'
 import type { LeadDecision } from '../src/lib/lead.ts'
 const NOW = Date.parse('2026-10-11T12:00:00Z')
 const input = { lead: true, asksYou: false, held: false, ended: false, workerProblem: false, workerLost: false, pinned: 'session' as const, last: 'lead' as const }
 const report = (patch: Partial<LeadDecision> = {}): LeadDecision => ({ event_id: 1, project_id: 'project', session_id: 'lead', recorded_at: '2026-10-11T10:42:00Z', outcome: 'selected', reason_codes: [], results: [], gate_freshness: ['dial','harness','account_room','host_load'].map(kind => ({ kind: kind as 'dial', freshness: 'fresh' })), request: { stage: 'admission', outcome: 'selected', reason_codes: [], attempt: 1 }, ...patch })
 const read = { complete: true, error: '', sessionStarted: '2026-10-11T09:00:00Z', now: NOW }
+
+test('AEON-1212 fix3: panel model names come from the matching harness registry and never expose an unrecognised identity', () => {
+  const profiles = [{ id: 'sol', slug: 'sol-medium', harness: 'codex', family: 'openai', model: 'gpt-6-sol', effort: 'medium', tier: 'standard', enabled: true, display_name: 'Sol', model_version: '6' }]
+  const session = { harness: 'codex', model: 'gpt-6-sol', reasoning_effort: 'medium' }
+  assert.equal(panelModelLine(session, profiles), 'Sol 6 · medium')
+  assert.equal(panelModelLine({ ...session, model: null }, profiles, 'sol-medium'), 'Sol 6 · medium')
+  assert.equal(panelModelLine({ ...session, model: 'vendor-private-id' }, profiles), 'Model name unavailable · medium')
+  assert.equal(panelModelLine({ ...session, harness: 'claude' }, profiles), 'Model name unavailable · medium')
+  assert.equal(panelModelLine({ ...session, model: null }, profiles), '')
+})
 
 test('AEON-1212: an explicit link wins; a real ask, held start and worker problem win over the pinned default; otherwise default then last used', () => {
   assert.deepEqual(openingTab({ ...input, asksYou: true }), { tab: 'chat', why: 'it asks you something · Session is your default' })

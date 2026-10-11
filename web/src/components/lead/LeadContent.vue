@@ -14,7 +14,9 @@ import { useWorkQueue } from '../../stores/workQueue'
 import AppIcon from '../AppIcon.vue'
 import HarnessMark from '../agents/HarnessMark.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
-import { admissionHistory } from '../../lib/leadPanel'
+import { admissionHistory, panelModelLine } from '../../lib/leadPanel'
+import { elapsed } from '../../lib/agentState'
+import { relativeTime } from '../../lib/work'
 import { useAgents } from '../../stores/agents'
 import AgentGlyph from '../agents/AgentGlyph.vue'
 
@@ -83,6 +85,12 @@ async function cancelAdoption() {
   } catch (e) { if (project === props.projectId && who === `${session.identity?.tenant.id}:${session.identity?.principal.id}`) toast(e instanceof Error ? e.message : 'The adoption was not cancelled.', { tone: 'error' }) }
 }
 const workerView = (id?: string | null) => agents.views.find(v => v.session.id === id)
+const workerRows = computed(() => workers.value.map(worker => {
+  const view = workerView(worker.session_id)
+  return { worker, view, name: worker.ticket ? `${worker.ticket.key} · ${worker.ticket.title}` : view?.name || worker.name || 'Worker',
+    model: view ? panelModelLine(view.session, agents.models, view.model) : '',
+    account: view ? [view.harness, view.session.account_label || view.account].filter(Boolean).join(' · ') : '' }
+}))
 function openWorker(id?: string | null) { if (id) void router.push(`/agents/${encodeURIComponent(id)}`) }
 </script>
 
@@ -114,11 +122,21 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
         <p v-if="!workersKnown" class="small warn">Its workers can’t be read right now.</p>
         <p v-else-if="workersPartial" class="small warn" data-partial>Not every session of this project could be read; more workers may run.</p>
         <p v-else-if="!workers.length" class="small faint">{{ lead?.state === 'paused' ? 'No worker runs while paused.' : 'No workers yet.' }}</p>
-        <button v-for="s in workers" :key="s.session_id ?? `${s.harness}:${s.since}`" type="button" class="wk worker" :aria-label="`${s.ticket?.key || 'Worker'}: ${workerView(s.session_id)?.status.label || s.phase}`" @click="openWorker(s.session_id)">
-          <AgentGlyph v-if="workerView(s.session_id)" :view="workerView(s.session_id)!" :size="26" /><span v-else class="vendor"><HarnessMark :harness="s.harness" :size="15" /></span>
-          <span class="wk-t"><span v-if="s.ticket" class="key">{{ s.ticket.key }}</span>{{ s.ticket?.title ?? 'No ticket bound' }}<small>{{ s.current_activity?.text || s.activity_note }}</small></span>
-          <span class="size">{{ s.phase === 'working' ? `${minutes(s.since)} min` : s.phase }}</span>
-        </button>
+        <div v-if="workerRows.length" class="worker-list" role="table" aria-label="Lead workers">
+          <div class="worker-columns" role="row"><span role="columnheader">Session</span><span role="columnheader">Time</span><span role="columnheader">Execution</span><span role="columnheader">Computer</span><span role="columnheader">Beat</span></div>
+          <div v-for="row in workerRows" :key="row.worker.session_id ?? `${row.worker.harness}:${row.worker.since}`" class="worker-row" role="row">
+            <button type="button" class="wk worker" :aria-label="`${row.name}: ${row.view?.status.label || row.worker.phase}`" :data-tip="[row.name, row.worker.current_activity?.text || row.worker.activity_note, row.model, row.account, row.view?.session.host].filter(Boolean).join(' · ')" @click="openWorker(row.worker.session_id)">
+              <span class="worker-session" role="cell">
+                <AgentGlyph v-if="row.view" :view="row.view" :size="26" /><span v-else class="vendor"><HarnessMark :harness="row.worker.harness" :size="15" /></span>
+                <span class="wk-t"><span class="worker-name" :data-tip="row.name">{{ row.name }}</span><small>{{ row.worker.current_activity?.text || row.worker.activity_note }}</small></span>
+              </span>
+              <span class="size worker-time" role="cell">{{ row.view ? elapsed(row.view.session, now) : `${minutes(row.worker.since)} min` }}</span>
+              <span class="worker-execution" role="cell"><span>{{ row.model || 'Model not reported' }}</span><small>{{ row.account }}</small></span>
+              <span class="worker-computer" role="cell">{{ row.view?.session.host || 'Not reported' }}</span>
+              <span class="size worker-beat" role="cell">{{ row.worker.heartbeat_at ? relativeTime(row.worker.heartbeat_at, { now }) : 'Not reported' }}</span>
+            </button>
+          </div>
+        </div>
       </section>
       <section id="next-up" ref="nextUp" class="p-sec" tabindex="-1" aria-labelledby="lp-next">
         <div class="p-head"><h3 id="lp-next">Next up</h3><span class="small">Queue order · {{ queued ? `${queued.length} queued` : 'unavailable' }}</span></div>
@@ -156,6 +174,19 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
 .admission-caption.held, .admission-caption.unreadable { color: var(--queue-wait-ink); }
 .worker { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .worker:hover { background: var(--row-hover); }
+.worker-list { container-type: inline-size; }
+.worker-columns, .wk.worker { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.wk.worker { height: 56px; }
+.worker-session small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.worker-columns { padding: 4px 8px; color: var(--ink-3); font-size: 11.5px; }
+.worker-session { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.worker-name { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.worker-execution, .worker-computer, .worker-beat, .worker-columns > :nth-child(n+3) { display: none; }
+.worker-execution small { display: block; color: var(--ink-3); font-size: 11.5px; }
+@container (min-width: 560px) {
+  .worker-columns, .wk.worker { grid-template-columns: minmax(0, 1fr) 4ch minmax(0, .7fr) minmax(0, .4fr) 5ch; }
+  .worker-execution, .worker-computer, .worker-beat, .worker-columns > :nth-child(n+3) { display: block; overflow-wrap: anywhere; }
+}
 .needs { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 2px 10px; margin: 10px 0 4px; padding: 10px 12px; border-radius: 12px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .needs strong { color: var(--ink); font-size: 13.5px; }
 .needs p { grid-column: 2; margin: 0; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }

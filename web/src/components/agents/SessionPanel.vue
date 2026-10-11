@@ -15,7 +15,7 @@ import KeyCap from '../KeyCap.vue'
 import { useRoute, useRouter } from 'vue-router'
 import SessionChat from './SessionChat.vue'
 import SessionTabs from './SessionTabs.vue'
-import { leadTab, openingTab, panelQueryTab, TAB_LABEL, type PanelTab } from '../../lib/leadPanel'
+import { leadTab, openingTab, panelModelLine, panelQueryTab, TAB_LABEL, type PanelTab } from '../../lib/leadPanel'
 import { leadActionAvailable, leadActionReason } from '../../lib/lead'
 import { openLeadPause } from '../../lib/leadOverlay'
 import { usePreference } from '../../lib/preferences'
@@ -181,7 +181,7 @@ const setupLine = computed(() => {
   if (!props.view) return ''
   return [props.view.harness, r?.harness_version].filter(Boolean).join(' ')
 })
-const modelLine = computed(() => [reported.value?.model || props.view?.model, reported.value?.reasoning_effort].filter(Boolean).join(' · '))
+const modelLine = computed(() => s.value ? panelModelLine(reported.value || s.value, agents.models, props.view?.model) : '')
 // Fetch only the selected session, and refresh when a heartbeat changes metadata
 // even if the activity note stays the same. The list does not carry history.
 watch([
