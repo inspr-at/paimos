@@ -74,7 +74,8 @@ A synthetic merge-queue SHA needs its own required checks and tested artifact.
 OPS supplies the qualified artifact reader; absence holds the request.
 
 A merged PR completes its routine only when the exact AEON-1008 merge-to-Done
-receipt is visible. Responsible-person fallback and missing-owner/benefit
+receipt is visible, with the approved queue SHA when queued. A different merge
+SHA stays held. Responsible-person fallback and missing-owner/benefit
 refusals remain owned by that existing automation. The routine broker never
 writes work status directly. Non-code results use an explicit result digest,
 confirmed process exits, settled usage, completed catalogue actions and an exact

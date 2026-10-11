@@ -214,7 +214,7 @@ func (b *Broker) ReconcilePipeline(ctx context.Context, tid, id string) (Receipt
 			return err
 		}
 		r.ApprovalID = a.ID
-		if _, err := tx.Exec(ctx, `UPDATE routine_effect_outbox SET result=jsonb_build_object('approval_digest',$2::text) WHERE action_id=$1`, r.ID, digest); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE routine_effect_outbox SET result=jsonb_build_object('approval_digest',$2::text,'queue_head',$3::text) WHERE action_id=$1`, r.ID, digest, facts.Facts.QueueHead); err != nil {
 			return err
 		}
 		approved, err := approvals.LiveRoutineHoldTx(ctx, tx, p, a.ID, e.Request.TargetID, "work_orders.write", digest, now)
@@ -262,8 +262,8 @@ func (b *Broker) observeMerge(ctx context.Context, tid, id string) (Receipt, boo
 			return err
 		}
 		var raw, result []byte
-		var run, digest string
-		err := tx.QueryRow(ctx, `SELECT a.run_id::text,o.payload,a.result,coalesce(o.result->>'approval_digest','') FROM routine_actions a JOIN routine_effect_outbox o ON o.action_id=a.id WHERE a.id=$1 AND a.kind='pipeline.request' AND a.state='awaiting_merge' FOR NO KEY UPDATE OF a,o`, id).Scan(&run, &raw, &result, &digest)
+		var run, digest, queueHead string
+		err := tx.QueryRow(ctx, `SELECT a.run_id::text,o.payload,a.result,coalesce(o.result->>'approval_digest',''),coalesce(o.result->>'queue_head','') FROM routine_actions a JOIN routine_effect_outbox o ON o.action_id=a.id WHERE a.id=$1 AND a.kind='pipeline.request' AND a.state='awaiting_merge' FOR NO KEY UPDATE OF a,o`, id).Scan(&run, &raw, &result, &digest, &queueHead)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
@@ -307,7 +307,7 @@ func (b *Broker) observeMerge(ctx context.Context, tid, id string) (Receipt, boo
 			return workorders.Fail(409, "pipeline_target_changed")
 		}
 		var merged bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE node_id=$1 AND type='delivery.merge_done' AND metadata->>'repository'=$2 AND metadata->>'head_sha'=$3 AND metadata->>'pull_request'=$4 AND metadata->>'merge_sha' ~ '^[a-f0-9]{40}$')`, work, in.Repository, in.HeadSHA, fmt.Sprint(pr.PullRequest)).Scan(&merged); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE node_id=$1 AND type='delivery.merge_done' AND metadata->>'repository'=$2 AND metadata->>'head_sha'=$3 AND metadata->>'pull_request'=$4 AND metadata->>'merge_sha' ~ '^[a-f0-9]{40}$' AND ($5='' OR metadata->>'merge_sha'=$5))`, work, in.Repository, in.HeadSHA, fmt.Sprint(pr.PullRequest), queueHead).Scan(&merged); err != nil {
 			return err
 		}
 		if !merged {
