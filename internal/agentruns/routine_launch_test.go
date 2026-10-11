@@ -155,15 +155,23 @@ func TestRoutineLaunchClaimReplayAndCurrentAuthority(t *testing.T) {
 			return err
 		}
 		defer local.Rollback(t.Context())
-		if _, err = local.Exec(t.Context(), `UPDATE agent_accounts SET harness='claude' WHERE id=$1`, g.AccountID); err != nil {
-			return err
-		}
 		browserProfile := uuid()
 		if _, err = local.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier)
  VALUES($1,$2,'browser-fixture','1','claude','anthropic','requested-browser-fixture','high','strong')`, g.TenantID, browserProfile); err != nil {
 			return err
 		}
-		if _, err = local.Exec(t.Context(), `UPDATE agent_runs SET model_profile_id=$2 WHERE id=$1`, g.AgentRunID, browserProfile); err != nil {
+		// A paired account's harness is immutable. Enroll a separate Claude
+		// account instead of rewriting the coding account's existing binding.
+		browser.AccountID = uuid()
+		if _, err = local.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation)
+ VALUES($1,$2::uuid,$2::text,'claude',$3,$4,'Browser fixture',clock_timestamp(),true,$5)`, browser.TenantID, browser.AccountID, browser.DaemonID, browser.PrincipalID, browser.DaemonGeneration); err != nil {
+			return err
+		}
+		if _, err = local.Exec(t.Context(), `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,ongoing_approved_at,verification_expires_at)
+ VALUES($1,$2,$3,$4,$5,clock_timestamp(),clock_timestamp()+interval '1 hour')`, browser.TenantID, browser.AccountID, browser.ComputerID, request, browserProfile); err != nil {
+			return err
+		}
+		if _, err = local.Exec(t.Context(), `UPDATE agent_runs SET model_profile_id=$2,account_id=$3 WHERE id=$1`, g.AgentRunID, browserProfile, browser.AccountID); err != nil {
 			return err
 		}
 		if _, err = local.Exec(t.Context(), `UPDATE agent_pairing_computers SET capacity_signals='{"unattended":{"login_session":"ready","idle_sleep":"disabled","filevault":"off"}}',capacity_reported_at=clock_timestamp() WHERE id=$1`, g.ComputerID); err != nil {
