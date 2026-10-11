@@ -6,6 +6,9 @@ its repository or workflows starts a new history window (1–90 days, default 30
 The existing backfill endpoint still returns one bounded step and also schedules
 continuation. `restart` replaces the history window. Progress survives leaving
 the page and restarting the server; each step stores its cursor and facts together.
+Continuation with omitted `days` and Check again retain the selected window,
+including after a first automatic read fails before committing a cursor. Once
+a cursor exists, selecting another window requires `restart`.
 
 The source exposes `last_read_error` (reason, missing permission when known, and
 check time), `retry_at`, and `last_event_at`. A GitHub 403 requesting `actions=read`
