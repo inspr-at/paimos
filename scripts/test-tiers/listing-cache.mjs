@@ -10,6 +10,7 @@ export const listingCacheDirectory = resolve(homedir(), '.cache/aeon/test-tier-l
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const maxBytes = 32 * 1024 * 1024
 const heldLocks = new Set()
+const tierPolicies = new Set(['scripts/ci/go-test-tiers.json', 'scripts/ci/web-test-tiers.json', 'web/ci-web-shards.json'])
 const source = /(?:\.(?:go|mjs|cjs|js|ts|tsx|vue|json|yaml|yml|sql|css|html|md|txt|mod|sum|work|lock|c|h|s|cc|cpp|sh|svg|png|webp|jpg|jpeg|gif|ico|woff|woff2|avif|csv|toml|tmpl)|(?:^|\/)go\.work\.sum)$/
 const safe = file => source.test(file) && !/(?:^|\/)(?:node_modules|\.git|\.env[^/]*|(?:secrets?|credentials?)(?:\.[^/]*)?)(?:\/|$)/i.test(file)
 
@@ -46,8 +47,7 @@ export function inputSnapshot(base, run) {
 }
 
 export function listingKey(snapshot, scope, identity) {
-  const policy = new Set(['scripts/ci/go-test-tiers.json', 'scripts/ci/web-test-tiers.json', 'web/ci-web-shards.json'])
-  let inputs = scope.startsWith('go-') ? snapshot.filter(([file]) => file.endsWith('.go') || /^go\.(?:mod|sum|work|work\.sum)$/.test(file) || file.startsWith('scripts/test-tiers/')) : snapshot.filter(([file]) => !policy.has(file))
+  let inputs = scope.startsWith('go-') ? snapshot.filter(([file]) => file.endsWith('.go') || /^go\.(?:mod|sum|work|work\.sum)$/.test(file) || file.startsWith('scripts/test-tiers/')) : snapshot.filter(([file]) => !tierPolicies.has(file))
   if (scope === 'go-base') inputs = inputs.filter(([file]) => !file.endsWith('_test.go'))
   return digest([1, scope, identity, inputs])
 }
@@ -187,14 +187,31 @@ export function cachedListing(key, compute, { directory = listingCacheDirectory,
 
 // A test edit invalidates its owner, while an ordinary source edit invalidates
 // owners that import it. Dependency test files do not belong to a Go binary.
+// Only module/tooling inputs are global. Package subtrees retain non-Go inputs
+// for embed, cgo and assembly, without making web/docs or tier policy edits
+// invalidate unrelated binaries after classification registers a test.
 export function goPackageKeys(snapshot, inventory, identity) {
-  const go = new Map(), common = []
+  const go = new Map(), assets = new Map(), common = []
   for (const row of snapshot) {
     const [file] = row
-    if (!file.endsWith('.go') || (!file.includes('/') && !file.endsWith('_test.go'))) { common.push(row); continue }
-    const owner = dirname(file).replaceAll('\\', '/')
-    if (!go.has(owner)) go.set(owner, [])
-    go.get(owner).push(row)
+    if (tierPolicies.has(file)) continue
+    if (/^go\.(?:mod|sum|work|work\.sum)$/.test(file) ||
+      (!file.includes('/') && file.endsWith('.go') && !file.endsWith('_test.go')) ||
+      file.startsWith('scripts/test-tiers/') || file.startsWith('scripts/test-tier-go/')) {
+      common.push(row); continue
+    }
+    let owner = dirname(file).replaceAll('\\', '/')
+    if (file.endsWith('.go')) {
+      if (!go.has(owner)) go.set(owner, [])
+      go.get(owner).push(row)
+    } else for (;;) {
+      // Embed patterns can reach any directory below the package. Index each
+      // ancestor once; sibling paths such as a/ and ab/ never share assets.
+      if (!assets.has(owner)) assets.set(owner, [])
+      assets.get(owner).push(row)
+      if (owner === '.') break
+      owner = dirname(owner).replaceAll('\\', '/')
+    }
   }
   const commonKey = digest(common)
   return Object.fromEntries(Object.keys(inventory.imports).sort().map(owner => {
@@ -205,8 +222,11 @@ export function goPackageKeys(snapshot, inventory, identity) {
       for (const dependency of inventory.imports[pkg] ?? []) visit(dependency)
     }
     visit(owner)
-    const inputs = [...dependencies].sort().flatMap(pkg => (go.get(pkg === identity.module ? '.' : pkg) ?? []).filter(([file]) => pkg === owner || !file.endsWith('_test.go')))
-    return [owner, digest([1, 'go-native', identity, owner, commonKey, inputs])]
+    const inputs = [...dependencies].sort().flatMap(pkg => {
+      const directory = pkg === identity.module ? '.' : pkg
+      return [...(go.get(directory) ?? []).filter(([file]) => pkg === owner || !file.endsWith('_test.go')), ...(assets.get(directory) ?? [])]
+    })
+    return [owner, digest([2, 'go-native', identity, owner, commonKey, inputs])]
   }))
 }
 
