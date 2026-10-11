@@ -1138,7 +1138,9 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 		if resolved.Profile != nil {
 			p := *resolved.Profile
 			setBy := ""
-			if resolved.Trace.Selector != nil {
+			// A matrix selector or the person's own Models row is a preference
+			// someone set; the workspace walk alone names no one.
+			if resolved.Trace.Selector != nil || resolved.Trace.SetBy == "person" {
 				setBy = resolved.Trace.SetBy
 			}
 			route.view = &planningRoute{Provider: p.Provider, Display: p.Display, EffortLevel: p.EffortLevel, Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision, SetBy: setBy, FollowsLatest: resolved.Trace.Mode == "latest", Pinned: resolved.Trace.Mode == "pinned"}
