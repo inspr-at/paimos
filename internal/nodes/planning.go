@@ -59,11 +59,11 @@ type planningView struct {
 	RouteGap string `json:"route_gap,omitempty"`
 	// RouteTruncated marks a "registry" gap where the model registry exceeds
 	// Models' bounds, so no route was resolved (dispatch refuses it too).
-	RouteTruncated bool            `json:"route_truncated,omitempty"`
-	Models         []planningModel `json:"models,omitempty"`
-	Tokens   planningTokens    `json:"tokens"`
-	Cost     *planningCost     `json:"cost,omitempty"`
-	Children *planningChildren `json:"children,omitempty"`
+	RouteTruncated bool              `json:"route_truncated,omitempty"`
+	Models         []planningModel   `json:"models,omitempty"`
+	Tokens         planningTokens    `json:"tokens"`
+	Cost           *planningCost     `json:"cost,omitempty"`
+	Children       *planningChildren `json:"children,omitempty"`
 }
 type planningRoute struct {
 	Provider string `json:"provider,omitempty"`
@@ -637,10 +637,10 @@ type planPrice struct {
 // planRoute is one resolved placement, shared by rows with the same project,
 // person, kind, bucket, role and residency. view is nil without a selected model.
 type planRoute struct {
-	cell     usagedashboard.LearningCell
-	price    *planPrice
-	view     *planningRoute
-	key      routeKey
+	cell      usagedashboard.LearningCell
+	price     *planPrice
+	view      *planningRoute
+	key       routeKey
 	mixPrice  *float64
 	gap       string
 	truncated bool
