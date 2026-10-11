@@ -159,17 +159,25 @@ const SETTINGS = {
 async function capacityPage(page: Page, options: { manage?: boolean } = {}) {
   await world(page)
   await permissions(page, options.manage !== false)
-  const state = { stored: null as number | null, patches: [] as unknown[], settings: structuredClone(SETTINGS) as Record<string, unknown>, revision: null as string | null }
+  const state = {
+    stored: null as number | null, profileRevision: 0, patches: [] as unknown[], settings: structuredClone(SETTINGS) as Record<string, unknown>, revision: null as string | null,
+    // While set, profile reads answer with this older copy: what the page cached before another tab's change.
+    cached: undefined as { stored: number | null; revision: number } | undefined, profileReads: 0,
+  }
   await page.route('**/api/agents/plan', route => route.request().method() === 'GET' ? route.fulfill({ json: planFor(state.stored, state.settings, state.revision) }) : route.fallback())
   await page.route('**/api/settings/quota-warnings', route => route.request().method() === 'GET' ? route.fulfill({ json: { early_percent: 10, urgent_percent: 3 } }) : route.fallback())
-  const profile = () => ({ principal_id: me.id, email: 'markus@example.test', first_name: 'Markus', last_name: 'Barta', preferred_name: '', short_name: 'mba', initials: 'MB', timezone: TZ, locale: 'en-GB', greeting_enabled: true, avatar_color: 'teal', avatar_hashes: {}, week_start: 1, daily_points_per_day: state.stored, revision: state.patches.length })
+  const profile = (stored = state.stored, revision = state.profileRevision) => ({ principal_id: me.id, email: 'markus@example.test', first_name: 'Markus', last_name: 'Barta', preferred_name: '', short_name: 'mba', initials: 'MB', timezone: TZ, locale: 'en-GB', greeting_enabled: true, avatar_color: 'teal', avatar_hashes: {}, week_start: 1, daily_points_per_day: stored, revision })
   await page.route('**/api/me/profile', route => {
     if (route.request().method() === 'PATCH') {
-      const body = route.request().postDataJSON() as { daily_points_per_day?: number | null }
+      const body = route.request().postDataJSON() as { daily_points_per_day?: number | null; expected_revision?: number }
       state.patches.push(body)
-      if ('daily_points_per_day' in body) state.stored = body.daily_points_per_day ?? null
+      // As the server: a guarded patch applies only at its revision; a change bumps the revision.
+      if (body.expected_revision !== undefined && body.expected_revision !== state.profileRevision) return route.fulfill({ status: 409, json: { errors: { revision: 'changed since it was read' } } })
+      if ('daily_points_per_day' in body && (body.daily_points_per_day ?? null) !== state.stored) { state.stored = body.daily_points_per_day ?? null; state.profileRevision++ }
+      return route.fulfill({ json: profile() })
     }
-    return route.fulfill({ json: profile() })
+    state.profileReads++
+    return route.fulfill({ json: state.cached ? profile(state.cached.stored, state.cached.revision) : profile() })
   })
   return state
 }
@@ -197,7 +205,7 @@ test('the default pace saves on Enter with Undo; harnesses that follow it follow
   const guard = await controlStability(page, { field, codex: page.locator('button[data-pace="codex"]'), claude: page.locator('button[data-pace="claude"]'), keep: page.locator('#capacity-and-load').getByRole('button', { name: /Keep for you/ }) })
   await guard.check(async () => {
     await field.fill('14'); await field.press('Enter')
-    await expect.poll(() => state.patches).toEqual([{ daily_points_per_day: 14 }])
+    await expect.poll(() => state.patches).toEqual([{ daily_points_per_day: 14, expected_revision: 0 }])
     await expect(page.locator('button[data-pace="codex"]')).toHaveAccessibleName('Daily limit for Codex: +14 percentage points a day, the default. Change')
   })
   await expect(page.locator('button[data-pace="claude"]')).toHaveAccessibleName('Daily limit for Claude: +6 percentage points a day. Change')
@@ -205,7 +213,7 @@ test('the default pace saves on Enter with Undo; harnesses that follow it follow
   await guard.check(async () => {
     await page.locator('.toast').filter({ hasText: 'Default pace: +14 percentage points a day' }).getByRole('button', { name: 'Undo' }).click()
     // The value before was the built-in default: Undo stores null again, not a copy of 10.
-    await expect.poll(() => state.patches).toEqual([{ daily_points_per_day: 14 }, { daily_points_per_day: null }])
+    await expect.poll(() => state.patches).toEqual([{ daily_points_per_day: 14, expected_revision: 0 }, { daily_points_per_day: null, expected_revision: 1 }])
     await expect(field).toHaveValue('10')
   })
   guard.done()
@@ -218,6 +226,65 @@ test('the default pace saves on Enter with Undo; harnesses that follow it follow
   await expect(field).toHaveValue('10')
   expect(state.patches).toHaveLength(2)
   expect(errors).toEqual([])
+})
+
+// Gate finding (fix round 2): Undo restored the cached profile's value, and overwrote a later change.
+test('the default pace’s Undo puts back the value stored when it saved, never a stale copy, and never overwrites a change made since', async ({ page }) => {
+  const errors = watchErrors(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const state = await capacityPage(page)
+  // Another tab set the default to 20 after this page cached the profile (still null); the plan shows 20.
+  Object.assign(state, { stored: 20, profileRevision: 1, cached: { stored: null, revision: 0 } })
+  await page.goto('/settings/capacity')
+  const field = page.locator('#def-pace')
+  await expect(field).toHaveValue('20')
+  await expect.poll(() => state.profileReads).toBeGreaterThan(0)
+  state.cached = undefined
+  await field.fill('30'); await field.press('Enter')
+  // Guarded by the revision of the value it replaces, read as it saves.
+  await expect.poll(() => state.patches).toEqual([{ daily_points_per_day: 30, expected_revision: 1 }])
+  await expect(field).toHaveValue('30')
+  await page.locator('.toast').filter({ hasText: 'Default pace: +30 percentage points a day' }).getByRole('button', { name: 'Undo' }).click()
+  // The 20 that was stored, not the cached null; guarded by the revision the edit left.
+  await expect.poll(() => state.patches.at(-1)).toEqual({ daily_points_per_day: 20, expected_revision: 2 })
+  await expect(field).toHaveValue('20')
+  expect(state.stored).toBe(20)
+
+  // Edit again; once the page has read the plan back, another tab sets 35. Only Undo's guard can see it.
+  const readBack = page.waitForResponse(r => r.url().endsWith('/api/agents/plan') && r.request().method() === 'GET' && state.patches.length >= 3)
+  await field.fill('25'); await field.press('Enter')
+  await expect.poll(() => state.patches.at(-1)).toEqual({ daily_points_per_day: 25, expected_revision: 3 })
+  await readBack
+  await expect(field).toHaveValue('25')
+  Object.assign(state, { stored: 35, profileRevision: 5 })
+  await page.locator('.toast').filter({ hasText: 'Default pace: +25 percentage points a day' }).getByRole('button', { name: 'Undo' }).click()
+  await expect(page.locator('.toast.error').filter({ hasText: 'Changed elsewhere; shown as it is now.' })).toBeVisible()
+  expect(state.patches.at(-1)).toEqual({ daily_points_per_day: 20, expected_revision: 4 })
+  await expect(field).toHaveValue('35')
+  expect(state.stored).toBe(35)
+  expect(errors).toEqual([])
+})
+
+test('Undo of a harness’s pace puts back the whole pace before, the number “use everything” keeps included', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await world(page)
+  await permissions(page, true)
+  const backend = await mockDailyPlan(page, { example: 'pace', settings: { claude: { pace: { mode: 'everything', points_per_day: 13 }, boost_today: null, at_limit: 'ladder' } } })
+  await page.goto('/settings/capacity')
+  const picker = page.locator('button[data-pace="claude"]')
+  await expect(picker).toHaveAccessibleName('Daily limit for Claude: Use everything. Change')
+  await picker.click()
+  const own = page.getByRole('dialog', { name: 'Daily limit for Claude' }).getByLabel('Own pace, percentage points a day')
+  await own.fill('20'); await own.press('Enter')
+  await expect.poll(() => backend.puts.length).toBe(1)
+  expect(backend.puts[0]!.value.daily!.claude!.pace).toEqual({ mode: 'pace', points_per_day: 20 })
+  await page.locator('.toast').filter({ hasText: 'Claude: +20 percentage points a day' }).getByRole('button', { name: 'Undo' }).click()
+  await expect.poll(() => backend.puts.length).toBe(2)
+  // The 13 comes back with "use everything", so switching back to pace on the dial uses 13 again.
+  expect(backend.puts[1]!.expected_updated_at).toBe(new Date(NOW + 1000).toISOString())
+  expect(backend.puts[1]!.value.daily!.claude!.pace).toEqual({ mode: 'everything', points_per_day: 13 })
+  await expect(picker).toHaveAccessibleName('Daily limit for Claude: Use everything. Change')
+  await expect(page.locator('.toast').filter({ hasText: 'Claude: uses everything before the reset' })).toBeVisible()
 })
 
 test('the bars, Boost today and what happens at the limit say what the plan says', async ({ page }) => {

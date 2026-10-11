@@ -8206,6 +8206,8 @@
     ,
     {"kind":"go","package":"internal/profile","name":"TestManifest","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/profile","name":"TestProfilePatchGuardedByExpectedRevision","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/profile","name":"TestProfileTenantUniquenessAvatarAndUndo","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/profile","name":"TestValidateAndCrop","tier":"GATED-FULL"}

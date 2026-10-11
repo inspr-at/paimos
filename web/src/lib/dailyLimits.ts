@@ -230,11 +230,12 @@ export async function putAgentsPlan(value: AgentsPlanValue, expectedUpdatedAt: s
 export interface PlanRead extends DailyPlanFields { total: number; limits: Record<string, unknown>; updated_at: string | null }
 /**
  * Settings › Capacity's pace write: the plan as read, with one harness's pace changed and
- * the total, the limits and every other daily setting carried unchanged.
+ * the total, the limits and every other daily setting carried unchanged. The pace is as
+ * stored ({@link storedPace} of a choice), so Undo can put back the whole pace before,
+ * the number "use everything" keeps included.
  */
-export function writePace(plan: PlanRead, harness: string, choice: PaceChoice): Promise<string> {
+export function writePace(plan: PlanRead, harness: string, pace: DailyPace): Promise<string> {
   const settings = dailyOf(plan.daily, harness)
-  const pace = storedPace(settings.pace, choice, plan.daily_default_points ?? DEFAULT_DAILY_POINTS)
   return putAgentsPlan({ total: plan.total, limits: { ...plan.limits }, daily: withDaily(plan.daily, harness, { ...settings, pace }) }, plan.updated_at)
 }
 

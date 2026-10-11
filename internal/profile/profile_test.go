@@ -449,6 +449,58 @@ func TestDefaultPaceIsBoundedAndUndoable(t *testing.T) {
 		t.Fatalf("undo pace %v, plan %d", restored.DailyPointsPerDay, planPoints())
 	}
 }
+
+// Undo of the default pace (AEON-1175) is guarded by the revision its own edit
+// left. Risk: Undo overwrites a change made since in another tab. A patch with
+// expected_revision applies only to the profile at that revision; otherwise it
+// is refused with 409 and nothing is written, and a malformed guard is refused.
+func TestProfilePatchGuardedByExpectedRevision(t *testing.T) {
+	d := dbtest.Open(t)
+	a := person(t, d, "profile_guard", "guard@example.test")
+	h := mux(d, attachments.Store{FilesDir: t.TempDir()})
+	patch := func(s string) *httptest.ResponseRecorder {
+		return req(t, h, a, "PATCH", "/api/me/profile", "application/json", bytes.NewBufferString(s))
+	}
+	updates := func() int {
+		t.Helper()
+		var n int
+		err := db.InTenant(dbtest.Seed(t.Context()), d.App, a.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1 AND type='profile.updated'`, a.TenantID).Scan(&n)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	edit := decodeProfile(t, patch(`{"daily_points_per_day":30,"expected_revision":0}`))
+	if edit.DailyPointsPerDay == nil || *edit.DailyPointsPerDay != 30 || edit.Revision != 1 {
+		t.Fatalf("guarded edit: %+v", edit)
+	}
+	// Another tab sets 35; Undo of the edit above still carries the revision the edit left.
+	if other := decodeProfile(t, patch(`{"daily_points_per_day":35}`)); other.Revision != 2 {
+		t.Fatalf("unguarded edit: %+v", other)
+	}
+	written := updates()
+	stale := patch(fmt.Sprintf(`{"daily_points_per_day":null,"expected_revision":%d}`, edit.Revision))
+	var refused struct{ Errors map[string]string }
+	if stale.Code != 409 || json.Unmarshal(stale.Body.Bytes(), &refused) != nil || refused.Errors["revision"] == "" {
+		t.Fatalf("stale undo: HTTP %d %s", stale.Code, stale.Body.String())
+	}
+	if kept := decodeProfile(t, req(t, h, a, "GET", "/api/me/profile", "", nil)); kept.DailyPointsPerDay == nil || *kept.DailyPointsPerDay != 35 || kept.Revision != 2 || updates() != written {
+		t.Fatalf("a refused undo wrote: %+v, %d events after %d", kept, updates(), written)
+	}
+	if undo := decodeProfile(t, patch(`{"daily_points_per_day":null,"expected_revision":2}`)); undo.DailyPointsPerDay != nil || undo.Revision != 3 {
+		t.Fatalf("current undo: %+v", undo)
+	}
+	for _, body := range []string{`{"expected_revision":3}`, `{"daily_points_per_day":12,"expected_revision":-1}`, `{"daily_points_per_day":12,"expected_revision":"3"}`, `{"daily_points_per_day":12,"expected_revision":1.5}`, `{"daily_points_per_day":12,"expected_revision":null}`} {
+		if got := patch(body); got.Code != 400 {
+			t.Fatalf("%s: HTTP %d %s", body, got.Code, got.Body.String())
+		}
+	}
+	if last := decodeProfile(t, req(t, h, a, "GET", "/api/me/profile", "", nil)); last.DailyPointsPerDay != nil || last.Revision != 3 {
+		t.Fatalf("a refused guard wrote: %+v", last)
+	}
+}
 func TestManifest(t *testing.T) {
 	if _, err := plugins.Builtin(Plugin); err != nil {
 		t.Fatal(err)

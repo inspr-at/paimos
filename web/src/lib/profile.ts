@@ -12,7 +12,7 @@ export interface Profile {
   daily_points_per_day?: number | null
 }
 export type ProfileField = 'first_name' | 'last_name' | 'preferred_name' | 'short_name' | 'initials' | 'timezone' | 'locale' | 'greeting_enabled' | 'daily_points_per_day'
-export type ProfilePatch = Partial<Pick<Profile, ProfileField>> & { initials?: string }
+export type ProfilePatch = Partial<Pick<Profile, ProfileField>> & { initials?: string; /** Applies only while the profile is at this revision (AEON-1175). */ expected_revision?: number }
 
 // A refused change: the server's messages keyed by field (400), or the taken short name (409).
 export class ProfileError extends Error {
@@ -20,6 +20,9 @@ export class ProfileError extends Error {
   readonly errors: Record<string, string>
   constructor(status: number, errors: Record<string, string>) { super(Object.values(errors)[0] ?? 'Your change could not be saved.'); this.status = status; this.errors = errors }
 }
+
+/** A guarded patch refused: the profile changed since the revision it carried (409, errors.revision). */
+export const profileChanged = (error: unknown) => error instanceof ProfileError && error.status === 409 && !!error.errors.revision
 
 export async function getProfile(): Promise<Profile> {
   const response = await api('/me/profile')

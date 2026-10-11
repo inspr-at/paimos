@@ -270,7 +270,7 @@ paths:
       responses:
         '200': {description: Profile, content: {application/json: {schema: {$ref: '#/components/schemas/PersonalProfile'}}}}
         '400': {description: Validation errors keyed by field, content: {application/json: {schema: {$ref: '#/components/schemas/ProfileValidationError'}}}}
-        '409': {description: Short name already used in this tenant}
+        '409': {description: 'Short name already used in this tenant (errors.short_name), or the profile changed since expected_revision (errors.revision)'}
   /me/security/session-watching:
     get:
       operationId: getSessionWatchingSecurity
@@ -454,6 +454,7 @@ components:
         locale: {type: string, description: BCP 47 language tag}
         greeting_enabled: {type: boolean}
         daily_points_per_day: {type: [integer, 'null'], minimum: 1, maximum: 50, description: 'Default pace in whole percentage points a day, 1 to 50. Null follows the built-in 10. Undo restores the value before, like the other profile fields.'}
+        expected_revision: {type: integer, minimum: 0, description: 'Optional guard: the patch applies only while the profile is at this revision, otherwise 409 with errors.revision and nothing is written. Settings › Capacity sends it so Undo never overwrites a change made since.'}
     PhoneApprovalPreferences:
       type: object
       additionalProperties: false

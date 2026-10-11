@@ -165,11 +165,24 @@ func validateField(key string, value json.RawMessage) string {
 		if json.Unmarshal(value, &b) != nil || string(value) == "null" {
 			return "must be a boolean"
 		}
+	case expectedRevision:
+		var n int64
+		if json.Unmarshal(value, &n) != nil || n < 0 {
+			return "must be the revision that was read, a whole number from 0"
+		}
 	default:
 		return "unknown field"
 	}
 	return ""
 }
+
+// expectedRevision guards a patch: it applies only to the profile at that
+// revision, so Undo never overwrites a change made since (AEON-1175).
+const expectedRevision = "expected_revision"
+
+// errRevisionChanged refuses a guarded patch whose profile changed since it was read.
+var errRevisionChanged = errors.New("profile changed since it was read")
+
 func ValidatePatch(raw []byte) (map[string]json.RawMessage, map[string]string) {
 	fields := map[string]json.RawMessage{}
 	errs := map[string]string{}
@@ -177,7 +190,7 @@ func ValidatePatch(raw []byte) (map[string]json.RawMessage, map[string]string) {
 		errs["body"] = "must be a JSON object"
 		return nil, errs
 	}
-	if len(fields) == 0 {
+	if _, guarded := fields[expectedRevision]; len(fields) == 0 || guarded && len(fields) == 1 {
 		errs["body"] = "at least one field is required"
 	}
 	for k, v := range fields {
@@ -320,6 +333,8 @@ func apiError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, pgx.ErrNoRows):
 		httpapi.WriteError(w, 404, "not found")
+	case errors.Is(err, errRevisionChanged):
+		httpapi.WriteJSON(w, 409, map[string]any{"errors": map[string]string{"revision": "changed since it was read"}})
 	case errors.As(err, &pg) && pg.ConstraintName == "personal_profiles_short_name":
 		httpapi.WriteJSON(w, 409, map[string]any{"errors": map[string]string{"short_name": "already used in this tenant"}})
 	default:
@@ -368,6 +383,12 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteJSON(w, 400, map[string]any{"errors": errs})
 		return
 	}
+	var expected *int64
+	if guard, ok := fields[expectedRevision]; ok {
+		expected = new(int64)
+		_ = json.Unmarshal(guard, expected)
+		delete(fields, expectedRevision)
+	}
 	var out Profile
 	err := db.InTenant(r.Context(), m.Pool, p.TenantID, func(tx pgx.Tx) error {
 		email, err := identityEmail(r.Context(), tx, p.TenantID, p.ID)
@@ -377,6 +398,10 @@ func (m *Module) patch(w http.ResponseWriter, r *http.Request) {
 		before, exists, err := read(r.Context(), tx, p.TenantID, p.ID, true)
 		if err != nil {
 			return err
+		}
+		// Checked under the profile lock in the writing transaction.
+		if expected != nil && before.Revision != *expected {
+			return errRevisionChanged
 		}
 		after := before
 		applyPatch(&after, fields)

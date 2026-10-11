@@ -20,8 +20,8 @@ import { accountsPartNeeds, matrixNeedFacts, NO_MATRIX_FACTS, partCounts, workCo
 import { PERMISSION as USE_PERMISSION, readMatrix } from './accountUse'
 import { hostCapacityReason } from './hostCapacity'
 import { daysSummary, HARNESS_NAME, ownOverride, poolOfRow, reserveLevel, timeLabel, when, type CapacityWindow } from './capacity'
-import { dailyOf, DEFAULT_DAILY_POINTS, paceChoice, PlanChanged, storedPace, withDaily, writePace, type PaceChoice, type PlanRead } from './dailyLimits'
-import { fieldMessage, ProfileError } from './profile'
+import { dailyOf, DEFAULT_DAILY_POINTS, paceChoice, PlanChanged, storedPace, withDaily, writePace, type DailyPace, type PaceChoice, type PlanRead } from './dailyLimits'
+import { fieldMessage, getProfile, ProfileError, profileChanged } from './profile'
 import { nextStale, pct, periodWords, quotaBar, quotaCaption, quotaInput, quotaLabel, type PlanClock } from './quotaBar'
 import { validQuotaThresholds, type QuotaWarningSettings } from './quotaWarnings'
 import { toast } from './toast'
@@ -162,52 +162,85 @@ export function useAccountsSettings(part: AccountsPart) {
   // Capacity is pace's home; the Agents dial keeps its inline edit. Both write through the
   // shared helper in dailyLimits, guarded by the updated_at of the plan the person saw: a
   // change made elsewhere meanwhile is read again and said, never overwritten. Undo writes
-  // the value before against the plan this write left, so it too never overwrites.
+  // the whole pace before against the plan this write left, so it too never overwrites.
   const profile = useProfile()
   const paceBusy = ref('')
   const paceDone = (choice: PaceChoice, def: number) => choice.mode === 'everything' ? 'uses everything before the reset' : choice.mode === 'default' ? `follows the default pace, +${def} percentage points a day` : `+${choice.points} percentage points a day${choice.points === def ? ', the default' : ''}`
-  async function savePace(harness: string, choice: PaceChoice, basis: PlanRead | null = plan.value, undoable = true) {
+  function savePace(harness: string, choice: PaceChoice, basis: PlanRead | null = plan.value) {
+    if (!basis) return Promise.resolve()
+    const def = basis.daily_default_points ?? DEFAULT_DAILY_POINTS
+    return writeHarnessPace(harness, storedPace(dailyOf(basis.daily, harness).pace, choice, def), paceDone(choice, def), basis, true)
+  }
+  async function writeHarnessPace(harness: string, pace: DailyPace, said: string, basis: PlanRead, undoable: boolean) {
     const identity = owner.value, turn = generation
-    if (!manage.value || paceBusy.value || !basis) return
-    const settings = dailyOf(basis.daily, harness), def = basis.daily_default_points ?? DEFAULT_DAILY_POINTS, before = paceChoice(settings.pace)
+    if (!manage.value || paceBusy.value) return
+    const settings = dailyOf(basis.daily, harness), def = basis.daily_default_points ?? DEFAULT_DAILY_POINTS, before = { ...settings.pace }
     paceBusy.value = harness
     try {
-      const updatedAt = await writePace(basis, harness, choice)
+      const updatedAt = await writePace(basis, harness, pace)
       if (identity !== owner.value || turn !== generation) return
-      const written: PlanRead = { ...(plan.value ?? basis), total: basis.total, limits: basis.limits, daily: withDaily(basis.daily, harness, { ...settings, pace: storedPace(settings.pace, choice, def) }), updated_at: updatedAt }
+      const written: PlanRead = { ...(plan.value ?? basis), total: basis.total, limits: basis.limits, daily: withDaily(basis.daily, harness, { ...settings, pace }), updated_at: updatedAt }
       plan.value = written
       void readPlan()
-      toast(`${vendorName(harness)}: ${paceDone(choice, def)}`, undoable ? { action: { label: 'Undo', run: () => void savePace(harness, before, written, false) } } : {})
+      toast(`${vendorName(harness)}: ${said}`, undoable ? { action: { label: 'Undo', run: () => { if (identity === owner.value && turn === generation) void writeHarnessPace(harness, before, paceDone(paceChoice(before), def), written, false) } } } : {})
     } catch (error) {
       if (identity !== owner.value || turn !== generation) return
       toast(error instanceof Error ? error.message : 'Couldn’t save the daily limit. Please try again.', { tone: 'error' })
       if (error instanceof PlanChanged) void readPlan()
     } finally { if (identity === owner.value && turn === generation) paceBusy.value = '' }
   }
-  /** The default pace (PATCH /me/profile); harnesses that follow it follow along. Null is the built-in 10. */
-  async function saveDefaultPace(points: number | null, undoable = true): Promise<boolean> {
+  /**
+   * The default pace (PATCH /me/profile); harnesses that follow it follow along. Null is the
+   * built-in 10. The edit reads the stored value and its revision fresh (the cached profile can
+   * lag behind the plan on screen) and is guarded by that revision; Undo puts that value back,
+   * guarded by the revision the edit left, so a change made since is said, never overwritten.
+   */
+  async function saveDefaultPace(points: number | null): Promise<boolean> {
     const identity = owner.value, turn = generation, basis = plan.value
     if (!manage.value || paceBusy.value || !basis) return false
     const before = basis.daily_default_points ?? DEFAULT_DAILY_POINTS, shown = points ?? DEFAULT_DAILY_POINTS
     if (shown === before) return true
-    // The value stored before: null stays null, so Undo follows the built-in default again.
-    const stored = profile.profile && profile.profile.daily_points_per_day !== undefined ? profile.profile.daily_points_per_day : before
+    const stale = () => identity !== owner.value || turn !== generation
     paceBusy.value = 'default'
     try {
-      await profile.save({ daily_points_per_day: points })
-      if (identity !== owner.value || turn !== generation) return false
+      const current = await getProfile()
+      if (stale()) return false
+      profile.adopt(current)
+      // The default on screen is no longer the one stored: say so and show it, never overwrite.
+      if ((current.daily_points_per_day ?? DEFAULT_DAILY_POINTS) !== before) { defaultChanged(); return false }
+      const stored = current.daily_points_per_day ?? null
+      const saved = await profile.save({ daily_points_per_day: points, expected_revision: current.revision })
+      if (stale()) return false
       plan.value = { ...(plan.value ?? basis), daily_default_points: shown }
       void readPlan()
-      toast(`Default pace: +${shown} percentage points a day`, undoable ? { action: { label: 'Undo', run: () => {
-        // Undo only what this edit set: a default changed since is said, never overwritten.
-        if (plan.value?.daily_default_points !== shown) { toast('Changed elsewhere; shown as it is now.', { tone: 'error' }); void readPlan(); return }
-        void saveDefaultPace(stored, false)
-      } } } : {})
+      toast(`Default pace: +${shown} percentage points a day`, { action: { label: 'Undo', run: () => { if (!stale()) void undoDefaultPace(stored, saved.revision) } } })
       return true
     } catch (error) {
-      if (identity === owner.value && turn === generation) toast(error instanceof ProfileError && error.errors.daily_points_per_day ? fieldMessage('daily_points_per_day', error.errors.daily_points_per_day) : 'The default pace did not save. Please try again.', { tone: 'error' })
+      if (!stale()) defaultFailed(error)
       return false
-    } finally { if (identity === owner.value && turn === generation) paceBusy.value = '' }
+    } finally { if (!stale()) paceBusy.value = '' }
+  }
+  async function undoDefaultPace(stored: number | null, revision: number) {
+    const identity = owner.value, turn = generation, stale = () => identity !== owner.value || turn !== generation
+    if (!manage.value || paceBusy.value) return
+    paceBusy.value = 'default'
+    try {
+      await profile.save({ daily_points_per_day: stored, expected_revision: revision })
+      if (stale()) return
+      if (plan.value) plan.value = { ...plan.value, daily_default_points: stored ?? DEFAULT_DAILY_POINTS }
+      void readPlan()
+      toast(`Default pace: +${stored ?? DEFAULT_DAILY_POINTS} percentage points a day`)
+    } catch (error) {
+      if (!stale()) defaultFailed(error)
+    } finally { if (!stale()) paceBusy.value = '' }
+  }
+  function defaultChanged() {
+    toast(new PlanChanged().message, { tone: 'error' })
+    void readPlan(); void profile.load(true)
+  }
+  function defaultFailed(error: unknown) {
+    if (profileChanged(error)) { defaultChanged(); return }
+    toast(error instanceof ProfileError && error.errors.daily_points_per_day ? fieldMessage('daily_points_per_day', error.errors.daily_points_per_day) : 'The default pace did not save. Please try again.', { tone: 'error' })
   }
   function computerSummary(c: PairingView) {
     if (c.computer_state === 'revoked') return computerState(c)

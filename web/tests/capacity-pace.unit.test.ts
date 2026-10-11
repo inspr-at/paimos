@@ -38,7 +38,7 @@ describe('the stored pace', () => {
 describe('the guarded write', () => {
   it('writes the plan as read with one pace changed, guarded by the revision it read', async () => {
     mocks.api.mockResolvedValue(json({ key: 'agents.working', updated_at: '2026-10-11T08:01:00.000002Z' }))
-    await expect(writePace(plan, 'codex', { mode: 'own', points: 20 })).resolves.toBe('2026-10-11T08:01:00.000002Z')
+    await expect(writePace(plan, 'codex', storedPace(daily.codex!.pace, { mode: 'own', points: 20 }, 12))).resolves.toBe('2026-10-11T08:01:00.000002Z')
     const [path, init] = mocks.api.mock.calls[0]!
     expect(path).toBe('/preferences/agents.working')
     expect(init.method).toBe('PUT')
@@ -49,12 +49,12 @@ describe('the guarded write', () => {
   })
   it('a harness the plan has no settings for starts from the defaults', async () => {
     mocks.api.mockResolvedValue(json({ updated_at: '2026-10-11T08:01:00Z' }))
-    await writePace({ ...plan, daily: undefined }, 'grok', { mode: 'everything' })
+    await writePace({ ...plan, daily: undefined }, 'grok', storedPace({ mode: 'pace', points_per_day: null }, { mode: 'everything' }, 12))
     expect(JSON.parse(mocks.api.mock.calls[0]![1].body).value.daily).toEqual({ grok: { pace: { mode: 'everything', points_per_day: null }, boost_today: null, at_limit: 'ladder' } })
   })
   it('a 409 is PlanChanged, any other failure or an unconfirmed save an error, never a success', async () => {
     mocks.api.mockResolvedValueOnce(json({ error: 'changed' }, 409))
-    await expect(writePace(plan, 'codex', { mode: 'default' })).rejects.toBeInstanceOf(PlanChanged)
+    await expect(writePace(plan, 'codex', storedPace(daily.codex!.pace, { mode: 'default' }, 12))).rejects.toBeInstanceOf(PlanChanged)
     mocks.api.mockResolvedValueOnce(json({ error: 'nope' }, 500))
     await expect(putAgentsPlan({ total: 1, limits: {} }, null, { failure: 'Couldn’t save the total and limits.' })).rejects.toThrow('Couldn’t save the total and limits.')
     mocks.api.mockResolvedValueOnce(json({ key: 'agents.working' }))
