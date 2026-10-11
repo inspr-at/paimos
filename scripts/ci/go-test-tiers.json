@@ -4894,6 +4894,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestPersonAPIErrorPreservesStatusAndRedactsSession","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestPillWritesSurface422AndReportOpenInvalidPills","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestPrintHeartbeatPauseAndBoundedHandover","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestPrintHeartbeatRequestsRejectsUnsafeOrUncataloguedValues","tier":"GATED-FULL"}

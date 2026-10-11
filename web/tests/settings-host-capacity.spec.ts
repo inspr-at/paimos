@@ -54,7 +54,8 @@ async function computer(page: Page) {
   await page.locator('[data-computer]').first().click()
   const pane = page.getByRole('dialog',{name:/^build-7/})
   await expect(pane).toBeVisible()
-  await pane.getByRole('button',{name:/Capacity and load/}).click()
+  // AEON-1174: the section is called New starts and is open by default.
+  await expect(pane.getByRole('button',{name:/New starts/})).toHaveAttribute('aria-expanded','true')
   return pane
 }
 for (const width of [390,1024,1440]) for (const theme of ['light','dark'] as const) {
@@ -83,7 +84,7 @@ for (const width of [390,1024,1440]) for (const theme of ['light','dark'] as con
     await expect.poll(()=>s.writes.length).toBe(1)
     expect(s.writes[0]).toMatchObject({expected_revision:4,policy:{mode:'smart',maximum_agents:12,consider_activity:false}})
     await expect(pane.getByRole('status')).toHaveText('All changes saved')
-    await expect(pane.getByRole('button',{name:/Capacity and load/})).toContainText('Smart')
+    await expect(pane.getByRole('button',{name:/New starts/})).toContainText('Smart')
     await expect(apply).toBeDisabled()
     if (process.env.AEON686_SHOTS) {
       const shots=process.env.AEON686_SHOTS;mkdirSync(shots,{recursive:true})
