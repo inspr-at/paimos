@@ -100,6 +100,19 @@ func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
 				return err
 			}
 		}
+		if len(cold) == 0 || !cold[0] {
+			rows, err := tx.Query(t.Context(), `SELECT profile_id::text FROM model_role_routes WHERE role='review-gate' ORDER BY priority`)
+			if err != nil {
+				return err
+			}
+			ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+			if err != nil {
+				return err
+			}
+			if err := dbtest.SetModelOrder(t.Context(), tx, tid, "", "other", "review", ids...); err != nil {
+				return err
+			}
+		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2,'review-account','claude','review-daemon',$3,'Review account',clock_timestamp(),true,'review-generation',$4)`, tid, f.account, f.agent.ID, f.person.ID); err != nil {
 			return err
 		}
@@ -239,7 +252,8 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 	f.call(t, f.person, "GET", "/api/work-orders/"+v.OrderID, nil, 200, &o)
 	f.call(t, f.person, "PATCH", "/api/work-orders/"+v.OrderID, map[string]any{"expected_revision": o.Revision, "assignee_principal_id": f.other.ID}, 409, nil)
 	f.tx(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET state='unavailable',valid_until=now()+interval '1 hour',reason='fixture unavailable' WHERE profile_id=$1`, f.profile)
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason)
+ SELECT tenant_id,harness,model,now()+interval '1 hour','fixture unavailable' FROM model_profiles WHERE id=$1`, f.profile)
 		return err
 	})
 	unavailable := f.input()

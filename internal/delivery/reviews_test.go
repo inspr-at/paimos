@@ -70,10 +70,10 @@ func seedReviewRoute(t *testing.T, f *fixture) string {
 		if _, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes WHERE role='review-gate'`); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'shadow-reviewer','test','claude','anthropic','claude-opus-4-6','xhigh','frontier') RETURNING id::text`, f.person.TenantID).Scan(&profile); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'shadow-reviewer','test','claude','anthropic','shadow-review-model','xhigh','frontier') RETURNING id::text`, f.person.TenantID).Scan(&profile); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state) VALUES($1,'review-gate',1,$2,'available')`, f.person.TenantID, profile); err != nil {
+		if err := dbtest.SetModelOrder(t.Context(), tx, f.person.TenantID, "", "other", "review", profile); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner)

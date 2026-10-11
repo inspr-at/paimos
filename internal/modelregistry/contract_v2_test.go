@@ -319,7 +319,7 @@ func TestModelsV2OutdatedCountsVisiblePins(t *testing.T) {
 	old := decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"older-sol-contract","version":"1","harness":"codex","family":"openai","model":"gpt-5-sol","effort":"xhigh","tier":"frontier"}`, 201)
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		var kind string
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug='work'`).Scan(&kind); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM work_kinds WHERE slug='backend'`).Scan(&kind); err != nil {
 			return err
 		}
 		for _, scope := range []modelprefs.Scope{{Level: "default"}, {Level: "person", PersonID: &member.ID}} {
@@ -503,7 +503,10 @@ func TestModelsV2CrossHarnessNativeWrites(t *testing.T) {
 func TestModelsV2CursorPauseCoversNativeIDs(t *testing.T) {
 	admin, _ := boardFixture(t)
 	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
-	profile := profileBySlug(profiles, "cursor-grok-4-7-high")
+	profile := profileBySlug(profiles, "cursor-grok")
+	if profile.ID == "" || profile.Model != "grok-4.7-high" {
+		t.Fatal("fixture lacks the Cursor native high route")
+	}
 	path := "/api/models/lines/cursor/" + profile.Model + "/pause"
 	boardDecode[modelPauseResult](t, boardCall(t, admin, "PUT", path, map[string]any{"until": nil, "reason": "Native route maintenance"}, ""), 200)
 	check := func(paused bool) {

@@ -18,7 +18,7 @@ func TestManagedOrderActivationOnlyChangesFutureReviewBindings(t *testing.T) {
 	modelregistry.New(f.d.App).Mount(f.mux)
 	strong := testID()
 	f.tx(t, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'saved-strong-review','1','claude','anthropic','opus','xhigh','strong')`, f.person.TenantID, strong); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'saved-strong-review','1','claude','anthropic','saved-review-model','xhigh','strong')`, f.person.TenantID, strong); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'review-gate',99,$2)`, f.person.TenantID, strong); err != nil {
@@ -31,7 +31,7 @@ func TestManagedOrderActivationOnlyChangesFutureReviewBindings(t *testing.T) {
 	input := f.input()
 	f.call(t, f.person, "POST", "/api/nodes/"+f.ticket+"/reviews", input, 201, &first)
 	if first.RunID == nil || first.ProfileID == nil || *first.ProfileID != f.profile {
-		t.Fatal("legacy review binding changed", first)
+		t.Fatal("saved fixture review binding changed", first)
 	}
 	stored := func() string {
 		var raw string
@@ -41,37 +41,20 @@ func TestManagedOrderActivationOnlyChangesFutureReviewBindings(t *testing.T) {
 		return raw
 	}
 	original := stored()
-	var ladder struct {
-		Routes []modelregistry.Route `json:"routes"`
-		Token  string                `json:"edit_token"`
-		Mode   string                `json:"order_mode"`
+	var document struct {
+		Revision int64 `json:"revision"`
 	}
-	f.call(t, f.person, "GET", "/api/models/routes?role=review-gate", nil, 200, &ladder)
-	if ladder.Mode != "legacy" {
-		t.Fatal("not opted out")
-	}
-	desired := []modelregistry.Route{}
-	for _, row := range ladder.Routes {
-		if row.ProfileID == strong {
-			desired = append(desired, row)
-		}
-	}
-	for _, row := range ladder.Routes {
-		if row.ProfileID != strong {
-			desired = append(desired, row)
-		}
-	}
-	for i := range desired {
-		desired[i].Priority = i + 1
-	}
-	raw, _ := json.Marshal(desired)
-	req := httptest.NewRequest("PUT", "/api/models/routes?role=review-gate&order_mode=saved", strings.NewReader(string(raw)))
+	f.call(t, f.person, "GET", "/api/model-preferences/simple?for=default", nil, 200, &document)
+	raw, _ := json.Marshal(map[string]any{"rank": []string{"anthropic:saved-review-model", "anthropic:review-model"}, "end": "wait", "revision": document.Revision})
+	req := httptest.NewRequest("PUT", "/api/model-preferences/orders/other/review?for=default", strings.NewReader(string(raw)))
 	req = req.WithContext(tenant.WithPrincipal(req.Context(), f.person))
-	req.Header.Set("If-Match", ladder.Token)
 	response := httptest.NewRecorder()
 	f.mux.ServeHTTP(response, req)
-	if response.Code != 200 || response.Header().Get("Model-Order-Mode") != "saved" {
-		t.Fatal("activation failed", response.Code, response.Body.String())
+	var saved struct {
+		Revision int64 `json:"revision"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &saved); err != nil || response.Code != 200 || saved.Revision != document.Revision+1 {
+		t.Fatal("order change failed", response.Code, response.Body.String(), err)
 	}
 	if stored() != original {
 		t.Fatal("activation rerouted or restamped queued review")
@@ -89,7 +72,7 @@ func TestManagedOrderActivationOnlyChangesFutureReviewBindings(t *testing.T) {
 	for _, tc := range []struct {
 		review Review
 		mode   string
-	}{{first, "legacy"}, {next, "saved"}} {
+	}{{first, "saved"}, {next, "saved"}} {
 		var trace modelregistry.PreferenceTrace
 		if err := json.Unmarshal(tc.review.Trace, &trace); err != nil {
 			t.Fatal(err)
@@ -118,7 +101,7 @@ func TestManagedSavedOrderFinishedTelemetryThroughProductionMiddleware(t *testin
 	f := newFixture(t)
 	strong := testID()
 	f.tx(t, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'completion-saved-review','1','claude','anthropic','opus','xhigh','strong')`, f.person.TenantID, strong); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'completion-saved-review','1','claude','anthropic','saved-review-model','xhigh','strong')`, f.person.TenantID, strong); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'review-gate',99,$2)`, f.person.TenantID, strong); err != nil {
@@ -130,12 +113,11 @@ func TestManagedSavedOrderFinishedTelemetryThroughProductionMiddleware(t *testin
 	source, report := f.completion(t)
 	handler := f.boundaryHandler(t, f.d.App)
 	cookie := f.boundaryCookie(t)
-	read := httptest.NewRequest("GET", "/api/models/routes?role=review-gate", nil)
+	read := httptest.NewRequest("GET", "/api/model-preferences/simple?for=default", nil)
 	read.AddCookie(cookie)
 	response := serveBoundary(handler, read)
 	var snapshot struct {
-		Rows  []modelregistry.Route `json:"routes"`
-		Token string                `json:"edit_token"`
+		Revision int64 `json:"revision"`
 	}
 	if response.Code != 200 {
 		t.Fatal("snapshot middleware refusal", response.Code, response.Body.String())
@@ -143,30 +125,18 @@ func TestManagedSavedOrderFinishedTelemetryThroughProductionMiddleware(t *testin
 	if err := json.Unmarshal(response.Body.Bytes(), &snapshot); err != nil {
 		t.Fatal(err)
 	}
-	desired := []modelregistry.Route{}
-	for _, row := range snapshot.Rows {
-		if row.ProfileID == strong {
-			desired = append(desired, row)
-		}
-	}
-	for _, row := range snapshot.Rows {
-		if row.ProfileID != strong {
-			desired = append(desired, row)
-		}
-	}
-	for i := range desired {
-		desired[i].Priority = i + 1
-	}
-	save := func(mode, token string) *httptest.ResponseRecorder {
-		raw, _ := json.Marshal(desired)
-		req := httptest.NewRequest("PUT", "/api/models/routes?role=review-gate&order_mode="+mode, strings.NewReader(string(raw)))
+	save := func(rank []string, revision int64) *httptest.ResponseRecorder {
+		raw, _ := json.Marshal(map[string]any{"rank": rank, "end": "wait", "revision": revision})
+		req := httptest.NewRequest("PUT", "/api/model-preferences/orders/other/review?for=default", strings.NewReader(string(raw)))
 		req.AddCookie(cookie)
-		req.Header.Set("If-Match", token)
 		return serveBoundary(handler, req)
 	}
-	activation := save("saved", snapshot.Token)
-	if activation.Code != 200 || activation.Header().Get("Model-Order-Mode") != "saved" {
-		t.Fatal("activation middleware refusal", activation.Code, activation.Body.String())
+	activation := save([]string{"anthropic:saved-review-model", "anthropic:review-model"}, snapshot.Revision)
+	var saved struct {
+		Revision int64 `json:"revision"`
+	}
+	if err := json.Unmarshal(activation.Body.Bytes(), &saved); err != nil || activation.Code != 200 || saved.Revision != snapshot.Revision+1 {
+		t.Fatal("order middleware refusal", activation.Code, activation.Body.String(), err)
 	}
 	finished := serveBoundary(handler, boundaryRequest(t.Context(), "/api/runs/"+source+"/telemetry", report, f.token, nil))
 	if finished.Code != 200 {
@@ -184,7 +154,7 @@ func TestManagedSavedOrderFinishedTelemetryThroughProductionMiddleware(t *testin
 		return nil
 	})
 	// Changing fallback after completion does not rebind an accepted replay.
-	restored := save("legacy", activation.Header().Get("ETag"))
+	restored := save([]string{"anthropic:review-model"}, saved.Revision)
 	if restored.Code != 200 {
 		t.Fatal("mode compensation failed", restored.Code, restored.Body.String())
 	}

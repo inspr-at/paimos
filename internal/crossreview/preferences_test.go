@@ -4,13 +4,15 @@ package crossreview
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+	"testing"
+
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
-	"strings"
-	"testing"
 )
 
 func TestReviewStoresLoosenedResidencyLockTrace(t *testing.T) {
@@ -69,7 +71,7 @@ func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 		{name: "role fallback", role: "build-hard", wantComplex: true}, {name: "explicit small", c: "S", role: "build-hard"},
 		{name: "codex pin rejected", c: "L", role: "build", pin: "codex"},
 		{name: "author family rejected", c: "L", role: "build", pin: "author"},
-		{name: "off ladder rejected", c: "L", role: "build", pin: "off-ladder"},
+		{name: "retired choice rejected", c: "L", role: "build", pin: "off-ladder"},
 		{name: "decoded security", c: "L", role: "build", security: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -80,7 +82,7 @@ func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 					return err
 				}
 				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier)
-    VALUES($1,$2,'complex-review','1','claude','anthropic','opus','xhigh','strong')`, f.person.TenantID, complexProfile); err != nil {
+    VALUES($1,$2,'complex-review','1','claude','anthropic','qualified-review-model','xhigh','strong')`, f.person.TenantID, complexProfile); err != nil {
 					return err
 				}
 				if tc.pin != "off-ladder" {
@@ -104,10 +106,28 @@ func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 				}
 				complexCell := modelprefs.Cell{Mode: "pinned", ProfileID: pin}
 				if tc.pin == "latest" {
-					complexCell = modelprefs.Cell{Mode: "latest", Family: "anthropic", Line: "opus", Effort: "xhigh"}
+					complexCell = modelprefs.Cell{Mode: "latest", Family: "anthropic", Line: "qualified-review-model", Effort: "xhigh"}
 				}
 				if err := modelprefs.PutRow(t.Context(), tx, f.person, scope, kind, modelprefs.Row{Cells: map[string]modelprefs.Cell{
 					"normal": {Mode: "pinned", ProfileID: f.profile}, "complex": complexCell}}); err != nil {
+					return err
+				}
+				// Models owns Review orders; complexity buckets remain historical
+				// evidence. Keep each qualification case's saved choice explicit.
+				order := []string{f.profile}
+				if tc.wantComplex {
+					order = []string{complexProfile, f.profile}
+				} else if tc.pin == "codex" || tc.pin == "author" {
+					order = []string{pin, f.profile}
+				} else if tc.pin == "off-ladder" {
+					// Model membership in the retired ladder is no longer a
+					// qualification. Retirement still excludes the choice.
+					if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($1,$2,'Unqualified fixture choice',$3)`, f.person.TenantID, complexProfile, f.person.ID); err != nil {
+						return err
+					}
+					order = []string{complexProfile, f.profile}
+				}
+				if err := dbtest.SetModelOrder(t.Context(), tx, f.person.TenantID, f.person.ID, "backend", "review", order...); err != nil {
 					return err
 				}
 				area := "backend"

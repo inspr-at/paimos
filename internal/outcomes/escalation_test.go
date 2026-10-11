@@ -613,7 +613,7 @@ func TestEscalationRetainsOriginalModelAcrossSelections(t *testing.T) {
 				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$1::uuid,$2::uuid] WHERE account_key='retry-claude'`, f.opus, fable); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state,reason) VALUES($1,'build-hard',99,$2,'available','Explicit fixture build authority')`, f.p.TenantID, fable); err != nil {
+				if err := dbtest.SetModelOrder(t.Context(), tx, f.p.TenantID, "", "other", "stuck", fable, f.opus); err != nil {
 					return err
 				}
 				// Observe first while Fable is the original writer. It must survive a later session.

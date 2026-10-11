@@ -41,7 +41,15 @@ func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) 
 		var rows []Route
 		if err := db.InTenant(t.Context(), appPool, p.TenantID, func(tx pgx.Tx) error {
 			var err error
-			rows, err = listRoutes(t.Context(), tx)
+			result, err := tx.Query(t.Context(), `SELECT role,priority,profile_id::text,state,reason,valid_until FROM model_role_routes ORDER BY role,priority,profile_id LIMIT 301`)
+			if err != nil {
+				return err
+			}
+			rows, err = pgx.CollectRows(result, func(row pgx.CollectableRow) (Route, error) {
+				var r Route
+				err := row.Scan(&r.Role, &r.Priority, &r.ProfileID, &r.State, &r.Reason, &r.ValidUntil)
+				return r, err
+			})
 			return err
 		}); err != nil {
 			t.Fatal(err)
@@ -58,7 +66,21 @@ func TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy(t *testing.T) 
 	if !foundPolicy {
 		t.Fatal("saved person policy missing or replaced", routes)
 	}
+	// Catalog additions retain source policy and wait for an explicit Models
+	// choice. Each account still has to qualify for its chosen native route.
 	for _, h := range []string{"gemini", "opencode"} {
+		slug := "gemini-gemini-2-5-pro-16384"
+		if h == "opencode" {
+			slug = "opencode-ollama-qwen3-coder-default"
+		}
+		profile := profileBySlug(profiles, slug)
+		if profile.ID == "" {
+			t.Fatal("missing added native route", slug)
+		}
+		minimalAccount(t, p, profile)
+		inRegistry(t, p, func(tx pgx.Tx) error {
+			return dbtest.SetModelOrder(t.Context(), tx, p.TenantID, "", "other", "first", profile.ID)
+		})
 		r := decode[Resolution](t, &p, http.MethodGet, "/api/models/resolve?role=build&harness="+h, "", http.StatusOK)
 		if r.Profile == nil || r.Profile.Harness != h {
 			t.Fatal("new harness not routable", r)

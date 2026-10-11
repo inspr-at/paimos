@@ -136,7 +136,8 @@ func TestPlanningSortedListSharesLearningRead(t *testing.T) {
 func TestPlanningTruncatedHistoryListFixture(t *testing.T) {
 	w := planningSetup(t)
 	// Independent legacy history is measured and bounded, even when the model
-	// registry makes the new learning query hit its real 4096-profile cap.
+	// archived registry makes the learning query hit its real 4096-profile cap.
+	// Disabled historical pins must not consume the live routing catalog budget.
 	for i := range 5 {
 		n := w.node(t, fmt.Sprintf("LEGACY-%d", i+1), "work", w.root.ID, "done", nil)
 		w.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 4_000_000, 0, 0, "api", "")
@@ -148,8 +149,8 @@ func TestPlanningTruncatedHistoryListFixture(t *testing.T) {
 		}
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier)
- SELECT $1,'history-cap-'||i,'1','codex','openai','gpt-6-astra','xhigh','standard' FROM generate_series(1,4097) i`, w.admin.TenantID)
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled)
+ SELECT $1,'history-cap-'||i,'1','codex','openai','gpt-6-astra','xhigh','standard',false FROM generate_series(1,4097) i`, w.admin.TenantID)
 		return err
 	}); err != nil {
 		t.Fatal(err)

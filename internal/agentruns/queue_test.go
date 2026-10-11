@@ -610,9 +610,7 @@ func TestTicketQueueAutomaticSecurityRoutingAndProjectVisibility(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET title='Check tenant permissions' WHERE id=$1`, security); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build-hard',1,$2)
- ON CONFLICT(tenant_id,role,priority) DO UPDATE SET profile_id=excluded.profile_id`, f.person.TenantID, f.profile)
-		return err
+		return dbtest.SetModelOrder(t.Context(), tx, f.person.TenantID, "", "other", "stuck", f.profile)
 	})
 	e := f.addQueue(t, security, nil)
 	if !e.Queued.SecurityReview || e.Queued.ExpectedAgentID != nil {

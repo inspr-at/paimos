@@ -10,6 +10,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -183,11 +184,18 @@ func TestEscalationSkipsAccountlessHarnessForRunnableSuccessor(t *testing.T) {
 		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,profile_id,priority) SELECT $1,'build-hard',id,CASE slug WHEN 'claude-opus-xhigh' THEN 1 ELSE 2 END FROM model_profiles WHERE slug IN ('claude-opus-xhigh','codex-astra-xhigh')`, p.TenantID); err != nil {
 			return err
 		}
+		var first string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&first); err != nil {
+			return err
+		}
+		if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, "", "other", "stuck", first, successor); err != nil {
+			return err
+		}
 		out, err := ResolveEscalation(ctx, tx, p, WorkQuery{Role: "build", Area: "backend"}, nil, now)
 		if err != nil {
 			return err
 		}
-		assertRunnableSuccessor(t, out, account, successor, "no qualified account; wait for live admission")
+		assertRunnableSuccessor(t, out, account, successor, "no qualified account with available capacity")
 		if len(out.Ladder) != 2 {
 			t.Fatalf("fixture did not exercise the two-route ladder: %+v", out.Ladder)
 		}

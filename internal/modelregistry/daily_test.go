@@ -9,6 +9,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -83,10 +84,7 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 				return err
 			}
 		}
-		if _, err := tx.Exec(ctx, `UPDATE model_role_routes SET priority=priority+100 WHERE role='build'`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2),($1,'build',2,$3)`, p.TenantID, next.ID, claude.ID); err != nil {
+		if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, "", "other", "first", next.ID, claude.ID); err != nil {
 			return err
 		}
 		settings := agentplan.DefaultDaily()
@@ -101,15 +99,15 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 		if err := save(); err != nil {
 			return err
 		}
+		// Both workspace and personal Models orders apply the cap at each
+		// route. Historical per-harness Wait is not a routing authority.
 		for _, board := range []bool{false, true} {
+			owner := ""
 			if board {
-				var id string
-				if err := tx.QueryRow(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,template,thinking,usage,revision) VALUES($1,'workspace','balanced','deep','balanced',1) RETURNING id::text`, p.TenantID).Scan(&id); err != nil {
-					return err
-				}
-				if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank) VALUES($1,$2,'other','first',ARRAY['openai:sol','anthropic:opus'])`, p.TenantID, id); err != nil {
-					return err
-				}
+				owner = p.ID
+			}
+			if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, owner, "other", "first", next.ID, claude.ID); err != nil {
+				return err
 			}
 			settings.AtLimit = "ladder"
 			if err := save(); err != nil {
@@ -139,8 +137,20 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 			if err != nil {
 				return err
 			}
+			if got.Profile == nil || got.Profile.ID != claude.ID || !slices.Equal(got.Trace.QualifyingAccountIDs, []string{accounts["claude"]}) {
+				t.Fatalf("historical per-harness wait overrode Models: %+v", got)
+			}
+			// Wait belongs to the Models order's ending. A one-line order
+			// stops after its capped route, with no provider added implicitly.
+			if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, owner, "other", "first", next.ID); err != nil {
+				return err
+			}
+			got, err = ResolveWork(ctx, tx, p, WorkQuery{Role: "build", Area: "other", Situation: "first"}, now)
+			if err != nil {
+				return err
+			}
 			if got.Profile != nil || got.Trace.Blocked != "daily_limit" {
-				t.Fatalf("wait became successor: %+v", got)
+				t.Fatalf("Models Wait acquired a successor: %+v", got)
 			}
 			if board {
 				// Risk: preserving a private owner's Wait choice leaks its cap
@@ -154,6 +164,12 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 					t.Fatalf("private Wait leaked metrics or selected a successor: %+v", private)
 				}
 			}
+		}
+		if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, "", "other", "first", next.ID, claude.ID); err != nil {
+			return err
+		}
+		if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, p.ID, "other", "first", next.ID, claude.ID); err != nil {
+			return err
 		}
 		settings.AtLimit = "ladder"
 		if err := save(); err != nil {
@@ -212,7 +228,7 @@ func TestDailyReviewKeepsReviewQualifiedAccounts(t *testing.T) {
 		if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes WHERE role='review-gate'`); err != nil {
 			return err
 		}
-		if err := insertRoute(ctx, tx, p.TenantID, Route{Role: "review-gate", Priority: 1, ProfileID: reviewer.ID, State: "available"}); err != nil {
+		if err := dbtest.SetModelOrder(ctx, tx, p.TenantID, "", "other", "review", reviewer.ID); err != nil {
 			return err
 		}
 		runner := func(name string, approved bool) (string, error) {

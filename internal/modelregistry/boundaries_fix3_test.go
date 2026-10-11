@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -194,14 +193,14 @@ func TestProjectQualifiedResolvePreservesLegacyLadder(t *testing.T) {
 	minimalAccount(t, p, profileBySlug(profiles, "claude-fable-xhigh"))
 	legacy := decode[Resolution](t, &p, http.MethodGet, path, "", 200)
 	if legacy.Profile == nil || legacy.CommandTemplate == "" || legacy.OwnerRequired {
-		t.Fatal("fixture must have a runnable legacy review ladder")
+		t.Fatal("fixture must have a runnable automatic Models review")
 	}
 	qualified := decode[struct {
 		Resolution
 		Trace PreferenceTrace `json:"trace"`
 	}](t, &p, http.MethodGet, path+"&project_id="+project, "", 200)
-	if !reflect.DeepEqual(legacy, qualified.Resolution) {
-		t.Fatalf("project changed legacy resolution: before=%+v after=%+v", legacy, qualified.Resolution)
+	if qualified.Profile != nil || qualified.CommandTemplate != "" || !qualified.OwnerRequired || qualified.Trace.Blocked == "" {
+		t.Fatalf("project residency did not qualify Models routing: %+v", qualified)
 	}
 	if qualified.Trace.PersonID == nil || *qualified.Trace.PersonID != p.ID || qualified.Trace.Residency.Value != "eu" {
 		t.Fatalf("legacy project residency evidence lost: %+v", qualified.Trace)
@@ -279,14 +278,13 @@ func TestExplicitPlacementModeSelectsManagedReview(t *testing.T) {
 		WorkResolution
 		Preference PreferenceDecision `json:"preference"`
 	}](t, &p, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude&mode=placement", "", http.StatusOK)
-	if got.Preference.Role != "review-gate" || got.Preference.Kind.Slug != "review:openai" || got.CommandTemplate != "" || !got.OwnerRequired || got.Profile != nil {
+	if got.Preference.Role != "review-gate" || got.Preference.Kind.Slug != "other" || got.CommandTemplate != "" || !got.OwnerRequired || got.Profile != nil {
 		t.Fatalf("explicit placement bypassed managed-review requirements: %+v", got)
 	}
 }
 
-// The closed board an explicit placement request initializes answers that
-// request only. Review dispatch without mode=placement keeps the legacy ladder
-// until the board is saved or migrated.
+// An unsaved initialized board is already Models authority. Review uses its
+// automatic fallback without reverting to retained role ladders.
 func TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "closed-board", "person", "Owner", []string{"admin"})
@@ -294,7 +292,7 @@ func TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch(t *testing.T) {
 		WorkResolution
 		Preference PreferenceDecision `json:"preference"`
 	}](t, &p, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude&mode=placement", "", http.StatusOK)
-	if got.Preference.Kind.Slug != "review:openai" || got.Trace.PreferenceOf == nil {
+	if got.Preference.Kind.Slug != "other" || got.Trace.PreferenceOf == nil {
 		t.Fatalf("explicit placement did not read the initialized board: %+v", got.Trace)
 	}
 	var revision int
@@ -312,8 +310,8 @@ func TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch(t *testing.T) {
 	if revision != 0 {
 		t.Fatalf("fixture is not the closed initializer: revision %d", revision)
 	}
-	if review.Trace.PreferenceOf != nil || review.Trace.OrderMode != reviewOrderLegacy {
-		t.Fatalf("closed board moved review dispatch off the legacy ladder: %+v", review.Trace)
+	if review.Trace.PreferenceOf == nil || review.Trace.OrderMode != reviewOrderLegacy || review.Trace.Column != "other" || review.Trace.Situation != "review" {
+		t.Fatalf("unsaved Models board lost automatic review authority: %+v", review.Trace)
 	}
 }
 

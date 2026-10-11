@@ -53,7 +53,8 @@ func ModelKey(model string) string {
 	return key
 }
 
-// Revision names registry pins, Models orders, never rules and pauses.
+// Revision names enabled routing pins, Models orders, never rules and pauses.
+// Archived history cannot consume the live routing digest budget.
 func Revision(ctx context.Context, tx pgx.Tx) (string, error) {
 	var setup bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles)`).Scan(&setup); err != nil {
@@ -62,7 +63,7 @@ func Revision(ctx context.Context, tx pgx.Tx) (string, error) {
 	if !setup {
 		return "", nil
 	}
-	revision, err := registryRevision(ctx, tx)
+	revision, err := registryRevision(ctx, tx, true)
 	if err != nil {
 		return "", err
 	}

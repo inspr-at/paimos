@@ -78,7 +78,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if !boardDispatchAdopted(s) && !(q.ExplicitBoard && boardInitialized(s)) {
 		return nil, nil
 	}
-	c, err := loadBoardCatalog(ctx, tx)
+	c, err := loadBoardCatalog(ctx, tx, true)
 	if err != nil {
 		return nil, err
 	}

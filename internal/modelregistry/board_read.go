@@ -23,16 +23,21 @@ type boardCatalog struct {
 	lines      []modelprefs.BoardLine
 }
 
-func loadBoardCatalog(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
+func loadBoardCatalog(ctx context.Context, tx pgx.Tx, routing ...bool) (boardCatalog, error) {
+	enabledOnly := len(routing) > 0 && routing[0]
+	filter := ""
+	if enabledOnly {
+		filter = " WHERE enabled"
+	}
 	out := boardCatalog{profiles: map[string][]Profile{}, introduced: map[string]time.Time{}, lines: []modelprefs.BoardLine{}}
 	var large bool
-	if err := tx.QueryRow(ctx, `SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles LIMIT 513) p`).Scan(&large); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles`+filter+` LIMIT 513) p`).Scan(&large); err != nil {
 		return out, err
 	}
 	if large {
 		return out, modelprefs.ErrBoardBounds
 	}
-	profiles, err := listProfiles(ctx, tx)
+	profiles, err := listProfilesLimit(ctx, tx, 513, enabledOnly)
 	if err != nil {
 		return out, err
 	}
@@ -41,7 +46,7 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
 		id := family + ":" + line
 		out.profiles[id] = append(out.profiles[id], p)
 	}
-	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(d.introduced_at,p.created_at) FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id LIMIT 513`)
+	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(d.introduced_at,p.created_at) FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id`+strings.Replace(filter, "enabled", "p.enabled", 1)+` LIMIT 513`)
 	if err != nil {
 		return out, err
 	}

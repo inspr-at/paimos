@@ -195,7 +195,7 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	return listProfilesLimit(ctx, tx, 0)
 }
 
-func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, error) {
+func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int, enabledOnly ...bool) ([]Profile, error) {
 	query := `
 		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.display_overrides->>'origin',''), coalesce(p.note,''),
  (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
@@ -203,6 +203,9 @@ func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, er
  (SELECT jsonb_build_object('until',x.until_at,'reason',x.reason,'by',x.set_by,'at',x.set_at) FROM model_pauses x WHERE x.harness=p.harness AND x.model=p.model AND (x.until_at IS NULL OR x.until_at>now()))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
 		ORDER BY p.slug, p.version, p.id`
+	if len(enabledOnly) > 0 && enabledOnly[0] {
+		query = strings.Replace(query, "ORDER BY p.slug", "WHERE p.enabled ORDER BY p.slug", 1)
+	}
 	if limit > 0 {
 		return readProfiles(ctx, tx, query+` LIMIT $1`, limit)
 	}

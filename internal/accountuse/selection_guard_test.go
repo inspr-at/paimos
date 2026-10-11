@@ -31,7 +31,7 @@ func TestAccountUseSelectionCallSiteGuard(t *testing.T) {
 		"internal/modelregistry/board_write.go":       1,
 		"internal/modelregistry/daily.go":             2,
 		"internal/modelregistry/preferences_write.go": 1,
-		"internal/modelregistry/refresh_successor.go": 2,
+		"internal/modelregistry/refresh_successor.go": 1,
 		"internal/workqueue/route.go":                 1,
 	}
 	root := filepath.Join("..", "..")
