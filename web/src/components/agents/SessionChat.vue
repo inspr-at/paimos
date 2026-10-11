@@ -12,6 +12,8 @@ import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
+import SessionQuestion from './SessionQuestion.vue'
+import type { Question } from '../../lib/decisionDeskApi'
 import ChatLiveBlock from './ChatLiveBlock.vue'
 import { applyLiveFrame, chatFinals, chatSeenIds, chatSeenMark, chatSent, followChatLive, liveQueue, liveWorking, offeredSteer, rebaseTurn, sessionReadMark, settleStop, settled, type LiveSource, type LiveTurn, type SendTransport } from './chatLive'
 import { collapseMessages } from './sessionMessages'
@@ -19,7 +21,7 @@ import { advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWor
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
-const props = defineProps<{ view: SessionView; now: number; canWrite: boolean; active: boolean; interruptBlock: string }>()
+const props = defineProps<{ view: SessionView; now: number; canWrite: boolean; active: boolean; interruptBlock: string; questions?: Question[]; questionFocus?: string }>()
 const emit = defineEmits<{ unread: [count: number]; interrupt: [] }>()
 const agents = useAgents()
 const identity = useSession()
@@ -27,6 +29,25 @@ const words = computed(() => chatWords[displayLanguage()])
 const me = computed(() => identity.identity?.principal.id ?? '')
 const person = computed(() => identity.identity?.principal.kind === 'person')
 const s = computed(() => props.view.session)
+// Retain answered cards for this visit. The shared projection alone supplies
+// open questions; a card rereads its own record when it leaves that projection.
+const seenQuestions = ref<Question[]>([])
+watch(() => [identity.identity?.tenant.id, me.value, s.value.id], () => { seenQuestions.value = [] }, { flush: 'sync' })
+watch(() => props.questions, questions => {
+  const known = new Map(seenQuestions.value.map(question => [question.id, question]))
+  for (const question of questions ?? []) known.set(question.id, question)
+  seenQuestions.value = [...known.values()].slice(-20)
+}, { deep: true, immediate: true })
+async function focusQuestion() {
+  if (!props.active || !props.questionFocus) return
+  await nextTick()
+  const card = document.getElementById(`question-${props.questionFocus}`)
+  if (!card || !root.value?.contains(card)) return
+  const area = card.closest<HTMLElement>('.thread-scroll')
+  if (area) area.scrollTop += card.getBoundingClientRect().top - area.getBoundingClientRect().top
+  card.focus({ preventScroll: true })
+}
+watch(() => [props.active, props.questionFocus, seenQuestions.value.length], () => { void focusQuestion() })
 const localSends = ref<ProjectMessage[]>([])
 // In-flight optimistic sends belong to the session they were addressed to.
 // A late failure for A must not leave B looking busy (S8-013).
@@ -110,12 +131,7 @@ const sendError = ref('')
 const historyLoading = ref(false)
 const historyError = ref('')
 const canStop = computed(() => !ended.value && working.value && !props.interruptBlock)
-function stop() {
-  if (!props.active || !canStop.value) return
-  const before = agents.controls[s.value.id]?.id
-  emit('interrupt')
-  if (liveWorking(liveTurn.value)) markStopping(before)
-}
+function interrupted() { if (liveWorking(liveTurn.value)) markStopping(agents.controls[s.value.id]?.id) }
 function chatKeys(event: KeyboardEvent) {
   if (!props.active || event.key !== 'Escape' || event.repeat || event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
   if (document.querySelector('dialog[open], .floating, .ticket-peek-host')) return
@@ -123,12 +139,12 @@ function chatKeys(event: KeyboardEvent) {
   if (editing.value) { event.preventDefault(); event.stopPropagation(); editing.value = null; return }
   if (replyTo.value) { event.preventDefault(); event.stopPropagation(); replyTo.value = null; return }
   // The repo keyboard convention takes precedence over the mock: the first
-  // Escape leaves a text field; the next press can interrupt the turn.
+  // Escape leaves a text field; the next press closes the panel.
   const target = event.target
   if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) {
     event.preventDefault(); event.stopPropagation(); target.blur(); return
   }
-  if (canStop.value) { event.preventDefault(); event.stopPropagation(); stop() }
+  // The next Escape reaches the panel close action.
 }
 
 // ---------- Read state ----------
@@ -922,7 +938,7 @@ function reply(message: ProjectMessage) {
   replyTo.value = message
   void nextTick(() => textarea.value?.focus())
 }
-defineExpose({ focusComposer: () => textarea.value?.focus() })
+defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted })
 </script>
 
 <template>
@@ -939,9 +955,12 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
           <span v-if="historyError" class="history-error" role="alert">{{ historyError }}</span>
         </div>
         <div v-if="noPermission" class="empty-state"><AppIcon name="lock" :size="32" /><h3>{{ words.noPermissionTitle }}</h3><p>{{ words.noPermission }}</p></div>
-        <div v-else-if="agents.threadState(s) === 'ready' && !messages.length && !liveTurn" class="empty-state"><AppIcon name="agent" :size="32" /><h3>{{ words.emptyTitle }} {{ view.name }}</h3><p>{{ words.emptyBody }}</p><div class="suggestions"><button v-for="text in [words.suggest1, words.suggest2, words.suggest3]" :key="text" type="button" :disabled="!canWrite || ended" @click="suggest(text)">{{ text }}</button></div></div>
+        <div v-else-if="agents.threadState(s) === 'ready' && !messages.length && !liveTurn && !seenQuestions.length" class="empty-state"><AppIcon name="agent" :size="32" /><h3>{{ words.emptyTitle }} {{ view.name }}</h3><p>{{ words.emptyBody }}</p><div class="suggestions"><button v-for="text in [words.suggest1, words.suggest2, words.suggest3]" :key="text" type="button" :disabled="!canWrite || ended" @click="suggest(text)">{{ text }}</button></div></div>
         <SessionMessages v-else :messages="threadMessages" :principal-id="s.agent_principal_id" :session-id="s.id" :now="now"
           :can-reply="canWrite && !composeBlock" :new-from="newFrom" :new-count="newCount" :statuses="statuses" :queued-ids="queuedIds" @reply="reply" @retry="retry" />
+        <div v-if="seenQuestions.length" class="chat-questions">
+          <SessionQuestion v-for="question in seenQuestions" :key="`${identity.identity?.tenant.id}:${me}:${s.id}:${question.id}`" :question="question" :label="view.name" :session-id="s.id" :open="!!questions?.some(item => item.id === question.id)" />
+        </div>
         <ChatLiveBlock v-if="liveTurn && !noPermission" :turn="liveTurn" :name="view.name" :now="now" :can-stop="canStop" />
       </div>
         <p v-if="editing" class="replying" role="status"><AppIcon name="edit" :size="13" /><span>{{ words.editing }}</span><button type="button" class="icon-btn sm flat" :aria-label="words.cancel" @click="editing = null"><AppIcon name="close" :size="12" /></button></p>
@@ -982,7 +1001,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
           <span v-else-if="steerOffered" class="steer-note" role="status">{{ words.chatBetween }}</span>
           <button v-if="capability === 'abort' && working" type="button" class="btn sm stop-send" :aria-label="words.stopSend" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || !canStop || offline" @click="stopAndSend"><AppIcon name="alert" :size="13" />{{ words.stopSend }}</button>
           <button type="submit" class="btn sm primary send" :aria-label="primaryLabel" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || offline"><AppIcon name="send" :size="13" /><span class="send-label"><span>{{ primaryLabel }}</span><span aria-hidden="true" class="label-size">{{ words.after }}</span></span><KeyCap k="enter" /></button>
-          <button type="button" class="btn sm chat-stop" :aria-label="words.stop" :data-tip="canStop ? words.stopTip : interruptBlock || words.stopTip" :disabled="!canStop" @click="stop"><AppIcon name="stop" :size="13" /><span>{{ words.stop }}</span><KeyCap k="Esc" /></button>
+
         </div>
       </form>
     </footer>
@@ -1010,6 +1029,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 /* Shrinks and wraps inside the action row instead of pushing the actions to a new line. */
 .steer-note { flex: 1 1 0; min-width: 0; font-size: 12px; line-height: 1.3; text-align: right; color: var(--ink-3); overflow-wrap: anywhere; }
 .stop-send { color: var(--warn-ink); background: var(--gold-wash); }
+.chat-questions { display: grid; gap: 10px; padding: 12px 0; }
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .thread-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 18px 24px 20px; }

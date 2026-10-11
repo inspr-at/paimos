@@ -5508,6 +5508,32 @@
     ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"phone › light 390: the lead line, the queue chip and every row target reach 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1000 dark Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1000 light Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1024 dark Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1024 light Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1440 dark Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 1440 light Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 390 dark Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 390 light Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 400 dark Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 check.mjs: 400 light Lead Session Chat controls stay put and the real answer records in place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: failed answer retries the same request, a plain message never decides, and a late result stays off another session","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: pinned and last-used tabs belong to the person; queue links force Lead at Next up and chat keys only type","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: server action omission and decision denial remain read-only, and more than four real options link to the Desk","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -14563,6 +14589,10 @@
     {"kind":"node","file":"tests/knowledge.test.ts","name":"the docked entry lives in ?entry=<type>/<slug>, and only real kinds and slugs count","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"the docking width leaves the list 560px beside a 560px pane","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/lead-panel.test.ts","name":"AEON-1212: admission uses four real gates and a timestamp; no report, unreadable, stale and held states never claim current passes","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/lead-panel.test.ts","name":"AEON-1212: an explicit link wins; a real ask, held start and worker problem win over the pinned default; otherwise default then last used","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"AEON-1038: unclaimed starts and launch-off policy never invent admission failures","tier":"GATED-FULL"}
     ,

@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../../lib/api'
 import { listPairingComputers, type PairingView } from '../../lib/agentPairing'
-import { canLaunchLead, leadLaunchReason, LEAD_LAUNCH_OFF, LEAD_WORDS, modelByRole, readLeadSettings, writeLeadSettings, type LeadSettings } from '../../lib/lead'
+import { leadActionAvailable, leadActionReason, LEAD_LAUNCH_OFF, LEAD_WORDS, modelByRole, readLeadSettings, writeLeadSettings, type LeadSettings } from '../../lib/lead'
 import { closeLeadSheet, leadOverlay } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
 import { useProjectLeads } from '../../stores/projectLeads'
@@ -39,8 +39,8 @@ const choices = computed(() => (computers.value ?? []).filter(c => c.computer_id
 const hostName = (id: string) => choices.value.find(c => c.computer_id === id)?.computer_name ?? 'the chosen computer'
 const model = computed(() => modelByRole(settings.value))
 const selectedLead = computed(() => leads.views[chosen.value]?.lead)
-const launchAvailable = computed(() => canLaunchLead(selectedLead.value) && settings.value?.automatic_launch_enabled === true)
-const launchReason = computed(() => settings.value?.automatic_launch_enabled === false ? LEAD_LAUNCH_OFF : leadLaunchReason(selectedLead.value))
+const launchAvailable = computed(() => leadActionAvailable(selectedLead.value, 'start') && settings.value?.automatic_launch_enabled === true)
+const launchReason = computed(() => settings.value?.automatic_launch_enabled === false ? LEAD_LAUNCH_OFF : leadActionReason(selectedLead.value, 'start'))
 
 async function load() {
   const turn = ++generation, who = identity(), id = chosen.value
@@ -78,7 +78,7 @@ async function start() {
       if (turn !== generation || who !== identity()) return
       settings.value = saved
     }
-    const next = await leads.start(id)
+    const next = await leads.start(id, lead)
     if (turn !== generation || who !== identity() || !next) return
     toast(`${key.value} ${w.l} requested`, { timeout: 5200 })
     close(false)

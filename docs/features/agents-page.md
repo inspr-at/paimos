@@ -100,3 +100,32 @@ session list cut short as "3+". The lead, decision, queue, question and
 reparent events wake a batched reread of what changed; a reconnect and the
 30-second reread refresh everything, including the Next up list of an open
 lead panel or band.
+
+## One lead panel (AEON-1212, P4)
+
+Leads have Lead, Session and Chat in one panel. An explicit tab link wins;
+otherwise a question that can be decided, a held start, an ended session or a
+worker problem opens the relevant tab, ahead of the person's pinned default
+and last-used tab. The opening reason stays visible. Workers have Overview
+and Chat. Defaults and last-used tabs are person preferences.
+
+Interrupt, Pause (Resume when paused) and Stop remain in the panel head on
+every tab. Lead start, resume and cooperative handover use the caller-specific
+lead action projection, including its blocked reason; a missing projection
+leaves those actions unavailable. Session controls retain their own ownership
+and permission checks. A stopped lead's Start a lead is in Right now.
+
+The queue chip and lead menu link to `/agents/:sessionId?tab=lead#next-up`.
+Only the panel body scrolls to Next up. The Lead tab's Answer in Chat opens
+the exact question in Chat. Its real server options use the Decision Desk's
+revision-checked decision adapter and an idempotent request id. Results replace
+the option row in place: pending, recorded, failed with Retry, or answered on
+the Desk. More than four options show the first three and a Desk link; without
+decision permission the card explains who may decide. A plain chat message
+never decides or closes a question. Selection and identity changes discard
+late results.
+
+Before every start displays the last admission report, with its timestamp and
+one row per reported gate. It never promises current availability. An absent
+report says No start yet, unreadable history offers Try again without check
+marks, and reports older than the session or 24 hours are labelled stale.

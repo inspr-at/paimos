@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { canPause, LEAD_WORDS } from '../../lib/lead'
+import { leadActionAvailable, leadActionReason, LEAD_WORDS } from '../../lib/lead'
 import { closeLeadSheet } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
 import { useProjectLeads } from '../../stores/projectLeads'
@@ -21,18 +21,18 @@ const busy = ref(false), error = ref('')
 const key = computed(() => projects.byId(props.projectId)?.routeKey ?? 'this project')
 const lead = computed(() => leads.views[props.projectId]?.lead ?? null)
 // The revision on screen when the sheet opened; a changed lead must be looked at again.
-const opened = lead.value ? { revision: lead.value.revision, generation: lead.value.generation } : null
+const opened = lead.value ? { revision: lead.value.revision, generation: lead.value.generation, session_id: lead.value.session_id } : null
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 let generation = 0
 
 async function pause() {
   if (busy.value) return
   const turn = generation, who = session.identity?.principal.id, current = lead.value
-  if (!current || !canPause(current)) { error.value = `The ${w.l} can’t be paused in its current state.`; return }
+  if (!current || !leadActionAvailable(current, 'pause')) { error.value = leadActionReason(current, 'pause'); return }
   if (!opened || current.revision !== opened.revision || current.generation !== opened.generation) { error.value = `The ${w.l} changed meanwhile. Check its state, then pause again.`; return }
   busy.value = true; error.value = ''
   try {
-    const next = await leads.pause(props.projectId)
+    const next = await leads.pause(props.projectId, opened)
     if (turn !== generation || who !== session.identity?.principal.id || !next) return
     toast(`${key.value} ${w.l} pausing`, { timeout: 5200 })
     close(true)
@@ -53,7 +53,7 @@ onBeforeUnmount(() => { generation++ })
   <dialog ref="dialog" class="lead-sheet" aria-labelledby="pause-lead-title" @cancel.prevent="close()" @keydown="keydown">
     <header class="sheet-head"><h2 id="pause-lead-title">Pause the {{ key }} {{ w.l }}</h2><button type="button" class="icon-btn" aria-label="Close" @click="close()"><AppIcon name="close" /></button></header>
     <div class="sheet-acts">
-      <button ref="pauseButton" type="button" class="btn primary" data-act="pause" :aria-disabled="busy" @click="pause"><AppIcon name="pause" :size="15" />Pause<KeyCap k="mod" class="hint" /><KeyCap k="enter" class="hint" /></button>
+      <button ref="pauseButton" type="button" class="btn primary" data-act="pause" :aria-disabled="busy || !leadActionAvailable(lead, 'pause')" :data-tip="leadActionReason(lead, 'pause')" @click="pause"><AppIcon name="pause" :size="15" />Pause<KeyCap k="mod" class="hint" /><KeyCap k="enter" class="hint" /></button>
       <button type="button" class="btn ghost" data-act="cancel" @click="close()">Cancel<KeyCap k="Esc" class="hint" /></button>
     </div>
     <div class="sheet-body">

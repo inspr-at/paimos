@@ -1,11 +1,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { displayLanguage } from '../../lib/displayLanguage'
 import { capacityWaitText } from '../../lib/capacityWait'
 import { brand } from '../../lib/brand'
 import { getNode } from '../../lib/api'
-import { can } from '../../lib/authz'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { can, ensurePermissions } from '../../lib/authz'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Approval, SessionControl } from '../../lib/agents'
 import { RUN_OUTCOME, approvalRun, cost, elapsed, runDuration, runModel, scopeLabel, stopReasonLabel, tokens } from '../../lib/agentState'
 import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
@@ -16,7 +15,19 @@ import TicketPeekLink from '../TicketPeekLink.vue'
 import { useRoute, useRouter } from 'vue-router'
 import SessionChat from './SessionChat.vue'
 import SessionTabs from './SessionTabs.vue'
-import { capabilityWords, chatCapability, initialTab, saveTab, type SessionTab } from './sessionChat'
+import { leadTab, openingTab, panelQueryTab, TAB_LABEL, type PanelTab } from '../../lib/leadPanel'
+import { leadActionAvailable, leadActionReason } from '../../lib/lead'
+import { openLeadPause } from '../../lib/leadOverlay'
+import { usePreference } from '../../lib/preferences'
+import { useAgentProjection } from '../../stores/agentProjection'
+import { useProjectLeads } from '../../stores/projectLeads'
+import { useAgentPause } from '../../stores/agentPause'
+import { useProjects } from '../../stores/projects'
+import { managedControlAllowed } from '../../lib/managedControl'
+import { pausedSession } from '../../lib/agentPause'
+import { confirmAction } from '../../lib/confirm'
+import { toast } from '../../lib/toast'
+import LeadContent from '../lead/LeadContent.vue'
 import { useVisualViewport } from '../../lib/visualViewport'
 import AgentStateLabel from './AgentStateLabel.vue'
 import AgentGlyph from './AgentGlyph.vue'
@@ -27,7 +38,6 @@ import SessionRecovery from './SessionRecovery.vue'
 import { useAgentRecovery } from '../../lib/agentRecovery'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
-import SessionPauseActions from './SessionPauseActions.vue'
 import PauseEvidence from './PauseEvidence.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import { pausingSession } from '../../lib/agentPause'
@@ -45,8 +55,7 @@ import { tierHistoryText, tierRunCostLabel, tierCostAmount } from '../../lib/ser
 import { useServiceTiers } from '../../stores/serviceTiers'
 const serviceTiers = useServiceTiers()
 
-// One session in the docked panel: who and where, the bound ticket, then two tabs:
-// Overview (now, details, work, runs, provenance) and Messages (thread and composer).
+// One docked panel, with Lead · Session · Chat for the bound project lead.
 const actionsAnchor = ref<HTMLElement | null>(null)
 const composing = ref(false)
 function chatFocus(event: FocusEvent) {
@@ -57,29 +66,24 @@ function chatBlur(event: FocusEvent) {
   // compact frame until focus explicitly leaves this panel.
   if (event.relatedTarget instanceof Node && !root.value?.contains(event.relatedTarget)) composing.value = false
 }
-const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string }>()
+const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string; section?: 'next-up' | null }>()
 const agentRecovery = useAgentRecovery(() => props.view?.session.id)
 const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval] }>()
 watch(() => props.view?.session.id, () => { actionsAnchor.value = null; composing.value = false })
+const s = computed(() => props.view?.session)
 const agents = useAgents()
 const auth = useSession()
-const capability = computed(() => s.value ? chatCapability(s.value) : 'between')
-const capText = computed(() => capabilityWords[displayLanguage()][capability.value])
 const root = ref<HTMLElement>()
 const thread = ref<HTMLElement>()
 const recovery = ref<{ open: () => void }>()
 const removal = ref<{ remove: () => void }>()
 // Same breakpoint as the full-height sheet. Only a managed session with the
 // control capability collapses Recover, Remove and settings into one overflow.
-const phoneMedia = window.matchMedia('(max-width: 720px)')
-const phone = ref(phoneMedia.matches)
-function syncPhone() { phone.value = phoneMedia.matches }
 const managedControls = computed(() => {
   const session = props.view?.session
   return !!session && session.management_mode === 'managed' && session.advertised_capabilities.includes('managed_control_v1')
 })
 // A watched session is read-only (AEON-258): no controls to collapse.
-const compactControls = computed(() => phone.value && managedControls.value && !reported.value?.watch)
 const showRecover = computed(() => {
   const session = props.view?.session
   return !!session && !session.archived_at && (can('harness.recover', session.project_id) || can('harness.force_stop', session.project_id))
@@ -88,21 +92,59 @@ const showRemove = computed(() => {
   const session = props.view?.session
   return !!session && auth.identity?.principal.kind === 'person' && !session.archived_at && can('harness.read', session.project_id)
 })
-// The last tab is remembered per viewer; ?tab=messages deep-links (AEON-273).
-const route = useRoute()
-const router = useRouter()
-const tab = ref<SessionTab>(initialTab(route.query.tab))
-const unread = ref(0)
-function selectTab(next: SessionTab) {
+// AEON-1212: one panel. Choice on opening only; live state never pulls someone
+// off the tab they are reading. Both preferences belong to the signed-in person.
+const route = useRoute(), router = useRouter()
+const projection = useAgentProjection(), leads = useProjectLeads(), pause = useAgentPause(), projects = useProjects()
+const leadPreference = usePreference<{ pinned?: unknown; last?: unknown }>('agents:lead-panel'), workerPreference = usePreference<{ last?: unknown }>('agents:session-panel')
+const tab = ref<PanelTab>('overview'), unread = ref(0), why = ref(''), openedTab = ref<PanelTab>('overview')
+const questionFocus = ref('')
+const managed = ref<InstanceType<typeof ManagedSessionControls>>()
+const chat = ref<InstanceType<typeof SessionChat>>()
+const owner = computed(() => auth.identity ? `${auth.identity.tenant.id}:${auth.identity.principal.id}` : '')
+const lead = computed(() => s.value?.project_id ? leads.views[s.value.project_id]?.lead ?? null : null)
+const isLead = computed(() => !!s.value && lead.value?.session_id === s.value.id)
+const project = computed(() => s.value ? projects.byId(s.value.project_id) : null)
+const pinned = computed(() => leadTab(leadPreference.value.value?.pinned))
+const questions = computed(() => s.value ? projection.asksOf(s.value.id).filter(q => q.project_id === s.value!.project_id) : [])
+const hasQuestion = computed(() => questions.value.length > 0 && auth.identity?.principal.kind === 'person' && can('questions.decide', s.value?.project_id))
+let opening = 0
+function selectTab(next: PanelTab) {
   tab.value = next
-  saveTab(next)
-  if (route.query.tab !== undefined) { const query = { ...route.query }; delete query.tab; void router.replace({ query }) }
+  if (isLead.value) leadPreference.save({ ...leadPreference.value.value, last: next }, 0)
+  else workerPreference.save({ last: next }, 0)
+  if (route.query.tab !== undefined || route.hash === '#next-up') { const query = { ...route.query }; delete query.tab; void router.replace({ query, hash: '' }) }
 }
-watch(() => route.query.tab, value => { if (value === 'messages' || value === 'overview') tab.value = value })
+function pinTab() { if (isLead.value) leadPreference.save({ ...leadPreference.value.value, pinned: pinned.value === tab.value ? null : tab.value }, 0) }
+function showQuestion(id: string) { selectTab('chat'); questionFocus.value = ''; void nextTick(() => { questionFocus.value = id }) }
+watch(() => [s.value?.id, owner.value], async () => {
+  const mine = ++opening, selected = s.value, who = owner.value
+  if (!selected || !who) return
+  questionFocus.value = ''; why.value = ''
+  const scope = projection.watchProjects({ project: selected.project_id })
+  try {
+    await Promise.all([leads.loadLead(selected.project_id), leadPreference.ready, workerPreference.ready, ensurePermissions(selected.project_id), projection.refresh()])
+    if (mine !== opening || selected.id !== s.value?.id || who !== owner.value) return
+    const ids = projection.workersOf(selected.project_id, selected.id)
+    const workers = agents.views.filter(v => ids?.has(v.session.id))
+    const choice = openingTab({ lead: isLead.value, forced: panelQueryTab(route.query.tab, isLead.value), asksYou: hasQuestion.value,
+      held: lead.value?.state === 'waiting_for_room', ended: selected.phase === 'stopped' || !!selected.stopped_at,
+      workerLost: workers.some(v => v.status.state === 'unresponsive'), workerProblem: workers.some(v => v.status.state === 'problem'),
+      pinned: pinned.value, last: (isLead.value ? leadPreference.value.value?.last : workerPreference.value.value?.last) as PanelTab | undefined })
+    tab.value = choice.tab; openedTab.value = choice.tab; why.value = route.hash === '#next-up' || props.section === 'next-up' ? 'Next up, from the queue count' : choice.why
+    if ((route.hash === '#next-up' || props.section === 'next-up') && isLead.value) tab.value = openedTab.value = 'lead'
+  } finally { scope() }
+}, { immediate: true })
+watch(() => [route.query.tab, route.hash, props.section], () => {
+  if (props.section === 'next-up' && isLead.value) { tab.value = openedTab.value = 'lead'; why.value = 'Next up, from the queue count' }
+  const forced = panelQueryTab(route.query.tab, isLead.value)
+  if (forced) { tab.value = forced; openedTab.value = forced; why.value = route.hash === '#next-up' ? 'Next up, from the queue count' : 'from this link' }
+})
+watch(isLead, value => { if (!value && ['lead', 'session'].includes(tab.value)) tab.value = 'overview' })
+onBeforeUnmount(() => { opening++ })
 useVisualViewport(root)
 const ticketState = ref('')
 
-const s = computed(() => props.view?.session)
 const pending = computed(() => s.value?.run_id && s.value.phase !== 'stopped' && s.value.needs_attention !== false ? agents.pending.filter(a => a.agent_principal_id === s.value!.agent_principal_id && approvalRun(a) === s.value!.run_id) : [])
 const recentRuns = computed(() => s.value ? agents.recentRuns(s.value.agent_principal_id).slice(0, 8) : [])
 const run = computed(() => props.view?.run)
@@ -112,7 +154,7 @@ const run = computed(() => props.view?.run)
 const activity = computed(() => props.view ? activityOf(props.view) : null)
 const reported = computed(() => s.value)
 // A watched session has no Messages tab, so it always shows the overview with the live view.
-const pane = computed<SessionTab>(() => reported.value?.watch ? 'overview' : tab.value)
+const pane = computed(() => reported.value?.watch || tab.value === 'session' ? 'overview' : tab.value)
 const hasWork = computed(() => !!(reported.value?.brief || reported.value?.worktree || reported.value?.branch || reported.value?.commits?.length))
 const timeline = computed(() => activity.value?.agent_activity_mode === 'off' ? [] : (activity.value?.activity_history ?? []).flatMap(item => {
   const note = cleanActivityNote(item.note)
@@ -167,19 +209,60 @@ watch(() => s.value?.id, async id => {
   thread.value?.scrollTo({ top: 0 })
   await agents.refreshAgentRuns(s.value.agent_principal_id)
 }, { immediate: true })
-onMounted(() => { root.value?.focus({ preventScroll: true }); phoneMedia.addEventListener('change', syncPhone) })
-onBeforeUnmount(() => phoneMedia.removeEventListener('change', syncPhone))
+onMounted(() => { root.value?.focus({ preventScroll: true }) })
 
 // AEON-291: offer Interrupt and Stop only where they work right now; a session
 // outside the product gets one quiet line instead of disabled buttons.
-const works = (kind: SessionControl['kind']) => !!props.view && !props.controlBlock(props.view, kind)
-const outside = computed(() => !!s.value && s.value.management_mode === 'unmanaged' && s.value.phase !== 'stopped' && !s.value.archived_at)
 const quick = computed(() => !!props.view && quickRemoval(props.view))
 function pickTier(anchor: HTMLElement | null) {
   const view = props.view
   if (view && anchor) serviceTiers.open(view.session, view.name, anchor)
 }
 function control(kind: SessionControl['kind']) { if (props.view && !props.controlBlock(props.view, kind)) emit('control', props.view, kind) }
+const controlSession = computed(() => reported.value || s.value)
+const resumeOffered = computed(() => isLead.value ? lead.value?.state === 'paused' : !!controlSession.value && pausedSession(controlSession.value))
+const managedAccess = () => ({ now: props.now, grant: { person: auth.identity?.principal.kind === 'person', can }, runStatus: controlSession.value?.run_status ?? props.view?.run?.status })
+const interruptReason = computed(() => {
+  const row = controlSession.value
+  if (managed.value?.waiting) return 'A control is pending.'
+  if (!row || !props.view) return 'No session is selected.'
+  if (pausingSession(row)) return 'This session is handing over.'
+  if (managedControls.value) return managedControlAllowed(row, 'interrupt', managedAccess()) ? '' : 'This session cannot be interrupted now.'
+  return props.controlBlock(props.view, 'interrupt')
+})
+const pauseReason = computed(() => {
+  if (isLead.value) return leadActionReason(lead.value, resumeOffered.value ? 'resume' : 'pause')
+  const row = controlSession.value
+  return row && pause.eligible(row, resumeOffered.value ? 'resume' : 'pause') ? '' : 'This session cannot pause or resume now.'
+})
+const stopReason = computed(() => {
+  const row = controlSession.value
+  if (managed.value?.waiting) return 'A control is pending.'
+  if (!row) return 'No session is selected.'
+  if (managedControls.value) return managedControlAllowed(row, 'stop', managedAccess()) ? '' : 'This session cannot be stopped now.'
+  return pause.eligible(row, 'stop') ? '' : 'This session cannot be stopped now.'
+})
+function interrupt() { if (!interruptReason.value) { chat.value?.interrupted(); if (managedControls.value) void managed.value?.interrupt(); else control('interrupt') } }
+async function pauseOrResume(anchor: HTMLElement) {
+  const row = controlSession.value
+  if (!row || pauseReason.value) return
+  if (!isLead.value) { pause.open(resumeOffered.value ? 'resume' : 'pause', [row], anchor); return }
+  if (!resumeOffered.value) { openLeadPause(row.project_id, anchor); return }
+  const id = row.id, who = owner.value, revision = lead.value?.revision
+  if (!leadActionAvailable(lead.value, 'resume')) return
+  try {
+    const next = await leads.start(row.project_id, { revision: lead.value!.revision, generation: lead.value!.generation, session_id: row.id }, 'resume')
+    if (next && id === s.value?.id && who === owner.value && revision !== undefined) toast('Lead restart requested.')
+  } catch (e) { if (id === s.value?.id && who === owner.value) toast(e instanceof Error ? e.message : 'The lead did not restart.', { tone: 'error' }) }
+}
+async function stopSession(anchor: HTMLElement) {
+  const row = controlSession.value
+  if (!row || stopReason.value) return
+  if (!managedControls.value) { pause.open('stop', [row], anchor); return }
+  const id = row.id, who = owner.value, ownership = JSON.stringify(row.process_ownership)
+  const confirmed = await confirmAction({ title: `Stop ${props.view?.name}?`, body: 'Ends this managed session. It cannot be resumed; the next session starts fresh.', danger: true, confirmLabel: 'Stop session' })
+  if (confirmed && id === s.value?.id && who === owner.value && ownership === JSON.stringify(controlSession.value?.process_ownership) && !stopReason.value) void managed.value?.stop()
+}
 defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 </script>
 
@@ -187,48 +270,32 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   <aside ref="root" class="session-panel" :class="{ composing }" aria-label="Session details" tabindex="-1" @focusin="chatFocus" @focusout="chatBlur">
     <!-- The identity stays in view while runs and messages scroll below it. -->
     <header class="panel-head">
-      <div class="head-top">
+      <div class="pane-bar">
         <template v-if="view && !loading">
           <AgentGlyph :view="view" :size="36" />
-          <h2 class="name">{{ view.name }}</h2>
-          <AgentStateLabel :state="view.status.state" :label="view.status.label" />
+          <div class="pane-title"><h2 class="name">{{ view.name }}<span v-if="isLead" class="role">Lead</span></h2><p><AgentStateLabel :state="view.status.state" :label="view.status.label" /><span class="pt-sub" :title="[view.projectTitle, modelLine, view.harness, view.session.host].filter(Boolean).join(' · ')">{{ [view.projectTitle, modelLine, view.harness, view.session.host].filter(Boolean).join(' · ') }}</span></p></div>
+          <span v-if="!reported?.watch" class="hd-acts" role="group" aria-label="Session actions">
+            <button type="button" class="btn sm act ghost" aria-label="Interrupt" :data-tip="interruptReason || 'Interrupt: ends its current step'" :disabled="!!interruptReason" @click="interrupt"><AppIcon name="interrupt" :size="13" /><span class="act-l">Interrupt</span></button>
+            <button type="button" class="btn sm act ghost" :aria-label="resumeOffered ? 'Resume' : isLead ? 'Pause…' : 'Pause'" :data-tip="pauseReason || (resumeOffered ? 'Resume through the start checks' : isLead ? 'Pause: workers finish their step' : 'Pause: finishes its step, then holds')" :disabled="!!pauseReason || !!(s && leads.busy[s.project_id])" @click="pauseOrResume($event.currentTarget as HTMLElement)"><AppIcon :name="resumeOffered ? 'play' : 'pause'" :size="13" /><span class="act-l">{{ resumeOffered ? 'Resume' : isLead ? 'Pause…' : 'Pause' }}</span></button>
+            <button type="button" class="btn sm act ghost danger-ghost" aria-label="Stop…" :disabled="!!stopReason" :data-tip="stopReason || 'Stop: opens the confirmation'" @click="stopSession($event.currentTarget as HTMLElement)"><AppIcon name="stop" :size="13" /><span class="act-l">Stop…</span></button>
+          </span>
+          <button type="button" class="icon-btn sm flat pane-more" aria-label="More session actions" aria-haspopup="menu" :aria-expanded="!!actionsAnchor" @click="actionsAnchor = $event.currentTarget as HTMLElement"><AppIcon name="more" :size="16" /></button>
+          <FloatingPanel v-if="actionsAnchor" :anchor="actionsAnchor" align="end" label="More session actions" @close="actionsAnchor = null">
+            <div class="panel-menu" role="menu">
+              <button v-if="agentRecovery.action(view.session)" type="button" role="menuitem" class="btn ghost" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name); actionsAnchor = null"><AppIcon name="refresh" :size="16" />{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</button>
+              <button v-if="!serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="btn ghost" @click="pickTier(actionsAnchor); actionsAnchor = null"><AppIcon name="gauge" :size="16" />Change tier…</button>
+              <button v-if="showRecover" type="button" role="menuitem" class="btn ghost" @click="recovery?.open(); actionsAnchor = null"><AppIcon name="wrench" :size="16" />Recover</button>
+              <button v-if="showRemove" type="button" role="menuitem" class="btn ghost" @click="removal?.remove(); actionsAnchor = null"><AppIcon name="trash" :size="16" />{{ quick ? 'Remove' : 'Remove…' }}</button>
+            </div>
+          </FloatingPanel>
+          <SessionRecovery ref="recovery" hide-trigger :session="view.session" />
+          <RemoveSessionDialog ref="removal" hide-trigger :session="view.session" :label="view.name" :quick="quick" />
         </template>
-        <span class="spacer" />
-        <button type="button" class="icon-btn sm flat" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
+        <button type="button" class="icon-btn sm flat pane-close" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
       </div>
-      <div v-if="view && !loading" class="head-sub">
-        <TicketPeekLink v-if="view.ticket" class="ticket-detail" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title"><span class="ticket-chip">{{ view.ticket.key }}</span><span class="head-ticket">{{ view.ticket.title }}</span></TicketPeekLink>
-        <span v-if="ticketState" class="ticket-status">{{ ticketState }}</span>
-      </div>
-      <div v-if="view && !loading && !reported?.watch" class="chat-identity">
-        <span class="chat-setup" :title="[view.harness, view.model, view.session.host].filter(Boolean).join(' · ')">{{ view.harness }}<template v-if="view.model"> · {{ view.model }}</template><template v-if="view.session.host"> · {{ view.session.host }}</template></span>
-        <button type="button" class="capability" :class="capability" :data-tip="capText[1]" :aria-label="capText[0]"><AppIcon :name="capability === 'native' ? 'bolt' : capability === 'abort' ? 'alert' : 'queue'" :size="12" /><span>{{ capText[0] }}</span></button>
-      </div>
-      <div v-if="view && !loading && !compactControls" class="head-actions">
-
-        <span class="spacer" />
-        <button v-if="agentRecovery.action(view.session)" class="btn sm ghost" type="button" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name)"><AppIcon name="refresh" :size="14" />{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</button>
-        <SessionPauseActions v-if="!reported?.watch" :session="reported || view.session" />
-        <button v-if="!reported?.watch && !view.session.advertised_capabilities.includes('managed_control_v1') && works('interrupt') && !pausingSession(view.session)" class="icon-btn sm flat" type="button" aria-label="More session actions" aria-haspopup="menu" :aria-expanded="!!actionsAnchor" @click="actionsAnchor = $event.currentTarget as HTMLElement"><AppIcon name="more" /></button>
-        <FloatingPanel v-if="actionsAnchor" :anchor="actionsAnchor" align="end" label="More session actions" @close="actionsAnchor = null"><div role="menu"><button class="btn sm ghost" type="button" role="menuitem" @click="control('interrupt'); actionsAnchor = null"><AppIcon name="interrupt" />Interrupt this step</button></div></FloatingPanel>
-        <SessionRecovery v-if="!reported?.watch" :session="view.session" />
-        <RemoveSessionDialog :session="view.session" :label="view.name" :quick="quick" />
-      </div>
-      <SessionPauseActions v-if="view && !loading && compactControls && !reported?.watch" :session="reported || view.session" />
-      <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" :run-status="view.run?.status">
-        <template v-if="compactControls" #more="{ anchor }">
-          <button v-if="view && agentRecovery.action(view.session)" type="button" role="menuitem" class="menu-item" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name)"><AppIcon name="refresh" :size="16" /><span class="mi-text">{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</span></button>
-          <button v-if="view && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="menu-item" :disabled="!!serviceTiers.state(view.session).pending" @click="pickTier(anchor)"><AppIcon name="gauge" :size="16" /><span class="mi-text">Change tier…</span></button>
-          <button v-if="showRecover" type="button" role="menuitem" class="menu-item" @click="recovery?.open()"><AppIcon name="wrench" :size="16" /><span class="mi-text"><span>Recover</span></span></button>
-          <hr v-if="showRemove" class="menu-sep">
-          <button v-if="showRemove" type="button" role="menuitem" class="menu-item" :aria-label="`Remove ${view.name}`" @click="removal?.remove()"><AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quick ? 'Remove' : 'Remove…' }}</span></span></button>
-        </template>
-      </ManagedSessionControls>
-      <SessionRecovery v-if="view && !loading && compactControls" ref="recovery" hide-trigger :session="view.session" />
-      <RemoveSessionDialog v-if="view && !loading && compactControls" ref="removal" hide-trigger :session="view.session" :label="view.name" :quick="quick" />
-      <SessionTabs v-if="view && !loading && !reported?.watch" :selected="tab" :unread="tab === 'messages' ? 0 : unread" @select="selectTab" />
-      <p v-if="view && !loading && view.session.agent_recovery" class="outside-note">{{ view.session.agent_recovery.detail }}</p>
-      <p v-else-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
+      <p v-if="isLead && why" class="why"><AppIcon name="sparkle" :size="12" /><span>Opened on <b>{{ TAB_LABEL[openedTab] }}</b>: {{ why }}</span></p>
+      <p v-if="managed?.feedback || managed?.error" class="session-feedback" :role="managed?.error ? 'alert' : 'status'">{{ managed.error || managed.feedback }}</p>
+      <SessionTabs v-if="view && !loading && !reported?.watch" :selected="tab" :lead="isLead" :pinned="pinned" :unread="tab === 'chat' ? 0 : Math.max(unread, hasQuestion ? questions.length : 0)" @select="selectTab" @pin="pinTab" />
     </header>
 
     <!-- Until the first load completes the body stays a placeholder, so runs and
@@ -245,7 +312,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       </div>
     </div>
 
-    <div v-else v-show="pane === 'overview'" id="session-panel-overview" ref="thread" class="scroll" role="tabpanel" aria-labelledby="session-tab-overview">
+    <LeadContent v-if="view && !loading && isLead && project" v-show="tab === 'lead'" :key="`${owner}:${view.session.id}`" :project-id="view.session.project_id" :project-key="project.routeKey" :route-key="project.routeKey" :session-started="view.session.created_at" :section="tab === 'lead' && (route.hash === '#next-up' || section === 'next-up') ? 'next-up' : undefined" role="tabpanel" id="session-panel-lead" aria-labelledby="session-tab-lead" @chat="showQuestion" />
+    <div v-else-if="!loading && !view" />
+    <div v-if="view && !loading" v-show="pane === 'overview'" id="session-panel-overview" ref="thread" class="scroll" role="tabpanel" aria-labelledby="session-tab-overview">
       <div v-if="pending.length" class="callout" role="note">
         <AppIcon name="shield" :size="15" />
         <div class="callout-text">
@@ -280,6 +349,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <DeliveryRating v-if="s && s.phase === 'stopped'" :session-id="s.id" />
       </section>
 
+      <ManagedSessionControls v-if="!reported?.watch" ref="managed" :session="reported || view.session" :now="now" :run-status="view.run?.status" />
       <ServiceTierBlock :key="view.session.id" :session="view.session" :name="view.name" />
 
       <section class="block first" aria-labelledby="setup-title">
@@ -340,8 +410,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 
       <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
     </div>
-    <SessionChat v-if="view && !loading && !reported?.watch" v-show="tab === 'messages'" id="session-panel-messages" :view="view" :now="now" :can-write="canWrite" :active="tab === 'messages'"
-      :interrupt-block="controlBlock(view, 'interrupt')" role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" @interrupt="control('interrupt')" />
+    <SessionChat v-if="view && !loading && !reported?.watch" ref="chat" v-show="tab === 'chat'" id="session-panel-messages" :view="view" :now="now" :can-write="canWrite" :active="tab === 'chat'"
+      :questions="questions" :question-focus="questionFocus" :interrupt-block="interruptReason" role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" @interrupt="interrupt" />
   </aside>
 </template>
 
@@ -461,13 +531,42 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .head-top .icon-btn { width: 40px; height: 40px; }
   /* Compact only after entering the composer. Keep that frame while focus
      moves to thread actions, so focusing Retry/Copy cannot move the click. */
-  .session-panel.composing .head-actions,
-  .session-panel.composing .head-sub,
-  .session-panel.composing .managed-controls { display: none; }
-  .scroll { padding: 16px 18px 24px; }
-  .telemetry { grid-template-columns: 1fr 1fr; }
-  .run-row { grid-template-columns: 88px minmax(0, 1fr) 56px; }
-  .run-tokens, .run-when { display: none; }
   @media (prefers-reduced-motion: no-preference) { .session-panel { animation-name: sheet-in; } @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } } }
 }
+</style>
+
+<style scoped>
+.session-panel { container: pane / inline-size; }
+.panel-head { position: relative; }
+.session-feedback { position: absolute; z-index: 2; top: 100%; left: 12px; right: 12px; padding: 8px 12px; margin: 0; background: var(--surface-raised); box-shadow: var(--shadow-pop); font-size: 12px; overflow-wrap: anywhere; }
+.panel-head { padding: 0; border-bottom: 0; }
+.pane-bar { display: flex; align-items: center; gap: 12px; padding: 14px 14px 10px 16px; }
+.pane-title { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.pane-title h2 { display: flex; align-items: center; gap: 8px; font-size: 17px; margin: 0; }
+.pane-title p { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 12.5px; color: var(--ink-3); margin: 0; }
+.pt-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.role { font-size: 11px; color: var(--ink-3); font-weight: 500; }
+.hd-acts { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.act { gap: 6px; min-height: 32px; }
+.danger-ghost { color: var(--danger); }
+.why { display: flex; align-items: center; gap: 7px; margin: 0 16px 6px; font-size: 12px; color: var(--ink-3); }
+.why svg { flex: none; color: var(--teal-ink); }
+.why b { color: var(--ink-2); font-weight: 600; }
+.pane-more, .pane-close { flex: none; }
+.panel-menu { display: grid; gap: 2px; }
+.panel-menu .btn { justify-content: flex-start; min-height: 44px; }
+@container pane (max-width: 640px) {
+  .act { width: 32px; padding: 0; justify-content: center; }
+  .act-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .pane-bar { gap: 8px; }
+}
+@media (max-width: 720px) {
+  .pane-bar { flex-wrap: wrap; row-gap: 4px; padding: max(8px, env(safe-area-inset-top)) 10px 8px 12px; }
+  .hd-acts { order: 5; flex: 1 1 100%; padding-left: 44px; }
+  .pane-title h2 .role { display: none; }
+  .pane-more, .pane-close, .act { min-width: 44px; min-height: 44px; }
+  .act { padding: 0; }
+  .why { margin: 0 12px 6px; }
+}
+@media (pointer: coarse) { .act { min-width: 44px; min-height: 44px; } }
 </style>

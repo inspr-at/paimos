@@ -368,7 +368,9 @@
         "web/src/components/agents/ChatCodeBlock.vue",
         "web/src/components/lead/LeadAdoption.vue",
         "web/src/components/agents/AgentChores.vue",
-        "web/src/components/agents/DecisionDeskPanel.vue"
+        "web/src/components/agents/DecisionDeskPanel.vue",
+        "web/src/components/lead/LeadContent.vue",
+        "web/src/components/agents/SessionQuestion.vue"
       ]
     },
     {
@@ -388,7 +390,10 @@
         "web/tests/access-refresh-panels.unit.test.ts",
         "web/src/stores/decisionDesk.ts",
         "web/src/lib/shortcuts.ts",
-        "web/tests/shortcuts.unit.test.ts"
+        "web/tests/shortcuts.unit.test.ts",
+        "web/src/lib/leadPanel.ts",
+        "web/tests/aeon-1212-lead-panel.spec.ts",
+        "web/tests/lead-panel.test.ts"
       ],
       "exclude": [
         "web/src/views/**",
