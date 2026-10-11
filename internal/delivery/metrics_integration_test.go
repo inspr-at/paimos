@@ -91,8 +91,8 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 	// Risk: an unconfigured metric consumer rejects an authenticated delivery
 	// on an unnecessary Actions read, or suppresses linked checks/queue facts.
 	for _, tc := range []struct {
-		name                                    string
-		linked, queue, suitePR, unrelated, fail bool
+		name                                                    string
+		linked, queue, projectedQueue, suitePR, unrelated, fail bool
 	}{
 		{name: "read_available"},
 		{name: "read_unavailable", fail: true},
@@ -100,6 +100,7 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 		{name: "linked_checks_empty_suite_pulls", linked: true},
 		{name: "linked_checks_explicit_suite_pull", linked: true, suitePR: true},
 		{name: "linked_queue_empty_suite_pulls", linked: true, queue: true},
+		{name: "linked_queue_projected_head", linked: true, queue: true, projectedQueue: true},
 		{name: "linked_read_failure_then_redelivery", linked: true, fail: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,6 +121,9 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 			}
 			if tc.queue {
 				head, branch, event, stepKey = strings.Repeat("c", 40), "gh-readonly-queue/main/pr-7-group", "merge_group", "queue"
+			}
+			if tc.projectedQueue {
+				auditSend(t, f, "merge_group", "unconfigured-queue", map[string]any{"action": "checks_requested", "merge_group": map[string]any{"head_sha": head, "base_sha": p.Base, "head_ref": "refs/heads/" + branch}}, 204)
 			}
 			needsFlow := tc.linked && !tc.unrelated
 			unavailable := tc.fail
@@ -148,6 +152,10 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 				}
 				return nil
 			})
+			suiteBranch := branch
+			if tc.projectedQueue {
+				suiteBranch = ""
+			}
 			pulls := []any{}
 			if tc.suitePR {
 				pulls = append(pulls, map[string]any{"number": 7})
@@ -156,7 +164,7 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 				"action":       "completed",
 				"installation": map[string]any{"id": 456},
 				"repository":   map[string]any{"full_name": f.m.config.Repository, "default_branch": "main"},
-				"check_suite":  map[string]any{"id": 900, "head_sha": head, "head_branch": branch, "status": "completed", "app": map[string]any{"slug": "github-actions"}, "pull_requests": pulls},
+				"check_suite":  map[string]any{"id": 900, "head_sha": head, "head_branch": suiteBranch, "status": "completed", "app": map[string]any{"slug": "github-actions"}, "pull_requests": pulls},
 			}
 			raw, err := json.Marshal(body)
 			if err != nil {
@@ -225,6 +233,20 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("unconfigured_pull_and_review", func(t *testing.T) {
+		f := newFixture(t)
+		g := &metricsFake{auditFake: &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}}
+		g.respond = func(path string) (any, error) { t.Fatalf("unexpected metric read: %s", path); return nil, errRead }
+		f.m.github = g
+		p := f.pull()
+		f.gh.pulls[7] = p
+		auditSend(t, f, "pull_request", "no-source-pull", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": f.at.Add(-time.Hour), "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+		auditSend(t, f, "status", "no-source-review", map[string]any{"sha": p.Head, "state": "success", "context": "aeon/review", "created_at": f.at}, 204)
+		if runs, pulls, marks := metricCounts(t, f); runs+pulls+marks != 0 || len(g.calls) != 0 {
+			t.Fatalf("unconfigured pull/review metrics: runs=%d pulls=%d marks=%d reads=%d", runs, pulls, marks, len(g.calls))
+		}
+	})
 }
 
 func TestDeliveryMetricsWebhookRecordsEachEventKind(t *testing.T) {

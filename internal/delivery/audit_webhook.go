@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -13,6 +14,25 @@ import (
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/jackc/pgx/v5"
 )
+
+type webhookOutcome string
+
+const (
+	webhookRecorded        webhookOutcome = "recorded"
+	webhookNotConfigured   webhookOutcome = "not_configured"
+	webhookNothingToRecord webhookOutcome = "nothing_to_record"
+	webhookFailed          webhookOutcome = "failed"
+)
+
+// Preserve the original error for content-free classification while naming
+// the failed downstream step instead of flattening it into the audit label.
+type webhookStepError struct {
+	step string
+	err  error
+}
+
+func (e *webhookStepError) Error() string { return e.err.Error() }
+func (e *webhookStepError) Unwrap() error { return e.err }
 
 // The existing ingress remains the HMAC/installation boundary and projection
 // owner. Delay its status until the additional audit work commits. A failed
@@ -91,6 +111,7 @@ func (m *Module) auditWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var f *MergeFact
+	step := "merge_audit"
 	switch name {
 	case "pull_request":
 		if e.Action == "closed" && e.Pull.Merged && e.Repository.Default != "" {
@@ -108,6 +129,7 @@ func (m *Module) auditWebhook(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case "check_run", "status":
+		step = "check_audit"
 		sha := e.CheckRun.Head
 		c := Check{Name: e.CheckRun.Name, Status: e.CheckRun.Status, Conclusion: e.CheckRun.Conclusion}
 		if name == "status" {
@@ -125,15 +147,21 @@ func (m *Module) auditWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 	if err == nil {
 		// AEON-993 timing facts; a failed read or write stays retryable.
-		err = m.metricsEvent(ctx, name, raw)
+		step = "metrics"
+		_, err = m.metricsEvent(ctx, name, raw)
 	}
 	if err == nil && name == "workflow_run" {
 		// Live checks stay out of the metric tables. Completed suites still
 		// write those facts, and the flow rows converge on redelivery.
+		step = "flow"
 		err = m.flowFromWorkflowRun(ctx, raw)
 	}
 	if err != nil {
-		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
+		var failed *webhookStepError
+		if errors.As(err, &failed) {
+			step = failed.step
+		}
+		m.rejectWebhook(w, r, e.Action, step, 502, err)
 		return
 	}
 	w.WriteHeader(204)
