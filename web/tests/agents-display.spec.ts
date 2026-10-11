@@ -217,7 +217,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
 }
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
-  test(`${width} ${theme}: existing Agents layout shows the report source and stable capacity controls`, async ({ page }) => {
+  test(`${width} ${theme}: existing Agents layout shows the report source and stable capacity controls`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
     await setup(page, theme)
@@ -244,6 +244,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await row(page, 2).locator('.agent-link').click()
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('.now-eta .report-source')).toBeVisible()
+    // Each action in the sheet's head keeps its whole label (AEON-1062): on a phone a row that is too
+    // narrow wraps, so no label spills past its button or the sheet's edge (the panel overflow below).
+    const actions = panel.locator('.head-actions .btn')
+    expect(await actions.count()).toBeGreaterThan(0)
+    for (const action of await actions.all()) expect(await action.evaluate(el => el.scrollWidth - el.clientWidth), await action.innerText()).toBeLessThanOrEqual(1)
+    await panel.screenshot({ path: testInfo.outputPath(`session-sheet-${width}-${theme}.png`) })
     // The Messages tab is Chat since AEON-977.
     await expectStableControls({
       controls: { overview: panel.getByRole('tab', { name: 'Overview' }), chat: panel.getByRole('tab', { name: 'Chat' }), tabs: panel.getByRole('tablist'), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel },
