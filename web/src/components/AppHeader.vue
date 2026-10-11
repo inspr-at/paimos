@@ -483,10 +483,10 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 @media (max-width: 1100px) { .search-pill { width: 200px; } }
 @media (max-width: 900px) { .search-pill { width: 180px; } }
 /* Just wider than the phone header, the fixed pill is a few pixels too wide for the
-   row and gives way with the trail; the row's gaps tighten, so the Desk's split place
-   fits beside Business and a project's density switch (AEON-1214). */
+   row and gives way with the trail; the row takes the phone header's gaps, so the
+   Desk's split place fits beside Business and a project's density switch (AEON-1214). */
 @media (max-width: 720px) {
-  .app-header { gap: 8px; }
+  .app-header { gap: 4px; }
   .search-pill { flex-shrink: 1; }
 }
 @media (max-width: 600px) {

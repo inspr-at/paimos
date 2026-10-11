@@ -49,7 +49,7 @@ The split place is wider than a plain place. On a project's tickets, where it
 shares the row with Business and the density switch, the header still never
 runs past the window: the breadcrumb gives way first, then the search pill. The
 pill drops its keys, then its label, and keeps its magnifier. Just above phone
-width the gaps between the header's controls tighten.
+width the header's controls sit as close as on a phone.
 
 ## Phones
 
