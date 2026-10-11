@@ -20,7 +20,7 @@ func TestCatalogSecurityRoutesHonorOverridesAndAuthorFamily(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "security-catalog", "person", "Owner", []string{"admin"})
 	foreign := makePrincipal(t, "foreign-security-catalog", "person", "Other", []string{"admin"})
-	profile := codexProfile(t, admin)
+	var profile string
 	until := time.Now().UTC().Truncate(time.Microsecond).Add(time.Hour)
 	seed := func(tenantID string, fn func(pgx.Tx) error) {
 		t.Helper()
@@ -29,6 +29,10 @@ func TestCatalogSecurityRoutesHonorOverridesAndAuthorFamily(t *testing.T) {
 		}
 	}
 	seed(admin.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier)
+		 VALUES($1,'security-sol','1','codex','openai','gpt-6.1-sol','xhigh','frontier') RETURNING id::text`, admin.TenantID).Scan(&profile); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,until_at,set_by)
 		 SELECT tenant_id,harness,model,'Owner override',$2,$3 FROM model_profiles WHERE id=$1`, profile, until, admin.ID)
 		return err
