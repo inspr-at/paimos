@@ -395,6 +395,127 @@ func TestPreferenceStoreCanonicalPeopleAndGuards(t *testing.T) {
 	})
 }
 
+// Risk: queued rounds lose their previous-family fallback or saved review row
+// while the Models migration is pending, misreport a plan-off cause, or bypass
+// an explicit order or lock.
+func TestModelsV2RoundRoutingCompatibility(t *testing.T) {
+	admin, _ := boardFixture(t)
+	boardDecode[boardDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/board", nil, ""), 200)
+	runner := addPrincipal(t, admin.TenantID, "agent", "Round runner", []string{"admin"})
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		ctx := tenant.WithPrincipal(t.Context(), admin)
+		now, err := dbNow(ctx, tx)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE model_pref_profiles SET thinking='deep' WHERE scope='workspace'`); err != nil {
+			return err
+		}
+		for column, rank := range map[string][]string{
+			"backend":       {"openai:sol", "anthropic:opus"},
+			"design":        {"anthropic:opus", "openai:sol"},
+			"review:openai": {"anthropic:opus", "openai:sol"},
+		} {
+			if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank)
+ SELECT $1,id,$2,'first',$3 FROM model_pref_profiles WHERE scope='workspace'`, admin.TenantID, column, rank); err != nil {
+				return err
+			}
+		}
+		schedule := capacity.DefaultSchedule("UTC")
+		schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+		raw, _ := json.Marshal(schedule)
+		for _, harness := range []string{"codex", "claude"} {
+			var account string
+			if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner)
+ VALUES($1,$2,$2,'round-fixture',$3,'Round fixture',$4,true,'round-generation',$5) RETURNING id::text`, admin.TenantID, harness, runner.ID, now, admin.ID).Scan(&account); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model)
+ VALUES($1,$2,$3,$4,'requests',1000,'unrestricted')`, admin.TenantID, account, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule)
+ VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, admin.TenantID, admin.ID, account, raw); err != nil {
+				return err
+			}
+		}
+		var project, ticket string
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'ROUND-1','Round project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,fields) SELECT $1,id,'ROUND-2','Round work',$2,'{"area":"backend","estimate_hours":4}' FROM node_kinds WHERE slug='work' RETURNING id::text`, admin.TenantID, project).Scan(&ticket); err != nil {
+			return err
+		}
+		for _, tc := range []struct{ kind, situation, column, family, effort string }{
+			{"first_build", "first", "backend", "openai", "xhigh"},
+			{"fix", "stuck", "backend", "anthropic", "xhigh"},
+			{"review", "first", "review:openai", "anthropic", "xhigh"},
+		} {
+			t.Run(tc.kind, func(t *testing.T) {
+				q := WorkQuery{TicketID: ticket, ProjectID: project, FixRound: 4, PreviousFamily: "openai", AuthorFamily: "openai"}
+				got, design, err := ResolveRound(ctx, tx, admin, q, tc.kind, true, now)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if design || got.Profile == nil || got.Profile.Family != tc.family || got.Profile.Effort != tc.effort || got.Trace.Column != tc.column || got.Trace.Situation != tc.situation || got.OwnerRequired || len(got.Trace.QualifyingAccountIDs) == 0 {
+					t.Fatalf("round lost compatibility: %+v; profile %+v", got, got.Profile)
+				}
+			})
+		}
+		t.Run("plan off cause", func(t *testing.T) {
+			q := WorkQuery{TicketID: ticket, ProjectID: project, OffHarnesses: []string{"claude"}}
+			got, _, err := ResolveRound(ctx, tx, admin, q, "design", true, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Profile == nil || got.Profile.Harness != "codex" || len(got.Trace.Held) == 0 || got.Trace.Held[0].Line != "anthropic:opus" || !strings.Contains(got.Trace.Held[0].Reason, "off in the plan") {
+				t.Fatalf("plan-off fallback lost its cause: %+v", got)
+			}
+		})
+		q := WorkQuery{TicketID: ticket, ProjectID: project, FixRound: 4}
+		checkStuck := func() {
+			t.Helper()
+			got, _, err := ResolveRound(ctx, tx, admin, q, "fix", true, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Profile == nil || got.Profile.Family != "openai" || got.Trace.Situation != "stuck" {
+				t.Fatalf("explicit order or lock was reordered: %+v; profile %+v", got, got.Profile)
+			}
+		}
+		// Ordinary Models routing keeps the row when no previous family is sent.
+		checkStuck()
+		q.PreviousFamily = "openai"
+		if _, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank)
+ SELECT $1,id,'backend','stuck',ARRAY['openai:sol','anthropic:opus'] FROM model_pref_profiles WHERE scope='workspace'`, admin.TenantID); err != nil {
+			return err
+		}
+		checkStuck()
+		if _, err := tx.Exec(ctx, `DELETE FROM model_pref_orders WHERE column_key='backend' AND situation='stuck'`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO model_rules(tenant_id,scope,column_key,line,lock,why)
+ VALUES($1,'workspace','backend','openai:sol','top','Freeze the workspace order')`, admin.TenantID); err != nil {
+			return err
+		}
+		checkStuck()
+		// An exhausted saved review chain must Wait instead of silently running
+		// Automatic or the build Default; its author's family never qualifies.
+		if _, err := tx.Exec(ctx, `UPDATE model_pref_orders SET rank=ARRAY['openai:sol'] WHERE column_key='review:openai'`); err != nil {
+			return err
+		}
+		q.AuthorFamily = "openai"
+		waited, _, err := ResolveRound(ctx, tx, admin, q, "review", true, now)
+		if err != nil {
+			return err
+		}
+		if waited.Profile != nil || !waited.OwnerRequired || waited.Trace.Blocked == "" || len(waited.Trace.QualifyingAccountIDs) != 0 || waited.Trace.OrderMode != reviewOrderSaved || waited.Trace.Column != "review:openai" {
+			t.Fatalf("saved review chain escaped Wait or family policy: %+v", waited)
+		}
+		return nil
+	})
+}
+
 // Risk: the resolver ignores Models, tries another model before its sibling
 // route, admits an author's family/security Anthropic, or blocks unknown quota.
 func TestModelsV2RolesRoutesAndWait(t *testing.T) {
