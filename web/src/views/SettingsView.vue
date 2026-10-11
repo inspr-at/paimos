@@ -7,7 +7,7 @@ import '../styles/settings.css'
 import { can, permissionsKnown, permissionsRevoked, refreshPermissions } from '../lib/authz'
 import AppIcon from '../components/AppIcon.vue'
 import BizIcon, { type BizIconName } from '../components/business/BizIcon.vue'
-import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId, type SettingsSection } from '../lib/settings'
+import { SETTINGS_GROUPS, SETTINGS_SECTIONS, adminOnly, sectionGranted, sectionOf, visibleSections, type SectionId, type SettingsSection } from '../lib/settings'
 import { useSession } from '../stores/session'
 import { textForKinds } from '../lib/workKindsCopy'
 import { doctrineInbox } from '../lib/doctrineInbox'
@@ -87,7 +87,7 @@ useFooterSummary(() => {
 })
 const meta = computed(() => SETTINGS_SECTIONS.find(section => section.id === current.value)!)
 const who = computed(() => current.value === 'models' ? modelText(meta.value.who, 'Die eigenen Modelle werden hier gewählt. Admins setzen auch den Standard für alle und können eine Wahl sperren.') : meta.value.who)
-const granted = computed(() => meta.value.permission ? anyOf(meta.value.permission, permission => can(permission)) : !meta.value.admin || admin.value)
+const granted = computed(() => sectionGranted(meta.value, admin.value, permission => can(permission)))
 watch([current, granted, mountedOwner], ([section, ok]) => { if (ok) shown.add(section) }, { immediate: true })
 const allowed = computed(() => granted.value || (permissionsRevoked() && shown.has(current.value)))
 // A permission-gated section waits for my permissions before it says no.
@@ -181,7 +181,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
             <RouterLink v-for="section in group.sections" :key="section.id" :to="`/settings/${section.id}`" class="section-link" :aria-current="section.id === current ? 'page' : undefined" @click="sectionClick">
               <span class="link-icon" aria-hidden="true"><BizIcon :name="ICON[section.id]" :size="15" /></span>
               <span class="link-text"><span class="link-label">{{ sectionLabel(section) }}</span><span v-clip-tip="sectionSummary(section)" class="link-summary">{{ sectionSummary(section) }}</span></span>
-              <span v-if="section.admin && !section.permission" class="admin-mark" role="img" aria-label="Admins only" data-tip="Only workspace admins see this"><AppIcon name="shield" :size="12" /></span>
+              <span v-if="adminOnly(section)" class="admin-mark" role="img" aria-label="Admins only" data-tip="Only workspace admins see this"><AppIcon name="shield" :size="12" /></span>
               <span v-else-if="navNeeds(section.id)" class="nav-n" role="img" :aria-label="`${navNeeds(section.id)} ${navNeeds(section.id) === 1 ? 'thing needs' : 'things need'} you`">{{ navNeeds(section.id) }}</span>
               <span v-else-if="section.fresh" class="new-mark">{{ modelText('New', 'Neu') }}</span>
               <span v-else-if="section.id === 'agent-rules' && doctrineInbox.pending" class="waiting-dot" role="img" :aria-label="`${doctrineInbox.pending} doctrine ${doctrineInbox.pending === 1 ? 'proposal waits' : 'proposals wait'}`" :data-tip="`${doctrineInbox.pending} doctrine proposals wait for review`" />
@@ -190,7 +190,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
         </nav>
       </div>
       <div class="body" :class="{ wide: current === 'access' || current === 'agent-rules' }">
-        <p v-if="allowed && current !== 'kinds' && current !== 'policies'" class="who"><AppIcon :name="meta.admin && !meta.permission ? 'shield' : 'eye'" :size="14" /><span>{{ who }}</span></p>
+        <p v-if="allowed && current !== 'kinds' && current !== 'policies'" class="who"><AppIcon :name="adminOnly(meta) ? 'shield' : 'eye'" :size="14" /><span>{{ who }}</span></p>
         <nav v-if="allowed && current === 'theme'" class="theme-links" aria-label="Theme cards"><RouterLink to="/settings/theme#themes">Themes</RouterLink><RouterLink to="/settings/theme#colours">Colours</RouterLink><RouterLink to="/settings/theme#agents">Agents</RouterLink></nav>
         <component :is="VIEW[current]" v-if="allowed" :key="`${mountedOwner}/${current}`" />
         <div v-else-if="deciding" class="set-skeleton" role="status" aria-label="Loading"><span class="skeleton" /><span class="skeleton" /></div>

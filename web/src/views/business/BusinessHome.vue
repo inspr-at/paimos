@@ -15,17 +15,18 @@ import { useSession } from '../../stores/session'
 import AppIcon from '../../components/business/BizIcon.vue'
 import BusinessPage from '../../components/business/BusinessPage.vue'
 import { settingsLink } from '../../lib/settings'
-import SetupCard from '../../components/business/SetupCard.vue'
+import PartsStatus from '../../components/business/PartsStatus.vue'
+import { SETUP_PLACE } from '../../components/business/areas'
 
 // A calm desk for the business side: your week of hours and where it went, the
-// periods waiting for an admin's approval, and the rates in force.
+// periods waiting for an admin's approval, and the rates in force. It shows which
+// parts are on and links to Settings › Business, the only place that sets them up.
 const business = useBusiness()
 const customers = useCustomers()
 const projects = useProjects()
 const session = useSession()
 const router = useRouter()
 const now = ref(Date.now())
-const managing = ref(false)
 const me = computed(() => session.identity?.principal.id ?? '')
 
 // ---------- Your week ----------
@@ -118,12 +119,11 @@ const offered = computed(() => business.anyOpen)
       <span v-else class="summary-loading"><span class="skeleton summary-skeleton" /><span class="skeleton summary-skeleton line2" /></span>
     </template>
     <template v-if="business.admin && offered" #actions>
-      <button type="button" class="btn sm" :aria-pressed="managing" @click="managing = !managing"><AppIcon name="sliders" :size="14" />Manage parts</button>
-      <RouterLink class="btn sm ghost" :to="settingsLink('business')">Business settings<AppIcon name="arrow" :size="13" /></RouterLink>
+      <RouterLink class="btn sm ghost" :to="settingsLink('business', 'parts')">Set up in {{ SETUP_PLACE }}<AppIcon name="arrow" :size="13" /></RouterLink>
     </template>
 
     <div v-if="!offered" class="intro">
-      <SetupCard v-if="business.admin" variant="intro" />
+      <PartsStatus v-if="business.admin" variant="intro" />
       <div v-else class="closed glass-card">
         <span class="state-icon"><AppIcon name="briefcase" :size="18" /></span>
         <h2>Business is not set up for this workspace</h2>
@@ -133,7 +133,7 @@ const offered = computed(() => business.anyOpen)
 
     <div v-else class="layout">
       <div class="main-col">
-        <SetupCard v-if="managing || (business.admin && !business.allOpen)" :variant="managing ? 'manage' : 'intro'" @done="managing = false" />
+        <PartsStatus v-if="business.admin && !business.allOpen" variant="status" />
 
         <section v-if="business.open.hours" class="card glass-card" aria-labelledby="week-title">
           <header class="card-head">

@@ -17,16 +17,25 @@ export function completedTicketState(state: string, schema?: Record<string, unkn
   if (['open', 'doing', 'progress', 'in_progress', 'blocked', 'done', 'cancelled', 'canceled', 'archived'].includes(category)) return category === 'done'
   return ['done', 'accepted', 'delivered'].includes(normal)
 }
-export function benefitIssues(fields: Record<string, unknown>): string[] {
+export function pillIssues(fields: Record<string, unknown>): string[] {
+  return benefitTextIssues(fields, false)
+}
+function benefitTextIssues(fields: Record<string, unknown>, required: boolean): string[] {
   const issues: string[] = []
-  for (const key of benefitTextKeys) {
+  for (const key of required ? benefitTextKeys : ['pill_en', 'pill_de']) {
     const value = fields[key]
-    if (typeof value !== 'string' || !value.trim()) issues.push(`${key} is required`)
+    if (value === undefined || value === null || typeof value === 'string' && !value.trim()) {
+      if (required) issues.push(`${key} is required`)
+    } else if (typeof value !== 'string') issues.push(`${key} ${required ? 'is required' : 'must be a string'}`)
     else if (key.startsWith('pill_')) {
       const count = pillWords(value)
       if (count < 2 || count > 4) issues.push(`${key} must contain 2–4 words`)
     }
   }
+  return issues
+}
+export function benefitIssues(fields: Record<string, unknown>): string[] {
+  const issues = benefitTextIssues(fields, true)
   if ('hide_from_release_notes' in fields && typeof fields.hide_from_release_notes !== 'boolean') issues.push('hide_from_release_notes must be a boolean')
   if ('no_release_needed' in fields && typeof fields.no_release_needed !== 'boolean') issues.push('no_release_needed must be a boolean')
   return issues
@@ -39,7 +48,12 @@ const benefitFieldNames: Record<(typeof benefitTextKeys)[number], string> = {
 }
 // The first incomplete benefit field, as one short line a person can act on.
 export function firstBenefitGap(fields: Record<string, unknown>): { key: (typeof benefitTextKeys)[number]; line: string } | null {
-  const issues = benefitIssues(fields)
+  return firstGap(benefitIssues(fields))
+}
+export function firstPillGap(fields: Record<string, unknown>): { key: (typeof benefitTextKeys)[number]; line: string } | null {
+  return firstGap(pillIssues(fields))
+}
+function firstGap(issues: string[]): { key: (typeof benefitTextKeys)[number]; line: string } | null {
   const key = benefitTextKeys.find(item => issues.some(issue => issue.startsWith(`${item} `)))
   if (!key) return null
   const issue = issues.find(item => item.startsWith(`${key} `)) ?? ''
