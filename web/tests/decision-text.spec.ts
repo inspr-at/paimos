@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { expect, test, type Page, type Locator } from '@playwright/test'
-import { mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
 import { expectStableControls } from './helpers/stable'
 import { mockDecisionDesk } from './decision-desk-fixtures'
 
@@ -11,9 +9,7 @@ const description = Array(8).fill('Vor der Freigabe müssen sämtliche Berechtig
 const tail = 'Abschließende Bedingung: keine mandantenübergreifenden Schreibzugriffe.'
 
 async function shot(page: Page, name: string) {
-  const dir = join(process.cwd(), 'test-results/aeon-629-decision-text')
-  await mkdir(dir, { recursive: true })
-  await page.screenshot({ path: join(dir, `${name}.png`) })
+  await page.screenshot({ path: test.info().outputPath(`${name}.png`) })
 }
 const scrollKeys = ['Home', 'ArrowDown', 'PageDown', 'Space', 'End', 'ArrowUp', 'PageUp', 'Shift+Space', 'Home', 'ArrowLeft', 'ArrowRight']
 async function nativeScrollKey(area: Locator, key: string) {
@@ -81,8 +77,9 @@ for (const device of [{ width: 390, coarse: true }, { width: 1024, coarse: true 
         await expect(context).toBeVisible()
         expect(await context.evaluate(el => el.scrollHeight - el.clientHeight)).toBeLessThanOrEqual(1)
         const first = page.getByTestId('choice-0'), second = page.getByTestId('choice-1')
-        await revealGeometry(first, second, device.coarse)
-        await revealGeometry(second, first, device.coarse)
+        const decide = page.getByTestId('desk-decide'), skip = page.getByTestId('desk-skip'), close = page.getByTestId('desk-close')
+        await revealGeometry(decide, skip.or(close), device.coarse)
+        await revealGeometry(skip, decide.or(close), device.coarse)
         await expectStableControls({
           controls: { first, second, choices: page.getByTestId('desk-choices'), actions: page.getByTestId('desk-actions').locator('.action-buttons'), decide: page.getByTestId('desk-decide'), close: page.getByTestId('desk-close') },
           scrollAreas: { body: page.getByTestId('desk-body') },
