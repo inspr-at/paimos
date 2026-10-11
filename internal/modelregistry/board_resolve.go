@@ -103,12 +103,12 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if roleName == "build-hard" {
 		q.Situation = "stuck"
 	}
-	query := modelprefs.BoardQuery{Column: q.Column, Area: q.Area, Labels: q.Labels, Situation: q.Situation, Review: review, Concept: q.Concept, AuthorFamily: q.AuthorFamily, EstimateHours: q.EstimateHours, FixRound: q.FixRound}
+	query := modelprefs.BoardQuery{Column: q.Column, Area: q.Area, Labels: q.Labels, Situation: q.Situation, Review: review, Concept: q.Concept, AuthorFamily: q.AuthorFamily, PreviousFamily: q.PreviousFamily, EstimateHours: q.EstimateHours, FixRound: q.FixRound}
 	if review && !boardDispatchAdopted(s) {
 		// Closed-board placement previews retain their public review column.
 		query.Column = "review:" + q.AuthorFamily
 	}
-	d := modelprefs.ResolveModelsBoard(s, query)
+	d := modelsBoardDecision(s, query)
 	chain, err := modelprefs.LoadChain(ctx, tx, q.PersonID, q.ProjectID)
 	if err != nil {
 		return nil, err
@@ -183,6 +183,11 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				return nil, err
 			}
 			reasons := skipReasons(step, role, resolveQuery{Role: roleName, AuthorFamily: q.AuthorFamily, Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, health)
+			if slices.Contains(q.OffHarnesses, profile.Harness) {
+				// Models handles admission below; this caller-supplied exclusion
+				// is the plan's Off switch, which skipReasons reports first.
+				reasons[0] = "harness off in the plan"
+			}
 			availabilityReasons := len(reasons)
 			policyAllowed := len(skipReasons(step, role, resolveQuery{Role: roleName, AuthorFamily: q.AuthorFamily, Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, nil)) == 0
 			if order.Stage == "quick" && profile.Tier != "fast" {
@@ -322,6 +327,70 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		}
 	}
 	return &out, nil
+}
+
+// Keep the queued-round policy and saved family review rows during the S2
+// transition. Explicit Models situations and workspace pick locks win; the
+// ordinary Models walk retains its saved order when no previous family is sent.
+func modelsBoardDecision(s modelprefs.BoardState, q modelprefs.BoardQuery) modelprefs.BoardDecision {
+	d := modelprefs.ResolveModelsBoard(s, q)
+	if q.Review && d.FollowsFirst {
+		column := "review:" + q.AuthorFamily
+		legacy := s
+		for _, rule := range s.Rules {
+			if rule.Column == d.Column && rule.Scope == "workspace" && rule.Lock == "top" {
+				legacy.Person = nil
+				break
+			}
+		}
+		legacy.Orders = slices.Clone(s.Orders)
+		saved := false
+		for i := range legacy.Orders {
+			o := &legacy.Orders[i]
+			if o.Column != column || o.Situation != "first" || o.Rank == nil || o.ProfileID != legacy.Workspace.ID && (legacy.Person == nil || o.ProfileID != legacy.Person.ID) {
+				continue
+			}
+			saved = true
+			if o.End == "" {
+				// A saved review chain must not acquire a build Default tail.
+				o.End = "wait"
+			}
+		}
+		if saved {
+			q.Column, q.Situation, q.Review = column, "first", false
+			d = modelprefs.ResolveModelsBoard(legacy, q)
+		}
+	}
+	if d.Situation != "stuck" || !d.FollowsFirst || q.PreviousFamily == "" {
+		return d
+	}
+	for _, rule := range s.Rules {
+		if rule.Column == d.Column && rule.Scope == "workspace" && rule.Lock == "top" {
+			return d
+		}
+	}
+	// Only inherited, unpinned row steps rotate. Keep pinned positions, Default
+	// continuation, and each step's native effort attached to their saved line.
+	positions := []int{}
+	steps := []modelprefs.BoardStep{}
+	for i, step := range d.Steps {
+		if step.Stage == "column" && d.Locks[step.Line] == nil {
+			positions = append(positions, i)
+			steps = append(steps, step)
+		}
+	}
+	family := func(step modelprefs.BoardStep) string { value, _, _ := strings.Cut(step.Line, ":"); return value }
+	sort.SliceStable(steps, func(i, j int) bool {
+		return family(steps[i]) != q.PreviousFamily && family(steps[j]) == q.PreviousFamily
+	})
+	for i, position := range positions {
+		d.Steps[position] = steps[i]
+	}
+	d.Rank = d.Rank[:0]
+	for _, step := range d.Steps {
+		d.Rank = append(d.Rank, step.Line)
+	}
+	return d
 }
 
 // ModelsReviewHighestNative is the reversible 2026-10-10 review-floor decision.
