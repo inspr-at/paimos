@@ -74,25 +74,37 @@
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first"
     ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 dark › accounts 1024 dark: the design's checks hold on the built page"
+    ,
     "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1024 light › accounts 1024 light: the design's checks hold on the built page"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first"
     ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 dark › accounts 1440 dark: the design's checks hold on the built page"
+    ,
     "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:1440 light › accounts 1440 light: the design's checks hold on the built page"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first"
     ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 dark › accounts 390 dark: the design's checks hold on the built page"
+    ,
     "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: a floor save and its Undo move no control in the panel"
     ,
     "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: each row carries the bar and one caption; the panel says what stops agents first"
+    ,
+    "browser:tests/accounts-quota-bar.spec.ts:390 light › accounts 390 light: the design's checks hold on the built page"
     ,
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
@@ -4918,25 +4930,37 @@
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 light › accounts 1024 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 dark › accounts 1440 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1440 light › accounts 1440 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 dark › accounts 390 dark: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: a floor save and its Undo move no control in the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: each row carries the bar and one caption; the panel says what stops agents first","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"390 light › accounts 390 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/activity-history.spec.ts","name":"automatic history is Aeon, and a person named System stays a person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

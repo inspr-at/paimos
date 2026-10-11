@@ -107,6 +107,44 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
       expect(errors).toEqual([])
     })
 
+    // The approved design's check (AEON-1149 check.mjs), on the built page: folds and panels never move what
+    // is above them, the menu offers no Sprint or Hold, Escape closes the menu first and then the panel, and
+    // every control has a name.
+    test(`accounts ${width} ${theme}: the design's checks hold on the built page`, async ({ page }) => {
+      const errors = watchErrors(page)
+      await setup(page, { limits: true })
+      await page.goto('/settings/accounts')
+      await expect(listRow(page, ACCOUNTS.main)).toBeVisible()
+      const top = (locator: ReturnType<Page['locator']>) => locator.evaluate(el => Math.round(el.getBoundingClientRect().top * 10) / 10)
+      const add = page.getByRole('button', { name: 'Add an account' }), heading = page.locator('#accounts-list-title')
+      await add.scrollIntoViewIfNeeded()
+      const before = [await top(add), await top(heading)]
+      await add.click(); await expect(add).toHaveAttribute('aria-expanded', 'true')
+      expect([await top(add), await top(heading)], 'Add an account moved what is above it').toEqual(before)
+      await add.click()
+      const row = listRow(page, ACCOUNTS.main)
+      await row.scrollIntoViewIfNeeded()
+      const rowTop = await top(row)
+      await row.click()
+      await expect(pane(page).locator('[data-limits]')).toBeVisible()
+      expect(await top(row), 'the account panel moved the page').toBe(rowTop)
+      const unnamed = await page.evaluate(() => [...document.querySelectorAll('.settings-page button, .settings-page input, .settings-page select, .settings-page [role="switch"], section.pane button, section.pane input, section.pane [role="switch"]')]
+        .filter(e => (e as HTMLElement).offsetParent !== null)
+        .filter(e => !(e.getAttribute('aria-label') || e.getAttribute('aria-labelledby') || e.textContent?.trim() || e.closest('label') || (e as HTMLElement).title))
+        .map(e => e.outerHTML.slice(0, 90)))
+      expect(unnamed, 'unnamed controls').toEqual([])
+      await pane(page).getByRole('button', { name: /^More actions for / }).click()
+      const menu = page.getByRole('menu')
+      await expect(menu).toContainText('Read quota now'); await expect(menu).toContainText('Remove account')
+      await expect(menu).not.toContainText(/Sprint|Hold|Back to the plan/)
+      await page.keyboard.press('Escape')
+      await expect(menu).toHaveCount(0); await expect(pane(page)).toBeVisible()
+      await page.keyboard.press('Escape')
+      await expect(pane(page)).toHaveCount(0)
+      expect(await overflow(page)).toBeLessThanOrEqual(1)
+      expect(errors).toEqual([])
+    })
+
     test(`accounts ${width} ${theme}: a floor save and its Undo move no control in the panel`, async ({ page }) => {
       const { floors } = await setup(page)
       await page.goto('/settings/accounts')
