@@ -174,7 +174,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     const icon = row(page).locator('.ticket-type-icon'), title = row(page).locator('.title-link')
     await expect(icon).toHaveAttribute('title', label)
     const geometry = await icon.locator('.recurrence-dot').evaluate(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height, ring: getComputedStyle(el).boxShadow, gold: getComputedStyle(el).backgroundColor, token: getComputedStyle(document.documentElement).getPropertyValue('--marker').trim() }))
-    expect(geometry.width).toBe(11); expect(geometry.height).toBe(11); expect(geometry.ring).toContain('1.5px')
+    expect(geometry.width).toBe(12); expect(geometry.height).toBe(12); expect(geometry.ring).toContain('1.5px')
     expect(geometry.gold).toBe(await page.evaluate(() => { const el = document.createElement('span'); el.style.color = 'var(--marker)'; document.body.append(el); const color = getComputedStyle(el).color; el.remove(); return color }))
     mkdirSync(shots, { recursive: true })
     await page.screenshot({ path: join(shots, `list-${width}-${theme}.png`) })

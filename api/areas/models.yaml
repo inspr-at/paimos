@@ -61,10 +61,14 @@ paths:
       operationId: previewModelLineRemoval
       description: 'Requires models.read. One read-only snapshot lists visible usages and qualified replacements using the dispatch fallback. Other people and project rules are visible only with workspace model_prefs.manage; hidden usages are reported as incomplete. No preference or retirement writes.'
       security: *auth
+      parameters:
+        - {name: profile, in: query, required: false, style: form, explode: true, description: 'Active profiles removed in the same step as this line, such as the other routes of one version. Every use is read from orders of every situation, rules and row constraints that name any of them, and each fallback excludes all of them. A profile that is gone or retired answers 409 stale_removal_set.', schema: {type: array, maxItems: 64, items: {type: string, format: uuid}}}
       responses:
         '200': {description: 'Removal preview.', content: {application/json: {schema: {$ref: '#/components/schemas/ModelLineUsage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
   /models:
     get:
@@ -484,6 +488,8 @@ components:
         who: {type: string, description: "Default or the person who owns or set the reference"}
         from: {type: string}
         to: {type: [string, 'null']}
+        from_effort: {type: [string, 'null'], description: "Native level this use runs the old version at; null when the use carries no level, such as a rule, lock or pause"}
+        to_effort: {type: [string, 'null'], description: "Nearest native level of the successor, ties going up, that the use moves to; null when the use carries no level or no successor route runs it"}
     ModelOutdatedVersion:
       allOf:
         - {$ref: '#/components/schemas/ModelCatalogLifecycle'}
@@ -645,6 +651,7 @@ components:
             properties:
               column: {type: string}
               layer: {type: string, enum: [default, person, workspace, project]}
+              situation: {type: string, enum: [first, fix, stuck, small, review], description: 'The situation of the order that names the line; absent for a rule, which applies to its whole row.'}
               person: {type: string, format: uuid}
               replacement: {$ref: '#/components/schemas/ModelSimplePick'}
         replacement: {$ref: '#/components/schemas/ModelSimplePick'}

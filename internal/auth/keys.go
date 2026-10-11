@@ -187,7 +187,7 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		rec, err := m.rotateAgentKeyWithScopes(r.Context(), p, *body.RotateKeyID, body.ExpiresAt, scopes, body.FullAccess)
-		m.writeCreatedAgentKey(w, rec, err)
+		m.writeCreatedAgentKey(w, r, rec, err)
 		return
 	}
 	if body.RotationScopes != nil {
@@ -214,10 +214,10 @@ func (m *Module) handleCreateAgentKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec, err := m.createAgentKey(r.Context(), p, name, principalID, scopes, body.ExpiresAt, body.FullAccess != nil && *body.FullAccess)
-	m.writeCreatedAgentKey(w, rec, err)
+	m.writeCreatedAgentKey(w, r, rec, err)
 }
 
-func (m *Module) writeCreatedAgentKey(w http.ResponseWriter, rec keyRecord, err error) {
+func (m *Module) writeCreatedAgentKey(w http.ResponseWriter, r *http.Request, rec keyRecord, err error) {
 	if err != nil {
 		if errors.Is(err, errKeyRevoked) {
 			writeJSON(w, http.StatusConflict, errorJSON{Error: "key already revoked or rotated"})
@@ -239,7 +239,7 @@ func (m *Module) writeCreatedAgentKey(w http.ResponseWriter, rec keyRecord, err 
 			writeForbidden(w)
 			return
 		}
-		writeInternal(w)
+		internalFailure(w, r, "create_agent_key", err)
 		return
 	}
 	created := agentKeyCreatedJSON{agentKeyJSON: keyJSON(rec), Token: rec.Token}
@@ -253,7 +253,7 @@ func (m *Module) handleListAgentKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	recs, err := m.listAgentKeys(r.Context(), p.TenantID)
 	if err != nil {
-		writeInternal(w)
+		internalFailure(w, r, "list_agent_keys", err)
 		return
 	}
 	out := make([]agentKeyJSON, 0, len(recs))
@@ -279,7 +279,7 @@ func (m *Module) handleRevokeAgentKey(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeInternal(w)
+		internalFailure(w, r, "revoke_agent_key", err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

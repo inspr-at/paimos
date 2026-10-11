@@ -56,8 +56,9 @@ var ErrNotFound = errors.New("GitHub resource not found")
 // GitHubHTTPError retains only content-free response metadata. Error and
 // Unwrap preserve the existing refusal/absence semantics for callers.
 type GitHubHTTPError struct {
-	StatusCode int
-	RequestID  string
+	StatusCode          int
+	RequestID           string
+	ActionsReadRequired bool
 }
 
 func (e *GitHubHTTPError) Error() string { return e.Unwrap().Error() }
@@ -112,7 +113,17 @@ func (g *GitHubApp) requestBounded(ctx context.Context, token, method, path stri
 	}) >= 0 {
 		id = ""
 	}
-	responseErr := &GitHubHTTPError{StatusCode: res.StatusCode, RequestID: id}
+	// Retain only the known permission, never arbitrary header text.
+	permissions := res.Header.Get("X-Accepted-GitHub-Permissions")
+	actionsRead := false
+	if len(permissions) <= 1024 {
+		for _, entry := range strings.FieldsFunc(permissions, func(r rune) bool { return r == ',' || r == ';' }) {
+			if strings.TrimSpace(entry) == "actions=read" {
+				actionsRead = true
+			}
+		}
+	}
+	responseErr := &GitHubHTTPError{StatusCode: res.StatusCode, RequestID: id, ActionsReadRequired: actionsRead}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return responseErr
 	}

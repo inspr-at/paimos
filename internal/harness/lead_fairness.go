@@ -63,7 +63,7 @@ func leadQueueDemand(ctx context.Context, tx pgx.Tx, owner string) ([]leadDemand
  FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.queue_node_id
  JOIN project_leads l ON l.tenant_id=n.tenant_id AND l.project_id=n.project_id
  JOIN nodes project ON project.tenant_id=l.tenant_id AND project.id=l.project_id
- WHERE l.owner_principal_id=$1 AND project.deleted_at IS NULL AND project.state<>'archived'
+ WHERE l.owner_principal_id=$1 AND project.deleted_at IS NULL AND project.state NOT IN ('frozen','archived')
  AND r.status='queued' AND n.deleted_at IS NULL AND n.state='open'
  AND (r.queue_routed_at IS NULL OR (r.trace->'project_lead'->>'session_id'=l.session_id::text AND r.trace->'project_lead'->>'generation'=l.generation::text))
  AND aeon_work_leaf(n.id) AND aeon_work_pending(n.id) IS NULL

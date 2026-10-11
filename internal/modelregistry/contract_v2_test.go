@@ -89,6 +89,37 @@ func TestModelsV2InheritedDefaultExclusionsAreNotExceptions(t *testing.T) {
 	}
 }
 
+// Risk: the matrix shows a situation order without its saved exclusions, so
+// writing the shown order back (Undo of "Same as the row") silently drops them.
+func TestModelsV2SituationCellsCarryTheirExclusions(t *testing.T) {
+	admin, member := boardFixture(t)
+	revision := int64(0)
+	for _, situation := range []string{"small", "fix", "stuck", "review"} {
+		end, not := "row", []string{"anthropic:sonnet"}
+		if situation == "review" {
+			end = "auto"
+		}
+		if situation == "fix" {
+			not = []string{}
+		}
+		revision = boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/"+situation+"?for=default", map[string]any{"rank": []string{"openai:sol"}, "not": not, "end": end, "revision": revision}, ""), 200).Revision
+	}
+	cells := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200).Situations
+	if cells == nil {
+		t.Fatal("workspace read lost the situation matrix")
+	}
+	for _, situation := range []string{"small", "fix", "stuck", "review"} {
+		cell, want := (*cells)["backend"][situation], []string{"anthropic:sonnet"}
+		if situation == "fix" {
+			want = []string{}
+		}
+		// An order without exclusions still says so: [] rather than a missing list.
+		if cell.Line == nil || *cell.Line != "openai:sol" || cell.Not == nil || !slices.Equal(cell.Not, want) {
+			t.Fatalf("situation %s lost its exclusions: %+v", situation, cell)
+		}
+	}
+}
+
 // Risk: the page saves a chain or native level that dispatch does not read,
 // personal writes alter workspace policy, or failed writes emit success/audit.
 func TestModelsV2PageContractWritesAndReads(t *testing.T) {
@@ -504,6 +535,87 @@ func TestModelsV2CrossHarnessNativeWrites(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+// Risk: a never rule stored under a harness-derived alias survives removal of
+// the provider identity the page displays, so dispatch stays blocked after a
+// successful reset; or a pin on the alias coexists with a never rule.
+func TestModelsV2NeverRuleAliasRemovedByDisplayedIdentity(t *testing.T) {
+	admin, member := boardFixture(t)
+	decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"cursor-nova-alias","version":"1","harness":"cursor","family":"openai","model":"gpt-7-nova","effort":"xhigh","tier":"strong"}`, 201)
+	const alias, displayed = "openai:gpt-nova", "openai:nova"
+	never := func() []simpleNever {
+		t.Helper()
+		doc := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
+		for _, row := range doc.Exceptions {
+			if row.Column == "backend" {
+				return row.Never
+			}
+		}
+		return nil
+	}
+	stored := func() []string {
+		t.Helper()
+		lines := []string{}
+		inRegistry(t, admin, func(tx pgx.Tx) error {
+			rows, err := tx.Query(t.Context(), `SELECT line FROM model_row_constraints WHERE scope='workspace' AND column_key='backend' AND kind='never' ORDER BY line`)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var line string
+				if err := rows.Scan(&line); err != nil {
+					return err
+				}
+				lines = append(lines, line)
+			}
+			return rows.Err()
+		})
+		return lines
+	}
+	base := "/api/model-preferences/orders/backend/first/never/"
+	// The never writer still accepts the alias but stores the provider identity.
+	saved := boardDecode[rulesDocument](t, boardCall(t, admin, "PUT", base+alias, map[string]any{"why": "Alias from an earlier picker", "revision": 0}, ""), 200)
+	if got := stored(); !slices.Equal(got, []string{displayed}) {
+		t.Fatalf("alias write stored %v, want the provider identity", got)
+	}
+	if got := never(); len(got) != 1 || got[0].Line != displayed {
+		t.Fatalf("page does not display the provider identity: %+v", got)
+	}
+	boardDecode[rulesDocument](t, boardCall(t, admin, "DELETE", base+displayed+"?revision="+strconv.FormatInt(saved.Revision, 10), nil, ""), 200)
+	if got := stored(); len(got) != 0 || len(never()) != 0 {
+		t.Fatalf("removing the displayed identity kept the restriction: %v", got)
+	}
+	// The retained rule editor stores the alias literally; removal by the
+	// displayed identity must clear it too, and a page write replaces it.
+	editorAlias := func(revision int64) rulesDocument {
+		t.Helper()
+		out := boardDecode[rulesDocument](t, boardCall(t, admin, "PUT", "/api/model-rules/workspace/backend", map[string]any{"top": []rulePin{}, "bottom": []rulePin{}, "not": map[string]string{alias: "Retained editor"}, "revision": revision}, ""), 200)
+		if got := stored(); !slices.Equal(got, []string{alias}) {
+			t.Fatalf("fixture lost the editor's alias row: %v", got)
+		}
+		return out
+	}
+	editor := editorAlias(saved.Revision + 1)
+	if got := never(); len(got) != 1 || got[0].Line != displayed {
+		t.Fatalf("page does not display the editor's alias as the provider identity: %+v", got)
+	}
+	removed := boardDecode[rulesDocument](t, boardCall(t, admin, "DELETE", base+displayed+"?revision="+strconv.FormatInt(editor.Revision, 10), nil, ""), 200)
+	if got := stored(); len(got) != 0 || len(never()) != 0 {
+		t.Fatalf("removing the displayed identity kept the editor's alias: %v", got)
+	}
+	editor = editorAlias(removed.Revision)
+	replaced := boardDecode[rulesDocument](t, boardCall(t, admin, "PUT", base+displayed, map[string]any{"why": "Page write", "revision": editor.Revision}, ""), 200)
+	if got := stored(); !slices.Equal(got, []string{displayed}) {
+		t.Fatalf("page write kept the equivalent alias row: %v", got)
+	}
+	// A pin on the alias is the same model as the displayed identity.
+	pinned := boardDecode[rulesDocument](t, boardCall(t, admin, "PUT", "/api/model-rules/workspace/backend", map[string]any{"top": []rulePin{{alias, "Fixed choice"}}, "bottom": []rulePin{}, "not": map[string]string{}, "revision": replaced.Revision}, ""), 200)
+	boardError(t, boardCall(t, admin, "PUT", base+displayed, map[string]any{"why": "Conflicts with the pin", "revision": pinned.Revision}, ""), 409, "rule_conflict")
+	if got := stored(); len(got) != 0 {
+		t.Fatalf("conflicting never write persisted: %v", got)
+	}
 }
 
 // Risk: pausing one Cursor native id leaves sibling levels running, or expands

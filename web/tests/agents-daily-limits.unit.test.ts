@@ -40,7 +40,7 @@ describe('what the dial may say about a daily reading', () => {
     const limit = view(state({ state: 'at_limit', next_on_ladder: 'codex', today_points_used: 11 }, [account({ used_pct: 51 })]))
     expect(limit.kind).toBe('at_limit'); expect(needsAttention(limit)).toBe(true)
     expect(stateWords(limit, true)).toBe('At today’s limit · Codex next')
-    expect(stateWords(limit)).toBe('At today’s limit · Codex next on the model ladder')
+    expect(stateWords(limit)).toBe('At today’s limit · Codex next in the Models order')
     expect(chipTip(limit, 'at most 2')).toBe(`${CLAUDE} · at most 2 · at today’s limit · Codex next`)
   })
   it('never reports the limit for a stale, missing or private reading, although the server also refuses starts then', () => {
@@ -83,12 +83,14 @@ describe('what the dial may say about a daily reading', () => {
     const free = view(state({ limit_used_pct: 100 }), settings({ pace: everything }))
     expect(free.kind).toBe('everything'); expect(usageLine(free)).toBe('no daily limit'); expect(detailHeadline(free)).toBe(`${CLAUDE} · no daily limit`)
   })
-  it('words what happens at the limit without inventing a ladder', () => {
+  it('words what happens at the limit without inventing an order: Settings › Models decides', () => {
     const base = state({ state: 'at_limit' }, [account({ used_pct: 51 })])
-    expect(atLimitWords(view(base))).toBe('new work follows the model ladder')
-    expect(atLimitWords(view({ ...base, next_on_ladder: 'cursor' }))).toBe('Cursor next on the model ladder')
-    expect(atLimitWords(view(base, settings({ at_limit: 'wait' })))).toBe('new work waits until midnight')
-    expect(stateWords(view(base, settings({ at_limit: 'wait' })), true)).toBe('At today’s limit · new work waits')
+    expect(atLimitWords(view(base))).toBe('new work follows Settings › Models')
+    expect(stateWords(view(base), true)).toBe('At today’s limit · follows Models')
+    expect(atLimitWords(view({ ...base, next_on_ladder: 'cursor' }))).toBe('Cursor next in the Models order')
+    // AEON-1166: a per-harness Wait saved before the dial followed Models is ignored, never promised.
+    for (const short of [false, true]) expect(stateWords(view(base, settings({ at_limit: 'wait' })), short)).toBe(stateWords(view(base), short))
+    expect(chipTip(view(base, settings({ at_limit: 'wait' })), 'at most 2')).toBe(`${CLAUDE} · at most 2 · at today’s limit · follows Models`)
   })
   it('lets only an owner who may manage every account change today’s limit', () => {
     expect(view(state()).editable).toBe(true)

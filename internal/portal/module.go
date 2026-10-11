@@ -184,20 +184,13 @@ const portalBodyTimeout = 10 * time.Second
 // Decode before opening a transaction. A byte cap alone does not stop a slow
 // sender; the socket deadline interrupts reads even when Body.Close would wait.
 func decodePortalInput(w http.ResponseWriter, r *http.Request, decode func() error) bool {
-	controller := http.NewResponseController(w)
-	err := controller.SetReadDeadline(time.Now().Add(portalBodyTimeout))
-	if err != nil && !errors.Is(err, http.ErrNotSupported) {
-		fail(w, http.StatusServiceUnavailable, "portal unavailable")
+	if err := httpapi.BufferRequestBodyTimeout(w, r, 32<<10, portalBodyTimeout); err != nil {
+		if errors.Is(err, httpapi.ErrBodyDeadlineUnavailable) {
+			fail(w, http.StatusServiceUnavailable, "portal unavailable")
+		} else {
+			fail(w, http.StatusBadRequest, "invalid input")
+		}
 		return false
-	}
-	if err == nil {
-		defer controller.SetReadDeadline(time.Time{})
-	}
-	// Non-socket handlers (including isolated tests) still have a time bound.
-	var timer *time.Timer
-	if errors.Is(err, http.ErrNotSupported) && r.Body != nil {
-		timer = time.AfterFunc(portalBodyTimeout, func() { _ = r.Body.Close() })
-		defer timer.Stop()
 	}
 	if err := decode(); err != nil {
 		var se statusError

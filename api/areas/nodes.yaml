@@ -59,6 +59,8 @@ paths:
         The created node includes the same read-only estimate view as a later read when it has hours or open children.
         Any create of a portal_product, portal_feature or portal_wish, and any create that places a node under a portal parent, requires a person with settings.manage. Agents are refused.
         An agent creating a ticket or task without an estimate is warned to set fields.estimate_hours. The warning does not name a client flag.
+        A requested project_key is reserved within the tenant, including deleted projects.
+        A duplicate returns 409 naming the visible project holding the key; hidden projects return a reservation conflict.
       security: *auth
       requestBody:
         $ref: '#/components/requestBodies/NodeCreate'
@@ -292,7 +294,7 @@ paths:
                   - {$ref: '#/components/schemas/NodeError'}
     delete:
       operationId: deleteNode
-      description: Soft-delete; cancel a still-queued ticket run and soft-delete its generated work-order child atomically before deleting the ticket. Reject while other live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused. The deletion moves updated_at forward like every other write; Aeon-Revision names that revision (AEON-326).
+      description: 'Soft-delete; project deletion additionally requires a live project Admin or workspace Owner/Admin role. Cancel a still-queued ticket run and soft-delete its generated work-order child atomically before deleting the ticket. Reject while other live children remain. Tags use DELETE /tags/{tagId} so assignments are removed atomically. Deleting a portal_product, portal_feature or portal_wish requires a person with settings.manage. Agents are refused. The deletion moves updated_at forward like every other write; Aeon-Revision names that revision (AEON-326).'
       security: *auth
       responses:
         '204':

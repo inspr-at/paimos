@@ -102,7 +102,7 @@ for (const regenerated of [false, true]) {
     const options = page.getByRole('grid', { name: 'Releases, newest first' }).getByRole('row')
     // AEON-305: the tag message is evidence, never a labelled title.
     await expect(options.first()).not.toContainText('Time entry editing')
-    await expect(options.first()).toContainText('AEON-75')
+    await expect(options.first().locator('.row-name .rn-name')).toHaveText(current.codename!)
     await expect(detail.locator('.headline')).toHaveCount(0)
     await expect(page.getByText('Historical tag headline')).toHaveCount(0)
     await expect(detail.getByText('Notes written after release')).toHaveCount(0)
@@ -220,6 +220,7 @@ for (const width of [1600, 390]) {
     const detail = page.locator('article.detail')
     const hint = detail.getByRole('region', { name: 'Release notes' }).getByText('Notes written after release', { exact: true })
     await expect(hint).toBeVisible()
+    await hint.scrollIntoViewIfNeeded()
     await expect(hint).toBeInViewport({ ratio: 1 })
     await expect(detail.getByText('Historical tag headline')).toHaveCount(0)
     const detailStyle = await hint.evaluate(el => {
@@ -265,7 +266,7 @@ for (const width of [1600, 390]) {
           await page.screenshot({ path: `${process.env.SHOTS}/internal-list-${width}-${theme}.png` })
         }
       }
-      if (width === 390) await row.click()
+      if (width === 390) await row.locator('.row-name').click()
       for (const theme of ['light', 'dark']) {
         await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
         await expect(notes.getByText('Internal changes only.', { exact: true })).toBeVisible()

@@ -5,11 +5,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/jackc/pgx/v5"
 )
@@ -42,12 +44,14 @@ func (m *Module) auditWebhook(w http.ResponseWriter, r *http.Request) {
 		m.webhook(w, r)
 		return
 	}
-	raw, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
+	raw, err := httpapi.ReadRequestBody(w, r, 2<<20, 5*time.Second)
 	if err != nil || len(raw) > 2<<20 {
 		class := webhookClass("body_too_large")
-		if err != nil {
+		var tooLarge *http.MaxBytesError
+		if err != nil && !errors.As(err, &tooLarge) {
 			class = "body_read"
 		}
+		closeAfterFailedRead(w)
 		m.rejectWebhook(w, r, "unknown", "audit", 413, class)
 		return
 	}

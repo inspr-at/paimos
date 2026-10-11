@@ -7,6 +7,9 @@ const DailyFreshness = 2 * time.Minute
 
 // DailyDecision is a refusal to start the requested harness, never a launch
 // grant for a successor. Models must qualify that successor independently.
+// FollowLadder is always true at a reached cap (AEON-1166): the saved
+// at_limit is ignored, the walk skips the capped route and continues the
+// order, and only an order that ends in Wait waits.
 type DailyDecision struct {
 	Reason       string
 	FollowLadder bool
@@ -75,5 +78,5 @@ func DailyStart(s Snapshot, harness string, now time.Time) DailyDecision {
 		return unknown
 	}
 	until := s.DailyUntil
-	return DailyDecision{Reason: "daily_limit", FollowLadder: s.DailySetting(harness).AtLimit == "ladder", Until: &until}
+	return DailyDecision{Reason: "daily_limit", FollowLadder: true, Until: &until}
 }
