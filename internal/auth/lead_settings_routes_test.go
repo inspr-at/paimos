@@ -166,6 +166,7 @@ func TestLeadRuntimeProductionMiddleware(t *testing.T) {
 	handler := (&httpapi.Server{Pool: appPool, Modules: []httpapi.Module{m, harness.New(appPool)}, Middleware: []func(http.Handler) http.Handler{m.Middleware}}).Handler()
 	tid := insertTenant(t, "lead-runtime-middleware", "Lead runtime")
 	owner, _ := signinPerson(t, tid, "runtime-owner", "runtime-owner", "runtime@example.com", "runtime@example.com", "admin")
+	dbtest.BindRole(t, testDB, tid, owner, "admin")
 	creator := tenant.Principal{TenantID: tid, ID: owner, Kind: tenant.Person}
 	key, err := m.createAgentKey(t.Context(), creator, "runtime-daemon", "", []string{"harness.worker"}, nil)
 	if err != nil {

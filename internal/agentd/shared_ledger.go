@@ -235,6 +235,33 @@ func (s *Supervisor) enableLedgerLocked(ctx context.Context, c LedgerConfig) err
 		entry.record = record
 		entry.mu.Unlock()
 	}
+	// Never-attempted lead receipts may survive an ordinary claim refusal or
+	// lost reply. Preserve their occupancy through import until exact server
+	// reconciliation confirms abandonment; they do not freeze worker startup.
+	names, err := s.state.Names(4096)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if !strings.HasPrefix(name, "lead-runtime-") {
+			continue
+		}
+		raw, e := s.state.Read(name, 32768)
+		if e != nil {
+			return e
+		}
+		var r leadRecord
+		if json.Unmarshal(raw, &r) != nil || r.Version != 1 || r.Pickup.DaemonID != s.daemonID || name != "lead-runtime-"+r.Pickup.Demand.ID+".json" {
+			return ErrProcessesUnconfirmed
+		}
+		if r.Abandoned || r.ExitReported {
+			continue
+		}
+		if r.Attempted {
+			return ErrProcessesUnconfirmed
+		}
+		groups = append(groups, agentsetup.LedgerGroup{ID: r.Group, Instance: binding.Member.ID, Generation: generation, State: "pending", Holds: []agentsetup.LedgerLogin{s.ledgerLogin(r.Pickup.AccountID, generation)}})
+	}
 	logins := []agentsetup.LedgerLogin{}
 	for _, a := range s.accounts {
 		login := s.ledgerLogin(a.ID, generation)

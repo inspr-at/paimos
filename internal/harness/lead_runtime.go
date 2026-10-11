@@ -33,6 +33,9 @@ type LeadRuntimeChecks struct {
 	Prepare  func(context.Context, pgx.Tx, tenant.Principal, agentsetup.LeadPickup) (agentsetup.LeadLaunch, error)
 	Validate func(context.Context, pgx.Tx, tenant.Principal, agentsetup.LeadLaunch) error
 	Exit     func(context.Context, pgx.Tx, tenant.Principal, agentsetup.LeadLaunch, ownedprocess.Identity) error
+	// Abandon settles a reserved actor that the exact daemon confirms it never
+	// attempted. It must release its hold without inventing process/usage proof.
+	Abandon func(context.Context, pgx.Tx, tenant.Principal, agentsetup.LeadLaunch) error
 }
 
 func (m *Module) WithLeadRuntime(checks LeadRuntimeChecks) *Module {
@@ -124,7 +127,7 @@ func (m *Module) readLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principal)
 		out.Reason = settings.WaitReason
 		return out, nil
 	}
-	if m.leadRuntime.Prepare == nil || m.leadRuntime.Validate == nil || m.leadRuntime.Exit == nil || m.leadAdmission == nil {
+	if m.leadRuntime.Prepare == nil || m.leadRuntime.Validate == nil || m.leadRuntime.Exit == nil || m.leadRuntime.Abandon == nil || m.leadAdmission == nil {
 		out.Reason = "lead_runtime_unqualified"
 		return out, nil
 	}
@@ -301,13 +304,11 @@ func (m *Module) claimLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principal
 	}
 	if state == "claimed" {
 		var saved leadRuntimeBinding
-		if json.Unmarshal(raw, &saved) != nil || !runtimeProof(saved, in) || l.SessionID == nil || *l.SessionID != saved.Launch.SessionID || l.Generation != saved.Launch.Generation {
+		if json.Unmarshal(raw, &saved) != nil || !runtimeProof(saved, in) || saved.Launch.Grant.PrincipalID != p.ID || l.SessionID == nil || *l.SessionID != saved.Launch.SessionID || l.Generation != saved.Launch.Generation {
 			return nil, workorders.Fail(409, "lead_writer_conflict")
 		}
-		// A lost reply returns the same claim, but never revives launch authority.
-		if err = m.validateLeadLaunch(ctx, tx, p, in, saved.Launch); err != nil {
-			return nil, err
-		}
+		// Recovery returns immutable evidence even after expiry/revocation. It
+		// never renews the grant; preflight remains required before native start.
 		return saved.Launch, nil
 	}
 	if state != "pending" || l.owner != in.Demand.OwnerID || l.Generation != in.Demand.Generation || l.Revision != in.Demand.Revision || l.State != "waiting_for_room" || l.Reason == adoptionPending || l.Reason == selectionCleared {
@@ -322,7 +323,7 @@ func (m *Module) claimLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principal
 			return nil, workorders.Fail(409, "lead_exit_unconfirmed")
 		}
 	}
-	if m.leadRuntime.Prepare == nil || m.leadRuntime.Validate == nil || m.leadRuntime.Exit == nil || m.leadAdmission == nil {
+	if m.leadRuntime.Prepare == nil || m.leadRuntime.Validate == nil || m.leadRuntime.Exit == nil || m.leadRuntime.Abandon == nil || m.leadAdmission == nil {
 		return nil, workorders.Fail(409, "lead_runtime_unqualified")
 	}
 	settings, e := modelregistry.ProjectExecutionTx(ctx, tx, p.TenantID, l.ProjectID, m.routineRuntime)
@@ -428,7 +429,7 @@ func (m *Module) reportLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principa
 	if err = workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
-	if !validLeadPickup(in.Pickup) || in.Pickup.Demand.ProjectID != r.PathValue("projectId") || !slices.Contains([]string{"preflight", "started", "exit_observed"}, in.Kind) {
+	if !validLeadPickup(in.Pickup) || in.Pickup.Demand.ProjectID != r.PathValue("projectId") || !slices.Contains([]string{"preflight", "started", "exit_observed", "abandon"}, in.Kind) || in.Kind == "abandon" && in.Ownership != nil {
 		return nil, workorders.Fail(400, "invalid_lead_report")
 	}
 	ctx := r.Context()
@@ -438,8 +439,13 @@ func (m *Module) reportLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principa
 	}
 	var raw []byte
 	var state, worktree string
-	if err = tx.QueryRow(ctx, `SELECT CASE WHEN octet_length(binding::text)<=65536 THEN binding END,state,worktree_id FROM routine_launch_intents WHERE id=$1 AND kind='lead' FOR NO KEY UPDATE`, pickup.Demand.ID).Scan(&raw, &state, &worktree); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT CASE WHEN octet_length(binding::text)<=65536 THEN binding END,state,coalesce(worktree_id,'') FROM routine_launch_intents WHERE id=$1 AND project_id=$2 AND owner_principal_id=$3 AND routine_run_id=$4 AND lead_generation=$5 AND kind='lead' FOR NO KEY UPDATE`, pickup.Demand.ID, pickup.Demand.ProjectID, pickup.Demand.OwnerID, pickup.Demand.RoutineRunID, pickup.Demand.Generation).Scan(&raw, &state, &worktree); err != nil {
 		return nil, err
+	}
+	// This explicit, fenced refusal is the only authority for deleting a
+	// private receipt whose claim response may have been lost.
+	if in.Kind == "abandon" && state == "pending" && worktree == "" {
+		return nil, workorders.Fail(409, "lead_claim_uncommitted")
 	}
 	var saved leadRuntimeBinding
 	if len(raw) > 65536 || json.Unmarshal(raw, &saved) != nil || !runtimeProof(saved, pickup) || saved.Launch.Grant.PrincipalID != p.ID || worktree != pickup.WorktreeID {
@@ -452,6 +458,52 @@ func (m *Module) reportLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principa
 	session, err := load(ctx, tx, pickup.Demand.ProjectID, launch.SessionID, true)
 	if err != nil {
 		return nil, err
+	}
+	if in.Kind == "abandon" {
+		if state == "abandoned" {
+			return launch, nil
+		}
+		var started bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_evidence WHERE launch_id=$1 AND kind='started')`, pickup.Demand.ID).Scan(&started); err != nil {
+			return nil, err
+		}
+		if state != "claimed" || started || session.ProcessOwnership != nil {
+			return nil, workorders.Fail(409, "lead_start_already_observed")
+		}
+		if m.leadRuntime.Abandon == nil {
+			return nil, workorders.Fail(409, "lead_runtime_unqualified")
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO routine_launch_evidence(tenant_id,launch_id,kind,receipt) VALUES($1,$2,'abandoned',$3)`, p.TenantID, pickup.Demand.ID, raw); err != nil {
+			return nil, err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE routine_launch_intents SET state='abandoned',exit_observed_at=clock_timestamp() WHERE id=$1`, pickup.Demand.ID); err != nil {
+			return nil, err
+		}
+		// Acquire/settle actor locks before status triggers append events.
+		if err = m.leadRuntime.Abandon(ctx, tx, p, launch); err != nil {
+			return nil, err
+		}
+		var settled bool
+		if err = tx.QueryRow(ctx, `SELECT state='settled' AND used_tokens=0 AND used_microusd=0 AND used_ms=0
+ FROM routine_budget_grants WHERE id=$1 AND run_id=$2 AND agent_run_id=$3 AND account_id=$4 AND parent_id IS NULL`, launch.Grant.BudgetGrantID, launch.Grant.RoutineRunID, launch.Grant.AgentRunID, launch.Grant.AccountID).Scan(&settled); err != nil {
+			return nil, err
+		}
+		if !settled {
+			return nil, workorders.Fail(409, "lead_abandon_hold_unsettled")
+		}
+		if _, err = tx.Exec(ctx, `UPDATE agent_runs SET status='cancelled',ended_at=clock_timestamp() WHERE id=$1 AND status='starting'`, launch.Grant.AgentRunID); err != nil {
+			return nil, err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE harness_sessions SET stopped_at=clock_timestamp(),stop_reason='stopped',phase='stopped',revision=revision+1 WHERE id=$1`, launch.SessionID); err != nil {
+			return nil, err
+		}
+		if _, err = tx.Exec(ctx, `UPDATE project_leads SET state='waiting_for_room',reason='awaiting_generation',revision=revision+1,updated_at=clock_timestamp() WHERE project_id=$1 AND session_id=$2 AND generation=$3`, launch.Grant.ProjectID, launch.SessionID, launch.Generation); err != nil {
+			return nil, err
+		}
+		if err = record(ctx, tx, p, Session{ProjectID: launch.Grant.ProjectID}, "lead_runtime_abandoned", nil, map[string]any{"launch_id": pickup.Demand.ID, "session_id": launch.SessionID}); err != nil {
+			return nil, err
+		}
+		return launch, nil
 	}
 	if in.Kind == "preflight" {
 		if state != "claimed" {

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
@@ -55,6 +56,9 @@ type LeadStartRequest struct {
 type LeadRuntimeConfig struct {
 	Repositories []RoutineRepository
 	Prepare      func(context.Context, agentsetup.LeadDemand, RoutineRepository) (RoutineWorkspace, RoutineResourceLease, error)
+	// RecoverResources reopens only this receipt's prior allocation for cleanup
+	// after restart. It cannot allocate substitutes, run fixtures or launch.
+	RecoverResources func(context.Context, agentsetup.LeadPickup, RoutineWorkspace) (RoutineResourceLease, error)
 }
 
 type leadRuntimeAPI interface {
@@ -73,6 +77,7 @@ type leadRecord struct {
 	Ownership    *ownedprocess.Identity `json:"ownership,omitempty"`
 	ExitObserved bool                   `json:"exit_observed"`
 	ExitReported bool                   `json:"exit_reported"`
+	Abandoned    bool                   `json:"abandoned,omitempty"`
 }
 
 type localLead struct {
@@ -128,7 +133,7 @@ func (s *Supervisor) pollLeadRuntime(ctx context.Context, discover bool) error {
 	}
 	s.leads.mu.Lock()
 	defer s.leads.mu.Unlock()
-	if err := s.reconcileLeadReceiptsLocked(ctx, api, true); err != nil {
+	if err := s.reconcileLeadReceiptsLocked(ctx, api, true, discover); err != nil {
 		return err
 	}
 	if !discover {
@@ -160,7 +165,7 @@ func (s *Supervisor) pollLeadRuntime(ctx context.Context, discover bool) error {
 
 // Caller holds dispatchMu followed by leads.mu. service=false never delivers
 // a control during Close; it only reconciles independently observed exits.
-func (s *Supervisor) reconcileLeadReceiptsLocked(ctx context.Context, api leadRuntimeAPI, service bool) error {
+func (s *Supervisor) reconcileLeadReceiptsLocked(ctx context.Context, api leadRuntimeAPI, service, resume bool) error {
 	// Reconcile retained receipts before discovering fresh work. The local files
 	// are exact-generation authority; a daemon restart never resumes a process.
 	names, err := s.state.Names(4096)
@@ -180,17 +185,39 @@ func (s *Supervisor) reconcileLeadReceiptsLocked(ctx context.Context, api leadRu
 		if json.Unmarshal(raw, &r) != nil || r.Version != 1 || !uuidPattern.MatchString(r.Pickup.Demand.ID) || name != "lead-runtime-"+r.Pickup.Demand.ID+".json" || r.Pickup.DaemonID != s.daemonID {
 			return ErrProcessesUnconfirmed
 		}
-		if r.ExitReported {
+		if r.ExitReported || r.Abandoned {
 			continue
 		}
 		count++
 		if count > 128 {
 			return ErrProcessesUnconfirmed
 		}
+		local := s.leads.leads[r.Pickup.Demand.ID]
+		if !r.Attempted {
+			// Recovery uses the private durable claim, even when the real poll
+			// now returns reused/no demand. Restart/drain never starts a lead.
+			recovered := false
+			if resume && r.Launch == nil && local != nil && local.resources != nil && r.Pickup.DaemonGeneration == s.generation && r.Pickup.LedgerGeneration == s.ledgerBinding.Generation && s.dispatchAllowed(r.Pickup.AccountID) && s.accountAvailable(r.Pickup.AccountID) {
+				for _, repository := range s.leads.config.Repositories {
+					if repository.ProjectID == r.Pickup.Demand.ProjectID && repository.OwnerID == r.Pickup.Demand.OwnerID {
+						if e = s.startLead(ctx, api, r.Pickup.Demand, repository); e != nil {
+							return e
+						}
+						recovered = true
+						break
+					}
+				}
+			}
+			if !recovered {
+				if e = s.abandonLead(ctx, api, r); e != nil {
+					return e
+				}
+			}
+			continue
+		}
 		if r.Pickup.DaemonGeneration != s.generation || r.Pickup.LedgerGeneration != s.ledgerBinding.Generation {
 			return ErrProcessesUnconfirmed
 		}
-		local := s.leads.leads[r.Pickup.Demand.ID]
 		if r.Attempted && !r.ExitObserved && local == nil {
 			return ErrProcessesUnconfirmed
 		}
@@ -255,6 +282,67 @@ func (s *Supervisor) reconcileLeadReceiptsLocked(ctx context.Context, api leadRu
 			}
 		}
 	}
+	return nil
+}
+
+func leadUncommitted(err error) bool {
+	var status *client.StatusError
+	return errors.As(err, &status) && status.Status == 409 && status.Message == "lead_claim_uncommitted"
+}
+
+// An ambiguous reply never releases local ownership. Only the exact server
+// abandonment receipt (or a fenced refusal proving no committed claim) does.
+func (s *Supervisor) abandonLead(ctx context.Context, api leadRuntimeAPI, r leadRecord) error {
+	if r.Attempted || r.Ownership != nil || r.ExitObserved {
+		return ErrProcessesUnconfirmed
+	}
+	launch, err := api.ReportLead(ctx, r.Pickup, "abandon", nil)
+	uncommitted := leadUncommitted(err)
+	if err != nil && !uncommitted {
+		return err
+	}
+	if !uncommitted && launch.Demand != r.Pickup.Demand {
+		return ErrReplay
+	}
+	local := s.leads.leads[r.Pickup.Demand.ID]
+	if local == nil {
+		if s.leads.config.RecoverResources == nil {
+			return ErrRoutineUnavailable
+		}
+		resources, e := s.leads.config.RecoverResources(ctx, r.Pickup, r.Workspace)
+		if e != nil {
+			return e
+		}
+		if resources == nil {
+			return ErrRoutineUnavailable
+		}
+		local = &localLead{record: r, resources: resources}
+		s.leads.leads[r.Pickup.Demand.ID] = local
+	}
+	if local != nil && local.resources != nil {
+		if err = local.resources.Finish(true); err != nil {
+			return err
+		}
+		local.resources = nil
+	}
+	if err = s.ledger.Release(s.ledgerBinding.Member.ID, s.ledgerBinding.Generation, r.Group); err != nil {
+		return err
+	}
+	if uncommitted {
+		raw, e := s.state.Read("lead-runtime-"+r.Pickup.Demand.ID+".json", 32768)
+		if e != nil {
+			return e
+		}
+		if err = s.state.RemoveExact("lead-runtime-"+r.Pickup.Demand.ID+".json", agentsetup.Hash(raw)); err != nil {
+			return err
+		}
+	} else {
+		r.Abandoned = true
+		if err = s.writeLead(r, false); err != nil {
+			return err
+		}
+	}
+	delete(s.leads.leads, r.Pickup.Demand.ID)
 	return nil
 }
 
@@ -380,9 +468,10 @@ func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand a
 	}
 	launch, err := api.ClaimLead(ctx, record.Pickup)
 	if err != nil {
-		return err
-	}
-	if err = s.validateLocalLead(launch, record, repository, account, native); err != nil {
+		var status *client.StatusError
+		if errors.As(err, &status) && status.Status >= 400 && status.Status < 500 {
+			return errors.Join(err, s.abandonLead(ctx, api, record))
+		}
 		return err
 	}
 	if record.Launch != nil && *record.Launch != launch { // Grant has pointers; compare canonical bytes below instead.
@@ -396,12 +485,15 @@ func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand a
 	if err = s.writeLead(record, false); err != nil {
 		return err
 	}
+	if err = s.validateLocalLead(launch, record, repository, account, native); err != nil {
+		return errors.Join(err, s.abandonLead(ctx, api, record))
+	}
 	if err = s.ledger.Claimed(s.ledgerBinding.Member.ID, record.Pickup.LedgerGeneration, record.Group, s.ledgerLogin(account.ID, record.Pickup.LedgerGeneration)); err != nil {
 		return err
 	}
 	checked, err := api.ReportLead(ctx, record.Pickup, "preflight", nil)
 	if err != nil {
-		return err
+		return errors.Join(err, s.abandonLead(ctx, api, record))
 	}
 	a, _ := json.Marshal(checked)
 	b, _ := json.Marshal(launch)
@@ -409,11 +501,11 @@ func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand a
 		return ErrReplay
 	}
 	if !s.capacityNow().Before(launch.Grant.ExpiresAt) || !s.dispatchAllowed(account.ID) || !s.accountAvailable(account.ID) {
-		return ErrRoutineUnavailable
+		return errors.Join(ErrRoutineUnavailable, s.abandonLead(ctx, api, record))
 	}
 	environment, err := validateRoutineEnvironment(resources.Environment(), launch.Grant)
 	if err != nil {
-		return err
+		return errors.Join(err, s.abandonLead(ctx, api, record))
 	}
 	// Persist the irreversible boundary BEFORE StartLead. Any uncertain error,
 	// crash or lost reply freezes this exact attempt instead of calling again.
@@ -422,12 +514,20 @@ func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand a
 		return err
 	}
 	if err = s.ledger.Launching(s.ledgerBinding.Member.ID, record.Pickup.LedgerGeneration, record.Group); err != nil {
-		return err
+		record.Attempted = false // No native call occurred under dispatchMu.
+		if e := s.writeLead(record, false); e != nil {
+			return errors.Join(err, e)
+		}
+		return errors.Join(err, s.abandonLead(ctx, api, record))
 	}
 	// Disk/ledger contention must not carry an expiring grant past a window.
 	// Its durable attempted boundary remains conservative if this refuses.
 	if !s.capacityNow().Before(launch.Grant.ExpiresAt) || ctx.Err() != nil || !s.dispatchAllowed(account.ID) {
-		return ErrProcessesUnconfirmed
+		record.Attempted = false // The final local fence refused before StartLead.
+		if e := s.writeLead(record, false); e != nil {
+			return e
+		}
+		return errors.Join(ErrRoutineUnavailable, s.abandonLead(ctx, api, record))
 	}
 	lifetime, cancel := context.WithTimeout(s.lifetime, time.Duration(launch.MaxDurationSeconds)*time.Second)
 	local := s.leads.leads[demand.ID]
@@ -512,7 +612,7 @@ func checkRetainedLeads(store *agentsetup.Store) error {
 			return ErrProcessesUnconfirmed
 		}
 		var r leadRecord
-		if json.Unmarshal(raw, &r) != nil || r.Version != 1 || !r.ExitReported || !r.ExitObserved || r.Ownership == nil {
+		if json.Unmarshal(raw, &r) != nil || r.Version != 1 || r.Attempted && (!r.ExitReported || !r.ExitObserved || r.Ownership == nil) || !r.Attempted && (r.Ownership != nil || r.ExitObserved || r.ExitReported) {
 			return ErrProcessesUnconfirmed
 		}
 	}

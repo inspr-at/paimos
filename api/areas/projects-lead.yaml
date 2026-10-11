@@ -41,7 +41,7 @@ paths:
   /projects/{projectId}/lead-runtime/report:
     post:
       summary: Recheck native start or report an observed lead process
-      description: 'Exact claimed daemon and private proof required. Preflight repeats consent and deterministic live gates before a native start; a closed window denies a fresh start. Started records only the reserved process. Exit requires the identical process identity and preserves unknown usage or fixture holds; turn completion, cancellation and lost reporting are not exit. Replays are idempotent and never authorize replacement or ownership transfer.'
+      description: 'Exact claimed daemon and private proof required. Preflight repeats consent and deterministic live gates before a native start; a closed window denies a fresh start. Started records only the reserved process. Abandon confirms that this daemon never attempted native launch, refuses started evidence, stops the reserved session and settles its hold through the executor. Exit requires the identical process identity and preserves unknown usage or fixture holds; turn completion, cancellation and lost reporting are not exit. Replays are idempotent and never authorize replacement or ownership transfer.'
       parameters:
         - $ref: '#/components/parameters/projectId'
       requestBody:
@@ -54,7 +54,7 @@ paths:
               additionalProperties: false
               properties:
                 pickup: {$ref: '#/components/schemas/LeadRuntimePickup'}
-                kind: {type: string, enum: [preflight, started, exit_observed]}
+                kind: {type: string, enum: [preflight, started, exit_observed, abandon]}
                 ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
       responses:
         '200':

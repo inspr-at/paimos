@@ -11,7 +11,9 @@ and process reports. Claim fences tenant, tree and pairing, repeats owner and
 routine consent, and requires a role-resolved native account and a distinct held
 lead attempt in the existing routine budget. It registers an owned root session,
 records one generation and persists the claim before any process launch. Lost
-claim replies replay the same claim. A changed daemon, proof, checkout or intent
+claim replies replay the same immutable claim from the daemon’s private receipt,
+even when polling returns an existing lead with no demand. Recovery does not
+renew an expired grant or skip preflight. A changed daemon, proof, checkout or intent
 cannot borrow that authority.
 
 The daemon keeps a private versioned receipt beside its existing journal. Its
@@ -20,6 +22,16 @@ first. Native execution requires an independently qualified lead adapter and the
 existing worktree/resource allocation seam. The receipt is marked attempted
 before calling the adapter. An uncertain start or old daemon generation freezes
 recovery; a persisted PID never authorizes adoption, signalling or relaunch.
+
+A never-attempted claim can be abandoned by its exact daemon and private proof,
+including after the grant expires or consent closes. The executor settles its
+unused actor hold in the same transaction as terminalizing the intent, stopping
+the reserved session and returning the project lead to waiting. Started evidence
+refuses abandonment. Lost abandonment replies retain local ownership for replay;
+only a fenced server refusal proving no committed claim permits receipt deletion.
+Never-attempted receipts do not freeze daemon startup. Ledger import retains their
+occupancy until reconciliation, and restart requires a qualified callback that
+reopens the exact prior resource allocation for cleanup without launching.
 
 Preflight repeats the deterministic live start gates. The executor must bind the
 grant expiry to the current window boundary, resolve the owner's lead model

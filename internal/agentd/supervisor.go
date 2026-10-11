@@ -2685,7 +2685,7 @@ func (s *Supervisor) Close(ctx context.Context) error {
 			if !ok || s.ledger == nil {
 				return ErrProcessesUnconfirmed
 			}
-			if err := s.reconcileLeadReceiptsLocked(ctx, api, false); err != nil {
+			if err := s.reconcileLeadReceiptsLocked(ctx, api, false, false); err != nil {
 				return err
 			}
 		}

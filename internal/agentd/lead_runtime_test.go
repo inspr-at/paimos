@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
@@ -27,18 +28,24 @@ type leadFixtureAPI struct {
 	claimCalls   int
 	lost         bool
 	windowClosed bool
+	refused      bool
+	abandoned    bool
+	abandonLost  bool
 	started      chan struct{}
 	release      chan struct{}
 }
 
 func (a *leadFixtureAPI) LeadDemand(context.Context, string) (*agentsetup.LeadDemand, error) {
-	if a.launch != nil {
+	if a.launch != nil || a.refused && a.claimCalls > 0 {
 		return nil, nil
 	}
 	return &a.demand, nil
 }
 func (a *leadFixtureAPI) ClaimLead(_ context.Context, in agentsetup.LeadPickup) (agentsetup.LeadLaunch, error) {
 	a.claimCalls++
+	if a.refused {
+		return agentsetup.LeadLaunch{}, &client.StatusError{Status: 409, Message: "lead_runtime_unqualified"}
+	}
 	if a.launch == nil {
 		g := a.grant
 		g.DaemonGeneration = in.DaemonGeneration
@@ -59,6 +66,16 @@ func (a *leadFixtureAPI) ClaimLead(_ context.Context, in agentsetup.LeadPickup) 
 	return *a.launch, nil
 }
 func (a *leadFixtureAPI) ReportLead(_ context.Context, _ agentsetup.LeadPickup, kind string, _ *ownedprocess.Identity) (agentsetup.LeadLaunch, error) {
+	if kind == "abandon" {
+		if a.abandonLost {
+			a.abandonLost = false
+			return agentsetup.LeadLaunch{}, errLeadReplyLost
+		}
+		if a.launch == nil {
+			return agentsetup.LeadLaunch{}, &client.StatusError{Status: 409, Message: "lead_claim_uncommitted"}
+		}
+		a.abandoned = true
+	}
 	if kind == "preflight" && a.windowClosed {
 		return agentsetup.LeadLaunch{}, ErrDraining
 	}
@@ -109,7 +126,7 @@ func (p *leadFixtureProcess) RoutineFixturesExited() bool { return p.adapter.exi
 // relaunching a retained claim, or a window/turn completion releasing a slot.
 // The claim barrier establishes concurrent pickup; Wait is released explicitly.
 func TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit(t *testing.T) {
-	for _, mode := range []string{"lost_claim", "window", "uncertain_start"} {
+	for _, mode := range []string{"lost_claim", "window", "expired", "refused", "restart", "uncertain_start"} {
 		t.Run(mode, func(t *testing.T) {
 			s, a, _ := testSupervisor(t)
 			g := routineTestGrant("11")
@@ -128,7 +145,10 @@ func TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit(t *testing.T
 				t.Fatal(err)
 			}
 			repository := RoutineRepository{TenantID: g.TenantID, OwnerID: g.OwnerID, ProjectID: g.ProjectID, AccountID: g.AccountID, ComputerID: g.ComputerID, Repository: s.workspace, Root: root, BaseCommit: strings.Repeat("e", 40), DaemonDigest: g.DaemonDigest, CapabilityDigest: g.CapabilityDigest, HostMappingDigest: g.HostMappingDigest}
-			tmp := t.TempDir()
+			tmp, err := filepath.EvalSymlinks(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
 			lease := &routineLeaseFixture{environment: []string{"AEON_RUN_ID=" + g.LaunchID, "AEON_RUN_DATABASE=aeon_run_" + strings.Repeat("a", 32), "AEON_RUN_APP_PORT=31001", "AEON_RUN_POSTGRES_PORT=31002", "AEON_RUN_TEMP_DIR=" + tmp, "TMPDIR=" + tmp, "TMP=" + tmp, "TEMP=" + tmp}}
 			s.leads.config = &LeadRuntimeConfig{Repositories: []RoutineRepository{repository}, Prepare: func(_ context.Context, d agentsetup.LeadDemand, r RoutineRepository) (RoutineWorkspace, RoutineResourceLease, error) {
 				id := LeadWorktreeID(d, r)
@@ -138,8 +158,48 @@ func TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit(t *testing.T
 				}
 				return RoutineWorkspace{ID: id, Path: path}, lease, nil
 			}}
+			s.leads.config.RecoverResources = func(_ context.Context, p agentsetup.LeadPickup, w RoutineWorkspace) (RoutineResourceLease, error) {
+				if p.Demand != api.demand || w.ID != LeadWorktreeID(api.demand, repository) {
+					return nil, ErrScope
+				}
+				return lease, nil
+			}
 			var closeOnce sync.Once
 			t.Cleanup(func() { closeOnce.Do(func() { close(adapter.exit) }) })
+			if mode == "restart" {
+				api.lost = true
+				if err := s.PollLeadRuntime(t.Context()); !errors.Is(err, errLeadReplyLost) {
+					t.Fatal(err)
+				}
+				if err := checkRetainedLeads(s.state); err != nil {
+					t.Fatal("never-attempted receipt blocked startup", err)
+				}
+				delete(s.leads.leads, g.LaunchID)
+				s.generation = "replacement-generation"
+				if err := s.EnableLedger(t.Context(), s.ledgerBinding.Config); err != nil {
+					t.Fatal("never-attempted receipt blocked ledger import", err)
+				}
+				data, _, err := s.ledger.Snapshot()
+				if err != nil || len(data.Groups) != 1 {
+					t.Fatal("import dropped unreconciled occupancy", err)
+				}
+				api.abandonLost = true
+				if err := s.ReconcileLeadRuntime(t.Context()); !errors.Is(err, errLeadReplyLost) {
+					t.Fatal(err)
+				}
+				data, _, err = s.ledger.Snapshot()
+				if err != nil || len(data.Groups) != 1 || len(lease.finished) != 0 {
+					t.Fatal("lost abandon reply released owners", err)
+				}
+				if err := s.ReconcileLeadRuntime(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				data, _, err = s.ledger.Snapshot()
+				if err != nil || len(data.Groups) != 0 || len(lease.finished) != 1 || !lease.finished[0] || adapter.starts.Load() != 0 || !api.abandoned {
+					t.Fatal("restart did not abandon exact unattempted claim", err)
+				}
+				return
+			}
 			if mode == "lost_claim" {
 				api.lost = true
 				api.started = make(chan struct{})
@@ -215,8 +275,30 @@ func TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit(t *testing.T
 				}
 			} else {
 				api.windowClosed = mode == "window"
+				api.refused = mode == "refused"
+				if mode == "expired" {
+					api.grant.ExpiresAt = now
+				}
+				if mode == "refused" {
+					err := s.PollLeadRuntime(t.Context())
+					var status *client.StatusError
+					if !errors.As(err, &status) || status.Message != "lead_runtime_unqualified" {
+						t.Fatal("wrong refusal", err)
+					}
+					if _, err := s.state.Read("lead-runtime-"+g.LaunchID+".json", 32768); !errors.Is(err, os.ErrNotExist) {
+						t.Fatal("uncommitted record not removed", err)
+					}
+					if err := s.EnableLedger(t.Context(), s.ledgerBinding.Config); err != nil {
+						t.Fatal("ordinary refusal froze ledger startup", err)
+					}
+					data, _, err := s.ledger.Snapshot()
+					if err != nil || len(data.Groups) != 0 || len(lease.finished) != 1 || !lease.finished[0] || adapter.starts.Load() != 0 {
+						t.Fatal("refusal leaked owners", err)
+					}
+					return
+				}
 				err := s.PollLeadRuntime(t.Context())
-				if mode == "window" && !errors.Is(err, ErrDraining) || mode == "uncertain_start" && !errors.Is(err, ErrProcessesUnconfirmed) {
+				if mode == "expired" && !errors.Is(err, ErrRoutineUnavailable) || mode == "window" && !errors.Is(err, ErrDraining) || mode == "uncertain_start" && !errors.Is(err, ErrProcessesUnconfirmed) {
 					t.Fatal(err)
 				}
 				expected := int32(0)
@@ -236,10 +318,26 @@ func TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit(t *testing.T
 					t.Fatal(err)
 				}
 				var saved leadRecord
-				if json.Unmarshal(raw, &saved) != nil || saved.ExitReported || saved.ExitObserved || saved.Attempted != (mode == "uncertain_start") {
+				if json.Unmarshal(raw, &saved) != nil || saved.ExitReported || saved.ExitObserved || saved.Attempted != (mode == "uncertain_start") || saved.Abandoned != (mode == "window" || mode == "expired") {
 					t.Fatal("lost durable state", saved)
 				}
-				// An old daemon cannot use an unattempted claim after restart either.
+				if mode == "window" || mode == "expired" {
+					if err := checkRetainedLeads(s.state); err != nil {
+						t.Fatal("abandoned receipt blocked startup", err)
+					}
+					data, _, err := s.ledger.Snapshot()
+					if err != nil || len(data.Groups) != 0 || len(lease.finished) != 1 || !lease.finished[0] || !api.abandoned {
+						t.Fatal("preflight refusal leaked ownership", err)
+					}
+					if err := s.ReconcileLeadRuntime(t.Context()); err != nil {
+						t.Fatal(err)
+					}
+					if adapter.starts.Load() != 0 || len(lease.finished) != 1 {
+						t.Fatal("abandonment was relaunched or settled twice")
+					}
+					return
+				}
+				// An old daemon cannot execute an attempted claim after restart either.
 				previous := s.generation
 				s.generation = "new-daemon-generation"
 				if err = s.PollLeadRuntime(t.Context()); !errors.Is(err, ErrProcessesUnconfirmed) {
@@ -251,5 +349,25 @@ func TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit(t *testing.T
 				}
 			}
 		})
+	}
+}
+
+// Risk: an ordinary claim refusal prevents all daemon work after restart even
+// though the persisted receipt proves the native boundary was never attempted.
+func TestLeadRuntimeUnattemptedReceiptDoesNotFreezeStartup(t *testing.T) {
+	s, _, _ := testSupervisor(t)
+	record := leadRecord{Version: 1, Pickup: agentsetup.LeadPickup{Demand: agentsetup.LeadDemand{ID: uidLead("50")}, DaemonID: s.daemonID}}
+	if err := s.writeLead(record, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkRetainedLeads(s.state); err != nil {
+		t.Fatal("unattempted receipt froze startup", err)
+	}
+	record.Attempted = true
+	if err := s.writeLead(record, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := checkRetainedLeads(s.state); !errors.Is(err, ErrProcessesUnconfirmed) {
+		t.Fatal("attempted unknown process escaped the startup fence", err)
 	}
 }
