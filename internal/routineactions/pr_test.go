@@ -609,8 +609,10 @@ func TestRoutinePipelineRecoversMergeFixAndTargetEdits(t *testing.T) {
 			t.Fatalf("approval: %+v %v", out, err)
 		}
 		oldID := out.ApprovalID
-		f.exec(`UPDATE approval_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, oldID)
-		f.exec(`UPDATE agent_permission_grants SET valid_until=clock_timestamp()-interval '1 second' WHERE approval_request_id=$1`, oldID)
+		// Advance the broker's hold clock; immutable requests and decisions
+		// remain intact, and no sleep stands in for expiration.
+		later := time.Now().UTC().Add(25 * time.Hour)
+		f.b.now = func() time.Time { return later }
 		p.facts.Facts.Merged, p.facts.MergeSHA = true, strings.Repeat("c", 40)
 		f.mergedReceipt(p.review.HeadSHA, p.facts.MergeSHA)
 		out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)

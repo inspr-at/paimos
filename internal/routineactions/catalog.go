@@ -95,10 +95,11 @@ type Broker struct {
 	pr        PullRequests
 	pipeline  Pipeline
 	observe   ObserveTx
+	now       func() time.Time
 }
 
 func New(pool *pgxpool.Pool, authorize AuthorizeTx) *Broker {
-	return &Broker{pool: pool, authorize: authorize}
+	return &Broker{pool: pool, authorize: authorize, now: time.Now}
 }
 func (b *Broker) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/routine-runs/{runId}/actions", b.handle)
@@ -434,6 +435,13 @@ func applyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Binding, in R
 	return out, nil
 }
 func requireTarget(ctx context.Context, tx pgx.Tx, b Binding, in Request) error {
+	return requireTargetState(ctx, tx, b, in, true)
+}
+
+// Reconciliation observes an immutable effect on the same live target; it
+// does not write the request-time node contents. New actions still require
+// the exact revision, while both paths retain project and ancestry checks.
+func requireTargetState(ctx context.Context, tx pgx.Tx, b Binding, in Request, exactRevision bool) error {
 	var project string
 	var revision time.Time
 	var inScope, withinLimits bool
@@ -450,7 +458,7 @@ func requireTarget(ctx context.Context, tx pgx.Tx, b Binding, in Request) error 
 	if project != in.ProjectID {
 		return workorders.Fail(409, "target_project_changed")
 	}
-	if revision.UnixMicro() != in.ExpectedRevision {
+	if exactRevision && revision.UnixMicro() != in.ExpectedRevision {
 		return workorders.Fail(409, "target_revision_changed")
 	}
 	if (in.Kind == "work.update" || in.Kind == "knowledge.write" && in.TargetID != in.ProjectID) && !withinLimits {

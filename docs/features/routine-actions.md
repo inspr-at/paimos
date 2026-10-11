@@ -63,8 +63,11 @@ after response loss. A durable send claim permits one POST only. A crash after
 that claim but before the request leaves an honest uncertainty for a person;
 automatic recovery reads the original reference and never posts another PR.
 
-`pipeline.request` references the PR action and exact artifact head. Once the
-coordinator has completed the review lineage, recovery rechecks current review,
+`pipeline.request` references the PR action and the build's exact head. Once the
+coordinator has completed the review lineage, its persisted pipeline handoff
+supplies the exact reviewed head, including a completed fix round on the same
+PR and branch. The original request and PR-open evidence remain immutable.
+Recovery rechecks current review,
 required CI, tested source SHA and owner rights. The existing approval source
 and Decision Desk carry a link to the routine run and PR. Its exact digest
 includes the review, guardrails, required checks, artifact and queue SHA; a
@@ -74,10 +77,19 @@ A synthetic merge-queue SHA needs its own required checks and tested artifact.
 OPS supplies the qualified artifact reader; absence holds the request.
 
 A merged PR completes its routine only when the exact AEON-1008 merge-to-Done
-receipt is visible, with the approved queue SHA when queued. A different merge
-SHA stays held. Responsible-person fallback and missing-owner/benefit
+receipt and a live exact person approval are visible. Polls retain each approval
+digest's head and queue SHA even while newer checks or decisions are pending.
+A queue approval accepts only its exact queue SHA; a still-live approval made
+before queueing can observe the normal pipeline's completed merge. A newer
+approved queue binding supersedes that earlier approval, including after
+revocation. Expired consent requests a fresh person decision for the same
+immutable evidence. Delayed merge-to-Done receipts remain recoverable.
+Responsible-person fallback and missing-owner/benefit
 refusals remain owned by that existing automation. The routine broker never
-writes work status directly. Non-code results use an explicit result digest,
+writes work status directly. PR and pipeline recovery permits ordinary work-item
+edits while rechecking the same live target, project, output subtree and current
+authority; new action submissions still require the exact node revision.
+Non-code results use an explicit result digest,
 confirmed process exits, settled usage, completed catalogue actions and an exact
 person approval; they do not fabricate a PR. Every installation remains inert
 until its separately qualified, person-owned project execution flag is enabled.

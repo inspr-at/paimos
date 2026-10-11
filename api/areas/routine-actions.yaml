@@ -69,7 +69,7 @@ components:
       type: object
       additionalProperties: false
       required: [non_code]
-      description: 'Code requests reference a pr.open action key and exact head. Non-code requests require a result digest and no PR. All other catalogue receipts and required approvals must settle before completion.'
+      description: 'Code requests reference a pr.open action key and the exact build head. A completed coordinator review/fix handoff supplies the exact reviewed head for that same PR and branch. Non-code requests require a result digest and no PR. All other catalogue receipts and required approvals must settle before completion.'
       oneOf:
         - required: [pr_action_key, head_sha]
           properties: {non_code: {const: false}}

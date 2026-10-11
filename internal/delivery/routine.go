@@ -141,7 +141,9 @@ func (m *Module) RoutineReviewTx(ctx context.Context, tx pgx.Tx, run, target str
 		return out, errRead
 	}
 	var order string
-	if err := tx.QueryRow(ctx, `SELECT v.work_order_id::text FROM work_order_reviews v JOIN routine_attempts a ON a.agent_run_id=v.run_id WHERE a.run_id=$1 AND v.ticket_node_id=$2 ORDER BY v.created_at DESC,v.work_order_id DESC LIMIT 1`, run, target).Scan(&order); err != nil {
+	// Only the exact completed coordinator handoff may supersede the build
+	// request's head. A newer review alone cannot advance a pipeline action.
+	if err := tx.QueryRow(ctx, `SELECT v.work_order_id::text FROM routine_effect_outbox o JOIN work_order_reviews v ON v.work_order_id::text=o.result->>'review_order_id' JOIN routine_attempts a ON a.agent_run_id=v.run_id AND a.run_id=o.run_id WHERE o.run_id=$1 AND o.kind='routine.continue' AND o.state='succeeded' AND o.result->>'state'='awaiting_pipeline' AND o.result->>'head_sha'=v.head_sha AND v.ticket_node_id=$2 ORDER BY o.updated_at DESC,o.id DESC LIMIT 1`, run, target).Scan(&order); err != nil {
 		return out, err
 	}
 	v, err := m.routineReviews.RoutineResultTx(ctx, tx, order)

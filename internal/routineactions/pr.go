@@ -133,8 +133,15 @@ func (b *Broker) effectTx(ctx context.Context, tid, id string, fn func(pgx.Tx, t
 		if err != nil {
 			return err
 		}
-		if err := requireTarget(ctx, tx, binding, v.Request); err != nil {
+		if err := requireTargetState(ctx, tx, binding, v.Request, false); err != nil {
 			return err
+		}
+		var work string
+		if err := tx.QueryRow(ctx, `SELECT work_node_id::text FROM routine_runs WHERE id=$1`, run).Scan(&work); err != nil {
+			return err
+		}
+		if work != v.Request.TargetID {
+			return workorders.Fail(409, "external_action_target_changed")
 		}
 		var result []byte
 		if err := tx.QueryRow(ctx, `SELECT result FROM routine_actions WHERE id=$1 AND run_id=$2 FOR NO KEY UPDATE`, id, run).Scan(&result); err != nil {
