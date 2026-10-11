@@ -1193,6 +1193,9 @@ td.c-title { position: relative; overflow: hidden; }
   /* Reserve the touch action reach before hover/focus so the recurring
      marker never changes the title width when those actions appear. */
   .title-cell { padding-right: 98px; }
+  /* Parents have only Open. Reserving an absent Queue target would consume
+     their title after the full arrow reach and subtree progress are drawn. */
+  td.c-title:has(.row-actions > :only-child) .title-cell { padding-right: 52px; }
 }
 
 .status-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 13px; line-height: 18px; white-space: nowrap; }
