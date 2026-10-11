@@ -447,7 +447,12 @@ func (m *Module) undoOutdated(w http.ResponseWriter, r *http.Request) {
 		if err := undoRetireSnapshots(ctx, tx, before, after.Snapshot, current); err != nil {
 			return err
 		}
-		event, err := events.Append(ctx, tx, p, events.Change{Type: "model.outdated_restored", Before: after.Snapshot, After: before, UndoOf: &id})
+		restored, err := loadRetireSnapshot(ctx, tx)
+		if err != nil {
+			return err
+		}
+		actualBefore, actualAfter := changedRetireSnapshots(current, restored)
+		event, err := events.Append(ctx, tx, p, events.Change{Type: "model.outdated_restored", Before: actualBefore, After: actualAfter, UndoOf: &id})
 		eventID = event.ID
 		return err
 	})

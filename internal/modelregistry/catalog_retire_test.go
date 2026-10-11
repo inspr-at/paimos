@@ -187,6 +187,16 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 	if reflect.DeepEqual(before["model_pref_scopes"], restored["model_pref_scopes"]) || eventCount(t, admin, "model.outdated_restored") != 1 {
 		t.Fatal("Undo did not advance revision or audit")
 	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		var revision int
+		if err := tx.QueryRow(t.Context(), `SELECT (after->'model_pref_scopes'->0->>'revision')::int FROM events WHERE type='model.outdated_restored'`).Scan(&revision); err != nil {
+			return err
+		}
+		if revision != 3 {
+			t.Fatal("Undo audit did not record actual monotonic revision", revision)
+		}
+		return nil
+	})
 	boardDecode[map[string]any](t, boardCall(t, admin, "POST", "/api/models/outdated/undo", map[string]any{"undo_token": result.UndoToken}, ""), 409)
 	if reflect.DeepEqual(before["model_profile_retirements"], after["model_profile_retirements"]) {
 		t.Fatal("profiles were never retired")
