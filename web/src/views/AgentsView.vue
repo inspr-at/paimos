@@ -34,9 +34,10 @@ import AccountsComputers from '../components/agents/AccountsComputers.vue'
 import { openModelPrefs } from '../lib/modelPrefsCommand'
 import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
-import LeadsList from '../components/lead/LeadsList.vue'
-import { openStartLead } from '../lib/leadOverlay'
-import { leadLaunchReason, LEAD_WORDS } from '../lib/lead'
+import { useAgentProjects } from '../components/agents/useAgentProjects'
+import { DEFAULT_GROUP, emptyFacets, facetParam, FACET_KEYS, parseFacet, parseGroup, sameFacets, type Facets, type GroupBy } from '../components/agents/sessionGroups'
+import { openLeadPanel, openStartLead } from '../lib/leadOverlay'
+import { LEAD_WORDS } from '../lib/lead'
 import { useDeveloperSettings } from '../lib/developerSettings'
 import RunQueue from '../components/agents/RunQueue.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
@@ -52,7 +53,8 @@ import { clockTime, liveSession } from '../lib/agentPause'
 // Markus's desk for agents (AEON-1209, design AEON-1196): the head line whose counts filter
 // Sessions; the capacity row (the dial and the accounts chip) that scrolls with the page;
 // what waits on him (only when something does); then the Sessions card, whose head carries
-// the list's own tools and sticks inside the card. A session opens in the docked panel.
+// the list's own tools and sticks inside the card. Sessions group by project, each lead
+// heading its group (AEON-1210). A session opens in the docked panel.
 const agents = useAgents()
 const pause = useAgentPause()
 const headerMenu = ref<{ type: 'add' | 'more'; anchor: HTMLElement } | null>(null)
@@ -91,6 +93,26 @@ function setQuery(value: string) {
   query.value = value
   if ((route.query.q ?? '') !== value) void router.replace({ query: { ...route.query, q: value || undefined } })
 }
+// Display › Group by and Filter › Project, Harness, Computer (AEON-1210): ?group=, ?project=,
+// ?harness= and ?computer= carry them, read with bounds before any work.
+const readFacets = (): Facets => ({ project: parseFacet(route.query.project), harness: parseFacet(route.query.harness), computer: parseFacet(route.query.computer) })
+const facets = ref<Facets>(readFacets())
+const group = ref<GroupBy>(parseGroup(route.query.group))
+watch(() => [route.query.project, route.query.harness, route.query.computer, route.query.group], () => {
+  const next = readFacets()
+  if (!sameFacets(next, facets.value)) facets.value = next
+  const grouped = parseGroup(route.query.group)
+  if (grouped !== group.value) group.value = grouped
+})
+function setFacets(next: Facets) {
+  const bounded = Object.fromEntries(FACET_KEYS.map(key => [key, parseFacet(facetParam(next[key]))])) as Facets
+  facets.value = bounded
+  void router.replace({ query: { ...route.query, project: facetParam(bounded.project), harness: facetParam(bounded.harness), computer: facetParam(bounded.computer) } })
+}
+function setGroup(next: GroupBy) {
+  group.value = next
+  void router.replace({ query: { ...route.query, group: next === DEFAULT_GROUP ? undefined : next } })
+}
 // Existing briefing/notification links retain the original source identity.
 watch(() => route.query.needs, value => {
   const id = deskLinkItem(value)
@@ -124,14 +146,18 @@ const showConnect = computed(() => !!session.identity && session.identity.princi
 const canAttach = computed(() => session.identity?.principal.kind === 'person' && pairingAccess.value.canLookup)
 // AEON-741: leads start workers; the manual Start agent is an expert opt-in.
 const { showExpertStart } = useDeveloperSettings()
-const leadsList = ref<InstanceType<typeof LeadsList>>()
+// Each project's lead and queued work: the Sessions list heads its groups with them (AEON-1210).
+const { view: projectLeads, withoutLead: leadless, mayStart: mayStartLead, launchAvailable: leadLaunchAvailable, launchReason } = useAgentProjects()
 const manualStart = computed(() => canStart.value && showExpertStart.value)
-const leadless = computed(() => leadsList.value?.withoutLead ?? [])
-const canStartLead = computed(() => !!leadsList.value?.mayStart && leadless.value.length > 0)
-const leadLaunchAvailable = computed(() => !!leadsList.value?.launchAvailable)
-const leadlessNote = computed(() => !leadLaunchAvailable.value ? leadsList.value?.launchReason ?? leadLaunchReason(null) : leadless.value.length === 1 ? `${projects.byId(leadless.value[0]!)?.routeKey ?? 'One project'} has none. One per project.` : `${leadless.value.length} projects have none. One per project.`)
+const canStartLead = computed(() => mayStartLead.value && leadless.value.length > 0)
+const leadlessNote = computed(() => !leadLaunchAvailable.value ? launchReason.value : leadless.value.length === 1 ? `${projects.byId(leadless.value[0]!)?.routeKey ?? 'One project'} has none. One per project.` : `${leadless.value.length} projects have none. One per project.`)
 const showNew = computed(() => manualStart.value || canStartLead.value || canAttach.value || showConnect.value)
-watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => { headerMenu.value = null; filter.value = null; if (query.value) setQuery('') })
+watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => {
+  headerMenu.value = null; filter.value = null
+  if (query.value) setQuery('')
+  if (FACET_KEYS.some(key => facets.value[key].length)) setFacets(emptyFacets())
+  if (group.value !== DEFAULT_GROUP) setGroup(DEFAULT_GROUP)
+})
 
 const ticketPeek = inject(TICKET_PEEK, null)
 const ticketPeekOpen = computed(() => !!ticketPeek?.openKey.value)
@@ -311,6 +337,8 @@ function keydown(event: KeyboardEvent) {
     case 'Enter': case 'o':
       if ((event.target as HTMLElement).closest('a, button, summary')) return
       if (kind === 's') { event.preventDefault(); openSession(id) }
+      // A lead without a session on the list opens its lead panel (AEON-1210).
+      else if (kind === 'l') { event.preventDefault(); openLeadPanel(id, document.querySelector<HTMLElement>(`.agents-page [data-row="l:${CSS.escape(id)}"]`)) }
       break
     case 'p': case 'r': {
       const view = agents.views.find(v => v.session.id === id)
@@ -420,14 +448,14 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <AttachPending ref="attachPending" :now="agents.now" @rows="rows => attachRows = rows" @history="rows => attachHistory = rows" @updated="requests => attachDialog?.sync(requests)" v-slot="{ rows }">
           <AgentChores v-if="capacity.signins.length || rows.length || attachHistory.length" :signins="capacity.signins" :attaches="rows" :history="attachHistory" @review="request => { attachRows = rows; reviewAttach(request) }" @dismiss="id => attachPending?.dismiss(id)" />
         </AttachPending>
-        <LeadsList v-if="agents.loaded" ref="leadsList" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <SessionList
           v-if="agents.loaded" ref="sessionList"
           :groups="agents.grouped" :history="agents.historyViews" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
           :loaded="agents.loaded" :controls="agents.controls" :can-start="manualStart" :can-lead="canStart" :filter="filter" :query="query"
+          :projects="projectLeads" :group="group" :facets="facets"
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()" @history="agents.loadHistory(true)" @older="agents.loadOlderHistory()" @clear-filter="clearFilter"
-          @filter="setFilter" @search="setQuery"
+          @filter="setFilter" @search="setQuery" @group="setGroup" @facets="setFacets"
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
         <RunQueue v-if="agents.loaded" ref="runQueue" @emptied="pageTitle?.focus()" />

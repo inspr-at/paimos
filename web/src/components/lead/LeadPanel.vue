@@ -43,7 +43,17 @@ async function readDial() {
   } catch { dial.value = null }
 }
 watch(() => [props.projectId, session.identity?.principal.id], () => { dial.value = null; void leads.load(props.projectId); void queue.load(props.projectId); void readDial() }, { immediate: true })
-onMounted(async () => { poller.start(); clock = setInterval(() => { now.value = Date.now() }, 10_000); await nextTick(); closeButton.value?.focus() })
+onMounted(async () => { poller.start(); clock = setInterval(() => { now.value = Date.now() }, 10_000); await nextTick(); if (!showSection()) closeButton.value?.focus() })
+// The queue chip on an Agents lead row opens the panel at Next up (AEON-1210), also when it is open already.
+const nextUp = ref<HTMLElement>()
+function showSection() {
+  if (leadOverlay.section !== 'next-up' || !nextUp.value) return false
+  leadOverlay.section = null
+  nextUp.value.scrollIntoView({ block: 'start', behavior: 'auto' })
+  nextUp.value.focus({ preventScroll: true })
+  return true
+}
+watch(() => leadOverlay.section, section => { if (section) void nextTick(showSection) })
 onBeforeUnmount(() => { poller.stop(); clearInterval(clock) })
 
 const time = (iso?: string | null) => iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''
@@ -139,7 +149,7 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
           <span class="wk-s">{{ [harnessName(s.harness), [s.model, s.reasoning_effort].filter(Boolean).join(', '), s.current_activity?.text || s.activity_note].filter(Boolean).join(' · ') }}</span>
         </div>
       </section>
-      <section class="p-sec" aria-labelledby="lp-next">
+      <section id="next-up" ref="nextUp" class="p-sec" tabindex="-1" aria-labelledby="lp-next">
         <div class="p-head"><h3 id="lp-next">Next up</h3><span class="small">Queue order · Move to top on the ticket</span></div>
         <p v-if="!queued" class="small warn">The queue can’t be read right now.</p>
         <p v-else-if="!next.length" class="small faint">Nothing is queued. Queue work on a ticket with <kbd class="keycap">Q</kbd>.</p>
@@ -208,6 +218,8 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
 .needs p { grid-column: 2; margin: 0; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
 .needs .btn { grid-column: 3; grid-row: 1 / span 2; }
 .p-sec { padding: 18px 0 20px; border-top: 1px solid var(--line); }
+.p-sec:focus { outline: none; }
+.p-sec:focus-visible { border-radius: 8px; box-shadow: var(--focus-ring); }
 .pane-body > .p-sec:first-child, .needs + .p-sec { padding-top: 0; border-top: 0; }
 .p-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; margin-bottom: 12px; }
 .p-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
