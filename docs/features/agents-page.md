@@ -61,19 +61,30 @@ gone). The state word is the avatar's tooltip and part of its accessible name
 requested" or "Lost contact", follows it in the tooltip and opens line 2. The
 State column is gone; Display › Sort still orders by state.
 
-**Two lines per row.** Line 1 names the session (its result, then its own name,
-and Lead); line 2 says what it works on, what it asks or how it ended. A state
-change changes the badge, line 2 and the time, never the row's height.
+**Two lines per row.** Line 1 is the name only: the ticket key opens it
+("PHAROS-12 · Restore the backups"), and a lead adds Lead. The session's own
+label is in the name's tooltip; its computer has its own column, never line 1.
+Line 2 says what it works on, what it asks or how it ended. A state change
+changes the badge, line 2 and the time, never the row's height.
+
+**The columns.** Session · Time · Execution · Computer · Beat, as the design
+has them. Execution names the model the way Settings › Models does, with its
+level ("Opus 5.5 · xhigh"), and the account under it ("Claude Max · markus");
+a model the registry does not list still reads as words, never as its raw id.
+The ticket has no column (its key opens the name; Display › Sort still orders
+by it). The tier, the estimate and whether the session listens or has an inbox
+live in the details, in words; the tier there keeps its one-step Left/Right
+arrow keys.
 
 **Time.** The Time column sits beside the name: running time while a session
 runs ("1 h 12 min"), how long ago it ended ("12 min ago"), or since when it is
 paused ("since 09:58"). Sorting by Time orders by what the column shows.
 
 **The list's width decides its form.** From 880 px the full table; from 560 px
-a table without Host and the account line, with the ticket key before the name
-(the details name and rename the computer); under 560 px (phones) compact rows.
+a table without Computer and the account line (the details name and rename the
+computer); under 560 px (phones) compact rows.
 A compact row opens line 1 with a 12 px harness mark whose tooltip and name say
-the model, effort, harness and account ("gpt-6.1-sol · xhigh · Codex · ChatGPT
+the model, level, harness and account ("GPT-6.1 Sol · xhigh · Codex · ChatGPT
 Pro"), ends line 1 with the short time ("42m", "3m ago"), and keeps ⋯ beside
 the two lines (an ended or silent row also keeps its one-tap bin): Pause,
 Resume and Change tier are in its menu, and the details name and rename the
