@@ -4,6 +4,7 @@ package routineexec
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,6 +40,7 @@ type fixture struct {
 	d                                                              *dbtest.DB
 	owner, agent                                                   tenant.Principal
 	project, parent, work, account, computer, profile, run, action string
+	token                                                          string
 	routine                                                        recurrences.Recurrence
 	broker                                                         routinebudget.Broker
 	gate                                                           agentaccounts.RoutineGateContract
@@ -157,8 +159,12 @@ func setup(t *testing.T, mode string, paid bool) *fixture {
 	if paid {
 		f.gate.PaidAccountIDs = []string{f.account}
 	}
-	var request, key string
-	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,created_by_principal_id) VALUES($1,$2,'Fixture',gen_random_uuid()::text,'fixture-not-a-credential',$3) RETURNING id::text`, f.owner.TenantID, f.agent.ID, f.owner.ID).Scan(&key))
+	var request, key, prefix string
+	// The daemon's claim re-reads its exact scoped key from the bearer token.
+	secret := "routine-dispatch-fixture-not-a-credential"
+	sum := sha256.Sum256([]byte(secret))
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'Fixture',replace(gen_random_uuid()::text,'-',''),$3,$4,$5) RETURNING id::text,prefix`, f.owner.TenantID, f.agent.ID, hex.EncodeToString(sum[:]), f.agent.Scopes, f.owner.ID).Scan(&key, &prefix))
+	f.token = "aeon_" + prefix + "_" + secret
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,gen_random_uuid(),'887887887',repeat('a',64),repeat('b',64),repeat('c',64),'{"platform":"darwin","arch":"arm64"}','fixture','redeemed',$2) RETURNING id::text`, f.owner.TenantID, f.owner.ID).Scan(&request))
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,capacity_signals,capacity_reported_at,ledger_generation,ledger_enrolled_at) VALUES($1,gen_random_uuid(),$2,$3,$4,'budget-daemon',repeat('c',64),'{"load":5,"cores":18,"memory_pressure":"normal","power":"plugged_in","thermal":"normal","unattended":{"login_session":"ready","idle_sleep":"disabled","filevault":"on"}}',clock_timestamp(),gen_random_uuid()::text,clock_timestamp()) RETURNING id::text`, f.owner.TenantID, request, f.agent.ID, key).Scan(&f.computer))
 	f.exec(`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) VALUES($1,$2,$3,$4,$5,clock_timestamp()+interval '1 hour',clock_timestamp())`, f.owner.TenantID, f.account, f.computer, request, f.profile)
@@ -528,6 +534,7 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 		"handoff": agentruns.WorkerPickup{TicketRevision: handoff.TicketRevision, WorkOrderRevision: handoff.WorkOrderRevision, BriefSHA256: handoff.BriefSHA256, WorktreeID: worktree}})
 	must(t, err)
 	req := httptest.NewRequest("POST", "/api/runs/"+d.agentRun+"/claim", strings.NewReader(string(body))).WithContext(tenant.WithPrincipal(t.Context(), f.agent))
+	req.Header.Set("Authorization", "Bearer "+f.token)
 	req.Header.Set(agentpairing.LedgerGenerationHeader, grant.LedgerGeneration)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
