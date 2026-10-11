@@ -296,9 +296,12 @@ test('the Agents page offers Routines in More, and one Routines line only while 
   await line.click()
   await expect(page).toHaveURL(/\/agents\/routines$/)
   quiet = true
+  // Absence counts only once the quiet list has been read and the page drew it.
+  const read = page.waitForResponse(response => new URL(response.url()).pathname === '/api/recurrences')
   await page.goto('/agents')
-  await expect(page.getByRole('heading', { level: 1, name: 'Agents' })).toBeVisible()
+  await read
   await expect(page.locator('.agents-page .main-col')).toBeVisible()
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   await expect(line).toHaveCount(0)
   expect(errors).toEqual([])
 })

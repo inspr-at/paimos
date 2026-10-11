@@ -67,6 +67,7 @@ const projectOptions = computed(() => {
   return [...ids].map(id => ({ id, key: projects.byId(id)?.routeKey ?? 'Another project' })).sort((a, b) => a.key.localeCompare(b.key))
 })
 const filtered = computed(() => scopeFilter.value !== 'all' || !!projectFilter.value || !!stateFilter.value)
+watch([scopeFilter, projectFilter, stateFilter], () => { closed.value = false })
 function toggleState(state: RoutineState) {
   if (stateFilter.value === state) setQuery({ state: undefined })
   else if (counts.value[state]) setQuery({ state })

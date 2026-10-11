@@ -46,23 +46,23 @@ function reset() {
 function load(mode: 'first' | 'refresh' | 'older' = 'first') {
   const id = props.item.id, chosen = filter.value, before = mode === 'older' ? cursor.value ?? undefined : undefined
   if (mode === 'older' && before === undefined) return
-  const mine = () => props.item.id === id && filter.value === chosen
+  const current = () => props.item.id === id && filter.value === chosen
   if (mode === 'older') { older.value = 'busy'; olderReason.value = '' } else { refreshFailure.value = ''; if (mode === 'first') { loading.value = true; failure.value = '' } }
   const lane = mode === 'older' ? olderPages : pages
   const handlers = {
     failed: (error: unknown) => {
-      if (!mine()) return
+      if (!current()) return
       if ((error as { status?: number }).status === 404) { gone.value = true; emit('gone'); return }
       const reason = error instanceof Error ? error.message : 'the server didn’t answer'
       if (mode === 'older') { older.value = 'failed'; olderReason.value = reason }
       else if (shown.value) refreshFailure.value = reason
       else failure.value = reason
     },
-    settled: () => { if (!mine()) return; if (mode !== 'older') loading.value = false; if (older.value === 'busy') older.value = '' },
+    settled: () => { if (!current()) return; if (mode !== 'older') loading.value = false; if (older.value === 'busy') older.value = '' },
   }
   if (chosen === 'runs') void lane.run(({ after, signal }) => after(listRoutineRuns(id, before as string | undefined, signal), raw => {
     const page = checkedRuns(raw)
-    if (!mine()) return
+    if (!current()) return
     if (mode === 'older') { runs.value = [...runs.value, ...page.items.filter(run => !runs.value.some(known => known.id === run.id))]; cursor.value = page.next_cursor; loadedMore.value = true }
     else if (mode === 'refresh' && loadedMore.value) { const fresh = new Set(page.items.map(run => run.id)); runs.value = [...page.items, ...runs.value.filter(run => !fresh.has(run.id))] }
     else { runs.value = page.items; cursor.value = page.next_cursor }
@@ -70,7 +70,7 @@ function load(mode: 'first' | 'refresh' | 'older' = 'first') {
   }), handlers)
   else void lane.run(({ after, signal }) => after(recurrenceHistory(id, chosen, before as number | undefined, signal), page => {
     if (!Array.isArray(page?.items)) throw new Error('The history answer was not a history page.')
-    if (!mine()) return
+    if (!current()) return
     if (mode === 'older') { entries.value = [...entries.value, ...page.items.filter(entry => !entries.value.some(known => known.id === entry.id))]; cursor.value = page.next_cursor; loadedMore.value = true }
     else if (mode === 'refresh' && loadedMore.value) { const fresh = new Set(page.items.map(entry => entry.id)); entries.value = [...page.items, ...entries.value.filter(entry => !fresh.has(entry.id))] }
     else { entries.value = page.items; cursor.value = page.next_cursor }
@@ -90,6 +90,8 @@ function toggleRun(id: string) { const next = new Set(opened.value); if (next.ha
 watch(() => props.item.id, () => { reset(); opened.value = new Set(); defaulted.value = false; gone.value = false; filter.value = defaultFilter() }, { flush: 'sync' })
 watch(agent, () => { if (!filters.value.some(([key]) => key === filter.value)) filter.value = defaultFilter() }, { flush: 'sync' })
 watch(filter, () => { reset() }, { flush: 'sync' })
+// Another person or workspace: nothing read for the previous one stays.
+watch(() => scope.owner.value, () => { reset(); opened.value = new Set(); defaulted.value = false; gone.value = false; if (scope.owner.value) load('first') }, { flush: 'sync' })
 watch([() => props.item.id, filter], () => load('first'), { immediate: true })
 // The list's poll shows a new revision or run: read the newest page again, keeping older pages.
 watch(() => [props.item.id, `${props.item.revision}/${props.item.occurrence_count}/${props.item.last_run?.id ?? ''}/${props.item.last_run?.state ?? ''}`] as const, (next, previous) => { if (previous && next[0] === previous[0] && next[1] !== previous[1]) load('refresh') })
