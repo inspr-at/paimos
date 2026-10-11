@@ -18,7 +18,7 @@ func TestManagedOrderActivationOnlyChangesFutureReviewBindings(t *testing.T) {
 	modelregistry.New(f.d.App).Mount(f.mux)
 	strong := testID()
 	f.tx(t, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'saved-strong-review','1','claude','anthropic','saved-review-model','xhigh','strong')`, f.person.TenantID, strong); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,$2,'saved-strong-review','1','claude','anthropic','saved-review-model','xhigh','strong',4)`, f.person.TenantID, strong); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'review-gate',99,$2)`, f.person.TenantID, strong); err != nil {
@@ -101,7 +101,7 @@ func TestManagedSavedOrderFinishedTelemetryThroughProductionMiddleware(t *testin
 	f := newFixture(t)
 	strong := testID()
 	f.tx(t, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'completion-saved-review','1','claude','anthropic','saved-review-model','xhigh','strong')`, f.person.TenantID, strong); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier,registered_effort_level) VALUES($1,$2,'completion-saved-review','1','claude','anthropic','saved-review-model','xhigh','strong',4)`, f.person.TenantID, strong); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'review-gate',99,$2)`, f.person.TenantID, strong); err != nil {

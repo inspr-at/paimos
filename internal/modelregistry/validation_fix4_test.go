@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -37,8 +38,9 @@ func TestPriorityOverflowDoesNotPrepareCatalog(t *testing.T) {
 			if err := json.Unmarshal(raw, &refusal); err != nil {
 				t.Fatalf("decode refusal: %v: %s", err, raw)
 			}
-			if status != http.StatusBadRequest || refusal.Error != "priority exceeds storage range" {
-				t.Errorf("wrong range refusal: status=%d body=%s", status, raw)
+			// The retired ladder writer refuses before decoding any priority.
+			if status != http.StatusGone || !strings.Contains(refusal.Error, "Role ladders moved") {
+				t.Errorf("wrong retired-writer refusal: status=%d body=%s", status, raw)
 			}
 			if after := catalogSetupState(t, p); after != before {
 				t.Error("priority overflow changed profiles, routes, seed events or event counter")
@@ -47,6 +49,8 @@ func TestPriorityOverflowDoesNotPrepareCatalog(t *testing.T) {
 	}
 }
 
+// Risk: the retired ladder writer still stores a route at any priority,
+// including the storage maximum, instead of refusing it unchanged.
 func TestMaximumRoutePriorityCanBeStored(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "priority-maximum", "person", "Owner", []string{"admin"})
@@ -54,22 +58,14 @@ func TestMaximumRoutePriorityCanBeStored(t *testing.T) {
 	if len(profiles) == 0 {
 		t.Fatal("missing catalog fixture")
 	}
+	before := catalogSetupState(t, p)
 	body := fmt.Sprintf(`[{"role":"build","priority":%d,"profile_id":%q,"state":"available"}]`, math.MaxInt32, profiles[0].ID)
-	got := decode[[]Route](t, &p, http.MethodPut, "/api/models/routes", body, http.StatusOK)
-	if len(got) != 1 || got[0].Priority != math.MaxInt32 || got[0].ProfileID != profiles[0].ID {
-		t.Fatalf("maximum priority changed: %+v", got)
+	status, raw := call(t, &p, http.MethodPut, "/api/models/routes", body)
+	if status != http.StatusGone || !strings.Contains(string(raw), "Role ladders moved") {
+		t.Fatalf("retired writer accepted a route: %d %s", status, raw)
 	}
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		var priority int
-		if err := tx.QueryRow(t.Context(), `SELECT priority FROM model_role_routes WHERE role='build' AND profile_id=$1`, profiles[0].ID).Scan(&priority); err != nil {
-			return err
-		}
-		if priority != math.MaxInt32 {
-			t.Fatalf("maximum priority not stored: %d", priority)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
+	if catalogSetupState(t, p) != before {
+		t.Fatal("retired writer stored a route")
 	}
 }
 

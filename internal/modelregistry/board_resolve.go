@@ -157,9 +157,6 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	seen := map[string]bool{}
 	admissionWait := false
 	waitCode := ""
-	// The first daily cap met on the walk. An order that ends without a
-	// runnable route waits for that cap rather than reporting its text.
-	capWait := ""
 	for _, order := range d.Steps {
 		key := order.Line
 		if order.Stage == "quick" {
@@ -251,9 +248,6 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				}
 				if cause != "" {
 					reasons = append(reasons, cause)
-					if capWait == "" {
-						capWait = daily.blocked
-					}
 					if daily.wait || q.Harness != "" {
 						dailyWait = daily.blocked
 					}
@@ -336,9 +330,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			if len(d.Held) > 0 {
 				out.Trace.Blocked = d.Held[0].Reason
 			}
-			if capWait != "" {
-				out.Trace.Blocked = capWait
-			} else if q.Escalation && waitCode == "" {
+			if q.Escalation && waitCode == "" {
 				// Escalation keeps its route-level reason for the Decision Desk;
 				// each line's own cause stays in Held.
 				out.Trace.Blocked = "no allowed stronger route"

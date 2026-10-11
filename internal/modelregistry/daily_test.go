@@ -149,7 +149,8 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if got.Profile != nil || got.Trace.Blocked != "daily_limit" {
+			// The order's Wait ending reports the capped route's own cause.
+			if got.Profile != nil || got.Trace.Blocked != "Codex account is at its daily cap until "+end.UTC().Format(time.RFC3339) {
 				t.Fatalf("Models Wait acquired a successor: %+v", got)
 			}
 			if board {
@@ -305,7 +306,7 @@ func TestDailyReviewKeepsReviewQualifiedAccounts(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if got.Profile != nil || got.Trace.Blocked != "daily_limit" || len(got.Trace.QualifyingAccountIDs) != 0 {
+			if got.Profile != nil || got.Trace.Blocked != "Claude account is at its daily cap until "+end.UTC().Format(time.RFC3339) || len(got.Trace.QualifyingAccountIDs) != 0 {
 				t.Fatalf("%s: headroom on an account review does not qualify kept the route: %+v", atLimit, got)
 			}
 		}

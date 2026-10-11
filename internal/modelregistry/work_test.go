@@ -50,6 +50,13 @@ func TestModelsV2UnadoptedSavedLadder(t *testing.T) {
 				if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&opus); err != nil {
 					return err
 				}
+				// The fixture owns the saved build ladder it migrates.
+				if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes`); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
+					return err
+				}
 				if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, p.TenantID, opus); err != nil {
 					return err
 				}

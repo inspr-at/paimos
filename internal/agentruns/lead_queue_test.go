@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -800,6 +801,9 @@ func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 	// jobs fall back to the Default, so the kind's own Models order holds only
 	// a model without an account and ends in Wait.
 	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if err := modelprefs.SeedKinds(t.Context(), tx, f.person.TenantID); err != nil {
+			return err
+		}
 		var accountless string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'accountless','1','claude','anthropic','accountless-test-model','high','strong') RETURNING id::text`, f.person.TenantID).Scan(&accountless); err != nil {
 			return err
