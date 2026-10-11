@@ -301,9 +301,15 @@ test('For new things folds into one line; opened, New model versions is read-onl
     await expect(rulesToggle(page)).toContainText('accounts ask first · contexts start empty · projects go to Default')
     await expect(sw(page, 'New accounts')).toBeHidden()
     const head = zone(page).locator('#account-use-title')
-    const above = await head.evaluate(el => el.getBoundingClientRect().top + window.scrollY)
+    const top = () => head.evaluate(el => {
+      let y = el.getBoundingClientRect().top + window.scrollY
+      for (let parent = el.parentElement; parent; parent = parent.parentElement) y += parent.scrollTop
+      return y
+    })
+    await rulesToggle(page).scrollIntoViewIfNeeded()
+    const above = await top()
     await openRules(page)
-    expect(Math.abs(await head.evaluate(el => el.getBoundingClientRect().top + window.scrollY) - above), 'the fold moved what is above it').toBeLessThanOrEqual(.5)
+    expect(Math.abs(await top() - above), 'the fold moved what is above it').toBeLessThanOrEqual(.5)
     await expect(zone(page).locator('[data-use-rule]')).toHaveCount(4)
     await expect(zone(page).locator('[data-use-say="new_accounts"]')).toHaveText('A new login runs nothing until you tick where it may work. For example, you sign in to Claude with another login on one of your computers, and it waits in the table below, unticked.', { useInnerText: true })
     // The model rule is shown as stored, never as a switch; Models is its editor.
@@ -537,9 +543,14 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
       await z.scrollIntoViewIfNeeded()
       await z.screenshot({ path: info.outputPath(`where-folded-${width}-${theme}.png`) })
 
-      // The fold grows downward: nothing above it moves.
-      const top = (locator: ReturnType<Page['locator']>) => locator.evaluate(el => el.getBoundingClientRect().top + window.scrollY)
+      // The fold grows downward: nothing above it moves (measured in scroll-container coordinates).
+      const top = (locator: ReturnType<Page['locator']>) => locator.evaluate(el => {
+        let y = el.getBoundingClientRect().top + window.scrollY
+        for (let parent = el.parentElement; parent; parent = parent.parentElement) y += parent.scrollTop
+        return y
+      })
       const above = [page.locator('#accounts-list-title'), z.locator('#account-use-title'), rulesToggle(page)]
+      await rulesToggle(page).scrollIntoViewIfNeeded()
       const before = await Promise.all(above.map(top))
       await openRules(page)
       const after = await Promise.all(above.map(top))

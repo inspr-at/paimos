@@ -438,6 +438,8 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
 /* The body clips only while folded or moving, so focus rings inside it are never cut off once open. */
 .nt-in { min-height: 0; overflow: hidden; }
 .nt.open:not(.moving) .nt-in { overflow: visible; }
+/* Folded and settled, the body is hidden as well as inert: nothing in it is shown, read out or focused. */
+.nt:not(.open):not(.moving) .nt-in { visibility: hidden; }
 .nt-rows { display: grid; padding: 0 16px 8px 38px; }
 .nt-r { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; column-gap: 20px; padding: 14px 0; }
 .nt-r + .nt-r { border-top: 1px solid var(--line); }
