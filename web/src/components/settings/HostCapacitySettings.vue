@@ -4,7 +4,7 @@
 // default, the full editor behind the chip on each Computers row. Both use the same write.
 import { computed, ref, watch } from 'vue'
 import type { PairingView } from '../../lib/agentPairing'
-import { defaultHostPolicy, hostCapacityReason, HostCapacityWriteError, saveHostPolicy, validHostPolicy, type HostCapacityPolicy } from '../../lib/hostCapacity'
+import { defaultHostPolicy, hostCapacityReason, HostCapacityWriteError, samePolicy, saveHostPolicy, validHostPolicy, type HostCapacityPolicy } from '../../lib/hostCapacity'
 import { settingsSubmitKey } from '../../lib/settingsOverlays'
 import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
@@ -13,11 +13,17 @@ const props = defineProps<{ computer: PairingView; manage: boolean; ownerKey: st
 const emit = defineEmits<{ saved: [] }>()
 const expanded = ref(true), busy = ref(false), message = ref('')
 const draft = ref<HostCapacityPolicy>(defaultHostPolicy())
+// The policy and revision this panel last accepted: the draft is edited from them, so a save
+// made elsewhere (the chip on the Computers row) moves an untouched draft along instead of
+// turning it into "Unsaved changes" at a revision the server no longer holds. Real edits stay.
+const accepted = ref<HostCapacityPolicy>(defaultHostPolicy())
 const revision = ref(0)
+const reported = () => ({ ...(props.computer.host_capacity?.policy ?? defaultHostPolicy()) })
+function accept(policy: HostCapacityPolicy, at: number) { accepted.value = { ...policy }; draft.value = { ...policy }; revision.value = at }
 const key = computed(() => `${props.ownerKey}/${props.computer.computer_id}`)
-watch(key, () => { draft.value = { ...(props.computer.host_capacity?.policy ?? defaultHostPolicy()) }; revision.value = props.computer.revision ?? 0; expanded.value = true; message.value = ''; busy.value = false }, { immediate: true })
-const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(props.computer.host_capacity?.policy ?? defaultHostPolicy()))
-watch(() => props.computer.revision, () => { if (!dirty.value && !busy.value) { draft.value = { ...(props.computer.host_capacity?.policy ?? defaultHostPolicy()) }; revision.value = props.computer.revision ?? 0 } })
+watch(key, () => { accept(reported(), props.computer.revision ?? 0); expanded.value = true; message.value = ''; busy.value = false }, { immediate: true })
+const dirty = computed(() => !samePolicy(draft.value, accepted.value))
+watch(() => props.computer.revision, () => { if (!busy.value && (!dirty.value || samePolicy(draft.value, reported()))) accept(reported(), props.computer.revision ?? 0) })
 const summary = computed(() => {
   const v = props.computer.host_capacity
   if (!v) return 'Off · no load report yet'
@@ -32,7 +38,7 @@ async function save() {
   try {
     const saved = await saveHostPolicy(computer, { expected_revision: reviewed, policy })
     if (key.value !== owner) return
-    draft.value = { ...saved }; message.value = 'All changes saved'; toast('New starts saved. Running agents keep working.'); emit('saved')
+    accept(saved, reviewed + 1); message.value = 'All changes saved'; toast('New starts saved. Running agents keep working.'); emit('saved')
   } catch (error) {
     if (key.value !== owner) return
     const status = error instanceof HostCapacityWriteError ? error.status : -1

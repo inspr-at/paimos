@@ -4,10 +4,19 @@
 // set in the panel (it must send the full policy with only the mode changed, at
 // the reviewed revision); a cell says Ready for a sign-in that cannot start
 // agents, or hides an expired verification behind "Offline"; the chip's choices
-// promise waits the computer's options have switched off.
+// promise waits the computer's options have switched off; a chip save leaves the
+// computer's open panel at the old policy and revision, so its untouched draft
+// reads "Unsaved changes" and Apply is refused (fix round 2).
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import * as Vue from 'vue'
+import { readFileSync } from 'node:fs'
+import { parse, compileScript } from '@vue/compiler-sfc'
+import ts from 'typescript'
 import type { PairingView } from '../src/lib/agentPairing'
 import { computerLine, shortIdentity, signinCell } from '../src/lib/accountsGlance'
+import * as hostCapacity from '../src/lib/hostCapacity'
+import * as settingsOverlays from '../src/lib/settingsOverlays'
+import * as toastModule from '../src/lib/toast'
 import { HostCapacityWriteError, mayChangeNewStarts, newStartsChoices, newStartsLabel, newStartsWrite, samePolicy, saveHostPolicy, type HostCapacityPolicy } from '../src/lib/hostCapacity'
 
 const NOW = Date.parse('2026-10-11T12:00:00Z')
@@ -120,5 +129,77 @@ describe('the computer cell and the column heads', () => {
     expect(shortIdentity('markus.barta@example.com')).toBe('markus.barta')
     expect(shortIdentity('Main')).toBe('Main')
     expect(shortIdentity('@handle')).toBe('@handle')
+  })
+})
+
+// The panel's own script (HostCapacitySettings.vue) with its real watchers; the template is not needed.
+type Panel = { draft: Vue.Ref<HostCapacityPolicy>; revision: Vue.Ref<number>; dirty: Vue.ComputedRef<boolean>; message: Vue.Ref<string>; save: () => Promise<void> }
+const panelModules: Record<string, unknown> = { vue: Vue, '../../lib/hostCapacity': hostCapacity, '../../lib/settingsOverlays': settingsOverlays, '../../lib/toast': toastModule, '../AppIcon.vue': {}, '../KeyCap.vue': {} }
+function panel(props: { computer: PairingView; manage: boolean; ownerKey: string }, scope: Vue.EffectScope): Panel {
+  const { descriptor } = parse(readFileSync(new URL('../src/components/settings/HostCapacitySettings.vue', import.meta.url), 'utf8'))
+  const { content } = compileScript(descriptor, { id: 'HostCapacitySettings.vue' })
+  const exports: { default?: { setup: (props: object, ctx: object) => unknown } } = {}
+  new Function('require', 'exports', ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)((id: string) => { if (!(id in panelModules)) throw new Error(id); return panelModules[id] }, exports)
+  return scope.run(() => exports.default!.setup(props, { expose: () => {}, emit: () => {} }))! as Panel
+}
+
+describe('the open panel follows a chip save', () => {
+  // The server as in the capacity PUT: the write must name the revision it holds, and bumps it.
+  let server: { revision: number; policy: HostCapacityPolicy }, puts: { expected_revision: number; policy: HostCapacityPolicy }[]
+  const scopes: Vue.EffectScope[] = []
+  function serve() {
+    server = { revision: 4, policy: { ...POLICY } }; puts = []
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)); puts.push(body)
+      if (body.expected_revision !== server.revision) return new Response(JSON.stringify({ error: 'conflict' }), { status: 409 })
+      server = { revision: server.revision + 1, policy: body.policy }
+      return new Response(JSON.stringify(host(server.policy)), { status: 200 })
+    }))
+  }
+  // The page's refresh after a write: the panel's computer is the row as the server now holds it.
+  const reread = () => computer({ revision: server.revision, host_capacity: host({ ...server.policy }) })
+  function open() {
+    serve()
+    const scope = Vue.effectScope(); scopes.push(scope)
+    const props = Vue.reactive({ computer: computer(), manage: true, ownerKey: 'me' }) as { computer: PairingView; manage: boolean; ownerKey: string }
+    return { props, view: panel(props, scope) }
+  }
+  afterEach(() => { for (const s of scopes.splice(0)) s.stop(); vi.unstubAllGlobals() })
+
+  it('an untouched panel takes the chip’s save and its revision, and Apply then saves', async () => {
+    const { props, view } = open()
+    expect(view.draft.value).toEqual(POLICY)
+    expect(view.revision.value).toBe(4)
+    await saveHostPolicy('c-1', newStartsWrite(props.computer, 'fixed')!)
+    props.computer = reread(); await Vue.nextTick()
+    expect(view.draft.value).toEqual({ ...POLICY, mode: 'fixed' })
+    expect(view.revision.value).toBe(5)
+    expect(view.dirty.value).toBe(false)
+    // Apply goes at the revision the chip produced, and keeps the chip's Fixed.
+    view.draft.value.maximum_load = 20
+    await view.save()
+    expect(puts.at(-1)).toEqual({ expected_revision: 5, policy: { ...POLICY, mode: 'fixed', maximum_load: 20 } })
+    expect(view.message.value).toBe('All changes saved')
+    expect(server).toEqual({ revision: 6, policy: { ...POLICY, mode: 'fixed', maximum_load: 20 } })
+    // A second Apply before the page has read again goes at the revision the first one produced.
+    expect(view.dirty.value).toBe(false)
+    view.draft.value.maximum_agents = 6
+    await view.save()
+    expect(puts.at(-1)!.expected_revision).toBe(6)
+    expect(server.revision).toBe(7)
+  })
+
+  it('real edits survive a chip save and are refused rather than overwriting it', async () => {
+    const { props, view } = open()
+    view.draft.value.maximum_agents = 3
+    await saveHostPolicy('c-1', newStartsWrite(props.computer, 'fixed')!)
+    props.computer = reread(); await Vue.nextTick()
+    expect(view.draft.value).toEqual({ ...POLICY, maximum_agents: 3 })
+    expect(view.dirty.value).toBe(true)
+    await view.save()
+    expect(puts.at(-1)).toEqual({ expected_revision: 4, policy: { ...POLICY, maximum_agents: 3 } })
+    expect(view.message.value).toBe('Computer changed. Reopen its settings before applying.')
+    expect(server).toEqual({ revision: 5, policy: { ...POLICY, mode: 'fixed' } })
+    expect(view.draft.value.maximum_agents).toBe(3)
   })
 })

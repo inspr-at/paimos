@@ -15794,6 +15794,10 @@
     ,
     {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the computer cell and the column heads > shortens an address to its name; a plain name stays whole","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the open panel follows a chip save > an untouched panel takes the chip’s save and its revision, and Apply then saves","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the open panel follows a chip save > real edits survive a chip save and are refused rather than overwriting it","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/crm-undo-receipt.unit.test.ts","name":"S9-002: a save receipt keeps event 10 when event 11 arrives before Undo","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/crm-undo-receipt.unit.test.ts","name":"S9-002: missing receipts and receipts from a previous sign-in refuse Undo","tier":"NIGHTLY"}
