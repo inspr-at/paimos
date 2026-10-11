@@ -138,7 +138,7 @@ func TestRoutineRunHistoryPrivacyUsageAndPagination(t *testing.T) {
 				return err
 			}
 			for _, id := range []string{grant, child} {
-				if _, err := tx.Exec(t.Context(), `INSERT INTO routine_budget_settlements(tenant_id,run_id,grant_id,event_key,receipt_digest,evidence_digest) VALUES($1,$2,$3,$3::text,repeat('a',64),repeat('b',64))`, f.p.TenantID, run.ID, id); err != nil {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO routine_budget_settlements(tenant_id,run_id,grant_id,event_key,receipt_digest,evidence_digest) VALUES($1,$2,$3::uuid,$3::text,repeat('a',64),repeat('b',64))`, f.p.TenantID, run.ID, id); err != nil {
 					return err
 				}
 			}
