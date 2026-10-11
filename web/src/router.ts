@@ -103,7 +103,7 @@ export const router = createRouter({
     // The full-screen board is gone with the minimal Models page (AEON-1011); old links land on the page.
     { path: '/settings/models/board', redirect: '/settings/models' },
     { path: '/settings/business/profiles/:profileId?', component: () => import('./views/settings/DocumentProfilesView.vue'), props: true, meta: { title: 'Document profiles', fill: true } },
-    { path: '/settings/:section(personal|theme|developer|policies|models|agent-rules|accounts|workspace|vocabulary|kinds|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
+    { path: '/settings/:section(personal|theme|developer|policies|models|agent-rules|accounts|computers|capacity|workspace|vocabulary|kinds|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
     { path: '/settings/:section(access)/:tab(people|invites|roles|projects|agents|audit)?/:id?', component: () => import('./views/SettingsView.vue'), meta: { title: 'Access', keepsFocus: true } },
     { path: '/link', component: () => import('./views/LinkAccountView.vue'), meta: { title: 'Link an account' } },
@@ -154,9 +154,16 @@ router.beforeEach(async (to, from) => {
     return { path: '/settings/models', query: to.query, hash: '#model-refresh' }
   }
   if (to.params.section === 'workspace') {
-    const moved: Record<string, string> = { '#work-vocabulary': 'vocabulary', '#ticket-types': 'vocabulary', '#models': 'models', '#model-refresh': 'models', '#estimates': 'agents', '#silent-sessions': 'agents', '#agent-activity': 'agents', '#quota-warnings': 'accounts', '#status-autopilot': 'autopilot', '#autopilot-projects': 'autopilot', '#autopilot-suggestions': 'autopilot', '#autopilot-recent': 'autopilot', '#autopilot-proposals': 'autopilot', '#autopilot-changes': 'autopilot', '#members': 'access' }
+    const moved: Record<string, string> = { '#work-vocabulary': 'vocabulary', '#ticket-types': 'vocabulary', '#models': 'models', '#model-refresh': 'models', '#estimates': 'agents', '#silent-sessions': 'agents', '#agent-activity': 'agents', '#quota-warnings': 'accounts', '#capacity-and-load': 'capacity', '#status-autopilot': 'autopilot', '#autopilot-projects': 'autopilot', '#autopilot-suggestions': 'autopilot', '#autopilot-recent': 'autopilot', '#autopilot-proposals': 'autopilot', '#autopilot-changes': 'autopilot', '#members': 'access' }
     const section = moved[to.hash]
     if (section) return { path: `/settings/${section}`, query: to.query, hash: to.hash === '#members' ? '' : to.hash }
+  }
+  // Accounts and computers became Accounts, Computers and Capacity (AEON-1171): a
+  // computer or approval link opens Computers with the same query, the pacing
+  // link opens Capacity at When agents work.
+  if (to.params.section === 'accounts') {
+    if (typeof to.query.computer === 'string' || typeof to.query.verify_account === 'string') return { path: '/settings/computers', query: to.query, hash: to.hash }
+    if (to.hash === '#capacity-and-load') return { path: '/settings/capacity', query: to.query, hash: '#when' }
   }
   // Canonical section URLs replace bookmarks without adding a history step.
   // Ticket addresses stay /p/KEY/TICKET; ?section= preserves a non-default background,

@@ -7,6 +7,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/modelreport"
@@ -403,22 +405,38 @@ func (r *Remote) WorkOrder(ctx context.Context, id string) (WorkOrder, error) {
 }
 
 func (r *Remote) Route(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64) (Route, error) {
+	return r.route(ctx, runID, daemonID, accountIDs, estimates, nil)
+}
+
+func (r *Remote) RouteRoutine(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64, pickup agentsetup.RoutinePickup) (Route, error) {
+	raw, err := json.Marshal(pickup)
+	if err != nil {
+		return Route{}, err
+	}
+	return r.route(ctx, runID, daemonID, accountIDs, estimates, map[string]string{agentsetup.RoutinePickupHeader: string(raw)})
+}
+
+func (r *Remote) route(ctx context.Context, runID, daemonID string, accountIDs []string, estimates map[string]int64, headers map[string]string) (Route, error) {
 	var route Route
 	err := r.Client.DoWithHeaders(ctx, "POST", "/api/agent-accounts/route", map[string]any{
 		"run_id": runID, "daemon_id": daemonID, "account_ids": accountIDs, "estimated_units": estimates,
-	}, &route, r.ledgerHeaders(nil))
+	}, &route, r.ledgerHeaders(headers))
 	return route, err
 }
 
 func (r *Remote) Claim(ctx context.Context, runID, daemonID, generation string, reservations []string) error {
-	return r.claim(ctx, runID, daemonID, generation, reservations, nil)
+	return r.claim(ctx, runID, daemonID, generation, reservations, nil, nil)
 }
 
 func (r *Remote) ClaimHandoff(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup WorkerPickup) error {
-	return r.claim(ctx, runID, daemonID, generation, reservations, &pickup)
+	return r.claim(ctx, runID, daemonID, generation, reservations, &pickup, nil)
 }
 
-func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup) error {
+func (r *Remote) ClaimRoutine(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup, routine agentsetup.RoutinePickup) error {
+	return r.claim(ctx, runID, daemonID, generation, reservations, pickup, &routine)
+}
+
+func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup, routine *agentsetup.RoutinePickup) error {
 	// Retain the attempted binding even if the HTTP response is lost. It is
 	// only a header hint; the server remains the authority for claim ownership.
 	r.mu.Lock()
@@ -427,6 +445,9 @@ func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, 
 	body := map[string]any{"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations}
 	if pickup != nil {
 		body["handoff"] = pickup
+	}
+	if routine != nil {
+		body["routine"] = routine
 	}
 	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", body, nil, r.ledgerHeaders(map[string]string{reviewgate.PolicyHeader: reviewgate.Policy}))
 	return err

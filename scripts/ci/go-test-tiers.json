@@ -1850,6 +1850,16 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRevokedProbeDoesNotStarveOtherAccount","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineCheckoutDisablesEffectiveFilterConfiguration","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineContinuationRetainsOriginalCheckout","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineSupervisorReleasesObsoleteRouting","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineSupervisorReplaysInterruptedRouting","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineWorkspacesSeparateAndRetainWriters","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRunCommitsEarlierReproductions","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRunCommitsFastForwardOntoUpstream","tier":"GATED-FULL"}
@@ -2027,6 +2037,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestTerminalSandboxesTestProcessFiles","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestTerminalSandboxesTestProcessNetwork","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestTerminalStagesAndCommitsLinkedWorktree","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestTerminalToolClosureGrantsOnlyExactPackages","tier":"GATED-FULL"}
     ,
@@ -2687,6 +2699,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestQueuedRunNotificationsWakeAndRecheckExactKey","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRequestedAccountIsValidatedAndAuditedWithoutReservation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestRoutineLaunchClaimReplayAndCurrentAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestRoutinePreparationPreservesAuthorityCriteriaAndPickup","tier":"GATED-FULL"}
     ,

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/localjournal"
@@ -73,6 +74,39 @@ func TestRecordSchemaGolden(t *testing.T) {
 // Risk: 123 and 124 shared version 2. Forward migration must keep their evidence
 // and leave persisted PIDs unowned through both startup and offline inspection.
 func TestRecordSchemaForwardRecoveryAndDowngrade(t *testing.T) {
+	t.Run("routine-version-5", func(t *testing.T) {
+		grant := routineTestGrant("31")
+		// Persistence stores wall-clock UTC, without time.Now's monotonic data.
+		grant.ExpiresAt = grant.ExpiresAt.UTC()
+		root, err := filepath.EvalSymlinks(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(root, 0700); err != nil {
+			t.Fatal(err)
+		}
+		want := Record{RoutineWorkspace: &RoutineWorkspace{Grant: grant, ID: strings.Repeat("a", 64), Path: filepath.Join(root, "checkout"), Branch: "routine/" + grant.LaunchID}, TenantID: grant.TenantID, PrincipalID: grant.PrincipalID, RunID: grant.AgentRunID, Generation: grant.DaemonGeneration, LaunchState: launchAttempted, State: "ownership_lost"}
+		want.Workspace = want.RoutineWorkspace.Path
+		config := localjournal.Config[Record]{Directory: root, Prefix: "routine", Version: 5, MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r Record) (string, error) { return r.RunID, nil }, Validate: validateLaunchRecord}
+		old, err := localjournal.Open(config)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := old.Put(want); err != nil {
+			t.Fatal(err)
+		}
+		current := config
+		current.Version, current.Migrations = RecordSchemaVersion, recordMigrations()
+		migrated, err := localjournal.Open(current)
+		if err != nil || !reflect.DeepEqual(migrated.Snapshot(), []Record{want}) {
+			t.Fatal("schema 5 migration changed routine ownership", err)
+		}
+		_, err = localjournal.Open(config)
+		var versionErr *localjournal.SchemaVersionError
+		if !errors.As(err, &versionErr) || versionErr.Stored != RecordSchemaVersion || versionErr.Supported != 5 {
+			t.Fatal("schema 5 reader failed for wrong reason", err)
+		}
+	})
 	for _, release := range []string{"123", "124"} {
 		for _, offline := range []bool{false, true} {
 			t.Run(release+"/offline="+strconv.FormatBool(offline), func(t *testing.T) {
