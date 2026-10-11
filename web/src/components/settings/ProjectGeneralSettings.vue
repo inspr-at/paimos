@@ -6,6 +6,7 @@ import { APIError, assignProjectGroup, getNode, getProjectGroups, undoGroupEvent
 import { can, myProjectRole, myWorkspaceRole } from '../../lib/authz'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { toast } from '../../lib/toast'
+import { compareRevision } from '../../lib/liveUpdates'
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
 import { claimSettingsPopover } from '../../lib/settingsOverlays'
 import { useProjects, type Project } from '../../stores/projects'
@@ -61,7 +62,8 @@ function load(preserveDraft = false) {
   void reads.run(({ after }) => after(getNode(target), value => {
     if (target !== props.project.id) return
     if (value.id !== target) throw new Error('The response did not match this project.')
-    node.value = value
+    if (compareRevision(value.updated_at, props.project.nodeUpdatedAt) < 0) throw new Error('The project changed while it was being read. Try again.')
+    node.value = value; projects.applyNode(value)
     if (!keepName) name.value = value.title
     if (!keepDescription) description.value = fullDescription(value)
   }), { failed: error => { loadError.value = sayError(error, 'The project could not be read.'); }, settled: () => { loading.value = false } })

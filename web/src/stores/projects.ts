@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { getProjects, listNodes, updateNode, type ProjectPerson, type ProjectSummary, type WorkNode } from '../lib/api'
 import { projectProgressPercent } from '../lib/projectColumns'
+import { compareRevision } from '../lib/liveUpdates'
 import { projectDescription, projectRouteKey } from '../lib/work'
 
 export interface Project extends ProjectSummary {
@@ -55,8 +56,21 @@ export const useProjects = defineStore('projects', () => {
       try {
         const [summary, nodes] = await Promise.all([getProjects(true), listNodes({ kind: ['project'], limit: 500 })])
         const map = new Map<string, { routeKey: string; description: string; updatedAt: string }>()
-        for (const node of nodes.items) map.set(node.id, { routeKey: projectRouteKey(node.key, node.fields), description: projectDescription(node.body, node.fields), updatedAt: node.updated_at })
-        summaries.value = summary.items
+        const current = new Map(summaries.value.map(item => [item.id, item]))
+        const names = new Map<string, { title: string; state: string }>()
+        for (const node of nodes.items) {
+          const cached = details.value.get(node.id), shown = current.get(node.id)
+          if (cached && shown && compareRevision(cached.updatedAt, node.updated_at) > 0) {
+            map.set(node.id, cached); names.set(node.id, shown)
+          } else {
+            map.set(node.id, { routeKey: projectRouteKey(node.key, node.fields), description: projectDescription(node.body, node.fields), updatedAt: node.updated_at })
+            names.set(node.id, node)
+          }
+        }
+        summaries.value = summary.items.map(item => {
+          const latest = names.get(item.id)
+          return latest ? { ...item, title: latest.title, state: latest.state } : item
+        })
         details.value = map
         loaded.value = true
         loadedAt = Date.now()
@@ -80,9 +94,10 @@ export const useProjects = defineStore('projects', () => {
     return projects.value.find(project => project.id === id)
   }
 
-  // Settings applies only a confirmed, revision-checked node write. Keep the
-  // header and the Projects page on that same returned revision.
+  // A current settings read or confirmed write supplies this node revision.
+  // A slower background read cannot put an earlier name or state back.
   function applyNode(node: WorkNode): void {
+    if (compareRevision(node.updated_at, details.value.get(node.id)?.updatedAt) < 0) return
     summaries.value = summaries.value.map(summary => summary.id === node.id ? { ...summary, title: node.title, state: node.state } : summary)
     details.value = new Map(details.value).set(node.id, {
       routeKey: projectRouteKey(node.key, node.fields), description: projectDescription(node.body, node.fields), updatedAt: node.updated_at,
