@@ -171,6 +171,9 @@ export function projectRouteKey(nodeKey: string, fields: Record<string, unknown>
   const key = classic && typeof classic === 'object' ? (classic as Record<string, unknown>).key : undefined
   return typeof key === 'string' && key.trim() ? key.trim() : nodeKey
 }
+export function ticketPath(routeKey: string, key: string): string {
+  return `/p/${encodeURIComponent(routeKey)}/${encodeURIComponent(key)}`
+}
 export function projectDescription(body: string, fields: Record<string, unknown> | null | undefined): string {
   const classic = fields?.classic
   const description = classic && typeof classic === 'object' ? (classic as Record<string, unknown>).description : undefined
