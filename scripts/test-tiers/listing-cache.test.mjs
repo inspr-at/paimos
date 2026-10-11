@@ -85,6 +85,55 @@ test('AEON-1200 native Go cache refreshes only the changed test owner and its ch
   assert.notEqual(goPackageKeys(initial, inventory, { ...identity, GOOS: 'other' })['internal/a'], keys['internal/a'])
 })
 
+test('AEON-1200 native Go cache survives tier registration and web edits while tracking package assets', t => {
+  const base = temporary(t), directory = temporary(t)
+  tree(base)
+  const files = {
+    'scripts/ci/go-test-tiers.json': '{}', 'scripts/ci/web-test-tiers.json': '{}', 'web/ci-web-shards.json': '{}',
+    'web/src/view.ts': '// view', 'docs/example.txt': 'documentation',
+    'internal/a/assets/template.txt': 'embedded template', 'internal/a/native.c': '// native source',
+    'internal/b/native.s': '// assembly source', 'internal/ab/assets/template.txt': 'unrelated asset',
+    'go.sum': '', 'go.work': 'go 1.26', 'go.work.sum': '', 'root.go': 'package fixture',
+    'scripts/test-tiers/collect.mjs': '// collector', 'scripts/test-tier-go/main.go': 'package main',
+  }
+  for (const [file, body] of Object.entries(files)) {
+    mkdirSync(resolve(base, file, '..'), { recursive: true })
+    writeFileSync(resolve(base, file), body)
+  }
+  command('git', ['add', '.'], { cwd: base })
+  const inventory = { imports: { 'internal/a': [], 'internal/b': ['internal/a'], 'internal/c': [] } }
+  const identity = { module: 'fixture' }, initial = inputSnapshot(base, command)
+  const keys = goPackageKeys(initial, inventory, identity), calls = []
+  const list = owners => {
+    calls.push(owners)
+    return Object.fromEntries(owners.map(owner => [owner, [`Test${owner.at(-1)}`]]))
+  }
+  const golden = cachedGoList(keys, list, { directory })
+  for (const file of ['scripts/ci/go-test-tiers.json', 'scripts/ci/web-test-tiers.json', 'web/ci-web-shards.json',
+    'web/src/view.ts', 'docs/example.txt', 'internal/ab/assets/template.txt']) {
+    writeFileSync(resolve(base, file), `${files[file]}\nchanged`)
+    assert.deepEqual(goPackageKeys(inputSnapshot(base, command), inventory, identity), keys, `${file} does not change a Go test binary`)
+  }
+  assert.deepEqual(cachedGoList(goPackageKeys(inputSnapshot(base, command), inventory, identity), () => {
+    throw new Error('tier registration or unrelated content compiled a Go test binary')
+  }, { directory }), golden)
+  writeFileSync(resolve(base, 'internal/a/source_test.go'), 'package a\n// changed test\n')
+  cachedGoList(goPackageKeys(inputSnapshot(base, command), inventory, identity), list, { directory })
+  assert.deepEqual(calls, [['internal/a', 'internal/b', 'internal/c'], ['internal/a']], 'test edit plus registration refreshes only its owner')
+  for (const [file, owners] of [['internal/a/assets/template.txt', ['internal/a', 'internal/b']],
+    ['internal/a/native.c', ['internal/a', 'internal/b']], ['internal/b/native.s', ['internal/b']]]) {
+    writeFileSync(resolve(base, file), `${files[file]}\nchanged`)
+    assert.deepEqual(cachedGoList(goPackageKeys(inputSnapshot(base, command), inventory, identity), list, { directory }), golden)
+    assert.deepEqual(calls.at(-1), owners, `${file} refreshes its owner and transitive consumers`)
+  }
+  for (const file of ['go.mod', 'go.sum', 'go.work', 'go.work.sum', 'root.go',
+    'scripts/test-tiers/collect.mjs', 'scripts/test-tier-go/main.go']) {
+    const changed = initial.map(row => row[0] === file ? [file, 'changed', row[2]] : row)
+    const next = goPackageKeys(changed, inventory, identity)
+    for (const owner of Object.keys(keys)) assert.notEqual(next[owner], keys[owner], `${file} remains a global Go listing input`)
+  }
+})
+
 test('AEON-1200 source discovery refreshes only an edited package and retains current active imports', t => {
   const base = temporary(t), directory = temporary(t)
   tree(base)
