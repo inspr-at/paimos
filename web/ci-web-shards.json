@@ -532,7 +532,7 @@
         ,
         {"file":"tests/models-registry-shots.spec.ts","listedTests":3,"weightSeconds":20,"weightSource":"AEON-1163 mbp2606 single worker 12.8s for 3 cases plus margin"}
         ,
-        {"file":"tests/models-registry.spec.ts","listedTests":31,"weightSeconds":30,"weightSource":"AEON-1163 mbp2606 single worker 23.8s for 31 cases plus margin"}
+        {"file":"tests/models-registry.spec.ts","listedTests":33,"weightSeconds":36,"weightSource":"AEON-1163 mbp2606 single worker 23.8s for 31 cases, plus two pause stability guards and margin"}
         ,
         {"file":"tests/models-simple-shots.spec.ts","listedTests":18,"weightSeconds":8,"weightSource":"AEON-1011 local-single-worker-5.3s-plus-margin"}
         ,
