@@ -78,6 +78,7 @@ export async function mockLeadFlow(page: Page, options: LeadFlowOptions = {}) {
     id: a.session_id, project_id: a.project_id, agent_principal_id: a.principal_id, parent_harness_session_id: a.role === 'worker' ? LEAD_SESSION : null,
     work_order_id: null, run_id: null, ticket_node_id: a.ticket?.id ?? null, ticket: a.ticket ? { id: a.ticket.id, key: a.ticket.key, title: a.ticket.title } : null,
     project: { id: a.project_id, key: 'PHAROS', title: 'Pharos' }, harness: a.harness, host: 'imac0', management_mode: a.management_mode, role: a.role,
+    model: a.model ?? null, reasoning_effort: a.reasoning_effort ?? null,
     advertised_capabilities: ['inbox', 'status'], activity_sequence: 1, revision: 1, work_shape: 'ship', phase: a.phase, activity: a.activity,
     heartbeat_at: a.heartbeat_at, created_at: a.since, stopped_at: a.phase === 'stopped' ? '2026-10-06T09:31:00Z' : null, stop_reason: null, finished: false, display_label: a.name,
   })

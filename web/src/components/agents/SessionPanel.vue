@@ -11,6 +11,7 @@ import { absoluteTime, relativeTime, statusMeta } from '../../lib/work'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
 import { useRoute, useRouter } from 'vue-router'
 import SessionChat from './SessionChat.vue'
 import SessionTabs from './SessionTabs.vue'
@@ -291,7 +292,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <SessionRecovery ref="recovery" hide-trigger :session="view.session" />
           <RemoveSessionDialog ref="removal" hide-trigger :session="view.session" :label="view.name" :quick="quick" />
         </template>
-        <button type="button" class="icon-btn sm flat pane-close" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><AppIcon name="close" :size="15" /></button>
+        <button type="button" class="btn sm ghost pane-close" aria-label="Close session details" aria-keyshortcuts="Escape" data-tip="Close · Esc" @click="emit('close')"><KeyCap class="close-key" k="Esc" /><AppIcon class="desktop-close" name="close" :size="14" /><AppIcon class="sheet-back" name="arrow-left" :size="18" /></button>
       </div>
       <p v-if="isLead && why" class="why"><AppIcon name="sparkle" :size="12" /><span>Opened on <b>{{ TAB_LABEL[openedTab] }}</b>: {{ why }}</span></p>
       <p v-if="managed?.feedback || managed?.error" class="session-feedback" :role="managed?.error ? 'alert' : 'status'">{{ managed.error || managed.feedback }}</p>
@@ -553,6 +554,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .why svg { flex: none; color: var(--teal-ink); }
 .why b { color: var(--ink-2); font-weight: 600; }
 .pane-more, .pane-close { flex: none; }
+.pane-close { gap: 6px; padding: 4px 8px; }
+.sheet-back { display: none; }
 .panel-menu { display: grid; gap: 2px; }
 .panel-menu .btn { justify-content: flex-start; min-height: 44px; }
 @container pane (max-width: 640px) {
@@ -561,10 +564,16 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .pane-bar { gap: 8px; }
 }
 @media (max-width: 720px) {
-  .pane-bar { flex-wrap: wrap; row-gap: 4px; padding: max(8px, env(safe-area-inset-top)) 10px 8px 12px; }
-  .hd-acts { order: 5; flex: 1 1 100%; padding-left: 44px; }
+  .pane-bar { flex-wrap: wrap; row-gap: 4px; padding: max(8px, env(safe-area-inset-top)) 10px 8px 6px; }
+  .hd-acts { order: 5; flex: 1 1 100%; padding-left: 50px; }
+  .pane-title { flex: 1 1 0; }
+  .pt-sub { display: none; }
+  .pane-close { order: -1; padding: 0; justify-content: center; }
+  .close-key, .desktop-close { display: none; }
+  .sheet-back { display: block; }
   .pane-title h2 .role { display: none; }
   .pane-more, .pane-close, .act { min-width: 44px; min-height: 44px; }
+  .scroll :deep(.btn), .project-link { min-width: 44px; min-height: 44px; }
   .act { padding: 0; }
   .why { margin: 0 12px 6px; }
 }

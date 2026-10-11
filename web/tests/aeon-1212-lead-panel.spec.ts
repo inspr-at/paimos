@@ -5,11 +5,12 @@
 // Risk: a chat send closes a question; a late decision lands on another person
 // or session; a historical gate passes as current; tab/header controls move.
 import { test, expect, type Page } from '@playwright/test'
-import { mockLeadFlow, LEAD_SESSION, NOW } from './lead-flow-fixtures'
+import { mockLeadFlow, LEAD_SESSION, LEAD_AGENT, NOW } from './lead-flow-fixtures'
 import { me, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { Question } from '../src/lib/decisionDeskApi'
+import type { ProjectMessage } from '../src/lib/agents'
 
 const Q = '6e000000-0000-4000-8000-000000000001'
 const makeQuestion = (): Question => ({
@@ -26,7 +27,16 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
   lead.actions = Object.fromEntries(['start', 'resume', 'pause', 'adopt', 'cancel_adoption', 'remove'].map(action => [action, { available: action === 'pause', blocked_reason: action === 'pause' ? '' : 'ordinary_succession_required' }]))
   if (options.actions === false) delete lead.actions
   if (options.pinned || options.last) world.data.preferences['agents:lead-panel'] = { pinned: options.pinned, last: options.last }
-  const state = { question: makeQuestion(), calls: [] as Record<string, unknown>[], hold: false, fail: false, messages: [] as string[] }
+  // The approved lead-chat reference has four ordinary messages before its ask.
+  // These remain messages; the independent question below has its own API record.
+  const messages: ProjectMessage[] = [
+    'Dispatched PHAROS-11 to Codex Sol. Next: the next queued item once a slot frees.',
+    'Hold the next item until the reviewed change lands.',
+    'Done. The next item waits behind the reviewed change.',
+    'The reviewed change passed review and is in the gate.',
+  ].map((body, index) => ({ id: `8e000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`, sender_principal_id: index === 1 ? me.id : LEAD_AGENT, recipient_principal_id: index === 1 ? LEAD_AGENT : me.id, sender_session_id: index === 1 ? undefined : LEAD_SESSION, recipient_session_id: index === 1 ? LEAD_SESSION : undefined, sender_label: index === 1 ? 'Markus' : 'Claude lead', to: index === 1 ? 'claude:lead' : 'paimos:markus', body, sent_event_id: 100 + index, is_action_request: false, expects_reply: false, delivery_level: 'simple', status: 'accepted', reply_obligation: 'none', created_at: `2026-10-06T09:${[31,33,33,38][index]}:00Z` }))
+  const state = { question: makeQuestion(), calls: [] as Record<string, unknown>[], hold: false, fail: false, messages }
+  const readMarkers = new Map<string, { last_read_message_id: string | null; last_read_event_id: number }>()
   let release: () => void = () => {}, arrived: () => void = () => {}
   let barrier = Promise.resolve(), started = Promise.resolve()
   function hold() { state.hold = true; barrier = new Promise<void>(resolve => { release = resolve }); started = new Promise<void>(resolve => { arrived = resolve }) }
@@ -40,7 +50,7 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
     return route.fulfill({ json: answer })
   })
   await page.route('**/api/decision-desk?*', route => route.fulfill({ json: { items: options.question === false || state.question.state !== new URL(route.request().url()).searchParams.get('state') ? [] : [state.question], has_more: false } }))
-  await page.route(`**/api/questions/${Q}*`, async route => {
+  await page.route(url => url.pathname === `/api/questions/${Q}` || url.pathname === `/api/questions/${Q}/decision`, async route => {
     if (route.request().method() === 'GET') return route.fulfill({ json: state.question })
     const body = route.request().postDataJSON() as Record<string, unknown>
     state.calls.push(body); arrived()
@@ -49,6 +59,26 @@ async function setup(page: Page, options: { denied?: boolean; question?: boolean
     if (body.expected_revision !== state.question.revision) return route.fulfill({ status: 409, json: { error: 'Question revision changed.' } })
     state.question = { ...state.question, revision: 2, state: 'answered', answer: { id: 'answer-one', revision: 2, answer: body.option_id === 'yes' ? 'Yes' : 'Not now', option_id: String(body.option_id), outcome: 'once', decided_by: me.id, created_at: NOW, deliver_after: NOW } }
     return route.fulfill({ json: state.question })
+  })
+  await page.route('**/api/**', route => {
+    const request = route.request(), url = new URL(request.url()), path = url.pathname
+    if (path === '/api/projects/p-pharos/message-targets') return route.fulfill({ json: [{ id: 'lead-target', principal_id: LEAD_AGENT, address: 'claude:lead', adapter: 'claude', target_kind: 'agent', maximum_level: 'simple', role: 'coordinator', enabled: true }] })
+    if (path === '/api/projects/p-pharos/messages') {
+      if (request.method() === 'POST') {
+        const body = request.postDataJSON()
+        const sent: ProjectMessage = { id: `message-${state.messages.length + 1}`, sender_principal_id: me.id, recipient_principal_id: LEAD_AGENT, recipient_session_id: body.recipient_session_id, to: body.to, body: body.body, sent_event_id: 100 + state.messages.length, is_action_request: false, expects_reply: false, delivery_level: body.delivery_level, status: 'accepted', reply_obligation: 'none', created_at: NOW }
+        state.messages.push(sent)
+        return route.fulfill({ status: 201, json: sent })
+      }
+      return route.fulfill({ json: { items: state.messages, next_after: 0 } })
+    }
+    if (path.endsWith('/read-marker') && path.startsWith('/api/projects/p-pharos/harness-sessions/')) {
+      const id = path.split('/').at(-2)!
+      if (request.method() === 'PUT') readMarkers.set(id, request.postDataJSON())
+      return route.fulfill({ json: { session_id: id, ...(readMarkers.get(id) ?? { last_read_message_id: null, last_read_event_id: 0 }), updated_at: NOW } })
+    }
+    if (path === '/api/inbox/message-status') return route.fulfill({ json: { items: (url.searchParams.get('ids') ?? '').split(',').filter(Boolean).map(id => ({ message_id: id, status: 'read', delivered_at: NOW, read_at: NOW, deliver_by: null })) } })
+    return route.fallback()
   })
   return { ...world, state, hold, release: () => { state.hold = false; release() }, started: () => started }
 }
@@ -89,16 +119,16 @@ for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','d
     await expect(tab(page, 'Chat')).toHaveAttribute('aria-selected', 'true')
     await expect(panel(page).locator('.why')).toContainText('it asks you something')
     await expect(question(page)).toContainText('Asks you')
-    const stable = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist'), pin: panel(page).getByRole('button', { name: 'Make this your default tab' }), close: panel(page).getByRole('button', { name: 'Close session details' }) }
+    const stable = { frame: panel(page), header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist'), pin: panel(page).getByRole('button', { name: 'Make this your default tab' }), close: panel(page).getByRole('button', { name: 'Close session details' }) }
     await expectStableControls({ controls: stable, scrollAreas: { panel: panel(page) }, interactions: [
       { name: 'Lead', run: async () => { await tab(page, 'Lead').click(); await expect(panel(page).locator('#lp-checks')).toHaveText('Before every start'); await expect(panel(page).locator('.admission-caption')).toContainText('All passed at the last start'); await expect(panel(page).locator('[data-check]')).toHaveCount(4); await checkPanel(page, width <= 400); await panel(page).screenshot({ path: info.outputPath(`AEON-1212/${width === 1000 ? "1000-sheet" : "lead-sheet"}-${width}-${look}.png`) }) } },
       { name: 'Session', run: async () => { await tab(page, 'Session').click(); await expect(panel(page).locator('#session-panel-overview')).toBeVisible(); await checkPanel(page, width <= 400); await panel(page).screenshot({ path: info.outputPath(`AEON-1212/session-${width}-${look}.png`) }) } },
       { name: 'Chat', run: async () => { await tab(page, 'Chat').click(); await expect(question(page)).toBeVisible(); await checkPanel(page, width <= 400); await panel(page).screenshot({ path: info.outputPath(`AEON-1212/lead-chat-${width}-${look}.png`) }) } },
     ] })
     world.hold()
-    await expectStableControls({ controls: { ...stable, card: question(page), choices: question(page).locator('.question-options'), composer: panel(page).locator('.composer') }, scrollAreas: { thread: panel(page).locator('.thread-scroll') }, interactions: [
-      { name: 'Pending', run: async () => { await question(page).getByRole('button', { name: 'Yes, merge now' }).click(); await world.started(); await expect(question(page).getByRole('button', { name: 'Recording…' })).toBeDisabled() } },
-      { name: 'Recorded', run: async () => { world.release(); await expect(question(page)).toContainText('Answered: Yes, merge now'); await expect(question(page)).toContainText('by you'); await panel(page).screenshot({ path: info.outputPath(`AEON-1212/recorded-${width}-${look}.png`) }) } },
+    await expectStableControls({ controls: { ...stable, card: question(page), answerArea: question(page).locator('.answer-slot'), composer: panel(page).locator('.composer') }, scrollAreas: { thread: panel(page).locator('.thread-scroll') }, interactions: [
+      { name: 'Pending', run: async () => { await expectStableControls({ controls: { options: question(page).locator('.question-options'), pressed: question(page).locator('.question-options button').first(), other: question(page).locator('.question-options button').last() }, interactions: [{ name: 'choose', run: async () => { await question(page).getByRole('button', { name: 'Yes, merge now' }).click(); await world.started(); await expect(question(page).getByRole('button', { name: 'Recording…' })).toBeDisabled() } }] }) } },
+      { name: 'Recorded', run: async () => { world.release(); await expect(question(page)).toContainText('Answered: Yes, merge now'); await expect(question(page)).toContainText('by you'); await expect(question(page).getByRole('button')).toHaveCount(0); await panel(page).screenshot({ path: info.outputPath(`AEON-1212/recorded-${width}-${look}.png`) }) } },
     ] })
     expect(world.state.calls).toHaveLength(1)
     expect(world.state.calls[0]).toMatchObject({ expected_revision: 1, option_id: 'yes', outcome: 'once' })
@@ -126,6 +156,7 @@ test('AEON-1212: failed answer retries the same request, a plain message never d
   await composer.fill('This is a message, not a decision.')
   await panel(page).locator('.compose .send').click()
   await expect(composer).toHaveValue('')
+  expect(world.state.messages.at(-1)?.body).toBe('This is a message, not a decision.')
   await expect(question(page).getByRole('button', { name: 'Not now', exact: true })).toBeEnabled()
   expect(world.state.calls).toHaveLength(2)
   world.hold()
@@ -152,11 +183,11 @@ for (const width of [1440, 1024, 390]) for (const look of ['light', 'dark'] as c
     await page.goto(`/agents/${LEAD_SESSION}?tab=chat`)
     await expect(question(page)).toBeVisible()
     await expect(question(page).locator('.primary')).toHaveCount(0)
-    const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), composer: panel(page).locator('.composer'), card: question(page), options: question(page).locator('.question-options') }
+    const controls = { frame: panel(page), header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), composer: panel(page).locator('.composer'), card: question(page), answerArea: question(page).locator('.answer-slot') }
     await panel(page).screenshot({ path: info.outputPath(`AEON-1212/long-text-chat-${width}-${look}.png`) })
     world.hold()
     await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.thread-scroll') }, interactions: [
-      { name: 'record long option', run: async () => { await question(page).getByRole('button', { name: world.state.question.input.options[0]!.title, exact: true }).click(); await world.started(); await expect(question(page).getByRole('button', { name: 'Recording…', exact: true })).toBeDisabled() } },
+      { name: 'record long option', run: async () => { await expectStableControls({ controls: { options: question(page).locator('.question-options'), pressed: question(page).locator('.question-options button').first() }, interactions: [{ name: 'choose', run: async () => { await question(page).getByRole('button', { name: world.state.question.input.options[0]!.title, exact: true }).click(); await world.started(); await expect(question(page).getByRole('button', { name: 'Recording…', exact: true })).toBeDisabled() } }] }) } },
       { name: 'recorded long answer', run: async () => { world.release(); await expect(question(page)).toContainText(`Answered: ${world.state.question.input.options[0]!.title}`) } },
     ] })
     await panel(page).screenshot({ path: info.outputPath(`AEON-1212/long-text-recorded-${width}-${look}.png`) })
@@ -200,6 +231,8 @@ test('AEON-1212: losing question-read access clears retained cards and discards 
   await expect.poll(() => world.state.question.state).toBe('answered')
   await expect(question(page)).toHaveCount(0)
   await expect(panel(page)).not.toContainText('Answered:')
+  await tab(page, 'Lead').click()
+  await expect(panel(page)).not.toContainText(world.state.question.input.question)
 })
 
 test('AEON-1212: pinned and last-used tabs belong to the person; queue links force Lead at Next up and chat keys only type', async ({ page }) => {

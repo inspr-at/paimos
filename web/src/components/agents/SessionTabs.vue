@@ -26,7 +26,7 @@ function move(event: KeyboardEvent) {
         <span v-if="lead" class="pinned" :class="{ hidden: pinned !== tab }" :data-tip="pinned === tab ? 'Your default' : undefined" :aria-hidden="pinned !== tab"><AppIcon name="pin" :size="11" /></span>
       </button>
     </div>
-    <button v-if="lead" type="button" class="pin-btn" :aria-pressed="pinned === selected" :aria-label="pinned === selected ? 'Remove your default tab' : 'Make this your default tab'" :data-tip="pinned === selected ? 'Remove your default tab' : 'Make this your default tab'" @click="emit('pin')"><AppIcon name="pin" :size="13" /><span class="pl">Default</span></button>
+    <button v-if="lead" type="button" class="pin-btn" :aria-pressed="pinned === selected" :aria-label="pinned === selected ? 'Remove your default tab' : 'Make this your default tab'" :data-tip="pinned === selected ? 'Remove your default tab' : 'Make this your default tab'" @click="emit('pin')"><AppIcon name="pin" :size="13" /><span class="pl"><span :class="{ hidden: pinned === selected }" :aria-hidden="pinned === selected">Set as default</span><span :class="{ hidden: pinned !== selected }" :aria-hidden="pinned !== selected">Default</span></span></button>
   </div>
 </template>
 
@@ -42,6 +42,8 @@ button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .hidden { visibility: hidden; }
 .pin-btn { margin-left: auto; gap: 5px; min-height: 30px; padding: 0 9px; border-radius: 999px; color: var(--ink-3); font-size: 12px; }
 .pin-btn[aria-pressed="true"] { color: var(--teal-ink); background: var(--chip-teal-bg); }
+.pl { display: grid; }
+.pl > span { grid-area: 1 / 1; }
 @media (max-width: 720px) {
   .tabs-line { padding: 0 8px; }
   button, .pin-btn { min-height: 44px; }
