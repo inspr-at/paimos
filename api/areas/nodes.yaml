@@ -73,7 +73,7 @@ paths:
           $ref: '#/components/responses/Error'
         '422':
           description: |
-            Unprocessable node. A work item or legacy ticket entering a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+            Unprocessable node. Creating, updating or changing the status of a work item or legacy ticket with a non-empty pill outside 2–4 whitespace-separated words returns 422 with the field name in error. Missing or blank draft benefit fields remain optional. A work item or legacy ticket entering a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
           content:
             application/json:
               schema:
@@ -283,7 +283,7 @@ paths:
           $ref: '#/components/responses/Error'
         '422':
           description: |
-            Unprocessable node. A work item or legacy ticket entering a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+            Unprocessable node. Creating, updating or changing the status of a work item or legacy ticket with a non-empty pill outside 2–4 whitespace-separated words returns 422 with the field name in error. Missing or blank draft benefit fields remain optional. A work item or legacy ticket entering a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
           content:
             application/json:
               schema:
@@ -1187,6 +1187,9 @@ components:
           description: 'Why a role has no model: area (no area set), review_gate (chosen against the author''s family at dispatch), registry (no available route).'
           type: string
           enum: [area, review_gate, registry]
+        route_truncated:
+          description: 'Present and true on a registry gap when the model registry exceeds the Models bounds, so no route was resolved; dispatch refuses it too.'
+          type: boolean
         models:
           description: 'Actually used models from visible sessions on this node and its open/done work descendants. Ordered by measured tokens descending, then harness/model. Session profile identity wins; normalized model and raw metadata are fallbacks. Contains no billing or prices.'
           type: array

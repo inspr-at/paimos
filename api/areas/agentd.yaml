@@ -1,6 +1,27 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # aeon:owner internal/auth
 paths:
+  /v1/setup:
+    servers: [{url: 'http://agentd'}]
+    post:
+      operationId: advanceLocalAgentdEnrollment
+      summary: Advance enrollment through the running daemon's private Unix socket
+      description: 'Local only; never mounted on the Aeon HTTP server. Requires the private socket bearer token and an owned mode-0600 Unix socket. Serializes add-harness and request-bound polling with lifecycle reconciliation. Local candidate paths and identities remain on this computer. Each new login still needs separate person approval in Aeon. This route never installs, reloads, adopts or removes a service, and never upgrades a confirmation key.'
+      security: [{localAgentdToken: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LocalAgentdSetupRequest'}
+      responses:
+        '200':
+          description: 'Safe enrollment progress; no installation proof or runtime credential.'
+          content:
+            application/json:
+              schema: {type: object, required: [schema, stage, local_processes], additionalProperties: true}
+        '400': {description: 'Invalid or oversized request (maximum 64 KiB).'}
+        '401': {description: 'Private socket authentication required.'}
+        '409': {description: 'Enrollment refused; bounded diagnostic text states the reason.'}
   /agentd/step-ups/{challenge_id}:
     get:
       operationId: getAgentdStepUp
@@ -43,3 +64,30 @@ paths:
         '404': {description: Challenge unavailable for this computer}
         '410': {description: Challenge expired or already consumed}
 components:
+  securitySchemes:
+    localAgentdToken: {type: http, scheme: bearer, description: 'Owner-only local socket token; never an Aeon API key.'}
+  schemas:
+    LocalAgentdSetupRequest:
+      type: object
+      additionalProperties: false
+      required: [operation]
+      properties:
+        operation: {type: string, enum: [add_harness, step]}
+        request_id: {type: string, format: uuid, description: 'Required for step; must match the current pairing request.'}
+        candidates:
+          type: array
+          maxItems: 7
+          items:
+            type: object
+            required: [candidate, path, identity, version]
+            properties:
+              candidate: {$ref: '#/components/schemas/PairingAccountChoice'}
+              path: {type: string, maxLength: 4096}
+              home: {type: string, maxLength: 4096}
+              identity: {type: string, maxLength: 128}
+              version: {type: string, maxLength: 128}
+              grok: {type: object}
+              pi_node: {type: object}
+              node: {type: object}
+        node_path: {type: string, maxLength: 4096}
+        claude_sdk_path: {type: string, maxLength: 4096}

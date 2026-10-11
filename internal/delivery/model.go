@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/routineactions/evidence"
 )
 
 type State string
@@ -70,11 +72,7 @@ func effective(parent, child Settings) Settings {
 	return out
 }
 
-type Check struct {
-	Name       string `json:"name"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-}
+type Check = evidence.Check
 
 // Observation is the replay source. It contains normalized platform facts at
 // observation time, not the raw webhook, PR title, body, author or review output.

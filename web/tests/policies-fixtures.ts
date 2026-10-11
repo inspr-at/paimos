@@ -45,3 +45,10 @@ export async function mockPolicies(page: Page, theme: 'light' | 'dark', restrict
   })
   return { data, holdNext() { const held = { until: barrier(), started: barrier() }; next = held; return { started: held.started.promise, release: held.until.release } } }
 }
+
+// AEON-1204: every request to the retired ladder endpoints, any method.
+export function ladderRequests(page: Page) {
+  const seen: string[] = []
+  page.on('request', request => { if (/\/api\/models\/routes(\?|$)/.test(request.url())) seen.push(`${request.method()} ${new URL(request.url()).pathname}`) })
+  return seen
+}

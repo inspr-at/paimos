@@ -1,6 +1,41 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # aeon:owner internal/modelregistry
 paths:
+  /models/lines/{harness}/{model}/pause:
+    parameters:
+      - {name: harness, in: path, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
+      - {name: model, in: path, required: true, schema: {type: string, maxLength: 128}}
+    put:
+      operationId: putModelPause
+      security: [{session: []}]
+      description: 'Person-only models.manage, rechecked under the tenant and catalog fences. Pauses all registered native levels of this harness/model route, including Cursor effort suffixes (up to 32 model ids). until null means until resumed; a timestamp must be in the future. Appends model.pause_changed after the mutation.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [until, reason]
+              properties:
+                until: {type: [string, 'null'], format: date-time}
+                reason: {type: string, minLength: 1, maxLength: 1000}
+      responses:
+        '200': {description: 'Saved model pause.', content: {application/json: {schema: {$ref: '#/components/schemas/ModelPauseResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteModelPause
+      security: [{session: []}]
+      description: 'Person-only models.manage under the tenant and catalog fences. Resumes this route at every native level and appends model.pause_changed.'
+      responses:
+        '200': {description: 'Resumed model route.', content: {application/json: {schema: {$ref: '#/components/schemas/ModelPauseResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /models/lines/{harness}/{model}:
     parameters:
       - {name: harness, in: path, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
@@ -260,7 +295,7 @@ paths:
   /models/resolve:
     get:
       operationId: resolveModelRole
-      description: "Resolves adopted Models orders for every role; saved role ladders and matrix preferences remain active until adopted or migrated in S2. A workspace Default without a chain reads its saved build-ladder tail until S2 persists it; explicit chains and ends are authoritative. Saved daily Wait settings stop after sibling routes of the current model are exhausted until S2 carries them into order ends. Without ticket, uses Default, situation first and the key's canonical person; ticket supplies kind, estimate, fix round and project. Quick jobs try qualifying fast models by catalog list price, then Default. Build uses the kind row or Default; build-hard uses Stuck with a strong tier floor. Review uses the kind's Review order or automatic cross-family selection at the highest native level, at least xhigh equivalent; security excludes Anthropic. Each model tries its registered routes before the next step. Workspace locks freeze the pick and order. Account approval, project, residency, tools, pauses, harness health and daily caps remain required. Unknown quota does not imply exhaustion. Exhausted orders return owner_required with the first cause and known reset in the trace. A harness filter never switches harnesses. Command templates come from trusted local templates."
+      description: "Resolves every role through Models orders. Migration 1333 moved saved role ladders, holds, pin-bottom and Not-allowed rules into orders, model pauses and row constraints; the retained ladder tables are not read. Nothing outside the row's order and the Default's order runs, and the Default ends in Wait. A kind without a saved row uses the Default's situations. A live dial Wait setting still stops after sibling routes of the current model until the dial follows Models. Without ticket, uses Default, situation first and the key's canonical person; ticket supplies kind, estimate, fix round and project. Quick jobs try qualifying fast models by catalog list price, then Default. Build uses the kind row or Default; build-hard uses Stuck with a strong tier floor. Review uses the kind's Review order or automatic cross-family selection at the highest native level, at least xhigh equivalent; security excludes Anthropic. Each model tries its registered routes before the next step. Workspace locks freeze the pick and order. Account approval, project, residency, tools, pauses, harness health and daily caps remain required. Unknown quota does not imply exhaustion. Exhausted orders return owner_required with the first cause and known reset in the trace; a route refused only for residency reports not allowed and the residency. A harness filter never switches harnesses. Command templates come from trusted local templates."
       security: *auth
       parameters:
         - {name: role, in: query, description: 'Required unless ticket supplies its route role. review-gate-security requires placement resolution; unavailable security ladders return owner_required with their explanation.', schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
@@ -285,19 +320,21 @@ paths:
   /models/routes:
     get:
       operationId: readModelRoutes
-      description: Read-only ladder for one role, requiring models.read. Never seeds the catalog or appends events. CLI uses ladder priority and harness health; ordinary managed review uses legacy family/tier order until an explicit saved-order activation, then saved priorities. Qualification floors, platform capability, approved accounts and preferences still apply. order_mode and managed_fallback_order (profile IDs before qualification/preferences) share the stored-row SQL snapshot; truncated order is incomplete. At most 50 steps, with explicit truncation. Complete snapshots include routes, a quoted strong edit_token over canonical role content (including full-precision expiry and reason), and can_edit for person plus models.manage. Truncated snapshots have no edit token and cannot be edited; no cursor. Unseeded tenants return setup false. Each read applies a five-second statement timeout.
+      deprecated: true
+      description: "Deprecated compatibility read derived from Models rows, chains, situations and model pauses. Requires models.read, never seeds the catalog or appends events. Returns at most 50 steps; truncated means incomplete. can_edit is false and edit_token is null. Use model preferences for choices and settings/review-policy for review rules."
       security: *auth
       parameters:
         - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
       responses:
-        '200': {description: Bounded tenant ladder snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRoutesRead'}}}}
+        '200': {description: "Bounded Models-derived compatibility snapshot", content: {application/json: {schema: {$ref: '#/components/schemas/ModelRoutesRead'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '503': {description: Statement timeout; retry later, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retrying}}, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     put:
       operationId: replaceModelRoutes
-      description: Person with workspace models.manage replaces routes under a tenant and registry fence with final authorization. Unqualified PUT preserves whole-tenant last-writer-wins compatibility. With role, replace only that complete role and require its quoted strong If-Match token; review-gate tokens include ordering mode. Explicit order_mode is allowed only for conditional review-gate writes; omission and legacy whole-tenant writes preserve the mode. Rows and mode change atomically, including mode-only audit events with before_order_mode/after_order_mode metadata; before/after arrays retain their shape; missing 428 revision_required, malformed 400 invalid_revision, mismatched 409 stale_revision. Never initializes in role mode. At most 50 rows per role and 300 total; audit before/after must be complete within those bounds. Unchanged stored expired holds may be reordered; new or changed holds require strictly future expiry sampled after fences. Conditional expiry_policy=clear compensation converts all desired expired holds to available with empty reason/null expiry. Invalid temporal conditional changes return 422 suppression_expired; legacy keeps 400. No-op emits no replacement event. Thirty-second request deadline; five-second lock and statement timeouts.
+      deprecated: true
+      description: "Retired role ladder writer. Returns 410 Gone without decoding or changing settings. Use Models orders and model pauses."
       security: [{session: []}]
       parameters:
         - {name: role, in: query, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
@@ -306,6 +343,7 @@ paths:
         - {name: expiry_policy, in: query, description: Allowed only with role. clear is for compensation; preserves future holds without extending them., schema: {type: string, enum: [preserve, clear], default: preserve}}
       requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 300, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
       responses:
+        '410': {description: "Role ladders moved to Models orders and pauses", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '200': {description: Actual normalized stored routes for the addressed role or whole tenant, headers: {ETag: {description: New quoted strong role content token including ordinary review mode in conditional mode, schema: {type: string}}, Model-Order-Mode: {description: Actual stored ordinary review mode for role=review-gate, schema: {type: string, enum: [legacy, saved]}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
         '400': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -341,6 +379,21 @@ paths:
         '422': {$ref: '#/components/responses/Error'}
 components:
   schemas:
+    ModelPause:
+      type: object
+      required: [until, reason, by, at]
+      properties:
+        until: {type: [string, 'null'], format: date-time}
+        reason: {type: string, maxLength: 1000}
+        by: {type: [string, 'null'], format: uuid}
+        at: {type: string, format: date-time}
+    ModelPauseResult:
+      type: object
+      required: [harness, model, pause]
+      properties:
+        harness: {type: string}
+        model: {type: string}
+        pause: {oneOf: [{$ref: '#/components/schemas/ModelPause'}, {type: 'null'}]}
     ModelPreferenceDecision:
       type: object
       description: Additive resolution evidence returned only when preference placement parameters are supplied.

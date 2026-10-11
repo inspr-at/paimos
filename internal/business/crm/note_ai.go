@@ -118,15 +118,25 @@ type noteAIState struct {
 	Reason  string `json:"reason,omitempty"`
 }
 
-// noteModel follows the configured scout route order without seeding a catalog.
-// An empty model registry therefore leaves this optional action disabled.
+// noteModel uses the same workspace Quick jobs walk as scout dispatch.
+// Missing account capacity leaves this optional action disabled.
 func noteModel(ctx context.Context, tx pgx.Tx) (modelregistry.Profile, error) {
-	var p modelregistry.Profile
-	err := tx.QueryRow(ctx, `SELECT p.id::text,p.slug,p.version,p.harness,p.family,p.model,p.effort,p.tier,p.enabled,p.created_at
-		FROM model_role_routes r JOIN model_profiles p ON p.tenant_id=r.tenant_id AND p.id=r.profile_id
-		WHERE r.role='scout' AND p.enabled AND (r.state='available' OR r.valid_until<=now())
-		ORDER BY r.priority LIMIT 1`).Scan(&p.ID, &p.Slug, &p.Version, &p.Harness, &p.Family, &p.Model, &p.Effort, &p.Tier, &p.Enabled, &p.CreatedAt)
-	return p, err
+	var tenantID string
+	if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')`).Scan(&tenantID); err != nil {
+		return modelregistry.Profile{}, err
+	}
+	var now time.Time
+	if err := tx.QueryRow(ctx, `SELECT now()`).Scan(&now); err != nil {
+		return modelregistry.Profile{}, err
+	}
+	out, err := modelregistry.ResolveWork(ctx, tx, tenant.Principal{TenantID: tenantID}, modelregistry.WorkQuery{Role: "scout", Area: "other", Situation: "first", WorkspaceOnly: true}, now)
+	if err != nil {
+		return modelregistry.Profile{}, err
+	}
+	if out.Profile == nil {
+		return modelregistry.Profile{}, pgx.ErrNoRows
+	}
+	return *out.Profile, nil
 }
 
 func (m *module) noteState(ctx context.Context, p tenant.Principal, id string) (noteAIState, modelregistry.Profile, Customer, error) {
