@@ -115,20 +115,27 @@ func (s *Supervisor) routineRepository(run Run, g agentsetup.RoutineGrant, adapt
 	if found == nil || found.TenantID != g.TenantID || found.OwnerID != g.OwnerID || found.ComputerID != g.ComputerID || found.DaemonDigest != g.DaemonDigest || found.CapabilityDigest != g.CapabilityDigest || found.HostMappingDigest != g.HostMappingDigest {
 		return RoutineRepository{}, ErrRoutineUnavailable
 	}
-	for _, path := range []string{found.Repository, found.Root} {
-		physical, err := filepath.EvalSymlinks(path)
-		if err != nil || !filepath.IsAbs(path) || physical != filepath.Clean(path) {
-			return RoutineRepository{}, ErrRoutineUnavailable
-		}
-	}
-	info, err := os.Lstat(found.Root)
-	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 || pathWithin(found.Repository, found.Root) || pathWithin(found.Root, found.Repository) {
-		return RoutineRepository{}, ErrRoutineUnavailable
-	}
-	if len(found.BaseCommit) != 40 || strings.Trim(found.BaseCommit, "0123456789abcdef") != "" {
-		return RoutineRepository{}, ErrRoutineUnavailable
+	if err := validateRoutineRepository(*found); err != nil {
+		return RoutineRepository{}, err
 	}
 	return *found, nil
+}
+
+func validateRoutineRepository(repository RoutineRepository) error {
+	for _, path := range []string{repository.Repository, repository.Root} {
+		physical, err := filepath.EvalSymlinks(path)
+		if err != nil || !filepath.IsAbs(path) || physical != filepath.Clean(path) {
+			return ErrRoutineUnavailable
+		}
+	}
+	info, err := os.Lstat(repository.Root)
+	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 || pathWithin(repository.Repository, repository.Root) || pathWithin(repository.Root, repository.Repository) {
+		return ErrRoutineUnavailable
+	}
+	if len(repository.BaseCommit) != 40 || strings.Trim(repository.BaseCommit, "0123456789abcdef") != "" {
+		return ErrRoutineUnavailable
+	}
+	return nil
 }
 
 func (s *Supervisor) prepareRoutineWorkspace(ctx context.Context, run Run, g agentsetup.RoutineGrant, repository RoutineRepository) (*RoutineWorkspace, error) {
@@ -581,7 +588,10 @@ func (s *Supervisor) routineEnvironment(runID string, g agentsetup.RoutineGrant)
 	if lease == nil {
 		return nil, ErrProcessesUnconfirmed
 	}
-	environment := lease.Environment()
+	return validateRoutineEnvironment(lease.Environment(), g)
+}
+
+func validateRoutineEnvironment(environment []string, g agentsetup.RoutineGrant) ([]string, error) {
 	if len(environment) != 8 {
 		return nil, ErrRoutineUnavailable
 	}
