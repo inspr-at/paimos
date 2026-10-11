@@ -309,13 +309,38 @@ func TestRoutineConsentProjectionMatchesNativePolicyAndPages(t *testing.T) {
 	// Coverage failure occurs before per-candidate policy work, never as partial success.
 	r = items["project"]
 	seed(func(tx pgx.Tx) error {
+		// Match create's write order: RLS requires the definition to exist
+		// before a marked recurrence, and its FK is deferred until commit.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO recurrence_definitions(tenant_id,recurrence_id,scope_type,scope_project_id,owner_principal_id,output_project_id,output_parent_id,assignment)
+ SELECT r.tenant_id,format('00000000-0000-4000-8000-%s',lpad(i::text,12,'0'))::uuid,d.scope_type,d.scope_project_id,d.owner_principal_id,d.output_project_id,d.output_parent_id,d.assignment
+ FROM recurrences r JOIN recurrence_definitions d ON d.tenant_id=r.tenant_id AND d.recurrence_id=r.id CROSS JOIN generate_series(1,1001) i WHERE r.id=$1`, r.ID); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO recurrences(tenant_id,id,project_id,parent_id,template,trigger,next_at,created_by_principal_id,definition_scope)
  SELECT tenant_id,format('00000000-0000-4000-8000-%s',lpad(i::text,12,'0'))::uuid,project_id,parent_id,template,trigger,next_at,created_by_principal_id,'project' FROM recurrences CROSS JOIN generate_series(1,1001) i WHERE id=$1`, r.ID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO recurrence_definitions(tenant_id,recurrence_id,scope_type,scope_project_id,owner_principal_id,output_project_id,output_parent_id,assignment)
- SELECT r.tenant_id,r.id,'project',r.project_id,r.created_by_principal_id,r.project_id,r.parent_id,d.assignment FROM recurrences r CROSS JOIN recurrence_definitions d WHERE d.recurrence_id=$1 AND r.id::text LIKE '00000000-0000-4000-8000-%'`, r.ID)
-		return err
+		return nil
+	})
+	ctx := tenant.WithPrincipal(t.Context(), f.person)
+	if err := db.InTenantReadSnapshot(ctx, f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
+		var candidates int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM recurrences r
+ JOIN recurrence_definitions d ON d.tenant_id=r.tenant_id AND d.recurrence_id=r.id
+ WHERE r.id::text LIKE '00000000-0000-4000-8000-%' AND r.definition_scope=d.scope_type
+ AND d.owner_principal_id=$1 AND d.assignment IS NOT NULL AND r.retired_at IS NULL`, f.person.ID).Scan(&candidates); err != nil {
+			return err
+		}
+		if candidates != 1001 {
+			t.Fatalf("coverage fixture has %d owner-visible candidates, want 1001", candidates)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.m.WithRoutineExecutionRuntime(func(context.Context, pgx.Tx, string) (modelregistry.ExecutionRuntime, error) {
+		t.Fatal("coverage overflow reached per-candidate runtime policy work")
+		return modelregistry.ExecutionRuntime{}, nil
 	})
 	if raw := request(f.person, "GET", "/api/decision-desk/projection", nil, 422); !strings.Contains(string(raw), "routine consent coverage") {
 		t.Fatal(fmt.Sprintf("wrong coverage failure: %s", raw))
