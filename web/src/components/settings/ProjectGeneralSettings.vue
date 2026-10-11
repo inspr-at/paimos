@@ -173,7 +173,7 @@ onBeforeUnmount(() => close(false))
 </script>
 
 <template>
-  <SettingsCard title="Project" icon="folder" anchor="project" variant="project">
+  <SettingsCard title="Project" icon="folder" anchor="project-general" variant="project">
     <p v-if="!writable" class="ro-note"><AppIcon name="lock" :size="14" /><span>Project admins and maintainers change the name and description.</span></p>
     <div class="frows">
       <div class="frow"><label class="fl" for="f-name"><b id="name-label">Name</b><small id="name-help">Shown in the header, the Projects page and search.</small></label>
