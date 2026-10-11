@@ -124,7 +124,9 @@ test('AEON-1212: failed answer retries the same request, a plain message never d
   await expect(question(page).getByRole('button', { name: 'Not now', exact: true })).toBeVisible()
   const composer = panel(page).locator('textarea')
   await composer.fill('This is a message, not a decision.')
-  await composer.press('Enter')
+  await panel(page).locator('.compose .send').click()
+  await expect(composer).toHaveValue('')
+  await expect(question(page).getByRole('button', { name: 'Not now', exact: true })).toBeEnabled()
   expect(world.state.calls).toHaveLength(2)
   world.hold()
   await question(page).getByRole('button', { name: 'Not now', exact: true }).click()
@@ -137,6 +139,32 @@ test('AEON-1212: failed answer retries the same request, a plain message never d
   await expect.poll(() => world.state.question.state).toBe('answered')
   await expect(question(page)).toHaveCount(0)
 })
+
+for (const width of [1440, 1024, 390]) for (const look of ['light', 'dark'] as const) {
+  test(`AEON-1212: ${width} ${look} long German question options stay readable and do not move the header or answer controls`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
+    const world = await setup(page, { german: true })
+    world.state.question.input.question = 'Soll die bereits geprüfte Änderung jetzt übernommen oder für die nächste gemeinsame Veröffentlichung zurückgestellt werden?'
+    world.state.question.input.options[0]!.title = 'Die bereits geprüfte Änderung jetzt vollständig übernehmen'
+    world.state.question.input.options[1]!.title = 'Bis zur nächsten gemeinsamen Veröffentlichung zurückstellen'
+    delete world.state.question.input.recommend
+    await page.goto(`/agents/${LEAD_SESSION}?tab=chat`)
+    await expect(question(page)).toBeVisible()
+    await expect(question(page).locator('.primary')).toHaveCount(0)
+    const controls = { header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), composer: panel(page).locator('.composer'), card: question(page), options: question(page).locator('.question-options') }
+    await panel(page).screenshot({ path: info.outputPath(`AEON-1212/long-text-chat-${width}-${look}.png`) })
+    world.hold()
+    await expectStableControls({ controls, scrollAreas: { body: panel(page).locator('.thread-scroll') }, interactions: [
+      { name: 'record long option', run: async () => { await question(page).getByRole('button', { name: world.state.question.input.options[0]!.title, exact: true }).click(); await world.started(); await expect(question(page).getByRole('button', { name: 'Recording…', exact: true })).toBeDisabled() } },
+      { name: 'recorded long answer', run: async () => { world.release(); await expect(question(page)).toContainText(`Answered: ${world.state.question.input.options[0]!.title}`) } },
+    ] })
+    await panel(page).screenshot({ path: info.outputPath(`AEON-1212/long-text-recorded-${width}-${look}.png`) })
+    await tab(page, 'Lead').click()
+    await expect(panel(page).locator('.queued-item')).toContainText('Agenten-Dial')
+    await panel(page).screenshot({ path: info.outputPath(`AEON-1212/long-text-lead-${width}-${look}.png`) })
+  })
+}
 
 test('AEON-1212: server action omission and decision denial remain read-only, and more than four real options link to the Desk', async ({ page }) => {
   const world = await setup(page, { denied: true, actions: false })

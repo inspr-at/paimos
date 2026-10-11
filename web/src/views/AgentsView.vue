@@ -358,8 +358,8 @@ function pauseSelected(action: 'pause' | 'resume') {
   pause.open(action, [view.session])
 }
 const shortcutDisposers = [
-  onAction('agents.search.focus', () => sessionList.value?.focusSearch() ?? false, actionScope),
-  onAction('agents.filter.add', () => sessionList.value?.openFilter() ?? false, actionScope),
+  onAction('agents.search.focus', () => { if (!sessionList.value?.focusSearch()) return false }, actionScope),
+  onAction('agents.filter.add', () => { if (!sessionList.value?.openFilter()) return false }, actionScope),
   onAction('agents.row.next', () => { move(1) }, actionScope),
   onAction('agents.row.prev', () => { move(-1) }, actionScope),
   onAction('agents.row.open', event => {

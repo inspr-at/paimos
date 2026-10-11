@@ -86,7 +86,6 @@ const history = computed(() => admissionHistory(decisions.value, { complete: com
 const recent = computed(() => [...decisions.value].reverse().slice(0, 6).map(d => ({ id: d.event_id, at: time(d.recorded_at), text: decisionLine(d, id => keyOf(id) ?? 'a ticket') })))
 const next = computed(() => (queued.value ?? []).filter(item => !item.target_agent_id).slice(0, 3))
 const href = (key: string) => `/p/${encodeURIComponent(props.routeKey)}/${encodeURIComponent(key)}`
-const harnessName = (h: string) => ({ codex: 'Codex', claude: 'Claude', cursor: 'Cursor', grok: 'Grok', pi: 'Pi', gemini: 'Gemini', opencode: 'OpenCode' } as Record<string, string>)[h] ?? h
 
 async function cancelAdoption() {
   if (!leadActionAvailable(lead.value, 'cancel_adoption') || leads.busy[props.projectId]) return
@@ -119,10 +118,10 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
         <p v-if="lead?.reason === 'adoption_pending'" class="now-act"><button type="button" class="btn" data-act="cancel-adoption" :disabled="!leadActionAvailable(lead, 'cancel_adoption') || leads.busy[projectId]" :data-tip="leadActionReason(lead, 'cancel_adoption')" @click="cancelAdoption">Cancel adoption</button></p>
         <p v-else-if="!lead?.process_active && lead?.state !== 'paused'" class="now-act"><button type="button" class="btn primary sm" data-act="start" :disabled="!mayStart || leads.busy[projectId]" :data-tip="leadActionReason(lead, 'start')" @click="mayStart && openStartLead([projectId], $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="13" />Start a lead</button></p>
         <dl class="facts">
-          <div><dt>Workers</dt><dd>{{ workerCount }}</dd><dd class="sub">{{ !workersKnown ? 'can’t be read' : workersPartial ? 'not all sessions read' : `of this ${w.l}` }}</dd></div>
-          <div><dt>Queued</dt><dd>{{ queued ? queued.length : '—' }}</dd><dd class="sub">{{ next[0] ? `next ${next[0].key}` : queued ? 'nothing waits' : 'can’t be read' }}</dd></div>
-          <div><dt>In the gate</dt><dd>{{ gateIds ? gateIds.length : '—' }}</dd><dd class="sub">{{ gateIds?.[0] ? keyOf(gateIds[0]) ?? '…' : gateIds ? 'none' : 'not read yet' }}</dd></div>
-          <div><dt>Merged today</dt><dd>{{ mergedIds ? mergedIds.length : '—' }}</dd><dd class="sub">today</dd></div>
+          <div><dt>Workers</dt><dd :data-tip="!workersKnown ? 'Workers could not be read' : workersPartial ? 'Not all sessions could be read' : undefined">{{ workerCount }}</dd></div>
+          <div><dt>Queued</dt><dd>{{ queued ? queued.length : '—' }}</dd></div>
+          <div><dt>In the gate</dt><dd>{{ gateIds ? gateIds.length : '—' }}</dd></div>
+          <div><dt>Merged today</dt><dd>{{ mergedIds ? mergedIds.length : '—' }}</dd></div>
         </dl>
       </section>
       <section class="p-sec" aria-labelledby="lp-workers">
@@ -130,23 +129,21 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
         <p v-if="!workersKnown" class="small warn">Its workers can’t be read right now.</p>
         <p v-else-if="workersPartial" class="small warn" data-partial>Not every session of this project could be read; more workers may run.</p>
         <p v-else-if="!workers.length" class="small faint">{{ lead?.state === 'paused' ? 'No worker runs while paused.' : 'No workers yet.' }}</p>
-        <button v-for="s in workers" :key="s.session_id ?? `${s.harness}:${s.since}`" type="button" class="wk worker" @click="openWorker(s.session_id)">
+        <button v-for="s in workers" :key="s.session_id ?? `${s.harness}:${s.since}`" type="button" class="wk worker" :aria-label="`${s.ticket?.key || 'Worker'}: ${workerView(s.session_id)?.status.label || s.phase}`" @click="openWorker(s.session_id)">
           <AgentGlyph v-if="workerView(s.session_id)" :view="workerView(s.session_id)!" :size="26" /><span v-else class="vendor"><HarnessMark :harness="s.harness" :size="15" /></span>
-          <span class="wk-t"><span v-if="s.ticket" class="key">{{ s.ticket.key }}</span>{{ s.ticket?.title ?? 'No ticket bound' }}</span>
-          <span class="st"><span class="live-mark" aria-hidden="true" />{{ s.phase === 'working' ? `${minutes(s.since)} min` : s.phase }}</span>
-          <span class="wk-s">{{ [harnessName(s.harness), [s.model, s.reasoning_effort].filter(Boolean).join(', '), s.current_activity?.text || s.activity_note].filter(Boolean).join(' · ') }}</span>
+          <span class="wk-t"><span v-if="s.ticket" class="key">{{ s.ticket.key }}</span>{{ s.ticket?.title ?? 'No ticket bound' }}<small>{{ s.current_activity?.text || s.activity_note }}</small></span>
+          <span class="size">{{ s.phase === 'working' ? `${minutes(s.since)} min` : s.phase }}</span>
         </button>
       </section>
       <section id="next-up" ref="nextUp" class="p-sec" tabindex="-1" aria-labelledby="lp-next">
         <div class="p-head"><h3 id="lp-next">Next up</h3><span class="small">Queue order · {{ queued ? `${queued.length} queued` : 'unavailable' }}</span></div>
         <p v-if="!queued" class="small warn">The queue can’t be read right now.</p>
         <p v-else-if="!next.length" class="small faint">Nothing is queued. Queue work on a ticket with <kbd class="keycap">Q</kbd>.</p>
-        <div v-for="item in next" :key="item.ticket_id" class="wk">
-          <span class="vendor"><AppIcon name="queue" :size="14" /></span>
-          <span class="wk-t"><TicketPeekLink class="key" :ticket-key="item.key" :href="href(item.key)" />{{ item.title }}</span>
-          <span class="st"><span v-if="item.estimate_hours" class="size">{{ item.estimate_hours }} h</span></span>
-          <span class="wk-s">{{ item.waiting_reason ? `Waits: ${item.waiting_reason}` : item.expected_model ? `${item.expected_model}${item.expected_effort ? `, ${item.expected_effort}` : ''}` : `Model chosen by role when the ${w.l} picks it up` }}</span>
-        </div>
+        <TicketPeekLink v-for="item in next" :key="item.ticket_id" class="wk queued-item" :ticket-key="item.key" :href="href(item.key)">
+          <AppIcon name="queue" :size="14" />
+          <span class="wk-t"><span class="key">{{ item.key }}</span>{{ item.title }}<small>{{ item.waiting_reason ? `Waits: ${item.waiting_reason}` : item.expected_model ? `${item.expected_model}${item.expected_effort ? `, ${item.expected_effort}` : ''}` : `Model chosen by role when the ${w.l} picks it up` }}</small></span>
+          <span v-if="item.estimate_hours" class="size">{{ item.estimate_hours }} h</span>
+        </TicketPeekLink>
       </section>
       <section class="p-sec" aria-labelledby="lp-checks">
         <div class="p-head"><h3 id="lp-checks">Before every start</h3><span class="small admission-caption" :class="history.tone" data-tip="From the admission report of the last start."><AppIcon v-if="history.tone === 'held'" name="pause" :size="13" /><AppIcon v-else-if="history.tone === 'unreadable'" name="alert" :size="13" />{{ history.caption }}</span></div>
@@ -174,34 +171,33 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
 .admission-caption.held, .admission-caption.unreadable { color: var(--queue-wait-ink); }
 .worker { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; }
 .worker:hover { background: var(--row-hover); }
-.needs { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 2px 10px; margin-bottom: 20px; padding: 12px 14px; border-radius: 12px; background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); color: var(--queue-wait-ink); }
+.needs { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 2px 10px; margin: 10px 0 4px; padding: 10px 12px; border-radius: 12px; background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); color: var(--queue-wait-ink); }
 .needs strong { color: var(--ink); font-size: 13.5px; }
 .needs p { grid-column: 2; margin: 0; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
 .needs .btn { grid-column: 3; grid-row: 1 / span 2; }
-.p-sec { padding: 14px 0 6px; border-top: 1px solid var(--line); }
+.p-sec { padding: 14px 0 6px; scroll-margin-top: 8px; }
 .p-sec:focus { outline: none; }
 .p-sec:focus-visible { border-radius: 8px; box-shadow: var(--focus-ring); }
-.pane-body > .p-sec:first-child, .needs + .p-sec { padding-top: 0; border-top: 0; }
-.p-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; margin-bottom: 12px; }
+.p-sec + .p-sec { border-top: 1px solid var(--line); }
+.p-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; margin-bottom: 8px; }
 .p-head h3 { margin: 0; font-size: 13px; font-weight: 600; }
 .small { margin: 0; font-size: 12.5px; color: var(--ink-3); }
 .small.warn { color: var(--warn-ink); }
 .faint { color: var(--ink-3); }
 .now-line { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--ink); font-weight: 600; }
-.now-copy { margin: 4px 0 0; font-size: 13px; color: var(--ink-2); }
+.now-copy { margin: 4px 0 0; font-size: 13.5px; color: var(--ink); }
 .facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 12px 0 0; }
 .facts > div { padding: 8px 10px; border-radius: 10px; background: var(--surface-sunken); }
 .facts dt { font: 400 11.5px/1.5 var(--font); color: var(--ink-3); }
-.facts dd { margin: 3px 0 0; color: var(--ink); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.3; }
-.facts dd.sub { margin: 1px 0 0; font-size: 12px; font-weight: 400; color: var(--ink-3); }
-.wk { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; margin: 0 -8px; padding: 10px 8px; border-top: 1px solid var(--line); }
-.wk:first-of-type { border-top: 0; }
-.vendor { grid-row: span 2; align-self: start; margin-top: 2px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }
-.wk-t { min-width: 0; color: var(--ink); font-size: 13.5px; font-weight: 600; overflow-wrap: anywhere; }
-.wk-t .key { margin-right: 6px; font: 500 12px var(--mono); color: var(--teal-ink); text-decoration: none; }
-.wk-s { grid-column: 2 / -1; font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
-.st { display: inline-flex; align-items: center; gap: 8px; justify-self: end; font-size: 12.5px; color: var(--ink-2); }
-.size { font: 500 11.5px/1 var(--mono); color: var(--ink-3); }
+.facts dd { margin: 0; color: var(--ink); font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.3; }
+.wk { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 4px 8px; border: 0; border-radius: 10px; background: transparent; text-align: left; font-size: 13px; color: var(--ink); text-decoration: none; }
+.wk:hover { background: var(--row-hover); }
+.vendor { display: grid; place-items: center; color: var(--ink); }
+.wk-t { display: block; min-width: 0; font-size: 13px; overflow-wrap: anywhere; }
+.wk-t small { display: block; font-size: 11.5px; color: var(--ink-3); }
+.wk-t .key { margin-right: 6px; font: 500 12px var(--mono); color: var(--teal-ink); }
+.queued-item > svg { color: var(--ink-3); justify-self: center; }
+.size { font: 500 11.5px var(--mono); color: var(--ink-3); white-space: nowrap; }
 .checks { display: grid; margin: 0; padding: 0; list-style: none; }
 .checks li { display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 40px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink); }
 .checks li:first-child { border-top: 0; }
@@ -211,8 +207,8 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
 .checks .bad { color: var(--warn-ink); }
 .checks li.bad-row > span:last-child { color: var(--warn-ink); font-weight: 600; }
 .log { margin: 0; padding: 0; list-style: none; }
-.log li { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 10px; padding: 6px 0; font-size: 13px; color: var(--ink-2); }
-.log time { font: 500 12px/1.5 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.log li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; padding: 4px 0; font-size: 12.5px; color: var(--ink-2); }
+.log time { font: 500 11.5px var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .footnote { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 8px; margin: 12px 0 0; font-size: 12.5px; color: var(--ink-3); }
 .footnote svg { margin-top: 2px; }
 .live-mark { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 18%, transparent); }

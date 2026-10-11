@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1212: opening is a choice made once, from the shared projection. Admission
 // is history of a real start, never a preflight or a promise of current capacity.
-import type { GateKind, LeadDecision, ProjectLead } from './lead.ts'
+import type { GateKind, LeadDecision } from './lead.ts'
 
 export type LeadTab = 'lead' | 'session' | 'chat'
 export type PanelTab = LeadTab | 'overview'
@@ -53,6 +53,7 @@ export function admissionHistory(decisions: readonly LeadDecision[], input: { co
   })
   const sessionAt = Date.parse(input.sessionStarted ?? ''), stale = at < sessionAt || input.now - at > 24 * 60 * 60_000 || report.gate_freshness.some(g => g.freshness === 'stale')
   if (stale) return { caption: `Last start: ${new Date(at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${time(at)} · may be out of date`, tone: 'stale', rows, note: '' }
+  if (rows.some(row => row.state === 'unreadable')) return empty("Couldn't read the last start", 'unreadable', `Unreadable evidence: ${rows.filter(row => row.state === 'unreadable').map(row => row.label).join(', ')}.`)
   const held = rows.filter(row => row.state === 'held').length
   return { caption: held ? `${held} held the last start · ${time(at)}` : rows.every(row => row.state === 'passed') ? `All passed at the last start · ${time(at)}` : `Last start · ${time(at)} · evidence ${rows.some(row => row.state === 'unreadable') ? 'unreadable' : 'unknown'}`,
     tone: held ? 'held' : rows.some(row => row.state === 'unreadable') ? 'unreadable' : 'rest', rows, note: '' }

@@ -37,4 +37,8 @@ test('AEON-1212: admission uses four real gates and a timestamp; no report, unre
   }
   const unreadable = admissionHistory([report({ gate_freshness: [], request: { stage: 'admission', outcome: 'wait', reason_codes: ['admission_unavailable'], attempt: 1 } })], read)
   assert.equal(unreadable.tone, 'unreadable'); assert.equal(unreadable.rows.length, 0)
+  const partiallyUnreadable = admissionHistory([report({ reason_codes: ['host_unavailable'] })], read)
+  assert.equal(partiallyUnreadable.caption, "Couldn't read the last start")
+  assert.equal(partiallyUnreadable.rows.length, 0)
+  assert.match(partiallyUnreadable.note, /Host load/)
 })
