@@ -596,7 +596,7 @@ func TestRoutineSupervisorReleasesObsoleteRouting(t *testing.T) {
 			nextGrant.LaunchID, nextGrant.AgentRunID = routineTestGrant("22").LaunchID, routineTestGrant("22").AgentRunID
 			api.grant, api.refusal = nextGrant, nil
 			next := first
-			next.ID, next.WorkOrderID, next.Status, next.AccountID = nextGrant.AgentRunID, "order-2", "queued", ""
+			next.ID, next.Status, next.AccountID = nextGrant.AgentRunID, "queued", ""
 			next.RoutineLaunchID = &api.grant.LaunchID
 			next.Trace, _ = json.Marshal(map[string]any{"routine_launch": nextGrant, "routine_run_id": nextGrant.RoutineRunID})
 			api.run = next
