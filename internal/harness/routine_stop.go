@@ -31,7 +31,7 @@ func QueueRoutineStopTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, 
   JOIN routine_effect_outbox o ON o.id=$2 AND o.run_id=r.id AND o.kind='routine.stop' AND o.payload->>'launch_id'=l.id::text
   JOIN principals p ON p.id=$3 AND p.kind='agent' AND p.name='System' AND p.roles @> ARRAY['system'] AND p.status='active'
   WHERE l.id=$1 AND l.claimed_at IS NOT NULL AND l.exit_observed_at IS NULL
-   AND (c.paused OR NOT coalesce((SELECT automatic_launch_enabled FROM project_routine_execution_settings WHERE project_id=l.project_id),false))
+   AND (c.paused OR r.state='paused' OR NOT coalesce((SELECT automatic_launch_enabled FROM project_routine_execution_settings WHERE project_id=l.project_id),false))
    AND h.management='managed' AND h.stopped_at IS NULL AND h.archived_at IS NULL
    AND NOT EXISTS(SELECT 1 FROM harness_sessions other WHERE other.id<>h.id
     AND other.project_id=l.project_id AND other.agent_principal_id=l.worker_principal_id
@@ -100,7 +100,7 @@ func routineStopAuthorizedTx(ctx context.Context, tx pgx.Tx, s Session, c Contro
   WHERE o.kind='routine.stop' AND o.result->>'control_id'=hc.id::text AND o.result->>'session_id'=$2::text
   AND l.worker_principal_id=$3 AND l.project_id=$4 AND l.claimed_at IS NOT NULL AND l.exit_observed_at IS NULL
   AND (l.kind='worker' AND l.agent_run_id=$5::uuid OR l.kind='lead' AND l.binding#>>'{launch,session_id}'=$2::text)
-  AND (rc.paused OR NOT coalesce((SELECT automatic_launch_enabled FROM project_routine_execution_settings WHERE project_id=l.project_id),false)))`, c.ID, s.ID, s.AgentPrincipalID, s.ProjectID, s.RunID).Scan(&allowed)
+  AND (rc.paused OR r.state='paused' OR NOT coalesce((SELECT automatic_launch_enabled FROM project_routine_execution_settings WHERE project_id=l.project_id),false)))`, c.ID, s.ID, s.AgentPrincipalID, s.ProjectID, s.RunID).Scan(&allowed)
 	if err != nil {
 		return false, err // caller rolls back
 	}

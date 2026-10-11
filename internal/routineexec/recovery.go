@@ -251,8 +251,11 @@ func (e *Executor) recoverRun(ctx context.Context, tid, id string) error {
 		if !outputCurrent {
 			reason = "output_project_changed"
 		}
-		var enabled, paused bool
-		if err = tx.QueryRow(ctx, `SELECT coalesce((SELECT automatic_launch_enabled FROM project_routine_execution_settings WHERE project_id=$1),false),paused FROM recurrences WHERE id=$2`, r.project, r.recurrence).Scan(&enabled, &paused); err != nil {
+		var enabled, paused, consentCurrent bool
+		if err = tx.QueryRow(ctx, `SELECT coalesce((SELECT automatic_launch_enabled FROM project_routine_execution_settings WHERE project_id=$1),false),c.paused,
+   c.revision=$3 AND d.owner_principal_id=$4::uuid AND d.execute_consent AND d.consent_revision=$3
+   AND coalesce(d.execution_principal_id::text,'')=$5
+   FROM recurrences c JOIN recurrence_definitions d ON d.recurrence_id=c.id WHERE c.id=$2`, r.project, r.recurrence, r.revision, r.owner, r.principal).Scan(&enabled, &paused, &consentCurrent); err != nil {
 			return err
 		}
 		if !enabled {
@@ -267,6 +270,9 @@ func (e *Executor) recoverRun(ctx context.Context, tid, id string) error {
 		}
 		if paused && reason == "" {
 			reason = "routine_paused"
+		}
+		if !consentCurrent && reason == "" {
+			reason = "routine_execution_consent_changed"
 		}
 		if oversized {
 			return recoveryReceiptTx(ctx, tx, tid, id, "recovery_evidence_exceeds_bound", true)

@@ -105,7 +105,7 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 	}
 	// An actual failed inbox write rolls back notification only. The committed
 	// scoped pause event remains a pending intent across executor reconstruction.
-	f.exec(`CREATE FUNCTION fail_routine_notice() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.sender_label='Routines' THEN RAISE EXCEPTION 'fixture_notice_failure'; END IF; RETURN NEW; END $$`)
+	f.exec(`CREATE FUNCTION fail_routine_notice() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.sender_label='Routines' THEN RAISE EXCEPTION 'fixture_notice_failure' USING ERRCODE='XX000'; END IF; RETURN NEW; END $$`)
 	f.exec(`CREATE TRIGGER fail_routine_notice BEFORE INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION fail_routine_notice()`)
 	sent, err := d.e.notifyPause(ctx, f.owner.TenantID, event)
 	if sent || err == nil || !strings.Contains(err.Error(), "fixture_notice_failure") {
@@ -238,7 +238,7 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 				var refusal *workorders.Error
 				want := "output_project_changed"
 				if cause == "role_loss" {
-					want = "definition_unavailable"
+					want = "owner_unavailable"
 				}
 				if !errors.As(err, &refusal) || refusal.Status != 409 || refusal.Message != want {
 					t.Fatalf("live final guard refused for wrong reason: %v", err)
@@ -252,6 +252,31 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 			}
 		})
 	}
+	t.Run("original_consent_changed", func(t *testing.T) {
+		d := setupDispatch(t)
+		f := d.fixture
+		must(t, f.tx(func(tx pgx.Tx) error {
+			out, err := d.e.DispatchTx(t.Context(), tx, f.owner.TenantID, f.run, "", 0)
+			if err == nil && !out.Routed {
+				t.Fatalf("consent stop positive dispatch: %+v", out)
+			}
+			return err
+		}))
+		var g agentsetup.RoutineGrant
+		must(t, f.tx(func(tx pgx.Tx) error { return loadActorGrant(t.Context(), tx, d.agentRun, &g) }))
+		f.exec(`UPDATE routine_launch_intents SET state='claimed',claimed_at=clock_timestamp() WHERE id=$1`, g.LaunchID)
+		f.exec(`UPDATE recurrence_definitions SET execute_consent=false WHERE recurrence_id=$1`, f.routine.ID)
+		must(t, d.e.recoverRun(db.AllProjects(t.Context(), "changed consent fixture"), f.owner.TenantID, f.run))
+		var paused, runPaused bool
+		var stops, held int
+		must(t, f.d.Admin.QueryRow(t.Context(), `SELECT c.paused,r.state='paused',
+   (SELECT count(*) FROM routine_effect_outbox WHERE run_id=r.id AND kind='routine.stop' AND state='pending'),
+   (SELECT count(*) FROM routine_budget_grants WHERE run_id=r.id AND state='held')
+   FROM routine_runs r JOIN recurrences c ON c.id=r.recurrence_id WHERE r.id=$1`, f.run).Scan(&paused, &runPaused, &stops, &held))
+		if paused || !runPaused || stops != 1 || held != 1 {
+			t.Fatalf("changed consent lost the original stop/hold or paused fresh definition: %v %v %d %d", paused, runPaused, stops, held)
+		}
+	})
 	t.Run("bounded_evidence_escalates_once", func(t *testing.T) {
 		d := setupDispatch(t)
 		f := d.fixture
