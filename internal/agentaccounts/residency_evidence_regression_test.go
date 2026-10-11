@@ -212,6 +212,7 @@ func evidenceBlocker(t *testing.T, ctx context.Context) (pgx.Tx, int) {
 // visibility read before the fence). A frozen activity snapshot makes the
 // read skew deterministic, without sleeps.
 func TestResidencyEvidenceBlockedStatementReadsFreshActivity(t *testing.T) {
+	useDB(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	const (
