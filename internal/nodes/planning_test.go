@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -275,9 +276,10 @@ func planningSetup(t *testing.T) planningWorld {
 	customKind(t, admin, "task", "task")
 	w := planningWorld{admin: admin, nodes: map[string]nodeJSON{}}
 	w.root = mustNode(t, admin, `{"kind_id":"`+kindBySlug(t, admin, "project").ID+`","title":"Planning"}`)
-	// This historical planning fixture owns its display names and calibrated
-	// effort levels. Discovery cannot supply those pins or inferred metadata.
-	// Registry: build-hard → Codex astra xhigh; build → Claude opus high.
+	// Models: the Default is Claude opus high, its Stuck order (build-hard)
+	// Codex astra xhigh. Quick jobs (mechanical) has no fast model, so the
+	// Default runs. Models routes only to accounts that can take the work.
+	w.agent = insertNamedAgent(t, admin.TenantID, "Builder")
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles (tenant_id, slug, version, harness, family, model, effort, tier,registered_effort_level,display_overrides)
             VALUES ($1,'codex-astra-xhigh','2','codex','openai','gpt-6-astra','xhigh','frontier',4,'{"display_name":"Codex Astra","short_name":"Astra","model_version":"6"}'),
@@ -285,18 +287,52 @@ func planningSetup(t *testing.T) planningWorld {
                    ($1,'codex-sol-xhigh','2','codex','openai','gpt-6-sol','xhigh','strong',4,'{"display_name":"Codex Sol","short_name":"Sol","model_version":"6"}')`, admin.TenantID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes (tenant_id, role, priority, profile_id)
-            SELECT $1, v.role, 1, p.id FROM (VALUES ('build-hard','codex-astra-xhigh'), ('build','claude-opus-high')) v(role, slug)
-            JOIN model_profiles p ON p.tenant_id=$1 AND p.slug=v.slug`, admin.TenantID)
-		return err
+		if err := planningModelsOrder(t, tx, admin.TenantID, "first", "wait", "claude-opus-high"); err != nil {
+			return err
+		}
+		if err := planningModelsOrder(t, tx, admin.TenantID, "stuck", "row", "codex-astra-xhigh"); err != nil {
+			return err
+		}
+		schedule := capacity.DefaultSchedule()
+		schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+		raw, err := json.Marshal(schedule)
+		if err != nil {
+			return err
+		}
+		for _, harness := range []string{"codex", "claude"} {
+			var account string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2,$3,'planning-runner',$4,$2,now(),true,'fixture',$5) RETURNING id::text`, admin.TenantID, "planning-"+harness, harness, w.agent, admin.ID).Scan(&account); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted')`, admin.TenantID, account); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, admin.TenantID, admin.ID, account, raw); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.agent = insertNamedAgent(t, admin.TenantID, "Builder")
 	w.viewer = insertPerson(t, admin.TenantID, "Viewer")
 	bindNamesOnly(t, admin.TenantID, w.viewer.ID)
 	return w
+}
+
+// planningModelsOrder saves the workspace Default's order for a situation.
+func planningModelsOrder(t *testing.T, tx pgx.Tx, tenantID, situation, end string, slugs ...string) error {
+	t.Helper()
+	ids := []string{}
+	for _, slug := range slugs {
+		var id string
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug=$1`, slug).Scan(&id); err != nil {
+			return err
+		}
+		ids = append(ids, id)
+	}
+	return dbtest.ModelsOrder(t.Context(), tx, tenantID, "other", situation, end, ids...)
 }
 
 func (w planningWorld) node(t *testing.T, key, kind, parent, state string, fields map[string]any) nodeJSON {
@@ -394,7 +430,12 @@ func TestListPlanningColumns(t *testing.T) {
 	if v := views["PLN-8"]; v == nil || v.Route == nil || v.Route.Label != "Claude opus · high" || v.Route.Revision != leaf.Route.Revision {
 		t.Fatalf("PLN-8 route: %#v", v)
 	}
-	for key, gap := range map[string]string{"PLN-4": "registry", "PLN-6": "area", "PLN-7": "review_gate"} {
+	// Quick jobs has no fast model here, so mechanical work runs the Default
+	// (approved Models v2 design c1); it no longer shows a registry gap.
+	if v := views["PLN-4"]; v == nil || v.Route == nil || v.Route.Label != "Claude opus · high" || v.Route.Revision != leaf.Route.Revision {
+		t.Fatalf("PLN-4 route: %#v", v)
+	}
+	for key, gap := range map[string]string{"PLN-6": "area", "PLN-7": "review_gate"} {
 		if v := views[key]; v == nil || v.Route != nil || v.RouteGap != gap {
 			t.Fatalf("%s gap: %#v", key, v)
 		}
@@ -411,7 +452,7 @@ func TestListPlanningColumns(t *testing.T) {
 	if leaf.Tokens.Estimated == nil || *leaf.Tokens.Estimated != 2*defaultTokensPerHour || leaf.Tokens.Calibration == nil || leaf.Tokens.Calibration.Basis != "default" || leaf.Tokens.Calibration.AnyRoute {
 		t.Fatalf("PLN-3 estimate: %#v %#v", leaf.Tokens, leaf.Tokens.Calibration)
 	}
-	if d := views["PLN-4"]; d.Tokens.Estimated == nil || *d.Tokens.Estimated != defaultTokensPerHour || !d.Tokens.Calibration.AnyRoute || d.Tokens.Spent != nil {
+	if d := views["PLN-4"]; d.Tokens.Estimated == nil || *d.Tokens.Estimated != defaultTokensPerHour || d.Tokens.Calibration.Basis != "default" || d.Tokens.Calibration.AnyRoute || d.Tokens.Spent != nil {
 		t.Fatalf("PLN-4 tokens: %#v", d.Tokens)
 	}
 
@@ -517,10 +558,9 @@ func TestListPlanningColumns(t *testing.T) {
 		}
 	}
 
-	// A registry change updates every row: build moves to Codex sol.
+	// A registry change updates every row: the Default moves to Codex sol.
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET profile_id=(SELECT id FROM model_profiles WHERE slug='codex-sol-xhigh') WHERE role='build'`)
-		return err
+		return planningModelsOrder(t, tx, w.admin.TenantID, "first", "wait", "codex-sol-xhigh")
 	})
 	if err != nil {
 		t.Fatal(err)

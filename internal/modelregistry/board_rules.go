@@ -206,9 +206,23 @@ func (m *Module) writeModelRules(w http.ResponseWriter, r *http.Request) {
 		if _, err := tx.Exec(ctx, `DELETE FROM model_rules WHERE scope=$1 AND project_id IS NOT DISTINCT FROM $2::uuid AND column_key=$3`, scope, optionalUUID(project), column); err != nil {
 			return err
 		}
+		// The compatibility editor replaces the same row's migrated constraints
+		// under its existing final write authority and tenant/preference fences.
+		if _, err := tx.Exec(ctx, `DELETE FROM model_row_constraints WHERE scope=$1 AND project_id IS NOT DISTINCT FROM $2::uuid AND column_key=$3`, scope, optionalUUID(project), column); err != nil {
+			return err
+		}
 		for _, rule := range desired {
-			if _, err := tx.Exec(ctx, `INSERT INTO model_rules(tenant_id,scope,project_id,column_key,line,lock,position,why,set_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, p.TenantID, scope, optionalUUID(project), column, rule.Line, rule.Lock, rule.Position, rule.Why, p.ID); err != nil {
+			if _, err := tx.Exec(ctx, `INSERT INTO model_rules(tenant_id,scope,project_id,column_key,line,lock,position,why,set_by,moved_to_models) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$6<>'top')`, p.TenantID, scope, optionalUUID(project), column, rule.Line, rule.Lock, rule.Position, rule.Why, p.ID); err != nil {
 				return err
+			}
+			if rule.Lock != "top" {
+				kind := "chain"
+				if rule.Lock == "not" {
+					kind = "never"
+				}
+				if _, err := tx.Exec(ctx, `INSERT INTO model_row_constraints(tenant_id,scope,project_id,column_key,line,kind,position,why,set_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, p.TenantID, scope, optionalUUID(project), column, rule.Line, kind, rule.Position, rule.Why, p.ID); err != nil {
+					return err
+				}
 			}
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO model_rule_revisions(tenant_id,scope,scope_key,revision) VALUES($1,$2,$3,1) ON CONFLICT(tenant_id,scope,scope_key) DO UPDATE SET revision=model_rule_revisions.revision+1 RETURNING revision`, p.TenantID, scope, project).Scan(&out.Revision); err != nil {

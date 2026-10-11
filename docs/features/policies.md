@@ -1,37 +1,19 @@
 # Policies
 
-Settings → Policies (`/settings/policies`) explains existing rules and provides
-scoped editors for saved job orders and model preferences. Each tab follows its source permission: review ladders need
-`models.read`; agent key limits read the permission registry with `roles.read`
-and a person session; ownership and advisory rules are visible to signed-in
-people. Links lead only to existing screens the person may open.
+Settings → Policies (`/settings/policies`) explains existing rules. Each tab
+follows its source permission: review ladders need `models.read`; agent key
+limits read the permission registry with `roles.read` and a person session;
+ownership and advisory rules are visible to signed-in people. Links lead only to
+existing screens the person may open.
 
-`GET /api/models/routes?role=review-gate` reads one of the six model roles,
-ordered by priority and profile id, with at most 50 steps and an explicit
-`truncated` flag. An unseeded registry returns `setup: false` without creating
-profiles or events. The read applies a five-second statement timeout and returns
-503 with `Retry-After` if it expires. CLI priority and qualified review dispatch
-are labelled separately; this display endpoint does not resolve a dispatch.
-Review family ordering and qualification floors are shown only for Review gate.
-Suspension expiry includes an explicit UTC time and date. A late server refusal
-clears the private rows while keeping the existing selector and detail link in
-place; a person without the source permission sees only its permission sentence.
-
-People with `models.read` and `models.manage` can edit one complete role order,
-using its quoted `If-Match` token. Truncated snapshots remain read-only.
-Add, move and remove operations renumber the draft in displayed order, including
-orders with gaps in their stored priorities. Ordinary managed reviews retain
-built-in family/tier fallback until a person deliberately saves the review order.
-The draft starts from the currently applied fallback. Save sends
-`order_mode=saved` on the conditional `review-gate` PUT; Undo restores the captured
-rows and `legacy`/`saved` mode together. Omitted mode and whole-tenant legacy PUTs
-preserve activation. The strong role token covers both rows and mode; mode-only
-changes emit `model.routes_replaced` with unchanged before/after arrays and
-`before_order_mode`/`after_order_mode` metadata. GET returns `order_mode` and
-`managed_fallback_order` from the same snapshot, and review traces capture the
-mode. Preferences may still choose another qualified reviewer. Author-family,
-effort/tier, platform, account and residency checks stay enforced; security uses
-its separate refusing path. Already queued profile/account bindings stay fixed.
+Role ladders moved to Settings › Models (AEON-1204, with the Models v2 server
+migration AEON-1158). The Review ladders tab shows one line, "Role ladders moved
+to Settings › Models", with a link to `/settings/models`. It reads and writes
+nothing: Policies never calls `GET` or `PUT /api/models/routes`. The server
+answers that `PUT` with 410 Gone and keeps the `GET` only as a deprecated
+compatibility read. The tab has no role selector, ladder list or editor, and a
+person without `models.read` sees its permission sentence instead. Under Rules
+elsewhere, the Role ladders row links to the Models page.
 
 Model preferences use Default, You and an explicitly visible Project, with the
 source GET/write permissions. Project-only management also needs workspace
@@ -46,8 +28,7 @@ work-kind settings therefore remain stored by these UI operations.
 
 Save is provisional until the source confirms its actual result. Undo is a
 conditional compensating source write with the confirmed token/revision, not an
-event deletion. Ladder Undo uses `expiry_policy=clear`; expired holds stay
-available. Newer changes, revoked permissions, linked-person changes and retired
+event deletion. Newer changes, revoked permissions, linked-person changes and retired
 kinds refuse honestly without retrying the old draft. Unknown outcomes require
 reconciliation; an equal value alone never certifies success. Provider Undo does
 not lower requirements already stamped on existing runs. Navigation discards
@@ -68,6 +49,8 @@ inside scrolling bodies. Phone editors use full-height sheets with safe-area
 action bars. Save keycaps follow the platform; keyboard Save focuses the stable
 Save action before fields are disabled, retaining focus for subsequent keyboard
 Undo and Escape. Escape first leaves a field, then
-closes the editor. Browser geometry and request-contract coverage lives in
-`web/tests/policy-editors.spec.ts`; screenshot evidence is generated locally in
-`web/test-results/aeon-633web/` and is not committed.
+closes the editor. Browser geometry for the Policies tabs lives in
+`web/tests/stability.spec.ts`. `web/tests/policies-ladders-moved.unit.test.ts`
+and the gated `web/tests/policies-ladders-moved.spec.ts` guard the moved line,
+its link and the absence of ladder requests. Screenshot evidence
+is generated locally under `web/test-results/` and is not committed.

@@ -747,10 +747,10 @@
       "table": "model_catalog_credentials",
       "classification": "secret",
       "columns": {
-        "tenant_id": "metadata",
         "account_id": "metadata",
-        "vendor": "metadata",
-        "ciphertext": "secret"
+        "ciphertext": "secret",
+        "tenant_id": "metadata",
+        "vendor": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
@@ -760,16 +760,16 @@
       "table": "model_catalog_facts",
       "classification": "metadata",
       "columns": {
-        "tenant_id": "metadata",
-        "provider": "metadata",
-        "model_id": "metadata",
-        "route": "metadata",
         "fact": "metadata",
-        "value": "metadata",
+        "fetched_at": "metadata",
+        "field_path": "metadata",
+        "model_id": "metadata",
+        "provider": "metadata",
+        "route": "metadata",
         "source": "metadata",
         "source_kind": "metadata",
-        "field_path": "metadata",
-        "fetched_at": "metadata"
+        "tenant_id": "metadata",
+        "value": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
@@ -778,22 +778,39 @@
     {
       "classification": "metadata",
       "columns": {
-        "tenant_id": "metadata",
         "account_id": "metadata",
         "binding_revision": "metadata",
+        "completed_at": "metadata",
+        "daemon_generation": "metadata",
+        "lease_until": "metadata",
+        "model_count": "metadata",
+        "report_digest": "metadata",
         "request_id": "metadata",
         "requested_at": "metadata",
-        "lease_until": "metadata",
-        "daemon_generation": "metadata",
-        "completed_at": "metadata",
         "state": "metadata",
-        "model_count": "metadata",
-        "report_digest": "metadata"
+        "tenant_id": "metadata"
       },
       "locator": {
         "tenant_column": "tenant_id"
       },
       "table": "model_harness_probes"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "harness": "metadata",
+        "model": "metadata",
+        "reason": "review",
+        "set_at": "metadata",
+        "set_by": "personal",
+        "tenant_id": "metadata",
+        "until_at": "personal"
+      },
+      "locator": {
+        "person_column": "set_by",
+        "tenant_column": "tenant_id"
+      },
+      "table": "model_pauses"
     },
     {
       "classification": "review",
@@ -813,6 +830,8 @@
         "column_key": "metadata",
         "effort": "metadata",
         "effort_level": "metadata",
+        "efforts": "personal",
+        "end_mode": "metadata",
         "not_allowed": "personal",
         "profile_id": "metadata",
         "rank": "personal",
@@ -850,6 +869,29 @@
         "tenant_column": "tenant_id"
       },
       "table": "model_pref_profiles"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "column_key": "metadata",
+        "effort": "metadata",
+        "effort_level": "metadata",
+        "efforts": "personal",
+        "end_mode": "metadata",
+        "not_allowed": "personal",
+        "profile_id": "metadata",
+        "rank": "personal",
+        "set_at": "metadata",
+        "set_by": "personal",
+        "situation": "metadata",
+        "tenant_id": "metadata",
+        "thinking": "personal"
+      },
+      "locator": {
+        "person_column": "set_by",
+        "tenant_column": "tenant_id"
+      },
+      "table": "model_pref_situation_orders"
     },
     {
       "classification": "metadata",
@@ -900,6 +942,26 @@
       "table": "model_refresh_settings"
     },
     {
+      "classification": "personal",
+      "columns": {
+        "column_key": "metadata",
+        "kind": "metadata",
+        "line": "metadata",
+        "position": "metadata",
+        "project_id": "metadata",
+        "scope": "metadata",
+        "set_at": "metadata",
+        "set_by": "personal",
+        "tenant_id": "metadata",
+        "why": "review"
+      },
+      "locator": {
+        "person_column": "set_by",
+        "tenant_column": "tenant_id"
+      },
+      "table": "model_row_constraints"
+    },
+    {
       "classification": "metadata",
       "columns": {
         "revision": "metadata",
@@ -918,6 +980,7 @@
         "column_key": "metadata",
         "line": "metadata",
         "lock": "metadata",
+        "moved_to_models": "metadata",
         "position": "metadata",
         "project_id": "metadata",
         "scope": "metadata",
@@ -947,6 +1010,18 @@
         "tenant_column": "tenant_id"
       },
       "table": "model_situation_limits"
+    },
+    {
+      "classification": "review",
+      "columns": {
+        "audit": "review",
+        "migrated_at": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "model_v2_migrations"
     },
     {
       "classification": "personal",

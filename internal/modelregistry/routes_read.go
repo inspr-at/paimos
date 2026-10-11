@@ -8,11 +8,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
-	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -66,7 +64,7 @@ func (m *Module) readRoutes(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	out := routesRead{ManagedFallbackOrder: []string{}, Role: roles[0], Steps: []routeDisplay{}, DispatchFamilyOrder: dispatchFamilyOrder(), ReviewFloors: []string{
 		"A reviewer must be from a different family than the author.",
-		"Review dispatch requires a frontier or strong profile at xhigh reasoning.",
+		"Review dispatch requires a frontier or strong profile at its highest native level, equivalent to at least xhigh.",
 		"Dispatch checks platform capability, an approved account with capacity, and model preferences.",
 	}}
 	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
@@ -77,48 +75,20 @@ func (m *Module) readRoutes(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if current.Kind == tenant.Person {
-			err := authz.RequireTx(ctx, tx, current, "models.manage", authz.Scope{})
-			if err != nil && !errors.Is(err, authz.ErrForbidden) {
-				return err
-			}
-			out.CanEdit = err == nil
+
+		_ = current // currentModelReader rechecks live models.read authority.
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles)`).Scan(&out.Setup); err != nil {
+			return err
 		}
-		// One statement supplies both setup and the capped ladder under the same
-		// snapshot. A LEFT JOIN retains setup even if this role has no steps.
-		rows, err := tx.Query(ctx, `
-			SELECT catalog.setup, COALESCE((SELECT ordinary_review_order_mode FROM model_review_order), 'legacy'), step.value
-			FROM (SELECT EXISTS(SELECT 1 FROM model_profiles) AS setup) catalog
-			LEFT JOIN LATERAL (
-				SELECT jsonb_build_object('role', r.role, 'priority', r.priority,
-					'profile_id', r.profile_id, 'state', r.state, 'reason', r.reason,
-					'valid_until', r.valid_until, 'profile',
-					(to_jsonb(p) - 'tenant_id') || jsonb_build_object(
-						'display_name', COALESCE(d.model_display->>'display_name',''),
-						'short_name', COALESCE(d.model_display->>'short_name',''),
-						'model_version', COALESCE(d.model_display->>'model_version',''),
-						'effort_level', d.effort_level, 'provider', d.provider)) AS value,
-					r.priority, r.profile_id
-				FROM (`+agentaccounts.ModelRoleRoutesSQL+`) r
-				JOIN model_profiles p ON p.tenant_id=r.tenant_id AND p.id=r.profile_id
-				LEFT JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
-				WHERE r.role=$1 ORDER BY r.priority, r.profile_id LIMIT $2
-			) step ON true
-			ORDER BY step.priority, step.profile_id`, out.Role, routesDisplayLimit+1)
+		steps, mode, err := derivedRoleSteps(ctx, tx, nil, out.Role, routesDisplayLimit+1)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var step *routeDisplay
-			if err := rows.Scan(&out.Setup, &out.OrderMode, &step); err != nil {
-				return err
-			}
-			if step != nil {
-				out.Steps = append(out.Steps, *step)
-			}
+		out.OrderMode = mode
+		for _, step := range steps {
+			out.Steps = append(out.Steps, routeDisplay{Route: step.Route, Profile: step.Profile})
 		}
-		return rows.Err()
+		return nil
 	})
 	if err != nil {
 		if db.IsStatementTimeout(err) {
@@ -151,11 +121,9 @@ func (m *Module) readRoutes(w http.ResponseWriter, r *http.Request) {
 	for _, step := range out.Steps {
 		out.Routes = append(out.Routes, step.Route)
 	}
-	out.CanEdit = out.CanEdit && out.Setup && !out.Truncated
-	if !out.Truncated {
-		token := routeEditToken(out.Role, out.Routes, out.OrderMode)
-		out.EditToken = &token
-		w.Header().Set("ETag", token)
-	}
+	// This compatibility endpoint has no write authority or edit token.
+	out.CanEdit, out.EditToken = false, nil
+	w.Header().Set("Deprecation", "true")
+	w.Header().Set("Link", `</api/model-preferences/simple>; rel="successor-version"`)
 	httpapi.WriteJSON(w, http.StatusOK, out)
 }
