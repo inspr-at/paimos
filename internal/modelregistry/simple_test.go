@@ -289,7 +289,12 @@ func TestMinimalSimpleReadPreservesFirstAndFallback(t *testing.T) {
 func TestMinimalQueuedScoutUsesQuickJobs(t *testing.T) {
 	admin, member := boardFixture(t)
 	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
-	minimalAccount(t, admin, profileBySlug(ps, "codex-luna-medium"))
+	luna := minimalAccount(t, admin, profileBySlug(ps, "codex-luna-medium"))
+	// Mechanical work runs Luna at its high level, scout at medium.
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=allowed_model_profile_ids||$2::uuid WHERE id=$1`, luna, profileBySlug(ps, "codex-luna-high").ID)
+		return err
+	})
 	project := editorProject(t, admin, "SCOUT-3")
 	var ticket string
 	inRegistry(t, admin, func(tx pgx.Tx) error {
@@ -341,7 +346,9 @@ func TestMinimalQueuedScoutUsesQuickJobs(t *testing.T) {
 		return nil
 	})
 	doc := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple", nil, ""), 200)
-	if doc.Next == nil || doc.Next.Ticket != "SCOUT-1" || doc.Next.Column != "backend" || doc.Next.Line == nil || *doc.Next.Line != want {
+	// Quick jobs are not the kind's row: the page names the Default, as the
+	// trace does, and the same line dispatch runs.
+	if doc.Next == nil || doc.Next.Ticket != "SCOUT-1" || doc.Next.Column != "other" || doc.Next.Line == nil || *doc.Next.Line != want {
 		t.Fatalf("queued scout was reported blocked or left its Quick job: next=%+v want=%s", doc.Next, want)
 	}
 }

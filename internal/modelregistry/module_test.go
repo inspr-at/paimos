@@ -404,6 +404,11 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 		profile := profileBySlug(profiles, slug)
 		accounts[profile.ID] = minimalAccount(t, admin, profile)
 	}
+	// Shared accounts expose their exact admission cause to the reader.
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=true`)
+		return err
+	})
 	scout := decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
 	if scout.Profile == nil || accounts[scout.Profile.ID] == "" {
 		t.Fatalf("fixture must run an enrolled Quick job: %+v", scout)

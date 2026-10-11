@@ -329,8 +329,14 @@ func TestAutomaticallyObservedProfilesRequirePersonGrant(t *testing.T) {
 		return nil
 	})
 	decode[Profile](t, &owner, "POST", "/api/models/proposals/accept", accept, 200)
-	if eventCount(t, owner, "model.proposal_accepted") != 1 || !reflect.DeepEqual(before, registryRoutes(t, owner)) || savedModelsPolicy(t, owner) != policy {
-		t.Fatal("grant replay or grant changed policy")
+	if eventCount(t, owner, "model.proposal_accepted") != 1 {
+		t.Fatal("grant replay")
+	}
+	if after := registryRoutes(t, owner); !reflect.DeepEqual(before, after) {
+		t.Fatalf("grant changed the derived routes:\nbefore %+v\nafter  %+v", before, after)
+	}
+	if after := savedModelsPolicy(t, owner); after != policy {
+		t.Fatalf("grant changed saved policy:\nbefore %s\nafter  %s", policy, after)
 	}
 }
 
