@@ -154,6 +154,13 @@
         "internal/agentsetup/routine_launch.go",
         "internal/agentruns/routine_launch.go",
         "internal/agentd/probe_batch.go",
+        "internal/agentd/catalog_probes.go",
+        "internal/agentd/catalog_parsers.go",
+        "internal/agentd/catalog_probes_test.go",
+        "internal/agentd/claudeassets/bridge.mjs",
+        "internal/modelregistry/harness_probes.go",
+        "internal/modelregistry/harness_probes_test.go",
+        "internal/modelreport/catalog.go",
         "internal/agentd/queue_cadence.go",
         "internal/agentd/queue_cadence_test.go",
         "internal/agentruns/queue_notifications.go",
@@ -269,7 +276,9 @@
         "internal/recurrences/reads.go",
         "internal/recurrences/consent_reads.go",
         "internal/recurrences/reads_test.go",
-        "internal/decisiondesk/routine_consent_test.go"
+        "internal/decisiondesk/routine_consent_test.go",
+        "internal/recurrences/run_history.go",
+        "internal/recurrences/run_history_test.go"
       ]
     },
     {

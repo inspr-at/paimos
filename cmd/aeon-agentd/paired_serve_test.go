@@ -81,6 +81,8 @@ func TestPairedServeRestartsWithUnconfirmedLedgerIntent(t *testing.T) {
 		case "/api/runs/queued/notifications", "/api/agent-accounts/probes":
 			// Pre-batch/pre-hint servers deny undeclared /api/ routes to agent keys.
 			w.WriteHeader(http.StatusForbidden)
+		case "/api/models/harness-probes/claim":
+			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}, "next_cursor": ""})
 		case "/api/runs/queued":
 			_ = json.NewEncoder(w).Encode([]any{})
 			select {
@@ -273,6 +275,8 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 				case "/api/runs/queued/notifications", "/api/agent-accounts/probes":
 					// Pre-batch/pre-hint servers deny undeclared /api/ routes to agent keys.
 					w.WriteHeader(http.StatusForbidden)
+				case "/api/models/harness-probes/claim":
+					_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}, "next_cursor": ""})
 				case "/api/runs/queued":
 					queueScans.Add(1)
 					_ = json.NewEncoder(w).Encode([]any{})

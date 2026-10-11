@@ -80,6 +80,9 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 			if r.Method == "GET" && len(parts) == 2 {
 				return nil
 			}
+			if r.Method == "POST" && len(parts) == 4 && parts[2] == "harness-probes" && (parts[3] == "claim" || validRouteUUID(parts[3])) {
+				return nil // Handlers recheck the key, account owner, binding and daemon generation under the pairing fence.
+			}
 		case "agent-accounts":
 			if r.Method == "GET" && (r.URL.Path == "/api/agent-accounts/capacity/next" || r.URL.Path == "/api/agent-accounts/use") {
 				return nil
