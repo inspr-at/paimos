@@ -144,11 +144,15 @@ const chips = computed(() => {
   const t = text.value, s = source.value
   if (!s) return []
   const day = (iso: string | null) => iso ? shortDate(iso.slice(0, 10), lang.value) : ''
-  const back = s.backfill === 'done' ? { icon: 'history' as const, b: t.srcBack[0], rest: fill(t.srcBack[1], { d: day(s.backfill_since) }) }
+  const stale = repositoryState(s, Date.parse(data.value?.generated_at ?? '')) === 'stale'
+  const readError = s.last_read_error?.reason
+  const historyProblem = lang.value === 'de' ? { actions_read_missing: 'Actions-Lesezugriff fehlt', not_installed: 'App nicht installiert', github_unavailable: 'GitHub nicht erreichbar' } : { actions_read_missing: 'Actions read access missing', not_installed: 'App not installed', github_unavailable: 'GitHub unavailable' }
+  const back = readError ? { icon: 'history' as const, b: lang.value === 'de' ? 'Historie' : 'History', rest: ` · ${historyProblem[readError]}` }
+    : s.backfill === 'done' ? { icon: 'history' as const, b: t.srcBack[0], rest: fill(t.srcBack[1], { d: day(s.backfill_since) }) }
     : s.backfill === 'running' ? { icon: 'history' as const, b: t.srcRun[0], rest: s.covered_since ? fill(t.srcRun[1], { d: day(s.covered_since) }) : t.srcRunNone[1] }
       : { icon: 'history' as const, b: t.srcNone[0], rest: t.srcNone[1] }
   return [
-    { icon: 'pulse' as const, b: s.app_connected ? t.srcApp[0] : t.srcAppOff[0], rest: s.app_connected ? t.srcApp[1] : t.srcAppOff[1], problem: !s.app_connected || repositoryState(s, Date.parse(data.value?.generated_at ?? '')) === 'stale' },
+    { icon: s.app_connected ? 'pulse' as const : 'signal-off' as const, b: s.app_connected ? t.srcApp[0] : t.srcAppOff[0], rest: stale ? lang.value === 'de' ? ` · letztes Ereignis ${day(s.last_event_at ?? null)}` : ` · last event ${day(s.last_event_at ?? null)}` : s.app_connected ? t.srcApp[1] : t.srcAppOff[1], problem: !s.app_connected || stale },
     { ...back, problem: s.backfill !== 'done' || !!s.last_read_error },
     { icon: 'merge' as const, b: t.srcTool[0], rest: t.srcTool[1], problem: false },
   ]

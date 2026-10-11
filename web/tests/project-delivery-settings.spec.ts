@@ -117,11 +117,13 @@ test('AEON-1226: repository states stay put and delivery edits preserve authorit
   await expect(page.locator('.repo-slot')).toHaveAttribute('data-state', 'noactions')
   await expect(page.locator('.ds-h')).toHaveText('Linked. History can’t be read: the GitHub App lacks Actions read access.')
   expect(world.links.at(-1)).toEqual({ repository: 'inspr-at/aeon', ci_workflow: '.github/workflows/ci.yml', nightly_workflow: '.github/workflows/nightly-full.yml', days: 60 })
+  await page.setViewportSize({ width: 400, height: 1000 })
   const linked = await controlStability(page, { change: page.locator('[data-act=change]'), check: page.locator('[data-act=check]'), checks: page.locator('#checks') })
   await linked.check(async () => { await page.locator('[data-act=check]').click(); await expect(page.locator('[data-act=check]')).toBeEnabled() })
   linked.done(); expect(world.history.at(-1)).toEqual({ days: 60, restart: false })
   await page.locator('[data-act=repo-more]').click(); await page.getByRole('menuitem', { name: /Read history again/ }).click()
   await expect.poll(() => world.history.at(-1)).toEqual({ days: 60, restart: true })
+  await page.setViewportSize({ width: 1440, height: 1000 })
 
   const wf = page.locator('#f-wf'), deadline = page.locator('#dl-ci_green')
   await wf.fill('Release CI'); await wf.press('Enter'); await expect(wf).toBeEnabled()
@@ -156,6 +158,7 @@ test('AEON-1226: approved repository reference states and check.mjs audit agains
       await choose(page, world, state, readOnly)
       const name = `delivery-${state}${readOnly ? '-readonly' : ''}-${width}-${theme}`
       results.push(...await checkProjectSettings(page, name, width < 600))
+      await page.locator('#repository').scrollIntoViewIfNeeded()
       await page.screenshot({ path: testInfo.outputPath(`${name}.png`), fullPage: true })
       if (state === 'loading') { world.pendingLoad = null; release(); await expect(page.locator('.repo-slot')).not.toHaveAttribute('data-state', 'loading') }
     }

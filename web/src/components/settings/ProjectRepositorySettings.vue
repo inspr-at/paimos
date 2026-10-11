@@ -11,6 +11,7 @@ import { HISTORY_DAYS, linkProjectRepository, readRepositoryHistory, repositoryS
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
 import { claimSettingsPopover } from '../../lib/settingsOverlays'
 import { usePoller } from '../../lib/usePolledData'
+import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import SettingsCard from './SettingsCard.vue'
@@ -73,8 +74,8 @@ function startHistory(restart = false) {
   closeMenu(false); reader.cancel(); busy.value = true; feedback.value = ''
   return scope.run(({ after, signal }) => after(readRepositoryHistory(id, selectedDays, restart, signal), value => {
     position.value = value
-    if (value.truncated) feedback.value = 'GitHub returned only part of the history. Delivery keeps those windows partial.'
-  }), { failed: cause => { feedback.value = cause instanceof Error ? cause.message : 'History could not be read. The repository stays linked.' }, settled: () => { busy.value = false; void load() } })
+    if (value.truncated) toast('GitHub returned only part of the history. Delivery keeps those windows partial.')
+  }), { failed: cause => { toast(cause instanceof Error ? cause.message : 'History could not be read. The repository stays linked.', { tone: source.value?.last_read_error ? 'info' : 'error', key: `repository-history/${id}` }) }, settled: () => { busy.value = false; void load() } })
 }
 function submit() {
   if (!manage.value || busy.value) return
@@ -109,7 +110,7 @@ onBeforeUnmount(() => { poller.stop(); stopAccess(); scope.dispose(); closeMenu(
       <div class="lf-row"><label class="fl" for="lf-days"><b>History</b><small>Read once on the server; after that PAIMOS follows along live.</small></label><select id="lf-days" v-model.number="days" class="field" :disabled="busy"><option v-for="n in HISTORY_DAYS" :key="n" :value="n">The last {{ n }} days</option></select></div>
       <div class="lf-acts"><button type="button" class="btn" :disabled="busy" @click="cancelForm">Cancel</button><button type="submit" class="btn primary" :disabled="busy"><AppIcon name="link" :size="14" />{{ source ? 'Save and read again' : 'Link repository' }}</button></div>
     </form>
-    <div v-else class="repo-slot" :data-state="state">
+    <div v-else class="repo-slot" :data-state="state" :aria-busy="busy">
       <div v-if="state === 'loading'" class="slot-sk" aria-busy="true" aria-label="Loading the repository"><div class="sk-row"><span class="sk" /><span class="sk" /></div><span class="sk ds-sk" /></div>
       <div v-else-if="state === 'error'" class="empty" role="alert"><span class="empty-ic"><AppIcon name="alert" :size="20" /></span><div><b>The repository link couldn’t load.</b><p>Nothing changed: delivery keeps its last state and the numbers stay as they were.</p></div><button type="button" class="btn" @click="load(true)"><AppIcon name="refresh" :size="14" />Try again</button></div>
       <div v-else-if="state === 'none'" class="empty"><span class="empty-ic"><AppIcon name="repo" :size="20" /></span><div><b>No repository linked yet</b><p>Link the project’s GitHub repository and Delivery starts counting. The server reads the last 30 days once, then follows along live.</p></div><button v-if="manage" ref="linkButton" type="button" class="btn primary" data-act="link" @click="openForm"><AppIcon name="link" :size="14" />Link repository</button></div>
@@ -139,7 +140,7 @@ onBeforeUnmount(() => { poller.stop(); stopAccess(); scope.dispose(); closeMenu(
         </div>
       </template>
     </div>
-    <p class="feedback" :class="{ problem: feedback }" role="status" :aria-busy="busy">{{ feedback || (busy ? 'Checking the repository…' : '') }}</p>
+    <p v-if="formOpen" class="feedback" :class="{ problem: feedback }" role="status" :aria-busy="busy">{{ feedback || (busy ? 'Linking the repository…' : '') }}</p>
   </SettingsCard>
   <FloatingPanel v-if="menuOpen" :anchor="moreButton ?? null" :width="340" :tallest="180" label="More for the repository" @close="restore => closeMenu(restore)"><div ref="menuContent" role="menu" aria-label="More for the repository"><button type="button" class="history-menu" role="menuitem" @click="startHistory(true)"><AppIcon name="history" :size="14" /><span><b>Read history again…</b><small>Starts over on the server. Use it after GitHub was unreadable for a while.</small></span></button></div></FloatingPanel>
 </template>
