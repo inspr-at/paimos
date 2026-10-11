@@ -80,7 +80,13 @@ func ReadPrivateFile(path string, max int64) ([]byte, error) {
 
 // openDirectory also anchors user-service directories, which may conventionally
 // be 0755. Their ancestors still cannot be writable by any other user.
-func openDirectory(path string, create, private bool) (_ *Store, resultErr error) {
+func openDirectory(path string, create, private bool) (*Store, error) {
+	return openDirectoryWithMkdirat(path, create, private, unix.Mkdirat)
+}
+
+// The injectable syscall keeps the concurrent-creator race testable without a
+// process-global hook.
+func openDirectoryWithMkdirat(path string, create, private bool, mkdirat func(int, string, uint32) error) (_ *Store, resultErr error) {
 	defer func() {
 		if resultErr != nil {
 			resultErr = fmt.Errorf("open state directory %s: %w", path, resultErr)
@@ -102,7 +108,9 @@ func openDirectory(path string, create, private bool) (_ *Store, resultErr error
 		}
 		next, e := unix.Openat(fd, part, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 		if errors.Is(e, unix.ENOENT) && create {
-			if e = unix.Mkdirat(fd, part, 0700); e == nil {
+			// A concurrent creator may win between lookup and mkdir; its entry is
+			// then opened and validated exactly like one that already existed.
+			if e = mkdirat(fd, part, 0700); e == nil || errors.Is(e, unix.EEXIST) {
 				e = unix.Fsync(fd)
 			}
 			if e != nil {
