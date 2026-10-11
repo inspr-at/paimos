@@ -167,8 +167,13 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 	harness.New(f.d.App).Mount(mux)
 	worker := f.agent
 	worker.Scopes = append(worker.Scopes, "harness.worker")
-	worker.KeyCreatorID = ""
+	// Reuse the fixture daemon key under an independently active administrator.
+	// A disabled person's key must remain unable to poll, even for safety work.
+	must(t, f.d.Admin.QueryRow(t.Context(), `UPDATE agent_keys SET scopes=array_append(scopes,'harness.worker'),created_by_principal_id=$2
+   WHERE principal_id=$1 RETURNING id::text`, worker.ID, admin).Scan(&worker.KeyID))
+	worker.AuthKeyID, worker.KeyCreatorID = worker.KeyID, admin
 	request := httptest.NewRequest("POST", fmt.Sprintf("/api/projects/%s/harness-sessions/%s/yield", f.project, session), strings.NewReader(`{}`)).WithContext(tenant.WithPrincipal(t.Context(), worker))
+	request.Header.Set("Authorization", "Bearer "+f.token)
 	request.Header.Set("X-Aeon-Worker-Lease", lease)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, request)
