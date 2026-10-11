@@ -10,7 +10,7 @@ A version runs through one or more **routes**: Opus 5.5 through Claude Code, Cur
 
 Every model has one name everywhere: the picker, the registry rows, the outdated tray and the review sheet all use `fullName` ("Opus 5.5", "GPT-6.1 Sol"). A concrete route names the version; an alias and Cursor's raw display ids never do.
 
-Rows are folded by default. A row shows its line and version, where the model came from, its tags (**New** and "off until used", **Retiring 31 Oct**, **Paused until 14 Oct**, "+N older"), the routes or the harness with the note, and the levels of its first route. Opening a row grows its fold below it, so nothing above it moves. The fold shows:
+Rows are folded by default. A row shows its line and version, where the model came from, its tags (**New** and "off until used", **Retiring 31 Oct**, "+N older"), one line with the pause (**Paused until 14 Oct**) first and then the routes or the harness with the note, and the levels of its first route. That line never wraps, so pausing never adds a line above a row's actions; the routes and the note it shortens are in the fold in full. Opening a row grows its fold below it, so nothing above it moves. The fold shows:
 
 - each route: harness (with "via OpenRouter" or "via Local" for pi and OpenCode), the id the harness is given, the route's own native levels (Gemini 2.5's token budgets say "tokens" once), and where the route came from;
 - the facts: provider, lifecycle (Active, Preview, Retiring 31 Oct, Deprecated, Superseded) and the note, each with its source, or "unknown" when nobody reported it; "was 6, taken on 3 Oct" when auto-update took a newer version on;

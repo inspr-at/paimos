@@ -16900,7 +16900,7 @@
     ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"How new models are found writes its settings with auto-update as the server holds it and never sends the matrix revision","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"Remove on a version reads where every one of its routes is used before anything is removed, then retires every level of every route","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"Remove on a version asks one read about every level of every route it removes, then retires exactly those","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a pause refused on one route says how far it got, and its Undo puts back only the routes it changed","tier":"GATED-FULL"}
     ,
@@ -16974,7 +16974,7 @@
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > pauses every route of a version, Cursor's Grok levels through one id, stops at the first refusal and undoes exactly what it changed","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > reads one remove question for a version with several routes: each use once, hidden uses from any route","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > reads one remove question for a whole version: every profile it removes goes with that one read","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"the grouped registry > says token budgets once and names a level as the sheet does","tier":"GATED-FULL"}
     ,
