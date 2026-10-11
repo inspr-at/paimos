@@ -25,6 +25,7 @@ type DrainRequest struct {
 // LifecycleStatus does not conflate telemetry acceptance with observed exit.
 // Only a drained status permits removing a pairing-owned service or credential.
 type LifecycleStatus struct {
+	AccountLogins           map[string]agentsetup.AccountLogin  `json:"account_logins,omitempty"`
 	VerificationReasons     map[string]string                   `json:"verification_reasons,omitempty"`
 	AccountStatuses         map[string]agentsetup.HarnessDetail `json:"account_statuses,omitempty"`
 	ProfilePermissions      bool                                `json:"profile_permissions,omitempty"`
@@ -253,6 +254,14 @@ func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatu
 			}
 		}
 		v.AccountStatuses[a.ID], _ = agentsetup.HarnessReport(a.Harness, status, reason)
+		if accountID == "" || accountID == a.ID {
+			if login, ok := s.accountLogins[a.ID]; ok && !v.AllFenced && !fenced && e == nil {
+				if v.AccountLogins == nil {
+					v.AccountLogins = map[string]agentsetup.AccountLogin{}
+				}
+				v.AccountLogins[a.ID] = login
+			}
+		}
 		v.AccountStatuses[a.ID] = v.AccountStatuses[a.ID].WithProbeDetail(a.Harness, s.probeReasonDetails[a.ID])
 		if reason == agentsetup.PairingSyncFailed {
 			v.AccountStatuses[a.ID] = v.AccountStatuses[a.ID].WithProbeDetail(a.Harness, s.pairingFailure)
@@ -525,6 +534,7 @@ func (s *Supervisor) beginAccountProbe(accountID string, now time.Time) {
 	delete(s.signInUnverified, accountID)
 	delete(s.probeFailureReasons, accountID)
 	delete(s.probeReasonDetails, accountID)
+	delete(s.accountLogins, accountID)
 }
 
 // settlePending retries the exact persisted sequence; it never restarts a run.
