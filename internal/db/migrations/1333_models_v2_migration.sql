@@ -95,10 +95,6 @@ BEGIN
   'orders',coalesce((SELECT jsonb_agg(to_jsonb(o) ORDER BY o.profile_id,o.column_key,o.situation) FROM model_pref_orders o),'[]'::jsonb),
   'rules',coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.scope,r.column_key,r.position,r.line) FROM model_rules r),'[]'::jsonb),
   'dial',coalesce((SELECT jsonb_agg(jsonb_build_object('person',pref.principal_id,'value',pref.value) ORDER BY pref.principal_id) FROM user_preferences pref WHERE pref.key='agents.working'),'[]'::jsonb)) INTO source_rows;
- -- Preserve the meaning of saved Cursor/provider aliases across routes.
- UPDATE model_pref_orders SET
-  rank=CASE WHEN rank IS NULL THEN NULL ELSE ARRAY(SELECT line FROM (SELECT aeon_models_canonical_line(v) AS line,n FROM unnest(rank) WITH ORDINALITY u(v,n)) refs GROUP BY line ORDER BY min(n)) END,
-  not_allowed=ARRAY(SELECT line FROM (SELECT aeon_models_canonical_line(v) AS line,n FROM unnest(not_allowed) WITH ORDINALITY u(v,n)) refs GROUP BY line ORDER BY min(n));
  SELECT id INTO actor FROM principals WHERE kind='agent' AND name='Models v2 migration' ORDER BY id LIMIT 1;
  IF actor IS NULL THEN INSERT INTO principals(tenant_id,kind,name) VALUES(p_tenant,'agent','Models v2 migration') RETURNING id INTO actor; END IF;
  IF NOT EXISTS(SELECT 1 FROM model_pref_profiles WHERE scope='workspace') THEN
@@ -118,7 +114,7 @@ BEGIN
    -- A saved multi-step Default already has its own chain.
    IF cardinality(existing)>1 THEN CONTINUE; END IF;
    pick := existing[1];
-   IF pick IS NOT NULL THEN ranked := ARRAY[pick]||array_remove(ranked,pick); native:=native-pick; END IF;
+   IF pick IS NOT NULL THEN ranked := ARRAY[pick]||array_remove(ranked,aeon_models_canonical_line(pick)); native:=native-aeon_models_canonical_line(pick); END IF;
    IF EXISTS(SELECT 1 FROM model_pref_orders WHERE profile_id=workspace AND column_key='other' AND situation='first') THEN
     UPDATE model_pref_orders SET rank=ranked,efforts=native||coalesce(efforts,'{}'),end_mode=coalesce(end_mode,'wait') WHERE profile_id=workspace AND column_key='other' AND situation='first';
    ELSE INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,efforts,end_mode,set_by)
@@ -172,7 +168,7 @@ BEGIN
    SELECT o.rank[1] AS line,o.effort,o.effort_level,o.efforts FROM model_pref_orders o JOIN model_pref_profiles owner ON owner.id=o.profile_id
    WHERE (owner.id=own.id OR owner.id=workspace) AND o.column_key IN (col.column_key,'other') AND o.situation='first' AND o.rank IS NOT NULL
    ORDER BY (owner.id=own.id) DESC,(o.column_key=col.column_key) DESC LIMIT 1) picked
-  WHERE own.scope='person' AND own.person_id=item.person AND EXISTS(SELECT 1 FROM model_profiles m WHERE aeon_models_line(m.family,m.harness,m.model)=picked.line AND m.harness=item.harness) LOOP
+  WHERE own.scope='person' AND own.person_id=item.person AND EXISTS(SELECT 1 FROM model_profiles m WHERE aeon_models_line(m.family,m.harness,m.model)=aeon_models_canonical_line(picked.line) AND m.harness=item.harness) LOOP
    IF EXISTS(SELECT 1 FROM model_pref_orders WHERE profile_id=target.profile_id AND column_key=target.column_key AND situation='first') THEN
     UPDATE model_pref_orders SET rank=ARRAY[target.line],end_mode='wait' WHERE profile_id=target.profile_id AND column_key=target.column_key AND situation='first';
    ELSE INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,end_mode,effort,effort_level,efforts,set_by)

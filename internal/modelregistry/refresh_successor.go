@@ -24,8 +24,8 @@ func acceptUsedSuccessor(ctx context.Context, tx pgx.Tx, p tenant.Principal, pin
  AND (aeon_model_line(p.harness,p.model))[1]=(aeon_model_line($1,$3))[1]
  AND aeon_model_version_newer((aeon_model_line($1,$3))[2],(aeon_model_line(p.harness,p.model))[2])
  AND NOT EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id)
- AND (EXISTS(SELECT 1 FROM (`+modelprefs.OrdersSQL+`) o WHERE aeon_models_line(p.family,p.harness,p.model)=ANY(o.rank) OR aeon_models_line(p.family,p.harness,p.model)=ANY(o.not_allowed))
- OR EXISTS(SELECT 1 FROM model_rules r WHERE r.line=aeon_models_line(p.family,p.harness,p.model) AND r.moved_to_models IS NOT TRUE)
+ AND (EXISTS(SELECT 1 FROM (`+modelprefs.OrdersSQL+`) o WHERE aeon_models_line(p.family,p.harness,p.model)=ANY(o.rank) OR aeon_model_board_line(p.family,p.harness,p.model)=ANY(o.rank) OR aeon_models_line(p.family,p.harness,p.model)=ANY(o.not_allowed) OR aeon_model_board_line(p.family,p.harness,p.model)=ANY(o.not_allowed))
+ OR EXISTS(SELECT 1 FROM model_rules r WHERE r.line IN (aeon_models_line(p.family,p.harness,p.model),aeon_model_board_line(p.family,p.harness,p.model)) AND r.moved_to_models IS NOT TRUE)
  OR EXISTS(SELECT 1 FROM model_row_constraints r WHERE r.line=aeon_models_line(p.family,p.harness,p.model))
  OR EXISTS(SELECT 1 FROM model_pauses r WHERE r.harness=p.harness AND r.model=p.model))
  AND NOT EXISTS(SELECT 1 FROM model_profiles n WHERE n.harness=$1 AND n.model=$3 AND n.effort=$4 AND n.enabled)
@@ -98,8 +98,8 @@ func successorObservations(ctx context.Context, tx pgx.Tx, observations []Observ
  AND (aeon_model_line(p.harness,p.model))[1]=(aeon_model_line($1,$2))[1]
  AND aeon_model_version_newer((aeon_model_line($1,$2))[2],(aeon_model_line(p.harness,p.model))[2])
  AND NOT EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.profile_id=p.id)
- AND (EXISTS(SELECT 1 FROM (`+modelprefs.OrdersSQL+`) o WHERE aeon_models_line(p.family,p.harness,p.model)=ANY(o.rank) OR aeon_models_line(p.family,p.harness,p.model)=ANY(o.not_allowed))
- OR EXISTS(SELECT 1 FROM model_rules r WHERE r.line=aeon_models_line(p.family,p.harness,p.model) AND r.moved_to_models IS NOT TRUE)
+ AND (EXISTS(SELECT 1 FROM (`+modelprefs.OrdersSQL+`) o WHERE aeon_models_line(p.family,p.harness,p.model)=ANY(o.rank) OR aeon_model_board_line(p.family,p.harness,p.model)=ANY(o.rank) OR aeon_models_line(p.family,p.harness,p.model)=ANY(o.not_allowed) OR aeon_model_board_line(p.family,p.harness,p.model)=ANY(o.not_allowed))
+ OR EXISTS(SELECT 1 FROM model_rules r WHERE r.line IN (aeon_models_line(p.family,p.harness,p.model),aeon_model_board_line(p.family,p.harness,p.model)) AND r.moved_to_models IS NOT TRUE)
  OR EXISTS(SELECT 1 FROM model_row_constraints r WHERE r.line=aeon_models_line(p.family,p.harness,p.model))
  OR EXISTS(SELECT 1 FROM model_pauses r WHERE r.harness=p.harness AND r.model=p.model))
  ORDER BY p.created_at DESC,p.id LIMIT 1)
