@@ -1,0 +1,11 @@
+# Models v2 migration
+
+Models owns work choices, fallback orders and model pauses. Migration 1333 carries saved Build ladders into Default when it has no saved chain, Build-hard into its Stuck situation, and explicitly saved review ladders into its Review situation. Automatic review and Quick jobs retain their qualification rules.
+
+Future ladder holds become pauses on the matching harness and model, across native levels. Row constraints preserve the workspace or project, author, timestamp and reason: pin-bottom entries become chain tails and Not-allowed entries become never rules. Saved Wait dial settings convert only existing personal pick rows on that harness to a Wait ending, excluding workspace-locked columns. Inherited workspace rows, situations and personal templates keep their ownership; no personal rows are created for them. The live dial's at-limit setting remains an admission bridge until the dial package retires its switch. Wait saved after migration still stops at the daily cap; switching back to Follow the model ladder resumes the saved Models order, including any explicit Wait ending.
+
+One `model.settings_migrated` event per existing tenant records the retained source snapshot, each moved item and its resulting settings. Source ladders remain intact for the deprecation release. Registry discovery and catalog upgrades no longer seed or append ladder entries. Successor edits carry order and situation references, native efforts, never rules and pauses.
+
+Replaying the migration keeps its original receipt and emits no duplicate event. Oversized audit snapshots abort the migration transaction. Successor transfers retain constraint ownership and preserve a stricter pause already set on the successor.
+
+`GET /api/models/routes` remains a bounded compatibility response derived from Models, with editing disabled. `PUT /api/models/routes` returns 410 Gone. Choices are edited through model preferences; pause editing is supplied by the Models v2 contract package.

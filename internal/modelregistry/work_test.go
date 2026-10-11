@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -38,51 +39,113 @@ func prefsFixture(t *testing.T, fn func(pgx.Tx, tenant.Principal) error) {
 	}
 }
 
-// Risk: opening an unadopted Models board silently discards a saved ladder
-// before S2 has migrated it into an order.
+// Risk: migration discards a saved ladder when merely opening Models had
+// created a revision-zero workspace profile. Both pre-cutover states must
+// retain their first choice through the durable Models migration.
 func TestModelsV2UnadoptedSavedLadder(t *testing.T) {
-	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
-		ctx := t.Context()
-		var opus string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&opus); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE model_role_routes SET priority=priority+100 WHERE role='build'`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2) ON CONFLICT(tenant_id,role,profile_id) DO UPDATE SET priority=EXCLUDED.priority`, p.TenantID, opus); err != nil {
-			return err
-		}
-		now, err := dbNow(ctx, tx)
-		if err != nil {
-			return err
-		}
-		for _, initialized := range []bool{false, true} {
-			if initialized {
-				if _, err := tx.Exec(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,revision) VALUES($1,'workspace',0)`, p.TenantID); err != nil {
+	for _, initialized := range []bool{false, true} {
+		t.Run(fmt.Sprint(initialized), func(t *testing.T) {
+			prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+				ctx := t.Context()
+				var opus string
+				if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&opus); err != nil {
 					return err
 				}
-			}
-			got, err := ResolveWork(ctx, tx, p, WorkQuery{Role: "build"}, now)
-			if err != nil {
-				return err
-			}
-			if got.Profile == nil || got.Profile.ID != opus || got.OwnerRequired {
-				t.Fatalf("initialized=%v discarded saved build ladder: %+v", initialized, got)
-			}
-		}
-		return nil
-	})
+				if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, p.TenantID, opus); err != nil {
+					return err
+				}
+				if initialized {
+					if _, err := tx.Exec(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,revision) VALUES($1,'workspace',0)`, p.TenantID); err != nil {
+						return err
+					}
+				}
+				var runner, account string
+				if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Saved ladder runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,allowed_model_profile_ids)
+     VALUES($1,'saved-ladder','claude','saved-ladder-host',$2,'Saved ladder',now(),true,'generation',$3,ARRAY[$4::uuid]) RETURNING id::text`, p.TenantID, runner, p.ID, opus).Scan(&account); err != nil {
+					return err
+				}
+				schedule := capacity.DefaultSchedule("UTC")
+				schedule.Override = "sprint"
+				schedule.Reserve = capacity.ReserveOff
+				raw, _ := json.Marshal(schedule)
+				if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, account, raw); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `SELECT aeon_migrate_models_v2($1)`, p.TenantID); err != nil {
+					return err
+				}
+				now, err := dbNow(ctx, tx)
+				if err != nil {
+					return err
+				}
+				got, err := ResolveWork(ctx, tx, p, WorkQuery{Role: "build"}, now)
+				if err != nil {
+					return err
+				}
+				if got.Profile == nil || got.Profile.ID != opus || got.OwnerRequired || got.Trace.PreferenceOf == nil {
+					t.Fatalf("initialized=%v discarded migrated build choice: %+v", initialized, got)
+				}
+				var rank []string
+				if err := tx.QueryRow(ctx, `SELECT o.rank FROM model_pref_orders o JOIN model_pref_profiles profile ON profile.id=o.profile_id WHERE profile.scope='workspace' AND o.column_key='other' AND o.situation='first'`).Scan(&rank); err != nil {
+					return err
+				}
+				if !reflect.DeepEqual(rank, []string{"anthropic:opus"}) {
+					t.Fatalf("saved choice was not persisted: %v", rank)
+				}
+				return nil
+			})
+		})
+	}
 }
 
+// enrollHarnesses gives each harness one healthy account with room for every
+// profile, so the Models walk can run (it has no account-less preview).
+func enrollHarnesses(t *testing.T, tx pgx.Tx, p tenant.Principal, harnesses ...string) {
+	t.Helper()
+	var runner string
+	if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Work runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
+		t.Fatal(err)
+	}
+	schedule := capacity.DefaultSchedule()
+	schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+	raw, _ := json.Marshal(schedule)
+	for _, h := range harnesses {
+		var account string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner)
+ VALUES($1,$2,$2,'work-runner',$3,$2,now(),true,'work-generation',$4) RETURNING id::text`, p.TenantID, h, runner, p.ID).Scan(&account); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model)
+ VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted')`, p.TenantID, account); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule)
+ VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, account, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Risk: with nothing saved, a ticket's kind or size changes a role's route,
+// or ticket routes and reviews disagree with dispatch. Models v2 sends every
+// unsaved kind through the Default (no role ladder), so each kind and size
+// must resolve exactly like the Default.
 func TestResolveWorkEmptyMatrixEquivalence(t *testing.T) {
 	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+		enrollHarnesses(t, tx, p, "codex", "claude")
 		now := time.Now()
 		for _, role := range []string{"scout", "mechanical", "build", "build-hard"} {
 			for _, h := range []string{"", "codex", "claude"} {
-				original, err := resolveRole(t.Context(), tx, resolveQuery{Role: role, Harness: h}, now)
+				defaultRoute, err := ResolveWork(t.Context(), tx, p, WorkQuery{Role: role, Harness: h}, now)
 				if err != nil {
 					return err
+				}
+				original := defaultRoute.Resolution
+				if h == "" && original.Profile == nil {
+					t.Fatalf("%s has no Default route: %+v", role, original)
 				}
 				for _, c := range []string{"", "S", "M", "L"} {
 					for _, area := range []string{"backend", "frontend", "full-stack", "infra", "design", "docs", "security", "firmware", "", "review", "other"} {
@@ -100,7 +163,7 @@ func TestResolveWorkEmptyMatrixEquivalence(t *testing.T) {
 							if err != nil {
 								return err
 							}
-							if ticket == nil || ticket.Profile.ID != got.Profile.ID {
+							if ticket == nil || got.Profile == nil || ticket.Profile.ID != got.Profile.ID {
 								t.Fatal("known area route changed")
 							}
 						}
@@ -133,55 +196,75 @@ func TestResolveWorkEmptyMatrixEquivalence(t *testing.T) {
 		return nil
 	})
 }
+
+// Risk: a paused or retired model in a saved order still runs instead of the
+// order's next step, or a residency requirement lets any role run on an
+// account outside it. Pauses are Models v2's ladder holds.
 func TestPreferenceFallbackAndResidencyBlocksEveryRole(t *testing.T) {
 	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+		enrollHarnesses(t, tx, p, "codex", "claude")
 		profiles, err := listProfiles(t.Context(), tx)
 		if err != nil {
 			return err
 		}
-		var pin Profile
-		for _, v := range profiles {
-			if v.Slug == "codex-sol-xhigh" {
-				pin = v
+		pin, opus := profileBySlug(profiles, "codex-sol-xhigh"), profileBySlug(profiles, "claude-opus-xhigh")
+		if err := dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "backend", "first", "wait", pin.ID, opus.ID); err != nil {
+			return err
+		}
+		pinLine, _ := modelsLine(pin)
+		opusLine, _ := modelsLine(opus)
+		held := func(got WorkResolution, reason string) bool {
+			for _, h := range got.Trace.Held {
+				if h.Line == pinLine && strings.Contains(h.Reason, reason) {
+					return true
+				}
 			}
-		}
-		scope, err := modelprefs.SaveScope(t.Context(), tx, p, modelprefs.Scope{Level: "default"})
-		if err != nil {
-			return err
-		}
-		kind, _, err := modelprefs.LookupKind(t.Context(), tx, "backend", "")
-		if err != nil {
-			return err
-		}
-		if err := modelprefs.PutRow(t.Context(), tx, p, scope, kind.ID, modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": {Mode: "pinned", ProfileID: pin.ID}}}); err != nil {
-			return err
-		}
-		// Suppression is on the run role even when its profile is off that ladder.
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state,reason,valid_until)
-   VALUES($1,'build',99,$2,'unavailable','test suppressed',now()+interval '1 hour')`, p.TenantID, pin.ID); err != nil {
-			return err
+			return false
 		}
 		got, err := ResolveWork(t.Context(), tx, p, WorkQuery{Role: "build", Area: "backend"}, time.Now())
 		if err != nil {
 			return err
 		}
-		if got.Profile == nil || got.Profile.ID == pin.ID || !strings.Contains(got.Trace.Fallback, "suppressed") {
-			t.Fatalf("suppression bypass: %+v", got)
+		if got.Profile == nil {
+			t.Fatalf("fixture must run the pinned line: %+v", got)
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($1,$2,'retired fixture',$3)`, p.TenantID, pin.ID, p.ID); err != nil {
+		if line, _ := modelsLine(*got.Profile); line != pinLine {
+			t.Fatalf("fixture must run the pinned line: %+v", got)
+		}
+		chosen := *got.Profile
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason) VALUES($1,$2,$3,now()+interval '1 hour','test suppressed')`, p.TenantID, chosen.Harness, chosen.Model); err != nil {
 			return err
 		}
 		got, err = ResolveWork(t.Context(), tx, p, WorkQuery{Role: "build", Area: "backend"}, time.Now())
 		if err != nil {
 			return err
 		}
-		if !strings.Contains(got.Trace.Fallback, "retired") {
-			t.Fatal(got.Trace)
+		if got.Profile == nil || got.Profile.Model == chosen.Model || !held(got, "test suppressed") {
+			t.Fatalf("pause bypass: %+v", got)
+		}
+		if line, _ := modelsLine(*got.Profile); line != opusLine {
+			t.Fatalf("pause did not fall to the order's next step: %+v", got)
+		}
+		if _, err := tx.Exec(t.Context(), `DELETE FROM model_pauses`); err != nil {
+			return err
+		}
+		// Retiring every version of the line leaves it no route to run.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by)
+ SELECT tenant_id,id,'retired fixture',$2 FROM model_profiles WHERE aeon_models_line(family,harness,model)=$1`, pinLine, p.ID); err != nil {
+			return err
+		}
+		got, err = ResolveWork(t.Context(), tx, p, WorkQuery{Role: "build", Area: "backend"}, time.Now())
+		if err != nil {
+			return err
+		}
+		if got.Profile == nil || !held(got, "no registered route for this line") {
+			t.Fatalf("retired line ran or lost its cause: %+v", got)
+		}
+		if line, _ := modelsLine(*got.Profile); line != opusLine {
+			t.Fatalf("retirement did not fall to the order's next step: %+v", got)
 		}
 		eu := "eu"
-		scope.Residency = &eu
-		scope, err = modelprefs.SaveScope(t.Context(), tx, p, scope)
-		if err != nil {
+		if _, err := modelprefs.SaveScope(t.Context(), tx, p, modelprefs.Scope{Level: "default", Residency: &eu}); err != nil {
 			return err
 		}
 		for _, role := range []string{"scout", "mechanical", "build", "build-hard"} {
@@ -189,13 +272,18 @@ func TestPreferenceFallbackAndResidencyBlocksEveryRole(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if got.Profile != nil || !got.OwnerRequired || got.Trace.Blocked != "no eu model route" || got.CommandTemplate != "" {
+			if got.Profile != nil || !got.OwnerRequired || got.Trace.Blocked != "no eu model route" || got.CommandTemplate != "" || got.Residency != "eu" {
 				t.Fatalf("%s escaped residency: %+v", role, got)
 			}
+			refused := false
 			for _, c := range got.Ladder {
 				if c.Selected {
 					t.Fatal("blocked step selected")
 				}
+				refused = refused || slices.Contains(c.SkipReasons, "not allowed: eu")
+			}
+			if !refused {
+				t.Fatalf("%s did not name residency on a refused route: %+v", role, got.Ladder)
 			}
 		}
 		for _, q := range []WorkQuery{{AuthorFamily: "openai", Area: "security"}, {AuthorFamily: "openai", Role: "review-gate-security"}} {

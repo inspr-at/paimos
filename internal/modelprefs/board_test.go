@@ -367,3 +367,31 @@ func TestModelsV2RowOwnershipAndSituations(t *testing.T) {
 		t.Fatalf("saved review lost automatic continuation: %+v", reviewer)
 	}
 }
+
+// Risk: a kind with no saved row of its own ignores the Default's saved Review
+// and Stuck orders while the Default is still its template, so a migrated
+// review ladder or build-hard ladder silently becomes Automatic or the row.
+func TestModelsV2TemplateKindInheritsDefaultSituations(t *testing.T) {
+	s := rankedFixture()
+	s.Person = nil
+	s.Orders = []BoardOrder{
+		{ProfileID: "workspace", Column: "other", Situation: "review", Rank: []string{"anthropic:fable"}, End: "wait"},
+		{ProfileID: "workspace", Column: "other", Situation: "stuck", Rank: []string{"anthropic:opus"}, End: "wait"},
+	}
+	if row := ResolveBoard(s, BoardQuery{Column: "backend"}, nil); row.Source != "template" {
+		t.Fatalf("fixture must show the row from the Default's template: %+v", row)
+	}
+	review := ResolveModelsBoard(s, BoardQuery{Column: "backend", Review: true, AuthorFamily: "openai"})
+	if review.Automatic || !reflect.DeepEqual(review.Rank, []string{"anthropic:fable"}) || len(review.Steps) != 1 || review.Situation != "review" {
+		t.Fatalf("template kind ignored the Default's Review order: %+v", review)
+	}
+	stuck := ResolveModelsBoard(s, BoardQuery{Column: "backend", Situation: "stuck"})
+	if !reflect.DeepEqual(stuck.Rank, []string{"anthropic:opus"}) || len(stuck.Steps) != 1 || stuck.FollowsFirst {
+		t.Fatalf("template kind ignored the Default's Stuck order: %+v", stuck)
+	}
+	// A kind with its own saved row keeps Automatic review and its own row.
+	s.Orders = append(s.Orders, BoardOrder{ProfileID: "workspace", Column: "backend", Situation: "first", Rank: []string{"openai:sol"}})
+	if own := ResolveModelsBoard(s, BoardQuery{Column: "backend", Review: true, AuthorFamily: "openai"}); !own.Automatic || len(own.Steps) != 0 {
+		t.Fatalf("a kind's own row inherited the Default's Review order: %+v", own)
+	}
+}

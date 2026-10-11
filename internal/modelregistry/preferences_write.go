@@ -63,7 +63,7 @@ func validateSelector(ctx context.Context, tx pgx.Tx, c modelprefs.Cell, kind st
 	var exists, review bool
 	err := tx.QueryRow(ctx, `
  WITH candidates AS NOT MATERIALIZED (
-   SELECT p.id,p.harness,p.effort,p.tier,
+   SELECT p.id,p.harness,p.effort,p.tier,coalesce(p.registered_effort_level,d.effort_level) AS effort_level,
      CASE WHEN p.harness='opencode' THEN regexp_replace(regexp_replace(p.model,'^google/',''),'^ollama/','')
           WHEN p.harness='pi' THEN regexp_replace(p.model,'^anthropic/','')
           ELSE p.model END AS model
@@ -92,8 +92,7 @@ func validateSelector(ctx context.Context, tx pgx.Tx, c modelprefs.Cell, kind st
  )
  SELECT EXISTS(SELECT 1 FROM matches LIMIT 1),
         CASE WHEN $7 THEN EXISTS(SELECT 1 FROM matches p
-          WHERE p.effort='xhigh' AND p.tier IN ('strong','frontier')
-            AND EXISTS(SELECT 1 FROM model_role_routes r WHERE r.profile_id=p.id AND r.role='review-gate' LIMIT 1)
+          WHERE p.effort_level>=4 AND p.tier IN ('strong','frontier')
           LIMIT 1) ELSE true END`, c.Mode, c.ProfileID, c.Family, c.Line, c.Effort, c.Harness, kind == "review").Scan(&exists, &review)
 	if err != nil {
 		return err

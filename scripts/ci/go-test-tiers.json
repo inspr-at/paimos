@@ -712,6 +712,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCatalogCascadeMetadataAndRouting","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestCatalogDefaultFollowsDispatchLatestVersion","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCatalogDefaultUsesOfferedProfileAndDeterministicAccount","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCatalogPreselectsOnlyRunnableUnreadAccount","tier":"GATED-FULL"}
@@ -7170,6 +7172,8 @@
     ,
     {"kind":"go","package":"internal/modelprefs","name":"TestModelsV2RowOwnershipAndSituations","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelprefs","name":"TestModelsV2TemplateKindInheritsDefaultSituations","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelprefs","name":"TestPlacementDecodesJSONTokens","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelprefs","name":"TestRankedBoardCapabilityIsNotALockAndNearestEffortTiesUp","tier":"ESSENTIAL"}
@@ -7261,6 +7265,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedCompleteListingPresence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedLifecycleEvidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedRetirePauseKeepsHarnessRoute","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogOutdatedRetireRevocationFence","tier":"ESSENTIAL"}
     ,
@@ -7392,7 +7398,7 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalAutoAcceptOnlyUsedSuccessors","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalFallbackColumnDefaultRoleAndSkipReasons","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalFallbackColumnDefaultWaitAndSkipReasons","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalManualRefreshCooldownBypassesInterval","tier":"ESSENTIAL"}
     ,
@@ -7404,7 +7410,7 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalOmittedKindFollowsDefaultAndKeepsStoredTail","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalQueuedScoutUsesRoleLadderWhenBoardDoesNotApply","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/modelregistry","name":"TestMinimalQueuedScoutUsesQuickJobs","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalRemovePreviewQualificationAndPrivacy","tier":"ESSENTIAL"}
     ,
@@ -7422,11 +7428,21 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2EscalationAdmissionWait","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigrationGolden","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigrationWaitPreservesInheritedRows","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NativeLevelsPerRoute","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NoRuntimeLadderReaders","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RolesRoutesAndWait","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RoundRoutingCompatibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RoutesRetiredAndDerived","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2SuccessorMovesAllReferences","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2UnadoptedSavedLadder","tier":"ESSENTIAL"}
     ,
