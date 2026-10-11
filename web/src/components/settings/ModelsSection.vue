@@ -9,8 +9,10 @@ import KindMenu from './models/KindMenu.vue'
 import ModelsPopover from './models/ModelsPopover.vue'
 import ModelRefreshSettings from './ModelRefreshSettings.vue'
 import ModelRegistryCard from './models/ModelRegistryCard.vue'
+import ModelSituations from './models/ModelSituations.vue'
 import { useModelsSimple } from '../../lib/useModelsSimple'
 import { lineFallback, lockTip, pickText, reasonText, type ModelEntry, type RowView } from '../../lib/modelsSimple'
+import { quickView, type SituationKey, type SituationOrder } from '../../lib/modelsSimple'
 
 // Settings › Models, minimal (AEON-999 v3): one default for all work, overrides only where it matters, reviews pick
 // themselves, and one line on what runs next. The stored board, rules and situations keep working underneath.
@@ -27,9 +29,9 @@ const catalog = ref(route.hash === '#model-refresh')
 // ----- menus ------------------------------------------------------------------------------------------------
 const picker = ref<{ key: string; anchor: HTMLElement } | null>(null)
 const kinds = ref<{ anchor: HTMLElement; use?: { entry: ModelEntry; canDo: string[] } } | null>(null)
-const why = ref<HTMLElement | null>(null)
+const why = ref<HTMLElement | null>(null), quickWhy = ref<HTMLElement | null>(null)
 const pickRow = computed(() => picker.value ? rows.value.find(row => row.key === picker.value!.key) ?? null : null)
-function closeMenus() { picker.value = null; kinds.value = null; why.value = null }
+function closeMenus() { picker.value = null; kinds.value = null; why.value = null; quickWhy.value = null }
 watch(actionKey, closeMenus)
 watch(pickRow, row => { if (picker.value && !row) picker.value = null })
 
@@ -94,6 +96,15 @@ async function chooseKind(column: string) {
 }
 async function notNow() { if (news.value) await model.dismiss(news.value.entry.line) }
 
+// ----- Quick jobs and the situation matrix (Models v2 W3) ---------------------------------------------------------
+const quick = computed(() => quickView({ quick: doc.value?.quick, fallback: defaultRow.value, entries: entries.value }))
+// Situations are workspace orders: For everyone edits them; an admin on Just me reads the workspace's.
+const situationSource = computed(() => scope.value === 'default' ? doc.value : model.workspace.value)
+const kindOrder = computed(() => (model.tail.value?.columns ?? []).map(column => column.column))
+// The fold stays open across For everyone and Just me.
+const situationsOpen = ref(false)
+const saveSituation = (column: string, key: SituationKey, next: SituationOrder | null, seen: number) => model.situation(column, key, next, seen)
+
 // ----- text -------------------------------------------------------------------------------------------------
 const tip = (row: RowView) => row.lock ? lockTip(row.lock, { mine: !!row.lock.by && row.lock.by === person.value, name: id => model.names.value.get(id) ?? 'An admin', admin: admin.value, scope: scope.value }) : ''
 const instead = (row: RowView) => row.unavailable ? pickText(entries.value.find(entry => entry.line === row.unavailable!.runs_instead) ?? null, row.unavailable.effort, lineFallback(row.unavailable.runs_instead)) : ''
@@ -140,11 +151,19 @@ watch(() => [route.hash, shown.value], async () => {
             </TransitionGroup>
             <div v-if="editable && model.freeKinds.value.length" class="addrow"><button id="add" type="button" class="add" aria-haspopup="listbox" :aria-expanded="!!kinds && !kinds.use" data-add :disabled="busy" @click="openAdd"><AppIcon name="plus" :size="15" /><span>Different model for…</span></button></div>
           </div>
-          <div class="row rv" data-reviews>
-            <div class="rl"><span class="rn">Reviews</span></div>
-            <div class="rv-v"><span class="hg" aria-hidden="true"><AppIcon name="compare" :size="13" /></span><span>Automatic · always another family</span><span class="grow" /><RouterLink class="link-btn quiet" to="/settings/policies">Rule in Policies</RouterLink></div>
+          <!-- Quick jobs and Reviews read the same: automatic, one quiet line each. -->
+          <div class="auto-rows">
+            <div class="row rv" data-quick>
+              <div class="rl"><span class="rn">Quick jobs</span></div>
+              <div class="rv-v"><span class="hg" aria-hidden="true"><AppIcon name="bolt" :size="13" /></span><span class="rv-t">Automatic · the cheapest model that qualifies</span><span class="grow" /><button id="why-quick" type="button" class="link-btn quiet rv-why" aria-haspopup="dialog" :aria-expanded="!!quickWhy" aria-label="Why this model for quick jobs" data-quick-why @click="quickWhy = quickWhy ? null : ($event.currentTarget as HTMLElement)">Why?</button></div>
+            </div>
+            <div class="row rv" data-reviews>
+              <div class="rl"><span class="rn">Reviews</span></div>
+              <div class="rv-v"><span class="hg" aria-hidden="true"><AppIcon name="compare" :size="13" /></span><span class="rv-t">Automatic · always another family</span><span class="grow" /><RouterLink class="link-btn quiet" to="/settings/policies">Rule in Policies</RouterLink></div>
+            </div>
           </div>
         </div>
+        <ModelSituations v-if="admin" v-model:open="situationsOpen" :source="situationSource" :entries="entries" :labels="model.labels.value" :order="kindOrder" :fresh="fresh" :editable="scope === 'default' && editable" :busy="busy" :action-key="actionKey" :cant="model.cantReason" :save="saveSituation" />
         <p class="next" data-next-line><AppIcon name="arrow" :size="14" /><span class="next-copy"><template v-for="(part, index) in next.parts" :key="index"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></span><button v-if="next.why" id="why" type="button" class="link-btn" aria-haspopup="dialog" :aria-expanded="!!why" data-why @click="why = why ? null : ($event.currentTarget as HTMLElement)">Why?</button></p>
         <!-- A refusal grows under the rows. Putting it above them shifts every picker (AEON-541). -->
         <div v-if="error" class="m-note" role="alert" data-models-error><AppIcon name="alert" :size="14" /><span>{{ error }}</span></div>
@@ -157,6 +176,12 @@ watch(() => [route.hash, shown.value], async () => {
     </ModelsPopover>
     <ModelsPopover v-if="kinds" :open="true" :anchor="kinds.anchor" label="Kinds of work" role="presentation" :width="280" @update:open="value => { if (!value) kinds = null }">
       <KindMenu :kinds="menuKinds" :note="menuNote" :link="!kinds.use" @choose="chooseKind" @navigate="closeMenus" />
+    </ModelsPopover>
+    <ModelsPopover v-if="quickWhy" :open="true" :anchor="quickWhy" label="Quick jobs" kind="why" labelledby="quick-t" @update:open="value => { if (!value) quickWhy = null }">
+      <h3 id="quick-t">Quick jobs</h3>
+      <p class="why-p">{{ quick.lead }}</p>
+      <ol><li v-for="(step, index) in quick.steps" :key="index" :class="{ skip: step[0]?.text.startsWith('Skipped') }"><template v-for="(part, at) in step" :key="at"><b v-if="part.strong">{{ part.text }}</b><template v-else>{{ part.text }}</template></template></li></ol>
+      <p class="why-foot">{{ quick.foot }}</p>
     </ModelsPopover>
     <ModelsPopover v-if="why && next.why" :open="true" :anchor="why" :label="next.why.title" kind="why" labelledby="why-t" @update:open="value => { if (!value) why = null }">
       <h3 id="why-t">{{ next.why.title }}</h3>

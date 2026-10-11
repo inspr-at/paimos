@@ -63,10 +63,13 @@
 .models-section .add:hover, .models-section .add[aria-expanded="true"] { background: var(--row-hover); }
 .models-section .add:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
-.models-section .row.rv { grid-template-areas: 'l v v v'; margin-top: 8px; border-top: 1px solid var(--line); }
+/* Automatic rows: Quick jobs and Reviews read the same, one quiet line each, under one hairline. */
+.models-section .auto-rows { margin-top: 8px; border-top: 1px solid var(--line); }
+.models-section .row.rv { grid-template-areas: 'l v v v'; min-height: 56px; }
 .models-section .rv-v { grid-area: v; display: flex; align-items: center; gap: 10px; min-width: 0; padding-left: 11px; font-size: 13.5px; color: var(--ink-2); }
 .models-section .rv-v .hg { color: var(--ink-2); }
 .models-section .rv-v .grow { flex: 1; }
+.models-section .rv-t { min-width: 0; }
 
 .models-section .link-btn, .mdl-pop .link-btn { display: inline; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-weight: 500; text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 2px; cursor: pointer; }
 .models-section .link-btn:hover, .mdl-pop .link-btn:hover { text-decoration-color: currentColor; }
@@ -190,3 +193,90 @@
   .mdl-pop .lvc, .mdl-pop .lvp.one { justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; }
 }
 @media (prefers-reduced-motion: reduce) { .models-section .rw-enter-active, .models-section .rw-leave-active { transition: none; } }
+
+/* ----- Quick jobs "Why?" and Different fallback by situation (Models v2 W3, AEON-1162) ----------------------------
+   The fold is Expert and admins only. It grows in place (height only); its cell popovers overlay, so nothing above
+   or beside them moves (AEON-541). Cells are quiet fills; a set cell reads as a field. No edge accents. */
+.models-section .rv-why, .mdl-pop .sxp .link-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; min-width: 24px; padding: 0 3px; margin: -2px -3px; }
+.mdl-pop.why .why-p { margin-top: 6px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.mdl-pop.why .why-foot { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.45; color: var(--ink-3); }
+
+.models-section .sx { padding: 6px 6px 0 10px; border-bottom: 1px solid var(--line); }
+.models-section .sx-sum { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 40px; margin-left: -6px; padding: 0 8px 0 6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font-size: 13px; text-align: left; }
+.models-section .sx-sum:hover { background: var(--row-hover); }
+.models-section .sx-sum:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.models-section .sx-sum b { color: var(--ink); font-weight: 600; }
+.models-section .sx-chev { flex: none; color: var(--ink-3); transition: transform .2s ease; }
+.models-section .sx-sum[aria-expanded="true"] .sx-chev { transform: rotate(90deg); }
+.models-section .sx-s { min-width: 0; line-height: 1.45; }
+.models-section .tag-exp { flex: none; margin-left: 4px; padding: 3px 6px; border-radius: 6px; box-shadow: inset 0 0 0 1px var(--line-2); font: 600 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.models-section .sx-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows .24s ease; }
+.models-section .sx-fold.open { grid-template-rows: 1fr; }
+.models-section .sx-fold-in { min-height: 0; overflow: hidden; }
+.models-section .sx-in { padding: 4px 6px 14px; }
+.models-section .sx-lead { margin-bottom: 10px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.models-section .sx-lead b { color: var(--ink); font-weight: 600; }
+/* One grid for the whole matrix, so the label column fits the longest kind name (up to two lines) and every row lines up. */
+.models-section .sx-t { display: grid; grid-template-columns: fit-content(9rem) repeat(4, minmax(0, 1fr)); gap: 4px; align-items: center; }
+.models-section .sx-r { display: contents; }
+.models-section .sx-c { display: grid; align-self: end; padding: 0 8px 2px; }
+.models-section .sx-c b { font-size: 12px; font-weight: 600; color: var(--ink); }
+.models-section .sx-c small { font-size: 11px; line-height: 1.35; color: var(--ink-3); }
+.models-section .sx-k { display: -webkit-box; min-width: 5.75rem; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; font-size: 12.5px; font-weight: 600; line-height: 1.35; color: var(--ink); }
+.models-section .sx-cell { display: flex; align-items: center; gap: 6px; min-width: 0; height: 40px; padding: 0 7px; border: 0; border-radius: 9px; background: var(--surface-sunken); color: var(--ink); font-size: 12.5px; font-weight: 600; text-align: left; }
+.models-section .sx-cell .hg { width: 18px; height: 18px; border-radius: 5px; }
+.models-section .sx-cell.set { background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); }
+.models-section button.sx-cell { cursor: pointer; }
+.models-section button.sx-cell:hover, .models-section button.sx-cell[aria-expanded="true"] { box-shadow: var(--field-inset), 0 0 0 1px var(--line-2); }
+.models-section button.sx-cell:focus-visible { outline: none; box-shadow: var(--field-inset), var(--focus-ring); }
+.models-section .sx-cell.ro { cursor: default; }
+.models-section .sx-cl { display: none; font-size: 11px; font-weight: 500; color: var(--ink-3); }
+.models-section .sx-cv { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.models-section .cell-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.models-section .cell-e { font-weight: 500; color: var(--ink-3); }
+.models-section .cell-more { flex: none; font: 500 11px/1 var(--mono); color: var(--ink-3); }
+
+/* The cell popover: its order, Add, and Same as the row / Back to automatic. */
+.mdl-pop .sxp { display: flex; flex-direction: column; min-height: 0; overflow: auto; padding: 14px 14px 10px; }
+.mdl-pop .sxp h3 { margin: 0 4px 10px; font-size: 13.5px; }
+.mdl-pop .sxp-l { display: grid; padding: 4px; border-radius: 12px; background: var(--surface-sunken); list-style: none; }
+.mdl-pop .sxp-it { display: grid; grid-template-columns: 16px minmax(0, max-content) minmax(0, 1fr) 28px; align-items: center; column-gap: 8px; min-height: 44px; padding: 2px 4px; border-radius: 9px; }
+.mdl-pop .sxp-it + .sxp-it { box-shadow: 0 -1px 0 var(--line); }
+.mdl-pop .sxp-n { font: 500 11px/1 var(--mono); color: var(--ink-3); text-align: center; }
+.mdl-pop .sxp-pick { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 13px; font-weight: 600; color: var(--ink); }
+.mdl-pop .sxp-pick .hg { width: 20px; height: 20px; border-radius: 6px; }
+.mdl-pop .sxp-pick .pn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mdl-pop .sxp-pick .pe { font-weight: 500; color: var(--ink-2); }
+.mdl-pop .sxp-d { min-width: 0; overflow-wrap: anywhere; font-size: 12px; color: var(--ink-3); }
+.mdl-pop .sxp-x { width: 28px; height: 28px; color: var(--ink-3); }
+.mdl-pop .sxp-end, .mdl-pop .sxp-empty { display: flex; align-items: center; gap: 6px; padding: 10px 4px 4px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.mdl-pop .sxp-end svg { flex: none; color: var(--ink-3); }
+.mdl-pop .sxp-empty { padding: 4px 4px 8px; color: var(--ink-3); }
+.mdl-pop .sxp-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.mdl-pop .sxp-acts .grow { flex: 1; }
+.mdl-pop .add.sm { display: inline-flex; align-items: center; gap: 8px; min-height: 34px; margin-left: -2px; padding: 0 12px 0 10px; border: 0; border-radius: 10px; background: transparent; color: var(--teal-ink); font-size: 13px; font-weight: 600; cursor: pointer; }
+.mdl-pop .add.sm:hover { background: var(--row-hover); }
+.mdl-pop .add.sm:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.mdl-pop .sxp button:disabled { opacity: .55; cursor: default; }
+.mdl-pop .sxp .link-btn.quiet { color: var(--ink-2); }
+.mdl-pop .sxp .link-btn.quiet:hover { color: var(--teal-ink); }
+
+/* Narrow: two cells per line under the kind's name, each cell labelled with its situation. */
+@container models-card (max-width: 560px) {
+  .models-section .rv-t { flex: 1 1 160px; }
+  .models-section .sx { padding: 6px 0 0; }
+  .models-section .sx-sum { min-height: 44px; padding-top: 6px; padding-bottom: 6px; }
+  .models-section .sx-in { padding: 4px 0 14px; }
+  .models-section .sx-t { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px; }
+  .models-section .sx-h { display: none; }
+  .models-section .sx-k { grid-column: 1 / -1; min-width: 0; padding-top: 10px; }
+  .models-section .sx-cell { display: grid; align-content: center; gap: 2px; height: auto; min-height: 52px; padding: 6px 10px; }
+  .models-section .sx-cl { display: block; }
+}
+@media (pointer: coarse) {
+  .models-section .rv-why, .mdl-pop .sxp .link-btn { min-height: 44px; min-width: 44px; padding: 0 8px; margin: -12px -8px; }
+  .models-section .sx-sum, .models-section .sx-cell, .mdl-pop .add.sm { min-height: 44px; }
+  .mdl-pop .sxp-it { grid-template-columns: 16px minmax(0, max-content) minmax(0, 1fr) 44px; }
+  .mdl-pop .sxp-x { width: 44px; height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) { .models-section .sx-fold, .models-section .sx-chev { transition: none; } }

@@ -9308,6 +9308,38 @@
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"the picker lists every model by harness with its own thinking levels, and a click on a level picks both","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations for everyone dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations for everyone light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations on just me dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations on just me light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations for everyone dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations for everyone light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations on just me dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations on just me light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations for everyone dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations for everyone light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations on just me dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations on just me light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations.spec.ts","name":"For everyone edits a cell in a popover that stays on screen and moves nothing; Undo restores it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations.spec.ts","name":"an admin on Just me reads the workspace situations; empty cells read Same or Automatic","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations.spec.ts","name":"members read Quick jobs and its Why, and never see the situation fold","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-situations.spec.ts","name":"on a phone › each cell names its situation, every target is 44 px and the popovers stay on screen","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -16747,6 +16779,10 @@
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"what runs next > keeps a queued ticket that nothing can run, and the skip trace behind Why","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-simple.unit.test.ts","name":"what runs next > leaves a reviewer skip out of the build trace, and says plainly when nothing is queued","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-situations.unit.test.ts","name":"Quick jobs > names what was skipped in plain words, what runs now, and the default it falls back to","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-situations.unit.test.ts","name":"situation matrix > shows every row with a cell, counts only what it shows, and writes orders the server accepts","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After beyond the lifetime ends the follow instead of reading later","tier":"GATED-FULL"}
     ,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api, APIError } from './api'
 import { policyJSON } from './policyEditor'
-import type { OrderBody, RegistryProfile, RulesBody, RulesDocument, Scope, SimpleDocument, TailBoard, WriteResult } from './modelsSimple'
+import type { OrderBody, RegistryProfile, RulesBody, RulesDocument, Scope, SimpleDocument, SituationKey, SituationOrder, TailBoard, WriteResult } from './modelsSimple'
 
 async function request<T>(path: string, method = 'GET', body?: unknown, person?: string | null, signal?: AbortSignal): Promise<T> {
   const response = await api(path, { method, signal, headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(person ? { 'If-Prefs-Person': person } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) })
@@ -29,3 +29,7 @@ export const putEffort = (scope: Scope, column: string, effort: string | null, r
 export const putWorkspaceRules = (column: string, body: RulesBody, revision: number) => request<RulesDocument>(`/model-rules/workspace/${encodeURIComponent(column)}`, 'PUT', { ...body, revision })
 export const dismissLine = (scope: Scope, line: string, revision: number, person: string | null) => request<WriteResult>(`/model-preferences/tray/${encodeURIComponent(line)}/dismiss?for=${scope}`, 'POST', { revision }, who(scope, person))
 export const putDismissed = (scope: Scope, lines: string[], revision: number, person: string | null) => request<WriteResult>(`/model-preferences/profile?for=${scope}`, 'PUT', { dismissed_lines: lines, revision }, who(scope, person))
+// Situation orders are workspace orders (Expert, For everyone): DELETE means "same as the row", or automatic for review.
+const situationPath = (column: string, situation: SituationKey) => `/model-preferences/orders/${encodeURIComponent(column)}/${situation}`
+export const putSituationOrder = (column: string, situation: SituationKey, body: SituationOrder, revision: number) => request<WriteResult>(`${situationPath(column, situation)}?for=default`, 'PUT', { ...body, revision })
+export const resetSituationOrder = (column: string, situation: SituationKey, revision: number) => request<WriteResult>(`${situationPath(column, situation)}?for=default&revision=${revision}`, 'DELETE')

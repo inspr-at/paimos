@@ -8,11 +8,12 @@ import { toast } from './toast'
 import { getMembers } from './access'
 import { preferenceFailure } from './modelsSettings'
 import { useSession } from '../stores/session'
-import { dismissLine, getRegistry, getSimple, getTail, getWorkspaceRules, putDismissed, putEffort, putOrder, putWorkspaceRules, resetOrder } from './modelsSimpleApi'
+import { dismissLine, getRegistry, getSimple, getTail, getWorkspaceRules, putDismissed, putEffort, putOrder, putSituationOrder, putWorkspaceRules, resetOrder, resetSituationOrder } from './modelsSimpleApi'
 import {
   ALL_COLUMN, buildEntries, buildRows, effortLevel, lockReason, movePin, nearestEffort, nextView, orderBody, orderWithFirst, pinFirst, rulesBody, unpin,
   type ModelEntry, type RegistryProfile, type RowView, type RulesBody, type Scope, type SimpleDocument, type TailBoard, type TailColumn,
 } from './modelsSimple'
+import { situationFailure, situationOrder, situationSteps, type SituationKey, type SituationOrder } from './modelsSimple'
 
 interface Revs { prefs: number; rules: number }
 type Step = (revs: Revs) => Promise<Revs>
@@ -257,6 +258,25 @@ export function useModelsSimple() {
     if (draft.value === column) draft.value = null
     return done
   }
+  /**
+   * A workspace situation order (Expert, For everyone): the new order, or null for "Same as the row" (review: automatic).
+   * `seen` is the revision on screen when the person opened the cell. Undo writes back the order the page showed, or
+   * removes it again.
+   */
+  async function situation(column: string, key: SituationKey, next: SituationOrder | null, seen: number): Promise<boolean> {
+    const state = doc.value
+    if (!state || scope.value !== 'default' || !admin.value || !columnOf(column)) return false
+    // The order was read from the page at this revision; a refresh in between means it may no longer be what was changed.
+    if (state.revision !== seen) { error.value = conflict; return false }
+    const shown = state.situations?.[column]?.[key] ?? null
+    if (!next && !shown) return false
+    const before = situationOrder(situationSteps(shown), shown?.end)
+    const write = (body: SituationOrder | null): Step => async revs => ({ ...revs, prefs: advanced(await (body ? putSituationOrder(column, key, body, revs.prefs) : resetSituationOrder(column, key, revs.prefs)), revs.prefs) })
+    const current = capture(), done = await commit({ forward: [write(next)], backward: [write(before)] })
+    // The server answers with codes; say what they mean.
+    if (!done && current()) { const plain = situationFailure(error.value); if (plain) error.value = plain }
+    return done
+  }
   function startException(column: string) { if (editable.value && columnOf(column)) draft.value = column }
   function discardException() { draft.value = null }
   function setScope(value: Scope) { if (value === 'default' && !can('model_prefs.manage')) return; scope.value = value }
@@ -272,5 +292,5 @@ export function useModelsSimple() {
   watch(() => can('models.read'), allowed => { if (allowed && !doc.value && !loading.value && owner.value) void load() })
   onBeforeUnmount(() => { alive = false; generation++; epoch.value++; abort?.abort(); unsubscribe() })
 
-  return { scope, doc, rows, names, entries, labels, kinds, freeKinds, next, news, tail, loading, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey, cantReason, load, pick, use, clear, lock, dismiss, startException, discardException, setScope, dropError }
+  return { scope, doc, workspace, rows, names, entries, labels, kinds, freeKinds, next, news, tail, loading, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey, cantReason, load, pick, use, clear, lock, dismiss, startException, discardException, situation, setScope, dropError }
 }

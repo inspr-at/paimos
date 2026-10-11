@@ -15,6 +15,8 @@ export interface SimpleNewLine { line: string; can_do: string[] }
 export interface SimpleDocument {
   all: SimpleRow; exceptions: SimpleRow[]; reviews: { mode: 'cross_family' }; next: SimpleNext | null
   unavailable: SimpleUnavailable[]; new_lines: SimpleNewLine[]; revision: number; rules_revision: number; person_id: string | null
+  /** Workspace situation orders (for=default only); a missing cell follows its row, or automatic review. */
+  situations?: SimpleSituations; quick?: SimpleQuick
 }
 /** The part of the ranked board this page needs: the stored order behind each first pick, and what a column cannot do. */
 export interface TailCard { line: string; lock?: unknown }
@@ -258,4 +260,86 @@ export function nextView(input: { next: SimpleNext | null; rows: RowView[]; entr
   if (skipped.length) steps.push([{ text: `Next in its order that can do ${kind}: ` }, { text: runs, strong: true }, { text: '.' }])
   if (reviewer) steps.push([{ text: 'Reviews always use another family: ' }, { text: reviewer, strong: true }, { text: '.' }])
   return { parts, why: { title: `Why ${entryFor(entries, next.line)?.name ?? lineFallback(next.line)}?`, steps } }
+}
+
+// ----- Quick jobs and the situation matrix (Models v2 W3, AEON-1162) -----------------------------------------------
+/** The matrix columns. "First build" is the small-work order; the row itself stays the first-build order. */
+export type SituationKey = 'small' | 'fix' | 'stuck' | 'review'
+export interface SituationStep { line: string; effort: string | null }
+export interface SimpleSituation extends SimplePick { chain: SituationStep[]; end: 'wait' | 'row' | 'auto' }
+export type SimpleSituations = Record<string, Partial<Record<SituationKey, SimpleSituation>>>
+export interface SimpleQuick { line: string | null; effort: string | null; harness: string | null; model?: string; trace: SimpleTrace[] }
+/** A situation order as the order endpoint takes it: rank = [pick, …chain]; an omitted end keeps the stored one. */
+export interface SituationOrder { rank: string[]; efforts: Record<string, string>; end?: 'wait' | 'row' | 'auto' }
+export interface SituationLimitsView { small_hours: number; fix_rounds: number }
+
+export const SITUATIONS: readonly { key: SituationKey; label: string }[] = [
+  { key: 'small', label: 'First build' }, { key: 'fix', label: 'Fix rounds' }, { key: 'stuck', label: 'Stuck' }, { key: 'review', label: 'Review' },
+]
+/** The limits come from Settings › Kinds of work; without them the hint names the situation in words only. */
+export function situationHint(key: SituationKey, limits: SituationLimitsView | null): string {
+  if (key === 'small') return limits ? `${limits.small_hours} h or less` : 'small work'
+  if (key === 'fix') return 'after findings'
+  if (key === 'stuck') return limits ? `after ${limits.fix_rounds} ${limits.fix_rounds === 1 ? 'round' : 'rounds'}` : 'after the fix rounds'
+  return 'another family'
+}
+/** Reviews never run below this native level (reviewgate.ReviewMinEffortLevel). */
+export const REVIEW_MIN_LEVEL = 4
+
+export interface SituationRow { column: string; label: string; isDefault: boolean; line: string | null; effort: string | null; entry: ModelEntry | null; cells: Record<SituationKey, SimpleSituation | null> }
+/**
+ * The matrix rows: the Default, every row of the workspace, then any kind that has a situation order but no row of its
+ * own, so a count never names a cell the page does not show. Kinds keep the order of Settings › Kinds of work.
+ */
+export function situationRows(input: { doc: SimpleDocument; entries: ModelEntry[]; labels: Map<string, string>; order: string[] }): SituationRow[] {
+  const { doc, entries, labels, order } = input, cells = doc.situations ?? {}
+  const cellsOf = (column: string) => Object.fromEntries(SITUATIONS.map(({ key }) => [key, cells[column]?.[key]?.line ? cells[column]![key]! : null])) as Record<SituationKey, SimpleSituation | null>
+  const view = (row: SimpleRow): SituationRow => ({ column: row.column, label: row.column === ALL_COLUMN ? 'Default' : labels.get(row.column) ?? row.column, isDefault: row.column === ALL_COLUMN, line: row.line, effort: row.effort, entry: entryFor(entries, row.line), cells: cellsOf(row.column) })
+  const rows = [doc.all, ...doc.exceptions].map(view)
+  const extra = Object.keys(cells).filter(column => !rows.some(row => row.column === column) && SITUATIONS.some(({ key }) => cells[column]?.[key]?.line))
+    .sort((a, b) => (order.indexOf(a) + 1 || order.length + 1) - (order.indexOf(b) + 1 || order.length + 1) || a.localeCompare(b))
+  return [...rows, ...extra.map(column => view({ ...doc.all, column }))]
+}
+export const situationCount = (rows: SituationRow[]) => rows.reduce((count, row) => count + SITUATIONS.filter(({ key }) => row.cells[key]).length, 0)
+export const situationSteps = (cell: SimpleSituation | null | undefined): SituationStep[] => cell?.line ? [{ line: cell.line, effort: cell.effort }, ...cell.chain] : []
+/** An order body for these steps; no steps means the cell goes back to the row (or to automatic review). */
+export function situationOrder(steps: SituationStep[], end?: SituationOrder['end']): SituationOrder | null {
+  if (!steps.length) return null
+  const efforts: Record<string, string> = {}
+  for (const step of steps) if (step.effort) efforts[step.line] = step.effort
+  return { rank: steps.map(step => step.line), efforts, ...(end ? { end } : {}) }
+}
+/** A review step keeps its level only at the review floor or above; below it the server picks the highest qualified level. */
+export const situationStep = (situation: SituationKey, entry: ModelEntry, effort: string | null): SituationStep =>
+  ({ line: entry.line, effort: situation === 'review' && (effortLevel(entry, effort) ?? 0) < REVIEW_MIN_LEVEL ? null : effort })
+export const situationEndText = (situation: SituationKey, cell: SimpleSituation) =>
+  cell.end === 'wait' ? 'Then wait.' : situation === 'review' ? 'Then automatic, always another family.' : 'Then the row’s fallback.'
+export const situationEmptyText = (situation: SituationKey) => situation === 'review' ? 'Automatic: the first qualified model of another family.' : 'Same as the row: its pick, then its fallback.'
+/** Refusals of a situation write, in plain words; the server sends codes. */
+export function situationFailure(code: string): string {
+  const words: Record<string, string> = {
+    review_floor: 'Reviews need a strong model at its highest level. That model can’t review here.',
+    invalid_effort: 'That level isn’t available for this model.', effort_not_registered: 'That level isn’t available for this model.',
+    unknown_column: 'That kind of work no longer exists. Reload to see the current kinds.', invalid_end: 'That ending isn’t allowed for this situation.',
+  }
+  return words[code] ?? ''
+}
+
+export interface QuickView { lead: string; steps: Part[][]; foot: string }
+/** The Quick jobs "Why?": the rule, what was skipped and why, what runs now, and what runs when nothing qualifies. */
+export function quickView(input: { quick: SimpleQuick | null | undefined; fallback: RowView | null | undefined; entries: ModelEntry[] }): QuickView {
+  const { quick, fallback, entries } = input
+  const name = (line: string | null | undefined, effort: string | null | undefined) => pickText(entryFor(entries, line), effort ?? null, lineFallback(line))
+  const said: Record<string, string> = { 'Quick jobs requires fast tier': 'it isn’t a fast model', 'No tools in PAIMOS': 'it has no tools in PAIMOS' }
+  const steps: Part[][] = [[{ text: 'PAIMOS takes the cheapest model that qualifies: a fast model with tools and an account with room.' }]]
+  const skipped = (quick?.trace ?? []).filter(step => step.role !== 'review-gate' && !step.selected && step.reason)
+  for (const step of skipped.slice(0, 3)) {
+    const reason = step.reason.split(';').map(part => said[part.trim()] ?? part).join(';')
+    steps.push([{ text: `Skipped ${entryFor(entries, step.line)?.name ?? lineFallback(step.line)}: ${reasonText(reason)}.` }])
+  }
+  if (skipped.length > 3) steps.push([{ text: `Skipped ${skipped.length - 3} more that can’t run right now.` }])
+  if (quick?.line) steps.push([{ text: 'Right now: ' }, { text: name(quick.line, quick.effort), strong: true }, { text: quick.harness ? ` through ${harnessLabel(quick.harness)}.` : '.' }])
+  else if (quick) steps.push([{ text: 'Right now nothing qualifies, so quick jobs wait.' }])
+  if (fallback?.line) steps.push([{ text: 'If none qualifies, the default runs: ' }, { text: name(fallback.line, fallback.effort), strong: true }, { text: '.' }])
+  return { lead: 'Scout and mechanical work: reading code, triage, small changes that are fully described.', steps, foot: 'Agents still ask by role name (scout, mechanical); the answer comes from this page.' }
 }
