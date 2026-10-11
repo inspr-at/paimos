@@ -536,8 +536,6 @@
         ,
         {"file":"tests/models-simple.spec.ts","listedTests":21,"weightSeconds":12,"weightSource":"AEON-1011 local-single-worker-7.1s-plus-margin"}
         ,
-        {"file":"tests/models-situations.spec.ts","listedTests":4,"weightSeconds":8,"weightSource":"AEON-1162 estimate before a measured run"}
-        ,
         {"file":"tests/policy-editors.spec.ts","listedTests":32,"weightSeconds":73,"weightSource":"local-single-worker-AEON-879-60.8s-plus-margin"}
       ]
     }
@@ -911,6 +909,8 @@
         {"file":"tests/markdown-ticket-links.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/models-situations-shots.spec.ts","listedTests":12,"weightSeconds":10,"weightSource":"AEON-1162 evidence screenshots, estimate from the AEON-1011 shots spec before a measured run"}
+        ,
+        {"file":"tests/models-situations.spec.ts","listedTests":4,"weightSeconds":8,"weightSource":"AEON-1162 estimate before a measured run"}
         ,
         {"file":"tests/multiple-account-pairing.spec.ts","listedTests":6,"weightSeconds":13.317072,"weightSource":"unmeasured-test-rate"}
         ,
