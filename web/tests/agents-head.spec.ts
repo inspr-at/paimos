@@ -95,13 +95,13 @@ for (const width of [1440, 390]) {
   })
 }
 
-test('"…" keeps five items; moved actions have their home on the page', async ({ page }) => {
+test('"…" keeps six items; moved actions have their home on the page', async ({ page }) => {
   await setup(page)
   await page.goto('/agents')
   const more = page.locator('.page-head').getByRole('button', { name: 'More agent actions', exact: true })
   await more.click()
   const menu = page.getByRole('menu')
-  await expect(menu.getByRole('menuitem')).toHaveText([/^Model preferences/, /^Usage/, /^Decision Desk/, /^Agent keys/, /^Agent settings/])
+  await expect(menu.getByRole('menuitem')).toHaveText([/^Model preferences/, /^Usage/, /^Routines/, /^Decision Desk/, /^Agent keys/, /^Agent settings/])
   await page.keyboard.press('Escape')
   await expect(menu).toHaveCount(0)
   await expect(more).toBeFocused()

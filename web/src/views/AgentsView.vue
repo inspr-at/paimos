@@ -17,6 +17,7 @@ import { useAgents, type SessionView } from '../stores/agents'
 import { useProjects } from '../stores/projects'
 import { useDecisionDesk } from '../stores/decisionDesk'
 import DecisionDeskPanel from '../components/agents/DecisionDeskPanel.vue'
+import RoutinesLine from '../components/routines/RoutinesLine.vue'
 import { useCapacity } from '../stores/capacity'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
@@ -388,6 +389,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           <template v-else>
             <button role="menuitem" type="button" class="menu-item" aria-label="Model preferences" @click="menuAction(() => openModelPrefs())"><AppIcon name="gear" /><span>Model preferences<small>Which models do which work.</small></span></button>
             <RouterLink role="menuitem" class="menu-item" to="/agents/usage" @click="headerMenu = null"><AppIcon name="pulse" /><span>Usage<small>Tokens and cost per agent, account and day.</small></span></RouterLink>
+            <RouterLink role="menuitem" class="menu-item" to="/agents/routines" @click="headerMenu = null"><AppIcon name="repeat" /><span>Routines<small>Recurring work agents do by themselves.</small></span></RouterLink>
             <RouterLink role="menuitem" class="menu-item" to="/decision-desk" aria-label="Decision Desk" @click="headerMenu = null"><AppIcon name="inbox" /><span>Decision Desk<small>Everything agents ask of people.</small></span></RouterLink>
             <RouterLink v-if="can('keys.manage')" role="menuitem" class="menu-item" to="/settings/access/agents" @click="headerMenu = null"><AppIcon name="key" /><span>Agent keys<small>Scoped API keys for agents.</small></span></RouterLink>
             <div class="menu-sep" role="separator" />
@@ -402,6 +404,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
     <div class="layout">
       <div class="main-col">
         <DecisionDeskPanel v-if="session.identity?.principal.kind === 'person'" />
+        <!-- AEON-1192: one Routines line while a routine waits for a person or failed. -->
+        <RoutinesLine v-if="agents.loaded && session.identity?.principal.kind === 'person'" />
         <AttachPending ref="attachPending" :now="agents.now" @rows="rows => attachRows = rows" @history="rows => attachHistory = rows" @updated="requests => attachDialog?.sync(requests)" v-slot="{ rows }">
           <AgentChores v-if="capacity.signins.length || rows.length || attachHistory.length" :signins="capacity.signins" :attaches="rows" :history="attachHistory" @review="request => { attachRows = rows; reviewAttach(request) }" @dismiss="id => attachPending?.dismiss(id)" />
         </AttachPending>
