@@ -161,7 +161,7 @@ function resetBaseline(saved: Recurrence) {
 }
 function close() {
   if (busy.value) return
-  if (step.value === 'consent' && base.value) emit('saved', base.value, 'kept')
+  if (step.value === 'consent' && base.value && mine.value) emit('saved', base.value, 'kept')
   else emit('close')
 }
 function enterConsent() {

@@ -21,16 +21,17 @@ import RecurrenceRun from './RecurrenceRun.vue'
 // (Settings › Personal) or the workspace's (Settings › Routines). One list, one editor.
 const props = withDefaults(defineProps<{ project?: { id: string; routeKey: string; title?: string } | null; scope?: RoutineScopeKind; selectedId?: string; consent?: boolean }>(), { project: null, scope: 'project', selectedId: undefined, consent: false })
 const session = useSession(), projects = useProjects()
+const kind = computed<RoutineScopeKind>(() => props.scope ?? 'project')
 const items = ref<Recurrence[]>([]), cursor = ref<string | null>(null), selected = ref(''), failure = ref(''), loading = ref(false), linked = ref<Recurrence | null>(null), linkFailure = ref(''), busy = ref<string[]>([])
 const editor = ref<{ item?: Recurrence; consent?: boolean } | null>(null), runPrompt = ref<Recurrence | null>(null), menu = ref<{ item: Recurrence; anchor: HTMLElement } | null>(null), revoked = ref<'' | 'draft' | 'saved'>('')
 const person = computed(() => !!session.identity && session.identity.principal.kind !== 'agent')
 const workspaceAdmin = computed(() => ['owner', 'admin'].includes(myWorkspaceRole()?.key ?? ''))
 const projectId = computed(() => props.project?.id ?? '')
-const mayManage = computed(() => props.scope === 'project' ? can('recurrences.manage', projectId.value) : props.scope === 'personal' ? person.value && can('recurrences.manage') : can('recurrences.manage') && workspaceAdmin.value)
-const mayRead = () => props.scope === 'project' ? can('nodes.read', projectId.value) : props.scope === 'personal' ? person.value : can('nodes.read')
+const mayManage = computed(() => kind.value === 'project' ? can('recurrences.manage', projectId.value) : kind.value === 'personal' ? person.value && can('recurrences.manage') : can('recurrences.manage') && workspaceAdmin.value)
+const mayRead = () => kind.value === 'project' ? can('nodes.read', projectId.value) : kind.value === 'personal' ? person.value : can('nodes.read')
 const identity = useIdentityScope(mayRead), reads = identity.lane(), links = identity.lane(), switchReads = identity.lane()
-const mayManageItem = (item: Recurrence) => mayManage.value && (props.scope === 'project' || can('recurrences.manage', item.project_id))
-const inScope = (item: Recurrence) => props.scope === 'project' ? item.project_id === projectId.value : routineScope(item) === props.scope
+const mayManageItem = (item: Recurrence) => mayManage.value && (kind.value === 'project' || can('recurrences.manage', item.project_id))
+const inScope = (item: Recurrence) => kind.value === 'project' ? item.project_id === projectId.value : routineScope(item) === kind.value
 const chosen = computed(() => {
   const row = items.value.find(item => item.id === selected.value)
   if (selected.value !== props.selectedId) return row
@@ -38,19 +39,30 @@ const chosen = computed(() => {
   if (!source) return undefined
   return row && row.project_id === source.project_id && (row.revision > source.revision || row.revision === source.revision && row.occurrence_count > source.occurrence_count) ? row : source
 })
-const heading = computed(() => props.scope === 'personal' ? 'Your routines' : props.scope === 'workspace' ? 'Workspace routines' : 'Routines')
-const lead = computed(() => props.scope === 'personal' ? 'Only you see these. They act with your rights, in projects where routines are on.' : props.scope === 'workspace' ? 'For the whole workspace. Everyone sees them; admins change them.' : 'Tickets that create themselves, and work an agent does on them by itself.')
-const cardId = computed(() => props.scope === 'personal' ? 'routines' : props.scope === 'workspace' ? 'workspace-routines' : 'recurring-work')
-const readOnlyReason = computed(() => props.scope === 'workspace' && can('recurrences.manage') ? 'Changing workspace routines needs a workspace admin' : 'Needs the Manage recurring work permission')
-const readOnlyNote = computed(() => props.scope === 'workspace' ? 'You can read workspace routines. Changing them needs an admin.' : `You can read routines. ${readOnlyReason.value}.`)
+const heading = computed(() => kind.value === 'personal' ? 'Your routines' : kind.value === 'workspace' ? 'Workspace routines' : 'Routines')
+const lead = computed(() => kind.value === 'personal' ? 'Only you see these. They act with your rights, in projects where routines are on.' : kind.value === 'workspace' ? 'For the whole workspace. Everyone sees them; admins change them.' : 'Tickets that create themselves, and work an agent does on them by itself.')
+const cardId = computed(() => kind.value === 'personal' ? 'routines' : kind.value === 'workspace' ? 'workspace-routines' : 'recurring-work')
+const readOnlyReason = computed(() => kind.value === 'workspace' && can('recurrences.manage') ? 'Changing workspace routines needs a workspace admin' : 'Needs the Manage recurring work permission')
+const readOnlyNote = computed(() => kind.value === 'workspace' ? 'You can read workspace routines. Changing them needs an admin.' : `You can read routines. ${readOnlyReason.value}.`)
 const projectKeyOf = (item: Recurrence) => props.project && item.project_id === props.project.id ? props.project.routeKey : projects.byId(item.project_id)?.routeKey ?? ''
 const outputOf = (item: Recurrence) => props.project && item.project_id === props.project.id ? props.project : projects.byId(item.project_id) ?? null
+// ---------- The project switch: "Agents may run routines in WEB" ----------
+const settings = ref<RoutineExecutionSettings | null>(null), switchBusy = ref(false)
+const showSwitch = computed(() => kind.value === 'project' && !!projectId.value && can('harness.read', projectId.value))
+const mayTurn = computed(() => person.value && can('harness.control', projectId.value) && can('run.create', projectId.value) && (workspaceAdmin.value || ['owner', 'admin'].includes(myProjectRole(projectId.value)?.key ?? '')))
+function readSwitch() {
+  settings.value = null
+  if (!showSwitch.value) return
+  const id = projectId.value
+  void switchReads.run(({ after, signal }) => after(getRoutineExecutionSettings(id, signal), result => { if (id === projectId.value) settings.value = result }), { failed: () => {} })
+}
+watch(showSwitch, value => { if (value && !settings.value) readSwitch() })
 let epoch = 0, alive = true
 function clear() { identity.reset(); epoch++; items.value = []; cursor.value = null; selected.value = ''; menu.value = null; editor.value = null; runPrompt.value = null; failure.value = ''; busy.value = []; loading.value = false; linked.value = null; linkFailure.value = ''; settings.value = null }
 const stopAccess = onAccessChange(change => { if (change === 'reset') clear() })
 function load(older = false) {
   if (!identity.owner.value || busy.value.length || editor.value || runPrompt.value || menu.value) return
-  const filter = { projectId: props.scope === 'project' ? projectId.value : undefined, scope: props.scope, after: older ? cursor.value || undefined : undefined }
+  const filter = { projectId: kind.value === 'project' ? projectId.value : undefined, scope: kind.value, after: older ? cursor.value || undefined : undefined }
   loading.value = true; failure.value = ''
   void reads.run(({ after, signal }) => after(listRoutines(filter, signal), page => {
     // Lists are replaced, never merged across people or scopes; Older appends this list's next page.
@@ -66,17 +78,17 @@ function selectSource() {
   if (!id) { if (!items.value.some(item => item.id === selected.value)) selected.value = items.value[0]?.id || ''; return }
   selected.value = id
   void links.run(({ after, signal }) => after(getRecurrence(id, signal), item => {
-    if (item.id !== id || !inScope(item)) throw new Error(props.scope === 'project' ? 'This routine belongs to another project.' : 'This routine isn’t one of these.')
+    if (item.id !== id || !inScope(item)) throw new Error(kind.value === 'project' ? 'This routine belongs to another project.' : 'This routine isn’t one of these.')
     linked.value = item
     // A Desk link-out (?consent=1) opens the editor at "Let agents run it".
     if (props.consent && item.definition?.assignment && mayManageItem(item) && !editor.value) editor.value = { item, consent: true }
   }), { failed: error => { linkFailure.value = error instanceof Error ? error.message : 'The linked routine could not be loaded.' } })
 }
-watch([projectId, () => props.scope, () => identity.owner.value], () => { clear(); selectSource(); load(); readSwitch() }, { immediate: true, flush: 'sync' })
+watch([projectId, () => kind.value, () => identity.owner.value], () => { clear(); selectSource(); load(); readSwitch() }, { immediate: true, flush: 'sync' })
 watch(() => props.selectedId, () => { menu.value = null; editor.value = null; runPrompt.value = null; selectSource() }, { flush: 'sync' })
 watch(mayManage, value => { if (!value) { if (editor.value) revoked.value = 'draft'; editor.value = null; runPrompt.value = null; menu.value = null } })
 const poller = usePoller(() => { if (!cursor.value) load() }, 20_000)
-onMounted(() => { poller.start(); if (props.scope !== 'project') void projects.load() })
+onMounted(() => { poller.start(); if (kind.value !== 'project') void projects.load() })
 onBeforeUnmount(() => { alive = false; epoch++; stopAccess(); poller.stop() })
 function current(item: Recurrence) { return alive && mayManageItem(item) && inScope(item) && (chosen.value?.id === item.id && chosen.value.revision === item.revision || items.value.some(row => row.id === item.id && row.revision === item.revision)) }
 function replace(item: Recurrence) { if (linked.value?.id === item.id && item.revision >= linked.value.revision && item.occurrence_count >= linked.value.occurrence_count) linked.value = { ...linked.value, ...item }; const index = items.value.findIndex(row => row.id === item.id), known = items.value[index]; if (known && item.revision >= known.revision && item.occurrence_count >= known.occurrence_count) items.value[index] = { ...known, ...item } }
@@ -92,12 +104,12 @@ function saved(item: Recurrence, outcome: 'saved' | 'consented' | 'kept' = 'save
 function refreshItem(id: string) { void identity.run(({ after, signal }) => after(getRecurrence(id, signal), item => { replace(item) }), { failed: error => { toast(error instanceof Error ? error.message : 'The routine could not be refreshed.', { tone: 'error' }) } }) }
 function toggle(item: Recurrence, undo = false) {
   if (!current(item) || busy.value.includes(item.id)) return
-  const owner = identity.owner.value, generation = epoch, scopeKey = `${props.scope}/${projectId.value}`, paused = !item.paused
+  const owner = identity.owner.value, generation = epoch, scopeKey = `${kind.value}/${projectId.value}`, paused = !item.paused
   reads.cancel(); busy.value = [...busy.value, item.id]
   void identity.run(({ after, signal }) => after(pauseRecurrence(item.id, paused, item.revision, signal), updated => {
     replace(updated)
     toast(`${paused ? 'Paused' : 'Resumed'} ${recurrenceName(item)}.`, { timeout: 8000, action: undo ? undefined : { label: 'Undo', run: () => {
-      if (!alive || owner !== identity.owner.value || generation !== epoch || scopeKey !== `${props.scope}/${projectId.value}` || !current(updated)) { toast('The routine changed since, so nothing was undone.', { tone: 'error' }); return }
+      if (!alive || owner !== identity.owner.value || generation !== epoch || scopeKey !== `${kind.value}/${projectId.value}` || !current(updated)) { toast('The routine changed since, so nothing was undone.', { tone: 'error' }); return }
       toggle(updated, true)
     } } })
   }), { failed: error => { toast(error instanceof Error ? error.message : 'Pause or resume failed.', { tone: 'error' }) }, settled: () => { busy.value = busy.value.filter(id => id !== item.id) } })
@@ -155,17 +167,6 @@ function stateNote(item: Recurrence) {
   return item.last_run?.reason ? reasonWords(item.last_run.reason) : 'Agents may run it'
 }
 
-// ---------- The project switch: "Agents may run routines in WEB" ----------
-const settings = ref<RoutineExecutionSettings | null>(null), switchBusy = ref(false)
-const showSwitch = computed(() => props.scope === 'project' && !!projectId.value && can('harness.read', projectId.value))
-const mayTurn = computed(() => person.value && can('harness.control', projectId.value) && can('run.create', projectId.value) && (workspaceAdmin.value || ['owner', 'admin'].includes(myProjectRole(projectId.value)?.key ?? '')))
-function readSwitch() {
-  settings.value = null
-  if (!showSwitch.value) return
-  const id = projectId.value
-  void switchReads.run(({ after, signal }) => after(getRoutineExecutionSettings(id, signal), result => { if (id === projectId.value) settings.value = result }), { failed: () => {} })
-}
-watch(showSwitch, value => { if (value && !settings.value) readSwitch() })
 function turnOff() {
   const known = settings.value, id = projectId.value, key = props.project?.routeKey ?? 'this project'
   if (!known || !mayTurn.value || switchBusy.value) return
@@ -187,7 +188,7 @@ function turnOff() {
         <div v-if="items.length" class="recurrence-list" role="table" :aria-label="heading">
           <div class="list-head" role="row"><span role="columnheader">Name</span><span role="columnheader">Trigger</span><span role="columnheader">Next run</span><span role="columnheader">Last result</span><span role="columnheader">Actions</span></div>
           <div v-for="item in items" :id="`recurrence-${item.id}`" :key="item.id" class="recurrence-row" :class="{ selected: selected === item.id, paused: item.paused }" role="row" :tabindex="selected === item.id ? 0 : -1" :aria-label="recurrenceName(item)" @click="selected = item.id" @keydown.stop="rowKeys($event, item)">
-            <div class="cell name" role="cell"><span class="glyph" :class="item.definition?.assignment ? 'agent' : 'ticket'" aria-hidden="true"><AppIcon :name="item.definition?.assignment ? 'agent' : 'repeat'" :size="14" /></span><span class="name-t"><b>{{ recurrenceName(item) }}</b><small>{{ item.template.type === 'task' ? 'Task' : 'Ticket' }} {{ item.parent_id === item.project_id ? 'at top level' : 'in an epic' }}{{ props.scope !== 'project' && projectKeyOf(item) ? ` of ${projectKeyOf(item)}` : '' }}{{ item.definition?.assignment ? ` · an agent ${effortVerb(item.definition.assignment.role)}` : item.queue_each ? ' · queued' : '' }}</small></span></div>
+            <div class="cell name" role="cell"><span class="glyph" :class="item.definition?.assignment ? 'agent' : 'ticket'" aria-hidden="true"><AppIcon :name="item.definition?.assignment ? 'agent' : 'repeat'" :size="14" /></span><span class="name-t"><b>{{ recurrenceName(item) }}</b><small>{{ item.template.type === 'task' ? 'Task' : 'Ticket' }} {{ item.parent_id === item.project_id ? 'at top level' : 'in an epic' }}{{ kind !== 'project' && projectKeyOf(item) ? ` of ${projectKeyOf(item)}` : '' }}{{ item.definition?.assignment ? ` · an agent ${effortVerb(item.definition.assignment.role)}` : item.queue_each ? ' · queued' : '' }}</small></span></div>
             <div class="cell trigger" role="cell"><span>{{ triggerWords(item.trigger) }}</span><small>{{ item.overlap_policy === 'skip' ? 'skips while the last is open' : 'creates even while open' }}</small></div>
             <div class="cell next" role="cell"><span><template v-if="item.paused"><AppIcon name="pause" :size="12" />Paused</template><template v-else>{{ item.trigger.kind === 'event' ? 'After the next release' : item.next_at ? when(item.next_at, recurrenceZone(item.trigger)) : 'No next date' }}</template></span><small>{{ item.paused ? item.trigger.kind === 'event' ? 'releases are ignored' : item.next_at ? `would be ${when(item.next_at, recurrenceZone(item.trigger))}` : '' : item.open_previous && item.overlap_policy === 'skip' ? `skipped if #${item.open_previous.number} is still open` : item.queue_each ? 'into the work queue' : '' }}</small></div>
             <div v-if="item.definition?.assignment" class="cell last" role="cell"><span><span class="stc" :class="STATE_TINT[routineState(item)]"><AppIcon :name="STATE_ICON[routineState(item)]" :size="12" /><span>{{ ROUTINE_STATE_WORDS[routineState(item)] }}</span></span></span><small :title="stateNote(item)">{{ stateNote(item) }}</small></div>
@@ -202,7 +203,7 @@ function turnOff() {
     </section>
     <RecurrenceHistory v-if="chosen && projectKeyOf(chosen)" :key="chosen.id" :item="chosen" :project-key="projectKeyOf(chosen)" :may-manage="mayManageItem(chosen)" :busy="busy.includes(chosen.id)" @toggle="toggle(chosen!)" @run="run(chosen!)" @edit="editor = { item: chosen }" />
     <FloatingPanel v-if="menu" :anchor="menu.anchor" :width="236" align="end" :label="`More for ${recurrenceName(menu.item)}`" @close="closeMenu"><div class="row-menu" role="menu" @keydown="menuKeys"><button type="button" role="menuitem" :disabled="!mayManageItem(menu.item) || busy.includes(menu.item.id)" :data-tip="!mayManageItem(menu.item) ? readOnlyReason : undefined" @click="editor = { item: menu.item }; closeMenu(false)"><AppIcon name="edit" :size="14" />Edit…</button><button type="button" role="menuitem" @click="selected = menu.item.id; closeMenu()"><AppIcon name="history" :size="14" />History</button><button type="button" role="menuitem" @click="copyCLI(menu.item)"><AppIcon name="terminal" :size="14" />Copy CLI command</button><div class="separator" /><button type="button" role="menuitem" class="danger" :disabled="!mayManageItem(menu.item) || busy.includes(menu.item.id)" @click="remove(menu.item)"><AppIcon name="trash" :size="14" />Delete…</button></div></FloatingPanel>
-    <RecurrenceEditor v-if="editor" :project="editor.item ? outputOf(editor.item) : project" :scope="props.scope" :recurrence="editor.item" :consent="editor.consent" @close="editor = null" @saved="saved" @changed="changed" @revoked="state => { revoked = state ? 'saved' : 'draft' }" />
+    <RecurrenceEditor v-if="editor" :project="editor.item ? outputOf(editor.item) : project" :scope="kind" :recurrence="editor.item" :consent="editor.consent" @close="editor = null" @saved="saved" @changed="changed" @revoked="state => { revoked = state ? 'saved' : 'draft' }" />
     <RecurrenceRun v-if="runPrompt" :key="runPrompt.id" :item="runPrompt" @close="runPrompt = null" @ran="ran" />
   </div>
 </template>
