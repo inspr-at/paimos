@@ -179,7 +179,7 @@
     "current_attempt_status": "INCOMPLETE: remote slot refused because CI pool and other remote runs occupied the cap. The retry result is recorded in the post-commit handoff.",
     "current_log": "web/test-results/AEON-1233/ap719-static.log",
     "existing_gated_source_result": "Fix3 records the same source commit a422a0d10518cb135cb6d04a8ac0f8860b528919 passing all 42 ci-static --merge-main checks without skips; no source changes in this evidence round.",
-    "existing_log": "web/test-results/AEON-1233/fix3-static-remote.log"
+    "existing_log": "web/test-results/AEON-1233/fix3-static.log"
   },
   "visual_inspection": "Fresh general-pharos-1440-light.png and delete-sheet-400-dark.png inspected; no package-owned spec failure or source change.",
   "post_commit_evidence": "The browser spec will run again after this evidence-only commit; its check-result report, screenshot inventory and every pass line are recorded at the local post-commit handoff paths above. Screenshots stay git-ignored."
