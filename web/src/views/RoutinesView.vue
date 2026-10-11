@@ -32,7 +32,7 @@ const person = computed(() => !!session.identity && session.identity.principal.k
 const identity = useIdentityScope(() => person.value && can('nodes.read'))
 const reads = identity.lane(), links = identity.lane(), names = identity.lane()
 const items = ref<Recurrence[]>([]), cursor = ref<string | null>(null), loading = ref(false), loaded = ref(false), failure = ref(''), moreFailure = ref('')
-const linked = ref<Recurrence | null>(null), closed = ref(false), revoked = ref(false), busy = ref<string[]>([])
+const linked = ref<Recurrence | null>(null), linkFailure = ref(''), closed = ref(false), revoked = ref(false), busy = ref<string[]>([])
 const editor = ref<{ item: Recurrence; consent?: boolean } | null>(null), runPrompt = ref<Recurrence | null>(null)
 const menu = ref<{ type: 'new' | 'more'; item?: Recurrence; anchor: HTMLElement } | null>(null)
 const owners = ref(new Map<string, string>())
@@ -116,14 +116,14 @@ function listKeys(event: KeyboardEvent) {
   if (!row) return
   const ids = rows.value.map(item => item.id), at = ids.indexOf(row.dataset.routine ?? '')
   if (['ArrowDown', 'j', 'ArrowUp', 'k'].includes(event.key)) {
-    event.preventDefault()
+    event.preventDefault(); event.stopPropagation()
     const next = ids[at + (['ArrowDown', 'j'].includes(event.key) ? 1 : -1)]
     if (!next) return
     focusRow(next)
     if (!single.value) select(next)
   } else if (event.key === 'n') {
     const item = rows.value[at]
-    if (item && mayManageItem(item)) { event.preventDefault(); run(item) }
+    if (item && mayManageItem(item)) { event.preventDefault(); event.stopPropagation(); run(item) }
   }
 }
 
@@ -131,7 +131,7 @@ function listKeys(event: KeyboardEvent) {
 function clear() {
   reads.cancel(); links.cancel(); names.cancel()
   items.value = []; cursor.value = null; loaded.value = false; loading.value = false; failure.value = ''; moreFailure.value = ''
-  linked.value = null; closed.value = false; revoked.value = false; busy.value = []; editor.value = null; runPrompt.value = null; menu.value = null; owners.value = new Map()
+  linked.value = null; linkFailure.value = ''; closed.value = false; revoked.value = false; busy.value = []; editor.value = null; runPrompt.value = null; menu.value = null; owners.value = new Map()
 }
 function load(older = false) {
   if (!identity.owner.value) return
@@ -152,11 +152,18 @@ function loadNames() {
   if (!can('members.read')) return
   void names.run(({ after }) => after(getMembers(), list => { owners.value = new Map(list.people.map(person => [person.principal_id, person.name])) }), { failed: () => {} })
 }
-// A linked routine that isn't on the loaded pages is read on its own; gone means a calm line.
-watch([routineId, loaded], ([id, ready]) => {
-  if (!id || !ready || items.value.some(item => item.id === id) || linked.value?.id === id) return
-  void links.run(({ after, signal }) => after(getRecurrence(id, signal), item => { if (routineId.value === id) linked.value = item }), { failed: () => { if (routineId.value === id) gone() } })
-})
+// A linked routine that isn't on the loaded pages is read on its own; gone (404) means a calm line.
+function readLinked() {
+  const id = routineId.value
+  linkFailure.value = ''
+  if (!id || !loaded.value || items.value.some(item => item.id === id) || linked.value?.id === id) return
+  void links.run(({ after, signal }) => after(getRecurrence(id, signal), item => { if (routineId.value === id) linked.value = item }), { failed: error => {
+    if (routineId.value !== id) return
+    if ((error as { status?: number }).status === 404) gone()
+    else linkFailure.value = error instanceof Error ? error.message : 'the server didn’t answer'
+  } })
+}
+watch([routineId, loaded], readLinked)
 function gone() {
   const id = routineId.value || chosen.value?.id
   closed.value = true
@@ -287,6 +294,7 @@ const stateIcon = (state: RoutineState) => STATE_LOOK[state].icon as IconName | 
         </div>
       </div>
       <p v-if="revoked" class="calm-line" role="status"><AppIcon name="eye" :size="13" /><span><b>The routine editor closed:</b> your rights for that routine changed. Nothing was saved; your draft was discarded. You can still read it.</span></p>
+      <p v-if="linkFailure" class="calm-line" role="alert"><AppIcon name="alert" :size="13" /><span><b>The linked routine couldn’t be read:</b> {{ linkFailure }}. </span><button type="button" class="btn sm ghost" @click="readLinked">Try again</button></p>
       <p v-if="closed" class="calm-line" role="status"><AppIcon name="eye" :size="13" /><span><b>This logbook closed.</b> The routine is gone or no longer visible to you, so nothing of it is shown here.</span></p>
       <div class="grid" :class="{ one: loaded && !rows.length && !chosen, 'pv-log': single && !!chosen, 'pv-list': single && !chosen }">
         <section class="glass-card rt-list" aria-label="Routine list" :aria-busy="loading && !loaded" @keydown="listKeys">
