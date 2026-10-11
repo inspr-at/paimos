@@ -65,8 +65,10 @@ a table without Host and the account line, with the ticket key before the name
 (the details name and rename the computer); under 560 px (phones) compact rows.
 A compact row opens line 1 with a 12 px harness mark whose tooltip and name say
 the model, effort, harness and account ("gpt-6.1-sol · xhigh · Codex · ChatGPT
-Pro"), ends line 1 with the short time ("42m", "3m ago"), and keeps only ⋯
-beside the two lines: Pause, Resume, Remove and Change tier are in its menu.
+Pro"), ends line 1 with the short time ("42m", "3m ago"), and keeps ⋯ beside
+the two lines (an ended or silent row also keeps its one-tap bin): Pause,
+Resume and Change tier are in its menu, and the details name and rename the
+computer.
 
 **Rows enter and leave calmly.** New sessions, rows leaving the list, rows
 moving to another group or parent and new orders wait while the pointer is on
