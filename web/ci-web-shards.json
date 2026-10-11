@@ -530,7 +530,7 @@
         ,
         {"file":"tests/model-refresh.spec.ts","listedTests":1,"tierTiming":{"caseSeconds":{"max":4.248,"median":4.248,"min":4.248},"seconds":7.561739,"selectedTests":1},"weightSeconds":3.5,"weightSource":"e2e-4"}
         ,
-        {"file":"tests/models-registry.spec.ts","listedTests":26,"weightSeconds":22,"weightSource":"AEON-1012 fix3 adds the revision-snapshot spec to the fix2 16.0s run"}
+        {"file":"tests/models-registry.spec.ts","listedTests":32,"weightSeconds":30,"weightSource":"AEON-1163 grouped registry: six new cases and screenshots at three widths; estimate until measured"}
         ,
         {"file":"tests/models-simple-shots.spec.ts","listedTests":18,"weightSeconds":8,"weightSource":"AEON-1011 local-single-worker-5.3s-plus-margin"}
         ,
@@ -914,7 +914,7 @@
         ,
         {"file":"tests/markdown-ticket-links.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/models-outdated.spec.ts","listedTests":9,"weightSeconds":10,"weightSource":"AEON-1164 local-single-worker-7.5s-plus-margin"}
+        {"file":"tests/models-outdated.spec.ts","listedTests":10,"weightSeconds":11,"weightSource":"AEON-1164 local-single-worker-7.5s-plus-margin; AEON-1163 adds the phone tray case"}
         ,
         {"file":"tests/multiple-account-pairing.spec.ts","listedTests":6,"weightSeconds":13.317072,"weightSource":"unmeasured-test-rate"}
         ,
