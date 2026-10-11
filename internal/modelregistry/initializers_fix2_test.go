@@ -20,7 +20,8 @@ func incompleteCatalogFixture(t *testing.T, p tenant.Principal) {
 		if err != nil {
 			return err
 		}
-		return insertRoute(t.Context(), tx, p.TenantID, Route{Role: "build", Priority: 17, ProfileID: profile.ID, State: "available"})
+		// A saved Models choice that catalog preparation must keep.
+		return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "first", "wait", profile.ID)
 	}); err != nil {
 		t.Fatal(err)
 	}

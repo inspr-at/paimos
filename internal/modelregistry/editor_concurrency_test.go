@@ -110,12 +110,11 @@ func TestEditorConcurrentConditionalLegacyAndRevocationFence(t *testing.T) {
 	}
 }
 
+// Risk: the retired writer still waits on the tenant fence or samples its
+// post-fence clock for a hold or an expiry compensation (holds are model pauses).
 func TestEditorPostFenceExpiryClearAfterWaiting(t *testing.T) {
-	p, h := editorFixture(t)
-	initial := h.ladder(t, p, "build")
+	p, _ := editorFixture(t)
 	expiry := time.Date(2030, 1, 1, 0, 0, 0, 654321000, time.UTC)
-	desired := append([]Route{}, initial.Routes...)
-	desired[0].State, desired[0].Reason, desired[0].ValidUntil = "unavailable", "previous hold", &expiry
 	for _, clear := range []bool{false, true} {
 		t.Run(fmt.Sprint(clear), func(t *testing.T) {
 			blocker, err := appPool.Begin(t.Context())
@@ -126,38 +125,25 @@ func TestEditorPostFenceExpiryClearAfterWaiting(t *testing.T) {
 			if err := db.LockTenant(t.Context(), blocker, p.TenantID); err != nil {
 				t.Fatal(err)
 			}
-			var pid int
-			blocker.QueryRow(t.Context(), `SELECT pg_backend_pid()`).Scan(&pid)
-			clockCalls := make(chan struct{}, 1)
-			m := &Module{pool: appPool, validationClock: func(ctx context.Context, tx pgx.Tx) (time.Time, error) { clockCalls <- struct{}{}; return expiry, nil }}
-			h = newEditorHTTP(t, m)
+			var clocked atomic.Int32
+			h := newEditorHTTP(t, &Module{pool: appPool, validationClock: func(context.Context, pgx.Tx) (time.Time, error) { clocked.Add(1); return expiry, nil }})
+			initial := h.ladder(t, p, "build")
+			desired := append([]Route{}, initial.Routes...)
+			if len(desired) == 0 {
+				t.Fatal("fixture has no derived build route")
+			}
+			desired[0].State, desired[0].Reason, desired[0].ValidUntil = "unavailable", "previous hold", &expiry
 			path := "/api/models/routes?role=build"
 			if clear {
 				path += "&expiry_policy=clear"
 			}
-			done := startEditorRequest(t, h, p, "PUT", path, editorJSON(desired), map[string]string{"If-Match": *initial.EditToken})
-			waitEditorBlocked(t, pid)
-			select {
-			case <-clockCalls:
-				t.Fatal("clock sampled before tenant fence acquired")
-			default:
+			// Answered while the tenant fence is still held: nothing waits.
+			w := finishEditorRequest(t, startEditorRequest(t, h, p, "PUT", path, editorJSON(desired), map[string]string{"If-Match": routeEditToken("build", initial.Routes)}))
+			if w.Code != http.StatusGone || clocked.Load() != 0 {
+				t.Fatalf("retired writer waited or sampled its clock: %d %s", w.Code, w.Body.String())
 			}
 			if err := blocker.Commit(t.Context()); err != nil {
 				t.Fatal(err)
-			}
-			w := finishEditorRequest(t, done)
-			select {
-			case <-clockCalls:
-			default:
-				t.Fatal("post-fence clock not sampled")
-			}
-			if clear {
-				actual := editorDecode[[]Route](t, w)
-				if actual[0].State != "available" || actual[0].ValidUntil != nil || actual[0].Reason != "" {
-					t.Fatal("equal expiry compensation revived hold")
-				}
-			} else {
-				editorError(t, w, 422, "suppression_expired")
 			}
 		})
 	}
@@ -245,14 +231,28 @@ func TestEditorArchiveWaitsBehindFencedRowUndo(t *testing.T) {
 	}
 }
 
+// Risk: the retired writer waits on additive catalog preparation, or the
+// preparation rewrites a saved Models choice. PUT is 410 while preparation
+// holds the fence; preparation then adds profiles and leaves the order alone.
 func TestEditorConditionalWriteWaitsForAdditivePreparation(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "editor-upgrade", "person", "Owner", []string{"admin"})
 	incompleteCatalogFixture(t, p)
 	h := newEditorHTTP(t, &Module{pool: appPool})
 	old := h.ladder(t, p, "build")
-	held, release := make(chan int, 1), make(chan struct{})
-	defer close(release)
+	orders := func() string {
+		t.Helper()
+		var state string
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT jsonb_build_object('orders',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM (`+modelprefs.OrdersSQL+`) o),
+ 'profiles',(SELECT count(*) FROM model_profiles))::text`).Scan(&state)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
+	before := orders()
+	held, release := make(chan struct{}), make(chan struct{})
 	calls := 0
 	r := httptest.NewRequest("GET", "/api/models", nil)
 	done := make(chan error, 1)
@@ -260,11 +260,7 @@ func TestEditorConditionalWriteWaitsForAdditivePreparation(t *testing.T) {
 		done <- PrepareCatalog(t.Context(), appPool, p, CatalogPreparation{Operation: CatalogRead, Request: r, Clock: func(ctx context.Context, tx pgx.Tx) (time.Time, error) {
 			calls++
 			if calls == 1 {
-				var pid int
-				if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
-					return time.Time{}, err
-				}
-				held <- pid
+				close(held)
 				select {
 				case <-release:
 				case <-ctx.Done():
@@ -274,15 +270,16 @@ func TestEditorConditionalWriteWaitsForAdditivePreparation(t *testing.T) {
 			return validationNow(ctx, tx)
 		}})
 	}()
-	var pid int
 	select {
-	case pid = <-held:
+	case <-held:
 	case <-time.After(10 * time.Second):
 		t.Fatal("preparation did not hold fence")
 	}
-	write := startEditorRequest(t, h, p, "PUT", "/api/models/routes?role=build", "[]", map[string]string{"If-Match": *old.EditToken})
-	waitEditorBlocked(t, pid)
-	release <- struct{}{}
+	w := finishEditorRequest(t, startEditorRequest(t, h, p, "PUT", "/api/models/routes?role=build", "[]", map[string]string{"If-Match": routeEditToken("build", old.Routes)}))
+	close(release)
+	if w.Code != http.StatusGone {
+		t.Fatalf("retired writer answered %d: %s", w.Code, w.Body.String())
+	}
 	select {
 	case err := <-done:
 		if err != nil {
@@ -291,9 +288,12 @@ func TestEditorConditionalWriteWaitsForAdditivePreparation(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("preparation hung")
 	}
-	editorError(t, finishEditorRequest(t, write), 409, "stale_revision")
+	after := orders()
+	if after == before || !strings.HasPrefix(after, before[:strings.Index(before, `"profiles"`)]) {
+		t.Fatalf("preparation rewrote the saved Default or added no profiles: %s → %s", before, after)
+	}
 	current := h.ladder(t, p, "build")
-	if *current.EditToken == *old.EditToken || len(current.Routes) <= len(old.Routes) || current.Routes[0].ProfileID != old.Routes[0].ProfileID || current.Routes[0].Priority != 17 {
-		t.Fatal("upgrade overwrote saved priority or snapshot missed additions")
+	if len(current.Routes) == 0 || len(old.Routes) == 0 || current.Routes[0].ProfileID != old.Routes[0].ProfileID {
+		t.Fatal("saved Default no longer leads the derived build read")
 	}
 }
