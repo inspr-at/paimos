@@ -54,7 +54,7 @@ async function setup(page: Page, readOnly = false, canonical = false) {
 }
 const editor = (page: Page) => page.getByRole('dialog', { name: /Repeat|New routine|Edit routine|Let agents run it/ })
 const row = (page: Page, name = 'Weekly tool sweep') => page.getByRole('row', { name, exact: true })
-async function settings(page: Page) { await page.goto('/p/PHAROS/settings'); await expect(row(page)).toBeVisible() }
+async function settings(page: Page) { await page.goto('/p/PHAROS/settings/routines'); await expect(page).toHaveURL('/p/PHAROS/settings/routines'); await expect(row(page)).toBeVisible() }
 async function newEditor(page: Page) {
   await page.getByRole('button', { name: 'New routine…', exact: true }).click()
   await editor(page).getByRole('textbox', { name: 'Name', exact: true }).fill('Weekly inspection')

@@ -16178,6 +16178,8 @@
     ,
     {"kind":"vitest","file":"tests/capacity-reset.unit.test.ts","name":"reports a failed pairing refresh while retaining the current identity snapshot","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/clip-tip.unit.test.ts","name":"a phone selection hold suppresses only its own row and pointer click","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/clip-tip.unit.test.ts","name":"detects horizontal ellipsis and vertical clamps, excluding hidden and fitting text","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/clip-tip.unit.test.ts","name":"preserves existing focus and tooltip attributes when text fits","tier":"GATED-FULL"}
