@@ -20,29 +20,36 @@ import DisplayPanel from '../src/components/work/DisplayPanel.vue'
 
 const root = fileURLToPath(new URL('../src/', import.meta.url))
 
-// Who imports `target` (a path under src/): static and dynamic imports of every source file.
-function importers(target: string) {
-  const found: string[] = []
+const EDITORS = ['DisplayMenu', 'DisplayPanel', 'HeaderRoomyChoice', 'SortEditor', 'ColumnPicker']
+
+// Relative imports (static and dynamic) of every source file, resolved under src/.
+// A file that never names an editor cannot import it, so only those are parsed.
+function importGraph() {
+  const graph = new Map<string, Set<string>>()
   for (const file of globSync('**/*.{vue,ts}', { cwd: root })) {
     let source = readFileSync(resolve(root, file), 'utf8')
+    if (!EDITORS.some(name => source.includes(name))) continue
     if (file.endsWith('.vue')) {
       const { descriptor } = parse(source)
       source = [descriptor.script?.content, descriptor.scriptSetup?.content].filter(Boolean).join('\n')
     }
     const ast = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-    const specifiers: string[] = []
+    const targets = new Set<string>()
+    const add = (specifier: string) => { if (specifier.startsWith('.')) targets.add(relative(root, resolve(root, dirname(file), specifier))) }
     const visit = (node: ts.Node) => {
-      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) specifiers.push(node.moduleSpecifier.text)
-      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) specifiers.push(node.arguments[0].text)
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) add(node.moduleSpecifier.text)
+      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) add(node.arguments[0].text)
       ts.forEachChild(node, visit)
     }
     visit(ast)
-    if (specifiers.some(specifier => specifier.startsWith('.') && relative(root, resolve(root, dirname(file), specifier)) === target)) found.push(file)
+    graph.set(file, targets)
   }
-  return found.sort()
+  return graph
 }
 
 it('only the Display menu mounts the display editors', () => {
+  const graph = importGraph()
+  const importers = (target: string) => [...graph].filter(([, targets]) => targets.has(target)).map(([file]) => file).sort()
   expect(importers('components/work/DisplayMenu.vue')).toEqual(['components/work/ListToolbar.vue'])
   expect(importers('components/work/DisplayPanel.vue')).toEqual(['components/work/ListToolbar.vue'])
   expect(importers('components/work/HeaderRoomyChoice.vue')).toEqual(['components/work/DisplayPanel.vue', 'components/work/ListToolbar.vue'])
