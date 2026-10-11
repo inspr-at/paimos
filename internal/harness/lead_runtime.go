@@ -40,6 +40,13 @@ func (m *Module) WithLeadRuntime(checks LeadRuntimeChecks) *Module {
 	return m
 }
 
+// WithLeadAdmission binds the executor's authoritative admission predicates.
+// It does not supply execution consent or enable automatic launches.
+func (m *Module) WithLeadAdmission(admission LeadAdmission) *Module {
+	m.leadAdmission = admission
+	return m
+}
+
 type leadRuntimeView struct {
 	Demand *agentsetup.LeadDemand `json:"demand"`
 	State  string                 `json:"state"`
@@ -79,7 +86,7 @@ func (m *Module) readLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principal)
 	if !workorders.UUID(project) {
 		return nil, workorders.Fail(400, "invalid project id")
 	}
-	if err := authz.RequireTx(ctx, tx, p, "harness.read", authz.Scope{ProjectID: project}); err != nil {
+	if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: project}); err != nil {
 		return nil, err
 	}
 	l, err := loadLead(ctx, tx, project, false)
@@ -218,6 +225,21 @@ func (m *Module) validateLeadLaunch(ctx context.Context, tx pgx.Tx, p tenant.Pri
 	}
 	if !valid {
 		return workorders.Fail(409, "lead_hold_unavailable")
+	}
+	policy, err := modelregistry.LoadRoutineLeadPolicyTx(ctx, tx, p.TenantID, g.ProjectID)
+	if err != nil {
+		return err
+	}
+	if policy.OwnerPersonID == nil || *policy.OwnerPersonID != g.OwnerID || policy.Effective.AllowedAccountIDs != nil && !slices.Contains(*policy.Effective.AllowedAccountIDs, g.AccountID) {
+		return workorders.Fail(409, "lead_owner_policy_changed")
+	}
+	// Explicit owner selectors are binding even when the injected reserver
+	// incorrectly returns a healthy profile from a different role/ladder.
+	if policy.ModelSelector != nil && policy.ModelSelector.Cell != nil {
+		cell := policy.ModelSelector.Cell
+		if cell.Mode == "pinned" && cell.ProfileID != launch.ProfileID || cell.Harness != "" && cell.Harness != launch.Harness || cell.Effort != "" && cell.Effort != launch.Effort {
+			return workorders.Fail(409, "lead_model_changed")
+		}
 	}
 	host, err := agentpairing.UnattendedForPrincipal(ctx, tx, p.ID)
 	if err != nil {
@@ -409,7 +431,8 @@ func (m *Module) reportLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principa
 	if _, err = loadLead(ctx, tx, pickup.Demand.ProjectID, true); err != nil {
 		return nil, err
 	}
-	if _, err = load(ctx, tx, pickup.Demand.ProjectID, launch.SessionID, true); err != nil {
+	session, err := load(ctx, tx, pickup.Demand.ProjectID, launch.SessionID, true)
+	if err != nil {
 		return nil, err
 	}
 	if in.Kind == "preflight" {
@@ -429,7 +452,7 @@ func (m *Module) reportLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principa
 		return launch, nil
 	}
 	identity := in.Ownership
-	if identity == nil || identity.DaemonID != pickup.DaemonID || identity.Generation != pickup.DaemonGeneration || !routineRuntimeIdentifier(identity.ProcessID) || identity.RootPID < 1 || identity.GroupID != identity.RootPID || identity.StartedAt.IsZero() {
+	if identity == nil || identity.DaemonID != pickup.DaemonID || identity.Generation != pickup.DaemonGeneration || !validIdentity(identity.Generation) || !validIdentity(identity.ProcessID) || identity.RootPID < 2 || identity.GroupID != identity.RootPID || identity.StartedAt.IsZero() {
 		return nil, workorders.Fail(400, "owned_process_required")
 	}
 	evidence, _ := json.Marshal(identity)
@@ -445,11 +468,16 @@ func (m *Module) reportLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principa
 		}
 	}
 	if in.Kind == "started" {
+		// A lost exit reply may replay started first. Returning its exact existing
+		// evidence is harmless and cannot revive an exited generation.
+		if e == nil {
+			return launch, nil
+		}
 		if state != "claimed" {
 			return nil, workorders.Fail(409, "lead_exit_observed")
 		}
-		if e == nil {
-			return launch, nil
+		if err = m.reportOwnership(ctx, tx, session, *identity, false); err != nil {
+			return nil, err
 		}
 		// This records an already reserved attempt, even across the window edge.
 		// It cannot create/revive a generation or authorize another process.
@@ -472,15 +500,17 @@ func (m *Module) reportLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principa
 		if m.leadRuntime.Exit == nil {
 			return nil, workorders.Fail(409, "lead_runtime_unqualified")
 		}
-		// Reconciliation retains unknown usage/fixtures. The callback cannot
-		// reinterpret a cancelled call or expired heartbeat as a proven exit.
-		if err = m.leadRuntime.Exit(ctx, tx, p, launch, *identity); err != nil {
-			return nil, err
-		}
 		if _, err = tx.Exec(ctx, `INSERT INTO routine_launch_evidence(tenant_id,launch_id,kind,receipt) VALUES($1,$2,'exit_observed',$3)`, p.TenantID, pickup.Demand.ID, evidence); err != nil {
 			return nil, err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE routine_launch_intents SET state='exit_observed',exit_observed_at=clock_timestamp() WHERE id=$1`, pickup.Demand.ID); err != nil {
+			return nil, err
+		}
+		// Make exact exit evidence visible to transactional reservation guards
+		// before reconciliation. Unknown usage remains held; callback failure
+		// rolls back both evidence and settlement. Acquire its locks before any
+		// session-status trigger can append an event.
+		if err = m.leadRuntime.Exit(ctx, tx, p, launch, *identity); err != nil {
 			return nil, err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE harness_sessions SET stopped_at=clock_timestamp(),stop_reason='process_exited',phase='stopped',revision=revision+1 WHERE id=$1`, launch.SessionID); err != nil {

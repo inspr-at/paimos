@@ -112,6 +112,11 @@ func (s *Supervisor) EnableLedger(ctx context.Context, c LedgerConfig) error {
 	return s.enableLedgerLocked(ctx, c)
 }
 func (s *Supervisor) enableLedgerLocked(ctx context.Context, c LedgerConfig) error {
+	// Separate native lead receipts are not worker journal rows. Never rebuild
+	// this member's occupancy from workers alone while a lead exit is unknown.
+	if err := checkRetainedLeads(s.state); err != nil {
+		return err
+	}
 	api, ok := s.api.(ledgerAPI)
 	if !ok {
 		return agentsetup.ErrLedgerUnavailable

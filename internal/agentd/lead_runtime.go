@@ -24,6 +24,19 @@ type LeadRuntimeAdapter interface {
 	RoutineExecutionAdapter
 	LeadExitConfirmed(Process) bool
 	StartLead(context.Context, LeadStartRequest) (Process, error)
+	// ServiceLead consumes only the bound session IO supplied at StartLead.
+	// Qualification must prove durable control/input replay, cooperative pause
+	// and exact-ownership/deadline checks before any native signal.
+	ServiceLead(context.Context, Process, *HarnessPause) error
+}
+
+// LeadSessionIO binds lifecycle operations to this session; the native adapter
+// receives neither the daemon API key nor a way to select another target.
+type LeadSessionIO struct {
+	Yield            func(context.Context) ([]HarnessControl, error)
+	CompleteControl  func(context.Context, string, string, string) error
+	Drain            func(context.Context) ([]HarnessDelivery, error)
+	CompleteDelivery func(context.Context, HarnessDelivery) error
 }
 
 type LeadStartRequest struct {
@@ -33,6 +46,7 @@ type LeadStartRequest struct {
 	Workspace           string
 	ResourceEnvironment []string
 	Lifetime            context.Context
+	SessionIO           LeadSessionIO
 }
 
 // Prepare uses S11's worktree isolation and AEON-1089's resource allocator.
@@ -67,6 +81,8 @@ type localLead struct {
 	resources RoutineResourceLease
 	cancel    context.CancelFunc
 	done      chan struct{}
+	adapter   LeadRuntimeAdapter
+	sequence  int64
 }
 
 type leadRuntime struct {
@@ -170,6 +186,24 @@ func (s *Supervisor) PollLeadRuntime(ctx context.Context) error {
 			if _, e = api.ReportLead(ctx, r.Pickup, "started", r.Ownership); e != nil {
 				return e
 			}
+			if local == nil || local.process == nil || local.adapter == nil || r.Launch == nil {
+				return ErrProcessesUnconfirmed
+			}
+			session := leadSession(r)
+			local.sequence++
+			session.ActivitySequence = local.sequence
+			var pause *HarnessPause
+			if heartbeat, ok := s.api.(pauseHeartbeatAPI); ok {
+				pause, e = heartbeat.HeartbeatHarnessPause(ctx, session, "working")
+			} else {
+				e = s.api.HeartbeatHarness(ctx, session, "working")
+			}
+			if e != nil {
+				return e
+			}
+			if e = local.adapter.ServiceLead(ctx, local.process, pause); e != nil {
+				return e
+			}
 		}
 	}
 	if !s.dispatchAllowed("") {
@@ -203,8 +237,44 @@ func localProcess(local *localLead) Process {
 	return local.process
 }
 
+func leadSession(record leadRecord) HarnessSession {
+	l := record.Launch
+	return HarnessSession{ID: l.SessionID, ProjectID: l.Demand.ProjectID, Lease: record.Pickup.Lease, Harness: l.Harness, Model: l.Model, ReasoningEffort: l.Effort, Ownership: record.Ownership}
+}
+
+func (s *Supervisor) leadSessionIO(session HarnessSession) LeadSessionIO {
+	return LeadSessionIO{
+		Yield: func(ctx context.Context) ([]HarnessControl, error) {
+			controls, err := s.api.YieldHarness(ctx, session)
+			if len(controls) > 32 {
+				return nil, ErrRoutineUnavailable
+			}
+			return controls, err
+		},
+		CompleteControl: func(ctx context.Context, id, outcome, reason string) error {
+			if !uuidPattern.MatchString(id) || len(outcome) > 32 || len(reason) > 128 {
+				return ErrScope
+			}
+			return s.api.CompleteHarnessControl(ctx, session, id, outcome, reason)
+		},
+		Drain: func(ctx context.Context) ([]HarnessDelivery, error) {
+			deliveries, err := s.api.DrainHarness(ctx, session)
+			if len(deliveries) > 1 {
+				return nil, ErrRoutineUnavailable
+			}
+			return deliveries, err
+		},
+		CompleteDelivery: func(ctx context.Context, delivery HarnessDelivery) error {
+			if !uuidPattern.MatchString(delivery.ID) || len(delivery.Outcome) > 32 || len(delivery.FailureReason) > 128 {
+				return ErrScope
+			}
+			return s.api.CompleteHarnessDelivery(ctx, session, delivery)
+		},
+	}
+}
+
 func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand agentsetup.LeadDemand, repository RoutineRepository) error {
-	if !uuidPattern.MatchString(demand.ID) || !uuidPattern.MatchString(demand.ProjectID) || demand.Generation < 0 || demand.Revision < 1 || !s.dispatchAllowed(repository.AccountID) || !s.accountAvailable(repository.AccountID) {
+	if !uuidPattern.MatchString(demand.ID) || !uuidPattern.MatchString(demand.ProjectID) || !uuidPattern.MatchString(demand.OwnerID) || !uuidPattern.MatchString(demand.RoutineRunID) || demand.Generation < 0 || demand.Revision < 1 || !s.dispatchAllowed(repository.AccountID) || !s.accountAvailable(repository.AccountID) {
 		return ErrRoutineUnavailable
 	}
 	// The server resolves the model/role. This local account only constrains the
@@ -221,6 +291,9 @@ func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand a
 	native, ok := adapter.(LeadRuntimeAdapter)
 	if !ok {
 		return ErrRoutineUnavailable
+	}
+	if err := validateRoutineRepository(repository); err != nil {
+		return err
 	}
 	name := "lead-runtime-" + demand.ID + ".json"
 	var record leadRecord
@@ -310,18 +383,27 @@ func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand a
 	if !s.capacityNow().Before(launch.Grant.ExpiresAt) || !s.dispatchAllowed(account.ID) || !s.accountAvailable(account.ID) {
 		return ErrRoutineUnavailable
 	}
+	environment, err := validateRoutineEnvironment(resources.Environment(), launch.Grant)
+	if err != nil {
+		return err
+	}
 	// Persist the irreversible boundary BEFORE StartLead. Any uncertain error,
 	// crash or lost reply freezes this exact attempt instead of calling again.
 	record.Attempted = true
 	if err = s.writeLead(record, false); err != nil {
 		return err
 	}
+	if err = s.ledger.Launching(s.ledgerBinding.Member.ID, record.Pickup.LedgerGeneration, record.Group); err != nil {
+		return err
+	}
 	lifetime, cancel := context.WithTimeout(s.lifetime, time.Duration(launch.MaxDurationSeconds)*time.Second)
 	local := s.leads.leads[demand.ID]
 	local.record = record
 	local.cancel = cancel
+	local.adapter = native
 	resources.HandoffPorts()
-	process, err := native.StartLead(ctx, LeadStartRequest{Launch: launch, Session: HarnessSession{ID: launch.SessionID, ProjectID: demand.ProjectID, Lease: record.Pickup.Lease, Harness: launch.Harness, Model: launch.Model, ReasoningEffort: launch.Effort}, AccountKey: account.Key, Workspace: record.Workspace.Path, ResourceEnvironment: resources.Environment(), Lifetime: lifetime})
+	session := leadSession(record)
+	process, err := native.StartLead(ctx, LeadStartRequest{Launch: launch, Session: session, AccountKey: account.Key, Workspace: record.Workspace.Path, ResourceEnvironment: environment, Lifetime: lifetime, SessionIO: s.leadSessionIO(session)})
 	if err != nil || process == nil {
 		cancel()
 		return ErrProcessesUnconfirmed
@@ -341,12 +423,6 @@ func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand a
 	if err = s.writeLead(record, false); err != nil {
 		return err
 	}
-	if err = resources.Running(process.PID()); err != nil {
-		return err
-	}
-	if err = s.ledger.Running(s.ledgerBinding.Member.ID, record.Pickup.LedgerGeneration, record.Group, identity.RootPID, identity.StartedAt); err != nil {
-		return err
-	}
 	// Wait observes the actual native process, including when a chat turn ends.
 	go func() {
 		defer close(local.done)
@@ -360,6 +436,12 @@ func (s *Supervisor) startLead(ctx context.Context, api leadRuntimeAPI, demand a
 		local.record.ExitObserved = true
 		_ = s.writeLead(local.record, false) // failure retains attempted/unconfirmed state
 	}()
+	if err = resources.Running(process.PID()); err != nil {
+		return err
+	}
+	if err = s.ledger.Running(s.ledgerBinding.Member.ID, record.Pickup.LedgerGeneration, record.Group, identity.RootPID, identity.StartedAt); err != nil {
+		return err
+	}
 	_, err = api.ReportLead(ctx, record.Pickup, "started", &identity)
 	return err
 }

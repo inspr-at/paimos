@@ -31,6 +31,13 @@ ledger release also require the native adapter's confirmed exit and fixture
 exit proof. The executor owns dispatch and continuation through the existing
 routine loop; no external worker-run script or recursive evaluator is used.
 
+Live receipts publish the same owned session's heartbeat. The separately
+qualified native adapter services cooperative pause, controls and leased inbox
+delivery through callbacks bound to that session, without receiving a daemon
+API key. Qualification must prove durable delivery/control replay and exact
+process/deadline checks. A ledger rebuild refuses unknown lead receipts rather
+than reconstructing occupancy from worker journal rows alone.
+
 `routineexec.Options.LeadRuntime` supplies the transaction-only actor preparation,
 validation and reconciliation callbacks; `agentd.Config.LeadRuntime` supplies
 owner-approved local mappings and allocation. These are qualification seams,

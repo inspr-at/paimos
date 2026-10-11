@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -69,16 +70,21 @@ type leadFixtureAdapter struct {
 	exited   atomic.Bool
 	fail     bool
 	identity ownedprocess.Identity
+	serviced atomic.Int32
 }
 
 func (*leadFixtureAdapter) RoutineExecutionSupported(agentsetup.RoutineGrant) bool { return true }
 func (a *leadFixtureAdapter) LeadExitConfirmed(Process) bool                       { return a.exited.Load() }
+func (a *leadFixtureAdapter) ServiceLead(context.Context, Process, *HarnessPause) error {
+	a.serviced.Add(1)
+	return nil
+}
 func (a *leadFixtureAdapter) StartLead(_ context.Context, in LeadStartRequest) (Process, error) {
 	a.starts.Add(1)
 	if a.fail {
 		return nil, errors.New("fixture uncertain native start")
 	}
-	a.identity = ownedprocess.Identity{DaemonID: in.Launch.Grant.DaemonID, Generation: in.Launch.Grant.DaemonGeneration, ProcessID: "fixture-process", RootPID: 99, GroupID: 99, StartedAt: time.Unix(100, 0).UTC()}
+	a.identity = ownedprocess.Identity{DaemonID: in.Launch.Grant.DaemonID, Generation: in.Launch.Grant.DaemonGeneration, ProcessID: strings.Repeat("a", 32), RootPID: 99, GroupID: 99, StartedAt: time.Unix(100, 0).UTC()}
 	return &leadFixtureProcess{adapter: a}, nil
 }
 
@@ -118,8 +124,9 @@ func TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit(t *testing.T
 			if err := os.Mkdir(root, 0700); err != nil {
 				t.Fatal(err)
 			}
-			repository := RoutineRepository{TenantID: g.TenantID, OwnerID: g.OwnerID, ProjectID: g.ProjectID, AccountID: g.AccountID, ComputerID: g.ComputerID, Repository: s.workspace, Root: root, DaemonDigest: g.DaemonDigest, CapabilityDigest: g.CapabilityDigest, HostMappingDigest: g.HostMappingDigest}
-			lease := &routineLeaseFixture{}
+			repository := RoutineRepository{TenantID: g.TenantID, OwnerID: g.OwnerID, ProjectID: g.ProjectID, AccountID: g.AccountID, ComputerID: g.ComputerID, Repository: s.workspace, Root: root, BaseCommit: strings.Repeat("e", 40), DaemonDigest: g.DaemonDigest, CapabilityDigest: g.CapabilityDigest, HostMappingDigest: g.HostMappingDigest}
+			tmp := t.TempDir()
+			lease := &routineLeaseFixture{environment: []string{"AEON_RUN_ID=" + g.LaunchID, "AEON_RUN_DATABASE=aeon_run_" + strings.Repeat("a", 32), "AEON_RUN_APP_PORT=31001", "AEON_RUN_POSTGRES_PORT=31002", "AEON_RUN_TEMP_DIR=" + tmp, "TMPDIR=" + tmp, "TMP=" + tmp, "TEMP=" + tmp}}
 			s.leads.config = &LeadRuntimeConfig{Repositories: []RoutineRepository{repository}, Prepare: func(_ context.Context, d agentsetup.LeadDemand, r RoutineRepository) (RoutineWorkspace, RoutineResourceLease, error) {
 				id := LeadWorktreeID(d, r)
 				path := filepath.Join(root, id)
@@ -157,6 +164,9 @@ func TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit(t *testing.T
 				}
 				if adapter.starts.Load() != 1 || len(lease.finished) != 0 {
 					t.Fatal("live lead released or replaced")
+				}
+				if adapter.serviced.Load() != 1 || a.harnessBeats != 1 || a.harnessBeatSessions[0].ID != api.launch.SessionID || a.harnessBeatSessions[0].Ownership == nil {
+					t.Fatal("live lead did not service its exact owned session")
 				}
 				// A restart cannot infer absence from a PID or reclaim an older daemon.
 				if err := checkRetainedLeads(s.state); !errors.Is(err, ErrProcessesUnconfirmed) {
