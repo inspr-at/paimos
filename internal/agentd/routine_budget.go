@@ -12,8 +12,6 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
-
-	"github.com/inspr-at/paimos/internal/routinebudget"
 )
 
 const RoutineProviderBudgetCapability = "routine_provider_budget_v1"
@@ -25,6 +23,42 @@ var (
 	ErrRoutineUsageUnconfirmed      = errors.New("routine_provider_usage_unconfirmed")
 	ErrRoutineBudgetOverflow        = errors.New("routine_budget_arithmetic_overflow")
 )
+
+// These wire projections mirror the persisted broker's JSON contract without
+// importing its database and account packages into the local daemon.
+type RoutineBudgetAmount struct {
+	Tokens       int64 `json:"tokens"`
+	PaidMicroUSD int64 `json:"paid_microusd"`
+	RecoveryMS   int64 `json:"recovery_ms"`
+}
+
+type RoutineBudgetGrant struct {
+	ID          string              `json:"id"`
+	RunID       string              `json:"run_id"`
+	AttemptID   string              `json:"attempt_id"`
+	ActionID    string              `json:"action_id"`
+	GrantKey    string              `json:"grant_key"`
+	ParentID    *string             `json:"parent_id,omitempty"`
+	AgentRunID  string              `json:"agent_run_id"`
+	AccountID   string              `json:"account_id"`
+	Maximum     RoutineBudgetAmount `json:"maximum"`
+	State       string              `json:"state"`
+	Usage       RoutineBudgetAmount `json:"usage"`
+	BillingMode string              `json:"billing_mode"`
+}
+
+// RoutineBudgetSettlement carries qualified usage evidence; it grants no
+// authority to settle a root hold without the broker's confirmed-exit checks.
+type RoutineBudgetSettlement struct {
+	EventKey       string              `json:"event_key"`
+	Usage          RoutineBudgetAmount `json:"usage"`
+	UsageComplete  bool                `json:"usage_complete"`
+	TokensKnown    bool                `json:"tokens_known"`
+	PaidCostKnown  bool                `json:"paid_cost_known"`
+	ExitConfirmed  bool                `json:"exit_confirmed"`
+	ProvenUnused   bool                `json:"proven_unused"`
+	EvidenceDigest string              `json:"evidence_digest"`
+}
 
 // RoutineProviderPrice is an upper bound from the qualified adapter, not a
 // model's estimate or subscription list price. Each category is disjoint;
@@ -52,8 +86,8 @@ type RoutineProviderBudget struct {
 	Generation     string               `json:"generation"`
 	ModelProfileID string               `json:"model_profile_id"`
 	Mode           string               `json:"mode"`
-	Grant          routinebudget.Grant  `json:"grant"`
-	Remaining      routinebudget.Amount `json:"remaining"`
+	Grant          RoutineBudgetGrant   `json:"grant"`
+	Remaining      RoutineBudgetAmount  `json:"remaining"`
 	Price          RoutineProviderPrice `json:"price"`
 	ExpiresAt      time.Time            `json:"expires_at"`
 }
@@ -76,7 +110,7 @@ type RoutineBudgetAdapter interface {
 }
 
 type RoutineCallReservation struct {
-	Grant routinebudget.Grant
+	Grant RoutineBudgetGrant
 	// True only for a persisted, new dispatch intent. A replay or unresolved
 	// intent MUST return false, even if the held subgrant was found successfully.
 	DispatchAllowed bool
@@ -89,8 +123,8 @@ type RoutineCallReservation struct {
 // Unknown transport outcomes retain holds. There is deliberately no fallback
 // to ordinary run telemetry and no Remote implementation until S11 wires it.
 type RoutineBudgetBroker interface {
-	ReserveRoutineCall(context.Context, RoutineProviderBudget, string, routinebudget.Amount) (RoutineCallReservation, error)
-	SettleRoutineCall(context.Context, string, string, routinebudget.Settlement) (routinebudget.Grant, error)
+	ReserveRoutineCall(context.Context, RoutineProviderBudget, string, RoutineBudgetAmount) (RoutineCallReservation, error)
+	SettleRoutineCall(context.Context, string, string, RoutineBudgetSettlement) (RoutineBudgetGrant, error)
 }
 
 type RoutineCallMaximum struct {
@@ -112,10 +146,10 @@ type RoutineCallPermit struct {
 }
 
 type routineCall struct {
-	maximum routinebudget.Amount
+	maximum RoutineBudgetAmount
 	counts  RoutineCallMaximum
-	grant   routinebudget.Grant
-	final   *routinebudget.Settlement
+	grant   RoutineBudgetGrant
+	final   *RoutineBudgetSettlement
 }
 
 // RoutineCallBudget is process-local enforcement backed by persisted subgrants.
@@ -127,7 +161,7 @@ type RoutineCallBudget struct {
 	binding   RoutineProviderBudget
 	broker    RoutineBudgetBroker
 	now       func() time.Time
-	allocated routinebudget.Amount // settled actual + every outstanding maximum
+	allocated RoutineBudgetAmount // settled actual + every outstanding maximum
 	calls     map[string]*routineCall
 	stopped   error
 }
@@ -142,10 +176,10 @@ func budgetDigest(s string) bool {
 	_, err := hex.DecodeString(s)
 	return err == nil
 }
-func validBudgetAmount(a routinebudget.Amount) bool {
+func validBudgetAmount(a RoutineBudgetAmount) bool {
 	return a.Tokens >= 0 && a.PaidMicroUSD >= 0 && a.RecoveryMS >= 0
 }
-func amountWithin(a, b routinebudget.Amount) bool {
+func amountWithin(a, b RoutineBudgetAmount) bool {
 	return validBudgetAmount(a) && validBudgetAmount(b) && a.Tokens <= b.Tokens && a.PaidMicroUSD <= b.PaidMicroUSD && a.RecoveryMS <= b.RecoveryMS
 }
 
@@ -213,8 +247,8 @@ func roundedFee(units, rate int64, divisor uint64) (int64, error) {
 	return int64(q), nil
 }
 
-func (m RoutineCallMaximum) amount(p RoutineProviderPrice) (routinebudget.Amount, error) {
-	out := routinebudget.Amount{RecoveryMS: m.RecoveryMS}
+func (m RoutineCallMaximum) amount(p RoutineProviderPrice) (RoutineBudgetAmount, error) {
+	out := RoutineBudgetAmount{RecoveryMS: m.RecoveryMS}
 	if m.RecoveryMS < 0 || m.RecoveryMS > 36_000_000_000 {
 		return out, ErrRoutineBudgetBinding
 	}
@@ -248,9 +282,9 @@ func (m RoutineCallMaximum) amount(p RoutineProviderPrice) (routinebudget.Amount
 func (b *RoutineCallBudget) RequireRemaining() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.remainingLocked(routinebudget.Amount{})
+	return b.remainingLocked(RoutineBudgetAmount{})
 }
-func (b *RoutineCallBudget) remainingLocked(next routinebudget.Amount) error {
+func (b *RoutineCallBudget) remainingLocked(next RoutineBudgetAmount) error {
 	if b.stopped != nil {
 		return b.stopped
 	}
@@ -361,7 +395,7 @@ func (b *RoutineCallBudget) Reconcile(ctx context.Context, key string, usage Rou
 	if !amountWithin(actual, c.maximum) || b.binding.Grant.BillingMode == "subscription" && actual.PaidMicroUSD != 0 {
 		return ErrRoutineBudgetBinding
 	}
-	in := routinebudget.Settlement{EventKey: key, Usage: actual, UsageComplete: usage.Complete, TokensKnown: usage.TokensKnown, PaidCostKnown: usage.PaidCostKnown, EvidenceDigest: usage.EvidenceDigest}
+	in := RoutineBudgetSettlement{EventKey: key, Usage: actual, UsageComplete: usage.Complete, TokensKnown: usage.TokensKnown, PaidCostKnown: usage.PaidCostKnown, EvidenceDigest: usage.EvidenceDigest}
 	if c.final != nil {
 		if *c.final != in {
 			return ErrRoutineCallReplay

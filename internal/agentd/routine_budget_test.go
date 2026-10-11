@@ -2,6 +2,7 @@
 package agentd
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,53 @@ import (
 
 	"github.com/inspr-at/paimos/internal/routinebudget"
 )
+
+// Risk: decoupling daemon wire projections from the database broker can drop
+// allowance, usage or exit-evidence fields and silently change settlement.
+func TestRoutineProviderBudgetWireMatchesBroker(t *testing.T) {
+	parent := "parent-grant"
+	maximum := routinebudget.Amount{Tokens: 101, PaidMicroUSD: 202, RecoveryMS: 303}
+	usage := routinebudget.Amount{Tokens: 11, PaidMicroUSD: 22, RecoveryMS: 33}
+	grant := routinebudget.Grant{
+		ID: "grant", RunID: "run", AttemptID: "attempt", ActionID: "action",
+		GrantKey: "call", ParentID: &parent, AgentRunID: "agent-run", AccountID: "account",
+		Maximum: maximum, State: "settled", Usage: usage, BillingMode: "api",
+	}
+	settlement := routinebudget.Settlement{
+		EventKey: "call", Usage: usage, UsageComplete: true, TokensKnown: true,
+		PaidCostKnown: true, ExitConfirmed: true, ProvenUnused: true,
+		EvidenceDigest: strings.Repeat("c", 64),
+	}
+	assertWire := func(t *testing.T, broker, daemon any) {
+		t.Helper()
+		wire, err := json.Marshal(broker)
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoder := json.NewDecoder(bytes.NewReader(wire))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(daemon); err != nil {
+			t.Fatalf("daemon rejected broker fields: %v", err)
+		}
+		roundTrip, err := json.Marshal(daemon)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(wire, roundTrip) {
+			t.Fatalf("daemon changed broker wire fields: broker=%s daemon=%s", wire, roundTrip)
+		}
+	}
+	t.Run("amount", func(t *testing.T) { assertWire(t, maximum, &RoutineBudgetAmount{}) })
+	t.Run("grant", func(t *testing.T) { assertWire(t, grant, &RoutineBudgetGrant{}) })
+	t.Run("root-grant", func(t *testing.T) {
+		grant.ParentID = nil
+		assertWire(t, grant, &RoutineBudgetGrant{})
+	})
+	t.Run("complete-settlement", func(t *testing.T) { assertWire(t, settlement, &RoutineBudgetSettlement{}) })
+	t.Run("unknown-settlement", func(t *testing.T) {
+		assertWire(t, routinebudget.Settlement{}, &RoutineBudgetSettlement{})
+	})
+}
 
 type qualifiedBudgetFixture struct {
 	qualification    RoutineBudgetQualification
@@ -39,13 +87,13 @@ func (a *qualifiedBudgetFixture) StartBudgeted(_ context.Context, _ StartRequest
 // S09's own package tests exercise the real DB broker and transactional fences.
 type budgetBrokerFixture struct {
 	mu        sync.Mutex
-	grants    map[string]routinebudget.Grant
-	receipts  map[string]routinebudget.Settlement
+	grants    map[string]RoutineBudgetGrant
+	receipts  map[string]RoutineBudgetSettlement
 	writes    int
 	loseReply bool
 }
 
-func (s *budgetBrokerFixture) ReserveRoutineCall(_ context.Context, b RoutineProviderBudget, key string, max routinebudget.Amount) (RoutineCallReservation, error) {
+func (s *budgetBrokerFixture) ReserveRoutineCall(_ context.Context, b RoutineProviderBudget, key string, max RoutineBudgetAmount) (RoutineCallReservation, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if g, ok := s.grants[key]; ok {
@@ -57,7 +105,7 @@ func (s *budgetBrokerFixture) ReserveRoutineCall(_ context.Context, b RoutinePro
 	s.grants[key] = g
 	return RoutineCallReservation{Grant: g, DispatchAllowed: true}, nil
 }
-func (s *budgetBrokerFixture) SettleRoutineCall(_ context.Context, run, id string, in routinebudget.Settlement) (routinebudget.Grant, error) {
+func (s *budgetBrokerFixture) SettleRoutineCall(_ context.Context, run, id string, in RoutineBudgetSettlement) (RoutineBudgetGrant, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key, g := range s.grants {
@@ -80,22 +128,22 @@ func (s *budgetBrokerFixture) SettleRoutineCall(_ context.Context, run, id strin
 		s.grants[key] = g
 		if s.loseReply && g.State == "settled" {
 			s.loseReply = false
-			return routinebudget.Grant{}, errors.New("fixture settlement response lost")
+			return RoutineBudgetGrant{}, errors.New("fixture settlement response lost")
 		}
 		return g, nil
 	}
-	return routinebudget.Grant{}, errors.New("fixture grant missing")
+	return RoutineBudgetGrant{}, errors.New("fixture grant missing")
 }
 
 func routineBudgetFixture(t *testing.T, mode string, tokens, money int64) (*RoutineCallBudget, *budgetBrokerFixture, StartRequest, *qualifiedBudgetFixture) {
 	t.Helper()
 	now := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
 	price := RoutineProviderPrice{Provider: "fixture", Model: "fixture-model", Currency: "USD", SourceDigest: strings.Repeat("a", 64), InputPerMillion: 1_000_000, OutputPerMillion: 1_000_000, CacheReadPerMillion: 1_000_000, CacheWritePerMillion: 1_000_000, ToolPerUnit: 20}
-	grant := routinebudget.Grant{ID: "root", RunID: "routine", AttemptID: "attempt", ActionID: "action", GrantKey: "actor", AgentRunID: "agent-run", AccountID: "account", Maximum: routinebudget.Amount{Tokens: tokens, PaidMicroUSD: money, RecoveryMS: 100000}, State: "held", BillingMode: "api"}
+	grant := RoutineBudgetGrant{ID: "root", RunID: "routine", AttemptID: "attempt", ActionID: "action", GrantKey: "actor", AgentRunID: "agent-run", AccountID: "account", Maximum: RoutineBudgetAmount{Tokens: tokens, PaidMicroUSD: money, RecoveryMS: 100000}, State: "held", BillingMode: "api"}
 	transport := &RoutineProviderBudget{Capability: RoutineProviderBudgetCapability, RuntimeDigest: strings.Repeat("b", 64), TenantID: "tenant", PrincipalID: "agent", Generation: "generation", ModelProfileID: "profile", Mode: mode, Grant: grant, Remaining: grant.Maximum, Price: price, ExpiresAt: now.Add(time.Hour)}
 	r := StartRequest{TenantID: "tenant", PrincipalID: "agent", Generation: "generation", Profile: Profile{ID: "profile", Model: price.Model}, Run: Run{ID: "agent-run", RequestedAccountID: "account", RoutineBudget: transport}}
 	a := &qualifiedBudgetFixture{qualification: RoutineBudgetQualification{Capability: transport.Capability, RuntimeDigest: transport.RuntimeDigest, BillingMode: "api", Price: price, Tokens: true, PaidMoney: true}}
-	broker := &budgetBrokerFixture{grants: map[string]routinebudget.Grant{}, receipts: map[string]routinebudget.Settlement{}}
+	broker := &budgetBrokerFixture{grants: map[string]RoutineBudgetGrant{}, receipts: map[string]RoutineBudgetSettlement{}}
 	b, err := newRoutineCallBudget(r, a, broker, func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
