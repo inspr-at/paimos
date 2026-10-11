@@ -115,7 +115,7 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		lifecycle, err := loadLifecycleCatalog(r.Context(), tx, now)
+		lifecycle, err := loadLifecycleCatalog(r.Context(), tx, now, ids...)
 		if err != nil {
 			return err
 		}

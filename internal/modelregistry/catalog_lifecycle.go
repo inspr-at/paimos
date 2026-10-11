@@ -72,6 +72,7 @@ func resolveLifecycle(facts []CatalogFact, identity string, now time.Time) Catal
 		successor := rawString(f.Value)
 		provider, _, _ := strings.Cut(identity, ":")
 		if successor != "" && len(successor) <= 128 && modelRE.MatchString(successor) {
+			successor = strings.TrimPrefix(successor, provider+":")
 			_, successor = CatalogIdentity(provider, "", successor, "")
 			successor = provider + ":" + successor
 			if successor != identity {
@@ -111,7 +112,7 @@ func resolveLifecycle(facts []CatalogFact, identity string, now time.Time) Catal
 // failed, revoked, partial or bounded-out response never reaches this writer.
 func recordCatalogPresence(ctx context.Context, tx pgx.Tx, tenantID, source string, at time.Time, catalog ProviderCatalog) error {
 	endpoint := vendorURLs[source]
-	rows, err := tx.Query(ctx, `SELECT provider,model_id,route,source_kind FROM model_catalog_facts WHERE source=$1 AND fact='model_id' ORDER BY provider,model_id,route LIMIT 2001`, endpoint)
+	rows, err := tx.Query(ctx, `SELECT provider,model_id,route,source_kind FROM model_catalog_facts WHERE source=$1 AND fact='model_id' ORDER BY provider,model_id,route LIMIT 20001`, endpoint)
 	if err != nil {
 		return err
 	}
@@ -139,14 +140,30 @@ func recordCatalogPresence(ctx context.Context, tx pgx.Tx, tenantID, source stri
 	if err != nil {
 		return err
 	}
-	if len(facts) > 2000 {
+	if len(facts) > 20000 {
 		return fail(413, "catalog presence limit")
 	}
 	return RecordCatalogFacts(ctx, tx, tenantID, facts)
 }
 
-func loadLifecycleCatalog(ctx context.Context, tx pgx.Tx, now time.Time) ([]lifecycleModel, error) {
-	rows, err := tx.Query(ctx, `SELECT provider,model_id,(aeon_model_line(CASE provider WHEN 'openai' THEN 'codex' WHEN 'anthropic' THEN 'claude' WHEN 'google' THEN 'gemini' WHEN 'xai' THEN 'grok' ELSE '' END,model_id))[1],(aeon_model_line(CASE provider WHEN 'openai' THEN 'codex' WHEN 'anthropic' THEN 'claude' WHEN 'google' THEN 'gemini' WHEN 'xai' THEN 'grok' ELSE '' END,model_id))[2],bool_or(source_kind IN ('native','harness','aggregator')) FROM model_catalog_facts GROUP BY provider,model_id ORDER BY provider,model_id LIMIT 2001`)
+func loadLifecycleCatalog(ctx context.Context, tx pgx.Tx, now time.Time, page ...[2]string) ([]lifecycleModel, error) {
+	c, err := loadBoardCatalog(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	focused := map[string]bool{}
+	focusLines := map[string]bool{}
+	for _, id := range page {
+		focused[id[0]+":"+id[1]] = true
+	}
+	for _, ps := range c.profiles {
+		for _, p := range ps {
+			provider, id := CatalogIdentity(p.Family, p.Harness, p.Model, p.Effort)
+			focused[provider+":"+id] = true
+		}
+	}
+
+	rows, err := tx.Query(ctx, `SELECT provider,model_id,(aeon_model_line(CASE provider WHEN 'openai' THEN 'codex' WHEN 'anthropic' THEN 'claude' WHEN 'google' THEN 'gemini' WHEN 'xai' THEN 'grok' ELSE '' END,model_id))[1],(aeon_model_line(CASE provider WHEN 'openai' THEN 'codex' WHEN 'anthropic' THEN 'claude' WHEN 'google' THEN 'gemini' WHEN 'xai' THEN 'grok' ELSE '' END,model_id))[2],bool_or(source_kind IN ('native','harness','aggregator')) FROM model_catalog_facts GROUP BY provider,model_id ORDER BY provider,model_id LIMIT 20001`)
 	if err != nil {
 		return nil, err
 	}
@@ -167,10 +184,39 @@ func loadLifecycleCatalog(ctx context.Context, tx pgx.Tx, now time.Time) ([]life
 	if err != nil {
 		return nil, err
 	}
-	if len(models) > 2000 {
+	if len(models) > 20000 {
 		return nil, fail(413, "catalog identity limit")
 	}
-	rows, err = tx.Query(ctx, `SELECT provider,model_id,route,fact,value,source,source_kind,field_path,fetched_at FROM model_catalog_facts WHERE fact IN ('lifecycle','deprecated_at','retirement_at','successor','present') ORDER BY provider,model_id,route,fact,source LIMIT 32001`)
+	// Source catalogs can contain thousands of unrelated models. Load full
+	// lifecycle evidence only for requested/registered models and their lines.
+	for _, model := range models {
+		if focused[model.Identity] {
+			focusLines[model.Provider+":"+model.Line] = true
+		}
+	}
+	for _, ps := range c.profiles {
+		for _, p := range ps {
+			provider, id := CatalogIdentity(p.Family, p.Harness, p.Model, p.Effort)
+			if _, ok := indexes[provider+":"+id]; !ok {
+				_, line, _ := ProfileLine(p)
+				focusLines[provider+":"+line] = true
+			}
+		}
+	}
+	modelsInScope := []lifecycleModel{}
+	keys := []map[string]string{}
+	indexes = map[string]int{}
+	for _, model := range models {
+		if !focused[model.Identity] && !focusLines[model.Provider+":"+model.Line] {
+			continue
+		}
+		indexes[model.Identity] = len(modelsInScope)
+		modelsInScope = append(modelsInScope, model)
+		keys = append(keys, map[string]string{"provider": model.Provider, "model_id": model.Model})
+	}
+	models = modelsInScope
+	keyJSON, _ := json.Marshal(keys)
+	rows, err = tx.Query(ctx, `SELECT f.provider,f.model_id,route,fact,value,source,source_kind,field_path,fetched_at FROM model_catalog_facts f JOIN jsonb_to_recordset($1::jsonb) AS k(provider text,model_id text) USING(provider,model_id) WHERE fact IN ('lifecycle','deprecated_at','retirement_at','successor','present') AND value<>'null'::jsonb ORDER BY f.provider,f.model_id,route,fact,source LIMIT 32001`, string(keyJSON))
 	if err != nil {
 		return nil, err
 	}
@@ -193,10 +239,6 @@ func loadLifecycleCatalog(ctx context.Context, tx pgx.Tx, now time.Time) ([]life
 	}
 	err = rows.Err()
 	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	c, err := loadBoardCatalog(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -243,7 +285,7 @@ func loadLifecycleCatalog(ctx context.Context, tx pgx.Tx, now time.Time) ([]life
 	}
 	for i := range models {
 		model := &models[i]
-		if model.Lifecycle.Successor != nil || model.Version == "" {
+		if !focused[model.Identity] || model.Lifecycle.Successor != nil || model.Version == "" {
 			continue
 		}
 		for _, j := range candidateLines[model.Provider+":"+model.Line] {
