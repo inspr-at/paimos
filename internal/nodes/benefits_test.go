@@ -22,7 +22,7 @@ import (
 const benefitFields = `{"pill_en":"Clear release notes","pill_de":"Verständliche Release Notes","benefit_en":"Tickets explain the benefit.","benefit_de":"Tickets erklären den Nutzen."}`
 
 // Risk: accepting invalid pills strands delivered work at the completion gate.
-func TestTicketPillsValidatedAtWriteTime(t *testing.T) {
+func testTicketPillsValidatedAtWriteTime(t *testing.T) {
 	p := newPrincipal(t, "pill-writes")
 	k := kindBySlug(t, p, "work")
 	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Valid draft","fields":%s}`, k.ID, benefitFields))
@@ -101,6 +101,7 @@ func TestTicketPillsValidatedAtWriteTime(t *testing.T) {
 }
 
 func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
+	testTicketPillsValidatedAtWriteTime(t)
 	for _, state := range []string{"done", "accepted", "delivered", "custom-complete", " CUSTOM--COMPLETE "} {
 		t.Run(state, func(t *testing.T) {
 			p := newPrincipal(t, "benefits")

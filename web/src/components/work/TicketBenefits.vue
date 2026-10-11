@@ -20,7 +20,9 @@ const languages = [
 const text = (key: string) => typeof props.fields[key] === 'string' ? (props.fields[key] as string).trim() : ''
 const filled = computed(() => languages.filter(language => text(`pill_${language.key}`) || text(`benefit_${language.key}`)))
 const guidance = computed(() => {
-  if (props.editing && !props.done) return 'Each non-empty pill needs 2–4 words to save. Before Done, both languages and benefits are required.'
+  if (props.editing) return props.done
+    ? 'Each non-empty pill needs 2–4 words to save. Completing it again needs both languages and benefits.'
+    : 'Each non-empty pill needs 2–4 words to save. Before Done, both languages and benefits are required.'
   if (props.parent || !issues.value.length) return ''
   return props.done
     ? 'This completed ticket has incomplete benefit fields. Completing it again needs both languages.'

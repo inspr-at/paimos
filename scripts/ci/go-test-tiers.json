@@ -7852,8 +7852,6 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestTicketGraphShapeClosedFilterAndIsolation","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/nodes","name":"TestTicketPillsValidatedAtWriteTime","tier":"GATED-FULL"}
-    ,
     {"kind":"go","package":"internal/nodes","name":"TestTrimDecimal","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestUSDFromMicros","tags":["delete-candidate"],"tier":"GATED-FULL"}
