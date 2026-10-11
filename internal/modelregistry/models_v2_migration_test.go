@@ -167,7 +167,10 @@ func TestModelsV2MigrationGolden(t *testing.T) {
 		if sourceCount != 7 {
 			t.Fatalf("legacy rows changed: %d", sourceCount)
 		}
-		before, _ := json.Marshal(audit)
+		var before json.RawMessage
+		if err := tx.QueryRow(ctx, `SELECT audit FROM model_v2_migrations`).Scan(&before); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(ctx, `SELECT aeon_migrate_all_models_v2()`); err != nil {
 			return err
 		}
@@ -178,12 +181,12 @@ func TestModelsV2MigrationGolden(t *testing.T) {
 		if eventCount != 1 {
 			t.Fatal("duplicate migration event")
 		}
-		var again any
+		var again json.RawMessage
 		if err := tx.QueryRow(ctx, `SELECT audit FROM model_v2_migrations`).Scan(&again); err != nil {
 			return err
 		}
-		if len(before) == 0 || again == nil {
-			t.Fatal("missing retained audit")
+		if len(before) == 0 || !reflect.DeepEqual(before, again) {
+			t.Fatal("migration replay changed retained audit")
 		}
 		return nil
 	})

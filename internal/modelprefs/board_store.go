@@ -58,17 +58,19 @@ func LoadBoard(ctx context.Context, tx pgx.Tx, person *string, project string) (
 	if len(ids) > 2 {
 		return s, ErrBoardBounds
 	}
-	rows, err = tx.Query(ctx, `SELECT profile_id::text,column_key,situation,rank,not_allowed,thinking,effort,effort_level,coalesce(end_mode,''),coalesce(efforts,'{}') FROM (`+OrdersSQL+`) orders WHERE profile_id=ANY($1::uuid[]) ORDER BY profile_id,column_key,situation LIMIT 1537`, ids)
+	rows, err = tx.Query(ctx, `SELECT profile_id::text,column_key,situation,rank,not_allowed,thinking,effort,effort_level,coalesce(end_mode,''),CASE WHEN octet_length(coalesce(efforts,'{}')::text)<=32768 AND jsonb_typeof(coalesce(efforts,'{}'))='object' THEN coalesce(efforts,'{}') ELSE '{}' END,
+ (octet_length(coalesce(efforts,'{}')::text)>32768 OR jsonb_typeof(coalesce(efforts,'{}'))<>'object') FROM (`+OrdersSQL+`) orders WHERE profile_id=ANY($1::uuid[]) ORDER BY profile_id,column_key,situation LIMIT 1537`, ids)
 	if err != nil {
 		return s, err
 	}
 	for rows.Next() {
 		var o BoardOrder
-		if err := rows.Scan(&o.ProfileID, &o.Column, &o.Situation, &o.Rank, &o.Not, &o.Thinking, &o.Effort, &o.EffortLevel, &o.End, &o.Efforts); err != nil {
+		var invalidEfforts bool
+		if err := rows.Scan(&o.ProfileID, &o.Column, &o.Situation, &o.Rank, &o.Not, &o.Thinking, &o.Effort, &o.EffortLevel, &o.End, &o.Efforts, &invalidEfforts); err != nil {
 			rows.Close()
 			return s, err
 		}
-		if len(o.Rank) > 512 || len(o.Not) > 512 {
+		if len(o.Rank) > 512 || len(o.Not) > 512 || invalidEfforts || len(o.Efforts) > 512 {
 			rows.Close()
 			return s, ErrBoardBounds
 		}

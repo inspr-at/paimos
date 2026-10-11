@@ -61,6 +61,12 @@ CREATE FUNCTION aeon_models_line(family text, harness text, model text) RETURNS 
   CASE WHEN family='anthropic' THEN regexp_replace(model,'^anthropic/','') ELSE model END);
 $$;
 
+-- Stored picker aliases are normalized only when the registry knows them.
+CREATE FUNCTION aeon_models_canonical_line(line text) RETURNS text LANGUAGE sql STABLE AS $$
+ SELECT coalesce((SELECT aeon_models_line(p.family,p.harness,p.model) FROM model_profiles p
+  WHERE aeon_model_board_line(p.family,p.harness,p.model)=line ORDER BY p.slug,p.version,p.id LIMIT 1),line);
+$$;
+
 CREATE FUNCTION aeon_migrate_models_v2(p_tenant uuid) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE prior text := current_setting('aeon.tenant_id',true); visible text := current_setting('aeon.visible_projects',true);
  audit jsonb; actor uuid; workspace uuid; item record; target record; source_rows jsonb; moved jsonb := '[]';
@@ -68,6 +74,7 @@ DECLARE prior text := current_setting('aeon.tenant_id',true); visible text := cu
 BEGIN
  PERFORM set_config('aeon.tenant_id',p_tenant::text,true);
  PERFORM set_config('aeon.visible_projects','*',true);
+ PERFORM id FROM tenants WHERE id=p_tenant FOR NO KEY UPDATE;
  SELECT m.audit INTO audit FROM model_v2_migrations m WHERE m.tenant_id=p_tenant;
  IF audit IS NOT NULL THEN
   PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
@@ -86,7 +93,12 @@ BEGIN
   'ladders',coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.role,r.priority) FROM model_role_routes r),'[]'::jsonb),
   'security_ladder',coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.priority) FROM model_security_role_routes r),'[]'::jsonb),
   'orders',coalesce((SELECT jsonb_agg(to_jsonb(o) ORDER BY o.profile_id,o.column_key,o.situation) FROM model_pref_orders o),'[]'::jsonb),
-  'rules',coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.scope,r.column_key,r.position,r.line) FROM model_rules r),'[]'::jsonb)) INTO source_rows;
+  'rules',coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.scope,r.column_key,r.position,r.line) FROM model_rules r),'[]'::jsonb),
+  'dial',coalesce((SELECT jsonb_agg(jsonb_build_object('person',pref.principal_id,'value',pref.value) ORDER BY pref.principal_id) FROM user_preferences pref WHERE pref.key='agents.working'),'[]'::jsonb)) INTO source_rows;
+ -- Preserve the meaning of saved Cursor/provider aliases across routes.
+ UPDATE model_pref_orders SET
+  rank=CASE WHEN rank IS NULL THEN NULL ELSE ARRAY(SELECT line FROM (SELECT aeon_models_canonical_line(v) AS line,n FROM unnest(rank) WITH ORDINALITY u(v,n)) refs GROUP BY line ORDER BY min(n)) END,
+  not_allowed=ARRAY(SELECT line FROM (SELECT aeon_models_canonical_line(v) AS line,n FROM unnest(not_allowed) WITH ORDINALITY u(v,n)) refs GROUP BY line ORDER BY min(n));
  SELECT id INTO actor FROM principals WHERE kind='agent' AND name='Models v2 migration' ORDER BY id LIMIT 1;
  IF actor IS NULL THEN INSERT INTO principals(tenant_id,kind,name) VALUES(p_tenant,'agent','Models v2 migration') RETURNING id INTO actor; END IF;
  IF NOT EXISTS(SELECT 1 FROM model_pref_profiles WHERE scope='workspace') THEN
@@ -136,8 +148,9 @@ BEGIN
   moved := moved||jsonb_build_array(jsonb_build_object('from',to_jsonb(item),'to',jsonb_build_object('pause',item.harness||'/'||item.model)));
  END LOOP;
  INSERT INTO model_row_constraints(tenant_id,scope,project_id,column_key,line,kind,position,why,set_by,set_at)
- SELECT tenant_id,scope,project_id,column_key,line,
-  CASE lock WHEN 'bottom' THEN 'chain' ELSE 'never' END,position,why,set_by,set_at FROM model_rules WHERE lock IN ('bottom','not');
+ SELECT DISTINCT ON (scope,project_id,column_key,aeon_models_canonical_line(line)) tenant_id,scope,project_id,column_key,aeon_models_canonical_line(line),
+  CASE lock WHEN 'bottom' THEN 'chain' ELSE 'never' END,position,why,set_by,set_at FROM model_rules WHERE lock IN ('bottom','not')
+ ORDER BY scope,project_id,column_key,aeon_models_canonical_line(line),(lock='not') DESC,position,line;
  -- Sources retain every stamp and value for older readers; Models reads the
  -- copied constraints, appending chain entries after the row's order.
  FOR item IN SELECT * FROM model_rules WHERE lock IN ('bottom','not') ORDER BY scope,column_key,position,line LOOP
@@ -165,7 +178,9 @@ BEGIN
    ELSE INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,end_mode,effort,effort_level,efforts,set_by)
     VALUES(p_tenant,target.profile_id,target.column_key,'first',ARRAY[target.line],'wait',target.effort,target.effort_level,target.efforts,actor); END IF;
   END LOOP;
-  moved := moved||jsonb_build_array(jsonb_build_object('from','dial/wait','person',item.person,'harness',item.harness,'to','personal rows ending in Wait'));
+  moved := moved||jsonb_build_array(jsonb_build_object('from','dial/wait','person',item.person,'harness',item.harness,'to',
+   coalesce((SELECT jsonb_agg(jsonb_build_object('profile',o.profile_id,'column',o.column_key,'rank',o.rank,'end',o.end_mode) ORDER BY o.column_key)
+   FROM model_pref_orders o JOIN model_pref_profiles own ON own.id=o.profile_id WHERE own.person_id=item.person AND o.situation='first' AND o.end_mode='wait'),'[]'::jsonb)));
  END LOOP;
  UPDATE model_pref_profiles SET revision=revision+1 WHERE scope='workspace' OR EXISTS(SELECT 1 FROM model_pref_orders o WHERE o.profile_id=model_pref_profiles.id);
  audit := jsonb_build_object('migration',1333,'migration_actor',actor,'before',source_rows,'moved',moved,

@@ -254,8 +254,21 @@ func boardLineID(p Profile) string { f, l, _ := ProfileLine(p); return f + ":" +
 
 // Caller holds the tenant and registry fences. All transfers precede events.
 func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile) error {
-	oldLine, _ := modelsLine(before[0])
 	newLine, _ := modelsLine(after[0])
+	oldLine, _ := modelsLine(before[0])
+	aliases := []string{oldLine}
+	if legacy := boardLineID(before[0]); legacy != oldLine {
+		aliases = append(aliases, legacy)
+	}
+	for _, line := range aliases {
+		if err := transferModelLineReferences(ctx, tx, p, before, after, line, newLine); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func transferModelLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile, oldLine, newLine string) error {
 	if oldLine != newLine {
 		var collision bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_rules a JOIN model_rules b ON b.tenant_id=a.tenant_id AND b.scope=a.scope AND b.project_id IS NOT DISTINCT FROM a.project_id AND b.column_key=a.column_key WHERE a.line=$1 AND b.line=$2)`, oldLine, newLine).Scan(&collision); err != nil {
