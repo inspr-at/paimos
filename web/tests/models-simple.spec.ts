@@ -294,7 +294,8 @@ test('many models stay calm: one option per line, older versions fold per provid
   await expect(menu.locator('[data-provider="anthropic"] .pm-oh')).toHaveText('Older versions')
   const opus48 = menu.locator('[data-old="anthropic:opus@4.8"]')
   await expect(opus48).toContainText('Claude Code · replaced by Opus 5.5'); await expect(opus48).toHaveAttribute('aria-disabled', 'true')
-  await opus48.click(); await expect(menu).toBeVisible(); expect(state.writes).toHaveLength(0)
+  // A person can still click it: nothing is picked and the menu stays (Playwright needs force for aria-disabled).
+  await opus48.click({ force: true }); await expect(menu).toBeVisible(); expect(state.writes).toHaveLength(0)
   // Typing searches older versions too; Enter on one says why it isn't picked, Enter on the newest picks it.
   await page.getByRole('combobox').fill('opus')
   await expect(menu.locator('[role="option"]')).toHaveCount(2)

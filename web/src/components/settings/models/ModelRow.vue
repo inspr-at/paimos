@@ -38,6 +38,6 @@ const family = computed(() => props.row.entry?.provider ?? lineFamily(props.row.
     </span>
     <div class="c3"><span v-if="row.lock" class="lock" data-lock tabindex="0" role="img" :data-tip="lockTip" :aria-label="`Locked for everyone. ${lockTip}`"><AppIcon name="lock" :size="15" /></span></div>
     <div class="c4"><button v-if="row.remove" type="button" class="icon-btn flat x" data-remove :aria-label="`Remove ${row.label}; it uses the default again`" data-tip="Use the default again" @click="emit('remove')"><AppIcon name="close" :size="14" /></button></div>
-    <p v-if="cant" class="na" data-unavailable><AppIcon name="alert" :size="14" /><span>{{ cant.cause }}<span class="sr-only">, so</span> <AppIcon class="ar" name="arrow" :size="12" /> {{ cant.then }}.</span></p>
+    <p v-if="cant" class="na" data-unavailable><AppIcon name="alert" :size="14" /><span>{{ cant.cause }}<span class="sr-only">, so </span><AppIcon class="ar" name="arrow" :size="12" />{{ cant.then }}.</span></p>
   </div>
 </template>
