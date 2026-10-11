@@ -377,6 +377,7 @@
         "web/src/components/agents/DecisionDeskPanel.vue",
         "web/src/components/lead/LeadContent.vue",
         "web/src/components/agents/SessionQuestion.vue",
+        "web/src/components/header/DeskPreview.vue",
         "web/src/components/settings/models/ModelOutdatedSheet.vue"
       ]
     },

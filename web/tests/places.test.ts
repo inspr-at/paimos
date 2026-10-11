@@ -3,8 +3,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { PLACES, placeOf, releaseChordOpen, sequence, visiblePlaces } from '../src/lib/places.ts'
 
-test('places are Projects, Decision Desk, Agents, Business in that order; pages belong to one or none', () => {
-  assert.deepEqual(PLACES.map(p => p.label), ['Projects', 'Decision Desk', 'Agents', 'Business'])
+test('places are Projects, Agents, Business, Decision Desk in that order; pages belong to one or none', () => {
+  assert.deepEqual(PLACES.map(p => p.label), ['Projects', 'Agents', 'Business', 'Decision Desk'])
   assert.equal(placeOf('/'), 'projects')
   assert.equal(placeOf('/briefing'), null)
   assert.equal(placeOf('/decision-desk'), 'desk')
@@ -16,8 +16,8 @@ test('places are Projects, Decision Desk, Agents, Business in that order; pages 
 })
 
 test('Business shows only while one of its parts is open', () => {
-  assert.deepEqual(visiblePlaces({ signedIn: true, business: false }).map(p => p.id), ['projects', 'desk', 'agents'])
-  assert.deepEqual(visiblePlaces({ signedIn: true, business: true }).map(p => p.id), ['projects', 'desk', 'agents', 'business'])
+  assert.deepEqual(visiblePlaces({ signedIn: true, business: false }).map(p => p.id), ['projects', 'agents', 'desk'])
+  assert.deepEqual(visiblePlaces({ signedIn: true, business: true }).map(p => p.id), ['projects', 'agents', 'business', 'desk'])
   assert.deepEqual(visiblePlaces({ signedIn: false, business: true }), [])
 })
 
