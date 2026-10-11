@@ -13,6 +13,8 @@ import urllib.error
 import urllib.request
 import uuid
 
+MISSING_ROUTE = object()
+
 
 def previous_account_use_capable(tag):
     """The pinned release's embedded entry migration identifies its floor.
@@ -59,25 +61,53 @@ class Probe:
         self.opener = urllib.request.build_opener(
             urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
-    def call(self, path, body=None):
+    def json_response(self, path, body=None):
         request = urllib.request.Request(
             self.base + path,
             data=None if body is None else json.dumps(body).encode(),
             headers={} if body is None else {'Content-Type': 'application/json'})
         try:
-            with self.opener.open(request, timeout=15) as response:
-                if response.status not in (200, 201):
-                    raise AssertionError(f'{path}: HTTP {response.status}')
-                if response.headers.get_content_type() != 'application/json':
-                    raise AssertionError(f'{path}: expected JSON')
-                payload = json.load(response)
+            response = self.opener.open(request, timeout=15)
         except urllib.error.HTTPError as error:
-            # Do not dump headers, cookies or response bodies into CI logs.
-            status = error.code
-            error.close()
-            raise AssertionError(f'{path}: HTTP {status}') from None
+            response = error
+        # Error responses need the same bounds and validation as successful
+        # responses. Never dump headers, cookies or bodies into CI logs.
+        with response:
+            if response.headers.get_content_type() != 'application/json':
+                raise AssertionError(f'{path}: expected JSON')
+            raw = response.read((1 << 20) + 1)
+            if len(raw) > 1 << 20:
+                raise AssertionError(f'{path}: response exceeds bound')
+            try:
+                payload = json.loads(raw)
+            except ValueError:
+                raise AssertionError(f'{path}: expected JSON') from None
+            return response.status, response.headers.get('Content-Type'), payload
+
+    def call(self, path, body=None, *, missing_route=False):
+        status, content_type, payload = self.json_response(path, body)
+        if status not in (200, 201):
+            if missing_route and (status, content_type, payload) == missing_route:
+                return MISSING_ROUTE
+            raise AssertionError(f'{path}: HTTP {status}')
         print(f'previous release: {path} OK')
         return payload
+
+    def account_use(self):
+        # Detect the previous binary's own API, never its release number or the
+        # candidate schema. Old authenticated routers may deny missing routes;
+        # only their exact unregistered-route response proves absence.
+        path = '/api/account-use?limit=1'
+        fallback = self.json_response(f'/api/aeon-compat-absent-{uuid.uuid4()}?limit=1')
+        matrix = self.call(path, missing_route=fallback)
+        if matrix is MISSING_ROUTE:
+            return None
+        if (not isinstance(matrix, dict) or not isinstance(matrix.get('rules'), dict)
+            or type(matrix['rules'].get('revision')) is not int or matrix['rules']['revision'] < 1
+            or 'enforced_at' not in matrix['rules']
+            or any(not isinstance(matrix.get(key), list) for key in ('accounts', 'contexts', 'cells'))):
+            raise AssertionError(f'{path}: invalid account-use capability response')
+        return matrix
 
     def refused(self, path, body=None, status=None, message=None):
         headers = {'Origin': 'http://localhost:8080'}
@@ -151,16 +181,15 @@ class AccountUseBoundary:
 
     Below-floor handlers sanitize DB errors into generic HTTP errors. The
     verbose log proves the exact SQLSTATE, message and entry function. Supported
-    releases instead prove safe previews and exact policy/authority refusals;
+    releases also prove safe previews and exact policy/authority refusals;
     an unrelated 403/404/500 cannot satisfy either branch.
     """
-    def __init__(self, probe, container, capable=False):
-        self.probe, self.container = probe, container
-        self.capable = capable
+    def __init__(self, probe, container, database='aeon'):
+        self.probe, self.container, self.database = probe, container, database
 
     def sql(self, statement):
         result = subprocess.run(['docker', 'exec', '-i', self.container, 'psql',
-            '-X', '-qAt', '-U', 'postgres', '-d', 'aeon', '-v', 'ON_ERROR_STOP=1'],
+            '-X', '-qAt', '-U', 'postgres', '-d', self.database, '-v', 'ON_ERROR_STOP=1'],
             input=statement, text=True, capture_output=True, timeout=30, check=False)
         if result.returncode:
             raise AssertionError('disposable account-use fixture SQL failed')
@@ -174,8 +203,13 @@ class AccountUseBoundary:
         logs = result.stdout + result.stderr
         return logs.count('0A000: ' + CAPABILITY_ERROR), logs.count('aeon_enter_principal(')
 
-    def request(self, probe, path, body=None):
+    def request(self, probe, path, body=None, *, capable=False):
         before = self.errors()
+        if capable:
+            payload = probe.call(path, body)
+            if self.errors() != before:
+                raise AssertionError(f'{path}: capable binary hit the capability refusal gate')
+            return payload
         probe.refused(path, body)
         after = self.errors()
         if not all(a > b for a, b in zip(after, before)):
@@ -187,6 +221,34 @@ class AccountUseBoundary:
             'reservations',(SELECT coalesce(jsonb_agg(jsonb_build_array(id,state) ORDER BY id),'[]') FROM account_reservations WHERE tenant_id='{tenant}'),
             'runs',(SELECT coalesce(jsonb_agg(jsonb_build_array(id,status,started_at,daemon_id,daemon_generation) ORDER BY id),'[]') FROM agent_runs WHERE tenant_id='{tenant}'),
             'claims',(SELECT count(*) FROM events WHERE tenant_id='{tenant}' AND type IN ('run.claimed','work_order.started')));""")
+
+    def check(self, state, version, *, require_refusal=False, release_tag=None):
+        self.probe.login()
+        me = self.probe.call('/api/me')['principal']
+        tenant, owner = str(uuid.UUID(me['tenant_id'])), str(uuid.UUID(me['id']))
+        ticket = str(uuid.UUID(state['ticket']))
+        capable = self.probe.account_use() is not None
+        # The running API remains authoritative. A pinned source tree also
+        # corroborates its floor; HTTP errors never select a fallback branch.
+        if release_tag is not None and previous_account_use_capable(release_tag) != capable:
+            raise AssertionError('pinned release floor disagrees with the running account-use API')
+        if capable:
+            if require_refusal:
+                raise AssertionError('legacy refusal boundary unexpectedly supports account_use_v1')
+            if release_tag is not None:
+                self.check_policy(state, capable=True)
+            self.sql("ALTER SYSTEM SET log_error_verbosity='verbose'; SELECT pg_reload_conf();")
+            self.sql(f"UPDATE account_use_rules SET enforced_at=coalesce(enforced_at,clock_timestamp()) WHERE tenant_id='{tenant}';")
+            # A capable binary must keep serving the strict seeded reads and
+            # normal resolution after activation, rather than merely avoid 0A000.
+            self.probe.check(state, version)
+            matrix = self.probe.account_use()
+            if matrix is None or matrix['rules']['enforced_at'] is None:
+                raise AssertionError('capable account-use fixture is not activated')
+            self.request(self.probe, '/api/models/resolve?role=build&harness=codex', capable=True)
+            print('previous release: activated account_use_v1 normal path OK')
+            return
+        self.check_policy(state)
 
     def selection(self, populated, account):
         """Supported releases enforce policy without rejecting every read."""
@@ -210,7 +272,8 @@ class AccountUseBoundary:
             status=409 if populated else 404,
             message='account_not_allowed_for_context' if populated else 'account not found')
 
-    def check(self, state):
+    def check_policy(self, state, *, capable=False):
+        """Exercise both activated pools before the strict supported reads."""
         self.probe.login()
         me = self.probe.call('/api/me')['principal']
         tenant, owner = str(uuid.UUID(me['tenant_id'])), str(uuid.UUID(me['id']))
@@ -264,7 +327,7 @@ class AccountUseBoundary:
                 ('/api/agent-accounts/route', {'run_id':run,'daemon_id':'compat-daemon','account_ids':[account],'estimated_units':{'requests':1}}),
                 (f'/api/agent-pairing/requests/{request}/approve', {'request_digest':'0'*64,'verification':'connect_only','selected_account_keys':['compat']})]
             claim = (f'/api/runs/{run}/claim', {'daemon_id':'compat-daemon','daemon_generation':'compat-generation','reservation_ids':[str(uuid.uuid4())]})
-            if self.capable:
+            if capable:
                 self.selection(populated, account)
                 self.probe.refused(*writes[0], status=403, message='agent key required')
                 self.probe.refused(*writes[1], status=404, message='pairing not found')
@@ -279,7 +342,7 @@ class AccountUseBoundary:
             time.sleep(10)
             if self.snapshot(tenant) != before:
                 raise AssertionError('old background jobs created a reservation, claim or start')
-            print('previous release: activated ' + ('denied' if populated else 'empty') + ' pool and background jobs fail closed')
+            print('previous release: activated ' + (('denied' if capable else 'populated') if populated else 'empty') + ' pool and background jobs fail closed')
 
 
 def main():
@@ -290,6 +353,8 @@ def main():
     parser.add_argument('--version')
     parser.add_argument('--database-container')
     parser.add_argument('--release-tag')
+    parser.add_argument('--database', default='aeon')
+    parser.add_argument('--require-refusal', action='store_true')
     args = parser.parse_args()
     if args.mode == 'wait-ready':
         wait_ready(args.base)
@@ -300,8 +365,9 @@ def main():
     if args.mode == 'account-use':
         if not args.database_container:
             parser.error('account-use requires --database-container')
-        capable = previous_account_use_capable(args.release_tag) if args.release_tag else False
-        AccountUseBoundary(probe, args.database_container, capable).check(json.loads(args.state.read_text()))
+        AccountUseBoundary(probe, args.database_container, args.database).check(
+            json.loads(args.state.read_text()), args.version, require_refusal=args.require_refusal,
+            release_tag=args.release_tag)
         return
     if args.mode == 'seed':
         state = probe.seed()

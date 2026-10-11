@@ -47,6 +47,8 @@
         "internal/agentaccounts/**",
         "internal/accountprivacy/**",
         "internal/approvals/**",
+        "internal/approvals/routine.go",
+        "internal/approvals/routine_test.go",
         "internal/principallink/**",
         "internal/scopecode/**",
         "internal/systemactor/**",
@@ -124,6 +126,8 @@
         "internal/agents/**",
         "internal/hooknote/**",
         "internal/delivery/**",
+        "internal/delivery/webhook_log.go",
+        "internal/delivery/webhook_log_test.go",
         "internal/engineadmission/**",
         "internal/agentsetup/ledger.go",
         "internal/agentsetup/ledger_test.go",
@@ -166,7 +170,11 @@
         "internal/plugins/**",
         "internal/events/**",
         "internal/attachedmsg/**",
-        "internal/cli/project_identity_test.go"
+        "internal/cli/project_identity_test.go",
+        "internal/cli/hook_subagent.go",
+        "internal/cli/hook_subagent_unix.go",
+        "internal/cli/hook_subagent_other.go",
+        "internal/cli/hook_subagent_unix_test.go"
       ]
     },
     {
@@ -244,8 +252,12 @@
         "internal/recurrences/consent.go",
         "internal/recurrences/consent_test.go",
         "internal/routineguard/**",
+        "internal/routineguard/evaluation.go",
+        "internal/routineguard/evaluation_test.go",
+        "internal/routineguard/evaluation_tx_test.go",
         "internal/recurrences/runs.go",
-        "internal/recurrences/runs_test.go"
+        "internal/recurrences/runs_test.go",
+        "internal/routinebudget/**"
       ]
     },
     {

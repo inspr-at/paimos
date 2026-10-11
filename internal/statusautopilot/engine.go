@@ -31,10 +31,12 @@ type node struct {
 	Updated    time.Time                  `json:"updated_at"`
 }
 type candidate struct {
-	Node            node
-	Since, Activity time.Time
-	WorkActivity    time.Time
-	Work, Objection bool
+	Node                   node
+	Since, Activity        time.Time
+	WorkActivity           time.Time
+	Work, Objection        bool
+	MergedAt               time.Time
+	UsesReleases, Released bool
 }
 type decision struct {
 	Rule, To, Flag, Reason, Anchor string
@@ -58,8 +60,16 @@ func noReleaseNeeded(n node) bool {
 	_ = json.Unmarshal(n.Fields["no_release_needed"], &marked)
 	return marked
 }
+func classic(n node) bool {
+	_, imported := n.Fields["classic"]
+	return imported
+}
+
 func evaluate(c candidate, s Settings, now time.Time) *decision {
 	n := c.Node
+	if classic(n) {
+		return nil
+	}
 	var key, to, flag, reason string
 	since := c.Since
 	switch normaliseState(n.State) {
@@ -96,10 +106,11 @@ func evaluate(c candidate, s Settings, now time.Time) *decision {
 		}
 		key = "done"
 		flag = "missed_release"
-		reason = "Merged but not released for %d days; flagged as missed release."
-		if t := fieldTime(n, "merged_at"); !t.IsZero() {
-			since = t
+		reason = "Done, but in no release: merged %d+ days ago and not released."
+		if c.MergedAt.IsZero() || !c.UsesReleases || c.Released {
+			return nil
 		}
+		since = c.MergedAt
 	case "delivered":
 		key = "accept"
 		to = "accepted"
@@ -138,6 +149,10 @@ func normaliseState(state string) string {
 	return stateSeparator.ReplaceAllString(strings.ToLower(strings.TrimSpace(state)), "_")
 }
 
+// Only delivery's recorded merge is evidence; editable ticket fields and import
+// events cannot establish a merge. Undo invalidates the recorded observation.
+const mergeEvidenceSQL = `e.type='delivery.merge_done' AND NOT EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id)`
+
 const candidateStateSQL = `regexp_replace(lower(btrim(n.state)), '[[:space:]-]+', '_', 'g')`
 
 func loadCandidates(ctx context.Context, tx pgx.Tx, ids []string, now time.Time) ([]candidate, error) {
@@ -146,9 +161,12 @@ func loadCandidates(ctx context.Context, tx pgx.Tx, ids []string, now time.Time)
  greatest(n.created_at,coalesce(activity.at,n.created_at),coalesce(work.at,n.created_at),coalesce(review.at,n.created_at)),
  greatest(coalesce(episode.at,n.created_at),coalesce(work.at,n.created_at),coalesce(review.at,n.created_at)),
  coalesce(work.live,false),
- EXISTS(SELECT 1 FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND p.kind='person' AND (e.type IN ('comment.created','comment.updated') OR EXISTS(SELECT 1 FROM events original WHERE original.tenant_id=e.tenant_id AND original.id=e.undo_of AND original.metadata->>'rule'='accept')) AND e.at>=coalesce(episode.at,n.created_at))
+ EXISTS(SELECT 1 FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND p.kind='person' AND (e.type IN ('comment.created','comment.updated') OR EXISTS(SELECT 1 FROM events original WHERE original.tenant_id=e.tenant_id AND original.id=e.undo_of AND original.metadata->>'rule'='accept')) AND e.at>=coalesce(episode.at,n.created_at)),
+ merged.merged_at,
+ EXISTS(SELECT 1 FROM journey_releases r JOIN nodes release ON release.tenant_id=r.tenant_id AND release.id=r.release_node_id WHERE r.tenant_id=n.tenant_id AND r.project_node_id=n.project_id AND release.deleted_at IS NULL),
+ EXISTS(SELECT 1 FROM journey_tickets t JOIN journey_releases r ON r.tenant_id=t.tenant_id AND r.release_node_id=t.release_node_id WHERE t.tenant_id=n.tenant_id AND t.ticket_node_id=n.id AND r.project_node_id=n.project_id AND r.state IN ('released','superseded'))
  FROM nodes n
- LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND e.after->>'state'=n.state AND e.before->>'state' IS DISTINCT FROM e.after->>'state' AND e.type<>'status_autopilot.attention_undone' AND NOT EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id)) episode ON true
+ LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND e.after->>'state'=n.state AND e.before->>'state' IS DISTINCT FROM e.after->>'state' AND e.type NOT IN ('status_autopilot.attention_undone','import.node_created') AND NOT EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id)) episode ON true
  LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND coalesce(e.metadata->>'job','')<>$2) activity ON true
  LEFT JOIN LATERAL (SELECT max(greatest(h.created_at,h.heartbeat_at,h.stopped_at)) at,
  bool_or(h.archived_at IS NULL AND (
@@ -156,6 +174,7 @@ func loadCandidates(ctx context.Context, tx pgx.Tx, ids []string, now time.Time)
  OR (h.stop_reason='paused' AND h.pause_record->>'state' IN ('paused','resume_requested')))) live
  FROM harness_sessions h WHERE h.ticket_node_id=n.id AND h.tenant_id=n.tenant_id) work ON true
  LEFT JOIN LATERAL (SELECT max(r.created_at) at FROM work_order_reviews r WHERE r.ticket_node_id=n.id AND r.tenant_id=n.tenant_id AND r.pull_request IS NOT NULL) review ON true
+ LEFT JOIN LATERAL (SELECT e.metadata->>'merged_at' merged_at FROM events e WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND `+mergeEvidenceSQL+` ORDER BY e.id DESC LIMIT 1) merged ON true
  WHERE n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL ORDER BY n.id FOR UPDATE OF n`, ids, Job, now.Add(-15*time.Minute))
 	if err != nil {
 		return nil, err
@@ -165,11 +184,15 @@ func loadCandidates(ctx context.Context, tx pgx.Tx, ids []string, now time.Time)
 	for rows.Next() {
 		var c candidate
 		var raw []byte
-		if err = rows.Scan(&raw, &c.Since, &c.Activity, &c.WorkActivity, &c.Work, &c.Objection); err != nil {
+		var mergedAt *string
+		if err = rows.Scan(&raw, &c.Since, &c.Activity, &c.WorkActivity, &c.Work, &c.Objection, &mergedAt, &c.UsesReleases, &c.Released); err != nil {
 			return nil, err
 		}
 		if err = json.Unmarshal(raw, &c.Node); err != nil {
 			return nil, err
+		}
+		if mergedAt != nil {
+			c.MergedAt, _ = time.Parse(time.RFC3339Nano, *mergedAt)
 		}
 		out = append(out, c)
 	}

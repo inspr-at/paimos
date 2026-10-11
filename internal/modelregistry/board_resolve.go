@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -34,7 +35,12 @@ func boardInitialized(s modelprefs.BoardState) bool {
 	return s.Workspace.ID != "" || s.Person != nil && s.Person.ID != ""
 }
 
-func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, excluded []string) (*WorkResolution, error) {
+func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, excluded []string, policies ...reviewgate.FamilyPolicy) (*WorkResolution, error) {
+	// Routine evaluation supplies its mandatory family policy through this
+	// boundary; keep it in the same Models qualification as project policies.
+	if len(policies) > 0 {
+		q.ReviewPolicies = policies
+	}
 	// Bound account/window fan-out before any availability projection.
 	var large bool
 	if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM (SELECT 1 FROM agent_accounts LIMIT 257) a)>256 OR (SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows WHERE NOT pairing_verification AND NOT capacity_retired AND removed_at IS NULL LIMIT 4097) w)>4096`).Scan(&large); err != nil {

@@ -6,6 +6,7 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -24,6 +25,8 @@ class MigrationCompatImagesTest(unittest.TestCase):
     # rollback-floor probe against that binary fails despite a sound DB fence.
     # Mock only process boundaries; execute the real shell orchestration and
     # retain strict refusals against an independently pinned incapable binary.
+    # Both images seed and migrate their own database: the floor image must
+    # boot before AND after migration, with its own retained seed state.
     def test_capable_previous_release_keeps_the_incapable_rollback_probe(self):
         latest_tag = 'v261010123154.0.0'
         latest_digest = 'sha256:' + 'a' * 64
@@ -44,6 +47,7 @@ with (root / 'calls.jsonl').open('a') as log:
     log.write(json.dumps([tool, args]) + '\\n')
 latest_id, floor_id = 'sha256:' + '1' * 64, 'sha256:' + '2' * 64
 active = root / 'active-image'
+active_database = root / 'active-database'
 if tool == 'docker':
     if args[:2] == ['image', 'ls']:
         print(floor_id if args[-1].endswith(os.environ['COMPAT_FLOOR_DIGEST']) else latest_id)
@@ -51,21 +55,35 @@ if tool == 'docker':
         print('127.0.0.1:5432' if args[-1] == '5432/tcp' else '127.0.0.1:8080')
     elif args[0] == 'run' and args[-1] in (latest_id, floor_id):
         active.write_text(args[-1])
+        database = next(value for value in args if value.startswith('AEON_DATABASE_URL=')).split('/')[-1].split('?')[0]
+        active_database.write_text(database)
 elif tool == 'python3':
     mode = args[1]
-    if mode == 'seed':
-        Path(args[args.index('--state') + 1]).write_text('{}')
     if mode in ('seed', 'check', 'account-use'):
         version = args[args.index('--version') + 1]
         expected = '261009095632.0.0' if active.read_text() == floor_id else '261010123154.0.0'
         if version != expected:
             sys.exit('tested binary does not match the previous release')
+        state = Path(args[args.index('--state') + 1])
+        fixture = {'image': active.read_text(), 'version': version}
+        if mode == 'seed':
+            state.write_text(json.dumps(fixture))
+        elif json.loads(state.read_text()) != fixture:
+            sys.exit('probe did not retain its own image seed state')
     if mode == 'account-use':
-        if '--release-tag' in args:
-            if active.read_text() != latest_id or args[args.index('--release-tag') + 1] != 'v' + expected:
-                sys.exit('latest account-use policy must use its pinned release')
-        elif active.read_text() != floor_id:
-            sys.exit('activated previous binary returned HTTP 200')
+        database = args[args.index('--database') + 1] if '--database' in args else 'aeon'
+        if database != active_database.read_text():
+            sys.exit('probe and binary used different fixtures')
+        if '--require-refusal' in args:
+            if active.read_text() != floor_id or database != 'aeon_legacy':
+                sys.exit('capability refusal must exercise the independent legacy fixture')
+        elif active.read_text() != latest_id or database != 'aeon':
+            sys.exit('capability-aware activation must exercise the latest binary')
+        if '--require-refusal' in args:
+            if '--release-tag' in args:
+                sys.exit('legacy refusal must remain unconditional')
+        elif args[args.index('--release-tag') + 1] != 'v261010123154.0.0':
+            sys.exit('latest account-use policy must use its pinned release')
 elif tool == 'git':
     if args != ['show', 'v261009095632.0.0:internal/db/visibility.go']:
         sys.exit('unexpected git call')
@@ -90,20 +108,56 @@ elif tool not in ('go', 'trash'):
                 capture_output=True, text=True, timeout=15, check=False)
             self.assertEqual(completed.returncode, 0, completed.stderr)
             calls = [json.loads(line) for line in (root / 'calls.jsonl').read_text().splitlines()]
-            boots = [args[-1] for tool, args in calls
-                     if tool == 'docker' and args[0] == 'run' and args[-1].startswith('sha256:')]
-            self.assertEqual(boots, ['sha256:' + '1' * 64] * 2 + ['sha256:' + '2' * 64] * 2)
+            boot_indices = [index for index, (tool, args) in enumerate(calls)
+                            if tool == 'docker' and args[0] == 'run' and args[-1].startswith('sha256:')]
+            starts = [calls[index][1] for index in boot_indices]
+            self.assertEqual([args[-1] for args in starts],
+                             ['sha256:' + '1' * 64] * 2 + ['sha256:' + '2' * 64] * 2)
             probes = [(args[1], args[args.index('--version') + 1]) for tool, args in calls
                       if tool == 'python3' and '--version' in args]
             self.assertEqual(probes, [
                 ('seed', latest_tag[1:]), ('check', latest_tag[1:]),
                 ('account-use', latest_tag[1:]),
-                ('seed', '261009095632.0.0'), ('check', '261009095632.0.0'),
-                ('account-use', '261009095632.0.0')])
+                ('seed', '261009095632.0.0'),
+                ('check', '261009095632.0.0'), ('account-use', '261009095632.0.0')])
             databases = [args for tool, args in calls
                          if tool == 'docker' and args[0] == 'run' and 'POSTGRES_USER=postgres' in args]
             self.assertEqual(len(databases), 2, 'each image seeds its own fresh database')
-            self.assertEqual(len([args for tool, args in calls if tool == 'go']), 2)
+            activations = [args for tool, args in calls if tool == 'python3' and args[1] == 'account-use']
+            self.assertEqual(['--require-refusal' in args for args in activations], [False, True])
+            self.assertEqual(activations[0][activations[0].index('--release-tag') + 1], latest_tag)
+            self.assertNotIn('--release-tag', activations[1])
+            self.assertNotIn('--database', activations[0])
+            self.assertEqual(activations[1][activations[1].index('--database') + 1], 'aeon_legacy')
+            database_names = [args[args.index('--name') + 1] for args in databases]
+            self.assertEqual(len(set(database_names)), 2)
+            for index, args in enumerate(starts):
+                database = 'aeon' if index < 2 else 'aeon_legacy'
+                self.assertIn('AEON_DATABASE_URL=postgres://aeon:aeon@' +
+                              database_names[index // 2] + ':5432/' + database + '?sslmode=disable', args)
+            seeds = [args for tool, args in calls if tool == 'python3' and args[1] == 'seed']
+            checks = [args for tool, args in calls if tool == 'python3' and args[1] == 'check']
+            state_paths = [args[args.index('--state') + 1] for args in seeds]
+            self.assertEqual(len(set(state_paths)), 2)
+            self.assertEqual([args[args.index('--state') + 1] for args in checks], state_paths)
+            migrations = [index for index, (tool, _) in enumerate(calls) if tool == 'go']
+            self.assertEqual(len(migrations), 2)
+            for index, migration in enumerate(migrations):
+                self.assertLess(boot_indices[2 * index], calls.index(['python3', seeds[index]]))
+                self.assertLess(calls.index(['python3', seeds[index]]), migration)
+                self.assertLess(migration, calls.index(['python3', checks[index]]))
+                self.assertLess(migration, boot_indices[2 * index + 1])
+                self.assertLess(boot_indices[2 * index + 1], calls.index(['python3', checks[index]]))
+            latest_probe, floor_probe = [args for tool, args in calls
+                                        if tool == 'python3' and args[1] == 'account-use']
+            self.assertEqual(latest_probe[latest_probe.index('--release-tag') + 1], latest_tag)
+            self.assertEqual(latest_probe[latest_probe.index('--state') + 1], state_paths[0])
+            self.assertEqual(latest_probe[latest_probe.index('--database-container') + 1], database_names[0])
+            self.assertLess(calls.index(['python3', checks[0]]), calls.index(['python3', latest_probe]))
+            self.assertNotIn('--release-tag', floor_probe)
+            self.assertEqual(floor_probe[floor_probe.index('--state') + 1], state_paths[1])
+            self.assertEqual(floor_probe[floor_probe.index('--database-container') + 1], database_names[1])
+            self.assertLess(calls.index(['python3', checks[1]]), calls.index(['python3', floor_probe]))
             pulls = [args[-1] for tool, args in calls if tool == 'docker' and args[0] == 'pull']
             self.assertEqual(pulls, ['ghcr.io/inspr-at/aeon@' + latest_digest,
                                      'ghcr.io/inspr-at/aeon@' + floor_digest])
@@ -117,6 +171,8 @@ class ProbeTest(unittest.TestCase):
     def setUp(self):
         self.requests = []
         self.posts = []
+        self.api_fallback = (403, 'application/json',
+                             b'{"error":"permission denied","code":"forbidden","route":"/api/"}')
         self.responses = {
             '/': (200, 'text/html', b'<html>previous SPA</html>'),
             '/api/health': {'status': 'ok', 'db': 'ok'},
@@ -134,7 +190,9 @@ class ProbeTest(unittest.TestCase):
         class Handler(BaseHTTPRequestHandler):
             def do_GET(self):
                 owner.requests.append(self.path)
-                value = owner.responses.get(self.path, (404, 'application/json', b'{}'))
+                fallback = (owner.api_fallback if self.path.startswith('/api/aeon-compat-absent-')
+                            else (404, 'application/json', b'{}'))
+                value = owner.responses.get(self.path, fallback)
                 if callable(value):
                     value = value()
                 if isinstance(value, dict):
@@ -273,6 +331,136 @@ class ProbeTest(unittest.TestCase):
             result.stderr = 'ERROR: 0A000: '+module.CAPABILITY_ERROR+'\nCONTEXT: aeon_enter_principal(uuid,uuid,boolean)'
             self.assertEqual(boundary.errors(), (1, 1))
 
+    def test_capability_detection_uses_the_binary_api_and_rejects_ambiguous_responses(self):
+        # Risk: the authenticated floor returns 403 for missing API routes;
+        # only its exact fallback can prove absence, never a distinct failure.
+        path = '/api/account-use?limit=1'
+        matrix = {'rules': {'revision': 1, 'enforced_at': None},
+                  'accounts': [], 'contexts': [], 'cells': []}
+        for version in ('260930115354.0.0', '261010123154.0.0', 'dev'):
+            with self.subTest(version=version), contextlib.redirect_stdout(io.StringIO()):
+                self.responses['/api/version'] = {'version': version}
+                self.responses[path] = matrix
+                self.assertEqual(self.probe.account_use(), matrix)
+                self.responses[path] = self.api_fallback
+                self.assertIsNone(self.probe.account_use())
+        self.api_fallback = (404, 'application/json', b'{"error":"not found"}')
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.responses[path] = self.api_fallback
+            self.assertIsNone(self.probe.account_use())
+            # Compare parsed JSON, not serialization whitespace or key order.
+            self.api_fallback = (403, 'application/json', b'{"error":"permission denied","code":"forbidden"}')
+            self.responses[path] = (403, 'application/json', b'{ "code": "forbidden", "error": "permission denied" }')
+            self.assertIsNone(self.probe.account_use())
+        self.api_fallback = (404, 'application/json', b'{"error":"not found"}')
+        for response, reason in (({}, 'invalid account-use capability response'),
+                         ((200, 'application/json', b'null'), 'invalid account-use capability response'),
+                         ((200, 'text/html', b'<html>SPA</html>'), 'expected JSON'),
+                         ((200, 'application/json', b'x' * ((1 << 20) + 1)), 'response exceeds bound'),
+                         ((403, 'application/json', b'{"error":"forbidden"}'), 'HTTP 403'),
+                         ((500, 'application/json', b'{"error":"failed"}'), 'HTTP 500'),
+                         ((404, 'application/json', b'{"error":"account-use resource not found"}'), 'HTTP 404'),
+                         ((404, 'application/json; charset=utf-8', b'{"error":"not found"}'), 'HTTP 404'),
+                         ((403, 'text/html', b'<html>denied</html>'), 'expected JSON'),
+                         ((403, 'application/json', b'not JSON'), 'expected JSON'),
+                         ((403, 'application/json', b'x' * ((1 << 20) + 1)), 'response exceeds bound')):
+            with self.subTest(response=response[:2] if isinstance(response, tuple) else response):
+                self.responses[path] = response
+                with self.assertRaisesRegex(AssertionError, reason):
+                    self.probe.account_use()
+        self.responses[path] = (403, 'application/json', b'{"error":"permission denied","code":"forbidden"}')
+        for fallback, reason in (((500, 'application/json', b'{"error":"permission denied","code":"forbidden"}'), 'HTTP 403'),
+                                ((403, 'application/json', b'{"error":"different refusal","code":"forbidden"}'), 'HTTP 403'),
+                                ((403, 'application/json; charset=utf-8', b'{"error":"permission denied","code":"forbidden"}'), 'HTTP 403'),
+                                ((403, 'text/html', b'<html>denied</html>'), 'expected JSON'),
+                                ((403, 'application/json', b'not JSON'), 'expected JSON'),
+                                ((403, 'application/json', b'x' * ((1 << 20) + 1)), 'response exceeds bound')):
+            with self.subTest(fallback=fallback[:2]):
+                self.api_fallback = fallback
+                with self.assertRaisesRegex(AssertionError, reason):
+                    self.probe.account_use()
+        # A matching successful response still needs a valid capability matrix.
+        self.api_fallback = (200, 'application/json', b'{}')
+        self.responses[path] = {}
+        with self.assertRaisesRegex(AssertionError, 'invalid account-use capability response'):
+            self.probe.account_use()
+        sentinels = [request for request in self.requests if request != path]
+        self.assertEqual(len(sentinels), len(set(sentinels)))
+        for sentinel in sentinels:
+            self.assertRegex(sentinel, r'^/api/aeon-compat-absent-[0-9a-f-]{36}\?limit=1$')
+            module.uuid.UUID(sentinel.removeprefix('/api/aeon-compat-absent-').removesuffix('?limit=1'))
+        self.assertNotIn('/api/version', self.requests)
+
+    def test_capable_binary_serves_strict_reads_after_activation(self):
+        # Risk: capability support can no longer make an activated HTTP 200
+        # fail the gate, but lost rows or a broken resolver must still fail it.
+        ticket = '11111111-1111-4111-8111-111111111111'
+        tenant = '22222222-2222-4222-8222-222222222222'
+        owner = '33333333-3333-4333-8333-333333333333'
+        state = {'project': 'project', 'ticket': ticket}
+        self.responses['/api/me'] = {'principal': {'tenant_id': tenant, 'id': owner}}
+        self.responses['/api/nodes?parent_id=project&limit=100'] = {'items': [{'id': ticket}]}
+        self.responses['/api/nodes/' + ticket] = {'id': ticket}
+        path = '/api/account-use?limit=1'
+        resolve = '/api/models/resolve?role=build&harness=codex'
+        matrix = {'rules': {'revision': 1, 'enforced_at': None},
+                  'accounts': [], 'contexts': [], 'cells': []}
+        self.responses[path] = matrix
+        self.responses[resolve] = {'command_template': 'fixture launch'}
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
+        def sql(statement):
+            if statement.startswith('UPDATE account_use_rules'):
+                matrix['rules']['enforced_at'] = '2026-10-10T00:00:00Z'
+            return ''
+        boundary.sql = Mock(side_effect=sql)
+        boundary.errors = Mock(return_value=(0, 0))
+        with contextlib.redirect_stdout(io.StringIO()):
+            boundary.check(state, '260930115354.0.0')
+        self.assertIsNotNone(matrix['rules']['enforced_at'])
+        self.assertIn('/api/nodes/' + ticket, self.requests)
+        self.assertIn(resolve, self.requests)
+        self.assertEqual(boundary.errors.call_count, 2)
+        with self.assertRaisesRegex(AssertionError, 'unexpectedly supports account_use_v1'):
+            boundary.check(state, '260930115354.0.0', require_refusal=True)
+        self.responses['/api/nodes/' + ticket] = (500, 'application/json', b'{"error":"read failed"}')
+        with self.assertRaisesRegex(AssertionError, '/api/nodes/' + ticket + ': HTTP 500'):
+            boundary.check(state, '260930115354.0.0')
+        self.responses['/api/nodes/' + ticket] = {'id': ticket}
+        self.responses[resolve] = (500, 'application/json', b'{"error":"resolve failed"}')
+        with self.assertRaisesRegex(AssertionError, 'models/resolve.*HTTP 500'):
+            boundary.check(state, '260930115354.0.0')
+        self.responses[resolve] = {'command_template': 'fixture launch'}
+        boundary.errors = Mock(side_effect=[(0, 0), (1, 1)])
+        with self.assertRaisesRegex(AssertionError, 'capable binary hit the capability refusal gate'):
+            boundary.request(self.probe, resolve, capable=True)
+
+    def test_unsupported_binary_retains_both_strict_activated_pool_probes(self):
+        tenant = '22222222-2222-4222-8222-222222222222'
+        owner = '33333333-3333-4333-8333-333333333333'
+        self.responses['/api/me'] = {'principal': {'tenant_id': tenant, 'id': owner}}
+        self.responses['/api/account-use?limit=1'] = self.api_fallback
+        resolve = '/api/models/resolve?role=build&harness=codex'
+        self.responses[resolve] = {}
+        boundary = module.AccountUseBoundary(self.probe, 'fixture-container', 'aeon_legacy')
+        def sql(statement):
+            if statement.startswith('SELECT (SELECT count(*) FROM agent_accounts'):
+                return '0,1,true'
+            if statement.startswith('SELECT count(*) FROM user_preferences'):
+                return '0'
+            return ''
+        boundary.sql = Mock(side_effect=sql)
+        boundary.snapshot = Mock(return_value='unchanged')
+        with patch.object(boundary, 'request') as request, patch.object(module.time, 'sleep'), contextlib.redirect_stdout(io.StringIO()):
+            boundary.check({'ticket': '11111111-1111-4111-8111-111111111111'}, '260930115354.0.0')
+        # Every original endpoint and the real runtime claim path remain in
+        # both empty and populated probes, with the strict default expectation.
+        self.assertEqual(request.call_count, 12)
+        for offset in (0, 6):
+            self.assertEqual(request.call_args_list[offset].args[1], resolve)
+            self.assertRegex(request.call_args_list[offset + 5].args[1], r'^/api/runs/.+/claim$')
+        self.assertTrue(all(not call.kwargs for call in request.call_args_list))
+        self.assertEqual(boundary.snapshot.call_count, 4)
+
     def capable_fixture(self):
         tenant, owner, agent, account, run, order, request = [str(uuid.UUID(int=i)) for i in range(1, 8)]
         self.responses['/api/me'] = {'principal': {'id': owner, 'tenant_id': tenant}}
@@ -291,7 +479,6 @@ class ProbeTest(unittest.TestCase):
                        for reason in ('account reservation required', 'account daemon generation changed')])
         self.responses[f'/api/runs/{run}/claim'] = lambda: next(claims)
         boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
-        boundary.capable = True
 
         def sql(statement):
             if 'enforced_at IS NULL' in statement:
@@ -313,7 +500,7 @@ class ProbeTest(unittest.TestCase):
     def test_supported_previous_release_checks_both_activated_pools(self):
         boundary, ids, state = self.capable_fixture()
         with patch.object(module.uuid, 'uuid4', side_effect=ids), patch.object(module.time, 'sleep'), contextlib.redirect_stdout(io.StringIO()):
-            boundary.check(state)
+            boundary.check_policy(state, capable=True)
         boundary.errors.assert_not_called()
         self.assertEqual(sum('jsonb_build_object' in c.args[0] for c in boundary.sql.call_args_list), 4)
         self.assertTrue(any('DELETE FROM account_use_cells' in c.args[0] for c in boundary.sql.call_args_list))
@@ -325,7 +512,7 @@ class ProbeTest(unittest.TestCase):
             'preview': True, 'profile': {'id': 'unsafe'}, 'command_template': 'unsafe launch'}
         with patch.object(module.uuid, 'uuid4', side_effect=ids), contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(AssertionError, 'activated pool supplied executable material'):
-                boundary.check(state)
+                boundary.check_policy(state, capable=True)
 
     def test_supported_previous_release_requires_context_and_no_capacity(self):
         boundary = module.AccountUseBoundary(self.probe, 'fixture-container')
@@ -479,7 +666,100 @@ elif tool == 'git':
         completed, calls = self.run_harness(legacy_pull_rc=19)
         self.assertEqual(completed.returncode, 19)
         self.assertNotIn('Account-use rollback floor passed:', completed.stdout)
+        self.assertNotIn('Migration compatibility passed:', completed.stdout)
         self.assertFalse(any(call[:3] == ['python3', 'scripts/migration-compat-probe.py', 'account-use'] for call in calls))
+
+
+class MigrationCompatImageTest(unittest.TestCase):
+    def run_gate(self, refuse_floor=True):
+        # Risk: a moving latest release acquires the capability, so treating
+        # that binary as below-floor makes every unrelated PR fail CI.
+        # Execute the real shell orchestration with disposable command doubles;
+        # no images, containers, credentials or network calls are involved.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'scripts').mkdir()
+            script = root / 'scripts' / 'migration-compat.sh'
+            script.write_text(Path(module.__file__).with_name('migration-compat.sh').read_text())
+            tools = root / 'tools'
+            tools.mkdir()
+            log = root / 'commands.jsonl'
+            double = '''import json
+import os
+from pathlib import Path
+import shutil
+import sys
+tool = Path(sys.argv[0]).name
+args = sys.argv[1:]
+with open(os.environ['COMPAT_FIXTURE_LOG'], 'a') as log:
+    log.write(json.dumps([tool, *args]) + '\\n')
+if tool == 'docker':
+    if args[:2] == ['image', 'ls']:
+        print(args[-1].split('@')[1])
+    elif args[:1] == ['port']:
+        print('127.0.0.1:' + ('8080' if args[-1] == '8080/tcp' else '5432'))
+elif tool == 'trash':
+    shutil.rmtree(args[0])
+elif tool == 'git':
+    if args != ['show', 'v261009095632.0.0:internal/db/visibility.go']:
+        sys.exit('unexpected git call')
+    print('func enterTenant() {}')
+elif tool == 'python3' and args[1] == 'account-use':
+    version = args[args.index('--version') + 1]
+    if '--release-tag' in args:
+        if version != '261010123154.0.0' or args[args.index('--release-tag') + 1] != 'v' + version:
+            sys.exit('latest account-use policy must use its pinned release')
+        sys.exit(0)
+    # A capable latest binary accepts entry, so the unchanged refusal probe
+    # fails. Only the archived incapable fixture can provide that evidence.
+    if version != '261009095632.0.0' or os.environ['COMPAT_FIXTURE_REFUSES'] != 'yes':
+        sys.exit(23)
+'''
+            for name in ('docker', 'go', 'python3', 'git', 'trash'):
+                executable = tools / name
+                executable.write_text(f'#!{sys.executable}\n' + double)
+                executable.chmod(0o755)
+            result = subprocess.run(
+                [shutil.which('bash'), str(script), 'v261010123154.0.0', 'sha256:' + 'a' * 64],
+                env={'PATH': str(tools) + os.pathsep + os.defpath,
+                     'COMPAT_FIXTURE_LOG': str(log),
+                     'COMPAT_FIXTURE_REFUSES': 'yes' if refuse_floor else 'no'},
+                capture_output=True, text=True, timeout=15, check=False)
+            commands = [json.loads(line) for line in log.read_text().splitlines()]
+            return result, commands
+
+    def test_latest_compatibility_and_below_floor_refusal_use_separate_images(self):
+        result, commands = self.run_gate()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        images = [args[-1] for tool, *args in commands if tool == 'docker' and args[0] == 'pull']
+        self.assertEqual(images, [
+            'ghcr.io/inspr-at/aeon@sha256:' + 'a' * 64,
+            'ghcr.io/inspr-at/aeon@sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c',
+        ])
+        phases = [(args[1], args[args.index('--version') + 1])
+                  for tool, *args in commands
+                  if tool == 'python3' and args[1] != 'wait-ready']
+        self.assertEqual(phases, [
+            ('seed', '261010123154.0.0'), ('check', '261010123154.0.0'),
+            ('account-use', '261010123154.0.0'),
+            ('seed', '261009095632.0.0'), ('check', '261009095632.0.0'),
+            ('account-use', '261009095632.0.0'),
+        ])
+        databases = [args[args.index('--name') + 1] for tool, *args in commands
+                     if tool == 'docker' and args[0] == 'run' and 'POSTGRES_USER=postgres' in args]
+        self.assertEqual(len(set(databases)), 2)
+        # Each lane cleans its own database/app and network after its checks.
+        cleanups = [args for tool, *args in commands
+                    if tool == 'docker' and args[:2] == ['network', 'rm']]
+        self.assertEqual(len(cleanups), 2)
+
+    def test_below_floor_acceptance_still_fails_the_whole_gate(self):
+        result, commands = self.run_gate(refuse_floor=False)
+        self.assertEqual(result.returncode, 23)
+        floor_probes = [args for tool, *args in commands
+                        if tool == 'python3' and args[1] == 'account-use' and '--release-tag' not in args]
+        self.assertEqual(len(floor_probes), 1)
+        self.assertEqual(floor_probes[0][floor_probes[0].index('--version') + 1], '261009095632.0.0')
 
 
 class MigrationHarnessTest(unittest.TestCase):
@@ -488,6 +768,7 @@ class MigrationHarnessTest(unittest.TestCase):
         # to fail the legacy capability guard rejects every subsequent PR.
         # Execute the harness with disposable command doubles: keep latest
         # reads, pinned policy checks and exact legacy refusal as gates.
+        # Each image seeds and migrates its own disposable database.
         latest_tag = 'v261010123154.0.0'
         latest_digest = 'sha256:c9952c1561c8d32c4a3efb17ed95934f81efd6bc2546de41a3b56bd138304deb'
         legacy_tag = 'v261009095632.0.0'
@@ -506,7 +787,7 @@ name, args = Path(sys.argv[0]).name, sys.argv[1:]
 state_path = Path(os.environ['HARNESS_STATE'])
 state = json.loads(state_path.read_text()) if state_path.exists() else {}
 with open(os.environ['HARNESS_LOG'], 'a') as log:
-    log.write(json.dumps({'command': name, 'args': args, 'image': state.get('image'), 'migrated': state.get('migrated', False)}) + '\\n')
+    log.write(json.dumps({'command': name, 'args': args, 'image': state.get('image'), 'database': state.get('database'), 'migrated': state.get('migrated', False)}) + '\\n')
 if name == 'docker':
     if args[:2] == ['image', 'ls']:
         print(args[-1].split('@')[1])
@@ -514,6 +795,7 @@ if name == 'docker':
         state = {'migrated': False}
     elif args[0] == 'run' and '--name' in args and args[args.index('--name') + 1].startswith('aeon-compat-app-'):
         state['image'] = args[-1]
+        state['database'] = next(value for value in args if value.startswith('AEON_DATABASE_URL=')).split('/')[-1].split('?')[0]
     elif args[0] == 'port':
         print('127.0.0.1:8080' if args[-1] == '8080/tcp' else '127.0.0.1:5432')
     elif args[0] == 'exec' and '-i' in args:
@@ -529,52 +811,81 @@ elif name == 'python3':
     if mode == 'seed':
         Path(args[args.index('--state') + 1]).write_text('{}')
     elif mode == 'account-use':
-        if '--release-tag' in args:
-            if state.get('image') != os.environ['HARNESS_LATEST_DIGEST'] or args[args.index('--release-tag') + 1] != 'v261010123154.0.0':
-                sys.exit('latest account-use policy must use its pinned release')
-        else:
-            if state.get('image') != os.environ['HARNESS_LEGACY_DIGEST']:
-                sys.exit('capability refusal must exercise the immutable legacy image')
-            if os.environ['HARNESS_FAIL_BOUNDARY'] == '1':
-                sys.exit(23)
+        database = args[args.index('--database') + 1] if '--database' in args else 'aeon'
+        if database != state.get('database'):
+            sys.exit('probe and binary used different fixtures')
+        boundary = 'legacy' if '--require-refusal' in args else 'latest'
+        if boundary == 'legacy':
+            if state.get('image') != os.environ['HARNESS_LEGACY_DIGEST'] or database != 'aeon_legacy':
+                sys.exit('capability refusal must exercise the independent immutable legacy image')
+        elif state.get('image') != os.environ['HARNESS_LATEST_DIGEST'] or database != 'aeon':
+            sys.exit('capability-aware activation must exercise the latest binary')
+        if boundary == 'legacy':
+            if '--release-tag' in args:
+                sys.exit('legacy refusal must remain unconditional')
+        elif args[args.index('--release-tag') + 1] != 'v261010123154.0.0':
+            sys.exit('latest account-use policy must use its pinned release')
+        if os.environ['HARNESS_FAIL_BOUNDARY'] == boundary:
+            sys.exit(23)
 state_path.write_text(json.dumps(state))
 '''
             for name in ('docker', 'python3', 'go', 'git', 'trash'):
                 executable = bin_dir / name
                 executable.write_text('#!' + sys.executable + '\n' + command)
                 executable.chmod(0o755)
-            for fail_boundary in (False, True):
+            for fail_boundary in ('none', 'latest', 'legacy'):
                 with self.subTest(fail_boundary=fail_boundary):
                     log = root / f'commands-{fail_boundary}.jsonl'
                     harness_env = dict(os.environ, PATH=str(bin_dir) + os.pathsep + os.environ['PATH'],
                         HARNESS_LOG=str(log), HARNESS_STATE=str(root / f'state-{fail_boundary}.json'),
-                        HARNESS_LATEST_DIGEST=latest_digest,
-                        HARNESS_LEGACY_DIGEST=legacy_digest, HARNESS_FAIL_BOUNDARY=str(int(fail_boundary)),
+                        HARNESS_LATEST_DIGEST=latest_digest, HARNESS_LEGACY_DIGEST=legacy_digest,
+                        HARNESS_FAIL_BOUNDARY=fail_boundary,
                         GITHUB_STEP_SUMMARY=str(root / f'summary-{fail_boundary}.txt'))
                     result = subprocess.run(['bash', str(scripts / 'migration-compat.sh'), latest_tag, latest_digest],
                         env=harness_env, capture_output=True, text=True, timeout=15, check=False)
-                    self.assertEqual(result.returncode, 23 if fail_boundary else 0, result.stdout + result.stderr)
+                    self.assertEqual(result.returncode, 0 if fail_boundary == 'none' else 23, result.stdout + result.stderr)
                     events = [json.loads(line) for line in log.read_text().splitlines()]
                     migrations = [event for event in events if event['command'] == 'go']
+                    expected_cycles = 1 if fail_boundary == 'latest' else 2
+                    self.assertEqual(len(migrations), expected_cycles)
+                    self.assertEqual([event['image'] for event in migrations], [latest_digest, legacy_digest][:expected_cycles])
                     self.assertEqual([(event['image'], event['migrated']) for event in migrations],
-                        [(latest_digest, False), (legacy_digest, False)])
+                        [(latest_digest, False)] +
+                        ([] if fail_boundary == 'latest' else [(legacy_digest, False)]))
                     databases = [event for event in events if event['command'] == 'docker' and
                         event['args'][0] == 'run' and 'POSTGRES_USER=postgres' in event['args']]
-                    self.assertEqual(len(databases), 2)
+                    self.assertEqual(len(databases), expected_cycles)
                     probes = [event for event in events if event['command'] == 'python3']
                     seeds = [event for event in probes if event['args'][1] == 'seed']
-                    self.assertEqual([(event['image'], event['migrated'], event['args'][-1]) for event in seeds],
-                        [(latest_digest, False, latest_tag[1:]), (legacy_digest, False, legacy_tag[1:])])
                     reads = [event for event in probes if event['args'][1] == 'check']
+                    self.assertEqual([(event['image'], event['migrated'], event['args'][-1]) for event in seeds],
+                        [(latest_digest, False, latest_tag[1:])] +
+                        ([] if fail_boundary == 'latest' else [(legacy_digest, False, legacy_tag[1:])]))
                     self.assertEqual([(event['image'], event['migrated'], event['args'][-1]) for event in reads],
-                        [(latest_digest, True, latest_tag[1:]), (legacy_digest, True, legacy_tag[1:])])
+                        [(latest_digest, True, latest_tag[1:])] +
+                        ([] if fail_boundary == 'latest' else [(legacy_digest, True, legacy_tag[1:])]))
+                    database_names = [event['args'][event['args'].index('--name') + 1] for event in databases]
+                    self.assertEqual(len(set(database_names)), expected_cycles)
+                    state_paths = [event['args'][event['args'].index('--state') + 1] for event in seeds]
+                    self.assertEqual(len(set(state_paths)), expected_cycles)
+                    self.assertEqual([event['args'][event['args'].index('--state') + 1] for event in reads], state_paths)
+                    for index, migration in enumerate(migrations):
+                        self.assertLess(events.index(seeds[index]), events.index(migration))
+                        self.assertLess(events.index(migration), events.index(reads[index]))
                     boundary = [event for event in probes if event['args'][1] == 'account-use']
-                    self.assertEqual([(event['image'], event['migrated'],
-                        event['args'][event['args'].index('--version') + 1]) for event in boundary],
-                        [(latest_digest, True, latest_tag[1:]), (legacy_digest, True, legacy_tag[1:])])
+                    self.assertEqual([(event['image'], event['database'], event['migrated'],
+                                       event['args'][event['args'].index('--version') + 1],
+                                       '--require-refusal' in event['args']) for event in boundary],
+                        [(latest_digest, 'aeon', True, latest_tag[1:], False)] +
+                        ([] if fail_boundary == 'latest' else [(legacy_digest, 'aeon_legacy', True, legacy_tag[1:], True)]))
                     self.assertEqual(boundary[0]['args'][boundary[0]['args'].index('--release-tag') + 1], latest_tag)
-                    self.assertNotIn('--release-tag', boundary[1]['args'])
-                    if fail_boundary:
+                    if fail_boundary != 'latest':
+                        self.assertNotIn('--release-tag', boundary[1]['args'])
+                    for index, activation in enumerate(boundary):
+                        self.assertEqual(activation['args'][activation['args'].index('--state') + 1], state_paths[index])
+                        self.assertEqual(activation['args'][activation['args'].index('--database-container') + 1], database_names[index])
+                        self.assertLess(events.index(reads[index]), events.index(activation))
+                    if fail_boundary != 'none':
                         self.assertNotIn('Migration compatibility passed:', result.stdout)
                     else:
                         self.assertIn('Migration compatibility passed:', result.stdout)
@@ -582,14 +893,15 @@ state_path.write_text(json.dumps(state))
 
 class MigrationRuntimeTest(unittest.TestCase):
     def test_latest_compatibility_and_legacy_refusal_use_their_own_images(self):
-        # Risk: the latest release's policy checks and the below-floor binary's
-        # strict refusals must both run against their own inactive fixture.
+        # Risk: after publishing a capable release, an activated 200 from that
+        # release must not replace the below-floor binary's strict refusal gate.
         floor_digest = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
         floor_version = '261009095632.0.0'
         latest_digest = 'sha256:' + 'a' * 64
         latest_version = '261010123154.0.0'
-        for latest_fails, legacy_fails in ((False, False), (False, True), (True, False)):
-            with self.subTest(latest_fails=latest_fails, legacy_fails=legacy_fails), tempfile.TemporaryDirectory() as directory:
+        for latest_capable, latest_fails, legacy_fails in ((True, False, False), (False, False, False),
+                                                        (True, True, False), (True, False, True)):
+            with self.subTest(latest_capable=latest_capable, latest_fails=latest_fails, legacy_fails=legacy_fails), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 scripts, commands = root / 'scripts', root / 'commands'
                 scripts.mkdir()
@@ -604,7 +916,7 @@ tool, args = Path(sys.argv[0]).name, sys.argv[1:]
 floor = 'sha256:d916ebb57249fda5f192e74b37ebd770c0eb67c26aafeb1c0045a635e8aa940c'
 latest_id, floor_id = 'sha256:' + 'b' * 64, 'sha256:' + 'c' * 64
 def fixture_path():
-    return root / ('fixture-' + (root / 'database').read_text())
+    return root / ('fixture-' + (root / 'cycle').read_text())
 def record(event):
     with (root / 'events.jsonl').open('a') as out:
         out.write(json.dumps(event) + '\\n')
@@ -616,15 +928,18 @@ if tool == 'docker':
     elif args[0] == 'run' and 'POSTGRES_USER=postgres' in args:
         if (root / 'database-live').exists() and (root / 'database-live').read_text() == 'true':
             sys.exit('a fresh database requires the previous container to be removed')
-        cycle = int((root / 'database').read_text()) + 1 if (root / 'database').exists() else 1
-        (root / 'database').write_text(str(cycle))
+        cycle = int((root / 'cycle').read_text()) + 1 if (root / 'cycle').exists() else 1
+        (root / 'cycle').write_text(str(cycle))
         (root / 'database-live').write_text('true')
         fixture_path().write_text('fresh')
         record(['database', cycle])
+        record(['database-name', args[args.index('--name') + 1]])
     elif args[0] == 'run' and args[-1] in (latest_id, floor_id):
         (root / 'image').write_text(args[-1])
+        database = next(value for value in args if value.startswith('AEON_DATABASE_URL=')).split('/')[-1].split('?')[0]
+        (root / 'database').write_text(database)
         (root / 'running').write_text('true')
-        record(['boot', args[-1]])
+        record(['boot', args[-1], database])
     elif args[0] == 'stop':
         (root / 'running').write_text('false')
     elif args[:3] == ['container', 'rm', '-fv']:
@@ -644,7 +959,8 @@ elif tool == 'go':
     if (root / 'running').read_text() != 'false' or fixture_path().read_text() != 'seeded':
         sys.exit('migration requires its own seeded fixture with no server connected')
     fixture_path().write_text('inactive')
-    record(['migrate', int((root / 'database').read_text())])
+    record(['migrate', int((root / 'cycle').read_text())])
+    record(['migrate-image', (root / 'image').read_text()])
 elif tool == 'python3':
     mode = args[1]
     current = (root / 'image').read_text()
@@ -654,27 +970,43 @@ elif tool == 'python3':
         expected = '261009095632.0.0' if current == floor_id else '261010123154.0.0'
         if version != expected:
             sys.exit('wrong binary version')
+        state = Path(args[args.index('--state') + 1])
+        fixture = {'image': current, 'version': version}
         if mode == 'seed':
             if fixture_path().read_text() != 'fresh':
                 sys.exit('seeding requires a fresh database')
             fixture_path().write_text('seeded')
+            state.write_text(json.dumps(fixture))
+        elif json.loads(state.read_text()) != fixture:
+            sys.exit('check requires the same image seed state')
         elif fixture_path().read_text() != 'inactive':
             sys.exit('reads require the non-activated migrated fixture')
     if mode == 'account-use':
+        database = args[args.index('--database') + 1] if '--database' in args else 'aeon'
+        if database != (root / 'database').read_text():
+            sys.exit('probe and binary used different fixtures')
         expected = '261009095632.0.0' if current == floor_id else '261010123154.0.0'
         if version != expected:
             sys.exit('wrong account-use capability release')
-        if current == latest_id and args[args.index('--release-tag') + 1] != 'v' + expected:
-            sys.exit('latest capability must use its pinned release')
-        if current == floor_id and '--release-tag' in args:
-            sys.exit('legacy refusal must remain unconditional')
-        if fixture_path().read_text() != 'inactive':
+        fixture = fixture_path()
+        if fixture.read_text() != 'inactive':
             sys.exit('account-use probes require an empty inactive fixture')
-        fixture_path().write_text('activated with populated pool')
-        if current == latest_id and os.environ['AEON_COMPAT_TEST_LATEST_FAILS'] == 'true':
-            sys.exit('latest policy gate failed')
-        if current == floor_id and os.environ['AEON_COMPAT_TEST_LEGACY_FAILS'] == 'true':
-            sys.exit('legacy refusal gate failed')
+        fixture.write_text('activated with populated pool')
+        if current == latest_id:
+            if args[args.index('--release-tag') + 1] != 'v' + expected:
+                sys.exit('latest capability must use its pinned release')
+            if '--require-refusal' in args:
+                sys.exit('latest binary forced to refuse regardless of capability')
+            record(['activated-latest', os.environ['AEON_COMPAT_TEST_LATEST_CAPABLE']])
+            if os.environ['AEON_COMPAT_TEST_LATEST_FAILS'] == 'true':
+                sys.exit('capable normal path failed')
+        else:
+            if '--release-tag' in args:
+                sys.exit('legacy refusal must remain unconditional')
+            if database != 'aeon_legacy' or '--require-refusal' not in args:
+                sys.exit('legacy refusal gate lost its independent strict fixture')
+            if os.environ['AEON_COMPAT_TEST_LEGACY_FAILS'] == 'true':
+                sys.exit('legacy refusal gate failed')
 '''
                 for name in ('docker', 'go', 'python3', 'git', 'trash'):
                     executable = commands / name
@@ -684,40 +1016,50 @@ elif tool == 'python3':
                     cwd=root, env={**os.environ, 'PATH': str(commands) + os.pathsep + os.environ['PATH'],
                         'GITHUB_STEP_SUMMARY': str(root / 'summary'),
                         'AEON_COMPAT_TEST_ROOT': str(root),
+                        'AEON_COMPAT_TEST_LATEST_CAPABLE': str(latest_capable).lower(),
                         'AEON_COMPAT_TEST_LATEST_FAILS': str(latest_fails).lower(),
                         'AEON_COMPAT_TEST_LEGACY_FAILS': str(legacy_fails).lower()},
                     capture_output=True, text=True, timeout=30, check=False)
                 events = [json.loads(line) for line in (root / 'events.jsonl').read_text().splitlines()]
                 latest_id, floor_id = 'sha256:' + 'b' * 64, 'sha256:' + 'c' * 64
                 checks = [event for event in events if event[:2] == ['probe', 'check']]
-                if latest_fails:
-                    self.assertEqual(checks, [['probe', 'check', latest_id, latest_version]])
-                    self.assertEqual([event for event in events if event[:2] == ['probe', 'account-use']],
-                        [['probe', 'account-use', latest_id, latest_version]])
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertIn('latest policy gate failed', result.stderr)
-                    self.assertNotIn('Migration compatibility passed:', result.stdout)
-                    self.assertEqual([event for event in events if event[0] == 'database'], [['database', 1]])
-                    continue
-                self.assertEqual(checks, [['probe', 'check', latest_id, latest_version],
-                    ['probe', 'check', floor_id, floor_version]])
+                self.assertEqual(checks, [['probe', 'check', latest_id, latest_version]] +
+                    ([] if latest_fails else [['probe', 'check', floor_id, floor_version]]))
                 self.assertEqual([event for event in events if event[:2] == ['probe', 'account-use']],
-                    [['probe', 'account-use', latest_id, latest_version],
-                     ['probe', 'account-use', floor_id, floor_version]])
+                    [['probe', 'account-use', latest_id, latest_version]] +
+                    ([] if latest_fails else [['probe', 'account-use', floor_id, floor_version]]))
+                # Both immutable images are resolved before activation, so
+                # even a failing latest probe has already pulled the floor.
                 self.assertEqual([event for event in events if event[0] == 'pull'],
                     [['pull', 'ghcr.io/inspr-at/aeon@' + latest_digest],
                      ['pull', 'ghcr.io/inspr-at/aeon@' + floor_digest]])
-                self.assertEqual([event for event in events if event[0] == 'database'], [['database', 1], ['database', 2]])
-                self.assertEqual([event for event in events if event[0] == 'migrate'], [['migrate', 1], ['migrate', 2]])
+                cycles = [1] if latest_fails else [1, 2]
+                self.assertEqual([event for event in events if event[0] == 'database'], [['database', cycle] for cycle in cycles])
+                self.assertEqual([event for event in events if event[0] == 'migrate'], [['migrate', cycle] for cycle in cycles])
+                database_names = [event[1] for event in events if event[0] == 'database-name']
+                self.assertEqual(len(database_names), len(cycles))
+                self.assertEqual(len(set(database_names)), len(cycles))
+                seeds = [event for event in events if event[:2] == ['probe', 'seed']]
+                self.assertEqual(seeds, [['probe', 'seed', latest_id, latest_version]] +
+                    ([] if latest_fails else [['probe', 'seed', floor_id, floor_version]]))
+                self.assertEqual([event for event in events if event[0] == 'migrate-image'],
+                    [['migrate-image', latest_id]] + ([] if latest_fails else [['migrate-image', floor_id]]))
+                for index in range(len(cycles)):
+                    migration = ['migrate', index + 1]
+                    self.assertLess(events.index(['database', index + 1]), events.index(seeds[index]))
+                    self.assertLess(events.index(seeds[index]), events.index(migration))
+                    self.assertLess(events.index(migration), events.index(checks[index]))
                 self.assertLess(events.index(['migrate', 1]), events.index(checks[0]))
-                self.assertLess(events.index(checks[0]), events.index(['probe', 'account-use', latest_id, latest_version]))
-                self.assertLess(events.index(['probe', 'account-use', latest_id, latest_version]), events.index(['database', 2]))
-                self.assertLess(events.index(['migrate', 2]), events.index(checks[1]))
+                self.assertLess(events.index(checks[0]), events.index(['activated-latest', str(latest_capable).lower()]))
                 self.assertEqual((root / 'fixture-1').read_text(), 'activated with populated pool')
-                self.assertEqual((root / 'fixture-2').read_text(), 'activated with populated pool')
-                if legacy_fails:
+                if not latest_fails:
+                    self.assertLess(events.index(['probe', 'account-use', latest_id, latest_version]), events.index(['database', 2]))
+                    self.assertLess(events.index(['migrate', 2]), events.index(checks[1]))
+                    self.assertEqual((root / 'fixture-2').read_text(), 'activated with populated pool')
+                    self.assertIn(['boot', floor_id, 'aeon_legacy'], events)
+                if latest_fails or legacy_fails:
                     self.assertNotEqual(result.returncode, 0)
-                    self.assertIn('legacy refusal gate failed', result.stderr)
+                    self.assertIn('capable normal path failed' if latest_fails else 'legacy refusal gate failed', result.stderr)
                     self.assertNotIn('Migration compatibility passed:', result.stdout)
                 else:
                     self.assertEqual(result.returncode, 0, result.stderr)
