@@ -112,6 +112,9 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 	admin, old, next := retireFixture(t)
 	account := minimalAccount(t, admin, old)
 	inRegistry(t, admin, func(tx pgx.Tx) error {
+        older,err:=insertActivatedProfile(t.Context(),tx,admin,profileWrite{Slug:"older-opus",Version:"1",Harness:"claude",Family:"anthropic",Model:"claude-opus-4",Effort:"high",Tier:"strong"},true,modelactivation.Person)
+        if err!=nil{return err}
+        if _,err:=tx.Exec(t.Context(),`INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',2,$2)`,admin.TenantID,older.ID);err!=nil{return err}
 		var scope, kind string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO work_kinds(tenant_id,slug,label) VALUES($1,'retire-kind','Retire kind') RETURNING id::text`, admin.TenantID).Scan(&kind); err != nil {
 			return err
@@ -131,8 +134,8 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 	if version.State == nil || *version.State != "superseded" || version.Successor == nil || *version.Successor != "anthropic:claude-opus-5.5" || version.Source != "aeon_model_line/aeon_model_version_newer" || len(version.Uses) != 2 {
 		t.Fatal(version)
 	}
-	result := boardDecode[retireResult](t, boardCall(t, admin, "POST", "/api/models/outdated/retire", retireWrite{Versions: []string{version.Version}, Revision: preview.Revision}, ""), 200)
-	if len(result.Removed) != 1 || len(result.Moved) != 2 || result.UndoToken == "" || eventCount(t, admin, "model.outdated_retired") != 1 {
+	result := boardDecode[retireResult](t, boardCall(t, admin, "POST", "/api/models/outdated/retire", retireWrite{Versions: []string{version.Version,"anthropic:claude-opus-4"}, Revision: preview.Revision}, ""), 200)
+	if len(result.Removed) != 2 || len(result.Moved) != 3 || result.UndoToken == "" || eventCount(t, admin, "model.outdated_retired") != 1 {
 		t.Fatal(result)
 	}
 	inRegistry(t, admin, func(tx pgx.Tx) error {
@@ -143,7 +146,10 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 		}
 		if pin != next.ID {
 			t.Fatal("role reference did not move", pin)
-		}
+		}        var routes int
+        if err:=tx.QueryRow(t.Context(),`SELECT count(*) FROM model_role_routes WHERE role='build'`).Scan(&routes);err!=nil{return err}
+        if routes!=1{t.Fatal("compatible successor routes were not deduplicated",routes)}
+
 		if err := tx.QueryRow(t.Context(), `SELECT profile_id::text FROM model_pref_cells WHERE mode='pinned'`).Scan(&pin); err != nil {
 			return err
 		}
