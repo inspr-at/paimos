@@ -20,7 +20,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const webhookAttemptTimeout = 4 * time.Minute
+const (
+	webhookAttemptTimeout = 4 * time.Minute
+	webhookMaxAttempts    = 12
+)
 
 var webhookSteps = []string{"projection", "fanout", "check_audit", "merge_audit", "metrics", "flow", "completion"}
 
@@ -225,16 +228,26 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 	if json.Unmarshal(receipt.raw, &e) != nil || e.Repository.Name != receipt.repository || strconv.FormatInt(e.Installation.ID, 10) != receipt.installation || e.Action != receipt.action || !validAction(receipt.event, receipt.action) {
 		return webhookClass("invalid_receipt")
 	}
-	receipt.attempts++
-	err = db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+	// A crash after reserving the last attempt must not buy another network
+	// attempt on restart. Fully checkpointed receipts can still finish safely.
+	if receipt.attempts >= webhookMaxAttempts {
+		for _, step := range webhookSteps {
+			if _, done := receipt.checkpoints[step]; !done {
+				return m.deferWebhook(ctx, &receipt, step, step, nil)
+			}
+		}
+	} else {
+		receipt.attempts++
+		err = db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+			if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET attempts=$2,next_attempt_at=$3 WHERE delivery_id=$1`, id, receipt.attempts, m.now().Add(webhookAttemptTimeout+webhookBackoff(receipt.attempts)))
+			return err
+		})
+		if err != nil {
 			return err
 		}
-		_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET attempts=$2,next_attempt_at=$3 WHERE delivery_id=$1`, id, receipt.attempts, m.now().Add(webhookAttemptTimeout+webhookBackoff(receipt.attempts)))
-		return err
-	})
-	if err != nil {
-		return err
 	}
 	for _, step := range webhookSteps {
 		if _, done := receipt.checkpoints[step]; done {
@@ -254,28 +267,16 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 			// Reuse only the same sequential session, bounded by a cleanup deadline.
 			cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 			defer stop()
-			storeErr := db.InTenant(db.AllProjects(cleanup, "delivery receipt retry schedule"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-				if err := db.LockTenant(cleanup, tx, m.config.TenantID); err != nil {
-					return err
-				}
-				_, err := tx.Exec(cleanup, `UPDATE delivery_webhook_receipts SET next_attempt_at=$2,last_step=$3,last_error_class=$4 WHERE delivery_id=$1`, id, m.now().Add(webhookBackoff(receipt.attempts)), failedStep, webhookErrorClass(err))
-				return err
-			})
+			storeErr := m.deferWebhook(cleanup, &receipt, step, failedStep, err)
 			if storeErr != nil {
 				return &webhookStepError{step: "receipt", err: storeErr}
 			}
 			return &webhookStepError{step: failedStep, err: err}
 		}
 		if outcome == webhookPending {
-			// The receipt was accepted and the existing Needs You refusal, if
-			// any, is durable. Keep this step open for later proof/gate recovery.
-			return db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
-				if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
-					return err
-				}
-				_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET next_attempt_at=$2,last_step=$3,last_error_class=NULL WHERE delivery_id=$1`, id, m.now().Add(webhookBackoff(receipt.attempts)), step)
-				return err
-			})
+			// The Needs You refusal, if any, remains durable even after the
+			// automated retry budget ends; no completion gate is bypassed.
+			return m.deferWebhook(ctx, &receipt, step, step, nil)
 		}
 	}
 	return db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
@@ -285,6 +286,34 @@ func (m *Module) processWebhook(ctx context.Context, id string, immediate bool) 
 		_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET finished_at=$2,last_step=NULL,last_error_class=NULL WHERE delivery_id=$1`, id, m.now())
 		return err
 	})
+}
+
+func (m *Module) deferWebhook(ctx context.Context, receipt *webhookReceipt, step, failedStep string, cause error) error {
+	exhausted := receipt.attempts >= webhookMaxAttempts
+	var class *string
+	if cause != nil {
+		value := webhookErrorClass(cause)
+		class = &value
+	}
+	if exhausted {
+		value := "retry_exhausted"
+		class = &value
+	}
+	at := m.now()
+	err := db.InTenant(db.AllProjects(ctx, "delivery receipt retry schedule"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET next_attempt_at=$2,last_step=$3,last_error_class=$4,
+			finished_at=CASE WHEN $5 THEN $6 ELSE finished_at END,
+			checkpoints=CASE WHEN $5 THEN jsonb_set(checkpoints,ARRAY[$7::text],to_jsonb($8::text)) ELSE checkpoints END
+			WHERE delivery_id=$1`, receipt.id, at.Add(webhookBackoff(receipt.attempts)), failedStep, class, exhausted, at, step, string(webhookGaveUp))
+		return err
+	})
+	if err == nil && exhausted {
+		m.logWebhookGaveUp(ctx, receipt, failedStep, cause)
+	}
+	return err
 }
 
 func (m *Module) checkpointWebhook(ctx context.Context, step string, outcome webhookOutcome, receipt *webhookReceipt) error {
@@ -341,7 +370,8 @@ func (m *Module) webhookStep(ctx context.Context, step string, receipt *webhookR
 }
 
 // A bounded due page and per-delivery session claim keep each sweep finite.
-// Failed attempts back off indefinitely: pending facts are never discarded.
+// Unresolved work backs off within its attempt budget. Exhausted receipts keep
+// their payload and checkpoints, but leave the due page with a gave_up outcome.
 func (m *Module) retryWebhooks(ctx context.Context) error {
 	ctx, stop := context.WithTimeout(ctx, webhookAttemptTimeout)
 	defer stop()

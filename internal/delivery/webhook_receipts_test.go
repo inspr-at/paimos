@@ -2,10 +2,12 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http/httptest"
 	"reflect"
 	"strings"
@@ -21,18 +23,47 @@ import (
 
 type receiptGitHub struct {
 	*metricsFake
-	merged   *MergeFact
-	mergeErr error
+	merged                *MergeFact
+	mergeErr              error
+	pullReads, mergeReads int
+}
+
+func (g *receiptGitHub) Pull(ctx context.Context, n int64) (Pull, error) {
+	g.pullReads++
+	return g.fakeGitHub.Pull(ctx, n)
 }
 
 func (g *receiptGitHub) MergedPull(context.Context, int64) (*MergeFact, error) {
+	g.mergeReads++
 	return g.merged, g.mergeErr
 }
 func (g *receiptGitHub) MergedGroup(context.Context, string) ([]MergeFact, error) {
+	g.mergeReads++
 	if g.merged == nil {
 		return nil, g.mergeErr
 	}
 	return []MergeFact{*g.merged}, g.mergeErr
+}
+
+type receiptCanonicalGitHub struct {
+	*receiptGitHub
+	pull auditPull
+}
+
+func (g *receiptCanonicalGitHub) mergedPullState(_ context.Context, number int64) (*MergeFact, bool, error) {
+	g.mergeReads++
+	return mergedPullState(func(_ string, out any) error {
+		raw, err := json.Marshal(g.pull)
+		if err != nil {
+			return err
+		}
+		return json.Unmarshal(raw, out)
+	}, g.pull.Base.Repo.Name, number)
+}
+
+func (g *receiptCanonicalGitHub) mergedGroupState(ctx context.Context, sha string, waitForProof bool) ([]MergeFact, bool, error) {
+	facts, err := g.MergedGroup(ctx, sha)
+	return facts, waitForProof && len(facts) == 0, err
 }
 
 func receiptSend(f *fixture, event, id string, raw []byte) *httptest.ResponseRecorder {
@@ -102,6 +133,222 @@ func receiptEffects(t *testing.T, f *fixture) []int {
 			(SELECT count(*) FROM events WHERE type='delivery.bypass_merge')`).Scan(&out[0], &out[1], &out[2], &out[3], &out[4], &out[5], &out[6], &out[7], &out[8])
 	})
 	return out
+}
+
+func TestDeliveryWebhookTerminalNoOps(t *testing.T) {
+	// Risk: empty terminal results create an endless stream of GitHub reads,
+	// or a closed/unmerged PR is incorrectly completed on a later sweep.
+	for _, scenario := range []string{"closed_unmerged", "other_branch_merge", "direct_push", "destroyed_closed_unmerged", "destroyed_other_branch"} {
+		t.Run(scenario, func(t *testing.T) {
+			f, metrics := newMetricsFixture(t)
+			g := &receiptCanonicalGitHub{receiptGitHub: &receiptGitHub{metricsFake: metrics}}
+			f.m.github = g
+			p := f.pull()
+			f.gh.pulls[7] = p
+			fact := mergeFactFixture(f, 7, "AEON-848", strings.Repeat("c", 40))
+			body := auditPRBody(f, fact)
+			pull := body["pull_request"].(map[string]any)
+			event := "pull_request"
+			switch scenario {
+			case "closed_unmerged":
+				pull["merged"] = false
+				pull["state"] = "closed"
+				p.Open = false
+			case "other_branch_merge":
+				pull["base"].(map[string]any)["ref"] = "release"
+				p.Open, p.Merged = false, true
+			case "direct_push":
+				event = "push"
+				body = map[string]any{"ref": "refs/heads/main", "after": fact.SHA}
+			case "destroyed_closed_unmerged", "destroyed_other_branch":
+				recordedMergeWebhook(t, f, "merge_group.checks_requested", "terminal-queue-request", 204, nil)
+				event = "merge_group"
+				body = map[string]any{"action": "destroyed", "merge_group": map[string]any{"head_sha": fact.SHA, "base_sha": p.Base, "head_ref": "refs/heads/gh-readonly-queue/main/pr-7-group"}}
+				g.pull.Number, g.pull.State = 7, "closed"
+				g.pull.Base.Ref, g.pull.Base.Repo.Name = "main", f.m.config.Repository
+				p.Open = false
+				if scenario == "destroyed_other_branch" {
+					g.pull.Merged, p.Merged = true, true
+					g.pull.Base.Ref = "release"
+				}
+			}
+			f.gh.pulls[7] = p
+			beforeState := mergedState(t, f, f.ticket)
+			raw := receiptBody(t, f, body)
+			if w := receiptSend(f, event, "retry-delivery", raw); w.Code != 204 {
+				t.Fatalf("terminal status %d", w.Code)
+			}
+			attempts, _, finished, checkpoints, step, class := receiptState(t, f, "retry-delivery")
+			if attempts != 1 || finished == nil || len(checkpoints) != len(webhookSteps) || checkpoints["completion"] != webhookNothingToRecord || step != nil || class != nil {
+				t.Fatalf("terminal result still pending: %d %v %v %v %v", attempts, finished, checkpoints, step, class)
+			}
+			for _, step := range []string{"check_audit", "merge_audit", "metrics", "flow"} {
+				if checkpoints[step] != webhookNothingToRecord {
+					t.Fatalf("empty %s was not a no-op: %s", step, checkpoints[step])
+				}
+			}
+			wantMergeReads := 0
+			if scenario == "direct_push" || strings.HasPrefix(scenario, "destroyed_") {
+				wantMergeReads = 1
+			}
+			if g.mergeReads != wantMergeReads {
+				t.Fatalf("terminal canonical reads %d, want %d", g.mergeReads, wantMergeReads)
+			}
+			effects := receiptEffects(t, f)
+			reads := []int{g.pullReads, g.mergeReads, metrics.checkReads, len(metrics.calls), f.fanouts}
+			restarted := New(f.d.App, f.m.config, f.m.secret, g, f.m.fanout)
+			restarted.now = f.m.now
+			for range 3 {
+				f.at = f.at.Add(24 * time.Hour)
+				if err := restarted.retryWebhooks(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if w := receiptSend(f, event, "retry-delivery", raw); w.Code != 204 {
+				t.Fatalf("terminal replay status %d", w.Code)
+			}
+			if got := []int{g.pullReads, g.mergeReads, metrics.checkReads, len(metrics.calls), f.fanouts}; !reflect.DeepEqual(got, reads) {
+				t.Fatalf("terminal receipt reread GitHub/fanout: %v -> %v", reads, got)
+			}
+			attempts, _, _, _, _, _ = receiptState(t, f, "retry-delivery")
+			if attempts != 1 || mergedState(t, f, f.ticket) != beforeState || !reflect.DeepEqual(receiptEffects(t, f), effects) || effects[6] != 0 {
+				t.Fatal("terminal replay changed attempts, effects or ticket")
+			}
+		})
+	}
+}
+
+func TestDeliveryWebhookRetryBudget(t *testing.T) {
+	// Risk: missing proof, a refused gate or persistent upstream failure never
+	// stops; exhaustion hides failure, bypasses a gate, or restarts more reads.
+	for _, scenario := range []string{"missing_merge_proof", "refused_gate", "github_failure", "reserved_last_attempt"} {
+		t.Run(scenario, func(t *testing.T) {
+			f, g := mergeFixture(t)
+			fact := mergeFactFixture(f, 7, "AEON-848", strings.Repeat("c", 40))
+			if scenario == "refused_gate" {
+				g.facts[7] = fact
+				f.tx(t, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{}' WHERE id=$1`, f.ticket)
+					return err
+				})
+			}
+			if scenario == "github_failure" {
+				g.beforeRead = func() { g.err = fmt.Errorf("%w: %s", crossreview.ErrUnavailable, webhookPrivateText) }
+			}
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, nil))
+			f.m.webhookFailures.logger = logger
+			raw := receiptBody(t, f, auditPRBody(f, fact))
+			wantStatus := 204
+			if scenario == "github_failure" {
+				wantStatus = 502
+			}
+			if w := receiptSend(f, "pull_request", "retry-delivery", raw); w.Code != wantStatus {
+				t.Fatalf("first attempt status %d, want %d", w.Code, wantStatus)
+			}
+			attempts, next, finished, checkpoints, step, class := receiptState(t, f, "retry-delivery")
+			if attempts != 1 || finished != nil || checkpoints["completion"] != "" || step == nil || !next.Equal(f.at.Add(5*time.Second)) {
+				t.Fatal("first unresolved attempt was not retained with backoff")
+			}
+			if scenario == "github_failure" {
+				if *step != "reader-MergedPull" || class == nil || *class != "github_unavailable" {
+					t.Fatal("wrong initial failure reason")
+				}
+			} else if *step != "completion" || class != nil {
+				t.Fatal("pending proof/gate reported a failure")
+			}
+			restarted := New(f.d.App, f.m.config, f.m.secret, g, f.m.fanout)
+			restarted.now = f.m.now
+			restarted.webhookFailures.logger = logger
+			if scenario == "reserved_last_attempt" {
+				// Model a process dying after the final reservation was committed.
+				f.tx(t, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `UPDATE delivery_webhook_receipts SET attempts=$2 WHERE delivery_id=$1`, "retry-delivery", webhookMaxAttempts)
+					return err
+				})
+				f.at = next
+				if err := restarted.retryWebhooks(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				for attempt := int64(2); attempt <= webhookMaxAttempts; attempt++ {
+					reads := g.reads
+					f.at = next.Add(-time.Nanosecond)
+					if err := restarted.retryWebhooks(t.Context()); err != nil || g.reads != reads {
+						t.Fatalf("retry before due time: %v, reads %d -> %d", err, reads, g.reads)
+					}
+					f.at = next
+					err := restarted.retryWebhooks(t.Context())
+					if scenario == "github_failure" {
+						if !errors.Is(err, crossreview.ErrUnavailable) {
+							t.Fatalf("failed attempt reported success or wrong cause: %v", err)
+						}
+					} else if err != nil {
+						t.Fatal(err)
+					}
+					attempts, next, finished, checkpoints, step, class = receiptState(t, f, "retry-delivery")
+					if attempts != attempt || g.reads != reads+1 {
+						t.Fatalf("attempt accounting %d/%d, reads %d -> %d", attempts, attempt, reads, g.reads)
+					}
+					if attempt < webhookMaxAttempts && (finished != nil || checkpoints["completion"] != "" || !next.Equal(f.at.Add(webhookBackoff(attempt)))) {
+						t.Fatal("unfinished attempt lost its checkpoint or backoff")
+					}
+				}
+			}
+			attempts, _, finished, checkpoints, step, class = receiptState(t, f, "retry-delivery")
+			if attempts != webhookMaxAttempts || finished == nil || checkpoints["completion"] != webhookGaveUp || step == nil || class == nil || *class != "retry_exhausted" || mergedState(t, f, f.ticket) != "qa" {
+				t.Fatalf("retry budget did not retain a terminal failure: %d %v %v %v %v", attempts, finished, checkpoints, step, class)
+			}
+			f.tx(t, func(tx pgx.Tx) error {
+				var payload []byte
+				if err := tx.QueryRow(t.Context(), `SELECT payload FROM delivery_webhook_receipts WHERE delivery_id='retry-delivery'`).Scan(&payload); err != nil {
+					return err
+				}
+				if !bytes.Equal(payload, raw) {
+					t.Fatal("exhaustion discarded the verified payload")
+				}
+				if scenario == "refused_gate" {
+					var count int
+					if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM status_autopilot_proposals WHERE node_id=$1 AND status='pending'`, f.ticket).Scan(&count); err != nil {
+						return err
+					}
+					if count != 1 {
+						t.Fatal("exhaustion erased or duplicated the Needs You refusal")
+					}
+				}
+				return nil
+			})
+			reads, fanouts, effects := g.reads, f.fanouts, receiptEffects(t, f)
+			for range 3 {
+				f.at = f.at.Add(24 * time.Hour)
+				if err := restarted.retryWebhooks(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if w := receiptSend(f, "pull_request", "retry-delivery", raw); w.Code != 204 {
+				t.Fatalf("exhausted replay status %d", w.Code)
+			}
+			if g.reads != reads || f.fanouts != fanouts || !reflect.DeepEqual(receiptEffects(t, f), effects) {
+				t.Fatal("exhaustion restarted network work or duplicated effects")
+			}
+			gaveUp := 0
+			for _, line := range strings.Split(strings.TrimSpace(logs.String()), "\n") {
+				var entry map[string]any
+				if json.Unmarshal([]byte(line), &entry) != nil {
+					t.Fatal("invalid log record")
+				}
+				if entry["msg"] == "GitHub webhook delivery gave up" {
+					gaveUp++
+					if entry["outcome"] != "gave_up" || entry["error_class"] != "retry_exhausted" || entry["attempts"] != float64(webhookMaxAttempts) || entry["delivery_id"] != "retry-delivery" || entry["level"] != "WARN" {
+						t.Fatalf("incomplete exhaustion diagnostic: %v", entry)
+					}
+				}
+			}
+			if gaveUp != 1 || strings.Contains(logs.String(), webhookPrivateText) || strings.Contains(logs.String(), string(raw)) {
+				t.Fatal("exhaustion diagnostic was missing, duplicated or contained private content")
+			}
+		})
+	}
 }
 
 func TestDeliveryWebhookInternalRetry(t *testing.T) {

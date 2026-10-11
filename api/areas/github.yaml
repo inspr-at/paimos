@@ -4,7 +4,7 @@ paths:
   /github/webhook:
     post:
       operationId: deliveryGitHubWebhook
-      description: 'Public ingress authenticated solely by the host-owned GitHub App HMAC, delivery ID, installation and repository binding. Stores verified payloads before processing, checkpoints completed steps and retries unfinished work internally. Reusing a delivery ID with different authenticated content is refused.'
+      description: 'Public ingress authenticated solely by the host-owned GitHub App HMAC, delivery ID, installation and repository binding. Stores verified payloads before processing, checkpoints completed steps and retries unfinished work internally with backoff for up to twelve processing attempts. Terminal no-ops finish immediately; exhausted receipts retain their facts with a logged gave_up outcome. Reusing a delivery ID with different authenticated content is refused.'
       security: []
       parameters:
         - {name: X-Hub-Signature-256, in: header, required: true, schema: {type: string}}
@@ -12,7 +12,7 @@ paths:
         - {name: X-GitHub-Event, in: header, required: true, schema: {type: string, enum: [pull_request, check_run, check_suite, merge_group, push, status, workflow_run]}}
       requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
       responses:
-        '204': {description: 'Verified delivery accepted; unfinished merge proof or ticket-gate work remains queued'}
+        '204': {description: 'Verified delivery accepted; unfinished work remains queued within the retry budget, and exhausted receipts retain a gave_up outcome'}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}

@@ -76,14 +76,19 @@ logs or credentials.
   returns 502; recovery also runs internally without a GitHub redelivery.
   Repeated attempts use the existing idempotent fact and event identities.
   A delivery ID reused with different authenticated content returns 409.
-  Missing canonical merge proof and refused ticket transitions stay pending;
-  internal recovery rechecks them under the existing ownership and human gates.
+  Closed unmerged PRs, merges into another branch and empty direct-push
+  completion results finish as `nothing_to_record`. Missing canonical merge
+  proof and refused ticket transitions stay pending within a budget of twelve
+  processing attempts. Internal recovery rechecks the existing ownership and
+  human gates. Unresolved or failed work then finishes with `gave_up` and a
+  content-free warning; it stops automatic reads without completing the ticket.
 
   The tenant-isolated receipt retains the verified payload, its digest and
   installation binding, never authentication headers or signatures. The DSAR
   inventory classifies the payload for review, the external installation ID as
   personal data and processing state as metadata, with a tenant locator like
-  the other delivery tables. Pending receipts have no retry-exhaustion deletion.
+  the other delivery tables. Exhausted receipts retain their payload and earlier
+  checkpoints; retry exhaustion deletes no facts or Needs You refusals.
   Historical suite heads include reconciliation observations; an overflow
   fallback still requires a currently ticket-linked consumer. Unconfigured
   metrics with no consumer require no Actions read.

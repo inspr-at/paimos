@@ -730,4 +730,27 @@ func TestMergeDoneReferencesAndCanonicalGroupReads(t *testing.T) {
 	if fact, err := mergedPull(get, "other/repo", 7); err != nil || fact != nil {
 		t.Fatal("foreign base proved merge")
 	}
+	for _, tc := range []struct {
+		name, state, branch string
+		merged, pending     bool
+	}{
+		{name: "closed_unmerged", state: "closed", branch: "main"},
+		{name: "other_branch_merge", state: "closed", branch: "release", merged: true},
+		{name: "open_pull", state: "open", branch: "main", pending: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			get := func(_ string, out any) error {
+				raw, err := json.Marshal(map[string]any{"number": 7, "state": tc.state, "merged": tc.merged,
+					"base": map[string]any{"ref": tc.branch, "repo": map[string]any{"full_name": "example/delivery"}}})
+				if err != nil {
+					return err
+				}
+				return json.Unmarshal(raw, out)
+			}
+			fact, pending, err := mergedPullState(get, "example/delivery", 7)
+			if err != nil || fact != nil || pending != tc.pending {
+				t.Fatalf("canonical empty state: fact=%v pending=%t err=%v", fact, pending, err)
+			}
+		})
+	}
 }

@@ -64,7 +64,21 @@ func (m *Module) finishMergeWebhook(w http.ResponseWriter, r *http.Request, raw 
 }
 
 func (m *Module) completeWebhook(ctx context.Context, name string, raw []byte, reader MergeReader) (webhookOutcome, error) {
-	var e envelope
+	var e struct {
+		Action string `json:"action"`
+		Ref    string `json:"ref"`
+		After  string `json:"after"`
+		Pull   struct {
+			Number int64 `json:"number"`
+			Merged *bool `json:"merged"`
+			Base   struct {
+				Ref string `json:"ref"`
+			} `json:"base"`
+		} `json:"pull_request"`
+		Group struct {
+			Head string `json:"head_sha"`
+		} `json:"merge_group"`
+	}
 	if err := json.Unmarshal(raw, &e); err != nil {
 		return webhookFailed, &webhookStepError{step: "parse", err: webhookClass("invalid_json")}
 	}
@@ -75,9 +89,14 @@ func (m *Module) completeWebhook(ctx context.Context, name string, raw []byte, r
 	switch name {
 	case "pull_request":
 		if e.Action == "closed" {
+			// The signed closure explicitly proves a terminal no-op. An absent
+			// merged field is not proof; canonical reads still resolve it.
+			if e.Pull.Merged != nil && !*e.Pull.Merged || e.Pull.Base.Ref != "" && e.Pull.Base.Ref != "main" {
+				return webhookNothingToRecord, nil
+			}
 			step = "reader-MergedPull"
 			var f *MergeFact
-			f, err = reader.MergedPull(ctx, e.Pull.Number)
+			f, pending, err = readMergedPull(ctx, reader, e.Pull.Number)
 			if f != nil {
 				facts = append(facts, *f)
 			}
@@ -90,7 +109,7 @@ func (m *Module) completeWebhook(ctx context.Context, name string, raw []byte, r
 	case "push":
 		if e.Ref == "refs/heads/main" {
 			step = "reader-MergedGroup"
-			facts, err = reader.MergedGroup(ctx, e.After)
+			facts, pending, err = readMergedGroup(ctx, reader, e.After, false)
 		}
 	}
 	if err == nil && len(facts) > 0 {
@@ -107,8 +126,11 @@ func (m *Module) completeWebhook(ctx context.Context, name string, raw []byte, r
 	}
 	// Canonical merge proof can arrive after destruction/closure. A refused
 	// ticket can also become eligible later; neither is a completed effect.
-	if pending || len(facts) == 0 {
+	if pending {
 		return webhookPending, nil
+	}
+	if len(facts) == 0 {
+		return webhookNothingToRecord, nil
 	}
 	return webhookRecorded, nil
 }
@@ -122,8 +144,7 @@ func (m *Module) completedGroup(ctx context.Context, reader MergeReader, head st
 		return tx.QueryRow(ctx, `SELECT observations FROM delivery_github_events WHERE repository=$1 AND event='merge_group' AND action='checks_requested' AND head_sha=$2 ORDER BY sequence DESC LIMIT 1`, m.config.Repository, head).Scan(&raw)
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		facts, err := reader.MergedGroup(ctx, head)
-		return facts, len(facts) == 0, err
+		return readMergedGroup(ctx, reader, head, true)
 	}
 	if err != nil {
 		return nil, false, err
@@ -133,8 +154,7 @@ func (m *Module) completedGroup(ctx context.Context, reader MergeReader, head st
 		return nil, false, errRead
 	}
 	if len(observations) == 0 {
-		facts, err := reader.MergedGroup(ctx, head)
-		return facts, len(facts) == 0, err
+		return readMergedGroup(ctx, reader, head, true)
 	}
 	out := []MergeFact{}
 	pending := false
@@ -142,15 +162,14 @@ func (m *Module) completedGroup(ctx context.Context, reader MergeReader, head st
 		if o.PR == nil {
 			return nil, false, errRead
 		}
-		f, err := reader.MergedPull(ctx, *o.PR)
+		f, waiting, err := readMergedPull(ctx, reader, *o.PR)
 		if err != nil {
 			return nil, false, err
 		}
 		if f != nil {
 			out = append(out, *f)
-		} else {
-			pending = true
 		}
+		pending = pending || waiting
 	}
 	return out, pending, nil
 }

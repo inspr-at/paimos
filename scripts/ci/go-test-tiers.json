@@ -5876,7 +5876,11 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookReceiptIntegrityAndClaims","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookRetryBudget","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookSequenceRebuildIsolationAndHolds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookTerminalNoOps","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookUnlinkedMetricSource","tier":"ESSENTIAL"}
     ,
