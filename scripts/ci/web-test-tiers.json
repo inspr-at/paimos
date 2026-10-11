@@ -5374,7 +5374,7 @@
     ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Collapse all folds every lead, Expand all opens them; the icon swaps in its fixed slot","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Display › Group by harness, state or none; the address keeps it and Project is back with one click","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Display groups by harness, state or none; the address keeps it and Project is back with one click","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Filter by project, harness and computer: pills under the head, the address keeps them, Clear all ends them","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,

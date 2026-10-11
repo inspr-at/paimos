@@ -203,7 +203,7 @@ test('Filter by project, harness and computer: pills under the head, the address
   await expect(filter).toBeFocused()
 })
 
-test('Display › Group by harness, state or none; the address keeps it and Project is back with one click', async ({ page }, info) => {
+test('Display groups by harness, state or none; the address keeps it and Project is back with one click', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await setup(page)

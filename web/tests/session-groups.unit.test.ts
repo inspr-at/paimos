@@ -68,7 +68,7 @@ describe('list tools in the address', () => {
 
   it('match by project, harness and computer, and count each value', () => {
     const view = (project: string | null, harness: string, host: string, key = project?.toUpperCase() ?? '') => ({ session: { project_id: project, harness, host }, projectKey: key })
-    const views = [view('aeon', 'codex', 'mbp2606'), view('aeon', 'claude', 'mbp2607'), view(null, 'claude', 'mbp2607')]
+    const views = [view('aeon', 'codex', 'build-a'), view('aeon', 'claude', 'build-b'), view(null, 'claude', 'build-b')]
     expect(views.filter(v => matchesFacets(v, { project: ['AEON'], harness: ['claude'], computer: [] }))).toHaveLength(1)
     expect(views.filter(v => matchesFacets(v, { project: [NO_PROJECT], harness: [], computer: [] }))).toHaveLength(1)
     expect(facetChoices(views, 'project', v => v === NO_PROJECT ? 'No project' : v, ['GONE'])).toEqual([
