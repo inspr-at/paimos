@@ -1866,6 +1866,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRevokedProbeDoesNotStarveOtherAccount","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineBuilderToolsConstrainEffects","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineCheckoutDisablesEffectiveFilterConfiguration","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineContinuationRetainsOriginalCheckout","tier":"GATED-FULL"}
@@ -1879,6 +1881,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestRoutineSupervisorReleasesObsoleteRouting","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineSupervisorReplaysInterruptedRouting","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineToolsRefuseUnqualifiedNativeStartup","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineWorkspacesSeparateAndRetainWriters","tier":"ESSENTIAL"}
     ,
@@ -8867,6 +8871,8 @@
     {"kind":"go","package":"internal/routineguard","name":"TestGuardrailFloorScopeEvidenceAndBoundedCheckpoints","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineguard","name":"TestIndependentEvaluationBindsEvidenceAndCannotBootstrap","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineguard","name":"TestLocalArtifactPathPolicyMatchesServerFloor","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/rules","name":"TestAccessChangesStillTakeConflictingTenantFence","tier":"GATED-FULL"}
     ,

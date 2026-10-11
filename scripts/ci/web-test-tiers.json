@@ -180,6 +180,22 @@
     ,
     "browser:tests/aeon-1062-qapolish.spec.ts:chat header light 620: actions wrap without overlap, stay put, and Stop reads in the theme"
     ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:Outline on a phone: Expand all from the Display sheet closes it and returns to Filters"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px dark"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px light"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px dark"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px light"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px dark"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px light"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:with the header folded on a phone, the link opens the Display menu beside New"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -5234,6 +5250,22 @@
     ,
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"Outline on a phone: Expand all from the Display sheet closes it and returns to Filters","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"with the header folded on a phone, the link opens the Display menu beside New","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -5601,6 +5633,8 @@
     {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"large budget and per-client delivery 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"pending budget saves preserve button positions and submit only once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"AEON-1195: focus replaces the proposal state and approval commit in place","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agent-rules-doctrine.spec.ts","name":"a manager retries a source that could not be read","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -9062,6 +9096,8 @@
     ,
     {"kind":"browser","file":"tests/lead-card.spec.ts","name":"the lead keeps one card gap above the section bar on Tickets, Knowledge and Settings at 400 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"AEON-1195: focus cycles retain the same lead DOM rows, order and controls during delayed refresh","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -11141,6 +11177,8 @@
     {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"ppm 390 header: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-tenant-notes.spec.ts","name":"ppm 390 version: frozen notes and both switches survive reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-ticket-links.spec.ts","name":"AEON-1195: focus during ticket lookup keeps the panel controls and resolves the ticket","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/release-ticket-links.spec.ts","name":"a lost project access takes the link and the open ticket away at the next access check","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15176,6 +15214,14 @@
     ,
     {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"refreshes the shared key cache when access settles after a key change","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/access-refresh-panels.unit.test.ts","name":"AEON-1195: focus during a held ticket-key lookup retries it and never reports a false missing ticket","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/access-refresh-panels.unit.test.ts","name":"AEON-1195: proposal refresh replaces state and approval head, removes server entries and retains only unlisted local upserts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/access-revalidate.unit.test.ts","name":"AEON-1195: access listeners use the shared boundary and cannot clear state in their refresh callback","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/access-revalidate.unit.test.ts","name":"AEON-1195: every audited store retains rows through refresh and fences delayed reads after sign-out, person switch and 401","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > accepts percent readings and structured first-run waits without inventing headroom","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > accepts the nested catalog and rejects the old flat launch catalog","tier":"GATED-FULL"}
@@ -16061,6 +16107,10 @@
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"family eligibility comes from the server; empty allowlists never save and failed writes keep the draft","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"the paused step and configured check progress are shown without inventing a completed step","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"only the Display menu mounts the display editors","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"the Filters sheet filters and links to the Display menu instead of holding display settings","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"has no app locale switches outside the shared helper","tier":"ESSENTIAL"}
     ,

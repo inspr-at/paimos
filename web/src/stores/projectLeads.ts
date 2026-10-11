@@ -2,7 +2,7 @@
 import { defineStore } from 'pinia'
 import { onScopeDispose, reactive, ref } from 'vue'
 import { onReset } from '../lib/position'
-import { onAccessChange } from '../lib/authz'
+import { onAccessRevalidate } from '../lib/authz'
 import { APIError, getNode } from '../lib/api'
 import { getSession } from '../lib/agentRows'
 import type { Question } from '../lib/decisionDeskApi'
@@ -45,11 +45,7 @@ export const useProjectLeads = defineStore('projectLeads', () => {
     pending.clear(); truncated.value = false
   }
   onScopeDispose(onReset(clear))
-  onScopeDispose(onAccessChange(change => {
-    const projects = Object.keys(views)
-    clear()
-    if (change === 'refresh') for (const id of projects) void load(id)
-  }))
+  onScopeDispose(onAccessRevalidate({ reset: clear, refresh: () => { for (const id of Object.keys(views)) void load(id) } }))
   const view = (id: string) => views[id] ??= blank()
 
   /** Lead state only: the Agents page reads one per project, bounded. */
