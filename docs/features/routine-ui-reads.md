@@ -41,3 +41,16 @@ AEON-1191 uses the S21 vocabulary and reason sentences read from
 `work/aeon-1180-runhistory` at `7e18edfd2` before that branch was merged. All four
 reads are additive and use existing tables; no migration or execution grant is
 introduced. The approved design is AEON-1182, Routines report section d (R0).
+
+## AEON-1191 verification handoff
+
+The migration guard against `v261010123154.0.0` passed, as did all 33 ownership
+inventory tests and all 314 tier/shard metadata tests. OpenAPI was regenerated
+from the authored areas; their changes, route declarations, test manifests and
+ownership inventory are additive. No pinned reporter response surface changed.
+Remote Go verification (recurrences, decisiondesk, harness, reportercontract and
+authz) was retried repeatedly but refused with exit 3 because the single night
+slot was occupied. The remote static check also returned exit 3 under the night
+hold. Go/contract tests, the targeted web unit file and the full static check
+remain pending on the approved runner or PR CI; exit 3 is incomplete. No heavy
+local fallback, origin push or deployment was performed.
