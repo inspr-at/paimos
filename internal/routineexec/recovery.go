@@ -220,6 +220,7 @@ func (e *Executor) recoverRun(ctx context.Context, tid, id string) error {
 			return err
 		}
 		// Bound evidence before joins, decoding or updates; overflow remains held.
+		oversized := false
 		for _, query := range []string{
 			`SELECT count(*) FROM (SELECT 1 FROM routine_launch_intents WHERE routine_run_id=$1 LIMIT 257) x`,
 			`SELECT count(*) FROM (SELECT 1 FROM routine_actions WHERE run_id=$1 LIMIT 257) x`,
@@ -231,7 +232,8 @@ func (e *Executor) recoverRun(ctx context.Context, tid, id string) error {
 				return err
 			}
 			if n > 256 {
-				return errors.New("routine recovery evidence exceeds bound")
+				oversized = true
+				break
 			}
 		}
 		reason, err := recurrences.OwnerStateTx(ctx, tx, tid, r.recurrence)
@@ -265,6 +267,9 @@ func (e *Executor) recoverRun(ctx context.Context, tid, id string) error {
 		}
 		if paused && reason == "" {
 			reason = "routine_paused"
+		}
+		if oversized {
+			return recoveryReceiptTx(ctx, tx, tid, id, "recovery_evidence_exceeds_bound", true)
 		}
 		if reason != "" {
 			if _, err = tx.Exec(ctx, `UPDATE routine_runs SET state='paused',updated_at=clock_timestamp() WHERE id=$1`, id); err != nil {
@@ -347,39 +352,44 @@ func (e *Executor) recoverRun(ctx context.Context, tid, id string) error {
 		if unknown && reason == "" {
 			reason = "process_or_usage_unconfirmed"
 		}
-		var prior []byte
-		err = tx.QueryRow(ctx, `SELECT result FROM routine_effect_outbox WHERE run_id=$1 AND effect_key='recovery' FOR NO KEY UPDATE`, id).Scan(&prior)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		result := recoveryResult{}
-		if len(prior) > 65536 || len(prior) > 0 && json.Unmarshal(prior, &result) != nil {
-			return errors.New("routine recovery receipt invalid")
-		}
-		result.Reason = reason
-		// Reconciliation uncertainty is distinct from failed work. Capacity waits
-		// never increment this counter or the routine's finite actor-attempt budget.
-		if unknown {
-			result.Reconciliations = min(result.Reconciliations+1, 3)
-		} else {
-			result.Reconciliations = 0
-		}
-		if unknown && result.Reconciliations == 3 && !result.Escalated {
-			result.Escalated = true
-			if _, err = tx.Exec(ctx, `INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,payload)
-    VALUES($1,$2,'recovery-notice','routine.notice',jsonb_build_object('reason','process_or_usage_unconfirmed')) ON CONFLICT DO NOTHING`, tid, id); err != nil {
-				return err
-			}
-		}
-		raw, _ := json.Marshal(result)
-		_, err = tx.Exec(ctx, `INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,payload,result,reconcile_after)
-   VALUES($1,$2,'recovery','routine.reconcile','{}',$3,clock_timestamp()+interval '30 seconds')
-   ON CONFLICT(tenant_id,run_id,effect_key) DO UPDATE SET result=excluded.result,reconcile_after=excluded.reconcile_after,updated_at=clock_timestamp()`, tid, id, raw)
+		err = recoveryReceiptTx(ctx, tx, tid, id, reason, unknown)
 		if err == nil && change != nil {
 			_, err = events.Append(ctx, tx, actor, *change)
 		}
 		return err
 	})
+}
+
+func recoveryReceiptTx(ctx context.Context, tx pgx.Tx, tid, id, reason string, uncertain bool) error {
+	var prior []byte
+	err := tx.QueryRow(ctx, `SELECT result FROM routine_effect_outbox WHERE run_id=$1 AND effect_key='recovery' FOR NO KEY UPDATE`, id).Scan(&prior)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	result := recoveryResult{}
+	if len(prior) > 65536 || len(prior) > 0 && json.Unmarshal(prior, &result) != nil {
+		return errors.New("routine recovery receipt invalid")
+	}
+	result.Reason = reason
+	// Reconciliation uncertainty is distinct from failed work. Capacity waits
+	// never increment this counter or the routine's finite actor-attempt budget.
+	if uncertain {
+		result.Reconciliations = min(result.Reconciliations+1, 3)
+	} else {
+		result.Reconciliations = 0
+	}
+	if uncertain && result.Reconciliations == 3 && !result.Escalated {
+		result.Escalated = true
+		if _, err = tx.Exec(ctx, `INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,payload)
+    VALUES($1,$2,'recovery-notice','routine.notice',jsonb_build_object('reason',$3::text)) ON CONFLICT DO NOTHING`, tid, id, reason); err != nil {
+			return err
+		}
+	}
+	raw, _ := json.Marshal(result)
+	_, err = tx.Exec(ctx, `INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,payload,result,reconcile_after)
+   VALUES($1,$2,'recovery','routine.reconcile','{}',$3,clock_timestamp()+interval '30 seconds')
+   ON CONFLICT(tenant_id,run_id,effect_key) DO UPDATE SET result=excluded.result,reconcile_after=excluded.reconcile_after,updated_at=clock_timestamp()`, tid, id, raw)
+	return err
 }
 
 // Pause events are the durable administrative notification outbox even before

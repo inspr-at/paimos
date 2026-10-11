@@ -245,4 +245,18 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 			}
 		})
 	}
+	t.Run("bounded_evidence_escalates_once", func(t *testing.T) {
+		d := setupDispatch(t)
+		f := d.fixture
+		f.exec(`INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,state)
+   SELECT $1,$2,'unknown:'||n,'fixture.external','unknown' FROM generate_series(1,257) n`, f.owner.TenantID, f.run)
+		for range 4 {
+			must(t, d.e.recoverRun(db.AllProjects(t.Context(), "bounded evidence fixture"), f.owner.TenantID, f.run))
+		}
+		var notices, retained int
+		must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE effect_key='recovery-notice'),count(*) FILTER(WHERE state='unknown') FROM routine_effect_outbox WHERE run_id=$1`, f.run).Scan(&notices, &retained))
+		if notices != 1 || retained != 257 {
+			t.Fatalf("bounded evidence lost uncertainty or repeated escalation: %d %d", notices, retained)
+		}
+	})
 }
