@@ -89,6 +89,16 @@ func RoutineAdministratorNoticeTx(ctx context.Context, tx pgx.Tx, actor tenant.P
 	if _, err = tx.Exec(ctx, `SELECT id FROM principals WHERE id=ANY($1::uuid[]) ORDER BY id FOR KEY SHARE`, []string{actor.ID, recipient}); err != nil {
 		return false, err
 	}
+	// Acceptance also references existing webhook targets. Bound and fence
+	// them before its first event; oversized fan-out remains pending.
+	var targets int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT id FROM inbox_delivery_targets
+   WHERE principal_id=$1 AND kind='webhook' AND enabled ORDER BY id LIMIT 33 FOR KEY SHARE) x`, recipient).Scan(&targets); err != nil {
+		return false, err
+	}
+	if targets > 32 {
+		return false, nil
+	}
 	_, err = AcceptMessageTx(ctx, tx, actor, Acceptance{RecipientPrincipalID: recipient, SenderLabel: "Routines", ProjectID: &project, IdempotencyKey: key, Body: body})
 	return err == nil, err
 }
