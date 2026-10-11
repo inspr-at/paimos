@@ -191,7 +191,7 @@ func TestModelsV2PauseLifecycleAndAuthority(t *testing.T) {
 			t.Fatalf("catalog hid indefinite pause: %+v", profile)
 		}
 	}
-	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"openai:sol"}, "end": "wait", "revision": 0}, ""), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"openai:sol"}, "efforts": map[string]string{"openai:sol": "xhigh"}, "end": "wait", "revision": 0}, ""), 200)
 	doc := boardDecode[simpleDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
 	if len(doc.Unavailable) != 1 || doc.Unavailable[0].Cause != "paused" || !doc.Unavailable[0].Waits || doc.Unavailable[0].Route == nil || *doc.Unavailable[0].Route != sol.Harness || doc.Unavailable[0].Until != nil {
 		t.Fatalf("pause cause duplicated/lost: %+v", doc.Unavailable)
@@ -248,7 +248,7 @@ func TestModelsV2OutdatedCountsVisiblePins(t *testing.T) {
 	old := decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"older-sol-contract","version":"1","harness":"codex","family":"openai","model":"gpt-5-sol","effort":"xhigh","tier":"frontier"}`, 201)
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		var kind string
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug='ticket'`).Scan(&kind); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug='work'`).Scan(&kind); err != nil {
 			return err
 		}
 		for _, scope := range []modelprefs.Scope{{Level: "default"}, {Level: "person", PersonID: &member.ID}} {
@@ -301,7 +301,7 @@ func TestModelsV2OrderNativeEffortCompatibility(t *testing.T) {
 	path := "/api/model-preferences/orders/backend/first?for=default"
 	rank := []string{"openai:sol", "anthropic:opus"}
 	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", path, map[string]any{"rank": rank, "efforts": map[string]string{"openai:sol": "xhigh", "anthropic:opus": "xhigh"}, "end": "default", "revision": 0}, ""), 200)
-	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/thinking/backend/first?for=default", map[string]any{"effort": "high", "revision": 1}, ""), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first/thinking?for=default", map[string]any{"effort": "high", "revision": 1}, ""), 200)
 	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", path, map[string]any{"rank": rank, "revision": 2}, ""), 200)
 	readOrder := func(person *string) modelprefs.BoardOrder {
 		t.Helper()
@@ -339,7 +339,7 @@ func TestModelsV2OrderNativeEffortCompatibility(t *testing.T) {
 	boardError(t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/small?for=default", map[string]any{"rank": rank, "end": "default", "revision": 4}, ""), 422, "invalid_end")
 	personal := "/api/model-preferences/orders/backend/first?for=me"
 	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", personal, map[string]any{"rank": rank, "end": "wait", "revision": 0}, member.ID), 200)
-	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/thinking/backend/first?for=me", map[string]any{"thinking": "deep", "effort": "high", "revision": 1}, member.ID), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/orders/backend/first/thinking?for=me", map[string]any{"thinking": "deep", "effort": "high", "revision": 1}, member.ID), 200)
 	boardDecode[boardWriteResult](t, boardCall(t, member, "DELETE", personal+"&revision=2", nil, member.ID), 200)
 	if o := readOrder(&member.ID); o.Thinking == nil || *o.Thinking != "deep" || o.Rank != nil || o.Effort != nil || o.End != "" || len(o.Efforts) != 0 {
 		t.Fatalf("rank reset altered thinking or retained a chain: %+v", o)
@@ -349,5 +349,27 @@ func TestModelsV2OrderNativeEffortCompatibility(t *testing.T) {
 		if row.Column == "backend" && row.Mine {
 			t.Fatal("thinking-only row still reports a personal order")
 		}
+	}
+}
+
+// Risk: same-line route fallback hides its pause cause, or Quick jobs reports
+// the normal row's strong model instead of the resolver's fast-tier choice.
+func TestModelsV2SameLineFallbackAndQuickJobs(t *testing.T) {
+	admin, _ := boardFixture(t)
+	profiles := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	sol := profileBySlug(profiles, "codex-6-1-sol-xhigh")
+	minimalAccount(t, admin, sol)
+	luna := profileBySlug(profiles, "codex-luna-medium")
+	minimalAccount(t, admin, luna)
+	cursor := decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"cursor-sol-contract","version":"1","harness":"cursor","family":"openai","model":"gpt-6.1-sol","effort":"xhigh","tier":"strong"}`, 201)
+	minimalAccount(t, admin, cursor)
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{"openai:sol"}, "efforts": map[string]string{"openai:sol": "xhigh"}, "end": "wait", "revision": 0}, ""), 200)
+	boardDecode[modelPauseResult](t, boardCall(t, admin, "PUT", "/api/models/lines/codex/"+sol.Model+"/pause", map[string]any{"until": nil, "reason": "Use the sibling route"}, ""), 200)
+	doc := boardDecode[simpleDocument](t, boardCall(t, admin, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200)
+	if len(doc.Unavailable) != 1 || doc.Unavailable[0].Cause != "paused" || doc.Unavailable[0].Waits || doc.Unavailable[0].RunsInstead == nil || *doc.Unavailable[0].RunsInstead != "openai:sol" || doc.Unavailable[0].Route == nil || *doc.Unavailable[0].Route != "codex" {
+		t.Fatalf("same-line sibling route hid the pause: %+v", doc.Unavailable)
+	}
+	if doc.Quick.Line == nil || *doc.Quick.Line != "openai:luna" || doc.Quick.Effort == nil || *doc.Quick.Effort != "medium" || doc.Quick.Harness == nil || *doc.Quick.Harness != "codex" || !slices.ContainsFunc(doc.Quick.Trace, func(trace simpleTrace) bool { return trace.Selected && trace.Line == "openai:luna" }) {
+		t.Fatalf("Quick jobs differs from dispatch: %+v", doc.Quick)
 	}
 }

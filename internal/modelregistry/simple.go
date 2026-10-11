@@ -350,7 +350,7 @@ func (m *Module) simple(w http.ResponseWriter, r *http.Request) {
 			if resolved != nil {
 				chosen = pickProfile(resolved.Profile)
 			}
-			if chosen.Line == nil || *chosen.Line != *row.Line {
+			if !sameSimplePick(chosen, row.simplePick) || chosen.Harness != row.Harness || chosen.Model != row.Model {
 				out.Unavailable = append(out.Unavailable, simpleCausesFor(column, *row.Line, chosen, resolved, c)...)
 			}
 		}

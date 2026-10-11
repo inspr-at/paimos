@@ -7302,6 +7302,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RoutesRetiredAndDerived","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2SameLineFallbackAndQuickJobs","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2SuccessorMovesAllReferences","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2UnadoptedSavedLadder","tier":"ESSENTIAL"}
