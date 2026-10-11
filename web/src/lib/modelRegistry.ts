@@ -1,28 +1,44 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Settings › Models › Model registry (AEON-1012): one line per model, derived
-// from the registry's immutable profiles (one profile per thinking level).
+// Settings › Models › Model registry (AEON-1012, grouped in AEON-1163): every model PAIMOS can run, by provider.
+// A line ("Claude Opus") holds its versions; a version ("Opus 5.5") holds its routes (Claude Code, Cursor, pi),
+// each with its own native levels and source. Everything is derived from the registry's immutable profiles
+// (one profile per route and thinking level).
 import { api } from './api'
 import { StaleScopeError } from './identityScope'
 import { compareModelVersions, profileLine } from './modelPrefs'
+import { fullName, lineName, modelLine, providerLabel, providerRank } from './modelsSimple'
 import { validPiModel } from './piModel'
-import { fullModelName } from './planning'
 
 export type Harness = 'codex' | 'claude' | 'grok' | 'gemini' | 'cursor' | 'pi' | 'opencode'
 export const HARNESS_ORDER: Harness[] = ['codex', 'claude', 'grok', 'gemini', 'cursor', 'pi', 'opencode']
-export const HARNESS_NAME: Record<Harness, string> = { codex: 'Codex', claude: 'Claude', grok: 'Grok', gemini: 'Gemini', cursor: 'Cursor', pi: 'pi', opencode: 'OpenCode' }
+export const HARNESS_NAME: Record<Harness, string> = { codex: 'Codex', claude: 'Claude Code', grok: 'Grok', gemini: 'Gemini', cursor: 'Cursor', pi: 'pi', opencode: 'OpenCode' }
 const isHarness = (value: string): value is Harness => (HARNESS_ORDER as string[]).includes(value)
 
 export interface RegistryProfile {
   id: string; slug: string; version: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean; created_at: string
   display_name?: string; short_name?: string; model_version?: string; note?: string
-  source?: 'auto' | 'manual'; origin?: 'shipped' | 'provider' | 'harness' | 'manual'; retire_at?: string | null; retired?: boolean; effort_level?: number | null; provider?: string
+  /** Immutable origin; '' or absent on servers that only tell auto from manual. */
+  source?: 'auto' | 'manual'; origin?: 'shipped' | 'provider' | 'harness' | 'manual' | ''; retire_at?: string | null; retired?: boolean; effort_level?: number | null; provider?: string
   /** Canonical provider:model identity shared across routes (AEON-1145). */
   identity?: string
+  /** Best-effort lifecycle evidence; null or absent when unknown. */
+  lifecycle?: Lifecycle | null
+  /** The active pause of this harness/model route, shared by its native levels; absent when it runs. */
+  pause?: ModelPause | null
 }
+export interface Lifecycle { state: string | null; date: string | null; successor: string | null; reason: string; source: string }
+export interface ModelPause { until: string | null; reason: string; by: string | null; at: string }
 export interface RefreshSettings { agent_reports_enabled: boolean; auto_add_profiles: boolean; api_enabled: boolean; interval_minutes: number }
 export interface DiscoverySourceResult { state?: string; seen?: number; vendor?: string; account_id?: string }
 export interface CheckResult { new_lines?: string[]; added?: number; proposed?: number; accepted_models?: string[]; sources?: DiscoverySourceResult[] }
-export interface RefreshStatus { settings: RefreshSettings; last_run_at: string | null; last_result?: CheckResult }
+/** A model a harness or vendor reported that waits for a person (auto-add off): accepting it enables it. */
+export interface Observation { harness: string; model: string; effort: string; pending: boolean; failures: number; suppressed_until: string | null; last_working_at: string | null }
+export interface RefreshStatus {
+  settings: RefreshSettings; last_run_at: string | null; last_result?: CheckResult
+  /** Accounts with a saved vendor discovery key. */
+  sources?: { account_id: string; vendor: string }[]
+  observations?: Observation[]
+}
 export interface LinePick { line: string | null; effort: string | null; harness?: string; model?: string }
 export interface LineUse { column: string; layer: 'default' | 'person' | 'workspace' | 'project'; person?: string; replacement: LinePick }
 export interface LineUsage { used_by: LineUse[]; replacement: LinePick; revision: string; incomplete: boolean; line_profiles?: RegistryProfile[] }
@@ -70,6 +86,16 @@ export const editLine = (harness: string, model: string, body: LineWrite, signal
 export const previewRemoval = (harness: string, model: string, signal?: AbortSignal) => request<LineUsage>(`${linePath(harness, model)}/usage`, 'GET', undefined, signal)
 export const retireProfile = (id: string, reason: string, signal?: AbortSignal) => request<{ profile_id: string; retired: boolean }>(`/models/${encodeURIComponent(id)}/retire`, 'POST', { reason }, signal)
 export const restoreProfile = (id: string, signal?: AbortSignal) => request<{ profile_id: string; retired: boolean }>(`/models/${encodeURIComponent(id)}/retire`, 'DELETE', undefined, signal)
+/** Pauses every native level of one harness/model route until a time, or until resumed (null). */
+export const putPause = (harness: string, model: string, until: string | null, reason: string, signal?: AbortSignal) =>
+  request<{ harness: string; model: string; pause: ModelPause | null }>(`${linePath(harness, model)}/pause`, 'PUT', { until, reason }, signal)
+export const deletePause = (harness: string, model: string, signal?: AbortSignal) =>
+  request<{ harness: string; model: string; pause: ModelPause | null }>(`${linePath(harness, model)}/pause`, 'DELETE', undefined, signal)
+/** Saves (or, with an empty key, removes) the vendor key an account uses to read its vendor's model list. */
+export const putDiscoveryKey = (accountId: string, vendor: string, key: string, signal?: AbortSignal) =>
+  request<unknown>(`/models/refresh/credentials/${encodeURIComponent(accountId)}`, 'PUT', { vendor, api_key: key }, signal)
+export const acceptProposal = (observation: Pick<Observation, 'harness' | 'model' | 'effort'>, signal?: AbortSignal) =>
+  request<RegistryProfile>('/models/proposals/accept', 'POST', { harness: observation.harness, model: observation.model, effort: observation.effort }, signal)
 
 // ---------- lines ----------
 
@@ -114,7 +140,7 @@ export function buildLines(profiles: RegistryProfile[]): RegistryLine[] {
     const enabled = group.some(profile => profile.enabled), source = group.some(profile => profile.source === 'manual') ? 'manual' : 'auto'
     lines.push({
       key, harness, model: first.model, source, origin: first.origin, enabled, retireAt: retiring,
-      name: fullModelName({ ...first, label: first.model }),
+      name: fullName(first),
       displayName: first.display_name || first.model,
       note: group.find(profile => profile.note)?.note ?? '',
       efforts: ordered.map(profile => profile.effort).filter(effort => !seen.has(effort) && !!seen.add(effort)),
@@ -146,6 +172,283 @@ function predecessorVersion(taken: RegistryProfile, profiles: RegistryProfile[])
   return best
 }
 
+// ---------- the registry: provider → line → version, routes as sub-rows (AEON-1163) ----------
+
+/** One way to run a model version: a harness with its model id, the route's own native levels and where they came from. */
+export interface RegistryRoute {
+  key: string; harness: Harness
+  /** The id the harness is given. Cursor's per-level ids show as one, with ‹level› where the level goes. */
+  id: string
+  /** Every model id behind the route: one, or one per level for Cursor. */
+  models: string[]
+  /** The provider pi and OpenCode reach it through ("OpenRouter", "Local"); empty when the harness has one. */
+  via: string
+  /** Native level names, lowest first. */
+  efforts: string[]
+  /** The levels are thinking-token budgets (Gemini 2.5), not named levels. */
+  budget: boolean
+  source: FactSource | null
+  /** Added by hand: the only routes an admin edits. Provider and harness facts are read-only. */
+  hand: boolean
+  /** Set when every id of the route is paused; partlyPaused when only some are. */
+  pause: ModelPause | null; partlyPaused: boolean
+  /** The registry lines (harness + model id) behind the route, for Edit, the remove preview and removal. */
+  lineKeys: string[]
+  profileIds: string[]
+  enabled: boolean
+}
+/** One version of a line, with every route that runs it. */
+export interface RegistryModel {
+  key: string; line: string; version: string; provider: string; family: string
+  /** "Claude Opus": the line, shown with the version beside it. */
+  lineName: string
+  /** "5.5"; empty when the registry names no version. */
+  versionLabel: string
+  /** "Opus 5.5": the model's name, said the same way in the picker, the registry, the tray and the sheet (fullName). */
+  name: string
+  note: string; routes: RegistryRoute[]; source: FactSource | null; lifecycle: Lifecycle | null
+  /** Superseded, deprecated, gone from its source, or retiring with a named successor. */
+  old: boolean
+  enabled: boolean; isNew: boolean; retireAt: string | null; took: { at: string; was: string } | null
+  profileIds: string[]
+}
+/** A row of the registry: a line in its current version, its older versions folded under it. */
+export interface RegistryRow { key: string; model: RegistryModel; older: RegistryModel[] }
+export interface ProviderGroup { provider: string; label: string; rows: RegistryRow[] }
+export interface Registry { groups: ProviderGroup[]; models: number; routes: number; rows: number }
+
+const harnessRank = (harness: string) => { const index = (HARNESS_ORDER as string[]).indexOf(harness); return index < 0 ? HARNESS_ORDER.length : index }
+const NAMED_LEVEL: Record<string, number> = { off: 0, none: 0, default: 0, minimal: 1, low: 1, medium: 2, high: 3, xhigh: 4, max: 5, ultra: 5 }
+const levelRank = (profile: RegistryProfile) => profile.effort_level ?? NAMED_LEVEL[profile.effort] ?? 2
+const BUDGET = /^\d+k?$/i
+// Cursor names a level in the model id ("grok-4.7-high", "grok-4.7-high-fast"); those ids are one route.
+const CURSOR_LEVEL = /^(.+?)(?:-(?:low|medium|high|xhigh|max|ultra))?(-fast)?$/
+function routeOfProfile(profile: RegistryProfile): { key: string; base: string; fast: string } {
+  if (profile.harness !== 'cursor') return { key: lineKey(profile.harness, profile.model), base: profile.model, fast: '' }
+  const match = CURSOR_LEVEL.exec(profile.model)
+  const base = match?.[1] ?? profile.model, fast = match?.[2] ?? ''
+  return { key: `cursor\u0000${base}${fast}`, base, fast }
+}
+const isHand = (profile: RegistryProfile) => profileSource(profile) === 'manual'
+const OLD_STATES = ['superseded', 'deprecated', 'vanished']
+/** Old: its source or the version rule says a newer version replaces it, or it retires with a successor named. */
+export const isOld = (lifecycle: Lifecycle | null) => !!lifecycle?.state && (OLD_STATES.includes(lifecycle.state) || (lifecycle.state === 'retiring' && !!lifecycle.successor))
+
+function routesOf(items: RegistryProfile[]): RegistryRoute[] {
+  const groups = new Map<string, { profiles: RegistryProfile[]; base: string; fast: string }>()
+  for (const profile of items) {
+    const { key, base, fast } = routeOfProfile(profile)
+    const group = groups.get(key)
+    if (group) group.profiles.push(profile); else groups.set(key, { profiles: [profile], base, fast })
+  }
+  const routes: RegistryRoute[] = []
+  for (const [key, { profiles, base, fast }] of groups) {
+    const first = profiles[0]!, harness = first.harness as Harness
+    const ordered = [...profiles].sort((a, b) => levelRank(a) - levelRank(b) || (Number.parseFloat(a.effort) || 0) - (Number.parseFloat(b.effort) || 0) || a.effort.localeCompare(b.effort))
+    const efforts = [...new Set(ordered.map(profile => profile.effort))]
+    const models = [...new Set(profiles.map(profile => profile.model))]
+    const pauses = models.map(model => profiles.find(profile => profile.model === model && profile.pause)?.pause ?? null)
+    const label = harness === 'pi' || harness === 'opencode' ? routeLabel(routeOf(harness, first.model)) : ''
+    routes.push({
+      key, harness, id: models.length > 1 ? `${base}-‹level›${fast}` : first.model, models, via: label, efforts,
+      budget: efforts.length > 0 && efforts.every(effort => BUDGET.test(effort)) && efforts.some(effort => effort !== '0'),
+      source: profiles.map(profileSource).find(Boolean) ?? null, hand: profiles.some(isHand),
+      pause: pauses.every(Boolean) ? pauses[0]! : null, partlyPaused: pauses.some(Boolean) && !pauses.every(Boolean),
+      lineKeys: models.map(model => lineKey(harness, model)), profileIds: ordered.map(profile => profile.id), enabled: profiles.some(profile => profile.enabled),
+    })
+  }
+  // Array sort is stable: routes of one harness keep the registry's order.
+  return routes.sort((a, b) => harnessRank(a.harness) - harnessRank(b.harness))
+}
+
+function modelOf(line: string, version: string, items: RegistryProfile[], lines: Map<string, RegistryLine>, now: Date): RegistryModel {
+  const ordered = [...items].sort((a, b) => harnessRank(a.harness) - harnessRank(b.harness))
+  // A concrete route names the model: an alias ("opus") names no version, and Cursor's own display can be a raw id.
+  const named = ordered.find(profile => modelLine(profile).version !== 'alias') ?? ordered[0]!
+  const lifecycle = [named, ...ordered].map(profile => profile.lifecycle).find(found => !!found?.state) ?? ordered.map(profile => profile.lifecycle).find(Boolean) ?? null
+  const scheduled = items.map(profile => profile.retire_at).filter((at): at is string => !!at && Date.parse(at) > now.getTime())
+  if (lifecycle?.state === 'retiring' && lifecycle.date && !lifecycle.successor && Date.parse(lifecycle.date) > now.getTime()) scheduled.push(lifecycle.date)
+  const enabled = items.some(profile => profile.enabled), source = profileSource(named)
+  return {
+    key: `${line}@${version}`, line, version, provider: named.provider || named.family || 'unknown', family: named.family,
+    lineName: lineName(named), versionLabel: named.model_version || (version === 'alias' ? '' : version), name: fullName(named),
+    note: ordered.map(profile => profile.note ?? '').find(note => note.trim()) ?? '',
+    routes: routesOf(items), source, lifecycle, old: isOld(lifecycle),
+    enabled, isNew: !enabled && source !== 'manual', retireAt: scheduled.sort()[0] ?? null,
+    took: lines.get(lineKey(named.harness, named.model))?.took ?? null,
+    profileIds: items.map(profile => profile.id),
+  }
+}
+
+/**
+ * The registry as the page shows it: providers in their fixed order, one row per line in its current version
+ * (the newest that runs and is not old), older versions folded under it. A newer version that does not run yet
+ * ("New · off until used") keeps a row of its own, so it can be paused or removed. Lines keep the registry's order.
+ */
+export function buildRegistry(profiles: RegistryProfile[], now = new Date()): Registry {
+  const lines = new Map(buildLines(profiles).map(line => [line.key, line] as const))
+  const byLine = new Map<string, { order: number; versions: Map<string, RegistryProfile[]> }>()
+  profiles.forEach((profile, order) => {
+    if (profile.retired || !isHarness(profile.harness)) return
+    const { line, version } = modelLine(profile)
+    const entry = byLine.get(line) ?? { order, versions: new Map<string, RegistryProfile[]>() }
+    entry.versions.set(version, [...(entry.versions.get(version) ?? []), profile])
+    byLine.set(line, entry)
+  })
+  const rows: { provider: string; order: number; row: RegistryRow }[] = []
+  let models = 0, routes = 0
+  for (const [line, { order, versions }] of byLine) {
+    const alias = versions.get('alias') ?? []
+    const concrete = [...versions.keys()].filter(version => version !== 'alias').sort((a, b) => compareModelVersions(b, a))
+    if (!concrete.length) concrete.push('alias')
+    const built = concrete.map(version => modelOf(line, version, versions.get(version) ?? [], lines, now))
+    let current = built.findIndex(model => model.enabled && !model.old)
+    if (current < 0) current = built.findIndex(model => model.enabled)
+    if (current < 0) current = 0
+    // An alias follows the current version: it is one more route of it.
+    if (alias.length && concrete[0] !== 'alias') built[current] = modelOf(line, concrete[current]!, [...(versions.get(concrete[current]!) ?? []), ...alias], lines, now)
+    built.forEach((model, index) => {
+      models++; routes += model.routes.length
+      if (index < current) rows.push({ provider: model.provider, order, row: { key: model.key, model, older: [] } })
+    })
+    const model = built[current]!
+    rows.push({ provider: model.provider, order, row: { key: line, model, older: built.slice(current + 1) } })
+  }
+  const groups = new Map<string, ProviderGroup>()
+  for (const { provider, row } of rows.sort((a, b) => providerRank(a.provider) - providerRank(b.provider) || a.order - b.order)) {
+    const group = groups.get(provider) ?? { provider, label: providerLabel(provider), rows: [] }
+    group.rows.push(row)
+    groups.set(provider, group)
+  }
+  return { groups: [...groups.values()], models, routes, rows: rows.length }
+}
+
+/** "29 models · 35 routes · 17 lines": the size of the registry above the list. */
+export function registryCount(registry: Registry): string {
+  const n = (count: number, one: string) => `${count} ${one}${count === 1 ? '' : 's'}`
+  return [n(registry.models, 'model'), n(registry.routes, 'route'), n(registry.rows, 'line')].join(' · ')
+}
+
+/** The level chips' names: a token budget says so once ("1024 · 8192 tokens"). */
+export const levelUnit = (route: Pick<RegistryRoute, 'budget'>) => route.budget ? 'tokens' : ''
+
+const STATE_TEXT: Record<string, string> = { active: 'Active', preview: 'Preview', superseded: 'Superseded', deprecated: 'Deprecated', vanished: 'No longer in its source’s model list' }
+/** The lifecycle fact in words, or null when nobody reported one (the page then says "unknown"). */
+export function lifecycleText(lifecycle: Lifecycle | null, now = new Date()): string | null {
+  if (!lifecycle?.state) return null
+  const date = lifecycle.date ? shortDate(lifecycle.date, now) : ''
+  if (lifecycle.state === 'retiring') return date ? `Retiring ${date}` : 'Retiring'
+  if (lifecycle.state === 'deprecated' && date) return `Deprecated · retires ${date}`
+  return STATE_TEXT[lifecycle.state] ?? lifecycle.state
+}
+/** Why an older version is old, in one plain sentence; the version rule when its source said nothing. */
+export function olderWhy(model: RegistryModel, successorName: string, now = new Date()): string {
+  if (!model.lifecycle?.state) return 'Older version in the same line'
+  return outdatedWhy({ ...model.lifecycle }, successorName, now)
+}
+/** The model's name at a level ("Opus 5 · xhigh", "Gemini 2.5 Pro · 32k budget"); no level, just the name. */
+export function atLevel(name: string, effort: string | null | undefined): string {
+  if (!effort) return name
+  return `${name} · ${BUDGET.test(effort) && effort !== '0' ? `${effort} budget` : effort}`
+}
+
+// ---------- pause ----------
+
+export const PAUSED_REASON = 'Paused in Settings › Models'
+export type PauseChoice = 'tomorrow' | 'week' | 'open'
+const DAY = 86_400_000
+/** When a pause ends: tomorrow at 04:00 local time, a week from now, or never by itself (null). */
+export function pauseUntil(choice: PauseChoice, now = new Date()): string | null {
+  if (choice === 'open') return null
+  if (choice === 'week') return new Date(now.getTime() + 7 * DAY).toISOString()
+  const at = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 4, 0, 0, 0)
+  return at.toISOString()
+}
+export interface PauseOption { choice: PauseChoice | 'resume'; label: string; detail: string }
+export function pauseOptions(paused: boolean, now = new Date()): PauseOption[] {
+  return [
+    ...(paused ? [{ choice: 'resume' as const, label: 'Resume now', detail: 'It can run again at once.' }] : []),
+    { choice: 'tomorrow', label: 'Until tomorrow, 04:00', detail: 'It runs again by itself' },
+    { choice: 'week', label: 'For a week', detail: `Until ${shortDate(pauseUntil('week', now)!, now)}` },
+    { choice: 'open', label: 'Until I resume it', detail: 'No end date' },
+  ]
+}
+/** "until 04:00", "until tomorrow, 04:00", "until 18 Oct" or "until resumed". */
+export function untilText(until: string | null, now = new Date()): string {
+  if (!until) return 'until resumed'
+  const at = new Date(until)
+  if (Number.isNaN(at.getTime())) return 'until resumed'
+  const time = `${two(at.getHours())}:${two(at.getMinutes())}`
+  if (at.toDateString() === now.toDateString()) return `until ${time}`
+  if (at.toDateString() === new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toDateString()) return `until tomorrow, ${time}`
+  return `until ${shortDate(until, now)}`
+}
+/** How a model's pause reads on its row: every route, one named route, or how many of them. */
+export function pauseTag(model: RegistryModel, now = new Date()): string {
+  const paused = model.routes.filter(route => route.pause)
+  if (!paused.length) return model.routes.some(route => route.partlyPaused) ? 'Partly paused' : ''
+  if (paused.length === model.routes.length) {
+    // The model runs again as soon as its first route does.
+    const ends = paused.map(route => route.pause!.until)
+    const dated = ends.filter((until): until is string => !!until).sort()
+    return `Paused ${untilText(dated.length === ends.length ? dated[0]! : dated.length ? dated[0]! : null, now)}`
+  }
+  return paused.length === 1 ? `${HARNESS_NAME[paused[0]!.harness]} paused` : `${paused.length} routes paused`
+}
+/** The ids one route's pause is written to. The server covers Cursor's Grok levels from any one of them (pause.go). */
+export function pauseTargets(route: RegistryRoute, family: string): string[] {
+  return route.harness === 'cursor' && family === 'xai' ? route.models.slice(0, 1) : route.models
+}
+export interface PauseStep { harness: Harness; model: string; before: ModelPause | null }
+/**
+ * Pauses (until, or null for until resumed) or resumes (resume) every route of a model, one id at a time, and says
+ * how far it got. Each step remembers the route's pause before, so Undo can put exactly that back.
+ */
+export async function pauseModel(model: RegistryModel, family: string, change: { until: string | null } | 'resume', scope?: WriteScope): Promise<{ done: PauseStep[]; error: string | null }> {
+  const done: PauseStep[] = []
+  for (const route of model.routes) {
+    for (const id of pauseTargets(route, family)) {
+      try {
+        stillCurrent(scope)
+        if (change === 'resume') await deletePause(route.harness, id, scope?.signal)
+        else await putPause(route.harness, id, change.until, PAUSED_REASON, scope?.signal)
+        done.push({ harness: route.harness, model: id, before: route.pause })
+      } catch (error) {
+        stale(error, scope)
+        return { done, error: error instanceof Error ? error.message : 'It could not be changed.' }
+      }
+    }
+  }
+  return { done, error: null }
+}
+/** Puts back what each step found: the earlier pause while it still lies ahead, otherwise no pause. */
+export async function undoPause(steps: PauseStep[], now = new Date(), scope?: WriteScope): Promise<string | null> {
+  let failed = 0
+  for (const step of steps) {
+    try {
+      stillCurrent(scope)
+      const before = step.before
+      if (before && (before.until === null || Date.parse(before.until) > now.getTime())) await putPause(step.harness, step.model, before.until, before.reason || PAUSED_REASON, scope?.signal)
+      else await deletePause(step.harness, step.model, scope?.signal)
+    } catch (error) {
+      stale(error, scope)
+      failed++
+    }
+  }
+  return failed ? `${failed} of ${steps.length} routes could not be put back` : null
+}
+
+/** One usage answer for a model with several routes: every visible use once, hidden uses if any route had them. */
+export function mergeUsage(answers: LineUsage[]): LineUsage {
+  const seen = new Set<string>(), used: LineUse[] = []
+  for (const answer of answers) for (const use of answer.used_by) {
+    const key = `${use.column}\u0000${use.layer}\u0000${use.person ?? ''}`
+    if (!seen.has(key)) { seen.add(key); used.push(use) }
+  }
+  const first = answers[0]
+  return { used_by: used, replacement: first?.replacement ?? { line: null, effort: null }, revision: first?.revision ?? '', incomplete: answers.some(answer => answer.incomplete) }
+}
+
 // ---------- copy helpers ----------
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -167,12 +470,12 @@ export function lastChecked(iso: string | null, now = new Date()): string {
 export const intervalLabel = (minutes: number) => minutes >= 60 && minutes % 60 === 0 ? `${minutes / 60} h` : `${minutes} min`
 export const cooldownLabel = (seconds: number) => `again in ${Math.max(1, Math.ceil(seconds / 60))} min`
 
-export function takenText(line: RegistryLine, now = new Date()): string {
+export function takenText(line: Pick<RegistryLine, 'took'>, now = new Date()): string {
   if (!line.took) return ''
   const date = shortDate(line.took.at, now)
   return line.took.was ? `was ${line.took.was}, taken on ${date}` : `taken on ${date}`
 }
-export type FactSource = NonNullable<RegistryProfile['origin']>
+export type FactSource = 'shipped' | 'provider' | 'harness' | 'manual'
 export const SOURCE_NAME: Record<FactSource, string> = { shipped: 'Shipped', provider: 'From provider', harness: 'From harness', manual: 'Added by hand' }
 export const SOURCE_TIP: Record<FactSource, string> = {
   shipped: 'In the catalog PAIMOS ships with; no provider or harness has confirmed it yet.',
@@ -180,12 +483,13 @@ export const SOURCE_TIP: Record<FactSource, string> = {
   harness: 'Reported by the harness that runs it. Read-only.',
   manual: 'Added by an admin. Editable.',
 }
-export function metaParts(line: RegistryLine, now = new Date()): string[] {
-  const label = routeLabel(line.route)
-  // Older servers only distinguish auto/manual; that cannot identify whether
-  // discovery came from a provider or a harness. Named origins stay explicit.
-  const source = line.origin ? SOURCE_NAME[line.origin] : line.source === 'manual' ? 'Added by hand' : 'Auto-discovered'
-  return [HARNESS_NAME[line.harness], ...(label && label !== HARNESS_NAME[line.harness] ? [label] : []), line.model, source, ...(line.took ? [takenText(line, now)] : [])]
+/**
+ * Where a profile came from. Older servers only tell auto from manual, and "auto" cannot say whether a provider,
+ * a harness or the shipped catalog reported it, so it stays unknown rather than guessed.
+ */
+export function profileSource(profile: Pick<RegistryProfile, 'origin' | 'source'>): FactSource | null {
+  if (profile.origin) return profile.origin
+  return profile.source === 'manual' ? 'manual' : null
 }
 
 // ---------- the inline form ----------
@@ -299,7 +603,8 @@ export async function addLine(draft: LineDraft, now = new Date(), scope?: WriteS
 }
 
 export function lineWriteOf(draft: LineDraft, line: RegistryLine): LineWrite {
-  const model = line.source === 'auto' ? line.model : modelSlug(draft)
+  // Only a route added by hand changes its id; any other keeps the one its source reported.
+  const model = profileSource(line) === 'manual' ? modelSlug(draft) : line.model
   return { display_name: draft.name.trim(), note: draft.note.trim(), efforts: splitLevels(draft.level, draft.efforts), route: routeOf(line.harness, model), ...(model !== line.model ? { model } : {}) }
 }
 
@@ -406,7 +711,8 @@ export function useText(use: LineUse, kinds: Record<string, string>, me: string)
 
 // ---------- outdated versions: the tray and the review sheet (AEON-1164) ----------
 
-export interface OutdatedUse { label: string; who: string; from: string; to: string | null }
+/** One use that moves. from_effort/to_effort (AEON-1163): the level it runs the old version at and the one it moves to; absent from older servers. */
+export interface OutdatedUse { label: string; who: string; from: string; to: string | null; from_effort?: string | null; to_effort?: string | null }
 export interface OutdatedVersion {
   version: string; line: string; state: string | null; date: string | null; successor: string | null; reason: string; source: string
   uses: OutdatedUse[]; incomplete: boolean
@@ -463,9 +769,11 @@ export interface OutdatedEntry {
 
 const identityOf = (profile: RegistryProfile) => profile.identity ?? ''
 const modelPart = (identity: string) => identity.slice(identity.indexOf(':') + 1)
+// The tray and the sheet name a version as the picker and the registry rows do (fullName); a concrete route names it.
 function nameOfIdentity(identity: string, profiles: RegistryProfile[]): string {
-  const profile = profiles.find(candidate => identityOf(candidate) === identity)
-  return profile ? fullModelName({ ...profile, label: profile.model }) : modelPart(identity)
+  const found = profiles.filter(candidate => identityOf(candidate) === identity).sort((a, b) => harnessRank(a.harness) - harnessRank(b.harness))
+  const profile = found.find(candidate => modelLine(candidate).version !== 'alias') ?? found[0]
+  return profile ? fullName(profile) : modelPart(identity)
 }
 
 /** Where a lifecycle fact came from. A version rule or a source nobody named has no badge. */
@@ -477,7 +785,7 @@ export function lifecycleSource(source: string): FactSource | null {
 }
 const SAME_LINE_RULE = 'aeon_model_line/aeon_model_version_newer'
 /** Why a version is old, in one plain sentence. */
-export function outdatedWhy(version: OutdatedVersion, successorName: string, now = new Date()): string {
+export function outdatedWhy(version: Pick<OutdatedVersion, 'state' | 'date' | 'source' | 'reason'>, successorName: string, now = new Date()): string {
   const date = version.date ? shortDate(version.date, now) : ''
   const past = !!version.date && new Date(version.date).getTime() <= now.getTime()
   if (version.state === 'retiring') return date ? `${past ? 'Retired' : 'Retires'} on ${date}` : 'Its source says it is retiring'

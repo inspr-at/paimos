@@ -55,6 +55,31 @@ export function fullName(profile: RegistryProfile): string {
   }
   return `${profile.short_name || profile.display_name || profile.model} ${profile.model_version ?? ''}`.trim()
 }
+/** The line a model version belongs to, without its version ("GPT Sol", "Claude Opus"), from the same fields as fullName. */
+export function lineName(profile: RegistryProfile): string {
+  if (profile.harness === 'codex') {
+    const gpt = /^gpt-([0-9]+(?:\.[0-9]+)*)-(.+)$/.exec(profile.model)
+    if (gpt) return `GPT ${gpt[2]!.charAt(0).toUpperCase()}${gpt[2]!.slice(1)}`
+  }
+  return profile.display_name || profile.short_name || profile.model
+}
+
+/**
+ * The server's provider line for a profile (modelsLine in board_resolve.go): Anthropic and OpenAI models are one line
+ * whichever harness runs them, so Opus through Claude Code, Cursor and pi is one model with three routes.
+ */
+export function modelLine(profile: PrefProfile): { line: string; version: string } {
+  let identity = profile
+  if (profile.family === 'anthropic') identity = { ...profile, harness: 'claude', model: profile.model.replace(/^anthropic\//, '') }
+  if (profile.family === 'openai' && profile.model.startsWith('gpt-')) identity = { ...profile, harness: 'codex' }
+  const { line, version } = profileLine(identity)
+  return { line: `${profile.family}:${line}`, version }
+}
+/** Providers in the picker's fixed order; a maker the registry doesn't know sorts last. */
+const PROVIDER_ORDER = ['openai', 'anthropic', 'xai', 'google', 'cursor', 'local', 'unknown']
+export const PROVIDER_LABEL: Record<string, string> = { openai: 'OpenAI', anthropic: 'Anthropic', xai: 'xAI', google: 'Google', cursor: 'Cursor', local: 'Local', unknown: 'Unknown provider' }
+export const providerLabel = (provider: string) => PROVIDER_LABEL[provider] ?? (provider ? provider.charAt(0).toUpperCase() + provider.slice(1) : PROVIDER_LABEL.unknown!)
+export const providerRank = (provider: string) => { const index = PROVIDER_ORDER.indexOf(provider); return index < 0 ? PROVIDER_ORDER.length - 1 : index }
 
 /**
  * One entry per model line in its latest version, as the server resolves it: the newest enabled version, its

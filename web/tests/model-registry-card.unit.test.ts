@@ -67,7 +67,8 @@ afterEach(() => { for (const s of scopes.splice(0)) s.stop() })
 const session = Vue.reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'admin', kind: 'person' } }, authenticationCurrent: () => true })
 const modules: Record<string, unknown> = {
   vue: { ...Vue, onBeforeUnmount: () => {} },
-  '../../AppIcon.vue': {}, '../../agents/HarnessMark.vue': {}, './ModelRegistryEditor.vue': {}, './ModelOutdatedSheet.vue': {},
+  '../../AppIcon.vue': {}, '../../agents/HarnessMark.vue': {}, './ModelRegistryEditor.vue': {}, './ModelOutdatedSheet.vue': {}, './ModelLineRow.vue': {}, './ModelDiscovery.vue': {}, './ModelsPopover.vue': {},
+  '../../../lib/api': { api: (path: string, init: RequestInit = {}) => http.handler(path, init) },
   '../../../lib/authz': { can: () => true, onAccessRevalidate: () => () => {} },
   '../../../lib/identityScope': identityScope,
   '../../../lib/toast': { toast: (message: string, options?: Toasted['options']) => { toasts.push({ message, options }) } },
@@ -249,7 +250,7 @@ it('versions that can move still reach the tray when the first page holds only v
   const card = await mountOld()
   expect(old.reads).toEqual(['/models/outdated?limit=50', '/models/outdated?limit=50&cursor=aaa%3Aold-49'])
   expect(card.entries.value.map(entry => entry.version)).toEqual(['openai:gpt-6-sol'])
-  expect(card.tray.value).toMatchObject({ named: [{ from: 'GPT Sol 6', to: 'GPT Sol 6.1' }], count: '1 old version' })
+  expect(card.tray.value).toMatchObject({ named: [{ from: 'GPT-6 Sol', to: 'GPT-6.1 Sol' }], count: '1 old version' })
   expect(card.more.value).toBe(false)
 
   card.retireOld(['openai:gpt-6-sol'])
@@ -292,4 +293,92 @@ it('a refusal the server answered still says nothing was removed', async () => {
   expect(old.retires).toHaveLength(1)
   expect(toasts.map(item => item.message)).toEqual(['Nothing was removed. Try again.'])
   expect(card.entries.value.map(entry => entry.version)).toEqual(['openai:gpt-6-sol'])
+})
+
+// AEON-1163 · W4. Risks: Remove on a version with several routes previews only one route's uses and then retires
+// levels it never asked about; a pause reports success after a refused route, or its Undo writes another state back;
+// the merged "How new models are found" settings write the auto-update rule a second way (AEON-1148: one writer).
+interface GroupedCard {
+  rows: Vue.ComputedRef<registry.RegistryRow[]>; question: Vue.Ref<{ key: string; state: string; text?: string; failed?: string } | null>
+  askRemove(row: registry.RegistryRow, trigger: HTMLElement | null): void; remove(): void
+  openPause(row: registry.RegistryRow, anchor: HTMLElement): void; choosePause(choice: registry.PauseChoice | 'resume'): void
+  setDiscovery(change: Partial<registry.RefreshSettings>): void; discoveryError: Vue.Ref<string>
+}
+const opus = (harness: string, model: string, efforts: string[]): Profile[] => efforts.map(effort => ({
+  id: `${harness}-${model.replace(/\//g, '-')}-${effort}`, slug: `${harness}-${effort}`, version: '1', harness, family: 'anthropic', model, effort, tier: 'strong', enabled: true, created_at: '2026-09-20T12:00:00Z',
+  display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5', source: 'auto', origin: 'provider', retired: false, retire_at: null, effort_level: ({ high: 3, xhigh: 4, max: 5 } as Record<string, number>)[effort] ?? null,
+}))
+/** Opus 5.5 through Claude Code and pi; every usage read, retirement and pause write is recorded. */
+function groupedServer(refusePause = '') {
+  const state = { usage: [] as string[], retired: [] as string[], pauses: [] as string[], settings: [] as Record<string, unknown>[] }
+  server.profiles = [...opus('claude', 'claude-opus-5-5', ['high', 'xhigh', 'max']), ...opus('pi', 'anthropic/claude-opus-5-5', ['high', 'xhigh'])]
+  const base = http.handler
+  http.handler = async (path, init) => {
+    const method = init.method ?? 'GET'
+    if (path.endsWith('/usage')) {
+      state.usage.push(path)
+      const column = path.includes('/pi/') ? 'backend' : 'other'
+      return answer({ used_by: [{ column, layer: 'default', replacement: { line: null, effort: null } }], incomplete: false, replacement: { line: null, effort: null }, revision: 'r1' })
+    }
+    if (/^\/models\/[^/]+\/retire$/.test(path) && method === 'POST') { state.retired.push(path.split('/')[2]!); return answer({ profile_id: path.split('/')[2], retired: true }) }
+    if (path.endsWith('/pause')) {
+      state.pauses.push(`${method} ${decodeURIComponent(path)}`)
+      if (refusePause && path.includes(refusePause)) return answer({ error: 'model_pause_limit' }, 413)
+      return answer({ harness: 'x', model: 'y', pause: null })
+    }
+    if (path === '/models/refresh/settings' && method === 'PUT') { state.settings.push(JSON.parse(String(init.body))); return answer(JSON.parse(String(init.body))) }
+    return base(path, init)
+  }
+  return state
+}
+async function mountGrouped(): Promise<GroupedCard> {
+  const scope = Vue.effectScope(); scopes.push(scope)
+  const card = scope.run(setup)! as unknown as GroupedCard
+  await settle()
+  return card
+}
+
+it('Remove on a version reads where every one of its routes is used before anything is removed, then retires every level of every route', async () => {
+  const state = groupedServer()
+  const card = await mountGrouped()
+  expect(card.rows.value.map(row => row.model.name)).toEqual(['Opus 5.5'])
+  const row = card.rows.value[0]!
+  card.askRemove(row, null)
+  await settle()
+  expect(state.usage).toEqual(['/models/lines/claude/claude-opus-5-5/usage', '/models/lines/pi/anthropic%2Fclaude-opus-5-5/usage'])
+  expect(state.retired).toEqual([])
+  expect(card.question.value).toMatchObject({ key: row.key, state: 'ready' })
+  expect(card.question.value!.text).toBe('Opus 5.5 is in use: Default · all work (for everyone) — no qualified fallback; backend (for everyone) — no qualified fallback. Auto-update won’t add it back.')
+  card.remove()
+  await settle()
+  expect(state.retired.slice().sort()).toEqual(row.model.profileIds.slice().sort())
+  expect(state.retired).toHaveLength(5)
+  expect(toasts.at(-1)).toMatchObject({ message: 'Removed Opus 5.5', options: { action: { label: 'Undo' } } })
+})
+
+it('a pause refused on one route says how far it got, and its Undo puts back only the routes it changed', async () => {
+  const state = groupedServer('/pi/')
+  const card = await mountGrouped()
+  const row = card.rows.value[0]!
+  const anchor = { isConnected: false, focus: () => {} } as unknown as HTMLElement
+  card.openPause(row, anchor)
+  card.choosePause('week')
+  await settle()
+  expect(state.pauses).toEqual(['PUT /models/lines/claude/claude-opus-5-5/pause', 'PUT /models/lines/pi/anthropic/claude-opus-5-5/pause'])
+  const told = toasts.at(-1)!
+  expect(told.message).toBe('Paused only 1 of its routes: model_pause_limit. Try again to finish.')
+  expect(told.options?.tone).toBe('error')
+  state.pauses.length = 0
+  told.options!.action!.run()
+  await settle()
+  expect(state.pauses).toEqual(['DELETE /models/lines/claude/claude-opus-5-5/pause'])
+})
+
+it('How new models are found writes its settings with auto-update as the server holds it and never sends the matrix revision', async () => {
+  const state = groupedServer()
+  const card = await mountGrouped()
+  card.setDiscovery({ api_enabled: false, interval_minutes: 720 })
+  await settle()
+  expect(state.settings).toEqual([{ agent_reports_enabled: true, auto_add_profiles: true, api_enabled: false, interval_minutes: 720 }])
+  expect(card.discoveryError.value).toBe('')
 })
