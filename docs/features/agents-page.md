@@ -80,12 +80,14 @@ Resume and Change tier are in its menu, and the details name and rename the
 computer.
 
 **Rows enter and leave calmly.** New sessions, rows leaving the list, rows
-moving to another group or parent and new orders wait while the pointer is on
-the list, a row has keyboard focus or one of the list's menus is open. Badges,
-line 2 and times keep updating meanwhile. The card head then says "2 changes
-wait while you point here · Show now"; otherwise, quietly, "Live · updated 4 s
-ago". The changes apply 1.5 s after the pointer leaves, on Show now, or when the
-page loads. Your own removals and moves apply at once; a new sort order applies
-at once. A done or ended session keeps its place and end state for 10 minutes
-(line 2 says when it moves to Ended), then moves to Ended at the next allowed
-moment.
+moving to another group or parent, rows that start or stop matching the filter
+or search, and new orders wait while the pointer is on the list, a row has
+keyboard focus or one of the list's menus is open; the last row stays even when
+the live list empties. Badges, line 2, the counts and times keep updating
+meanwhile. The card head then says "2 changes wait while you point here · Show
+now"; otherwise, quietly, "Live · updated 4 s ago". The changes apply 1.5 s
+after the pointer leaves, on Show now, or when the page loads. Your own
+removals and moves apply at once, and so do a new sort order, filter or search.
+A done or ended session keeps its place among its siblings and its end state
+for 10 minutes (line 2 says when it moves to Ended), then moves to Ended at the
+next allowed moment.
