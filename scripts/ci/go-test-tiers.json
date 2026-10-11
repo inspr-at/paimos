@@ -7410,6 +7410,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NativeLevelsPerRoute","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NeverRuleAliasRemovedByDisplayedIdentity","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NoRuntimeLadderReaders","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2OrderNativeEffortCompatibility","tier":"ESSENTIAL"}
