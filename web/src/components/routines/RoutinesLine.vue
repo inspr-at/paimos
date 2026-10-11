@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { listRoutines } from '../../lib/api'
+import { onAccessChange, permissionsRevoked } from '../../lib/authz'
 import { recurrenceZone, when, type Recurrence } from '../../lib/recurrences'
 import { routinesLine } from '../../lib/routineRuns'
 import { useIdentityScope } from '../../lib/useIdentityScope'
@@ -24,9 +25,11 @@ function load() {
 }
 // Another person never sees the previous person's line, not even for a moment.
 watch(() => identity.owner.value, () => { items.value = []; more.value = false; load() }, { immediate: true, flush: 'sync' })
+// A permission reset drops the read in flight with the scope (its listener runs first): read again.
+const stopAccess = onAccessChange(change => { if (change === 'reset' && !permissionsRevoked()) { items.value = []; more.value = false; load() } })
 const poller = usePoller(load, 60_000)
 onMounted(() => poller.start())
-onBeforeUnmount(() => poller.stop())
+onBeforeUnmount(() => { stopAccess(); poller.stop() })
 const words = computed(() => identity.owner.value ? routinesLine(items.value, more.value, item => when(item.next_at!, recurrenceZone(item.trigger))) : null)
 </script>
 

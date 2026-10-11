@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getRecurrence, listRoutines, pauseRecurrence, runRecurrence } from '../lib/api'
 import { getMembers } from '../lib/access'
-import { can, myWorkspaceRole } from '../lib/authz'
+import { can, myWorkspaceRole, onAccessChange, permissionsRevoked } from '../lib/authz'
 import type { After } from '../lib/identityScope'
 import { ROUTINE_STATE_WORDS, reasonWords, recurrenceName, recurrenceZone, routineState, when, type Recurrence, type RecurrenceResult } from '../lib/recurrences'
 import { SCOPE_FILTERS, STATE_FILTERS, STATE_LOOK, countWords, matchesScope, parseScope, parseState, scopeOf, stateCounts, type ScopeFilter } from '../lib/routineRuns'
@@ -219,6 +219,9 @@ watch(() => identity.owner.value, owner => {
   if (owner) { load(); loadNames() }
 }, { immediate: true, flush: 'sync' })
 // The poll refreshes whatever pages are loaded, and the routine on screen even when no page lists it.
+// A permission reset (another person or workspace, a new session) drops every read in flight
+// with the scope: start from nothing and read again. The scope's own listener runs first.
+const stopAccess = onAccessChange(change => { if (change === 'reset' && !permissionsRevoked()) { clear(); if (identity.owner.value) { load(); loadNames() } } })
 const poller = usePoller(() => {
   if (busy.value.length || editor.value || runPrompt.value || menu.value) return
   load(loaded.value ? 'refresh' : 'first')
@@ -229,7 +232,7 @@ onMounted(() => {
   observer = new ResizeObserver(([entry]) => { if (entry) single.value = entry.contentRect.width < 1100 })
   if (pageEl.value) observer.observe(pageEl.value)
 })
-onBeforeUnmount(() => { poller.stop(); observer?.disconnect() })
+onBeforeUnmount(() => { stopAccess(); poller.stop(); observer?.disconnect() })
 
 // ---------- Actions: bound to the record on screen ----------
 function mayManageItem(item: Recurrence) {
