@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -99,6 +100,14 @@ func TestCursorHarnessProbeReusesRecordedLaunchIdentity(t *testing.T) {
 				// A daemon generation is recorded with its probe outcome, as the
 				// readiness writer does; agent_accounts_check1 pairs the two.
 				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=now(),last_probe_ok=true,last_daemon_generation='generation' WHERE id=$1`, account); err != nil {
+					return err
+				}
+				// Turn off automatic pins through the canonical account-use rule
+				// writer sequence; 1309 maps auto_add_profiles=false to shipped_only.
+				if _, err := tx.Exec(t.Context(), `UPDATE account_use_rules SET new_models='shipped_only',revision=revision+1`); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.account_use_rule_write','on',true)`); err != nil {
 					return err
 				}
 				if _, err := tx.Exec(t.Context(), `UPDATE model_refresh_settings SET auto_add_profiles=false`); err != nil {
@@ -302,7 +311,9 @@ func TestHarnessProbesScheduleCheckNowAndFencePublication(t *testing.T) {
 			facts = append(facts, f)
 		}
 		chosen := ResolveCatalogFacts(facts, "codex/"+model.Model)
-		if string(chosen["native_levels"].Value) != `["max","low","focused"]` || chosen["native_levels"].SourceKind != "harness" || chosen["default_level"].FieldPath != "defaultReasoningEffort" {
+		// jsonb re-renders arrays with spaces; compare the decoded native list.
+		var levels []string
+		if json.Unmarshal(chosen["native_levels"].Value, &levels) != nil || !slices.Equal(levels, []string{"max", "low", "focused"}) || chosen["native_levels"].SourceKind != "harness" || chosen["default_level"].FieldPath != "defaultReasoningEffort" {
 			t.Fatal("harness facts did not outrank newer providers", chosen)
 		}
 		if chosen := ResolveCatalogFacts(facts, "pi/"+model.Model); string(chosen["native_levels"].Value) != `["high"]` {
