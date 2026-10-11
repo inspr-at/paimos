@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -28,6 +29,29 @@ type EngineCapacity struct {
 // It additionally requires fresh measurable capacity and a fresh enrolled host;
 // the runtime's blind one-run recovery fallback never authorizes this shadow gate.
 func EngineCapacityTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner, harness string, hours float64, now time.Time, projectIDs ...string) (EngineCapacity, error) {
+	projectID := ""
+	if len(projectIDs) > 0 {
+		projectID = projectIDs[0]
+	}
+	return engineCapacityTx(ctx, tx, p, owner, harness, hours, now, projectID, runRow{Purpose: "managed"})
+}
+
+// EngineRunCapacityTx checks only the account already reserved for this queued
+// routine. Its own slot and window holds are excluded from projections; sibling
+// runs remain counted across projects and shared quotas. Callers retain the
+// tenant/tree/pairing fences and the durable-intent check in RequireRoutineTx.
+func EngineRunCapacityTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner, harness string, hours float64, now time.Time, projectID, runID string) (EngineCapacity, error) {
+	run, err := lockRun(ctx, tx, runID)
+	if err != nil {
+		return EngineCapacity{}, err
+	}
+	if run.AccountID == nil || run.ProfileID == nil || run.Status != "queued" || run.Purpose != "managed" {
+		return EngineCapacity{}, workorders.Fail(409, "routine_account_unbound")
+	}
+	return engineCapacityTx(ctx, tx, p, owner, harness, hours, now, projectID, run)
+}
+
+func engineCapacityTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner, harness string, hours float64, now time.Time, projectID string, run runRow) (EngineCapacity, error) {
 	permission := "account.read"
 	if p.Kind == tenant.Agent {
 		permission = "account.overview.read"
@@ -45,11 +69,7 @@ func EngineCapacityTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner,
 	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
 		return EngineCapacity{}, err
 	}
-	projectID := ""
-	if len(projectIDs) > 0 {
-		projectID = projectIDs[0]
-	}
-	out, err := engineCapacityInputs(ctx, tx, p, owner, harness, hours, now, projectID)
+	out, err := engineCapacityInputs(ctx, tx, p, owner, harness, hours, now, projectID, run)
 	if err != nil {
 		return EngineCapacity{}, err
 	}
@@ -57,7 +77,7 @@ func EngineCapacityTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner,
 	return out, err
 }
 
-func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner, harness string, hours float64, now time.Time, projectID string) (EngineCapacity, error) {
+func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner, harness string, hours float64, now time.Time, projectID string, run runRow) (EngineCapacity, error) {
 
 	for _, bound := range []struct {
 		query   string
@@ -86,18 +106,18 @@ func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, ow
 	if err != nil {
 		return EngineCapacity{}, err
 	}
-	used, err := occupancy(ctx, tx)
+	used, err := occupancyExcept(ctx, tx, run.ID)
 	if err != nil {
 		return EngineCapacity{}, err
 	}
-	quotaUsed, err := quotaOccupancy(ctx, tx)
+	quotaUsed, err := quotaOccupancyExcept(ctx, tx, run.ID)
 	if err != nil {
 		return EngineCapacity{}, err
 	}
 	out := EngineCapacity{Reason: "account_unavailable"}
 	denied, allowedCandidate := false, false
 	for _, a := range accounts {
-		if a.Harness != harness || !privacy[a.ID] {
+		if a.Harness != harness || !privacy[a.ID] || run.AccountID != nil && (a.ID != *run.AccountID || a.RegisteredBy != run.AgentID) {
 			continue
 		}
 		var own bool
@@ -124,7 +144,16 @@ func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, ow
 			out = EngineCapacity{Reason: "account_models"}
 			continue
 		}
-		windows, wait, err := admission(ctx, tx, a, a.Windows, now, slotCount(a, used, quotaUsed), runRow{Purpose: "managed"}, false)
+		if run.ProfileID != nil {
+			allowed, err := AccountAllowsProfile(ctx, tx, a, *run.ProfileID)
+			if err != nil {
+				return EngineCapacity{}, err
+			}
+			if !allowed {
+				return EngineCapacity{Reason: "account_models"}, nil
+			}
+		}
+		windows, wait, err := admissionInputs(ctx, tx, a, a.Windows, now, slotCount(a, used, quotaUsed), run, false, nil, run.ID)
 		if err != nil {
 			return EngineCapacity{}, err
 		}
@@ -225,4 +254,47 @@ func engineHost(ctx context.Context, tx pgx.Tx, account, owner string, now time.
 		return "host_" + reason, nil
 	}
 	return "", nil
+}
+
+// Adjust projections only; never release the persisted ledger. Shared quota and
+// fact windows carry overlapping historical holds, so match their resource key
+// and interval. Independent account windows retain their exact window IDs.
+func excludeWindowReservations(ctx context.Context, tx pgx.Tx, windows []Window, runID string, sharedQuota bool) error {
+	if runID == "" {
+		return nil
+	}
+	rows, err := tx.Query(ctx, `SELECT w.id::text,coalesce(w.capacity_kind,''),coalesce(w.capacity_bucket,''),w.starts_at,w.ends_at,r.reserved_units
+ FROM account_reservations r JOIN account_allowance_windows w ON w.tenant_id=r.tenant_id AND w.id=r.window_id
+ WHERE r.run_id=$1 AND r.state='active' ORDER BY w.id LIMIT 4097`, runID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	count := 0
+	for rows.Next() {
+		count++
+		if count > 4096 {
+			return workorders.Fail(409, "account_inputs_unreadable")
+		}
+		var id, kind, bucket string
+		var start, end time.Time
+		var held int64
+		if err := rows.Scan(&id, &kind, &bucket, &start, &end, &held); err != nil {
+			return err
+		}
+		for i := range windows {
+			w := &windows[i]
+			match := w.ID == id
+			if w.capacityKind == "fact" || sharedQuota && w.capacityReadAt != nil && !synthetic(*w) {
+				match = kind == w.capacityKind && bucket == w.capacityBucket && start.Before(w.EndsAt) && w.StartsAt.Before(end)
+			}
+			if match {
+				if held > w.Reserved {
+					return workorders.Fail(409, "account_inputs_unreadable")
+				}
+				w.Reserved -= held
+			}
+		}
+	}
+	return rows.Err()
 }

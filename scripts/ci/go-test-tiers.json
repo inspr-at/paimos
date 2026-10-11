@@ -5600,6 +5600,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestRevocationDecisionExpiryAndFinishedWork","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestRoutineConsentProjectionMatchesNativePolicyAndPages","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestScopeDeniedApprovalReceivesTerminalSkippedClaim","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestSourceClaimDoesNotScanProjectionAndCoverageIsExplicit","tier":"GATED-FULL"}
@@ -8412,6 +8414,8 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineRunStateMappings","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineUIReadsScopeLatestRunAndDraftPolicy","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestSixMonthSpringGapWalksPastOneYear","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestSourceClaimSkipsFilteredEventsInBoundedBatches","tier":"ESSENTIAL"}
@@ -8809,6 +8813,12 @@
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetMovedRootKeepsChildBinding","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetUnknownRetainsSlotAndChildBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchRaceRecoveryAndAdmission","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchReservedAccountAdmission","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineQueueWaitsDoNotBlockLaterWork","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineguard","name":"TestEvaluationAuthorMatchesPersistedActionAttempt","tier":"ESSENTIAL"}
     ,
