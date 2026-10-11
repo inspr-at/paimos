@@ -22,6 +22,116 @@ func encoded(t *testing.T, v any) string {
 	return string(raw)
 }
 
+// seedExistingSchedule represents a schedule saved by a release before the
+// Sprint/Hold write retirement. Live save assertions use the HTTP handler.
+func seedExistingSchedule(t *testing.T, person tenant.Principal, in scheduleOverride) {
+	t.Helper()
+	key := ""
+	var account any
+	switch in.Scope {
+	case "pool":
+		key = in.Pool
+	case "group":
+		key = in.GroupID
+	case "account":
+		key, account = in.AccountID, in.AccountID
+	}
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		if in.Scope == "account" {
+			if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET capacity_owner=COALESCE(capacity_owner,$2::uuid) WHERE id=$1`, key, person.ID); err != nil {
+				return err
+			}
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,principal_id,scope,scope_key) DO UPDATE SET schedule=EXCLUDED.schedule`, person.TenantID, person.ID, in.Scope, key, account, encoded(t, in.Schedule))
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// AEON-1177: all schedule scopes reject creating, replaying and extending
+// Sprint/Hold; clearing or removing an existing override remains possible.
+func TestRetiredCapacityOverridesCanStillEnd(t *testing.T) {
+	f := limitWorld(t, "override-retired", 3)
+	path := "/api/agent-accounts/capacity/schedule"
+	var group AccountGroup
+	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/groups", `{"harness":"codex","name":"Legacy"}`, 201, &group)
+	snapshot := func() string {
+		t.Helper()
+		var rows []scheduleOverride
+		callStatus(t, f.mod, &f.admin, "", "GET", path, "", 200, &rows)
+		return encoded(t, rows)
+	}
+	reject := func(in scheduleOverride) {
+		t.Helper()
+		before := snapshot()
+		var out struct{ Error, Code string }
+		callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, in), 400, &out)
+		if out.Code != "override_retired" || out.Error == "" {
+			t.Fatalf("%s %s: %+v", in.Scope, in.Schedule.Override, out)
+		}
+		if after := snapshot(); after != before {
+			t.Fatalf("rejected override changed schedules: %s -> %s", before, after)
+		}
+	}
+	for _, target := range []scheduleOverride{
+		{Scope: "user"}, {Scope: "pool", Pool: "codex"},
+		{Scope: "account", AccountID: f.account.ID}, {Scope: "group", GroupID: group.ID},
+	} {
+		for _, kind := range []string{"sprint", "hold"} {
+			s := capacity.DefaultSchedule("Europe/Vienna")
+			s.Override = kind
+			target.Schedule = &s
+			reject(target)
+			until := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+			s.OverrideUntil = &until
+			reject(target)
+			seedExistingSchedule(t, f.admin, target)
+			reject(target) // replay cannot revive or renew a retired override
+			later := until.Add(time.Hour)
+			s.OverrideUntil = &later
+			reject(target) // extension also cannot change the stored deadline
+			s.Override = ""
+			callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, target), 204, nil)
+			var rows []scheduleOverride
+			callStatus(t, f.mod, &f.admin, "", "GET", path, "", 200, &rows)
+			found := false
+			for _, row := range rows {
+				if row.Scope == target.Scope && row.Pool == target.Pool && row.AccountID == target.AccountID && row.GroupID == target.GroupID {
+					found = true
+					if row.Schedule.Override != "" || row.Schedule.OverrideUntil != nil {
+						t.Fatalf("clear did not end override: %+v", row)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("clear removed the base schedule")
+			}
+			s.Override, s.OverrideUntil = kind, &until
+			seedExistingSchedule(t, f.admin, target)
+			target.Schedule = nil
+			callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, target), 204, nil)
+			callStatus(t, f.mod, &f.admin, "", "GET", path, "", 200, &rows)
+			for _, row := range rows {
+				if row.Scope == target.Scope && row.Pool == target.Pool && row.AccountID == target.AccountID && row.GroupID == target.GroupID {
+					t.Fatal("null schedule did not remove legacy override")
+				}
+			}
+		}
+	}
+	s := capacity.DefaultSchedule("Europe/Vienna")
+	s.Override = "hold"
+	in := scheduleOverride{Scope: "user", Schedule: &s}
+	callStatus(t, f.mod, nil, "", "PUT", path, encoded(t, in), 401, nil)
+	callStatus(t, f.mod, &f.runner, f.token, "PUT", path, encoded(t, in), 403, nil)
+	// Away and ordinary schedules continue to use the existing validation.
+	s.Override = "away"
+	until := time.Now().UTC().Add(time.Hour)
+	s.OverrideUntil = &until
+	callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, in), 204, nil)
+}
+
 func TestCapacityIngestRouteResetAndRLS(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "capacity", "person", "Ada", []string{"admin"})
@@ -73,7 +183,7 @@ func TestCapacityIngestRouteResetAndRLS(t *testing.T) {
 	}
 	schedule := capacity.DefaultSchedule()
 	schedule.Override = "sprint"
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, &schedule, false, ""}), 204, nil)
+	seedExistingSchedule(t, admin, scheduleOverride{"account", "", account.ID, &schedule, false, ""})
 	run := insertRun(t, admin, runner, profile)
 	route := mustRoute(t, mod, runner, token, run, "daemon-a", []Account{account}, map[string]int64{"requests": 1})
 	if len(route.Reservations) != 1 || route.Reservations[0].Unit != "percent" {
@@ -415,7 +525,11 @@ func TestCapacityEnforcesSchedulesSnapshotsAndResourceStops(t *testing.T) {
 		if scope == "pool" {
 			pool, id = "codex", ""
 		}
-		callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{scope, pool, id, &schedule, false, ""}), 204, nil)
+		if override != "" {
+			seedExistingSchedule(t, admin, scheduleOverride{scope, pool, id, &schedule, false, ""})
+		} else {
+			callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{scope, pool, id, &schedule, false, ""}), 204, nil)
+		}
 	}
 	route := func(status int) string {
 		t.Helper()
@@ -554,7 +668,7 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	check("Pacific/Auckland", "")
 	user := capacity.DefaultSchedule("Europe/Vienna")
 	user.Override = "hold"
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"user", "", "", &user, false, ""}), 204, nil)
+	seedExistingSchedule(t, person, scheduleOverride{"user", "", "", &user, false, ""})
 	check("Europe/Vienna", "hold")
 	pool := capacity.DefaultSchedule("America/New_York")
 	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", &pool, false, ""}), 204, nil)
@@ -637,7 +751,7 @@ func TestCapacityPreviewPacesDraftWithoutSaving(t *testing.T) {
 	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"user", "", "", &saved, false, ""}), 204, nil)
 	hold := saved
 	hold.Override = "hold"
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", &hold, false, ""}), 204, nil)
+	seedExistingSchedule(t, admin, scheduleOverride{"pool", "codex", "", &hold, false, ""})
 
 	draft := capacity.DefaultSchedule("Europe/Vienna")
 	for i := range draft.Week {

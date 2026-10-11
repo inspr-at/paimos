@@ -8,13 +8,12 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
-	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 const (
-	evLimitSet      = "account.limit_set"
 	evLimitRemoved  = "account.limit_removed"
 	evWindowRemoved = "account.window_removed"
 )
@@ -37,29 +36,6 @@ type limitUse struct {
 	LimitRule
 	Used      float64   `json:"used"`
 	PeriodEnd time.Time `json:"period_end"`
-}
-
-type limitWrite struct {
-	Amount int64  `json:"amount"`
-	Unit   string `json:"unit"`
-	Period string `json:"period"`
-}
-
-func (in limitWrite) validate() error {
-	switch in.Unit {
-	case "percent", "runs", "requests", "tokens", "cost_micros":
-	default:
-		return fail(http.StatusBadRequest, "invalid limit")
-	}
-	switch in.Period {
-	case "day", "week", "month":
-	default:
-		return fail(http.StatusBadRequest, "invalid limit")
-	}
-	if in.Amount < 1 || in.Amount > 1_000_000_000_000_000 || in.Unit == "percent" && in.Amount > 100 {
-		return fail(http.StatusBadRequest, "invalid limit")
-	}
-	return nil
 }
 
 const limitColumns = `id::text, account_id::text, amount, unit, period, from_window_id::text, created_at`
@@ -89,44 +65,6 @@ func lockForLimit(ctx context.Context, tx pgx.Tx, accountID string) error {
 	}
 	_, err := lockAccount(ctx, tx, accountID)
 	return err
-}
-
-func setLimit(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string, in limitWrite, fromWindow *string) (LimitRule, error) {
-	if err := in.validate(); err != nil {
-		return LimitRule{}, err
-	}
-	if err := lockForLimit(ctx, tx, accountID); err != nil {
-		return LimitRule{}, err
-	}
-	if in.Unit == "cost_micros" {
-		supported, err := costLimitSupported(ctx, tx, accountID)
-		if err != nil {
-			return LimitRule{}, err
-		}
-		if !supported {
-			return LimitRule{}, &httpError{status: http.StatusUnprocessableEntity, code: "unsupported_limit_unit", msg: "Dollar limits require priced run usage. This account does not report costs; choose runs or another supported limit."}
-		}
-	}
-	before, err := currentLimit(ctx, tx, accountID)
-	if err != nil {
-		return LimitRule{}, err
-	}
-	// An identical sentence is a no-op, so a retried Apply stores nothing twice.
-	if before != nil && fromWindow == nil && before.Amount == in.Amount && before.Unit == in.Unit && before.Period == in.Period {
-		return *before, nil
-	}
-	if _, err := tx.Exec(ctx, `UPDATE account_limit_rules SET removed_at=clock_timestamp() WHERE account_id=$1 AND removed_at IS NULL`, accountID); err != nil {
-		return LimitRule{}, err
-	}
-	after, err := scanLimit(tx.QueryRow(ctx, `INSERT INTO account_limit_rules(tenant_id,account_id,amount,unit,period,from_window_id,created_by)
- VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING `+limitColumns, p.TenantID, accountID, in.Amount, in.Unit, in.Period, fromWindow, p.ID))
-	if err != nil {
-		return LimitRule{}, err
-	}
-	if err := writeEvent(ctx, tx, p, evLimitSet, before, after); err != nil {
-		return LimitRule{}, err
-	}
-	return after, nil
 }
 
 func removeLimit(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID string) error {
@@ -175,49 +113,6 @@ func removeWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID,
 		return err
 	}
 	return writeEvent(ctx, tx, p, evWindowRemoved, w, nil)
-}
-
-// repeatWindow is Make this repeat: the window's amount per the period its
-// length matches becomes the account's rule, and the window itself is removed
-// in the same transaction, so the use counted this period stays counted.
-func repeatWindow(ctx context.Context, tx pgx.Tx, p tenant.Principal, accountID, windowID string) (LimitRule, error) {
-	if err := lockForLimit(ctx, tx, accountID); err != nil {
-		return LimitRule{}, err
-	}
-	w, err := manualWindow(ctx, tx, accountID, windowID)
-	if err != nil {
-		return LimitRule{}, err
-	}
-	if w.Unit == "percent" {
-		return LimitRule{}, fail(http.StatusConflict, "this limit cannot repeat")
-	}
-	before, err := currentLimit(ctx, tx, accountID)
-	if err != nil {
-		return LimitRule{}, err
-	}
-	if before != nil {
-		return LimitRule{}, fail(http.StatusConflict, "This account already has a limit. Remove it explicitly before making this window repeat.")
-	}
-	rule, err := setLimit(ctx, tx, p, accountID, limitWrite{Amount: w.Allowance, Unit: w.Unit, Period: periodFor(w.EndsAt.Sub(w.StartsAt))}, &w.ID)
-	if err != nil {
-		return LimitRule{}, err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE account_allowance_windows SET removed_at=clock_timestamp() WHERE id=$1`, w.ID); err != nil {
-		return LimitRule{}, err
-	}
-	return rule, writeEvent(ctx, tx, p, evWindowRemoved, w, rule)
-}
-
-// periodFor names the period a window's length is closest to.
-func periodFor(length time.Duration) string {
-	switch {
-	case length <= 36*time.Hour:
-		return "day"
-	case length <= 10*24*time.Hour:
-		return "week"
-	default:
-		return "month"
-	}
 }
 
 // limitPeriod is the local day, week (Monday first) or month around now.
@@ -467,22 +362,7 @@ func (m *Module) putLimit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var in limitWrite
-	if err := decodeJSON(w, r, &in); err != nil {
-		writeErr(w, err)
-		return
-	}
-	var out LimitRule
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		var err error
-		out, err = setLimit(r.Context(), tx, p, r.PathValue("accountId"), in, nil)
-		return err
-	})
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, out)
+	writeErr(w, &httpError{status: http.StatusGone, code: "limit_retired", msg: "Advanced limit writes are retired. Existing limits remain in force until removed."})
 }
 
 func (m *Module) deleteLimit(w http.ResponseWriter, r *http.Request) {
@@ -495,6 +375,9 @@ func (m *Module) deleteLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		if authz.RequireTx(r.Context(), tx, p, "account.manage", authz.Scope{}) != nil {
+			return fail(http.StatusForbidden, "permission denied")
+		}
 		return removeLimit(r.Context(), tx, p, r.PathValue("accountId"))
 	})
 	if err != nil {
@@ -532,15 +415,5 @@ func (m *Module) repeatWindow(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var out LimitRule
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		var err error
-		out, err = repeatWindow(r.Context(), tx, p, r.PathValue("accountId"), r.PathValue("windowId"))
-		return err
-	})
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	httpapi.WriteJSON(w, http.StatusOK, out)
+	writeErr(w, &httpError{status: http.StatusGone, code: "limit_retired", msg: "Repeating manual windows is retired. Existing windows and limits remain in force."})
 }

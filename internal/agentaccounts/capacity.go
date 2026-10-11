@@ -636,6 +636,10 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, err)
 			return
 		}
+		if in.Schedule != nil && (in.Schedule.Override == "sprint" || in.Schedule.Override == "hold") {
+			writeErr(w, &httpError{status: http.StatusBadRequest, code: "override_retired", msg: "Sprint and Hold writes are retired. Clear the override or remove the schedule to end an existing override."})
+			return
+		}
 	}
 	out := []scheduleOverride{}
 	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
@@ -667,6 +671,9 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 				out = append(out, v)
 			}
 			return rows.Err()
+		}
+		if authz.RequireTx(r.Context(), tx, p, "account.manage", authz.Scope{}) != nil {
+			return fail(http.StatusForbidden, "permission denied")
 		}
 		key := ""
 		var account any
@@ -719,21 +726,6 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		switch in.Schedule.Override {
-		case "sprint":
-			// Sprint is literal and bounded to the next limiting reset in scope.
-			var until *time.Time
-			if err := tx.QueryRow(r.Context(), `SELECT min(w.ends_at) FROM account_allowance_windows w JOIN agent_accounts a ON a.tenant_id=w.tenant_id AND a.id=w.account_id WHERE `+currentCapacityWindows+` AND ($1='user' OR ($1='pool' AND a.harness=$2) OR ($1='account' AND a.id::text=$2) OR ($1='group' AND a.group_id::text=$2))`, in.Scope, key).Scan(&until); err != nil {
-				return err
-			}
-			if until == nil {
-				return fail(400, "Sprint requires a current capacity reset")
-			}
-			in.Schedule.OverrideUntil = until
-		case "hold":
-			// Hold for a while, until tomorrow's hours, or until you resume (no date).
-			if u := in.Schedule.OverrideUntil; u != nil && (!u.After(now) || u.After(now.Add(maxHold))) {
-				return fail(400, "Hold must end within 31 days")
-			}
 		case "away":
 			// I'm away until…: the person's own schedule, every pool, until the date.
 			if in.Scope != "user" {
@@ -768,11 +760,8 @@ func (m *Module) capacitySchedule(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// maxHold and maxAway bound dated overrides: a hold is a pause, Away a trip.
-const (
-	maxHold = 31 * 24 * time.Hour
-	maxAway = 366 * 24 * time.Hour
-)
+// maxAway bounds new Away overrides; existing Sprint/Hold dates are preserved.
+const maxAway = 366 * 24 * time.Hour
 
 func awayUntilOK(until, now time.Time) error {
 	if !until.After(now) || until.After(now.Add(maxAway)) {

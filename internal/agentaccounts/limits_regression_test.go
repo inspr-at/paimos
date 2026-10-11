@@ -2,8 +2,6 @@
 package agentaccounts
 
 import (
-	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -40,7 +38,7 @@ func TestLimitPeriodDST(t *testing.T) {
 
 func TestPercentLimitSurvivesVendorResetAndRefresh(t *testing.T) {
 	f := limitWorld(t, "limit-reset", 3)
-	callStatus(t, accountsMod(), &f.admin, "", "PUT", "/api/agent-accounts/"+f.account.ID+"/limit", `{"amount":20,"unit":"percent","period":"day"}`, 200, nil)
+	seedExistingLimit(t, f, 20, "percent", "day", nil)
 	loc, _ := time.LoadLocation("Europe/Vienna")
 	now := time.Date(2026, 9, 29, 15, 0, 0, 0, loc)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
@@ -106,7 +104,7 @@ func TestLimitConcurrentReservationsAndClaim(t *testing.T) {
 				seedPricedRun(t, f, amount)
 			}
 			f.report(t, 10, now, now.Add(48*time.Hour))
-			callStatus(t, accountsMod(), &f.admin, "", "PUT", "/api/agent-accounts/"+f.account.ID+"/limit", fmt.Sprintf(`{"amount":%d,"unit":%q,"period":"day"}`, amount, unit), 200, nil)
+			seedExistingLimit(t, f, amount, unit, "day", nil)
 			runs := []string{insertRun(t, f.admin, f.runner, f.profile), insertRun(t, f.admin, f.runner, f.profile), insertRun(t, f.admin, f.runner, f.profile)}
 			bodies := make([]string, len(runs))
 			for i, id := range runs {
@@ -174,21 +172,21 @@ func seedPricedRun(t *testing.T, f limitFixture, cost int64) string {
 
 func TestCostLimitRequiresPricedRunAccounting(t *testing.T) {
 	f := limitWorld(t, "limit-priced", 3)
-	path := "/api/agent-accounts/" + f.account.ID + "/limit"
-	status, raw := call(t, accountsMod(), &f.admin, "", "PUT", path, `{"amount":1000000,"unit":"cost_micros","period":"day"}`)
-	if status != 422 || !strings.Contains(string(raw), "unsupported_limit_unit") {
-		t.Fatalf("unsupported cost: %d %s", status, raw)
+	seedExistingLimit(t, f, 1_000_000, "cost_micros", "day", nil)
+	// A legacy dollar rule on an unpriced account fails closed in admission.
+	now := time.Now().Add(-time.Second)
+	f.report(t, 10, now, now.Add(48*time.Hour))
+	_, denied := f.route(t, 409)
+	if denied.Wait == nil || denied.Wait.Code != "allowance" {
+		t.Fatalf("unpriced legacy limit did not fail closed: %+v", denied)
 	}
 	if f.capacity(t).CostLimitSupported {
 		t.Fatal("unpriced account offers dollars")
 	}
 	seedPricedRun(t, f, 1_000_000)
-	callStatus(t, accountsMod(), &f.admin, "", "PUT", path, `{"amount":1000000,"unit":"cost_micros","period":"day"}`, 200, nil)
 	if !f.capacity(t).CostLimitSupported {
 		t.Fatal("priced account has no dollar support")
 	}
-	now := time.Now().Add(-time.Second)
-	f.report(t, 10, now, now.Add(48*time.Hour))
 	run, _ := f.route(t, 200)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
 		// A run spanning midnight finishes without cost telemetry. Its final
@@ -211,7 +209,15 @@ func TestRepeatPreservesOriginalAndExistingCaps(t *testing.T) {
 	callStatus(t, mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now.Add(-time.Hour), now.Add(48*time.Hour), "requests", 1, "unrestricted"), 201, &old)
 	run, _ := f.route(t, 200)
 	path := "/api/agent-accounts/" + f.account.ID + "/windows/" + old.ID + "/repeat"
-	callStatus(t, mod, &f.admin, "", "POST", path, "", 200, nil)
+	// The conversion and original reservation predate retirement.
+	seedExistingLimit(t, f, 1, "requests", "week", &old.ID)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET removed_at=clock_timestamp() WHERE id=$1`, old.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	callStatus(t, mod, &f.admin, "", "POST", path, "", 410, nil)
 	f.route(t, 409)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error { return ValidateReservedCapacity(t.Context(), tx, run, f.account.ID) })
 	if err != nil {
@@ -220,7 +226,7 @@ func TestRepeatPreservesOriginalAndExistingCaps(t *testing.T) {
 	// A second old window cannot silently replace the first repeating cap.
 	var other Window
 	callStatus(t, mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows", windowBody(now.Add(49*time.Hour), now.Add(72*time.Hour), "requests", 100, "unrestricted"), 201, &other)
-	callStatus(t, mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows/"+other.ID+"/repeat", "", 409, nil)
+	callStatus(t, mod, &f.admin, "", "POST", "/api/agent-accounts/"+f.account.ID+"/windows/"+other.ID+"/repeat", "", 410, nil)
 	if f.capacity(t).Limit.Amount != 1 {
 		t.Fatal("repeat weakened existing rule")
 	}
@@ -241,8 +247,7 @@ func TestLearnedLimitEstimateAndOutstandingUsage(t *testing.T) {
 	}
 	now := time.Now().Add(-time.Second)
 	f.report(t, 10, now, now.Add(48*time.Hour))
-	path := "/api/agent-accounts/" + f.account.ID + "/limit"
-	callStatus(t, accountsMod(), &f.admin, "", "PUT", path, `{"amount":9,"unit":"requests","period":"day"}`, 200, nil)
+	seedExistingLimit(t, f, 9, "requests", "day", nil)
 	run, _ := f.route(t, 200) // Caller asks for one, history reserves five.
 	f.route(t, 409)
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, f.admin.TenantID, func(tx pgx.Tx) error {
@@ -259,6 +264,6 @@ func TestLearnedLimitEstimateAndOutstandingUsage(t *testing.T) {
 		t.Fatalf("recorded 2 plus remaining 3 should be 5: %+v", c.Limit)
 	}
 	f.route(t, 409) // A claimed run keeps the rest of its estimate.
-	callStatus(t, accountsMod(), &f.admin, "", "PUT", path, `{"amount":10,"unit":"requests","period":"day"}`, 200, nil)
+	seedExistingLimit(t, f, 10, "requests", "day", nil)
 	f.route(t, 200)
 }
