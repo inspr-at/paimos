@@ -35,11 +35,15 @@ func init() {
 		"POST /api/model-preferences/tray/{line}/dismiss":            "models.read|model_prefs.manage",
 		"POST /api/models":                                           "models.manage",
 		"POST /api/models/proposals/accept":                          "models.manage",
-		"POST /api/models/refresh":                                   "models.refresh",
-		"POST /api/models/reports":                                   "models.report",
-		"POST /api/models/{id}/retire":                               "models.manage",
-		"POST /api/work-kinds":                                       "model_prefs.manage",
-		"POST /api/work-kinds/{kindId}/restore":                      "model_prefs.manage",
+		"POST /api/models/harness-probes/claim":                      "models.report",
+		// The handler accepts only the harness-probes collection. Literal claim
+		// and retirement registrations keep their own permission declarations.
+		"POST /api/models/{collection}/{accountId}": "models.report",
+		"POST /api/models/refresh":                  "models.refresh",
+		"POST /api/models/reports":                  "models.report",
+		"POST /api/models/{id}/retire":              "models.manage",
+		"POST /api/work-kinds":                      "model_prefs.manage",
+		"POST /api/work-kinds/{kindId}/restore":     "model_prefs.manage",
 		// Level-specific, person-only authority is rechecked under the mutation fence.
 		"PUT /api/model-preferences/levels/{level}":                       "models.read|model_prefs.manage",
 		"PUT /api/model-preferences/levels/{level}/rows/{kindId}":         "models.read|model_prefs.manage",

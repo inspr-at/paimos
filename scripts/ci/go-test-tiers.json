@@ -1272,6 +1272,10 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCaptureDoesNotHoldDispatchBudget","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestCatalogCaptureLoopDoesNotHoldDispatchOrHealthPolling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestCatalogPollServicesIdleAccountsAndKeepsQualification","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestChatCapabilitiesHonorOwnedSessionControls","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestChatFinalComesOnlyFromHarnessCompletionRecords","tier":"ESSENTIAL"}
@@ -1373,6 +1377,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestCodexCapacityNotification","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexCaptureCapacityBlockedNotificationUsesCaptureDeadline","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestCodexCatalogBoundedPagesKeepPartialHonest","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestCodexChatPreAcknowledgementKeepsExactTurn","tier":"ESSENTIAL"}
     ,
@@ -1541,6 +1547,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestGrokStartRejectsLegacyProviderLabel","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestGrokVerificationPlatformGate","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestHarnessCatalogRecordedFactsAndUnknown","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestHarnessHintsDrainAndStopWithoutHeartbeatOrPoll","tier":"ESSENTIAL"}
     ,
@@ -1713,6 +1721,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestPauseWakeHintAnchorsBeforeHeartbeatRoundTrip","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPiAdapterPublishesUsageFromOwnedWire","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestPiCatalogReadsLevelsForConfirmedSelectedModel","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestPiHeldQueueRefusesOtherGeneration","tier":"GATED-FULL"}
     ,
@@ -3503,6 +3513,8 @@
     {"kind":"go","package":"internal/auth","name":"TestFromEnv","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestFullAccessLiveCatalogAndBoundaries","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestHarnessProbeRoutesThroughPairedRuntimeMiddleware","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestHasScopeAcceptsDotAndColon","tier":"GATED-FULL"}
     ,
@@ -7206,6 +7218,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCommandTemplates","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCursorHarnessProbeReusesRecordedLaunchIdentity","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDailyReviewKeepsReviewQualifiedAccounts","tier":"ESSENTIAL"}
@@ -7285,6 +7299,10 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestExplicitPlacementModeSelectsManagedReview","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestFailuresMustBeSpacedAndReceiptsAreBounded","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestHarnessProbeRoutesMountWithoutRetirementConflict","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestHarnessProbesScheduleCheckNowAndFencePublication","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestInjectedResolverRefusesUnreadyWithoutCatalogWrites","tier":"GATED-FULL"}
     ,
@@ -8381,6 +8399,10 @@
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineIntentAtomicReplayAndAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineInvalidDefinitionPreservesSafetyControls","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineRunHistoryPrivacyUsageAndPagination","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineRunStateMappings","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineTemplatesValidateApplyWithoutActivationOrDuplicates","tier":"ESSENTIAL"}
     ,
