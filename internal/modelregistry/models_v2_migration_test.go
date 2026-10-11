@@ -96,8 +96,8 @@ func TestModelsV2MigrationGolden(t *testing.T) {
 		raw, _ := json.Marshal(schedule)
 		for _, h := range []string{"codex", "claude", "opencode"} {
 			var id string
-			if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation)
-    VALUES($1,$2,$2,'migration-host',$3,$2,'available',$4,true,'migration-generation') RETURNING id::text`, admin.TenantID, h, runner.ID, now).Scan(&id); err != nil {
+			if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,state,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner)
+    VALUES($1,$2,$2,'migration-host',$3,$2,'available',$4,true,'migration-generation',$5) RETURNING id::text`, admin.TenantID, h, runner.ID, now, admin.ID).Scan(&id); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, admin.TenantID, admin.ID, id, raw); err != nil {
@@ -315,6 +315,9 @@ func TestModelsV2SuccessorMovesAllReferences(t *testing.T) {
 			}
 			if o.Situation == "review" && !reflect.DeepEqual(o.Rank, []string{"anthropic:fable"}) {
 				t.Fatalf("stranded situation: %+v", o)
+			}
+			if o.Situation == "first" && !reflect.DeepEqual(o.Rank, []string{"openai:sol", "anthropic:fable"}) {
+				t.Fatalf("successor lost denied fallback position: %+v", o)
 			}
 			if o.Situation == "first" && !reflect.DeepEqual(o.Not, []string{"anthropic:fable"}) {
 				t.Fatalf("stranded never: %+v", o)

@@ -279,7 +279,7 @@ func transferModelLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Princi
 		}
 
 		for _, table := range []string{"model_pref_orders", "model_pref_situation_orders"} {
-			if _, err := tx.Exec(ctx, `UPDATE `+table+` SET rank=CASE WHEN rank IS NULL THEN NULL ELSE ARRAY(SELECT v FROM unnest(array_replace(rank,$1,$2)) WITH ORDINALITY u(v,n) WHERE NOT v=ANY(array_replace(not_allowed,$1,$2)) GROUP BY v ORDER BY min(n)) END,efforts=CASE WHEN efforts ? $1 THEN (efforts-$1)||jsonb_build_object($2,coalesce(efforts->$2,efforts->$1)) ELSE efforts END,not_allowed=ARRAY(SELECT v FROM unnest(array_replace(not_allowed,$1,$2)) WITH ORDINALITY u(v,n) GROUP BY v ORDER BY min(n)) WHERE $1=ANY(rank) OR $1=ANY(not_allowed)`, oldLine, newLine); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE `+table+` SET rank=CASE WHEN rank IS NULL THEN NULL ELSE ARRAY(SELECT v FROM unnest(array_replace(rank,$1,$2)) WITH ORDINALITY u(v,n) GROUP BY v ORDER BY min(n)) END,efforts=CASE WHEN efforts ? $1 THEN (efforts-$1)||jsonb_build_object($2,coalesce(efforts->$2,efforts->$1)) ELSE efforts END,not_allowed=ARRAY(SELECT v FROM unnest(array_replace(not_allowed,$1,$2)) WITH ORDINALITY u(v,n) GROUP BY v ORDER BY min(n)) WHERE $1=ANY(rank) OR $1=ANY(not_allowed)`, oldLine, newLine); err != nil {
 				return err
 			}
 		}

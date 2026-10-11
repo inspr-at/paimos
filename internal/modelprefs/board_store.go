@@ -4,6 +4,7 @@ package modelprefs
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -73,6 +74,12 @@ func LoadBoard(ctx context.Context, tx pgx.Tx, person *string, project string) (
 		if len(o.Rank) > 512 || len(o.Not) > 512 || invalidEfforts || len(o.Efforts) > 512 {
 			rows.Close()
 			return s, ErrBoardBounds
+		}
+		for line, effort := range o.Efforts {
+			if len(line) == 0 || len(line) > 128 || len(effort) > 32 || strings.ContainsAny(line+effort, "\x00\r\n") {
+				rows.Close()
+				return s, ErrBoardBounds
+			}
 		}
 		s.Orders = append(s.Orders, o)
 	}
