@@ -3,8 +3,11 @@
 AEON-1033 adds the data for the approved AEON-1030 draft 6 dial. The existing
 `PUT /api/preferences/agents.working` accepts optional `daily` settings keyed by
 harness: pace (1–50 percentage points a day, or the person's default), use
-everything, an absolute Boost today used percentage, and ladder or wait at the
-limit. A number entered as left is converted to used before saving. Boost may
+everything and an absolute Boost today used percentage. The per-harness
+`at_limit` (ladder or wait) is deprecated and ignored since AEON-1166: writes
+still carry it so the previous release can read the plan, reads report ladder,
+and `daily_at_limit: follows_models` states that at a daily cap new work
+follows Settings › Models. A number entered as left is converted to used before saving. Boost may
 raise or lower the ceiling and expires at the person's next local midnight.
 The existing atomic `expected_updated_at` precondition and 409 are unchanged.
 Older clients that omit `daily` preserve existing daily controls.
@@ -78,9 +81,9 @@ existing Verify action, and the checks before every start.
 Open, the dial is master and detail. Fixed 88 px rows on the left carry the usage
 lines and the pace state; the detail on the right reads week used and left,
 today's points with a teal, gold and red bar, resets only where the vendor
-reports them, then the folds Pace and Boost today, the choice at the limit
-(follow the model ladder, or wait) and the accounts read-only. Pace and the
-choice at the limit write `daily` through `PUT /api/preferences/agents.working`
+reports them, then the folds Pace and Boost today, the line "At the limit:
+follows Settings › Models" with a link to Models (AEON-1166, no choice of its
+own) and the accounts read-only. Pace and Boost today write `daily` through `PUT /api/preferences/agents.working`
 with the whole current `daily` map and the plan's revision; the total and
 limits are never changed by such a write, and a plain total or limit change
 never sends `daily`. Boost today is typed as used or left, stored as the used
