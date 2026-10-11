@@ -18,10 +18,10 @@ import (
 // Actual contention and FK compatibility are exercised by boundary/recurrence tests.
 var sharedFenceCallers = map[string][]string{
 	"db.LockTree":               {"accountuse/module.go", "authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/alerts.go", "delivery/audit.go", "delivery/audit_store.go", "delivery/reviews_api.go", "delivery/routing.go", "modelregistry/module.go", "modelregistry/preparation.go", "modelregistry/refresh.go", "operatoractor/actor.go", "stepup/server/store.go", "workorders/common.go"},
-	"db.LockTenant":             {"accountuse/module.go", "accountuse/policy.go", "auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/flow_store.go", "delivery/metrics_api.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "delivery/workqueue.go", "delivery/workqueue_api.go", "engineadmission/module.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/proposals.go", "statusautopilot/attention_bulk.go", "workorders/common.go"},
+	"db.LockTenant":             {"accountuse/module.go", "accountuse/policy.go", "auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/flow_store.go", "delivery/metrics_api.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "delivery/workqueue.go", "delivery/workqueue_api.go", "engineadmission/module.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/proposals.go", "routineexec/recovery.go", "statusautopilot/attention_bulk.go", "workorders/common.go"},
 	"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
 	"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
-	"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/routine_launch.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "harness/lead_runtime.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/harness_probes.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go", "routineactions/catalog.go", "routinebudget/store.go", "routineexec/dispatch.go"},
+	"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/routine_launch.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "harness/lead_runtime.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/harness_probes.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go", "routineactions/catalog.go", "routineactions/pipeline.go", "routineactions/pr.go", "routinebudget/store.go", "routineexec/dispatch.go", "routineexec/recovery.go", "routineexec/review.go"},
 	"agentpairing.LockMutation": {"agentaccounts/module.go", "agentpairing/module.go", "agentruns/queue.go", "auth/owner_workstation.go", "harness/agent_recovery.go", "harness/module.go", "modelprovider/settings.go", "parentbenefits/module.go", "portal/market.go", "portal/moderate.go", "portal/module.go", "portal/products.go", "questions/store.go"},
 	"authz.LockProjectMutation": {"authz/agent_creation.go", "authz/members.go", "authz/project_members.go", "importer/users_backfill.go", "importer/writer.go", "statusautopilot/settings.go"},
 	"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "knowledge/learnings.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "themes/store.go", "themes/undo.go"},
@@ -98,6 +98,20 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"ledger.go", "enrollLedger", "out, err = view(", "return audit("},
 		{"../agentaccounts/route.go", "reserve", "RequireLedgerWork(", "activeRoute("},
 		{"../agentruns/runs.go", "claim", "RequireLedgerWork(", "refuseVerification("},
+		// Routine review/fix continuation (AEON-1201) takes tenant/tree/pairing,
+		// then the account-use fence before outbox/resource rows. The owner is
+		// re-authorized inside that transaction; child writes precede events.
+		{"../routineexec/review.go", "ContinueTx", "agentpairing.Lock(", "accountuse.LockShared("},
+		{"../routineexec/review.go", "ContinueTx", "accountuse.LockShared(", "FOR NO KEY UPDATE"},
+		{"../routineexec/review.go", "advance", "authz.RequireTx(", "FOR NO KEY UPDATE"},
+		{"../routineexec/review.go", "advance", "e.fix(", "events.Append("},
+		{"../routineexec/review.go", "advance", "e.finishActor(", "events.Append("},
+		// The fix account's project matrix is checked in the fenced write,
+		// before profile compatibility and the new run, rather than inherited
+		// from the completed writer's historical admission.
+		{"../agentruns/review.go", "QueueRoutineFixTx", "authz.RequireTx(", "accountuse.RequireProject("},
+		{"../agentruns/review.go", "QueueRoutineFixTx", "accountuse.RequireProject(", "aeon_account_allows_profile("},
+		{"../agentruns/review.go", "QueueRoutineFixTx", "aeon_account_allows_profile(", "INSERT INTO agent_runs"},
 		{"../db/fences.go", "LockTree", "LockTenant(", "pg_advisory_xact_lock"},
 		{"lifecycle.go", "Lock", "db.LockCurrentTree(", "aeon-pairing:"},
 		{"../auth/store.go", "revokeAgentKeyTx", "db.LockTenant(", "lockAgentKey("},

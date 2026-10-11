@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -28,9 +29,10 @@ import (
 // Start rechecks a budget-held launch's grant for the claiming daemon when
 // its reserved capacity is validated; without it such claims keep waiting.
 type RoutineLaunchChecks struct {
-	Runtime   modelregistry.ExecutionRuntimeReader
-	Admission func(context.Context, pgx.Tx, tenant.Principal, agentsetup.RoutineGrant) error
-	Start     func(tenant.Principal) agentaccounts.RoutineStartCheck
+	Runtime        modelregistry.ExecutionRuntimeReader
+	Admission      func(context.Context, pgx.Tx, tenant.Principal, agentsetup.RoutineGrant) error
+	Start          func(tenant.Principal) agentaccounts.RoutineStartCheck
+	BrowserRuntime workqueue.NativeBrowserRuntimeReader
 }
 
 // BindRoutineLaunch connects internal executor collaborators. It is not a
@@ -141,16 +143,21 @@ func validateRoutineGrantTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	}
 	var matches bool
 	var recurrenceID string
-	err := tx.QueryRow(ctx, `SELECT r.owner_principal_id=$2::uuid AND r.output_project_id=$3::uuid AND r.agent_run_id=$4::uuid
+	err := tx.QueryRow(ctx, `SELECT r.owner_principal_id=$2::uuid AND r.output_project_id=$3::uuid AND (r.agent_run_id=$4::uuid OR ($12 AND EXISTS(SELECT 1 FROM routine_attempts a JOIN routine_budget_orders b ON b.tenant_id=a.tenant_id AND b.run_id=a.run_id AND b.work_order_id=$9 WHERE a.run_id=r.id AND a.agent_run_id=$4 AND a.assignment_digest=r.assignment_digest AND a.role=$13)))
  AND r.assignment_digest=$5 AND r.definition_revision=$6 AND r.consent_revision=$7 AND r.execute_consent
  AND d.owner_principal_id=r.owner_principal_id AND d.output_project_id=r.output_project_id
  AND d.execute_consent AND d.consent_revision=r.consent_revision AND d.assignment=r.assignment
  AND c.revision=r.definition_revision AND r.consent_revision=r.definition_revision AND c.retired_at IS NULL AND NOT c.paused
- AND d.consent_qualification_id=$8::uuid AND r.work_order_id=$9::uuid
+ AND d.consent_qualification_id=$8::uuid AND (r.work_order_id=$9::uuid OR $12)
  AND r.assignment->'budget'->>'mode'=$10 AND r.execution_principal_id=$11::uuid
+ AND r.assignment->'runtime_requirements'->>'needs_native_host'='true'
+ AND (($14='routine_native_browser_v1' AND r.assignment->'runtime_requirements'->>'needs_browser'='true'
+       AND r.assignment->'runtime_requirements'->>'runtime_class'='native_browser')
+   OR ($14='routine_native_coding_v1' AND r.assignment->'runtime_requirements'->>'needs_browser'='false'
+       AND r.assignment->'runtime_requirements'->>'runtime_class'='native_coding'))
 , r.recurrence_id::text
  FROM routine_runs r JOIN recurrence_definitions d ON d.tenant_id=r.tenant_id AND d.recurrence_id=r.recurrence_id
- JOIN recurrences c ON c.tenant_id=d.tenant_id AND c.id=d.recurrence_id WHERE r.id=$1`, g.RoutineRunID, g.OwnerID, g.ProjectID, g.AgentRunID, g.AssignmentDigest, g.DefinitionRevision, g.ConsentRevision, g.QualificationID, o.NodeID, g.BudgetMode, g.ExecutionPrincipalID).Scan(&matches, &recurrenceID)
+ JOIN recurrences c ON c.tenant_id=d.tenant_id AND c.id=d.recurrence_id WHERE r.id=$1`, g.RoutineRunID, g.OwnerID, g.ProjectID, g.AgentRunID, g.AssignmentDigest, g.DefinitionRevision, g.ConsentRevision, g.QualificationID, o.NodeID, g.BudgetMode, g.ExecutionPrincipalID, g.Lineage != nil, lineageRole(g), g.RuntimeCapability).Scan(&matches, &recurrenceID)
 	if errors.Is(err, pgx.ErrNoRows) || err == nil && !matches {
 		return workorders.Fail(409, "routine_assignment_changed")
 	}
@@ -191,7 +198,17 @@ func validateRoutineGrantTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	if err := agentpairing.RequireRoutineAccountTx(ctx, tx, g); err != nil {
 		return err
 	}
+	if err := workqueue.RequireNativeBrowserRouteTx(ctx, tx, g, checks.BrowserRuntime); err != nil {
+		return err
+	}
 	return checks.Admission(ctx, tx, p, g)
+}
+
+func lineageRole(g agentsetup.RoutineGrant) string {
+	if g.Lineage != nil {
+		return g.Lineage.Role
+	}
+	return "build"
 }
 
 // routineInternal runs a bounded decision on one exact routine launch with

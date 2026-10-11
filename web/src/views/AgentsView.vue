@@ -17,6 +17,7 @@ import { useAgents, type SessionView } from '../stores/agents'
 import { useProjects } from '../stores/projects'
 import { useDecisionDesk } from '../stores/decisionDesk'
 import DecisionDeskPanel from '../components/agents/DecisionDeskPanel.vue'
+import RoutinesLine from '../components/routines/RoutinesLine.vue'
 import { useCapacity } from '../stores/capacity'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
@@ -49,6 +50,7 @@ import { agentsFooter } from '../lib/footerProviders'
 import { countedLive, jumpTarget } from '../components/agents/sessionTree'
 import { useFooterSummary } from '../lib/footerSummary'
 import { clockTime, liveSession } from '../lib/agentPause'
+import { onAction, shortcutCaps, shortcutKeys, type ShortcutAction } from '../lib/shortcuts'
 
 // Markus's desk for agents: one head line whose counts filter Sessions, what waits
 // on him (only when something does), the accounts with today's plan, then every
@@ -287,33 +289,46 @@ function move(step: number) {
   if (sessionId.value && cursor.value.startsWith('s:')) void router.replace({ path: `/agents/${cursor.value.slice(2)}`, query: route.query })
 }
 const serviceTiers = useServiceTiers()
-function typing(target: EventTarget | null) {
-  return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+const actionScope = {
+  enabled: () => !!session.identity,
+  when: (event: KeyboardEvent) => {
+    if (event.target instanceof Node && document.querySelector('.ticket-peek-host')?.contains(event.target)) return false
+    // Local controls get first refusal through the bubble dispatcher; these
+    // role guards also keep navigation inside controls such as the mode selector.
+    return !(event.target instanceof HTMLElement && event.target.closest('[role="radiogroup"], [role="tablist"], [role="slider"], [role="spinbutton"], [role="listbox"], [role="separator"]'))
+  },
 }
-function keydown(event: KeyboardEvent) {
-  if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey) return
-  if (document.querySelector('dialog[open], .floating') || typing(event.target)) return
-  if (event.target instanceof Node && document.querySelector('.ticket-peek-host')?.contains(event.target)) return
-  const [kind, id] = [cursor.value.slice(0, 1), cursor.value.slice(2)]
-  switch (event.key) {
-    case 'j': case 'ArrowDown': event.preventDefault(); move(1); break
-    case 'k': case 'ArrowUp': event.preventDefault(); move(-1); break
-    case 'Enter': case 'o':
-      if ((event.target as HTMLElement).closest('a, button, summary')) return
-      if (kind === 's') { event.preventDefault(); openSession(id) }
-      break
-    case 'p': case 'r': {
-      const view = agents.views.find(v => v.session.id === id)
-      if (kind === 's' && view && pause.eligible(view.session, event.key === 'p' ? 'pause' : 'resume')) { event.preventDefault(); pause.open(event.key === 'p' ? 'pause' : 'resume', [view.session]) }
-      break
-    }
-    case 'Escape':
-      if (ticketPeekOpen.value) return
-      if (sessionId.value) { event.preventDefault(); void closePanel() }
-      else if (filter.value) { event.preventDefault(); filter.value = null }
-      break
-  }
+function pauseSelected(action: 'pause' | 'resume') {
+  const id = cursor.value.slice(2)
+  const view = agents.views.find(view => view.session.id === id)
+  if (!cursor.value.startsWith('s:') || !view || !pause.eligible(view.session, action)) return false
+  pause.open(action, [view.session])
 }
+const shortcutDisposers = [
+  onAction('agents.row.next', () => { move(1) }, actionScope),
+  onAction('agents.row.prev', () => { move(-1) }, actionScope),
+  onAction('agents.row.open', event => {
+    if (event.target instanceof HTMLElement && event.target.closest('a, button, summary')) return false
+    if (!cursor.value.startsWith('s:')) return false
+    openSession(cursor.value.slice(2))
+  }, actionScope),
+  onAction('agents.session.pause', () => pauseSelected('pause'), actionScope),
+  onAction('agents.session.resume', () => pauseSelected('resume'), actionScope),
+  onAction('agents.details.close', () => {
+    if (ticketPeekOpen.value) return false
+    if (sessionId.value) void closePanel()
+    else if (filter.value) filter.value = null
+    else return false
+  }, actionScope),
+]
+const hintGroups: { actions: ShortcutAction[]; label: string }[] = [
+  { actions: ['agents.row.next', 'agents.row.prev'], label: 'move' },
+  { actions: ['agents.group.fold', 'agents.group.unfold'], label: 'fold' },
+  { actions: ['agents.row.open'], label: 'open' },
+  { actions: ['agents.session.pause'], label: 'pause' },
+  { actions: ['agents.session.resume'], label: 'resume' },
+]
+const activeHints = computed(() => hintGroups.map(group => ({ ...group, keys: group.actions.flatMap(id => shortcutKeys(id).slice(0, 1).flatMap(binding => shortcutCaps(binding).flat())) })).filter(group => group.keys.length))
 
 // ---------- Live ----------
 let stop: (() => void) | undefined
@@ -346,13 +361,12 @@ onMounted(() => {
   stop = subscribeAgents(changed, value => { live.value = value }, () => agents.deliveryChanged())
   poller.start()
   clock = setInterval(() => agents.tick(), 1000)
-  window.addEventListener('keydown', keydown)
 })
 onBeforeUnmount(() => {
   evidenceRefresh.stop(); document.removeEventListener('visibilitychange', evidenceVisible)
   stopTierWatch?.()
   stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
-  window.removeEventListener('keydown', keydown)
+  shortcutDisposers.forEach(dispose => dispose())
 })
 watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true })
 </script>
@@ -388,6 +402,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           <template v-else>
             <button role="menuitem" type="button" class="menu-item" aria-label="Model preferences" @click="menuAction(() => openModelPrefs())"><AppIcon name="gear" /><span>Model preferences<small>Which models do which work.</small></span></button>
             <RouterLink role="menuitem" class="menu-item" to="/agents/usage" @click="headerMenu = null"><AppIcon name="pulse" /><span>Usage<small>Tokens and cost per agent, account and day.</small></span></RouterLink>
+            <RouterLink role="menuitem" class="menu-item" to="/agents/routines" @click="headerMenu = null"><AppIcon name="repeat" /><span>Routines<small>Recurring work agents do by themselves.</small></span></RouterLink>
             <RouterLink role="menuitem" class="menu-item" to="/decision-desk" aria-label="Decision Desk" @click="headerMenu = null"><AppIcon name="inbox" /><span>Decision Desk<small>Everything agents ask of people.</small></span></RouterLink>
             <RouterLink v-if="can('keys.manage')" role="menuitem" class="menu-item" to="/settings/access/agents" @click="headerMenu = null"><AppIcon name="key" /><span>Agent keys<small>Scoped API keys for agents.</small></span></RouterLink>
             <div class="menu-sep" role="separator" />
@@ -402,6 +417,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
     <div class="layout">
       <div class="main-col">
         <DecisionDeskPanel v-if="session.identity?.principal.kind === 'person'" />
+        <!-- AEON-1192: one Routines line while a routine waits for a person or failed. -->
+        <RoutinesLine v-if="agents.loaded && session.identity?.principal.kind === 'person'" />
         <AttachPending ref="attachPending" :now="agents.now" @rows="rows => attachRows = rows" @history="rows => attachHistory = rows" @updated="requests => attachDialog?.sync(requests)" v-slot="{ rows }">
           <AgentChores v-if="capacity.signins.length || rows.length || attachHistory.length" :signins="capacity.signins" :attaches="rows" :history="attachHistory" @review="request => { attachRows = rows; reviewAttach(request) }" @dismiss="id => attachPending?.dismiss(id)" />
         </AttachPending>
@@ -418,7 +435,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
         <RunQueue v-if="agents.loaded" ref="runQueue" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
-          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <KeyCap k="left" /><KeyCap k="right" /> fold · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume
+          <template v-for="(hint, index) in activeHints" :key="hint.label"><span v-if="index"> · </span><KeyCap v-for="key in hint.keys" :key="key" :k="key" /> {{ hint.label }}</template>
         </p>
       </div>
     </div>

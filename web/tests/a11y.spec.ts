@@ -163,6 +163,7 @@ const screens: [string, (page: Page) => Promise<void>, string, (page: Page) => P
     await expect(page.getByRole('complementary', { name: 'Session details' }).locator('.now-step')).toBeVisible()
   }],
   ['business setup', business({ enabled: [] }), '/business', async page => { await expect(page.getByRole('heading', { name: 'Set up Business' })).toBeVisible() }],
+  ['business parts status', business({ enabled: ['business_costs'] }), '/business', async page => { await expect(page.getByRole('region', { name: 'Business parts' }).getByText('Needs Customers.')).toBeVisible() }],
   ['business overview', business(), '/business', async page => { await expect(page.getByRole('list', { name: 'Time per ticket' })).toBeVisible() }],
   ['hours week', business(), '/business/hours', async page => { await expect(page.locator('.week-grid tbody tr').first()).toBeVisible() }],
   ['hours ticket picker', business(), '/business/hours', async page => {

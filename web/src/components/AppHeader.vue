@@ -20,7 +20,8 @@ import { fatal } from '../lib/fatal'
 import { usePoller } from '../lib/usePolledData'
 import { pollDoctrineInbox, resetDoctrineInbox } from '../lib/doctrineInbox'
 import { toast } from '../lib/toast'
-import { placeOf, releaseChordOpen, sequence, visiblePlaces, type PlaceId } from '../lib/places'
+import { placeOf, visiblePlaces, type PlaceId } from '../lib/places'
+import { cancelShortcutSequence, installShortcutDispatcher, onAction, shortcutCaps, shortcutHint, shortcutKeys } from '../lib/shortcuts'
 import { SETTINGS_SECTIONS, sectionOf } from '../lib/settings'
 import AppIcon from './AppIcon.vue'
 import KeyCap from './KeyCap.vue'
@@ -98,67 +99,25 @@ const settingsSection = computed(() => route.path.startsWith('/settings') ? SETT
 const placeLabel = (id: PlaceId) => id === 'desk' ? `Decision Desk, ${desk.count === null ? 'count unavailable' : `${desk.count} open`}` : undefined
 
 watch(command, value => { if (value?.command.name === 'palette') { consume(); palette.value?.open() } })
-function typing(target: EventTarget | null) {
-  return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
-}
 // Pages with their own list search keep '/'; everywhere else it opens the palette.
-const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || route.path === '/business/quotes' || route.path === '/knowledge' || route.path === '/tickets' || (!!projectKey.value && route.query.view !== 'full' && !knowledgeSlug.value))
-function shortcut(event: KeyboardEvent) {
-  if (!globalSearch.value) return
-  const isK = event.key.toLowerCase() === 'k' || event.code === 'KeyK'
-  if ((event.metaKey || event.ctrlKey) && !event.altKey && isK) {
-    // Capture runs before the focused control. Ctrl+K in the open palette moves
-    // the highlight; Cmd+K still selects the query.
-    const paletteInput = document.querySelector('dialog.palette[open] input')
-    if (event.ctrlKey && !event.metaKey && paletteInput && event.target === paletteInput) return
-    event.preventDefault()
-    event.stopPropagation()
+const pageOwnsSlash = computed(() => route.path === '/' || route.matched.some(record => record.path === '/agents/:sessionId?') || route.path === '/business/customers' || route.path === '/business/quotes' || route.path === '/knowledge' || route.path === '/tickets' || (!!projectKey.value && route.query.view !== 'full' && !knowledgeSlug.value))
+const shortcutDisposers = [
+  onAction('app.palette', event => {
+    // Ctrl+K in the open palette moves the highlight; Cmd+K selects the query.
+    const input = document.querySelector('dialog.palette[open] input')
+    if (event.ctrlKey && input && event.target === input) return false
     palette.value?.open()
-    return
-  }
-  if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented || typing(event.target) || document.querySelector('dialog[open], .floating')) return
-  if (event.key === '/' && !pageOwnsSlash.value) { event.preventDefault(); palette.value?.open() }
-  else if (event.key === '?') { event.preventDefault(); run({ name: 'shortcuts' }) }
-}
-// g p · g a · g b: go to a place. Listened for first (capture), so the second key
-// never reaches the page (p is Priority on an open ticket, a approves on Agents).
-// g on an open ticket also opens the release menu; that one layer must not swallow
-// the place key that follows. Any other menu, dialog or focused field cancels the
-// arm, and an expired arm must not re-arm inside one.
-const nextKey = sequence()
-let armedAt: number | null = null
-function layerLabels(): string[] {
-  return [...document.querySelectorAll('dialog[open], .floating')].map(layer => layer.getAttribute('aria-label') ?? '')
-}
-function releaseFromChord(now = Date.now()): Element | null {
-  if (!releaseChordOpen(layerLabels(), armedAt, now)) return null
-  return document.querySelector('dialog[open], .floating')
-}
-function disarmChord(now = Date.now()) {
-  if (armedAt === null) return
-  nextKey('\0', now, places.value)
-  armedAt = null
-}
-function placeKeys(event: KeyboardEvent) {
-  if (!session.identity || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return
-  const now = Date.now()
-  if (typing(event.target) || (document.querySelector('dialog[open], .floating') && !releaseFromChord(now))) {
-    disarmChord(now)
-    return
-  }
-  const hit = nextKey(event.key, now, places.value)
-  armedAt = hit === 'armed' ? now : null
-  if (!hit || hit === 'armed') return
-  event.preventDefault(); event.stopImmediatePropagation()
-  if (route.path !== hit.to) void router.push(hit.to)
-}
-function chordPointer(event: PointerEvent) {
-  if (armedAt === null) return
-  const layer = releaseFromChord()
-  if (layer && event.target instanceof Node && layer.contains(event.target)) return
-  disarmChord()
-}
-function chordFocus(event: FocusEvent) { if (typing(event.target)) disarmChord() }
+  }, { enabled: () => globalSearch.value }),
+  onAction('app.search', () => { palette.value?.open() }, { enabled: () => globalSearch.value && !pageOwnsSlash.value }),
+  onAction('app.shortcuts', () => run({ name: 'shortcuts' }), { enabled: () => globalSearch.value }),
+  ...(['projects', 'agents', 'business', 'desk'] as const).map(id => onAction(`places.${id}`, () => {
+    const place = places.value.find(place => place.id === id)
+    if (!place) return false
+    if (route.path !== place.to) void router.push(place.to)
+  }, { enabled: () => places.value.some(place => place.id === id) })),
+]
+let stopShortcuts: (() => void) | undefined
+watch(() => [session.identity?.tenant.id, session.identity?.principal.id], cancelShortcutSequence)
 // One canonical Decision Desk count, independent of live sessions.
 const needsPoll = usePoller(() => desk.refresh(), 30_000, { enabled: () => session.identity?.principal.kind === 'person', invalidate: desk.invalidate })
 // The doctrine inbox (AEON-444): people who can send a proposal to git see a dot
@@ -229,12 +188,12 @@ onMounted(() => {
   fonts?.addEventListener('loadingdone', remeasure)
   void fonts?.ready.then(remeasure)
   refit()
-  window.addEventListener('keydown', headerKeys, true); window.addEventListener('keydown', shortcut, true); window.addEventListener('keydown', placeKeys, true)
-  window.addEventListener('pointerdown', chordPointer, true); window.addEventListener('focusin', chordFocus, true)
+  window.addEventListener('keydown', headerKeys, true)
+  stopShortcuts = installShortcutDispatcher()
   needsPoll.start()
   doctrinePoller.start()
 })
-onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', headerKeys, true); window.removeEventListener('keydown', shortcut, true); window.removeEventListener('keydown', placeKeys, true); window.removeEventListener('pointerdown', chordPointer, true); window.removeEventListener('focusin', chordFocus, true); needsPoll.stop(); doctrinePoller.stop() })
+onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow.removeEventListener('change', remeasure); fonts?.removeEventListener('loadingdone', remeasure); cancelAnimationFrame(fitFrame); window.removeEventListener('keydown', headerKeys, true); stopShortcuts?.(); shortcutDisposers.forEach(dispose => dispose()); needsPoll.stop(); doctrinePoller.stop() })
 </script>
 
 <template>
@@ -255,7 +214,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
       <RouterLink
         v-for="place in places" :key="place.id" :to="place.to" class="place" :class="{ active: activePlace === place.id }"
         :aria-current="activePlace === place.id ? (atPlaceRoot ? 'page' : 'true') : undefined" :aria-label="placeLabel(place.id)" :data-place="place.id"
-        :data-tip="place.id === 'desk' ? `${desk.error || (desk.count === null ? 'Reading Decision Desk' : `${desk.count} open in Decision Desk`)} · g then d` : `g then ${place.key}`"
+        :data-tip="place.id === 'desk' ? `${desk.error || (desk.count === null ? 'Reading Decision Desk' : `${desk.count} open in Decision Desk`)}${shortcutHint('places.desk') ? ` · ${shortcutHint('places.desk')}` : ''}` : shortcutHint(`places.${place.id}`) || undefined"
       >
         <BizIcon v-if="place.id === 'business'" name="briefcase" :size="16" />
         <AppIcon v-else :name="place.id === 'agents' ? 'agent' : place.id === 'desk' ? 'check' : 'folder'" :size="16" />
@@ -322,7 +281,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
     <button v-if="globalSearch" class="search-pill" type="button" aria-label="Search everything" aria-keyshortcuts="Control+K Meta+K" @click="palette?.open()">
       <AppIcon name="search" :size="15" />
       <span class="pill-text">Search</span>
-      <span class="pill-keys"><KeyCap k="mod" /><KeyCap k="K" /></span>
+      <span class="pill-keys"><KeyCap v-for="key in shortcutCaps(shortcutKeys('app.palette')[0] ?? '').flat()" :key="key" :k="key" /></span>
     </button>
     <!-- Quick light or dark; the avatar menu has the full choice, System included. -->
     <button class="icon-btn header-btn theme-btn" :class="{ away: moonAway }" type="button" :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'" :data-tip="dark ? 'Light theme' : 'Dark theme'" @click="toggleTheme()">

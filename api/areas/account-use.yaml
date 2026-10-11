@@ -3,7 +3,7 @@ paths:
   /account-use:
     get:
       operationId: getAccountUseMatrix
-      description: "Person account.use.manage required. Reads one consistent matrix page under its shared lock. Account and context cursors are independent; missing cells in the returned rectangle are denied. Defaults and migration confirmation are included. Running work outside the matrix continues and is returned separately with explicit truncation. No credentials or quota readings."
+      description: "Person account.use.manage required. Reads one consistent matrix page under its shared lock. Account and context cursors are independent; missing cells in the returned rectangle are denied. Defaults and migration confirmation are included. Running work outside the matrix continues and is returned separately with explicit truncation. An account is awaiting while it was added under New accounts ask first and no live context allows it; a person's cell save that touches it ends the wait. holding_projects counts the visible live projects in Unassigned and names at most 20, newest first. No credentials or quota readings."
       parameters:
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 100}}
         - {name: after_account, in: query, schema: {type: string, format: uuid}}
@@ -14,7 +14,7 @@ paths:
   /account-use/rules:
     put:
       operationId: putAccountUseRules
-      description: "Person account.use.manage required. Tenant, tree, catalog and exclusive matrix fences precede live authority and revision checks. Changes only future defaults, bumps the revision, writes the Auto-update mirror and audits persisted rules. Activation is monotonic."
+      description: "Person account.use.manage required. Tenant, tree, catalog and exclusive matrix fences precede live authority and revision checks. Every rule is optional and at least one is required: an absent rule keeps its stored value under the same revision guard. Settings sends only new_accounts, new_contexts and new_projects; new_models is edited by Auto-update in Models. Changes only future defaults, bumps the revision, writes the Auto-update mirror and audits persisted rules. Activation is monotonic."
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/AccountUseRuleWrite'}}}}
       responses:
         '200': {description: "Saved rules", content: {application/json: {schema: {$ref: '#/components/schemas/AccountUseRules'}}}}
@@ -96,13 +96,15 @@ components:
     AccountUseRuleWrite:
       type: object
       additionalProperties: false
-      required: [expected_revision, new_accounts, new_contexts, new_projects, new_models]
+      description: "A partial rule write. An absent rule keeps its stored value; at least one rule is required."
+      required: [expected_revision]
+      minProperties: 2
       properties:
         expected_revision: {type: integer, minimum: 1}
         new_accounts: {type: string, enum: [allow, ask]}
         new_contexts: {type: string, enum: [allow, ask]}
         new_projects: {type: string, enum: [default, holding]}
-        new_models: {type: string, enum: [allow, shipped_only, deny]}
+        new_models: {type: string, enum: [allow, shipped_only, deny], deprecated: true, description: "Accepted for older clients. Auto-update in Models edits this rule; Settings never sends it."}
     AccountUseRules:
       type: object
       required: [new_accounts, new_contexts, new_projects, new_models, revision, enforced_at, confirmation_required, confirmed_at]
@@ -180,7 +182,7 @@ components:
         revision: {type: integer}
     AccountUseMatrix:
       type: object
-      required: [rules, accounts, contexts, cells, next_account, next_context, running_outside, running_outside_truncated]
+      required: [rules, accounts, contexts, cells, next_account, next_context, running_outside, running_outside_truncated, holding_projects]
       properties:
         rules: {$ref: '#/components/schemas/AccountUseRules'}
         accounts:
@@ -188,7 +190,7 @@ components:
           maxItems: 200
           items:
             type: object
-            required: [id, label, harness, plan, billing_mode, owner_id]
+            required: [id, label, harness, plan, billing_mode, owner_id, awaiting]
             properties:
               id: {type: string, format: uuid}
               label: {type: string}
@@ -196,6 +198,7 @@ components:
               plan: {type: [string, 'null']}
               billing_mode: {type: string}
               owner_id: {type: [string, 'null'], format: uuid}
+              awaiting: {type: boolean, description: "Added while New accounts asked first, and no live context allows it yet."}
         contexts: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/WorkContext'}}
         cells: {type: array, maxItems: 40000, items: {$ref: '#/components/schemas/AccountUseCell'}}
         next_account: {type: [string, 'null'], format: uuid}
@@ -211,3 +214,19 @@ components:
               account_id: {type: string, format: uuid}
               node_id: {type: [string, 'null'], format: uuid}
         running_outside_truncated: {type: boolean}
+        holding_projects:
+          type: object
+          required: [count, first]
+          description: "Visible live projects waiting in Unassigned, where no account works."
+          properties:
+            count: {type: integer, minimum: 0}
+            first:
+              type: array
+              maxItems: 20
+              items:
+                type: object
+                required: [project_id, key, name]
+                properties:
+                  project_id: {type: string, format: uuid}
+                  key: {type: string}
+                  name: {type: string}

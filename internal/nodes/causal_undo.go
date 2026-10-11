@@ -97,8 +97,11 @@ func undoWorkChild(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.
 	if err := authorizeWorkRestore(p, current, before); err != nil {
 		return events.Change{}, err
 	}
-	issues, err := benefitTransition(ctx, tx, current.KindID, kind.Slug, current.State, before.State, fields)
+	issues, err := benefitTransition(ctx, tx, current.KindID, kind.Slug, current.State, before.State, current.Fields, fields)
 	if err != nil {
+		if he, ok := err.(*httpError); ok && he.status == http.StatusUnprocessableEntity {
+			return events.Change{}, events.ErrConflict
+		}
 		return events.Change{}, err
 	}
 	if len(issues) > 0 {

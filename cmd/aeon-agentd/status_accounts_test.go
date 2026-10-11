@@ -47,3 +47,26 @@ func TestStatusShowsReadyAccountVerificationExpiryAndPendingCleanup(t *testing.T
 		t.Fatal("expired request still needs polling")
 	}
 }
+
+func TestStatusNamesActiveClaudeLoginAndApproval(t *testing.T) {
+	p := agentsetup.Progress{Stage: "connected", HarnessDetails: map[string]agentsetup.HarnessDetail{"claude": {State: "ready"}},
+		Accounts:      []agentsetup.Enrollment{{AccountID: "a", Harness: "claude", Label: "a@example.test", State: "connected"}, {AccountID: "b", Harness: "claude", Label: "b@example.test", State: "connected"}},
+		AccountLogins: map[string]agentsetup.AccountLogin{"a": {ActiveIdentity: "a@example.test", Approved: true}, "b": {ActiveIdentity: "a@example.test"}}}
+	var out bytes.Buffer
+	if err := printSetupProgress(&out, false, p); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(out.String(), "active login a@example.test: approved on this computer") != 1 || !strings.Contains(out.String(), "account b harness claude unconfirmed login b@example.test") {
+		t.Fatalf("active or enrolled login missing: %s", out.String())
+	}
+	for id := range p.AccountLogins {
+		p.AccountLogins[id] = agentsetup.AccountLogin{ActiveIdentity: "c@example.test"}
+	}
+	out.Reset()
+	if err := printSetupProgress(&out, false, p); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(out.String(), "active login c@example.test: not approved on this computer; run aeon-agentd add-harness --harness claude") != 1 {
+		t.Fatalf("unapproved active login hidden: %s", out.String())
+	}
+}

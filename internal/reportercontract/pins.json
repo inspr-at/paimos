@@ -3946,6 +3946,181 @@
       }
     }
   },
+  "project-lead": {
+    "version": "project-lead/1.1",
+    "sha256": "73842c01da31e5090adebb11a3045ab60bf2feab7c12cdd89833edb6a73f7646",
+    "shape": {
+      "GET /projects/{projectId}/lead 200": {
+        "properties": {
+          "actions": {
+            "properties": {
+              "adopt": {
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "blocked_reason": {
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "readOnly": true,
+                "required": [
+                  "available",
+                  "blocked_reason"
+                ],
+                "type": "object"
+              },
+              "cancel_adoption": {
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "blocked_reason": {
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "readOnly": true,
+                "required": [
+                  "available",
+                  "blocked_reason"
+                ],
+                "type": "object"
+              },
+              "pause": {
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "blocked_reason": {
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "readOnly": true,
+                "required": [
+                  "available",
+                  "blocked_reason"
+                ],
+                "type": "object"
+              },
+              "remove": {
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "blocked_reason": {
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "readOnly": true,
+                "required": [
+                  "available",
+                  "blocked_reason"
+                ],
+                "type": "object"
+              },
+              "resume": {
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "blocked_reason": {
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "readOnly": true,
+                "required": [
+                  "available",
+                  "blocked_reason"
+                ],
+                "type": "object"
+              },
+              "start": {
+                "properties": {
+                  "available": {
+                    "type": "boolean"
+                  },
+                  "blocked_reason": {
+                    "maxLength": 64,
+                    "type": "string"
+                  }
+                },
+                "readOnly": true,
+                "required": [
+                  "available",
+                  "blocked_reason"
+                ],
+                "type": "object"
+              }
+            },
+            "readOnly": true,
+            "required": [
+              "start",
+              "resume",
+              "pause",
+              "adopt",
+              "cancel_adoption",
+              "remove"
+            ],
+            "type": "object"
+          },
+          "automatic_launch_enabled": {
+            "default": false,
+            "type": "boolean"
+          },
+          "generation": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "process_active": {
+            "type": "boolean"
+          },
+          "project_id": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "format": "uuid",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "state": {
+            "enum": [
+              "none",
+              "starting",
+              "working",
+              "waiting_for_room",
+              "paused",
+              "cannot_start"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "revision",
+          "generation",
+          "state",
+          "reason",
+          "process_active"
+        ],
+        "type": "object"
+      }
+    }
+  },
   "stage-evidence": {
     "version": "stage-evidence/1.0",
     "sha256": "ad8e9f46011757ba299727edc91f9d3e875eb8a6b4d8dd8c087bad82c6440f2b",

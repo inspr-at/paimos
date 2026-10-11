@@ -351,7 +351,7 @@ func sameRouteProfiles(profiles []Profile, old Profile) []Profile {
 	return out
 }
 func profileReferenced(s retireSnapshot, id string) bool {
-	for _, table := range []string{"model_pref_cells"} {
+	for _, table := range []string{"model_role_routes", "model_security_role_routes", "model_pref_cells"} {
 		for _, raw := range s[table] {
 			if rowString(rowFields(raw), "profile_id") == id {
 				return true
@@ -422,7 +422,7 @@ func (m *Module) undoOutdated(w http.ResponseWriter, r *http.Request) {
 		if undone {
 			return fail(409, "retirement already undone")
 		}
-		for _, table := range []string{"model_pref_orders", "model_pref_situation_orders", "model_rules", "model_row_constraints", "model_pauses", "model_pref_cells"} {
+		for _, table := range []string{"model_pref_orders", "model_pref_situation_orders", "model_rules", "model_row_constraints", "model_pauses", "model_pref_cells", "model_role_routes", "model_security_role_routes"} {
 			if len(before[table])+len(after.Snapshot[table]) > 0 {
 				if err := authz.RequireTx(ctx, tx, p, "model_prefs.manage", authz.Scope{}); err != nil {
 					return err

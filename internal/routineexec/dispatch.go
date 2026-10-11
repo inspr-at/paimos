@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/engineadmission"
 	"github.com/inspr-at/paimos/internal/events"
@@ -25,6 +26,7 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/recurrences"
+	"github.com/inspr-at/paimos/internal/routineactions"
 	"github.com/inspr-at/paimos/internal/routinebudget"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -40,6 +42,8 @@ const recoveryInterval = 30 * time.Second
 // runtime, qualified gate ages or CI readings means WAIT. No HTTP setting can
 // replace a collaborator or turn an advisory verdict into authority.
 type Options struct {
+	Actions       *routineactions.Broker
+	Reviews       *crossreview.Module
 	LeadRuntime   harness.LeadRuntimeChecks
 	Runtime       modelregistry.ExecutionRuntimeReader
 	Gates         routinebudget.GateReader
@@ -49,6 +53,7 @@ type Options struct {
 type Executor struct {
 	pool    *pgxpool.Pool
 	options Options
+	cursors recoveryCursors
 }
 
 func New(pool *pgxpool.Pool, options Options) *Executor {
@@ -58,6 +63,9 @@ func New(pool *pgxpool.Pool, options Options) *Executor {
 // Bind installs the same executor for leased coordinator pickup and scheduler
 // recovery, with fail-closed final-claim checks even before runtime qualification.
 func (e *Executor) Bind(module httpapi.Module) error {
+	if err := agentruns.BindRoutineCompletion(module, e.recordCompletion); err != nil {
+		return err
+	}
 	if err := agentruns.BindRoutineQueue(module, e.DispatchTx); err != nil {
 		return err
 	}
@@ -81,10 +89,12 @@ func (e *Executor) BindHarness(module *harness.Module) {
 
 // Pass reports partial work explicitly; a capped pass is never a complete scan.
 type Pass struct {
-	Scanned    int
-	Dispatched int
-	Waiting    int
-	Partial    bool
+	Scanned         int
+	Dispatched      int
+	Waiting         int
+	Partial         bool
+	RecoveryScanned int
+	RecoveryWaiting int
 }
 
 // Run combines transactional S05 notifications with bounded polling recovery.
@@ -201,6 +211,8 @@ func (e *Executor) RunTenant(ctx context.Context, tenantID string) (Pass, error)
 	out := Pass{}
 	ctx, cancel := context.WithTimeout(db.AllProjects(ctx, "routine intent recovery"), 25*time.Second)
 	defer cancel()
+	recovered, recoveryErr := e.recoverTenant(ctx, tenantID)
+	out.RecoveryScanned, out.RecoveryWaiting, out.Partial = recovered.Scanned, recovered.Waiting, recovered.Partial
 	ids := []string{}
 	err := db.InTenant(ctx, e.pool, tenantID, func(tx pgx.Tx) error {
 		if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
@@ -226,13 +238,16 @@ func (e *Executor) RunTenant(ctx context.Context, tenantID string) (Pass, error)
 		return rows.Err()
 	})
 	if err != nil {
-		return out, err
+		return out, errors.Join(err, recoveryErr)
 	}
 	if len(ids) > batchSize {
 		out.Partial = true
 		ids = ids[:batchSize]
 	}
 	var failures []error
+	if recoveryErr != nil {
+		failures = append(failures, recoveryErr)
+	}
 	for _, id := range ids {
 		out.Scanned++
 		var result agentruns.RoutineQueueResult
@@ -251,6 +266,22 @@ func (e *Executor) RunTenant(ctx context.Context, tenantID string) (Pass, error)
 	}
 	if ctx.Err() != nil {
 		out.Partial = true
+	}
+	continued, err := e.continueTenant(ctx, tenantID)
+	out.Scanned += continued.Scanned
+	out.Dispatched += continued.Dispatched
+	out.Waiting += continued.Waiting
+	out.Partial = out.Partial || continued.Partial
+	if err != nil {
+		failures = append(failures, err)
+	}
+	landed, err := e.landTenant(ctx, tenantID)
+	out.Scanned += landed.Scanned
+	out.Dispatched += landed.Dispatched
+	out.Waiting += landed.Waiting
+	out.Partial = out.Partial || landed.Partial
+	if err != nil {
+		failures = append(failures, err)
 	}
 	return out, errors.Join(failures...)
 }
@@ -380,6 +411,9 @@ func (e *Executor) dispatch(ctx context.Context, tx pgx.Tx, tenantID string, r i
 	if !r.consent || r.consentRevision != r.revision || principal != r.principal || r.assignment == nil {
 		return out, workorders.Fail(409, "routine_execution_consent_required")
 	}
+	if err := routineRecoveryGuardTx(ctx, tx, r.id); err != nil {
+		return out, err
+	}
 	owner := tenant.Principal{ID: r.owner, TenantID: tenantID, Kind: tenant.Person}
 	for _, permission := range []string{"nodes.read", "nodes.write", "run.create", "work_orders.write"} {
 		if err := authz.RequireTx(ctx, tx, owner, permission, authz.Scope{ProjectID: r.project}); err != nil {
@@ -391,20 +425,8 @@ func (e *Executor) dispatch(ctx context.Context, tx pgx.Tx, tenantID string, r i
 	}
 	// Shared routing/fairness can materialize account windows. Enforce S09's
 	// exact input bounds before entering those helpers, rather than after work.
-	for _, bound := range []struct {
-		query string
-		limit int
-	}{
-		{`SELECT count(*) FROM (SELECT 1 FROM agent_accounts LIMIT 1025) x`, 1024},
-		{`SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows w WHERE w.removed_at IS NULL OR EXISTS(SELECT 1 FROM account_limit_rules l WHERE l.tenant_id=w.tenant_id AND l.from_window_id=w.id AND l.removed_at IS NULL) LIMIT 4097) x`, 4096},
-	} {
-		var count int
-		if err := tx.QueryRow(ctx, bound.query).Scan(&count); err != nil {
-			return out, err
-		}
-		if count > bound.limit {
-			return out, workorders.Fail(409, "account_inputs_unreadable")
-		}
+	if err := routingBounds(ctx, tx); err != nil {
+		return out, err
 	}
 	var session *string
 	var generation int64
@@ -541,6 +563,10 @@ func (e *Executor) leadDemand(ctx context.Context, tx pgx.Tx, owner tenant.Princ
 }
 
 func (e *Executor) finish(ctx context.Context, tx pgx.Tx, owner tenant.Principal, r intent, a recurrences.Assignment, run agentruns.Run, target workqueue.RouteTarget) ([]events.Change, error) {
+	return e.finishActor(ctx, tx, owner, r, a, run, target, "dispatch", "build", nil)
+}
+
+func (e *Executor) finishActor(ctx context.Context, tx pgx.Tx, owner tenant.Principal, r intent, a recurrences.Assignment, run agentruns.Run, target workqueue.RouteTarget, key, role string, lineage *agentsetup.RoutineLineage) ([]events.Change, error) {
 	var account, computer, daemon, daemonGeneration, harnessName string
 	var ledger *string
 	// Exact account/host selection stays bounded. Multiple accounts require the
@@ -578,11 +604,15 @@ func (e *Executor) finish(ctx context.Context, tx pgx.Tx, owner tenant.Principal
 	if ledger == nil {
 		return nil, workorders.Fail(409, "routine_ledger_enrollment_required")
 	}
+	var attempt, action string
+	if err = tx.QueryRow(ctx, `INSERT INTO routine_attempts(tenant_id,run_id,attempt_key,role,agent_run_id,principal_id,assignment_digest) VALUES($1,$2,$6,$7,$3,$4,$5) RETURNING id::text`, owner.TenantID, r.id, run.ID, target.Agent, r.digest, key, role).Scan(&attempt); err != nil {
+		return nil, err
+	}
 	worker := tenant.Principal{ID: target.Agent, TenantID: owner.TenantID, Kind: tenant.Agent, Scopes: []string{"run.claim"}}
 	if _, err = tx.Exec(ctx, `UPDATE agent_runs SET requested_account_id=$2 WHERE id=$1`, run.ID, account); err != nil {
 		return nil, err
 	}
-	_, change, err := agentaccounts.ReserveRoutineAccountTx(ctx, tx, worker, r.id, run.ID, account)
+	_, change, err := agentaccounts.ReserveRoutineAccountTx(ctx, tx, worker, r.id, run.ID, account, role)
 	if err != nil {
 		return nil, err
 	}
@@ -591,10 +621,6 @@ func (e *Executor) finish(ctx context.Context, tx pgx.Tx, owner tenant.Principal
 		return nil, err
 	}
 	if err = engineadmission.RequireRoutineTx(ctx, tx, owner, r.id, run.ID, harnessName, estimate, e.options.Facts); err != nil {
-		return nil, err
-	}
-	var attempt, action string
-	if err = tx.QueryRow(ctx, `INSERT INTO routine_attempts(tenant_id,run_id,attempt_key,role,agent_run_id,principal_id,assignment_digest) VALUES($1,$2,'dispatch','build',$3,$4,$5) RETURNING id::text`, owner.TenantID, r.id, run.ID, target.Agent, r.digest).Scan(&attempt); err != nil {
 		return nil, err
 	}
 	// The occurrence action is the immutable lineage root; local coding emits
@@ -606,14 +632,45 @@ func (e *Executor) finish(ctx context.Context, tx pgx.Tx, owner tenant.Principal
 		return nil, workorders.Fail(409, "recovery_budget_unavailable")
 	}
 	maximum := routinebudget.Amount{RecoveryMS: int64(math.Ceil(estimate * 3600000))}
+	if role == "review" {
+		maximum.RecoveryMS = 1800000
+	}
 	if a.Budget.TokenCeiling != nil {
 		maximum.Tokens = *a.Budget.TokenCeiling
 	}
-	if a.Budget.MoneyCeilingMicroUSD != nil {
+	var billing string
+	if err := tx.QueryRow(ctx, `SELECT billing_mode FROM agent_accounts WHERE id=$1`, account).Scan(&billing); err != nil {
+		return nil, err
+	}
+	// Continuations reuse the frozen run balance. Settled usage is counted once;
+	// every outstanding actor/evaluator hold stays unavailable to the next actor.
+	if lineage != nil {
+		var token, money *int64
+		var usedTokens, heldTokens, usedMoney, heldMoney int64
+		if err := tx.QueryRow(ctx, `SELECT token_ceiling,money_ceiling_microusd,settled_tokens,held_tokens,settled_microusd,held_microusd FROM routine_budget_balances WHERE run_id=$1`, r.id).Scan(&token, &money, &usedTokens, &heldTokens, &usedMoney, &heldMoney); err != nil {
+			return nil, err
+		}
+		if token != nil {
+			remaining := *token - usedTokens - heldTokens
+			if remaining <= 0 {
+				return nil, workorders.Fail(409, "token_budget_exhausted")
+			}
+			a.Budget.TokenCeiling = &remaining
+			maximum.Tokens = remaining
+		}
+		if money != nil {
+			remaining := *money - usedMoney - heldMoney
+			if remaining <= 0 {
+				return nil, workorders.Fail(409, "money_budget_exhausted")
+			}
+			a.Budget.MoneyCeilingMicroUSD = &remaining
+		}
+	}
+	if billing == "api" && a.Budget.MoneyCeilingMicroUSD != nil {
 		maximum.PaidMicroUSD = *a.Budget.MoneyCeilingMicroUSD
 	}
 	broker := routinebudget.Broker{Runtime: e.options.Runtime, Gates: e.options.Gates}
-	held, err := broker.ReserveTx(ctx, tx, owner, routinebudget.Reservation{RunID: r.id, AttemptID: attempt, ActionID: action, GrantKey: "dispatch", AgentRunID: run.ID, AccountID: account, Maximum: maximum})
+	held, err := broker.ReserveTx(ctx, tx, owner, routinebudget.Reservation{RunID: r.id, AttemptID: attempt, ActionID: action, GrantKey: key, AgentRunID: run.ID, AccountID: account, Maximum: maximum})
 	if err != nil {
 		return nil, err
 	}
@@ -638,6 +695,7 @@ func (e *Executor) finish(ctx context.Context, tx pgx.Tx, owner tenant.Principal
 		capability = "routine_native_browser_v1"
 	}
 	g := agentsetup.RoutineGrant{LedgerGeneration: *ledger, LaunchID: launch, TenantID: owner.TenantID, OwnerID: owner.ID, ProjectID: r.project, RoutineRunID: r.id, AgentRunID: run.ID, ExecutionPrincipalID: r.principal, PrincipalID: target.Agent, AccountID: account, ComputerID: computer, DaemonID: daemon, DaemonGeneration: daemonGeneration, AssignmentDigest: r.digest, DefinitionRevision: r.revision, ConsentRevision: r.consentRevision, ExecutionRevision: settings.Revision, QualificationID: q.ID, DaemonDigest: q.Runtime.DaemonDigest, CapabilityDigest: q.Runtime.CapabilityDigest, HostMappingDigest: q.Runtime.HostMappingDigest, Capability: agentsetup.RoutineExecutionCapability, RuntimeCapability: capability, BudgetMode: a.Budget.Mode, BudgetGrantID: held.ID, RemainingTokens: a.Budget.TokenCeiling, RemainingCostMicros: a.Budget.MoneyCeilingMicroUSD, ExpiresAt: now.Add(90 * time.Second)}
+	g.Lineage = lineage
 	if err := agentruns.PrepareRoutineLaunchTx(ctx, tx, owner, g, e.LaunchChecks()); err != nil {
 		return nil, err
 	}
@@ -652,9 +710,14 @@ func (e *Executor) finish(ctx context.Context, tx pgx.Tx, owner tenant.Principal
 func (e *Executor) LaunchChecks() agentruns.RoutineLaunchChecks {
 	starts := routinebudget.Broker{Runtime: e.options.Runtime, Gates: e.options.Gates}
 	return agentruns.RoutineLaunchChecks{Runtime: e.options.Runtime, Start: starts.StartCheck, Admission: func(ctx context.Context, tx pgx.Tx, p tenant.Principal, g agentsetup.RoutineGrant) error {
+		if g.Lineage != nil {
+			if err := e.validateContinuation(ctx, tx, g); err != nil {
+				return err
+			}
+		}
 		worker := tenant.Principal{ID: g.PrincipalID, TenantID: p.TenantID, Kind: tenant.Agent, Scopes: []string{"run.claim"}}
 		var bound bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_budget_grants WHERE id=$1 AND run_id=$2 AND agent_run_id=$3 AND account_id=$4 AND parent_id IS NULL AND state='held' AND ($5::bigint IS NULL OR maximum_tokens=$5) AND ($6::bigint IS NULL OR maximum_microusd=$6))`, g.BudgetGrantID, g.RoutineRunID, g.AgentRunID, g.AccountID, g.RemainingTokens, g.RemainingCostMicros).Scan(&bound); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_budget_grants WHERE id=$1 AND run_id=$2 AND agent_run_id=$3 AND account_id=$4 AND parent_id IS NULL AND state='held' AND ($5::bigint IS NULL OR maximum_tokens=$5) AND CASE WHEN billing_mode='subscription' THEN maximum_microusd=0 ELSE ($6::bigint IS NULL OR maximum_microusd=$6) END)`, g.BudgetGrantID, g.RoutineRunID, g.AgentRunID, g.AccountID, g.RemainingTokens, g.RemainingCostMicros).Scan(&bound); err != nil {
 			return err
 		}
 		if !bound {
@@ -673,7 +736,7 @@ func (e *Executor) LaunchChecks() agentruns.RoutineLaunchChecks {
 		}
 		var harnessName string
 		var estimate float64
-		if err := tx.QueryRow(ctx, `SELECT m.harness,(n.fields->>'estimate_hours')::float8 FROM routine_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_node_id JOIN agent_runs ar ON ar.tenant_id=r.tenant_id AND ar.id=r.agent_run_id JOIN model_profiles m ON m.tenant_id=ar.tenant_id AND m.id=ar.model_profile_id WHERE r.id=$1`, g.RoutineRunID).Scan(&harnessName, &estimate); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT m.harness,(n.fields->>'estimate_hours')::float8 FROM routine_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_node_id JOIN agent_runs ar ON ar.tenant_id=r.tenant_id AND ar.id=$2 JOIN model_profiles m ON m.tenant_id=ar.tenant_id AND m.id=ar.model_profile_id WHERE r.id=$1`, g.RoutineRunID, g.AgentRunID).Scan(&harnessName, &estimate); err != nil {
 			return err
 		}
 		return engineadmission.RequireRoutineTx(ctx, tx, tenant.Principal{ID: g.OwnerID, TenantID: p.TenantID, Kind: tenant.Person}, g.RoutineRunID, g.AgentRunID, harnessName, estimate, e.options.Facts)

@@ -101,7 +101,7 @@ jobs:
         id: setup-go
         with:
           go-version: "1.26"
-          cache: true
+          cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: go.sum
       - name: Locate Go build cache
         id: go-cache-path
@@ -283,7 +283,7 @@ jobs:
         id: setup-go
         with:
           go-version: "1.26"
-          cache: true
+          cache: ${{ runner.environment == 'github-hosted' }}
           cache-dependency-path: go.sum
       - name: Node for test tier selection
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -298,6 +298,7 @@ jobs:
       # GitHub scopes PR writes to refs/pull/N/merge; main cannot restore them.
       - name: Persist Go build cache
         id: go-cache
+        if: runner.environment == 'github-hosted'
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: ${{ steps.go-cache-path.outputs.path }}
@@ -570,6 +571,43 @@ jobs:
           test "$GO_TIMING" = success
           echo "reused pull_request run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
 
+  # Strict discovery runs beside runtime preparation; the required web gate joins both.
+  web-catalogue:
+    needs: [ci-plan, tree-reuse, tier-plan]
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Resolve lockfile and Playwright cache keys
+        id: web-cache-keys
+        env:
+          LOCKFILE_HASH: ${{ hashFiles('web/package-lock.json') }}
+        run: |
+          set -euo pipefail
+          pw_version="$(node -p "require('./web/package-lock.json').packages['node_modules/@playwright/test'].version")"
+          echo "dependencies=web-deps-v1-${RUNNER_OS}-${RUNNER_ARCH}-node24-${LOCKFILE_HASH}-pw${pw_version}" >> "$GITHUB_OUTPUT"
+          echo "browsers=web-playwright-v1-${RUNNER_OS}-${RUNNER_ARCH}-${LOCKFILE_HASH}-pw${pw_version}" >> "$GITHUB_OUTPUT"
+      - name: Cache installed web dependencies
+        id: web-dependencies
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: web/node_modules
+          key: ${{ steps.web-cache-keys.outputs.dependencies }}
+      - name: Install web dependencies
+        if: steps.web-dependencies.outputs.cache-hit != 'true'
+        working-directory: web
+        run: npm ci
+      - name: Require every web case to be classified
+        run: node scripts/test-tiers/cli.mjs check web --strict
+
   # OPS-257: install/build once, then fan out balanced UI specs on hosted runners.
   # The former footer-ui, status-help-ui and status-autopilot-ui jobs and the e2e
   # model-settings step ran specs that the shards now own (groups footer,
@@ -612,8 +650,6 @@ jobs:
         run: npm ci
       - name: Check Docker web inputs without Docker
         run: node --test scripts/docker-web-inputs.test.mjs
-      - name: Require every web case to be classified
-        run: node scripts/test-tiers/cli.mjs check web --strict
       - working-directory: web
         run: npm run typecheck
       # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
@@ -798,7 +834,7 @@ jobs:
   web:
     name: web
     if: always()
-    needs: [ci-plan, web-setup, web-unit, web-shard, tree-reuse, cache-prime, tier-plan]
+    needs: [ci-plan, web-catalogue, web-setup, web-unit, web-shard, tree-reuse, cache-prime, tier-plan]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -821,7 +857,7 @@ jobs:
           CI_MG_REUSE: ${{ vars.CI_MG_REUSE }}
           CONFIRM_PR_RUN: ${{ needs.tree-reuse.outputs.run }}
         run: node scripts/ci-tree-reuse.mjs
-      - name: Require setup, units and every web shard
+      - name: Require catalogue, setup, units and every web shard
         env:
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
           REUSE_PROOF: ${{ needs.tree-reuse.result }}
@@ -833,6 +869,7 @@ jobs:
           TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
           CI_PLAN: ${{ needs.ci-plan.result }}
           CI_LANE: ${{ needs.tier-plan.outputs.lane }}
+          WEB_CATALOGUE: ${{ needs.web-catalogue.result }}
           WEB_SETUP: ${{ needs.web-setup.result }}
           WEB_UNIT: ${{ needs.web-unit.result }}
           WEB_SHARD: ${{ needs.web-shard.result }}
@@ -849,6 +886,7 @@ jobs:
             test "$REUSE_PROOF" = success
             [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
             test "$CACHE_PRIME" = skipped
+            test "$WEB_CATALOGUE" = skipped
             test "$WEB_SETUP" = skipped
             test "$WEB_UNIT" = skipped
             test "$WEB_SHARD" = skipped
@@ -863,26 +901,30 @@ jobs:
             test "$REUSE_PROOF" = success
             [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
             test "$CACHE_PRIME" = success
+            test "$WEB_CATALOGUE" = skipped
             test "$WEB_SETUP" = skipped
             test "$WEB_UNIT" = skipped
             test "$WEB_SHARD" = skipped
             echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          echo "web-setup=${WEB_SETUP} web-unit=${WEB_UNIT} web-shard=${WEB_SHARD}"
+          echo "web-catalogue=${WEB_CATALOGUE} web-setup=${WEB_SETUP} web-unit=${WEB_UNIT} web-shard=${WEB_SHARD}"
           test "$CI_PLAN" = success
           case "$CI_LANE" in
             docs-only)
+              test "$WEB_CATALOGUE" = skipped
               test "$WEB_SETUP" = skipped
               test "$WEB_UNIT" = skipped
               test "$WEB_SHARD" = skipped
               echo 'docs-only: web checks skipped' >> "$GITHUB_STEP_SUMMARY" ;;
             spec-only)
+              test "$WEB_CATALOGUE" = success
               test "$WEB_SETUP" = success
               test "$WEB_UNIT" = success
               test "$WEB_SHARD" = success
               echo 'spec-only: changed specs passed' >> "$GITHUB_STEP_SUMMARY" ;;
             full)
+              test "$WEB_CATALOGUE" = success
               test "$WEB_SETUP" = success
               test "$WEB_UNIT" = success
               # Static layout (PR-only affected lane): units run, browsers skip.

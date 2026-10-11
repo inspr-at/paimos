@@ -50,6 +50,43 @@ run routines there; an owner or admin can turn it off, and turning it on waits
 for OPS qualification. Rows show the derived state (Scheduled, Waiting for a
 person, Held, Stopped; Running and Failed once runs are reported).
 
+### Agents › Routines and the logbook (AEON-1192)
+
+**Agents › Routines** (`/agents/routines`, in the Agents page's More menu)
+lists every routine the signed-in person can see once, whichever box made it;
+read access in some projects is enough, and without any the page says so.
+Scope (All, Projects, Yours, Workspace), project and state filters live in the
+query (`?scope=&project=&state=&routine=&run=`), so a link reopens the same
+view. Counts cover the loaded pages and read "N+" while more pages remain;
+**More routines** appends the next 100 once per definition. The poll rereads
+every loaded page and keeps the selected routine, reading it on its own when no
+loaded page lists it. The Agents page
+shows one **Routines** line while a routine waits for a person or failed.
+Each project, personal and workspace box links to the page, and
+`/settings/routines` opens Settings → Routines directly.
+
+The selected routine's logbook opens beside the list; on narrow screens the
+list gives way to one logbook with **All routines** to go back. It is
+RecurrenceHistory extended: the same head with Pause/Resume, Run now and Edit…,
+then facts (Who with today's route, May, Budget, Runs on, Owner, Upcoming), a
+band when it waits for consent or is held (with the wait code), and the
+logbook. Agent routines list their S21 runs (`GET /api/recurrences/{id}/runs`,
+20 a page) and Changes; ticket-only routines keep All, Created, Skipped and
+Changes from the history (50 a page). A run opens into its chain from
+`GET /api/recurrences/{id}/runs/{runId}`: ticket, agent attempts, actions,
+checks, the person's decision (with a Decision Desk link) and the settled
+usage. A run link older than the loaded page is read on its own, shown first
+and kept open through Show older; a changed `?run=` opens that run, and a run
+the logbook doesn't have is said. Only Done uses the Done tint; a created
+ticket says it is not a finished run; unknown or partial usage and unknown
+reservations are never shown as zero or complete (only a run that never
+started, with a zero balance, reads "Nothing used, nothing held"), and paid,
+API-list-price and reserved amounts are kept apart. A failed older
+page says so and keeps what is shown. Each routine and filter has its own
+read lane, so a late page for another routine or person never alters the
+logbook on screen; a person switch clears the list, filters, open logbook and
+draft. In a project box, an agent routine's history is the same logbook.
+
 The additive UI contract stores the optional recurrence `name` in `template`.
 `GET /api/recurrences/{id}/history` pages 50 events with a `before` cursor and
 `all|created|skipped|changes` filter. `GET /api/recurrences/{id}/releases` lists
@@ -318,3 +355,9 @@ UUIDs return `404`. Sender and owner permissions are checked again before
 scheduling. Intake records an event only; neither intake nor the scheduler
 launches an agent. Explicit `queue_each` retains the existing inert queue
 handoff to coordinator routing. No schema migration or new secret is required.
+
+Execution recovery checks the current owner under the access fence. In an enabled project, loss of owner authority or an output-parent move pauses the routine and revokes execution consent. A durable, scope-protected pause receipt remains pending until a current project or workspace administrator receives an inbox notice, including when notification acceptance fails. Restoring rights does not resume execution: an interactive person must reload, resume, and give execution consent again.
+
+Recovery reconciles original launch, action and usage receipts in bounded passes. Unconfirmed process exit or usage retains its budget hold, slot and worktree; it never authorizes a replacement process or assumes zero cost. Cooperative stop requests bind the exact managed session, daemon generation and observed process identity. After three unresolved reconciliation passes, one durable administrator notice requests intervention. Capacity waits do not count as failed work attempts. Stale review evidence is checked again against current policy and the original commit range, without broadening permissions or creating another actor. Automatic execution remains disabled until the separate project qualification and person enablement steps.
+
+A cooperative stop rejected before delivery because its authorization expired or was revoked can be requested again after checking current process ownership. Recovery records one fresh control atomically with its pending intent. Claimed stops and uncertain outcomes remain bound to their original control. A lost cooperative reply is completed as an unconfirmed outcome so later person-confirmed stop requests can proceed without repeating that cooperative signal.

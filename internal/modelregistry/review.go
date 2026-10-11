@@ -91,6 +91,9 @@ func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	q.ReviewPolicies = policies
 	q.Role = out.Role
 	q.AuthorFamily = author
+	if catalog != nil {
+		q.preview = catalog
+	}
 	var boardPolicies []reviewgate.FamilyPolicy
 	if q.routineEval {
 		boardPolicies = policies

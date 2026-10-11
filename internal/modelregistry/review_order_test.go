@@ -461,3 +461,12 @@ func TestReviewOrderCatalogUpgradePreservesSavedV2Default(t *testing.T) {
 		t.Fatal("catalog upgrade did not run")
 	}
 }
+
+func reviewOrderSave(t *testing.T, tx pgx.Tx, p tenant.Principal, profiles ...string) error {
+	t.Helper()
+	if len(profiles) == 0 {
+		_, err := tx.Exec(t.Context(), `DELETE FROM model_pref_situation_orders WHERE column_key='other' AND situation='review'`)
+		return err
+	}
+	return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "review", "wait", profiles...)
+}
