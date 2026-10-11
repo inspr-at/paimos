@@ -17,7 +17,6 @@ import (
 	"github.com/inspr-at/paimos/internal/accountuse"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/linkvault"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -126,129 +125,143 @@ func registryRoutes(t *testing.T, p tenant.Principal) []Route {
 	return out
 }
 
-// Risk: an owner's security-review override (a Models pause on the security
-// reviewer) is ignored, outlives its expiry, leaves the routing revision
-// unchanged, or reaches another tenant.
+// Risk: a model pause on the security reviewer (a security ladder hold before
+// Models v2) lets security fall back to Anthropic, outlives its expiry, stays
+// out of the registry revision, or reaches another tenant.
 func TestSecurityRoutesReplaceExpireAndRemainTenantScoped(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "security-routes", "person", "Owner", []string{"admin"})
 	other := makePrincipal(t, "other-security-routes", "person", "Other", []string{"admin"})
 	profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
-	decode[[]Profile](t, &other, "GET", "/api/models", "", 200)
-	inRegistry(t, p, func(tx pgx.Tx) error { return ensureCatalog(t.Context(), tx, p) })
-	inRegistry(t, other, func(tx pgx.Tx) error { return ensureCatalog(t.Context(), tx, other) })
-	reviewAccount(t, p, "grok")
-	grok := profileBySlug(profiles, "grok-4-7-xhigh")
-	revision := func(who tenant.Principal) string {
-		var out string
-		inRegistry(t, who, func(tx pgx.Tx) error {
-			var err error
-			out, err = Revision(t.Context(), tx)
-			return err
-		})
-		return out
-	}
-	beforeRevision, otherRevision := revision(p), revision(other)
-	gate := decode[Resolution](t, &p, "GET", "/api/models/resolve?role=review-gate-security&author_family=openai", "", 200)
-	if gate.Profile == nil || gate.Profile.Harness != "grok" || gate.Profile.Family == "anthropic" {
-		t.Fatalf("security review lacks its native Grok reviewer: %+v", gate)
-	}
-	first := gate.Profile.ID
-	until := time.Now().UTC().Truncate(time.Second).Add(time.Hour)
-	decode[modelPauseResult](t, &p, "PUT", "/api/models/lines/grok/"+grok.Model+"/pause", fmt.Sprintf(`{"until":%q,"reason":"Owner security override"}`, until.Format(time.RFC3339)), 200)
-	gate = decode[Resolution](t, &p, "GET", "/api/models/resolve?role=review-gate-security&author_family=openai", "", 200)
-	if gate.Profile != nil || !gate.OwnerRequired {
-		t.Fatalf("security override did not stop the reviewer: %+v", gate)
-	}
-	overridden := false
-	for _, candidate := range gate.Ladder {
-		if candidate.ProfileID == first && strings.HasSuffix(strings.Join(candidate.SkipReasons, ";"), ": Owner security override") {
-			overridden = true
+	otherProfiles := decode[[]Profile](t, &other, "GET", "/api/models", "", 200)
+	// Grok is the first qualified non-Anthropic reviewer for OpenAI work.
+	for _, slug := range []string{"grok-4-7-xhigh", "claude-fable-xhigh"} {
+		enroll := minimalAccount
+		if slug == "grok-4-7-xhigh" {
+			enroll = nativeGrokAccount
 		}
+		enroll(t, p, profileBySlug(profiles, slug))
+		enroll(t, other, profileBySlug(otherProfiles, slug))
 	}
-	if !overridden {
-		t.Fatalf("security override lost its cause: %+v", gate.Ladder)
+	gate := decode[Resolution](t, &p, "GET", "/api/models/resolve?role=review-gate-security&author_family=openai", "", 200)
+	if gate.Profile == nil || gate.Profile.Family == "anthropic" || gate.Profile.Family == "openai" {
+		t.Fatalf("fixture must select a non-Anthropic security reviewer: %+v", gate)
 	}
-	if changed := revision(p); changed == beforeRevision || changed == "" {
-		t.Fatal("revision ignored the security override")
+	reviewer := *gate.Profile
+	otherBefore := decode[Resolution](t, &other, "GET", "/api/models/resolve?role=review-gate-security&author_family=openai", "", 200)
+	until := time.Now().UTC().Truncate(time.Second).Add(time.Hour)
+	var beforeRevision string
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var err error
+		if beforeRevision, err = Revision(t.Context(), tx); err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason) VALUES($1,$2,$3,$4,'Owner security override')`, p.TenantID, reviewer.Harness, reviewer.Model, until)
+		return err
+	})
+	gate = decode[Resolution](t, &p, "GET", "/api/models/resolve?role=review-gate-security&author_family=openai", "", 200)
+	if gate.Profile != nil && (gate.Profile.Model == reviewer.Model || gate.Profile.Family == "anthropic") || gate.Profile == nil && !gate.OwnerRequired {
+		t.Fatalf("security pause selected the paused model or Anthropic: %+v", gate)
+	}
+	paused := false
+	for _, c := range gate.Ladder {
+		paused = paused || c.ProfileID == reviewer.ID && slices.Contains(c.SkipReasons, "paused until "+until.Format(time.RFC3339)+": Owner security override")
+	}
+	if !paused {
+		t.Fatalf("security pause lost its reason: %+v", gate.Ladder)
 	}
 	inRegistry(t, p, func(tx pgx.Tx) error {
-		// Refresh the reviewer's heartbeat at the controlled instant.
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$1`, until.Add(time.Minute)); err != nil {
-			return err
-		}
-		expired, err := ResolveWork(t.Context(), tx, p, WorkQuery{Role: "review-gate-security", AuthorFamily: "openai"}, until.Add(time.Minute))
+		revision, err := Revision(t.Context(), tx)
 		if err != nil {
 			return err
 		}
-		if expired.Profile == nil || expired.Profile.ID != first {
-			t.Fatal("security override did not expire", expired)
+		if revision == beforeRevision || revision == "" {
+			t.Fatal("revision ignored the security pause")
 		}
-		return nil
+		// Refresh the account heartbeat at the controlled instant, so only the
+		// pause's expiry changes; the savepoint keeps that clock out of storage.
+		at, err := tx.Begin(t.Context())
+		if err != nil {
+			return err
+		}
+		if _, err := at.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$1`, until.Add(time.Minute)); err != nil {
+			return err
+		}
+		expired, err := ResolveWork(t.Context(), at, p, WorkQuery{Role: "review-gate-security", AuthorFamily: "openai"}, until.Add(time.Minute))
+		if err != nil {
+			return err
+		}
+		if expired.Profile == nil || expired.Profile.ID != reviewer.ID {
+			t.Fatalf("security pause did not expire: %+v", expired)
+		}
+		if err := at.Rollback(t.Context()); err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `DELETE FROM model_pauses`)
+		return err
 	})
-	if revision(other) != otherRevision {
-		t.Fatal("security override changed another tenant")
+	gate = decode[Resolution](t, &p, "GET", "/api/models/resolve?role=review-gate-security&author_family=openai", "", 200)
+	if gate.Profile == nil || gate.Profile.ID != reviewer.ID {
+		t.Fatalf("lifted pause did not restore the reviewer: %+v", gate)
+	}
+	otherAfter := decode[Resolution](t, &other, "GET", "/api/models/resolve?role=review-gate-security&author_family=openai", "", 200)
+	if !reflect.DeepEqual(otherAfter, otherBefore) || otherAfter.Profile == nil {
+		t.Fatal("security pause changed another tenant")
 	}
 }
 
-// Both route tables must retain independent retirement and health fences.
+// Retirement and timed model health remain independent fences: a retired
+// route never runs again, while a health suppression ends at its expiry.
 func TestRefreshLaddersPreserveRetirementAndSuppression(t *testing.T) {
 	for _, role := range []string{"build", "review-gate-security"} {
 		t.Run(role, func(t *testing.T) {
 			reset(t)
 			p := makePrincipal(t, "retired-refresh", "person", "Owner", []string{"admin"})
-			profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
-			// The order's first line is a dedicated pin; a runnable fallback follows.
-			harness, family, fallback, situation := "claude", "anthropic", profileBySlug(profiles, "codex-6-1-sol-high"), "first"
-			if role == "review-gate-security" {
-				harness, family, fallback, situation = "grok", "xai", profileBySlug(profiles, "grok-4-7-xhigh"), "review"
-				reviewAccount(t, p, "grok")
-			} else {
-				reviewAccount(t, p, "claude")
-				minimalAccount(t, p, fallback)
-			}
+			decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
 			inRegistry(t, p, func(tx pgx.Tx) error {
 				now, err := dbNow(t.Context(), tx)
 				if err != nil {
 					return err
 				}
-				profile, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: "fenced-first", Version: "1", Harness: harness, Family: family, Model: "fenced-first-model", Effort: "xhigh", Tier: "frontier"})
+				q := resolveQuery{Role: role, AuthorFamily: "openai"}
+				before, err := resolveRole(t.Context(), tx, q, now)
 				if err != nil {
 					return err
 				}
-				if err := dbtest.SetModelOrder(t.Context(), tx, p.TenantID, "", "other", situation, profile.ID, fallback.ID); err != nil {
+				if before.Profile == nil {
+					t.Fatal("fixture must select the first route")
+				}
+				retired := before.Profile
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($1,$2,'merge regression',$3)`, p.TenantID, retired.ID, p.ID); err != nil {
 					return err
 				}
-				q := WorkQuery{Role: role, AuthorFamily: "openai"}
-				before, err := ResolveWork(t.Context(), tx, p, q, now)
+				next, err := resolveRole(t.Context(), tx, q, now)
 				if err != nil {
 					return err
 				}
-				if before.Profile == nil || before.Profile.ID != profile.ID {
-					t.Fatalf("fixture must select the first route: %+v", before)
+				if next.Profile == nil || next.Profile.ID == retired.ID {
+					t.Fatalf("retired route selected or fallback lost: %+v", next)
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($1,$2,'merge regression',$3)`, p.TenantID, profile.ID, p.ID); err != nil {
-					return err
-				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_observations(tenant_id,harness,model,effort,failures,last_failing_at,suppressed_until,source) VALUES($1,$2,$3,$4,2,$5,$6,'agent')`, p.TenantID, profile.Harness, profile.Model, profile.Effort, now, now.Add(time.Hour)); err != nil {
+				suppressed := next.Profile
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_observations(tenant_id,harness,model,effort,failures,last_failing_at,suppressed_until,source) VALUES($1,$2,$3,$4,2,$5,$6,'agent')`, p.TenantID, suppressed.Harness, suppressed.Model, suppressed.Effort, now, now.Add(time.Hour)); err != nil {
 					return err
 				}
 				for _, at := range []time.Time{now, now.Add(2 * time.Hour)} {
-					// Refresh the independent account heartbeats at the controlled instant.
-					if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=$1`, at); err != nil {
-						return err
-					}
-					out, err := ResolveWork(t.Context(), tx, p, q, at)
+					out, err := resolveRole(t.Context(), tx, q, at)
 					if err != nil {
 						return err
 					}
-					if out.Profile == nil || out.Profile.ID == profile.ID {
-						t.Fatalf("retired route selected or fallback lost: %+v", out)
+					healthy := !at.Before(now.Add(time.Hour))
+					if out.Profile == nil || out.Profile.ID == retired.ID || (out.Profile.ID == suppressed.ID) != healthy {
+						t.Fatalf("retirement and timed health fence diverged at %s: %+v", at, out)
 					}
-					first := out.Ladder[0]
-					reasons := strings.Join(first.SkipReasons, "; ")
-					if first.ProfileID != profile.ID || first.Selected || !strings.Contains(reasons, "retired") || strings.Contains(reasons, "model invalid until") != at.Before(now.Add(time.Hour)) {
-						t.Fatalf("retirement and timed health fence diverged: %+v", first)
+					for _, c := range out.Ladder {
+						if c.ProfileID == retired.ID && (c.Selected || !slices.Contains(c.SkipReasons, "retired")) {
+							t.Fatalf("retired route lost its fence: %+v", c)
+						}
+						if c.ProfileID == suppressed.ID && strings.Contains(strings.Join(c.SkipReasons, "; "), "model invalid until") == healthy {
+							t.Fatalf("health fence ignored its expiry: %+v", c)
+						}
 					}
 				}
 				return nil
@@ -377,34 +390,21 @@ func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 			if eventCount(t, p, "model.catalog_upgraded") != 1 {
 				t.Fatal("upgrade not idempotent")
 			}
-			var securityProfile Profile
-			inRegistry(t, p, func(tx pgx.Tx) error {
-				steps, err := loadLadder(t.Context(), tx, "review-gate-security")
-				if err != nil {
-					return err
-				}
-				for _, step := range steps {
-					if step.Profile.Family == "openai" {
-						securityProfile = step.Profile
-						break
-					}
-				}
-				return nil
-			})
-			if securityProfile.ID == "" {
-				t.Fatal("historical OpenAI security route missing from the derived read")
-			}
+			// The retained security ladder pin is history, not routing: Models
+			// v2 security review is automatic and never Anthropic. Enrolling
+			// the historical Codex pin cannot make it a reviewer, because Codex
+			// has no qualified no-tools adapter, so the review waits for a person.
+			securityProfile := profileBySlug(profiles, "codex-sol-high")
 			minimalAccount(t, p, securityProfile)
-			// Even with an account, Codex cannot verify a no-tools review.
 			gate := decode[Resolution](t, &p, "GET", "/api/models/resolve?role=review-gate-security&author_family=xai", "", 200)
-			refused := false
-			for _, candidate := range gate.Ladder {
-				if candidate.ProfileID == securityProfile.ID && !candidate.Selected && slices.Contains(candidate.SkipReasons, "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.") {
-					refused = true
-				}
-			}
-			if gate.Profile != nil && gate.Profile.Harness == "codex" || !refused {
+			if gate.Profile != nil || !gate.OwnerRequired || gate.CommandTemplate != "" || len(gate.Ladder) == 0 {
 				t.Fatalf("security route: %+v", gate)
+			}
+			for _, c := range gate.Ladder {
+				family := profileByID(profiles, c.ProfileID).Family
+				if c.Selected || family == "xai" || family == "anthropic" && !slices.Contains(c.SkipReasons, "security review policy") {
+					t.Fatalf("security review read the historical pin or bypassed its rules: %+v", c)
+				}
 			}
 		})
 	}
@@ -457,8 +457,8 @@ func TestReportsAreScopedIdempotentAndPreserveOverrides(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, account, raw); err != nil {
 			return err
 		}
-		// The owner's override is a Models pause on the model.
-		_, err = tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by) SELECT tenant_id,harness,model,$2,'owner override',$3 FROM model_profiles WHERE id=$1`, sol.ID, until, p.ID)
+		// An owner pause on the model (a conserved ladder hold before Models v2).
+		_, err = tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason) VALUES($1,$2,$3,$4,'owner override')`, p.TenantID, sol.Harness, sol.Model, until)
 		return err
 	})
 	if got := send(agent, o, 200); got.Recorded != 1 {

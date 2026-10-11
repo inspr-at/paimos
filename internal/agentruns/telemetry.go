@@ -412,6 +412,11 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (out 
 	if err = workorders.BlockBudgetDeferred(ctx, tx, p, o, &pending); err != nil {
 		return nil, err
 	}
+	if m.routineCompletion != nil {
+		if err = m.routineCompletion(ctx, tx, p, v, t, &pending); err != nil {
+			return nil, err
+		}
+	}
 	if t.ReviewRange != nil && m.reviews != nil {
 		if err = m.reviews(ctx, tx, p, v.ID, *t.ReviewRange, &pending); err != nil {
 			return nil, err

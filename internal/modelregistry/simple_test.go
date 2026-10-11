@@ -283,12 +283,18 @@ func TestMinimalSimpleReadPreservesFirstAndFallback(t *testing.T) {
 	}
 }
 
-// Risk: a queued scout or mechanical ticket is shown as blocked or on a
-// different line than dispatch picks. Models routes them through Quick jobs.
-func TestMinimalQueuedScoutUsesRoleLadderWhenBoardDoesNotApply(t *testing.T) {
+// Risk: a queued scout or mechanical ticket is shown as blocked, or the page
+// names another model than dispatch. Models v2 runs both roles as Quick jobs
+// (the cheapest qualifying fast model); dispatch and the page share that walk.
+func TestMinimalQueuedScoutUsesQuickJobs(t *testing.T) {
 	admin, member := boardFixture(t)
 	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
-	minimalAccount(t, admin, profileBySlug(ps, "codex-luna-medium"))
+	luna := minimalAccount(t, admin, profileBySlug(ps, "codex-luna-medium"))
+	// Mechanical work runs Luna at its high level, scout at medium.
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=allowed_model_profile_ids||$2::uuid WHERE id=$1`, luna, profileBySlug(ps, "codex-luna-high").ID)
+		return err
+	})
 	project := editorProject(t, admin, "SCOUT-3")
 	var ticket string
 	inRegistry(t, admin, func(tx pgx.Tx) error {
@@ -308,7 +314,7 @@ func TestMinimalQueuedScoutUsesRoleLadderWhenBoardDoesNotApply(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,queue_node_id,queue_by_principal_id,queue_at,queue_security_review_required) VALUES($1,$2,$3,$4,$5,now(),false)`, admin.TenantID, order, runner, ticket, member.ID)
 		return err
 	})
-	var want, column string
+	var want string
 	inRegistry(t, member, func(tx pgx.Tx) error {
 		now, err := dbNow(t.Context(), tx)
 		if err != nil {
@@ -319,36 +325,39 @@ func TestMinimalQueuedScoutUsesRoleLadderWhenBoardDoesNotApply(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if board == nil || board.Profile == nil || board.Trace.Prefs != "quick jobs" {
-			t.Fatalf("scout did not route through Models Quick jobs: %+v", board)
+		if board == nil || board.Profile == nil || board.Profile.Tier != "fast" || board.Trace.Prefs != "quick jobs" {
+			t.Fatal("scout did not run as a Quick job", board)
 		}
 		mechanical, err := resolveBoardWork(t.Context(), tx, member, WorkQuery{Role: "mechanical", TicketID: ticket, Area: "backend", ExplicitBoard: true}, now, nil)
 		if err != nil {
 			return err
 		}
-		if mechanical == nil {
-			t.Fatal("mechanical left Models routing")
+		if mechanical == nil || mechanical.Profile == nil || mechanical.Profile.Tier != "fast" || mechanical.Trace.Prefs != "quick jobs" {
+			t.Fatal("mechanical did not run as a Quick job", mechanical)
 		}
 		resolved, err := ResolveWork(t.Context(), tx, member, q, now)
 		if err != nil {
 			return err
 		}
 		if resolved.Profile == nil || resolved.Profile.ID != board.Profile.ID {
-			t.Fatalf("dispatch and the Models walk disagree: %+v vs %+v", resolved.Profile, board.Profile)
+			t.Fatal("dispatch and the Models walk chose different Quick jobs", resolved, board)
 		}
-		want, column = boardLineID(*resolved.Profile), board.Trace.Column
+		want = boardLineID(*resolved.Profile)
 		return nil
 	})
 	doc := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple", nil, ""), 200)
-	if doc.Next == nil || doc.Next.Ticket != "SCOUT-1" || doc.Next.Column != column || doc.Next.Line == nil || *doc.Next.Line != want {
-		t.Fatalf("queued scout was reported blocked or on another line: next=%+v want=%s", doc.Next, want)
+	// Quick jobs are not the kind's row: the page names the Default, as the
+	// trace does, and the same line dispatch runs.
+	if doc.Next == nil || doc.Next.Ticket != "SCOUT-1" || doc.Next.Column != "other" || doc.Next.Line == nil || *doc.Next.Line != want {
+		t.Fatalf("queued scout was reported blocked or left its Quick job: next=%+v want=%s", doc.Next, want)
 	}
 }
 
-// Risk: fallback stops at a failed column before its default, borrows the
-// wrong account, or runs a model outside the orders (the retired role-ladder
-// tail). Every skip explains itself and the default ends in Wait.
-func TestMinimalFallbackColumnDefaultRoleAndSkipReasons(t *testing.T) {
+// Risk: fallback stops at a failed column before the Default, borrows the
+// wrong account, or runs a model outside every order. Models v2: the Default
+// ends in Wait, so the only enrolled model (Sol, in no order) never runs,
+// and every skip explains its cause.
+func TestMinimalFallbackColumnDefaultWaitAndSkipReasons(t *testing.T) {
 	admin, _ := boardFixture(t)
 	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
 	sol := profileBySlug(ps, "codex-6-1-sol-high")
@@ -364,12 +373,12 @@ func TestMinimalFallbackColumnDefaultRoleAndSkipReasons(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if resolved == nil || resolved.Profile != nil || !resolved.OwnerRequired {
-			t.Fatal("a model outside the orders ran", resolved)
+		if resolved == nil || resolved.Profile != nil || !resolved.OwnerRequired || resolved.CommandTemplate != "" {
+			t.Fatal("a model outside the row's and the Default's orders ran", resolved)
 		}
-		for _, candidate := range resolved.Ladder {
-			if candidate.ProfileID == sol.ID {
-				t.Fatal("hidden role-ladder tail walked", resolved.Ladder)
+		for _, c := range resolved.Ladder {
+			if c.ProfileID == sol.ID || c.Selected {
+				t.Fatal("the walk left the saved orders", resolved.Ladder)
 			}
 		}
 		c, err := loadBoardCatalog(t.Context(), tx)

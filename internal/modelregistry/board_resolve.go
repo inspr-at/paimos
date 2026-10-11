@@ -79,11 +79,11 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		return nil, nil
 	}
 	var c boardCatalog
-	if preview, ok := ctx.Value(previewBoardKey{}).(*preferencePreviewCatalog); ok && preview != nil {
-		c, err = preview.routingBoard(ctx, tx)
-	} else {
-		c, err = loadBoardCatalog(ctx, tx, true)
+	preview := q.preview
+	if inherited, ok := ctx.Value(previewBoardKey{}).(*preferencePreviewCatalog); preview == nil && ok {
+		preview = inherited
 	}
+	c, err = preview.dispatchBoard(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -161,6 +161,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	daily := modelsDailyAdmission{principal: p, snapshots: map[string]agentplan.Snapshot{}, unknown: map[string]bool{}}
 	seen := map[string]bool{}
 	admissionWait := false
+	residencyHeld := false
 	waitCode := ""
 	for _, order := range d.Steps {
 		key := order.Line
@@ -227,6 +228,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				admissionWait = true
 			}
 			ids := []string{}
+			residencyOnly := false
 			if len(reasons) == 0 {
 				if review {
 					capability := agentverification.For(profile.Harness, "darwin", "arm64")
@@ -237,9 +239,12 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 					}
 				} else {
 					ids, err = boardRouteAccounts(ctx, tx, profile, q.ProjectID, requirement, now)
-					if err == nil && q.Escalation {
-						ids, err = agentaccounts.EscalationRoomIDs(ctx, tx, ids, now)
-					}
+				}
+				if err == nil && len(reasons) == 0 && len(ids) == 0 && requirement != "any" {
+					residencyOnly, err = refusedForResidency(ctx, tx, profile, q.ProjectID, review, now)
+				}
+				if err == nil && !review && q.Escalation {
+					ids, err = agentaccounts.EscalationRoomIDs(ctx, tx, ids, now)
 				}
 				if err != nil {
 					return nil, err
@@ -259,24 +264,12 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				}
 			}
 			if len(reasons) == 0 && len(ids) == 0 {
-				reason := "no qualified account with available capacity"
-				if requirement != "any" {
-					// Distinguish residency evidence from absent/unavailable
-					// accounts without exposing account identities or quotas.
-					var unrestricted []string
-					if review {
-						unrestricted, err = reviewQualifiedAccountIDs(ctx, tx, profile, q.ProjectID, "any", now)
-					} else {
-						unrestricted, err = boardRouteAccounts(ctx, tx, profile, q.ProjectID, "any", now)
-					}
-					if err != nil {
-						return nil, err
-					}
-					if len(unrestricted) > 0 {
-						reason = "not allowed: " + requirement
-					}
+				if residencyOnly {
+					reasons = append(reasons, "not allowed: "+requirement)
+					residencyHeld = true
+				} else {
+					reasons = append(reasons, "no qualified account with available capacity")
 				}
-				reasons = append(reasons, reason)
 			}
 			stage := order.Stage
 			if stage == "quick" || stage == "automatic" {
@@ -335,9 +328,12 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			if len(d.Held) > 0 {
 				out.Trace.Blocked = d.Held[0].Reason
 			}
+			if residencyHeld {
+				out.Trace.Blocked = "no " + requirement + " model route"
+			}
+			// An escalation outcome is the whole walk's, not its first line's:
+			// the Decision Desk stores it as the route block.
 			if q.Escalation && waitCode == "" {
-				// Escalation keeps its route-level reason for the Decision Desk;
-				// each line's own cause stays in Held.
 				out.Trace.Blocked = "no allowed stronger route"
 				if lockedEscalation {
 					out.Trace.Blocked = "locked model preference"
@@ -357,6 +353,19 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		}
 	}
 	return &out, nil
+}
+
+// refusedForResidency reports whether accounts would run this route without
+// the residency requirement, so the walk names residency as the cause.
+func refusedForResidency(ctx context.Context, tx pgx.Tx, profile Profile, project string, review bool, now time.Time) (bool, error) {
+	var ids []string
+	var err error
+	if review {
+		ids, err = reviewQualifiedAccountIDs(ctx, tx, profile, project, "any", now)
+	} else {
+		ids, err = boardRouteAccounts(ctx, tx, profile, project, "any", now)
+	}
+	return len(ids) > 0, err
 }
 
 // Keep the queued-round policy and saved family review rows during the S2
@@ -425,7 +434,7 @@ func modelsBoardDecision(s modelprefs.BoardState, q modelprefs.BoardQuery) model
 
 // ModelsReviewHighestNative is the reversible 2026-10-10 review-floor decision.
 // The minimum equivalent stays xhigh even when the native catalog has no name.
-const ModelsReviewHighestNative = true
+const ModelsReviewHighestNative = modelprefs.ReviewHighestNative
 const modelsReviewMinLevel = reviewgate.ReviewMinEffortLevel
 
 func qualifiedReviewProfile(p Profile) bool {
@@ -435,16 +444,7 @@ func qualifiedReviewProfile(p Profile) bool {
 // Normalize provider identities across today's harness ids. AEON-1145 supplies
 // explicit identities later; this does not invent catalog models or routes.
 func modelsLine(p Profile) (string, string) {
-	identity := p
-	if p.Family == "anthropic" {
-		identity.Harness = "claude"
-		identity.Model = strings.TrimPrefix(p.Model, "anthropic/")
-	}
-	if p.Family == "openai" && strings.HasPrefix(p.Model, "gpt-") {
-		identity.Harness = "codex"
-	}
-	family, line, version := ProfileLine(identity)
-	return family + ":" + line, version
+	return modelprefs.ModelsLine(p.Family, p.Harness, p.Model)
 }
 
 func modelsCatalog(c boardCatalog) boardCatalog {
@@ -528,8 +528,17 @@ func modelsBoardIdentities(s modelprefs.BoardState, c boardCatalog) modelprefs.B
 
 // Select the nearest level separately on each route, so a route lacking the
 // exact name still gets its chance before the next model. Equal distance ties up.
+// The account picker shares this choice (modelprefs.RouteCandidates).
 func modelsRouteCandidates(ps []Profile, effort string, level int, review bool) []Profile {
-	return routeCandidates(ps, effort, level, review, func(p Profile) bool { return p.Enabled && !p.Retired })
+	routes := make([]modelprefs.RouteProfile, len(ps))
+	for i, p := range ps {
+		routes[i] = modelprefs.NewRouteProfile(p.Family, p.Harness, p.Model, p.Effort, p.EffortLevel, p.Enabled && !p.Retired)
+	}
+	out := []Profile{}
+	for _, i := range modelprefs.RouteCandidates(routes, effort, level, review) {
+		out = append(out, ps[i])
+	}
+	return out
 }
 
 // modelsWalkCandidates keeps a line whose every version is retired in the

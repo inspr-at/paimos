@@ -30,3 +30,10 @@ export async function mockPolicies(page: Page, theme: 'light' | 'dark', role: 'a
   await page.route(/\/api\/settings\/review-policy$/, route => route.fulfill({ json: reviewPolicy() }))
   return { retired }
 }
+
+// AEON-1204: every request to the retired ladder endpoints, any method.
+export function ladderRequests(page: Page) {
+  const seen: string[] = []
+  page.on('request', request => { if (/\/api\/models\/routes(\?|$)/.test(request.url())) seen.push(`${request.method()} ${new URL(request.url()).pathname}`) })
+  return seen
+}

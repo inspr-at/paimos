@@ -196,7 +196,7 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 // reservation write, without a network/daemon call or event append. The server
 // must hold tenant/tree/pairing and revalidate consent before entering. An
 // ordinary run cannot use this seam; current owned native enrollment is required.
-func ReserveRoutineAccountTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routine, runID, accountID string) (result RouteResult, change events.Change, err error) {
+func ReserveRoutineAccountTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routine, runID, accountID string, actorRole ...string) (result RouteResult, change events.Change, err error) {
 	defer func() {
 		var refusal *httpError
 		if errors.As(err, &refusal) && refusal.status == http.StatusConflict {
@@ -212,8 +212,17 @@ func ReserveRoutineAccountTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	}
 	var bound bool
 	var project string
-	if err := tx.QueryRow(ctx, `SELECT r.output_project_id::text,r.execute_consent AND r.consent_revision=r.definition_revision AND r.state IN ('created','pending') AND ar.agent_principal_id=$3
- FROM routine_runs r JOIN agent_runs ar ON ar.tenant_id=r.tenant_id AND ar.id=r.agent_run_id WHERE r.id=$1 AND r.agent_run_id=$2`, routine, runID, p.ID).Scan(&project, &bound); err != nil {
+	role := "build"
+	if len(actorRole) == 1 {
+		role = actorRole[0]
+	}
+	if len(actorRole) > 1 || role != "build" && role != "review" && role != "fix" {
+		return RouteResult{}, events.Change{}, workorders.Fail(400, "invalid_routine_actor")
+	}
+	if err := tx.QueryRow(ctx, `SELECT r.output_project_id::text,r.execute_consent AND r.consent_revision=r.definition_revision AND ar.agent_principal_id=$3 AND
+ ((r.agent_run_id=ar.id AND r.state IN ('created','pending') AND $4='build') OR
+ (r.state IN ('dispatched','starting','running') AND $4 IN ('review','fix') AND EXISTS(SELECT 1 FROM routine_attempts a JOIN routine_budget_orders b ON b.run_id=a.run_id AND b.work_order_id=ar.work_order_id WHERE a.run_id=r.id AND a.agent_run_id=ar.id AND a.role=$4 AND a.assignment_digest=r.assignment_digest)))
+ FROM routine_runs r JOIN agent_runs ar ON ar.tenant_id=r.tenant_id AND ar.id=$2 WHERE r.id=$1`, routine, runID, p.ID, role).Scan(&project, &bound); err != nil {
 		return RouteResult{}, events.Change{}, err
 	}
 	if !bound {

@@ -34,11 +34,15 @@ otherwise the owner is named without a link. Fix rounds and lane pause, and GitH
 merge queue and code owners, have no screen here and never link.
 
 The review ladders, their editor and the "About these rules" sheet are gone: role
-orders moved into Models chains and holds into model pauses (AEON-1158). Browser
-coverage, including the approved design's layout, target-size and edge-accent
-probes at 1440 and 390 px in light and dark, lives in
-`web/tests/policies-rules.spec.ts`; screenshot evidence is written to the test
-output directory and is not committed.
+orders moved into Models chains and holds into model pauses (AEON-1158). Policies
+never calls `GET` or `PUT /api/models/routes` (AEON-1204): the server answers that
+`PUT` with 410 Gone and keeps the `GET` only as a deprecated compatibility read.
+Browser coverage, including the approved design's layout, target-size and
+edge-accent probes at 1440 and 390 px in light and dark, lives in
+`web/tests/policies-rules.spec.ts`; `web/tests/policies-ladders-moved.unit.test.ts`
+and the gated `web/tests/policies-ladders-moved.spec.ts` guard the Models link and
+the absence of ladder requests. Screenshot evidence is written to the test output
+directory and is not committed.
 
 Queue routes finish buffering request bodies before opening their transaction
 or retaining tenant/tree/pairing locks. Input is capped at 1 MiB and shares a

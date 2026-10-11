@@ -44,7 +44,6 @@ func TestSelectorValidationBoundedLargeCatalog(t *testing.T) {
 	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
 		// Keep the whole catalog in place, including unrelated profiles in the same
 		// family/effort, matching revisions, and an oversized review ladder.
-		// Activated pins register their native level; review qualification reads it.
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled,registered_effort_level)
    SELECT $1,'large-'||n,'1','claude','anthropic',CASE WHEN n%2=0 THEN 'claude-opus-5' ELSE 'claude-sonnet-5' END,'xhigh','strong',true,4 FROM generate_series(1,1024) n`, p.TenantID)
 		if err != nil {
