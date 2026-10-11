@@ -16,4 +16,3 @@ Stored exception rows continue through Default when their end is unset; Default 
 
 S1 provides the resolver and in-memory end/per-step effort controls. S2/S3 own persistence migration, new situation/order writes, cause-code fields and the public v2 contract. The existing resolution description and trace situation enum receive minimal contract updates. No migration or endpoint is added here.
 
-S1 validation on mbp2606 passed the Models v2 acceptance tests and the full modelprefs and reportercontract suites. Static CI on the final code snapshot completed all 42 checks with no skips. The full modelregistry suite still has 30 existing compatibility failures covering legacy ladders, accountless previews, matrix picks and trace expectations. Those assertions remain intact; the combined migration release requires their deliberate reconciliation.
