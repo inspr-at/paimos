@@ -14,8 +14,12 @@ matches the ID suffix; the original launch ID remains on the route. Google IDs
 shared by Gemini and OpenCode resolve to the same provider identity.
 
 The existing manual/scheduled refresh path fetches OpenRouter, models.dev and
-LiteLLM without keys. `api_enabled` still controls credentialed native requests;
-public discovery runs on the same refresh schedule and cooldown without a vault.
+LiteLLM without keys. Explicit refreshes fetch public sources without a vault.
+`api_enabled` controls credentialed native requests and opts in to scheduled
+public discovery. Startup and interval workers make no catalog network requests
+with the default disabled setting; offline bootstrap and retirements still run.
+Opted-in public discovery uses the same refresh schedule and cooldown, and
+disabling discovery fences both subsequent requests and in-flight publication.
 Available OpenAI, Anthropic, xAI and Google account credentials add native facts.
 Google uses the same vault derivation and the credential endpoint's additive
 `google` vendor. Credentials are never returned by the catalog, logged, or stored

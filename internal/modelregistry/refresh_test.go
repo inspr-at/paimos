@@ -244,8 +244,33 @@ func TestV2UpgradePreservesPinsCustomRoutesAndOverrides(t *testing.T) {
 			m := NewWithVault(appPool, nil)
 			m.discovery = fixtureCatalogClient(t, nil)
 			m.sweep(t.Context())
+			// Compare stored rows before crossing the HTTP boundary, retaining
+			// every pin and metadata field as well as the exact timestamp.
+			inRegistry(t, p, func(tx pgx.Tx) error {
+				stored, err := listProfiles(t.Context(), tx)
+				if err != nil {
+					return err
+				}
+				for _, old := range oldProfiles {
+					if got := profileBySlug(stored, old.Slug); !reflect.DeepEqual(got, old) {
+						t.Fatalf("historical stored pin or metadata changed: before=%+v after=%+v", old, got)
+					}
+				}
+				return nil
+			})
+			// pgx retains time.Local on UTC hosts; JSON decodes Z as time.UTC.
+			// Put both snapshots through the same wire conversion, preserving
+			// all fields rather than comparing those internal location pointers.
+			rawProfiles, err := json.Marshal(oldProfiles)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var oldWire []Profile
+			if err := json.Unmarshal(rawProfiles, &oldWire); err != nil {
+				t.Fatal(err)
+			}
 			profiles := decode[[]Profile](t, &p, "GET", "/api/models", "", 200)
-			for _, old := range oldProfiles {
+			for _, old := range oldWire {
 				if got := profileBySlug(profiles, old.Slug); !reflect.DeepEqual(got, old) {
 					t.Fatalf("historical pin or metadata changed: before=%+v after=%+v", old, got)
 				}
