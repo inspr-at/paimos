@@ -299,8 +299,11 @@ func TestRemovePreviewCoversTheWholeVersionAndEverySituation(t *testing.T) {
 // route that is still in use without saying so.
 func TestRemovePreviewNamesUsesOfEveryRoute(t *testing.T) {
 	admin, _ := boardFixture(t)
-	opus := profileBySlug(decode[[]Profile](t, &admin, "GET", "/api/models", "", 200), "claude-opus-high")
-	cursor := decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"cursor-opus-route","version":"1","harness":"cursor","family":"anthropic","model":"`+opus.Model+`","effort":"high","tier":"`+opus.Tier+`"}`, 201)
+	tier := profileBySlug(decode[[]Profile](t, &admin, "GET", "/api/models", "", 200), "claude-opus-high").Tier
+	route := func(slug, harness string) Profile {
+		return decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"`+slug+`","version":"1","harness":"`+harness+`","family":"anthropic","model":"claude-opus-5-5","effort":"high","tier":"`+tier+`"}`, 201)
+	}
+	opus, cursor := route("claude-opus-5-5-route", "claude"), route("cursor-opus-5-5-route", "cursor")
 	line, version := modelsLine(opus)
 	if l, v := modelsLine(cursor); l != line || v != version || boardLineID(cursor) == line || boardLineID(cursor) == boardLineID(opus) {
 		t.Fatalf("fixture: Cursor must be a later route of %s %s with an id of its own, got %s %s %s", line, version, l, v, boardLineID(cursor))
