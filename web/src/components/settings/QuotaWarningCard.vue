@@ -1,11 +1,14 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+// Low-quota warnings for the workspace, as one sentence under the account list (AEON-1172,
+// design AEON-1149). Warnings never stop agents; Change opens the same popover.
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { validQuotaThresholds, type QuotaWarningSettings } from '../../lib/quotaWarnings'
 import { useSession } from '../../stores/session'
 import { toast } from '../../lib/toast'
+import AppIcon from '../AppIcon.vue'
 import SettingsPopover from './SettingsPopover.vue'
 const emit = defineEmits<{ changed: [settings: QuotaWarningSettings] }>()
 const session = useSession()
@@ -56,11 +59,11 @@ async function save() {
 }
 </script>
 <template>
-  <p id="quota-warnings" class="quota-line">Low-quota warnings: <template v-if="ready">early {{ saved.early_percent }} %, urgent {{ saved.urgent_percent }} %</template><template v-else>{{ feedback || 'Loading…' }}</template><template v-if="ready && manage"> · <button type="button" @click="edit">Change</button></template></p>
+  <p id="quota-warnings" class="quota-line"><AppIcon name="alert" :size="14" /><span v-if="ready">Warn me when an account is low: at <b>{{ saved.early_percent }} %</b> left, urgently at <b>{{ saved.urgent_percent }} %</b>. Warnings never stop agents.</span><span v-else>{{ feedback || 'Loading the low-quota warnings…' }}</span><button v-if="ready && manage" type="button" class="change" aria-haspopup="dialog" :aria-expanded="open" aria-label="Change the low-quota warnings" @click="edit">Change</button></p>
   <SettingsPopover v-model:open="open" :anchor="anchor" label="Low-quota warnings" mode="form" :context-key="identity" :busy="saving || !valid" :error="feedback || (!valid ? 'Use whole percentages, with urgent below early.' : '')" hint="1–50% remaining; urgent must be lower than early." @submit="save">
     <div class="thresholds"><label>Early notice (%)<input v-model.number="early" type="number" min="2" max="50" step="1" inputmode="numeric" :disabled="saving" /></label><label>Urgent notice (%)<input v-model.number="urgent" type="number" min="1" max="49" step="1" inputmode="numeric" :disabled="saving" /></label></div>
   </SettingsPopover>
 </template>
 <style scoped>
-.quota-line { margin: 12px 0 0; color: var(--ink-3); font-size: 12.5px; }.quota-line button { border: 0; padding: 0; background: transparent; color: var(--teal-ink); text-decoration: underline; }.thresholds { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }.thresholds label { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }.thresholds input { width: 100%; min-height: 36px; padding: 4px 8px; border: 1px solid var(--line-2); border-radius: var(--radius-s); background: var(--field-bg); color: var(--ink); }@media(pointer:coarse) { .quota-line button, .thresholds input { min-height: 44px; } }
+.quota-line { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 6px 10px; margin: 0; padding: 14px 2px 0; color: var(--ink-2); font-size: 12.5px; line-height: 1.5; }.quota-line > svg { flex: none; margin-top: 3px; color: var(--ink-3); }.quota-line > span { flex: 1 1 260px; min-width: 0; }.quota-line b { color: var(--ink); font-weight: 600; }.quota-line .change { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; min-width: 24px; padding: 0 6px; margin: -2px -6px; border: 0; border-radius: 6px; background: transparent; color: var(--teal-ink); font: inherit; font-weight: 600; text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 2px; cursor: pointer; }.quota-line .change:hover { text-decoration-color: currentColor; }.quota-line .change:focus-visible { outline: none; box-shadow: var(--focus-ring); }.thresholds { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }.thresholds label { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }.thresholds input { width: 100%; min-height: 36px; padding: 4px 8px; border: 1px solid var(--line-2); border-radius: var(--radius-s); background: var(--field-bg); color: var(--ink); }@media(pointer:coarse) { .quota-line .change { min-height: 44px; min-width: 44px; margin: -10px -6px; }.thresholds input { min-height: 44px; } }
 </style>

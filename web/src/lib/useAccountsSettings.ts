@@ -19,7 +19,9 @@ import { DEFAULT_QUOTA_THRESHOLDS, isProblemSignin, quotaWindowWarns, signinStat
 import { accountsPartNeeds, matrixNeedFacts, NO_MATRIX_FACTS, partCounts, workContextLink, type AccountsPart, type MatrixNeedFacts } from './accountsNeeds'
 import { PERMISSION as USE_PERMISSION, readMatrix } from './accountUse'
 import { hostCapacityReason } from './hostCapacity'
-import { daysSummary, HARNESS_NAME, holdOptions, ownOverride, overrideDone, poolOfRow, reserveLevel, timeLabel, when, type CapacityWindow, type HoldOption, type Override, type PoolView } from './capacity'
+import { daysSummary, HARNESS_NAME, ownOverride, poolOfRow, reserveLevel, timeLabel, when, type CapacityWindow } from './capacity'
+import { DEFAULT_DAILY_POINTS, type DailyPlanFields } from './dailyLimits'
+import { pct, periodWords, quotaBar, quotaCaption, quotaInput, quotaLabel } from './quotaBar'
 import { validQuotaThresholds, type QuotaWarningSettings } from './quotaWarnings'
 import { toast } from './toast'
 import { usePoller } from './usePolledData'
@@ -61,7 +63,7 @@ export function useAccountsSettings(part: AccountsPart) {
   let root: HTMLElement | null = null
   const bindRoot = (element: unknown) => { root = element instanceof HTMLElement ? element : null }
   let generation = 0
-  function reset() { generation++; selected.value = null; open.value = false; add.value = false; menuOpen.value = false; renameOpen.value = false; busy.value = false; focusSignIn.value = ''; thresholds.value = { ...DEFAULT_QUOTA_THRESHOLDS }; facts.value = NO_MATRIX_FACTS; void readThresholds(); void readFacts() }
+  function reset() { generation++; selected.value = null; open.value = false; add.value = false; menuOpen.value = false; renameOpen.value = false; busy.value = false; focusSignIn.value = ''; thresholds.value = { ...DEFAULT_QUOTA_THRESHOLDS }; facts.value = NO_MATRIX_FACTS; plan.value = null; void readThresholds(); void readFacts(); void readPlan() }
   watch(owner, reset)
   watch(manage, allowed => { if (!allowed) { menuOpen.value = false; add.value = false } })
   watch(selectedKey, () => { menuOpen.value = false; renameOpen.value = false; busy.value = false })
@@ -98,13 +100,52 @@ export function useAccountsSettings(part: AccountsPart) {
   })
   const counts = computed(() => partCounts(needs.value))
 
-  function accountSummary(a: OverviewAccount) {
-    const problem = problemSignins.value.find(p => p.account.id === a.id && isProblemSignin(p.signin))
-    if (problem) return `Needs verifying on ${problem.signin.computer.computer_name}`
-    const w = a.windows[0]
-    return w ? `${Math.round(w.remaining_percent)}% left · ${windowLabel(w).toLowerCase()}${w.freshness !== 'fresh' ? ' · may be out of date' : ''}` : 'Quota not reported'
+  // ---------- The quota bar (AEON-1172): one picture of every limit, from the viewer's plan and the readings ----------
+  // Today's limit, the floor and Boost come with the viewer's own plan (GET /agents/plan,
+  // daily_state); accounts outside it show their reading only, never a guessed limit.
+  const plan = ref<DailyPlanFields | null>(null)
+  let planRead: AbortController | null = null
+  async function readPlan() {
+    planRead?.abort()
+    const identity = owner.value
+    if (session.identity?.principal.kind !== 'person') { plan.value = null; return }
+    const controller = new AbortController(); planRead = controller
+    try {
+      const response = await api('/agents/plan', { signal: controller.signal })
+      if (!response.ok) throw new Error('plan')
+      const body = await response.json() as DailyPlanFields
+      if (planRead === controller && identity === owner.value) plan.value = body
+    } catch { /* a failed read keeps the last plan; without one the bars show only what was read */ }
+    finally { if (planRead === controller) planRead = null }
   }
-  function accountTone(a: OverviewAccount) { return a.signins.some(expired) || a.windows.some(w => quotaWindowWarns(w, thresholds.value, agents.now)) ? 'wait' : a.signins.some(s => status(s.computer, s.enrollment.account_id) === 'Ready') ? 'ok' : 'blocked' }
+  /** The long window is the daily one; a 5-hour reading alone still beats "not reported". */
+  const longWindow = (a: OverviewAccount) => a.windows.find(w => w.reading.window_kind !== '5h' && !w.reading.bucket) ?? a.windows.find(w => w.reading.window_kind !== '5h') ?? a.windows[0] ?? null
+  const allowed = (r: AgentAccount) => r.state === 'available' && r.ongoing_use_approved !== false
+  function quotaOf(a: OverviewAccount) {
+    const ids = new Set(a.records.map(r => r.id))
+    const daily = plan.value?.daily_state?.[a.harness]?.accounts.find(d => ids.has(d.account_id)) ?? null
+    const window = longWindow(a), record = a.records.find(r => r.id === daily?.account_id) ?? a.records[0]
+    const settings = plan.value?.daily?.[a.harness]
+    const boost = !!settings?.boost_today && Date.parse(settings.boost_today.until) > agents.now
+    const bar = quotaBar(quotaInput({ daily, window, boost, rule: record ? capacity.byAccount.get(record.id)?.limit : null, override: poolOf(a)?.override ?? '', off: !a.records.some(allowed) }))
+    const period = periodWords(window)
+    const low = a.windows.some(w => quotaWindowWarns(w, thresholds.value, agents.now))
+    const problem = problemSignins.value.find(p => p.account.id === a.id && isProblemSignin(p.signin))
+    let caption = quotaCaption(bar, { period, resetsAt: daily?.resets_at ?? window?.reading.resets_at, now: agents.now, timezone: capacity.timezone, low })
+    if (problem) caption = { text: `${caption.text.split(' · ')[0]} · needs verifying on ${problem.signin.computer.computer_name}`, tone: 'warn', icon: 'alert' }
+    return { bar, caption, label: quotaLabel(bar, `${a.vendor} · ${a.identity}`, period), atLimit: settings?.at_limit, window, daily }
+  }
+  const quotas = computed(() => new Map(accounts.value.map(a => [a.id, quotaOf(a)])))
+  const quota = (a: OverviewAccount) => quotas.value.get(a.id) ?? quotaOf(a)
+  /** The panel's Daily limit row: the harness's pace from the viewer's plan; empty outside it. */
+  function paceWords(a: OverviewAccount) {
+    const d = plan.value?.daily?.[a.harness]
+    if (!d || !quota(a).daily || !quota(a).bar.known) return ''
+    const def = plan.value?.daily_default_points ?? DEFAULT_DAILY_POINTS
+    const base = d.pace.mode === 'everything' ? 'Use everything before the reset' : `+${d.pace.points_per_day ?? def} percentage points a day${d.pace.points_per_day == null ? ', the default' : ''}`
+    const boost = d.boost_today && Date.parse(d.boost_today.until) > agents.now ? `. Boost today: up to ${pct(d.boost_today.limit_used_pct)} % used, until midnight` : ''
+    return `${base}${boost}. The same for every ${a.vendor} account; set in Capacity.`
+  }
   function computerSummary(c: PairingView) {
     if (c.computer_state === 'revoked') return computerState(c)
     if (c.computer_state === 'draining') return 'New starts blocked · running agents finish'
@@ -137,7 +178,7 @@ export function useAccountsSettings(part: AccountsPart) {
 
   // ---------- Reads: accounts, capacity and computers every 20 s; thresholds and matrix facts with them ----------
   async function refresh() {
-    void readFacts()
+    void readFacts(); void readPlan()
     await agents.refreshAccounts(); await capacity.load()
     const result = await capacity.refreshComputers()
     if (!result.ok && capacity.computersLoaded) toast('Computer status could not refresh. The previous report stays visible.', { tone: 'error' })
@@ -174,7 +215,7 @@ export function useAccountsSettings(part: AccountsPart) {
   function onFocus() { poller.tick(true); void readThresholds() }
   onMounted(() => { poller.start(true); void readThresholds(); window.addEventListener('focus', onFocus) })
   // The nav counts stay while the next part opens; Settings clears them when it closes or the person changes.
-  onBeforeUnmount(() => { generation++; thresholdTurn++; factsRead?.abort(); poller.stop(); window.removeEventListener('focus', onFocus); settingsNeeds.value = 0 })
+  onBeforeUnmount(() => { generation++; thresholdTurn++; factsRead?.abort(); planRead?.abort(); poller.stop(); window.removeEventListener('focus', onFocus); settingsNeeds.value = 0 })
 
   // ---------- Deep links ----------
   watch(() => route.hash, hash => {
@@ -259,7 +300,7 @@ export function useAccountsSettings(part: AccountsPart) {
     const enrollment = computer.enrollments.find(e => e.account_id === t.signin.enrollment.account_id)
     return enrollment && { kind: 'signin', signin: { computer, enrollment } }
   }
-  function menuKey(t: MenuTarget) { return `${selectedKey.value}/${t.kind}/${t.kind === 'account' ? `${t.account.records.map(r => `${r.id}:${r.link_revision ?? ''}`).join(',')}|${paceKey(poolOf(t.account))}|${t.account.signins.map(s => `${s.computer.computer_id}:${s.computer.revision}:${s.enrollment.account_id}`).join(',')}` : t.kind === 'signin' ? `${t.signin.computer.computer_id}:${t.signin.computer.revision}:${t.signin.enrollment.account_id}` : `${t.computer.computer_id}:${t.computer.revision}`}` }
+  function menuKey(t: MenuTarget) { return `${selectedKey.value}/${t.kind}/${t.kind === 'account' ? `${t.account.records.map(r => `${r.id}:${r.link_revision ?? ''}`).join(',')}|${t.account.signins.map(s => `${s.computer.computer_id}:${s.computer.revision}:${s.enrollment.account_id}`).join(',')}` : t.kind === 'signin' ? `${t.signin.computer.computer_id}:${t.signin.computer.revision}:${t.signin.enrollment.account_id}` : `${t.computer.computer_id}:${t.computer.revision}`}` }
   async function openMenu(t: MenuTarget, event: Event) {
     if (!manage.value) return
     menuTarget.value = t; menuAnchor.value = event.currentTarget as HTMLElement; menuContext.value = menuKey(t); menuError.value = ''
@@ -272,7 +313,7 @@ export function useAccountsSettings(part: AccountsPart) {
       menuItems.value = [{ id: 'cleanup', label: 'Finish cleanup…', disabled: !cleanupRemoval(t.computer).allowed, detail: cleanupRemoval(t.computer).reason || 'Use only after vendor sign-out or wiping the computer.', confirmation: { title: `Finish cleanup without ${t.computer.computer_name}?`, effect: 'Do this only after signing out of all devices at the vendors, or wiping the computer. PAIMOS then forgets it from this list.', keeps: 'Accounts on other computers are unaffected. Unsettled run accounting is kept and cannot be bypassed.', action: 'Finish cleanup' } }]
     } else {
       const reader = quotaReader(t.account)
-      menuItems.value = [...paceItems(t.account), { id: 'read', label: 'Read quota now', icon: 'refresh', separated: !!menuPool.value, disabled: !reader, detail: reader ? `Ask ${reader.computer.computer_name} for a fresh reading.` : 'Needs a verified sign-in with a quota reader.' }, { id: 'everywhere', label: 'Sign out everywhere…', icon: 'logout', disabled: !t.account.signins.some(s => s.enrollment.state !== 'revoked'), confirmation: { title: `Sign out of ${t.account.vendor} everywhere?`, effect: 'PAIMOS blocks this account on every paired computer at once. Local sign-ins are deleted as the computers reconnect.', keeps: 'Other accounts, the vendor subscription and vendor sessions outside PAIMOS are untouched.', action: 'Sign out everywhere' } }, removeItem(t.account)]
+      menuItems.value = [{ id: 'read', label: 'Read quota now', icon: 'refresh', disabled: !reader, detail: reader ? `Ask ${reader.computer.computer_name} for a fresh reading.` : 'Needs a verified sign-in with a quota reader.' }, { id: 'everywhere', label: 'Sign out everywhere…', icon: 'logout', disabled: !t.account.signins.some(s => s.enrollment.state !== 'revoked'), confirmation: { title: `Sign out of ${t.account.vendor} everywhere?`, effect: 'PAIMOS blocks this account on every paired computer at once. Local sign-ins are deleted as the computers reconnect.', keeps: 'Other accounts, the vendor subscription and vendor sessions outside PAIMOS are untouched.', action: 'Sign out everywhere' } }, removeItem(t.account)]
     }
     // Publish the captured record before opening. The shared popover closes on
     // context changes; changing its context and opening in one render would
@@ -305,7 +346,6 @@ export function useAccountsSettings(part: AccountsPart) {
     // (other logins), a newer computer revision or a gone sign-in all differ.
     const current = currentTarget(t)
     if (!current || menuKey(current) !== context) { fail('This record changed. Reopen its menu.'); return }
-    if (t.kind === 'account' && (id === 'plan' || id === 'sprint' || id.startsWith('hold:'))) { await pace(t.account, id); return }
     if (t.kind === 'account' && id === 'remove-account') { await removeAccount(t.account); return }
     if (id === 'rename' && t.kind === 'computer') { renameName.value = t.computer.computer_name; await nextTick(); renameOpen.value = true; return }
     if (id === 'verify' && t.kind === 'signin') { menuOpen.value = false; await verify(t.signin); return }
@@ -334,39 +374,34 @@ export function useAccountsSettings(part: AccountsPart) {
   /** A plain menu item closes before it runs: its failure is a toast, a confirmation's stays in place. */
   function fail(message: string) { if (menuOpen.value) menuError.value = message; else toast(message, { tone: 'error' }) }
 
-  // ---------- Pacing per account: Back to the plan, Sprint, Hold (AEON-786) ----------
-  // The same choices and words as the Agents page menu; they act on the pool the
-  // account paces with (its harness, or its group).
-  const menuPool = ref<PoolView>(), menuHolds = ref<HoldOption[]>([])
+  // ---------- A Sprint or Hold set before they were retired (AEON-786 → AEON-1149) ----------
+  // Nobody can set a new one; one in force shows in the account panel until it ends,
+  // with End now. It belongs to the pool the account paces with (its harness or group).
   function poolOf(a: OverviewAccount) {
     const row = a.rows[0] ?? (a.records[0] ? { id: a.records[0].id, groupId: a.records[0].group_id ?? '', harness: a.records[0].harness } : undefined)
     return row ? poolOfRow(capacity.pools, row) : undefined
   }
-  const paceKey = (pool: PoolView | undefined) => (pool ? `${pool.id}:${ownOverride(pool)}:${pool.overrideUntil}` : '')
-  function paceItems(a: OverviewAccount): SettingsMenuItem[] {
-    const pool = poolOf(a), own: Override = ownOverride(pool)
-    menuPool.value = pool; menuHolds.value = []
-    if (!pool) return []
-    const items: SettingsMenuItem[] = []
-    if (own) items.push({ id: 'plan', label: 'Back to the plan', icon: 'play', detail: `${pool.name} paces by your work week again.` })
-    if (own !== 'sprint') items.push({ id: 'sprint', label: `Sprint ${pool.name} until reset`, icon: 'bolt', detail: pool.sprintEnd ? `Agents may use everything left until ${when(pool.sprintEnd, agents.now)}.` : 'Agents may use everything left until the next reset.' })
-    if (own !== 'hold') {
-      // The times shown are the times saved: the choices are fixed when the menu opens.
-      menuHolds.value = holdOptions(capacity.schedule, agents.now)
-      items.push({ id: 'hold', label: `Hold ${pool.name}`, icon: 'pause', detail: `Agents leave ${pool.name} alone. Running steps finish.`, options: menuHolds.value.map((h, i) => ({ id: `hold:${i}`, label: h.label, hint: h.hint, name: h.name })) })
+  function heldOf(a: OverviewAccount) {
+    const pool = poolOf(a), kind = ownOverride(pool)
+    if (!pool || (kind !== 'hold' && kind !== 'sprint')) return null
+    const until = pool.overrideUntil, alone = pool.rows.length <= 1
+    return {
+      key: `${pool.id}:${kind}:${until}`, kind,
+      title: kind === 'sprint' ? 'Sprint until reset' : until ? `Held until ${when(until, agents.now, capacity.timezone)}` : 'Held until you end it',
+      text: kind === 'sprint'
+        ? `Set before Sprint was retired. Agents may use everything left on ${alone ? 'this account' : pool.name} until it resets; then the daily limit paces it again.`
+        : `Set before Hold was retired. Agents leave ${alone ? 'this account' : pool.name} alone until then; “Agents may use it” replaces Hold.`,
     }
-    return items
   }
-  async function pace(a: OverviewAccount, id: string) {
-    const pool = menuPool.value, identity = owner.value, turn = generation
-    if (!pool || paceKey(pool) !== paceKey(poolOf(a)) || busy.value) { fail('This account changed. Reopen its menu.'); return }
-    const hold = id.startsWith('hold:') ? menuHolds.value[Number(id.slice(5))] : undefined
-    if (id.startsWith('hold:') && !hold) return
-    const value: Override = id === 'sprint' ? 'sprint' : hold ? 'hold' : ''
+  /** End now removes the override with the same schedule write; the shown hold must still be the one in force. */
+  async function endHeld(a: OverviewAccount, seen: string) {
+    const identity = owner.value, turn = generation, pool = poolOf(a), held = heldOf(a)
+    if (!manage.value || busy.value) return
+    if (!pool || !held || held.key !== seen) { toast('This hold changed. The panel shows it as it is now.', { tone: 'error' }); return }
     busy.value = true
     try {
-      await capacity.setPoolOverride(pool.id, value, hold?.until)
-      if (identity === owner.value && turn === generation) toast(overrideDone(pool, value, hold?.until, agents.now))
+      await capacity.setPoolOverride(pool.id, '')
+      if (identity === owner.value && turn === generation) toast(held.kind === 'sprint' ? `${pool.name}: Sprint ended · the daily limit paces it again` : `${pool.name}: hold ended · agents may use it again`)
     } catch (error) { if (identity === owner.value && turn === generation) toast(error instanceof Error ? error.message : 'That did not save. Please try again.', { tone: 'error' }) }
     finally { if (identity === owner.value && turn === generation) busy.value = false }
   }
@@ -421,7 +456,7 @@ export function useAccountsSettings(part: AccountsPart) {
   return reactive({
     part, agents, capacity, owner, manage, computers, accounts, machines, add, open, opener, computer, account, selectedKey, title, thresholds, busy, focusSignIn,
     bindRoot, computerState, status, references, mayVerify, verificationBusy, verificationMessage, retained, vendorName, expired,
-    needs, counts, allReady, accountSummary, accountTone, computerSummary, windowLabel: (w: CapacityWindow) => windowLabel(w),
+    needs, counts, allReady, quota, paceWords, heldOf, endHeld, computerSummary, windowLabel: (w: CapacityWindow) => windowLabel(w),
     show, actAttention, refresh, verify, goPacing, bindPacing, planCard, planBusy, confirmPlan, cardSecondary,
     cleanupRemoval, renameOpen, renameName, menuOpen, menuAnchor, menuItems, menuContext, menuError, openMenu, renameComputer, menuAction,
     setAccount, primarySignin,

@@ -1,25 +1,30 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-// Per-account overrides (AEON-1037): the floor and the Resets card. Pace and Boost today
-// are per harness on the dial and replace the former account posture (AEON-1030 draft 6).
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+// Per-account overrides (AEON-1037), as rows of "Limits on this account" (AEON-1172, design
+// AEON-1149): the floor saves on change (or ⌘↵ / Ctrl+↵) with Undo, the Daily limit row
+// says the harness's pace and links Capacity, the default slot holds older limits, then
+// the Resets card. Pace and Boost today are per harness, never per account (AEON-1030).
+import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { can, onAccessChange } from '../../lib/authz'
 import { createScope, scopeOwner } from '../../lib/identityScope'
 import { getUsageOverview, putAccountUsage, putResetPolicy, type AccountUsagePolicy } from '../../lib/accountUsage'
 import type { ResetCredits, ResetPlan, ResetPolicy } from '../../lib/accountResets'
+import { toast } from '../../lib/toast'
 import { useSession } from '../../stores/session'
+import AppIcon from '../AppIcon.vue'
 import AccountResetsCard from './AccountResetsCard.vue'
-import KeyCap from '../KeyCap.vue'
 interface ResetsView { harness: string; provider?: string; credits: ResetCredits; policy: ResetPolicy; plan: ResetPlan | null }
-const props = defineProps<{ accountId: string; german?: boolean }>()
+const props = defineProps<{ accountId: string; german?: boolean; pace?: string; who?: string }>()
 const emit = defineEmits<{ changed: [] }>()
 const session = useSession(), policy = ref<AccountUsagePolicy | null>(null), resets = ref<ResetsView | null>(null), busy = ref(false), error = ref(''), floor = ref(0), readAt = ref(Date.now())
 const text = (en: string, de: string) => props.german ? de : en
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+const floorId = `floor-${useId()}`
 const key = computed(() => `${scopeOwner(session.identity)}/${props.accountId}`)
 const scope = createScope(() => session.authenticationCurrent() && can('account.read') ? key.value : '')
 // Reset policy belongs to the account's owner, like the former posture (can_set_posture = owns).
 const mayResets = computed(() => !!policy.value?.can_set_posture && session.identity?.principal.kind === 'person' && can('account.manage'))
+const mayFloor = computed(() => !!policy.value?.can_set_floor && session.identity?.principal.kind === 'person' && can('account.manage') && can('model_prefs.manage'))
 function load() {
   policy.value = null; resets.value = null; busy.value = true; error.value = ''
   void scope.run(async ({ after, signal }) => {
@@ -43,27 +48,42 @@ function load() {
     throw new Error(text('The account list is incomplete.', 'Die Kontenliste ist unvollständig.'))
   }, { failed: () => { error.value = text('Usage settings could not be loaded.', 'Nutzungseinstellungen konnten nicht geladen werden.') }, settled: () => { busy.value = false } })
 }
+// Esc puts the saved floor back; the docked panel then leaves the field. ⌘↵ / Ctrl+↵ saves at once.
 function floorKey(event: KeyboardEvent) {
-  if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); (event.target as HTMLInputElement).form?.querySelector<HTMLButtonElement>('button[type="submit"]')?.focus(); return }
+  if (event.key === 'Escape') { floor.value = policy.value?.own_floor_percent ?? 0; return }
   if (event.key !== 'Enter') return
   event.preventDefault()
-  if (!event.altKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) (event.target as HTMLInputElement).form?.requestSubmit()
+  if (!event.altKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) commitFloor()
 }
-const failed = () => { error.value = text('The change could not be confirmed. Reload before trying again.', 'Die Änderung konnte nicht bestätigt werden. Vor dem nächsten Versuch neu laden.') }
-function save(value: { floor_percent: number }) {
-  const before = policy.value
-  if (!before || busy.value || session.identity?.principal.kind !== 'person' || !can('account.manage') || !before.can_set_floor || !can('model_prefs.manage')) return
-  busy.value = true; error.value = ''
-  void scope.run(({ after, signal }) => after(putAccountUsage(before, value, signal), result => {
+const failed = () => toast(text('The change could not be confirmed. Reload before trying again.', 'Die Änderung konnte nicht bestätigt werden. Vor dem nächsten Versuch neu laden.'), { tone: 'error', action: { label: text('Reload', 'Neu laden'), run: load } })
+/** A whole percentage from 0 to 80, the server's range; anything else is said and the saved value returns. */
+function commitFloor() {
+  const before = policy.value, next = Number(floor.value)
+  if (!before || busy.value || !mayFloor.value) return
+  if (next === before.own_floor_percent) return
+  if (!Number.isInteger(next) || next < 0 || next > 80) { floor.value = before.own_floor_percent; toast(text('Use a whole percentage from 0 to 80.', 'Eine ganze Prozentzahl von 0 bis 80 verwenden.'), { tone: 'error' }); return }
+  write(before, next, previous => toast(text(`Floor saved: ${next} %.`, `Untergrenze gespeichert: ${next} %.`), { action: { label: text('Undo', 'Rückgängig'), run: () => undoFloor(previous) } }))
+}
+function undoFloor(previous: { key: string; value: number; revision: number }) {
+  const now = policy.value
+  // Undo restores only the record it was made on, as long as nothing changed it since.
+  if (!now || previous.key !== key.value || now.revision !== previous.revision) { toast(text('The floor changed since. Undo is no longer possible.', 'Die Untergrenze hat sich seither geändert. Rückgängig ist nicht mehr möglich.'), { tone: 'error' }); return }
+  write(now, previous.value, () => toast(text(`Floor restored: ${previous.value} %.`, `Untergrenze wiederhergestellt: ${previous.value} %.`)))
+}
+function write(before: AccountUsagePolicy, value: number, done: (previous: { key: string; value: number; revision: number }) => void) {
+  const owner = key.value
+  busy.value = true
+  void scope.run(({ after, signal }) => after(putAccountUsage(before, { floor_percent: value }, signal), result => {
     if (result.account_id !== before.account_id || result.binding_revision !== before.binding_revision || result.revision !== before.revision + 1) throw new Error('Save could not be confirmed')
     policy.value = result; floor.value = result.own_floor_percent; emit('changed')
-  }), { failed, settled: () => { busy.value = false } })
+    done({ key: owner, value: before.own_floor_percent, revision: result.revision })
+  }), { failed: () => { floor.value = before.own_floor_percent; failed() }, settled: () => { busy.value = false } })
 }
 // The floor and the reset policy share one account revision, so either write moves both forward.
 function setResets(next: ResetPolicy) {
   const before = policy.value, shown = resets.value
   if (!before || !shown || busy.value || !mayResets.value || shown.policy === next) return
-  busy.value = true; error.value = ''
+  busy.value = true
   void scope.run(({ after, signal }) => after(putResetPolicy(before, next, signal), result => {
     if (result.account_id !== before.account_id || result.binding_revision !== before.binding_revision || result.revision !== before.revision + 1 || result.reset_policy !== next) throw new Error('Save could not be confirmed')
     policy.value = { ...before, revision: result.revision }; readAt.value = Date.now()
@@ -76,17 +96,50 @@ const unsubscribe = onAccessChange(() => { scope.reset(); policy.value = null; r
 onBeforeUnmount(() => { scope.dispose(); unsubscribe() })
 </script>
 <template>
-  <section class="usage-policy" data-account-usage>
-    <h3>{{ text('Usage', 'Nutzung') }}</h3>
-    <div v-if="policy" class="usage-controls">
-      <form v-if="policy.can_set_floor && can('account.manage') && can('model_prefs.manage')" class="floor-controls" @submit.prevent="save({ floor_percent: floor })"><label>{{ text('Floor (%)', 'Untergrenze (%)') }}<input v-model.number="floor" type="number" min="0" max="80" step="1" required :disabled="busy" @keydown="floorKey" /></label><button type="submit" class="btn sm" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :disabled="busy">{{ text('Save floor', 'Untergrenze speichern') }}<KeyCap k="mod" /><KeyCap k="enter" /></button></form>
-      <p class="policy-note">{{ text(`Floor: ${policy.floor_percent}%. Agents never use it, not even with Use everything or Run now.`, `Untergrenze: ${policy.floor_percent} %. Agenten nutzen sie nie, auch nicht mit „Alles nutzen“ oder Jetzt starten.`) }} {{ text('Pace and Boost today are set per harness on the Agents dial and apply to every account.', 'Tempo und Boost heute werden je Harness am Agenten-Regler eingestellt und gelten für jedes Konto.') }}</p>
-      <AccountResetsCard v-if="resets" :account-id="policy.account_id" :harness="resets.harness" :provider="resets.provider" :credits="resets.credits" :policy="resets.policy" :plan="resets.plan" :now="readAt" :can-set="mayResets" :busy="busy" @set="setResets" />
-    </div>
-    <div class="policy-feedback" aria-live="polite"><p v-if="error" role="alert">{{ error }} <button type="button" class="btn sm" @click="load">{{ text('Reload', 'Neu laden') }}</button></p><p v-else-if="!policy" role="status">{{ busy ? text('Loading usage settings…', 'Nutzungseinstellungen werden geladen…') : text('Usage settings are private.', 'Nutzungseinstellungen sind privat.') }}</p></div>
-  </section>
+  <div class="usage-policy" data-account-usage :aria-busy="busy">
+    <p v-if="who" class="who">{{ who }}</p>
+    <template v-if="policy">
+      <div class="lim" data-limit="floor">
+        <span class="lbl"><b :id="floorId">{{ text('Floor', 'Untergrenze') }}</b><small>{{ text(`Agents never use the last ${policy.floor_percent} % of this account, not even with Use everything or Boost today.`, `Agenten nutzen die letzten ${policy.floor_percent} % dieses Kontos nie, auch nicht mit „Alles nutzen“ oder Boost heute.`) }}</small></span>
+        <span v-if="mayFloor" class="pct"><input v-model.number="floor" class="field n" type="number" min="0" max="80" step="1" inputmode="numeric" :aria-labelledby="floorId" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" :readonly="busy" @change="commitFloor" @keydown="floorKey" />%</span>
+        <span v-else class="pct"><b>{{ policy.floor_percent }} %</b></span>
+      </div>
+      <div v-if="pace" class="lim" data-limit="daily">
+        <span class="lbl"><b>{{ text('Daily limit', 'Tageslimit') }}</b><small>{{ pace }}</small></span>
+        <RouterLink class="go" to="/settings/capacity" :aria-label="text('Daily limit, in Capacity', 'Tageslimit, unter Kapazität')">{{ text('Capacity', 'Kapazität') }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
+      </div>
+      <slot />
+      <AccountResetsCard v-if="resets" class="rs" :account-id="policy.account_id" :harness="resets.harness" :provider="resets.provider" :credits="resets.credits" :policy="resets.policy" :plan="resets.plan" :now="readAt" :can-set="mayResets" :busy="busy" @set="setResets" />
+    </template>
+    <p v-else-if="error" class="policy-feedback" role="alert">{{ error }} <button type="button" class="btn sm" @click="load">{{ text('Reload', 'Neu laden') }}</button></p>
+    <p v-else class="policy-feedback quiet" role="status">{{ busy ? text('Loading usage settings…', 'Nutzungseinstellungen werden geladen…') : text('Usage settings are private.', 'Nutzungseinstellungen sind privat.') }}</p>
+  </div>
 </template>
 <style scoped>
-.usage-policy { display: grid; gap: 10px; padding-block: 16px; border-block-end: 1px solid var(--line); }.usage-policy h3 { font-size: 14px; }.usage-controls { display: grid; gap: 10px; }.floor-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; }.floor-controls label { display: grid; gap: 6px; font-size: 13px; }.floor-controls input { width: 7ch; min-height: 44px; background: var(--surface-raised); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px; }.policy-note { min-height: 4.5em; font-size: 12px; line-height: 1.5; color: var(--ink-2); }.policy-feedback { height: 6em; overflow: auto; font-size: 12px; color: var(--danger); }
+.usage-policy { display: grid; container: usage / inline-size; }
+.who { margin: 4px 0 2px; font-size: 12px; font-weight: 600; color: var(--ink-2); overflow-wrap: anywhere; }
+.lim { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 16px; min-height: 60px; padding: 8px 0; }
+.lim + .lim { border-top: 1px solid var(--line); }
+.lbl { display: grid; gap: 2px; min-width: 0; }
+.lbl b { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.lbl small { font-size: 12.5px; line-height: 1.45; color: var(--ink-3); }
+.pct { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--ink-2); }
+.pct .field.n { width: 58px; height: 36px; padding: 0 4px; text-align: center; font: 600 14px/1 var(--font); }
+.pct b { color: var(--ink); font-weight: 600; }
+.go { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 32px; padding: 0 6px; margin-right: -6px; border-radius: 8px; color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.go:hover { color: var(--teal-ink); background: var(--row-hover); }
+.go:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.rs { margin: 4px 0 8px; }
+.policy-feedback { padding: 8px 0; font-size: 12.5px; color: var(--danger); }
+.policy-feedback.quiet { color: var(--ink-3); }
+@container usage (max-width: 420px) {
+  .lim { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+  .lim > .pct, .lim > .go { justify-self: start; }
+  .go { margin-left: -6px; }
+}
+@media (pointer: coarse) {
+  .pct .field.n { height: 44px; min-height: 44px; }
+  .go { min-height: 44px; min-width: 44px; }
+}
 </style>
 <style scoped src="../../styles/settingsButtons.css"></style>

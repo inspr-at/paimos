@@ -57,7 +57,8 @@ a.att-name:focus-visible { outline: none; box-shadow: var(--focus-ring); border-
 .att-row p { grid-column: 2; grid-row: 2; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
 .att-row > .btn { grid-column: 3; grid-row: 1; justify-self: end; }
 .calm .att-name { color: var(--ink-2); font-weight: 600; }.calm p { color: var(--ink-3); }
-@container needs-you (max-width: 520px) { .att-row p { grid-row: 3; } .att-row { grid-template-columns: 32px minmax(0, 1fr); padding: 14px; }.att-row > .btn { grid-column: 2; grid-row: 2; justify-self: start; margin-top: 10px; min-height: 44px; } }
+/* Phone (Tick, AEON-1172): title, then detail, then the action button below them. */
+@container needs-you (max-width: 520px) { .att-row { grid-template-columns: 32px minmax(0, 1fr); padding: 14px; }.att-row > .btn { grid-column: 2; grid-row: 3; justify-self: start; margin-top: 10px; min-height: 44px; } }
 @media (pointer: coarse) { .btn, a.att-name { min-height: 44px; } a.att-name { display: flex; align-items: center; } }
 </style>
 <style scoped src="../../styles/settingsButtons.css"></style>

@@ -8,3 +8,43 @@
 .pc-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 @media(max-width:720px) { .plan-card p { flex-basis: 100%; }.pc-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; margin: 0; }.pc-actions .btn { min-height: 44px; }.list-row { grid-template-columns: 28px minmax(0,1fr) 16px; gap: 4px 10px; }.list-row > .st { grid-column: 2; }.list-row > svg:last-child { grid-column: 3; grid-row: 1/3; }.facts { grid-template-columns: repeat(2,minmax(0,1fr)); }.matrix .corner { width: 34%; }.mx-head { gap: 6px; padding: 6px; }.mx-cell { gap: 6px; padding: 6px; }.si-row { grid-template-columns: 24px minmax(0,1fr) 34px; gap: 4px 8px; } }
 @media(pointer:coarse) { .btn,.icon-btn,.name-link { min-height: 44px; }.icon-btn { width: 44px; }.si-row { grid-template-columns: 24px minmax(0,1fr) 44px; } }
+/* AEON-1172 (design AEON-1149): the account list with its quota bars, and the panel's Quota and Limits. */
+.acc-zone { container: acc-list / inline-size; }
+.acc-lh { display: grid; grid-template-columns: 24px minmax(0,1.15fr) minmax(0,1fr) 16px; column-gap: 16px; align-items: end; padding: 0 12px 8px; }
+.acc-lh .eh { grid-column: 1/3; font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+.acc-lh .legend { grid-column: 3/5; }
+.list-row.acc { grid-template-columns: 24px minmax(0,1.15fr) minmax(0,1fr) 16px; column-gap: 16px; min-height: 68px; padding: 10px 12px; }
+.list-row.acc > svg:last-child { grid-column: 4; grid-row: 1; color: var(--ink-3); }
+.lr-who small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ar-q { display: grid; gap: 7px; min-width: 0; }
+.ar-q .cap { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
+.ar-q .cap svg { display: inline-block; vertical-align: -2px; margin-right: 5px; }
+.ar-q .cap.warn { color: var(--warn-ink); font-weight: 600; }
+@container acc-list (max-width: 560px) {
+  .acc-lh { display: none; }
+  .list-row.acc { grid-template-columns: 24px minmax(0,1fr) 16px; row-gap: 8px; }
+  .list-row.acc > .ar-q { grid-column: 2; grid-row: 2; }
+  .list-row.acc > svg:last-child { grid-column: 3; grid-row: 1/span 2; }
+  .ar-q .cap { white-space: normal; overflow: visible; }
+}
+.q-legend { margin-top: 12px; }
+.p-say { margin-top: 12px; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
+.p-say b { color: var(--ink); font-weight: 600; }
+.p-win { display: grid; gap: 6px; margin: 12px 0 0; }
+.p-win > div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 2px 12px; font-size: 12.5px; color: var(--ink-2); }
+.p-win dt { font: inherit; text-transform: none; color: inherit; }
+.p-win dd { margin: 0; }
+.p-win b { color: var(--ink); font-weight: 600; }
+.p-win dd.stale { color: var(--warn-ink); }
+.lim-sec .lim { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; column-gap: 16px; min-height: 60px; padding: 8px 0; }
+.lim-sec .lim + .lim, .lim-sec [data-account-usage] + .lim, .lim-sec [data-account-usage] + [data-account-usage] { border-top: 1px solid var(--line); }
+.lim-sec .lim.legacy { margin: 6px 0; padding: 10px 12px; border-radius: 12px; background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); }
+.lim-sec .lim.legacy + .lim, .lim-sec .lim + .lim.legacy, .lim-sec [data-account-usage] + .lim.legacy { border-top: 0; }
+.lim-sec .lbl { display: grid; gap: 2px; min-width: 0; }
+.lim-sec .lbl b { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.lim-sec .lbl small { font-size: 12.5px; line-height: 1.45; color: var(--ink-3); }
+.lim-sec .legacy .lbl small { color: var(--ink-2); }
+.two-btn { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.lim-sec { container: lim / inline-size; }
+@container lim (max-width: 420px) { .lim-sec .lim { grid-template-columns: minmax(0,1fr); row-gap: 8px; } .lim-sec .lim > .btn, .lim-sec .lim > .switch, .lim-sec .lim > .two-btn { justify-self: start; } }
+@media(pointer:coarse) { .list-row.acc { min-height: 68px; }.lim-sec .lim .btn { min-height: 44px; }.ref-row { min-height: 52px; } }
