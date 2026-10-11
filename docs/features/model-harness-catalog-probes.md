@@ -13,7 +13,11 @@ pending, probing, fresh, limited, unsupported, stale or timeout states. Reportin
 can be disabled through the existing `agent_reports_enabled` setting.
 
 Both probe endpoints require `models.report` and admit paired runtime keys for
-the exact claim and UUID report routes. Claims use bounded account keyset pages,
+the exact claim and UUID report routes. Publication retains
+`POST /api/models/harness-probes/{accountId}` through a guarded router fallback
+that accepts only the `harness-probes` collection; literal claim, proposal and
+person-only retirement routes keep precedence and their own permissions.
+Claims use bounded account keyset pages,
 one-minute retry leases, exact daemon generations and account binding revisions.
 Reports recheck the exact live agent
 key and `models.report` permission under tenant, tree, pairing, catalog and

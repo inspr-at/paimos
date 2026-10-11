@@ -51,8 +51,13 @@ func TestHarnessProbeRoutesThroughPairedRuntimeMiddleware(t *testing.T) {
 		t.Fatal(err)
 	}
 	mux := http.NewServeMux()
+	// Mount the intersecting retirement route as production does. Probe
+	// publication uses a guarded fallback, while retirement stays person-only.
+	mux.HandleFunc("POST /api/models/{id}/retire", func(http.ResponseWriter, *http.Request) {
+		t.Fatal("paired runtime key reached person-only retirement")
+	})
 	reached := 0
-	for _, pattern := range []string{"POST /api/models/harness-probes/claim", "POST /api/models/harness-probes/{accountId}"} {
+	for _, pattern := range []string{"POST /api/models/harness-probes/claim", "POST /api/models/{collection}/{accountId}"} {
 		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 			p, ok := tenant.PrincipalFrom(r.Context())
 			if !ok || p.Kind != tenant.Agent || p.ID != key.PrincipalID || p.KeyID != key.ID {
@@ -87,6 +92,9 @@ func TestHarnessProbeRoutesThroughPairedRuntimeMiddleware(t *testing.T) {
 		{http.MethodPost, "/api/models/harness-probes/not-a-uuid"},
 		{http.MethodPost, paths[0] + "/extra"},
 		{http.MethodDelete, paths[1]},
+		{http.MethodPost, "/api/models/harness-probes/retire"},
+		{http.MethodPost, "/api/models/other/11111111-1111-4111-8111-111111111111"},
+		{http.MethodPost, paths[1] + "/retire"},
 		{http.MethodPost, "/api/models/reports"},
 	} {
 		if w := request(route.method, route.path); w.Code != http.StatusForbidden {

@@ -85,7 +85,16 @@ func (m *Module) mount(mux *http.ServeMux, legacy http.HandlerFunc) {
 	mux.HandleFunc("PUT /api/models/refresh/credentials/{accountId}", m.putCredential)
 	mux.HandleFunc("GET /api/models/catalog", m.catalog)
 	mux.HandleFunc("POST /api/models/harness-probes/claim", m.claimHarnessProbes)
-	mux.HandleFunc("POST /api/models/harness-probes/{accountId}", m.reportHarnessProbe)
+	// A literal harness-probes segment plus an account wildcard conflicts with
+	// {id}/retire. This fallback keeps the public probe path and lets the more
+	// specific retirement, proposal and claim routes retain precedence.
+	mux.HandleFunc("POST /api/models/{collection}/{accountId}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("collection") != "harness-probes" {
+			http.NotFound(w, r)
+			return
+		}
+		m.reportHarnessProbe(w, r)
+	})
 	mux.HandleFunc("GET /api/models", m.list)
 	mux.HandleFunc("POST /api/models", m.create)
 	mux.HandleFunc("PUT /api/models/routes", m.replace)

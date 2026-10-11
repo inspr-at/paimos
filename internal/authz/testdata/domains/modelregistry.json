@@ -41,7 +41,7 @@
     "POST /api/models": "models.manage",
     "POST /api/models/proposals/accept": "models.manage",
     "POST /api/models/harness-probes/claim": "models.report",
-    "POST /api/models/harness-probes/{accountId}": "models.report",
+    "POST /api/models/{collection}/{accountId}": "models.report",
     "POST /api/models/refresh": "models.refresh",
     "POST /api/models/reports": "models.report",
     "POST /api/models/{id}/retire": "models.manage",
