@@ -456,8 +456,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .panel-head { padding: calc(6px + env(safe-area-inset-top)) 8px 10px 16px; }
   .head-actions { flex-wrap: wrap; }
   .head-actions .spacer { flex-basis: 100%; height: 0; }
-  /* Up to four quiet controls share one row on phones. */
-  .head-actions .btn { flex: 1 1 0; min-width: 0; min-height: 44px; padding-inline: 4px; }
+  /* Up to four quiet controls share one row on phones; none shrinks under its label, so one that
+     would wraps to the next row instead of spilling past the sheet's edge (AEON-1062). */
+  .head-actions .btn { flex: 1 1 0; min-width: max-content; min-height: 44px; padding-inline: 4px; }
   .head-top .icon-btn { width: 40px; height: 40px; }
   /* Compact only after entering the composer. Keep that frame while focus
      moves to thread actions, so focusing Retry/Copy cannot move the click. */
