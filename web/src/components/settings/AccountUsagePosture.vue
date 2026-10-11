@@ -5,7 +5,7 @@
 // says the harness's pace and links Capacity, the default slot holds older limits, then
 // the Resets card. Pace and Boost today are per harness, never per account (AEON-1030).
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { createScope, scopeOwner } from '../../lib/identityScope'
 import { getUsageOverview, putAccountUsage, putResetPolicy, type AccountUsagePolicy } from '../../lib/accountUsage'
 import type { ResetCredits, ResetPlan, ResetPolicy } from '../../lib/accountResets'
@@ -26,7 +26,8 @@ const scope = createScope(() => session.authenticationCurrent() && can('account.
 const mayResets = computed(() => !!policy.value?.can_set_posture && session.identity?.principal.kind === 'person' && can('account.manage'))
 const mayFloor = computed(() => !!policy.value?.can_set_floor && session.identity?.principal.kind === 'person' && can('account.manage') && can('model_prefs.manage'))
 function load() {
-  policy.value = null; resets.value = null; busy.value = true; error.value = ''
+  const draft = floor.value, keepDraft = !!policy.value && draft !== policy.value.own_floor_percent
+  busy.value = true; error.value = ''
   void scope.run(async ({ after, signal }) => {
     let cursor: string | undefined
     // The server bounds the tenant to 1024 accounts; never loop on an invalid cursor.
@@ -34,7 +35,9 @@ function load() {
       const next = await after(getUsageOverview(cursor, signal), value => {
         const row = value.accounts.find(account => account.account_id === props.accountId)
         if (row) {
-          policy.value = row.usage_policy ?? null; floor.value = row.usage_policy?.own_floor_percent ?? 0; readAt.value = Date.now()
+          policy.value = row.usage_policy ?? null
+          if (!keepDraft && floor.value === draft) floor.value = row.usage_policy?.own_floor_percent ?? 0
+          readAt.value = Date.now()
           resets.value = row.usage_policy && row.resets ? { harness: row.harness ?? '', provider: row.provider, credits: row.resets, policy: row.reset_policy ?? 'suggest', plan: row.reset_plan ?? null } : null
           return undefined
         }
@@ -91,8 +94,8 @@ function setResets(next: ResetPolicy) {
     emit('changed')
   }), { failed, settled: () => { busy.value = false } })
 }
-watch(key, () => { scope.reset(); load() }, { immediate: true, flush: 'sync' })
-const unsubscribe = onAccessChange(() => { scope.reset(); policy.value = null; resets.value = null; busy.value = false; if (can('account.read')) load() })
+watch(key, () => { scope.reset(); policy.value = null; resets.value = null; floor.value = 0; load() }, { immediate: true, flush: 'sync' })
+const unsubscribe = onAccessRevalidate({ reset: () => { scope.reset(); policy.value = null; resets.value = null; busy.value = false; floor.value = 0; error.value = '' }, refresh: () => { if (can('account.read') && !busy.value) load() } })
 onBeforeUnmount(() => { scope.dispose(); unsubscribe() })
 </script>
 <template>
