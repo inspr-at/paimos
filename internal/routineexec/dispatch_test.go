@@ -641,7 +641,7 @@ func TestLeadRuntimeClaimReplayAndAbandon(t *testing.T) {
 	for _, mode := range []string{"expired_reply", "unlaunched", "started", "settlement_failure", "unsettled"} {
 		t.Run(mode, func(t *testing.T) {
 			f := setup(t, "off", false)
-			f.agent.Scopes = []string{"harness.worker", "run.telemetry"}
+			f.agent.Scopes = []string{"harness.worker", "run.claim", "run.telemetry"}
 			// A real scoped key is required by the handler's final-write auth boundary.
 			keySecret := "fixture-lead-runtime-proof"
 			keyHash := sha256.Sum256([]byte(keySecret))

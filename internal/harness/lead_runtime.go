@@ -307,6 +307,9 @@ func (m *Module) claimLeadRuntime(r *http.Request, tx pgx.Tx, p tenant.Principal
 		if json.Unmarshal(raw, &saved) != nil || !runtimeProof(saved, in) || saved.Launch.Grant.PrincipalID != p.ID || l.SessionID == nil || *l.SessionID != saved.Launch.SessionID || l.Generation != saved.Launch.Generation {
 			return nil, workorders.Fail(409, "lead_writer_conflict")
 		}
+		if err = authz.RequireTx(ctx, tx, p, "run.claim", authz.Scope{ProjectID: in.Demand.ProjectID}); err != nil {
+			return nil, err
+		}
 		// Recovery returns immutable evidence even after expiry/revocation. It
 		// never renews the grant; preflight remains required before native start.
 		return saved.Launch, nil
