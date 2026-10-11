@@ -603,8 +603,13 @@ func TestRoutineSupervisorReleasesObsoleteRouting(t *testing.T) {
 			if err := s.StartRun(t.Context(), next); err != nil {
 				t.Fatal("one routine cleanup failure blocked an unrelated run", err)
 			}
-			if requests := s.adapters[Codex].(*routineQualifiedFixture).requests; len(requests) != 1 || requests[0].Workspace == intent.Workspace || len(api.claims) != 1 {
-				t.Fatal("unrelated run did not start in its own checkout", requests, api.claims)
+			requests := s.adapters[Codex].(*routineQualifiedFixture).requests
+			claimed := len(api.claims) > 0
+			for _, claim := range api.claims {
+				claimed = claimed && claim.LaunchID == nextGrant.LaunchID
+			}
+			if len(requests) != 1 || requests[0].Workspace == intent.Workspace || !claimed {
+				t.Fatal("unrelated run did not start in its own checkout", len(requests), api.claims)
 			}
 		})
 	}
