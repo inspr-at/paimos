@@ -78,15 +78,21 @@ test('attention row links and both open actions use imported and native canonica
     await expect(ticket.locator('.attention-title')).toHaveText(node.title)
     const guard = await controlStability(page, { search: page.getByRole('searchbox'), row: ticket, actions: ticket.locator('.action-stack') })
     await guard.check(async () => { await ticket.hover() })
-    guard.done()
     // Capture the real new-tab address without opening an unmocked second page.
     await page.evaluate(() => {
       const opened: string[] = []
       Object.assign(window, { attentionOpened: opened })
       window.open = (url?: string | URL) => { opened.push(String(url)); return null }
     })
-    await ticket.getByRole('button', { name: `Open ${node.key} in a new tab` }).click()
-    expect(await page.evaluate(() => (window as unknown as { attentionOpened: string[] }).attentionOpened)).toEqual([path])
+    // Needs attention hides the shared table's hover buttons; its supported
+    // new-tab action is Ctrl-click / Cmd-click on the row title.
+    for (const modifier of ['Control', 'Meta'] as const) {
+      await guard.check(async () => { await ticket.locator('.attention-title').click({ modifiers: [modifier] }) })
+      await expect(page).toHaveURL(/\/tickets\?view=needs-attention$/)
+    }
+    expect(await page.evaluate(() => (window as unknown as { attentionOpened: string[] }).attentionOpened)).toEqual([path, path])
+    await expect(page.getByRole('toolbar', { name: 'Selected tickets' })).toHaveCount(0)
+    guard.done()
     await ticket.locator('.attention-title').click()
     await expect(page).toHaveURL(new RegExp(`${path}$`))
   }
@@ -619,7 +625,7 @@ test('a phone tap opens the ticket', async ({ page }) => {
  await page.goto('/tickets?view=needs-attention')
  await expect(first(page)).toBeVisible()
  await first(page).locator('.attention-title').click()
- await expect(page).toHaveURL(/\/projects\/AEON\/tickets\/AEON-10/)
+ await expect(page).toHaveURL(/\/p\/AEON\/AEON-10$/)
  await expect(page.getByRole('toolbar', { name: 'Selected tickets' })).toHaveCount(0)
 })
 
