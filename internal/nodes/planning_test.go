@@ -275,13 +275,14 @@ func planningSetup(t *testing.T) planningWorld {
 	customKind(t, admin, "task", "task")
 	w := planningWorld{admin: admin, nodes: map[string]nodeJSON{}}
 	w.root = mustNode(t, admin, `{"kind_id":"`+kindBySlug(t, admin, "project").ID+`","title":"Planning"}`)
-	// Registry: build-hard → Codex astra xhigh; build → Claude opus high;
-	// mechanical has no route.
+	// This historical planning fixture owns its display names and calibrated
+	// effort levels. Discovery cannot supply those pins or inferred metadata.
+	// Registry: build-hard → Codex astra xhigh; build → Claude opus high.
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles (tenant_id, slug, version, harness, family, model, effort, tier)
-            VALUES ($1,'codex-astra-xhigh','2','codex','openai','gpt-6-astra','xhigh','frontier'),
-                   ($1,'claude-opus-high','2','claude','anthropic','opus','high','strong'),
-                   ($1,'codex-sol-xhigh','2','codex','openai','gpt-6-sol','xhigh','strong')`, admin.TenantID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles (tenant_id, slug, version, harness, family, model, effort, tier,registered_effort_level,display_overrides)
+            VALUES ($1,'codex-astra-xhigh','2','codex','openai','gpt-6-astra','xhigh','frontier',4,'{"display_name":"Codex Astra","short_name":"Astra","model_version":"6"}'),
+                   ($1,'claude-opus-high','2','claude','anthropic','opus','high','strong',3,'{"display_name":"Claude Opus","short_name":"Opus","model_version":""}'),
+                   ($1,'codex-sol-xhigh','2','codex','openai','gpt-6-sol','xhigh','strong',4,'{"display_name":"Codex Sol","short_name":"Sol","model_version":"6"}')`, admin.TenantID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes (tenant_id, role, priority, profile_id)

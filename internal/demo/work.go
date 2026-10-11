@@ -61,6 +61,25 @@ func (s *seeder) work() error {
 	if err := s.api.do(s.admin, "", http.MethodGet, "/api/models", nil, http.StatusOK, &profiles, nil); err != nil {
 		return fmt.Errorf("models: %w", err)
 	}
+	// A fresh registry advertises identities only. The demo owns its fictional
+	// history pins; registering them through the ordinary handler keeps the
+	// grants and events inside the seed transaction without inventing facts
+	// about a provider model. Existing configured registries retain their pins.
+	if len(profiles) == 0 {
+		for _, pin := range []struct{ harness, family string }{
+			{"codex", "openai"}, {"claude", "anthropic"}, {"grok", "xai"},
+		} {
+			var profile modelregistry.Profile
+			if err := s.api.do(s.admin, "", http.MethodPost, "/api/models", map[string]any{
+				"slug": "demo-" + pin.harness + "-fictional", "version": "1", "harness": pin.harness,
+				"family": pin.family, "model": "demo-" + pin.harness, "effort": "default", "tier": "standard",
+				"note": "Fictional demo history; no provider model or runner executed.",
+			}, http.StatusCreated, &profile, nil); err != nil {
+				return fmt.Errorf("fictional %s model: %w", pin.harness, err)
+			}
+			profiles = append(profiles, profile)
+		}
+	}
 	for _, work := range []demoWork{
 		{s.scribe, s.scribeKey, "codex", "lumen-scribe", "Lumen desk", s.lumenID, s.ids["LT-1"],
 			"Lumen lantern pass", "Review the fictional lantern label and report the result.", "lantern-review/SKILL.md",
