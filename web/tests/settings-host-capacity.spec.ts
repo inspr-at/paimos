@@ -9,7 +9,9 @@ import { expectStableControls } from './helpers/stable'
 import { defaultHostPolicy } from '../src/lib/hostCapacity'
 
 test.use({ timezoneId: TZ })
-async function setup(page: Page, manage = true, longText = false, expired = longText) {
+// AEON-1171: computers live in Settings › Computers, accounts and low-quota warnings in Settings › Accounts.
+const ACCOUNTS = '/settings/accounts', COMPUTERS = '/settings/computers'
+async function setup(page: Page, manage = true, longText = false, expired = longText, path = COMPUTERS) {
   await page.clock.setSystemTime(NOW)
   await mockWork(page,fixtures(),{admin:true})
   const world = capacityWorld(), data = agentData({ me: me.id, now: NOW, projects: {}, tickets: {}, nodes: {} })
@@ -44,8 +46,8 @@ async function setup(page: Page, manage = true, longText = false, expired = long
     if (r.request().method() === 'PUT') { const b = r.request().postDataJSON(); writes.push(b); thresholds = {early_percent:b.early_percent,urgent_percent:b.urgent_percent} }
     return r.fulfill({json:thresholds})
   })
-  await page.goto('/settings/accounts')
-  await expect(page.locator('[data-computer]').first()).toBeVisible()
+  await page.goto(path)
+  await expect(page.locator(path === COMPUTERS ? '[data-computer]' : '[data-account]').first()).toBeVisible()
   return {world,writes,setFail:(value:boolean)=>{fail=value}}
 }
 async function computer(page: Page) {
@@ -88,6 +90,7 @@ for (const width of [390,1024,1440]) for (const theme of ['light','dark'] as con
       await page.screenshot({path:`${shots}/computer-${width}-${theme}.png`,fullPage:true})
       await pane.getByRole('button',{name:'Close details'}).click()
       await page.screenshot({path:`${shots}/lists-${width}-${theme}.png`,fullPage:true})
+      await page.goto(ACCOUNTS)
       await page.locator('[data-account]').first().click()
       const accountPane=page.getByRole('dialog',{name:'Codex'});await expect(accountPane).toBeVisible()
       await page.screenshot({path:`${shots}/account-${width}-${theme}.png`,fullPage:true})
@@ -96,6 +99,7 @@ for (const width of [390,1024,1440]) for (const theme of ['light','dark'] as con
       await expect(page.getByRole('dialog',{name:'Low-quota warnings'})).toBeVisible()
       await page.screenshot({path:`${shots}/quota-warnings-${width}-${theme}.png`,fullPage:true})
       await page.getByRole('dialog',{name:'Low-quota warnings'}).getByRole('button',{name:'Cancel'}).click()
+      await page.goto(COMPUTERS)
       await page.locator('[data-computer]').last().click()
       await expect(page.getByRole('dialog',{name:'studio'})).toBeVisible()
       await expect(page.getByRole('dialog',{name:'studio'}).getByRole('button',{name:'Finish cleanup…'})).toBeDisabled()
@@ -111,15 +115,16 @@ test('failed capacity apply stays unsaved and reports the actual failure',async(
   await expect(pane.getByRole('button',{name:/^Apply/})).toBeEnabled()
 })
 test('members see account and computer details without mutation controls',async({page}) => {
-  await setup(page,false);await expect(page.locator('.quota-line')).toContainText('early 10 %, urgent 3 %')
+  await setup(page,false,false,false,ACCOUNTS);await expect(page.locator('.quota-line')).toContainText('early 10 %, urgent 3 %')
   await expect(page.locator('.quota-line').getByRole('button',{name:'Change'})).toHaveCount(0)
+  await page.goto(COMPUTERS)
   const pane = await computer(page)
   await expect(pane.getByRole('radio')).toHaveCount(0);await expect(pane.getByRole('button',{name:/^Apply/})).toHaveCount(0)
   await expect(pane.getByRole('button',{name:/More/})).toHaveCount(0)
   await expect(pane.locator('.read-policy')).toContainText('Off')
 })
 test('quota warning popover submits with platform modifier and Undo restores its snapshot',async({page}) => {
-  const s = await setup(page);await page.locator('.quota-line').getByRole('button',{name:'Change'}).click()
+  const s = await setup(page,true,false,false,ACCOUNTS);await page.locator('.quota-line').getByRole('button',{name:'Change'}).click()
   const form = page.getByRole('dialog',{name:'Low-quota warnings'})
   await form.getByRole('spinbutton',{name:'Early notice (%)'}).fill('20');await form.getByRole('spinbutton',{name:'Urgent notice (%)'}).fill('5')
   const mac = await page.evaluate(()=>/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
@@ -149,7 +154,7 @@ test('Needs you verifies the expired sign-in once and reports a failed request h
 })
 
 test('sign-out confirmation names its scope and a failed write keeps the reviewed account open',async({page}) => {
-  const s=await setup(page), requests: unknown[]=[]
+  const s=await setup(page,true,false,false,ACCOUNTS), requests: unknown[]=[]
   await page.route('**/api/agent-pairing/accounts/sign-out',r=>{
     requests.push(r.request().postDataJSON())
     return r.fulfill({status:409,json:{error:'sign-ins changed'}})
@@ -173,7 +178,7 @@ test('sign-out confirmation names its scope and a failed write keeps the reviewe
 // panel follows it, and Sign out everywhere then names every sign-in.
 test('a matching login joins the shared quota from the account panel and Sign out everywhere covers it',async({page}) => {
   const errors=watchErrors(page)
-  const s=await setup(page), fingerprint='ab'.repeat(32)
+  const s=await setup(page,true,false,false,ACCOUNTS), fingerprint='ab'.repeat(32)
   const [main,studio]=[s.world.accounts.find(a=>a.label==='Main')!,s.world.accounts.find(a=>a.label==='Studio')!]
   for (const a of s.world.accounts.filter(a=>a.harness==='codex')) Object.assign(a,{quota_fingerprint:fingerprint,quota_pool_fingerprint:''})
   const pools: unknown[]=[], signouts: unknown[]=[]

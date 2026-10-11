@@ -216,7 +216,7 @@ test('verification errors stay honest and changing computer discards pending fee
   })
   // The same approved account can be enrolled on multiple computers. The
   // clicked attention row must request only its own computer's verification.
-  await page.goto('/settings/accounts')
+  await page.goto('/settings/computers')
   const attention = page.locator(`[data-need="verify:${other.computer_id}:${ACCOUNTS.claude}"]`)
   const attentionVerify = attention.locator('.verify-button')
   const attentionGuard = await controlStability(page, { attentionVerify })

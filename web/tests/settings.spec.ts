@@ -316,7 +316,7 @@ test('settings layout evidence in light and dark at phone, tablet and desktop si
     await page.setViewportSize({ width, height: 900 })
     for (const theme of ['light', 'dark']) {
       await page.addInitScript(value => localStorage.setItem('aeon-theme', value), theme)
-      for (const section of ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'kinds', 'access', 'agents', 'agent-rules', 'accounts', 'autopilot', 'business', 'portal']) {
+      for (const section of ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'kinds', 'access', 'agents', 'agent-rules', 'accounts', 'computers', 'capacity', 'autopilot', 'business', 'portal']) {
         await page.goto(`/settings/${section}`)
         const audience = section === 'kinds' ? page.locator('.kinds-section > .who') : page.locator('.body > .who')
         await expect(audience).toBeVisible()
