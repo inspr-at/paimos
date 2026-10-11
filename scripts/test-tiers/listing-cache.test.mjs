@@ -134,6 +134,36 @@ test('AEON-1200 native Go cache survives tier registration and web edits while t
   }
 })
 
+test('AEON-1200 static typecheck scratch configs cannot invalidate a concurrent native Go listing', t => {
+  const base = temporary(t), directory = temporary(t)
+  tree(base)
+  mkdirSync(resolve(base, 'web/src'), { recursive: true })
+  writeFileSync(resolve(base, 'web/static_stub.go'), 'package web\n')
+  writeFileSync(resolve(base, 'web/src/view.ts'), '// view\n')
+  command('git', ['add', '.'], { cwd: base })
+  const inventory = { imports: { web: [], 'internal/a': ['web'], 'internal/b': [] } }, identity = { module: 'fixture' }
+  const initial = inputSnapshot(base, command), keys = goPackageKeys(initial, inventory, identity)
+  const calls = [], list = owners => {
+    calls.push(owners)
+    return Object.fromEntries(owners.map(owner => [owner, ['TestKnown']]))
+  }
+  const golden = cachedGoList(keys, list, { directory })
+  // ci-static deliberately keeps these generated configs below web/ for
+  // TypeScript module resolution; they are not source or Go build inputs.
+  const scratch = resolve(base, 'web/.ci-static-typecheck-fixture')
+  mkdirSync(scratch)
+  for (const name of ['app', 'node', 'tsconfig']) writeFileSync(resolve(scratch, `${name}.json`), '{}')
+  const during = inputSnapshot(base, command)
+  assert.deepEqual(during, initial, 'reserved typecheck output is absent from the source snapshot')
+  assert.deepEqual(cachedGoList(goPackageKeys(during, inventory, identity), list, { directory }), golden)
+  assert.equal(calls.length, 1, 'creating static-check output does not compile a Go test binary')
+  rmSync(scratch, { recursive: true })
+  assert.deepEqual(inputSnapshot(base, command), initial, 'scratch cleanup also leaves discovery stable')
+  writeFileSync(resolve(base, 'web/src/view.ts'), '// changed view\n')
+  cachedGoList(goPackageKeys(inputSnapshot(base, command), inventory, identity), list, { directory })
+  assert.deepEqual(calls.at(-1), ['internal/a', 'web'], 'ordinary web package content still invalidates its consumer')
+})
+
 test('AEON-1200 source discovery refreshes only an edited package and retains current active imports', t => {
   const base = temporary(t), directory = temporary(t)
   tree(base)
