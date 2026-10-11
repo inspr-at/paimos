@@ -211,3 +211,129 @@ for (const width of [375, 390]) test(`on a ${width} px phone the chevron gives w
   })
   expect(reach).toBeLessThanOrEqual(0.5)
 })
+
+// AEON-1214 fix round 2: inside the Desk place the preview must not inherit the
+// place's one-line label, so a long request wraps beside its Open, never under it.
+const LONG_TITLE = 'Decide whether the release train may ship the tenant isolation migration together with the reporter contract bump before Monday: https://github.com/inspr-at/paimos/pull/181/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef'
+for (const width of [1024, 1440]) test(`a long request wraps inside the preview at ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 })
+  await setup(page, { projectedSources: () => [{
+    id: 'long-1', kind: 'question', project_id: 'p-aeon', revision: 1, title: LONG_TITLE, created_at: '2026-10-02T09:00:00Z', held: false,
+    href: '/decision-desk?item=q:long-1', source: '/api/questions/long-1',
+  }] })
+  await page.goto('/')
+  await chevron(page).click()
+  const row = page.getByTestId('desk-preview-item-q:long-1')
+  await expect(row).toBeVisible()
+  const [title, open, box] = await Promise.all([row.locator('.dp-t b').boundingBox(), row.locator('.dp-open').boundingBox(), row.boundingBox()])
+  const line = await row.locator('.dp-t b').evaluate(el => parseFloat(getComputedStyle(el).lineHeight))
+  expect(title!.height, 'the title runs over several lines').toBeGreaterThan(2 * line)
+  expect(title!.x + title!.width, 'the title ends before Open').toBeLessThanOrEqual(open!.x)
+  expect(open!.x + open!.width, 'Open stays inside its row').toBeLessThanOrEqual(box!.x + box!.width + 0.5)
+  for (const target of [row, page.locator('.hm-panel.desk-panel'), preview(page).locator('.dp-body')]) {
+    expect(await target.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+})
+
+// AEON-541: the preview's own controls stay put while the Desk is read, fails,
+// is read again and a poll adds a row. Wide screens keep the link above the rows;
+// phones pin it at the foot of a full-height sheet.
+for (const width of [1440, 390]) test(`the preview's controls stay put through reading, a failure, Retry and a refresh at ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: width < 600 ? 844 : 900 })
+  await page.clock.install({ time: new Date('2026-10-11T10:00:00Z') })
+  const added: DeskProjectionItem[] = []
+  const control = await setup(page, { projectedSources: () => added })
+  // The first read waits until the preview is open.
+  let release!: () => void
+  const firstRead = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/decision-desk/projection*', async route => { await firstRead; await route.fallback() })
+  await page.goto('/')
+  await chevron(page).click()
+  await expect(preview(page)).toContainText('Reading the Desk…')
+  const heading = preview(page).getByRole('heading', { name: 'Decision Desk' })
+  const go = preview(page).getByRole('link', { name: 'Open the Decision Desk' })
+  const body = preview(page).locator('.dp-body')
+  await expectStableControls({
+    controls: { heading, go },
+    interactions: [
+      { name: 'the first read arrives', run: async () => {
+        release()
+        await expect(preview(page)).toContainText('5 things for you')
+      } },
+      { name: 'a poll fails', run: async () => {
+        control.failProjection = true
+        await page.clock.runFor(30_000)
+        await expect(preview(page).getByRole('alert')).toContainText('Decision Desk could not be read (403).')
+      } },
+      { name: 'Retry reads it again', run: async () => {
+        control.failProjection = false
+        await preview(page).getByRole('button', { name: 'Retry', exact: true }).click()
+        await expect(preview(page)).toContainText('5 things for you')
+      } },
+    ],
+    scrollAreas: { body },
+  })
+  // A poll that adds a row moves neither the rows already there nor the link.
+  const firstRow = preview(page).getByRole('link', { name: /^Approval · nodes\.read, / })
+  await expectStableControls({
+    controls: { heading, go, firstRow },
+    interactions: [{ name: 'a poll adds a row', run: async () => {
+      added.push({ id: 'late-1', kind: 'question', project_id: 'p-aeon', revision: 1, title: 'A late question', created_at: '2026-10-11T09:59:00Z', held: false, href: '/decision-desk?item=q:late-1', source: '/api/questions/late-1' })
+      await page.clock.runFor(30_000)
+      await expect(preview(page)).toContainText('6 things for you')
+      await expect(page.getByTestId('desk-preview-item-q:late-1')).toBeVisible()
+    } }],
+    scrollAreas: { body },
+  })
+  if (width < 600) {
+    // The full-height sheet: its link sits at the bottom, clear of the safe area.
+    const [sheet, link] = await Promise.all([page.locator('.hm-panel.desk-panel').boundingBox(), go.boundingBox()])
+    expect(Math.round(sheet!.y + sheet!.height)).toBe(844)
+    expect(sheet!.y).toBeLessThanOrEqual(8.5)
+    expect(link!.height).toBeGreaterThanOrEqual(44)
+    expect(sheet!.y + sheet!.height - (link!.y + link!.height)).toBeLessThanOrEqual(24)
+  }
+})
+
+// Where the chevron has stepped aside on a phone, the avatar sheet opens the
+// preview instead, and Escape returns to the avatar; where it fits, only the chevron does.
+for (const [width, where, path, away] of [[375, 'home', '/', true], [375, 'a ticket', '/p/PHAROS/PHAROS-11?view=full', true], [390, 'a ticket', '/p/PHAROS/PHAROS-11?view=full', true], [390, 'home', '/', false]] as const) {
+  test(`on ${where} at ${width} px the preview is ${away ? 'one entry away in the avatar sheet' : 'on its chevron, not in the avatar sheet'}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 })
+    await page.emulateMedia({ colorScheme: 'light' })
+    await setup(page)
+    await page.goto(path)
+    if (path !== '/') await expect(page.getByRole('navigation', { name: 'Breadcrumb' }).locator('.crumb.current')).toHaveText('PHAROS-11')
+    else await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
+    const avatar = page.getByRole('button', { name: /^Account for / })
+    const entry = page.getByRole('menu', { name: 'Account' }).getByRole('menuitem', { name: 'Preview the Decision Desk' })
+    if (!away) {
+      await expect(chevron(page)).toBeVisible()
+      await avatar.click()
+      await expect(page.getByRole('menu', { name: 'Account' })).toBeVisible()
+      await expect(entry).toHaveCount(0)
+      return
+    }
+    await expect(chevron(page)).toBeHidden()
+    await avatar.click()
+    await expect(entry).toBeVisible()
+    const box = (await entry.boundingBox())!
+    expect(box.height, 'a 44 px target').toBeGreaterThanOrEqual(44)
+    await entry.click()
+    await expect(page.getByRole('menu', { name: 'Account' })).toBeHidden()
+    await expect(preview(page)).toContainText('5 things for you')
+    await expect(preview(page).getByRole('link', { name: /^Approval · nodes\.read, / })).toBeFocused()
+    await expect(page.locator('.hm-panel.desk-panel')).toHaveClass(/sheet/)
+    expect(await designGate(page, true)).toEqual({ edges: [], glyphs: [], german: [], small: [] })
+    await page.keyboard.press('Escape')
+    await expect(preview(page)).toBeHidden()
+    await expect(avatar).toBeFocused()
+    // From there, a row opens its item on the Desk.
+    await avatar.click()
+    await entry.click()
+    await preview(page).getByRole('link', { name: /^Approval · nodes\.read, / }).click()
+    await expect(page).toHaveURL('/decision-desk?item=a:approval-1')
+    await expect(preview(page)).toBeHidden()
+  })
+}
