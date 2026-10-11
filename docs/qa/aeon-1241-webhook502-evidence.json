@@ -1,213 +1,201 @@
 {
   "ticket": "AEON-1241",
-  "status": "partial_fix_blocked_migration",
+  "fix_round": 4,
+  "status": "implemented_runtime_passed_static_incomplete",
   "ready_for_merge": false,
-  "statement": "MIGRATION NEEDED: durable verified receipts/checkpoints/internal retries still require a coordinator-reserved expansion number. Fix round 3 implements bounded historical-suite consumer resolution and stored GitHub flake preservation without metric storage. No migration reservation is present in the current brief, ledger or ticket; a request was posted on AEON-1241. This remains a partial fix and is not ready for merge.",
-  "stop_authority": "Repository AGENTS.md rule 3 requires the coordinator-assigned migration number and forbids worker renumbering. Original brief Build 3 says to report MIGRATION NEEDED and stop before writing a migration. Fix3 review requests obtaining the reservation; none is recorded, so that ownership boundary is preserved.",
-  "ownership": {
-    "tracker": "PPM / INSPR",
-    "account_verified": true,
-    "worker_marker_verified": true,
+  "recorded_at_utc": "2026-10-11 21:48:51 UTC",
+  "statement": "All three fix4 findings are implemented and committed. Final integrated source 656c97c98 passes full remote delivery, reportercontract and DSAR suites, including all per-step restart/checkpoint and historical-consumer regressions plus merge-proof/gate recovery and main history-worker cases. Static conflicts with current main were resolved, but its final approved rerun and the isolated negative control remain incomplete because global remote slots were occupied. No refused check is green; merge/release acceptance remains with the coordinator.",
+  "authority": {
+    "brief": "/Users/markus/.aeon/lead/aeon/briefs/aeon-1241-webhook502-fix4.md",
+    "review_findings": "/Users/markus/.aeon/lead/aeon/qa/review-ap710.out",
+    "account": {
+      "instance": "PPM / https://aeon.barta.cm",
+      "tenant": "INSPR",
+      "principal": "workstation-agents",
+      "kind": "agent",
+      "verification": "Approved pm whoami; credentials never read or displayed."
+    },
+    "worker_marker": "Coordinator-recorded per worker-common.md; worker did not alter ticket status.",
     "branch": "work/aeon-1241-webhook502",
+    "worktree": "/Users/markus/Code/aeon-worktrees/aeon-1241-webhook502",
+    "migration_reservation": "1341 AEON-1241 (webhook durable receipts + internal retries; reserved 2026-10-11 23:10 by LEAD); migration-ledger.txt line 233.",
     "coordinator_owns": [
-      "migration reservation",
-      "review gates",
+      "cross-family review",
       "release gates",
-      "ticket status",
-      "push",
+      "ticket status and acceptance",
+      "origin push",
       "merge",
-      "deploy"
+      "deploy",
+      "live verification"
     ]
   },
-  "source_base": "928157260",
-  "changes": [
-    "Unconfigured metrics return explicit not_configured/nothing_to_record outcomes without writing metric runs, pulls or review marks.",
-    "Completed Actions suites skip the Actions read only when neither a metric source nor a linked delivery flow consumer needs it. Linked PR heads, explicit suite PRs, stored queue heads and queue branch PRs retain the checks/queue flow path and default CI workflow.",
-    "Failed check-audit, merge-audit, metric and flow work retains its content-free step/error class; flow-only Actions failures remain 502.",
-    "Expanded the existing ESSENTIAL regression with linked/unlinked suites, queue subjects, upstream failure, explicit redelivery and idempotent flow effects; no test is skipped or weakened.",
-    "Merged the newer origin/main cleanly; no migration, API, permission, version or UI changes were authored.",
-    "Fix3: completed suites with empty pull_requests resolve prior verified PR/queue heads through at most 101 matching ledger rows and 100 normalized observations per row, then current repository/ticket linkage. A full history page conservatively requires the bounded Actions read; a five-second lookup deadline bounds database work.",
-    "Fix3: the stored github_app run-attempt step retains its established flaky outcome when a less-informed single failed attempt is redelivered, even without metric rows.",
-    "Fix3: added synchronization -> delayed empty-subject suite and current-link-removal cases to TestDeliveryWebhookUnlinkedMetricSource; TestDeliveryFlowCompletionKeepsFlake now covers configured and unconfigured metrics, unchanged outcomes/events and zero unconfigured metric rows. Existing ESSENTIAL registrations are unchanged."
-  ],
-  "reproduction": {
-    "baseline_application": "5da91b7fbdaecd3b2a7fb278e0f530a85ba11275",
-    "test_only_baseline_commit": "0e91ccee4",
-    "test": "TestDeliveryWebhookUnlinkedMetricSource",
-    "risk": "Unconfigured metrics must not reject authenticated deliveries on unnecessary Actions reads or suppress linked checks/queue flow facts.",
-    "fixture": "Signed HTTP mux, installation/repository binding, RLS-backed transactions and injected GitHub reads. No metric source is created; linked scenarios explicitly create a ticket-linked delivery item.",
-    "desired": "204 with no metric rows; Actions reads and flow rows only for linked consumers. A required read failure is a visible 502/flow/github_unavailable, not silent success.",
-    "baseline_result": "CONFIRMED expected regression failure, exit 1, on test-only commit 0e91ccee4 (application files unchanged from 5da91b7f): read_available wrote one unwanted metric fact; read_unavailable returned 502 instead of 204; linked_read_failure_then_redelivery logged audit instead of flow. The initial queue fixture also failed for its invalid subject and was subsequently corrected independently; it is not used as defect evidence.",
-    "fixed_result": "Full internal/delivery passed remotely on 21e09932d in 47.432 seconds after the queue fixture corrections, including the linked/unlinked suite, queue and explicit-redelivery assertions. The subsequent refs/heads-prefixed suite guard and clean origin/main merges were formatted but not compiled or executed in a final Go run: repeated final reruns were refused with exit 3 (load 15 > 12 or 2/2 remote slots).",
-    "explicit_redelivery_limit": "The test manually resends the same signed delivery and asserts convergent flow effects. It does not prove internal retry; durable receipt/retry remains blocked on the coordinator migration assignment."
+  "source": {
+    "final_source_commit": "656c97c98a393b9595387433222a0b72db04a883",
+    "included_origin_main": "67d8e726f60111b76b1060128fbcc540d287b0a6",
+    "main_merge": "7dacb0a35 preserved main bounded httpapi.ReadRequestBody in the durable ingress boundary. 656c97c98 integrates later main 67d8e726f: both metrics-history and receipt workers remain, shared caller/source/DSAR inventories are combined, and all eight audit cases/assertions are retained. Main last_event_at now commits atomically with the authenticated receipt under the same tenant fence. Tier manifests auto-merged without conflict; no migration-number collision.",
+    "history": "Normal AEON-1241 commits only; no amend. The evidence commit follows the final source commit. The isolated negative-control commit is absent from the delivery branch.",
+    "runtime_fix": "6cf02b54c retains unfinished completion when canonical merge proof is missing/partial or a ticket gate refuses. It rechecks existing ownership/human gates internally and retains the same 204 acceptance semantics, without checkpointing completion until its logical effect is complete."
   },
-  "storage_findings": [
+  "findings": [
     {
-      "path": "internal/db/migrations/1267_delivery.sql",
-      "finding": "delivery_github_events has payload_sha256 and typed normalized observations, but no raw delivery, per-step checkpoints, attempt count, retry schedule or lease. processed_at is populated at the projection write, before the audit/metrics/flow/completion chain finishes."
+      "number": 1,
+      "status": "IMPLEMENTED_RUNTIME_PASSED",
+      "risk": "Authenticated facts must survive failure before or after each logical effect and restart, without depending on another GitHub delivery.",
+      "implementation": [
+        "Migration 1341 adds dedicated tenant-scoped verified receipts with payload/hash and installation/repository/event/action binding, per-step outcome checkpoints, persisted metric-to-flow batches, attempt count, due time and error class.",
+        "Ingress bounds the body to 2 MiB and five seconds, validates HMAC, unique keys, supported event/action, typed envelope and configured binding, then commits the receipt before any step/network work. Signatures and HTTP headers are not persisted. Reuse of a delivery id with different authenticated content returns 409.",
+        "Projection, fanout, check_audit, merge_audit, metrics, flow and completion run in order. Each successful or explicit no-op outcome is checkpointed; already completed steps are skipped.",
+        "Session advisory claims serialize a receipt across replicas and requests without row locks spanning network reads. Tenant fences remain in the final receipt writes. Restart releases the session claim; the stored crash due time preserves unfinished work.",
+        "The module worker scans at most 20 due receipts with a five-second database deadline and a four-minute pass bound. Failed work becomes eligible after five seconds, doubling to a five-minute backoff cap; reconciliation may delay a pass. Pending facts are not discarded on retry exhaustion.",
+        "Existing logical-effect keys/upserts are retained. The legacy reconciliation fanout scan excludes durable receipts so it cannot race the new chain. Failed writes remain visible 502 responses with content-free step/error-class logs.",
+        "Missing/partial canonical merge proof and refused completion remain pending with backoff and earlier checkpoints retained. Recovery rechecks the original ownership/human gates; confirmed constituents converge independently without duplicate completion events."
+      ],
+      "regressions": {
+        "names": [
+          "TestDeliveryWebhookInternalRetry",
+          "TestDeliveryWebhookReceiptIntegrityAndClaims"
+        ],
+        "tier": "ESSENTIAL",
+        "cases": "Seven steps, each with a pre-effect fault and an effect-committed/checkpoint-failed fault (14 cases). Failures are injected at real upstream or database boundaries. A fresh module recovers from the same store by invoking only the internal due-page worker.",
+        "assertions": [
+          "Failure leaves attempts=1, the correct failed step/error class, no completed checkpoint for that step and next_attempt_at exactly five seconds later.",
+          "Injected-clock retry before due time has no effect; the due retry finishes attempts=2 with all seven checkpoints and cleared failure state.",
+          "The selected logical effect exists exactly once after retry. Retained bypass-merge and Flow event counts do not grow across the respective checkpoint failure.",
+          "A completed metrics checkpoint supplies the saved batch without another Actions read when downstream flow/completion retries.",
+          "Another due pass and same-content redelivery do not add effects; backoff growth and cap are asserted.",
+          "A barrier proves the receipt exists before projection's network read. A second replica cannot claim it, altered signed content returns 409, unsigned input stores nothing, and another tenant sees no receipt."
+        ],
+        "method": "Barriers and injected clocks, immutable run timestamps; timeouts only guard hangs. Fanout's idempotent sink is modeled with a committed unique key, not invocation counts.",
+        "runtime": "PASS on final integrated source 656c97c98: full remote delivery suite (60.943s), all 14 pre/post-effect cases and receipt-integrity/claim case included; no failed or skipped fix4 regression reported.",
+        "pending_completion": "Existing TestMergeDoneQueueConstituentsRequireActualMerge and TestMergeDoneRefusalNeedsYouAndRecovery retain their assertions and now also require internal-worker recovery before redelivery. Partial canonical proof leaves the unconfirmed subject pending and produces exactly two logical completion events after both are confirmed. Both strengthened cases PASS in the full 6cf02b54c suite. Both cases also PASS in the final 656c97c98 suite."
+      }
     },
     {
-      "path": "internal/delivery/webhook.go",
-      "finding": "GitHub/network observation reads occur before recordTx. A failure there leaves no durable delivery receipt. workflow_run is accepted without a projection ledger entry."
+      "number": 2,
+      "status": "IMPLEMENTED_RUNTIME_PASSED",
+      "risk": "A PR discovered by reconciliation has a blank scalar ledger head but must still consume a delayed empty-subject suite for an observed historical head.",
+      "implementation": "suiteNeedsFlow matches bounded historical observations by head_sha or queue_head independently of the scalar ledger head_sha and resolves those observations against current repository/ticket-linked consumers. The history page is limited to 101 rows, observations to 100 per row and the database lookup to five seconds.",
+      "regression": "TestDeliveryWebhookUnlinkedMetricSource/reconciled_then_synchronized_delayed_empty_suite: discover through Reconcile without any opening webhook, synchronize the head, then deliver an empty-subject suite for the old head; retain the Actions read and linked Flow fact without metric rows.",
+      "runtime": "PASS in the full final remote delivery suite on 656c97c98 (60.943s). The reconciliation-only historical-head and saturated-history/current-link-removal cases are both included."
     },
     {
-      "path": "internal/delivery/store.go",
-      "finding": "The projection record insert deduplicates on tenant_id/delivery_id. Inserting the current ledger row before reads would cause the duplicate path and ON CONFLICT to skip the unfinished projection. Rebuild decodes observations as []Observation."
-    },
-    {
-      "path": "internal/delivery/audit_store.go",
-      "finding": "audit_checks is consumed as check facts; observations are consumed with jsonb_array_elements. Repurposing either typed field to hold payload/retry state would change existing reader semantics."
-    },
-    {
-      "path": "internal/db/migrations/0200_agent_inbox.sql",
-      "finding": "inbox_messages requires sender/recipient principals and a message body of at most 65536 characters. inbox_wakes is an outbound wake-hint queue tied to an enabled principal webhook target, not an inbound service receipt. It cannot faithfully retain all allowed 2 MiB webhook bodies without repurposing user messaging."
-    },
-    {
-      "path": "internal/delivery/reconcile.go",
-      "finding": "Existing internal replay scans unfinished fanout_done only. It cannot replay audit, metrics, flow, completion or deliveries that failed before a ledger row was inserted."
-    },
-    {
-      "path": "internal/delivery/metrics_store.go",
-      "finding": "jobScope returns an empty workflow list for an unlinked repository, but metricsEvent still calls MetricsRead/suiteRuns for a completed GitHub Actions suite. Source absence itself is not an error; the unnecessary API read can fail."
-    },
-    {
-      "path": "internal/delivery/audit_webhook.go",
-      "finding": "Check audit, merge audit, metrics and flow share the audit error label. Later steps stop on any earlier error and depend on a fresh delivery for replay."
-    },
-    {
-      "path": "internal/delivery/merge_done.go",
-      "finding": "Merge completion is an additional downstream step after auditWebhook; a durable chain must include it to avoid regressions."
-    },
-    {
-      "path": "internal/dsar/inventory.json",
-      "finding": "The existing ledger classifies audit_checks as metadata and observations as review. A raw payload needs a deliberate inventory classification and tenant-scoped locator in the same authorized expansion."
+      "number": 3,
+      "status": "IMPLEMENTED_RUNTIME_PASSED",
+      "risk": "Saturated historic observations must not revive a consumer after every current ticket link is removed.",
+      "implementation": "The history-overflow predicate is inside the EXISTS over current repository-scoped delivery_items with both project_id and ticket_node_id. Overflow only conservatively requests Actions data while such a consumer exists.",
+      "regression": "TestDeliveryWebhookUnlinkedMetricSource/saturated_history_all_links_removed: saturate history beyond the 100-row bound, remove all current links, make Actions unavailable, and assert 204 with zero Actions reads and no metric/Flow facts.",
+      "runtime": "PASS in the full final remote delivery suite on 656c97c98 (60.943s). The reconciliation-only historical-head and saturated-history/current-link-removal cases are both included."
     }
   ],
-  "continuation_requirements": [
-    "Coordinator assigns an expansion migration number above the released maximum; prefer a dedicated durable receipt table using the existing tenant-scoped ledger pattern, with DSAR inventory in the same change.",
-    "Commit a bounded, verified delivery receipt before network/step work; retain event, action, repository, installation binding, delivery id, payload hash and replayable verified payload without persisting signatures or credentials. Reject reuse of a delivery id with different authenticated content.",
-    "Use explicit recorded/not-configured/nothing-to-record/failed outcomes. Distinguish projection/fanout/check-audit/merge-audit/metrics/flow/completion in content-free failure logs.",
-    "Replay failed steps internally across restart/replicas with bounded claiming, timeouts, injected-clock backoff and idempotent effects. Do not discard pending facts on retry exhaustion or rely on GitHub redelivery.",
-    "Preserve tenant -> tree -> record -> sorted blob -> event-counter lock order and current-target authorization in final mutation transactions; no network I/O under those row locks.",
-    "Do not skip delivery flow facts merely because metrics are unconfigured. Delivery Flow here is independent of the retired Journey/stage system.",
-    "Keep the new regression assertions and add failure -> internal retry -> exactly-once effect tests for each step, plus restart/duplicate/concurrency/integrity checks. Do not report completion or release acceptance before they pass."
-  ],
+  "schema_and_privacy": {
+    "migration": "internal/db/migrations/1341_delivery_webhook_receipts.sql",
+    "compatibility": "Expand-only dedicated table/index; no existing table or writer contract changed. Reserved number is above the released maximum and has no current-main collision.",
+    "isolation": "tenant_id plus ENABLE and FORCE ROW LEVEL SECURITY; USING and WITH CHECK bind to current_setting('aeon.tenant_id',true).",
+    "dsar_inventory": "internal/dsar/inventory.json classifies the table and payload as review, installation_id as personal (external identifier), and remaining columns as metadata, with tenant_column=tenant_id.",
+    "retention": "The DSAR inventory records the same tenant locator and review/personal/metadata categories used by existing delivery tables for the DSAR/retention kit. No retry-exhaustion deletion was added; pending receipts remain recoverable. No new automated expiry policy is claimed.",
+    "limits": "Stored raw authenticated GitHub payloads may contain review/personal content. Only content-free step/error classes are logged; no HMAC signature, credential or HTTP authorization header is stored."
+  },
+  "contract_and_shared_files": {
+    "authored_api": "api/areas/github.yaml: quoted durable acceptance/retry description, additive 409 Error response and accurate 204 accepted-with-pending-proof/gate wording. No route or pinned response schema changed; no contract/version bump required.",
+    "generated_api": "api/openapi.yaml regenerated with node api/generate.mjs --write; generated output is git-ignored and --check matches authored sources.",
+    "inventories": "New receipt source/test files assigned to the delivery audit slice, new tests registered ESSENTIAL in canonical Go tier manifest, new db.LockTenant caller listed in shared_fence_test.go; DSAR inventory updated with every new column.",
+    "existing_test_preservation": "TestWebhookFailureAudit retains all eight cases and exact single-line/privacy assertions, now through the mounted HTTP handler and production-style DB/RLS fixture. No test was skipped or weakened.",
+    "docs": "Updated existing docs/features/delivery-flow-data.md with durable receipt behavior, retry eligibility, integrity conflict and data classification. No authored UI change, permission addition or version-bearing change."
+  },
+  "negative_control": {
+    "commit": "c3d21649e9ac30a340a8e1c492becd3122953a55",
+    "source_base": "6cf02b54c67970831da7b0131e5b3ea87989c691",
+    "isolation": "Detached commit constructed only in the assigned worktree, not on the delivery branch. Branch automatically restored after the approved runner attempt.",
+    "mutations": "Disable retryWebhooks and restore scalar-head-only history lookup with overflow outside the current-consumer EXISTS; retain regression tests and schema.",
+    "expected_failures": [
+      "Internal retry fails to finish the receipt or produce the missing logical effect.",
+      "Reconciliation-only historical head loses its delayed Actions/Flow fact.",
+      "Saturated history with all current links removed attempts the forbidden Actions read instead of returning 204."
+    ],
+    "observed_result": "INCOMPLETE: approved attempts on c3d21649e refused exit 3 for 2/2 global remote runs occupied (CI pool 0/4). Branch restored automatically every time. This control is paired with positively verified 6cf02b54c, includes the unused-import correction and leaves all final retry/consumer tests intact. Expected failures are not claimed as observed.",
+    "rerun": "Use remote-test.sh on the isolated commit with ./internal/delivery -run TestDeliveryWebhook -count=1; restore the assigned delivery branch afterward. No negative-control commit may be merged onto the delivery branch.",
+    "previous_unexecuted_control": "f6848f20b04f435b9d993acea9dc355ccfda0990 was refused before execution and is superseded; it predates the later unused-import correction and must not be used as runtime defect evidence.",
+    "branch_isolation_verified": true
+  },
   "validation": [
     {
-      "command": "git fetch origin main; git merge origin/main",
-      "result": "Clean merge of newer main; tier manifests auto-merged without conflict."
+      "command": "node scripts/check-migrations.mjs --base-ref v261010123154.0.0",
+      "result": "PASS after the second main integration: 343 unique numbers; reserved 1341 expand-safe and no collision. Existing pinned exceptions unchanged."
+    },
+    {
+      "command": "node --test scripts/check-migrations.test.mjs",
+      "result": "PASS: 43 tests."
+    },
+    {
+      "command": "python3 -m unittest discover -s scripts/audit",
+      "result": "PASS: 33 tests, repeated after both main integrations, including receipt and history-worker source ownership."
     },
     {
       "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
       "result": "PASS: 289 tests, zero failures/skips."
     },
     {
-      "command": "python3 -m unittest discover -s scripts/audit",
-      "result": "PASS: 33 tests; no new Go/web source file was authored."
+      "command": "node scripts/test-tiers/cli.mjs manifests --write",
+      "result": "PASS: canonical manifests regenerated after registering both ESSENTIAL tests."
     },
     {
-      "command": "GOMAXPROCS=2 go test -p 2 ./internal/delivery -run ^TestWebhookFailureAudit$ -count=1 -v",
-      "result": "PASS: all eight logging cases and package compilation; the single permitted local package run. Local test Postgres port 55432 is unavailable."
+      "command": "node api/generate.mjs --write; node api/generate.mjs --check",
+      "result": "PASS: regenerated after both main integrations and the 204 wording correction. Final --check on 656c97c98 matches the authored sources."
     },
     {
-      "command": "remote-test.sh <assigned-worktree> ./internal/delivery -run <unconfigured and logging baseline names> -count=1 -v",
-      "result": "Expected regression failure on 0e91ccee4: unnecessary metric fact, unconfigured-source 502, and flattened flow error label. Original application code matches 5da91b7f. Baseline checkout was confined to the assigned worktree and automatically restored the assigned branch."
+      "command": "gofmt -l <changed delivery Go files and shared_fence_test.go>; git diff --check",
+      "result": "PASS: authored receipt/completion and merge-resolution files formatted; final git diff --check is clean."
     },
     {
-      "command": "remote-test.sh <assigned-worktree> ./internal/delivery -run TestDeliveryWebhookUnlinkedMetricSource -count=1 -v",
-      "result": "Initial run on f0e4ef8a5 passed seven cases and failed two queue fixtures. Fixtures were corrected with valid SHA-suffixed queue branches and a separate queue-check reader; assertions retained."
+      "command": "remote-test.sh <assigned-worktree> ./internal/delivery ./internal/reportercontract ./internal/dsar ./internal/agentpairing -count=1",
+      "result": "Source 435d6048b, approved run 435d6048b7-34987: delivery compiled and ran (84.060s), but FAILED only TestMergeDoneQueueConstituentsRequireActualMerge and TestMergeDoneRefusalNeedsYouAndRecovery. New per-step retry/integrity and historical-consumer regressions passed. reportercontract PASS (6.457s), dsar PASS (0.226s), agentpairing PASS (195.996s). Earlier occupied-slot refusals were incomplete. Delivery failures corrected in 6cf02b54c; final repeat required."
     },
     {
-      "command": "remote-test.sh <assigned-worktree> ./internal/delivery -count=1",
-      "result": "PASS on 21e09932d, 47.432 seconds. Final merged revision INCOMPLETE: repeated exit-3 refusals for load 15 > 12 or 2/2 occupied global remote slots; the last attempt also refused. No additional local Go run."
+      "command": "remote-test.sh <assigned-worktree> ./internal/delivery ./internal/routineexec ./internal/authz -count=1",
+      "result": "INCOMPLETE: approved earlier attempt refused occupied slots, exit 3; no runtime result."
     },
     {
-      "command": "ci-static-locked.sh",
-      "result": "INCOMPLETE: all approved attempts refused exit 3 because both global remote slots were occupied. Static checks and web dependency/shard prerequisites were not evaluated. No heavy local fallback; not green."
+      "command": "ci-static-remote.sh (approved node scripts/ci-static.mjs --merge-main runner)",
+      "result": "INCOMPLETE after resolutions on final source 656c97c98: approved final attempts refused exit 3 for 2/2 occupied global remote runs (CI pool 0/4). Earlier static runs failed merge-main against 713617c66 and later 67d8e726f; conflicts were resolved in 7dacb0a35 and 656c97c98 respectively. No final static exit 0 is claimed."
     },
     {
-      "command": "git diff --check",
-      "result": "PASS."
+      "command": "node --test scripts/test-tiers/test-tiers.test.mjs web/scripts/ci-web-shard.test.mjs",
+      "result": "Earlier combined invocation FAILED because this worktree has no Vue/web dependencies. Standalone tier tests pass separately; web prerequisite/static checks remain incomplete. No heavy local fallback."
+    },
+    {
+      "command": "remote-test.sh <assigned-worktree> ./internal/delivery ./internal/reportercontract ./internal/dsar -count=1",
+      "result": "PASS on final integrated source 656c97c98, approved run 656c97c98a-37491: delivery 60.943s, reportercontract 6.080s, dsar 0.239s; exit 0. Earlier corrected source 6cf02b54c also passed (55.662s / 5.787s / 0.260s). Includes the new main history-worker tests and all fix4 regressions."
+    },
+    {
+      "command": "remote-test.sh <assigned-worktree> ./internal/delivery -run TestDeliveryWebhook -count=1 (isolated c3d21649e)",
+      "result": "INCOMPLETE: repeated exit-3 occupied-slot refusals. Control differs from positively verified 6cf02b54c only by disabling the internal retry operation and restoring the two defective history predicates. No expected failure was executed/observed; assigned branch automatically restored."
+    },
+    {
+      "command": "remote-test.sh <assigned-worktree> ./internal/agentpairing -run TestSharedFenceCallerInventory -count=1",
+      "result": "INCOMPLETE on 656c97c98: exit 3, 2/2 occupied global remote runs (CI pool 0/4). Earlier full agentpairing PASS on 435d6048b (195.996s). Final inventory manually combines main delivery/metrics_worker.go and own delivery/webhook_receipts.go entries in order."
     }
   ],
-  "limits": [
-    "Partial fix only: durable verified receipts/checkpoints/internal retries and per-step internal-retry exactly-once regressions remain blocked on an unassigned coordinator expansion. Do not merge or advertise no lost facts.",
-    "Production and GitHub delivery logs were not accessed; the actual production upstream error remains unverified.",
-    "No migration, authored API/version/UI change, new secret, origin push, deployment, review gate, other model CLI or ticket-status change.",
-    "Prior-round remote parsing residue 0e91ccee42-79570 may still require coordinator cleanup. Fix3 refused remote runs before creating any run ref/worktree/database; no other worker state was touched.",
-    "Fix3 DB regressions and static check are not yet executed. No incomplete or refused run is reported green. Coordinator owns migration reservation, cross-family gate, push, merge, deploy and ticket/release acceptance."
-  ],
-  "storage_findings_context": "Original pre-fix diagnosis. Durable-storage findings still apply; the unconfigured metrics no-op is implemented in this fix round.",
-  "fix_round_3": {
-    "baseline": "0839528027f96e9897e06b8fc16c2c282665992d",
-    "implementation_commit": "0af041959e16837a8853ee842b6f5fb4f10fab37",
-    "negative_control": {
-      "commit": "e5cf541be1aab4eae6da6a407c72a83e26bba81b",
-      "location": "Detached commit made only in the assigned worktree, absent from the work branch; branch restored after attempts.",
-      "application_code": "Exactly unchanged from 083952802; git diff excluding the two changed test files is empty.",
-      "expected_failures": [
-        "Delayed empty-subject suite records zero Actions reads/flow facts after synchronization instead of the asserted linked run.",
-        "Unconfigured completed failure redelivery changes the established flaky outcome and emits another flow event."
-      ],
-      "runtime_result": "INCOMPLETE: four approved remote baseline attempts refused exit 3 for two occupied global remote slots. No negative-control commit was merged/cherry-picked onto the work branch."
-    },
-    "blocking_findings": [
-      {
-        "number": 1,
-        "status": "BLOCKED",
-        "reason": "Coordinator expansion reservation missing; request posted to AEON-1241. Durable receipts/checkpoints/internal retries and their per-step failure -> internal retry -> exactly-once coverage remain unimplemented. No schema change or storage repurposing performed."
-      },
-      {
-        "number": 2,
-        "status": "IMPLEMENTED_RUNTIME_PENDING",
-        "paths": [
-          "internal/delivery/metrics_store.go",
-          "internal/delivery/metrics_integration_test.go"
-        ],
-        "risk": "Delayed linked-PR suite after head synchronization must retain historical flow facts; historical linkage cannot revive a currently unlinked PR."
-      },
-      {
-        "number": 3,
-        "status": "IMPLEMENTED_RUNTIME_PENDING",
-        "paths": [
-          "internal/delivery/flow_store.go",
-          "internal/delivery/flow_integration_test.go"
-        ],
-        "risk": "Single failed-attempt redelivery must preserve an established flaky outcome and emit no new flow event without metric storage."
-      }
+  "handoff": {
+    "complete": "Requested fixes, regression coverage, reserved migration/RLS/DSAR, contract/docs, current-main integration, full final delivery/contract/DSAR runtime, normal commits and truthful evidence are complete. Worker handoff is complete and the worker exits without waiting for input.",
+    "remaining": [
+      "Obtain exit 0 from the final approved static --merge-main runner, including web prerequisites.",
+      "Run the recorded isolated negative control and verify its expected failure reasons; restore the assigned branch.",
+      "Run final shared-fence caller inventory with the approved runner: the full agentpairing suite passed on 435d6048b; the final targeted attempt on 656c97c98 refused exit 3 for occupied slots. The merged inventory retains both history-worker and receipt callers.",
+      "Coordinator runs the required cross-family gate and all release/acceptance steps."
     ],
-    "validation": [
-      {
-        "command": "git fetch origin main; git merge origin/main",
-        "result": "PASS: latest origin/main is already included; no conflict or new migration collision."
-      },
-      {
-        "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
-        "result": "PASS: 289 tests, zero failures/skips."
-      },
-      {
-        "command": "python3 -m unittest discover -s scripts/audit",
-        "result": "PASS: 33 tests; no new source files or ownership changes."
-      },
-      {
-        "command": "GOMAXPROCS=2 GOTOOLCHAIN=local go test -p 2 ./internal/delivery -run ^TestWebhookFailureAudit$ -count=1 -v",
-        "result": "PASS on 0af041959: changed Go package compilation and all eight logging cases. The single permitted small local Go run. Local Postgres port 55432 is unavailable; this is not DB regression execution."
-      },
-      {
-        "command": "remote-test.sh <assigned-worktree> ./internal/delivery -count=1",
-        "result": "INCOMPLETE: fixed-head attempt on 0af041959 refused exit 3 for full CI pool 4/4; retry on 9094450a1 refused exit 3 for two occupied global remote slots. Both commits have the same Go source."
-      },
-      {
-        "command": "ci-static-locked.sh",
-        "result": "INCOMPLETE: both approved attempts on the implementation/evidence heads refused exit 3 for two occupied global remote slots; static and web prerequisites not executed."
-      },
-      {
-        "command": "git diff --check",
-        "result": "PASS."
-      }
+    "prohibited_actions_not_taken": [
+      "origin push",
+      "deploy",
+      "review gates",
+      "other model CLIs",
+      "subagent delegation",
+      "ticket status writes",
+      "production/GitHub delivery-log access",
+      "credential reads or printing",
+      "other worktree mutations",
+      "destructive git"
     ],
-    "web_scope": "No authored UI/web changes; no affected web unit test or browser spec. Full static web prerequisites await the approved runner.",
-    "handoff": "Worker completion is a local handoff, not ticket/release acceptance. Coordinator must reserve the expansion and complete durable retries; run the recorded negative control and final DB/static checks before accepting the fixes.",
-    "migration_request_result": "Posted the reservation request on AEON-1241; final recheck of the ticket and migration ledger still found no assigned number. Coordinator action is required; worker exits without waiting for input."
-  }
+    "web_scope": "No authored web/UI change; static web prerequisites are still incomplete. The earlier local web-shard invocation lacked Vue dependencies and is not reported green."
+  },
+  "prior_rounds": "This fix4 evidence supersedes the prior blocked-migration statement: LEAD reserved 1341, durable receipts/internal retries are implemented and their final database regressions pass. Prior-round runtimes are kept only as history and do not substitute for the recorded final-source run."
 }
