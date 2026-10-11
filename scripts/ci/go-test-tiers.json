@@ -1856,6 +1856,12 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineContinuationRetainsOriginalCheckout","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineProviderBudgetBeforeCallsAndSettlement","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineProviderBudgetRefusesNativeBeforeLaunch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineProviderBudgetWireMatchesBroker","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineSupervisorReleasesObsoleteRouting","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineSupervisorReplaysInterruptedRouting","tier":"GATED-FULL"}
@@ -3145,6 +3151,8 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestStatusSurfacesClaudeDependencyAndRepinFailures","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestStoreCleanupRequiresRecordedDigest","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestStoreConcurrentDirectoryCreationKeepsPrivateBoundary","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestStoreConcurrentLockAcquisition","tier":"GATED-FULL"}
     ,
