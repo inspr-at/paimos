@@ -300,7 +300,7 @@ const trailFit = (page: Page) => page.locator('.app-header').evaluate(header => 
   if (!parts.some(part => part.matches('.crumb'))) cut.push('a trail without a crumb')
   return { parts: parts.map(label), cut }
 })
-// The trail element itself: once nothing in it fits whole it steps aside, and leaves the accessibility tree with it.
+// The trail element itself, whatever it shows; the probe judges only what is in sight.
 const trailOf = (page: Page) => page.locator('.app-header .crumbs')
 const settle = (page: Page) => page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
 const TRAILS = [
@@ -329,22 +329,23 @@ for (const width of [601, 640, 721]) for (const theme of ['light', 'dark'] as co
   })
 }
 
-// Every width from just above phone width to where the places show their labels:
-// the trail never shows a cut chip, and it returns whole when the window widens.
-test('from 601 to 1180 px the trail never cuts a chip and returns whole when the window widens', async ({ page }, testInfo) => {
-  await page.setViewportSize({ width: 1180, height: 900 })
+// Every width from just above phone width to a wide desktop, places labelled from
+// 1181 px: the trail never shows a cut chip, and it returns whole when the window
+// widens. What steps aside stays in the trail for screen readers, out of the tab order.
+test('from 601 to 1440 px the trail never cuts a chip and returns whole when the window widens', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.emulateMedia({ colorScheme: 'light' })
   await setup(page)
   const dir = testInfo.outputPath('AEON-1214')
   await mkdir(dir, { recursive: true })
   for (const trail of TRAILS.slice(0, 2)) {
-    await page.setViewportSize({ width: 1180, height: 900 })
+    await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto(trail.path)
     await trail.ready(page)
     await expect(trailOf(page)).toContainText('Pharos')
     await page.evaluate(() => document.fonts.ready.then(() => undefined))
     const seen: string[] = []
-    for (let width = 1180; width >= 601; width -= 7) {
+    for (let width = 1440; width >= 601; width -= 7) {
       await page.setViewportSize({ width, height: 900 })
       await settle(page)
       const fit = await trailFit(page)
@@ -353,14 +354,20 @@ test('from 601 to 1180 px the trail never cuts a chip and returns whole when the
       if (fit.parts.join(' ') !== seen.at(-1)) await page.screenshot({ path: join(dir, `trail-step-${trail.slug}-${width}.png`), clip: { x: 0, y: 0, width, height: 64 } })
       seen.push(fit.parts.join(' '))
     }
-    // Narrow enough, whole segments went; they come back with the room.
-    expect(seen.at(-1), `${trail.path} at 601`).not.toBe(seen[0])
+    // The sweep saw the trail whole and saw whole segments go; they come back with the room.
+    expect(new Set(seen).size, seen.join(' | ')).toBeGreaterThan(1)
     await page.setViewportSize({ width: 1024, height: 900 })
     await settle(page)
     const back = await trailFit(page)
     expect(back.cut).toEqual([])
     expect(back.parts[0]).toBe('/')
     expect(back.parts, `${trail.path} at 1024 after the sweep`).toContain(trail.slug === 'tickets' ? 'PHAROS Pharos' : 'PHAROS-11')
+    // Screen readers keep the whole trail at every width; what is out of sight is out of the tab order.
+    await page.setViewportSize({ width: 640, height: 900 })
+    await settle(page)
+    const crumbs = page.getByRole('navigation', { name: 'Breadcrumb' })
+    await expect(crumbs.getByRole('link', { name: 'PHAROS Pharos', exact: true })).toHaveAttribute('href', '/p/PHAROS')
+    expect(await trailOf(page).evaluate(trail => [...trail.querySelectorAll<HTMLElement>('a[href], button')].filter(el => el.getBoundingClientRect().width <= 1 && el.tabIndex >= 0 && getComputedStyle(el).display !== 'none').length)).toBe(0)
   }
 })
 

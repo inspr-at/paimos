@@ -217,8 +217,9 @@ function overflow(el: HTMLElement) {
 // (AEON-1214): a crumb leaves together with the separator that joins it, from the
 // start, so the page you are on goes last; with nothing whole left, the trail
 // steps aside. A project's name ends in an ellipsis first, and steps aside
-// rather than show a sliver. Each fit starts from the whole trail, so one width
-// always gives one trail.
+// rather than show a sliver. What steps aside leaves sight and the tab order, but
+// screen readers keep the whole trail. Each fit starts from the whole trail, so
+// one width always gives one trail.
 function cutTrail(trail: HTMLElement) {
   const frame = trail.getBoundingClientRect(), range = document.createRange()
   for (const part of trail.children) {
@@ -241,10 +242,19 @@ function cutTrail(trail: HTMLElement) {
 function fitTrail(trail: HTMLElement | null, wide: boolean) {
   if (!trail) return
   delete trail.dataset.empty
-  for (const part of trail.querySelectorAll<HTMLElement>('[data-dropped]')) delete part.dataset.dropped
+  for (const part of trail.querySelectorAll<HTMLElement>('[data-dropped]')) {
+    if (part.dataset.dropped === 'tab') part.removeAttribute('tabindex')
+    delete part.dataset.dropped
+  }
   if (!wide) return
+  const drop = (part: HTMLElement) => {
+    if (part.dataset.dropped !== undefined) return
+    const tab = part.matches('a[href], button') && !part.hasAttribute('tabindex')
+    if (tab) part.tabIndex = -1
+    part.dataset.dropped = tab ? 'tab' : ''
+  }
   const name = trail.querySelector<HTMLElement>('.crumb-name')
-  if (name && name.scrollWidth > name.clientWidth && name.clientWidth < 3 * (parseFloat(getComputedStyle(name).fontSize) || 13.5)) name.dataset.dropped = ''
+  if (name && name.scrollWidth > name.clientWidth && name.clientWidth < 3 * (parseFloat(getComputedStyle(name).fontSize) || 13.5)) drop(name)
   const parts = [...trail.children] as HTMLElement[]
   const crumbs = parts.filter(part => part.classList.contains('crumb') && getComputedStyle(part).display !== 'none')
   // A trail that continues from a place keeps the separator before its first crumb.
@@ -252,7 +262,7 @@ function fitTrail(trail: HTMLElement | null, wide: boolean) {
   for (let gone = 1; gone <= crumbs.length && cutTrail(trail); gone++) {
     const first = crumbs[gone]
     const from = first ? parts.indexOf(first) - (joined && first.previousElementSibling?.classList.contains('sep') ? 1 : 0) : parts.length
-    for (const part of parts.slice(0, from)) part.dataset.dropped = ''
+    parts.slice(0, from).forEach(drop)
     if (!first) trail.dataset.empty = ''
   }
 }
@@ -599,6 +609,9 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 @media (min-width: 380px) and (max-width: 600px) {
   .app-header:has(.places) .lockup.tenant.squarish:not(.compact) { display: inline-flex; min-width: 40px; }
 }
-/* What the measured fit drops leaves whole (fitTrail, AEON-1214). Last, so it wins. */
-.app-header .crumbs [data-dropped], .app-header .crumbs[data-empty] { display: none; }
+/* What the measured fit drops (fitTrail, AEON-1214) takes no room and stays for
+   screen readers, like the folded Settings label. Last, so it wins. */
+.app-header .crumbs [data-dropped], .app-header .crumbs[data-empty] {
+  position: absolute; width: 1px; min-width: 0; height: 1px; padding: 0; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
 </style>
