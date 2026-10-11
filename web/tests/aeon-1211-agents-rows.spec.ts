@@ -190,7 +190,7 @@ test('a refresh never adds, moves or removes a row under the pointer; the change
   data.sessions.push({ ...data.sessions[1]!, id: '5e000000-0000-4000-8000-000000000032', display_label: 'Fresh worker', created_at: new Date(NOW + 1000).toISOString(), heartbeat_at: new Date(NOW + 1000).toISOString() })
   await page.clock.runFor(21_000)
   await expect(note(page)).toContainText('2 changes wait while you point here')
-  await expect(note(page).getByRole('button', { name: 'Show now' })).toBeVisible()
+  await expect(note(page).getByRole('button', { name: /Show now$/ })).toBeVisible()
   expect(await boxes(page), 'nothing moved, arrived or left under the pointer').toEqual(before)
   await expect(row(page, gone.id)).toBeVisible()
   // The note keeps its box whichever text it shows (AEON-541).
@@ -210,7 +210,7 @@ test('a refresh never adds, moves or removes a row under the pointer; the change
   await page.clock.runFor(21_000)
   await expect(note(page)).toContainText('1 change waits while you point here')
   await expect(row(page, '5e000000-0000-4000-8000-000000000033')).toHaveCount(0)
-  await note(page).getByRole('button', { name: 'Show now' }).click()
+  await note(page).getByRole('button', { name: /Show now$/ }).click()
   await expect(row(page, '5e000000-0000-4000-8000-000000000033')).toBeVisible()
 })
 

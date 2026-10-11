@@ -105,10 +105,14 @@ export interface SessionHold<T> {
   reset: () => void
 }
 
-export function useSessionHold<T>(live: () => readonly T[], structure: Structure<T>, holding: () => boolean, timers: { set: typeof setTimeout; clear: typeof clearTimeout } = { set: setTimeout, clear: clearTimeout }): SessionHold<T> {
+export interface HoldTimers { set: (run: () => void, ms: number) => unknown; clear: (handle: unknown) => void }
+// Called as functions, never as methods: a browser's setTimeout refuses another `this`.
+const browserTimers: HoldTimers = { set: (run, ms) => setTimeout(run, ms), clear: handle => clearTimeout(handle as ReturnType<typeof setTimeout>) }
+
+export function useSessionHold<T>(live: () => readonly T[], structure: Structure<T>, holding: () => boolean, timers: HoldTimers = browserTimers): SessionHold<T> {
   const frame = shallowRef<Frame<T> | null>(null)
   const follows = shallowRef<ReadonlySet<string>>(new Set())
-  let release: ReturnType<typeof setTimeout> | undefined
+  let release: unknown
   const cancel = () => { if (release !== undefined) timers.clear(release); release = undefined }
   function reset() { cancel(); frame.value = null; follows.value = new Set() }
   function showNow() { follows.value = new Set(); frame.value = holding() ? frameOf(live(), structure) : null }

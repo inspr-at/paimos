@@ -57,7 +57,10 @@ test('pi sessions retain their SVG harness icon and provider account label', asy
   const item = row(page, pi.id)
   await expect(item).toBeVisible()
   await expect(item.locator('.exec-account')).toContainText('Pi · pi / anthropic (local profile)')
-  await expect(item.locator('svg[viewBox="165.29 165.29 469.43 469.43"] path').first()).toBeVisible()
+  // AEON-1211: the avatar carries the state badge only; a compact row opens with the harness's own mark.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(item.locator('.op-mark svg[viewBox="165.29 165.29 469.43 469.43"] path').first()).toBeVisible()
+  await expect(item.locator('.op-mark')).toHaveAttribute('aria-label', /Pi · pi \/ anthropic \(local profile\)$/)
   if (process.env.PI_PAIRING_SHOTS) {
     for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
@@ -563,7 +566,11 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [1600,
     await page.emulateMedia({ colorScheme })
     await setup(page)
     await openAgents(page)
-    await row(page, camy).getByRole('link', { name: 'PHAROS-11', exact: true }).click()
+    // Compact rows (AEON-1211) carry the key in the name; the ticket opens from the session's details.
+    if (width === 390) {
+      await row(page, camy).locator('.l2').click()
+      await panel(page).getByRole('link', { name: /^PHAROS-11/ }).first().click()
+    } else await row(page, camy).getByRole('link', { name: 'PHAROS-11', exact: true }).click()
     const ticket = page.getByRole('complementary', { name: 'Ticket details' })
     await expect(ticket).toBeVisible()
     const box = (await ticket.boundingBox())!

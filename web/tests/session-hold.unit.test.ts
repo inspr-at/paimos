@@ -3,7 +3,7 @@
 // row under the pointer; held changes never apply, or apply before the pointer has been away 1.5 s;
 // an ended session vanishes at once instead of keeping its place for 10 minutes; the time column
 // says the wrong thing. Timers are injected, never slept on.
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref } from 'vue'
 import { LINGER_MS, RELEASE_MS, frameOf, heldChanges, lingers, movesAt, reordered, settle, useSessionHold, type Structure } from '../src/components/agents/sessionHold'
 import { timeShort, timeText, timeTip, timeValue } from '../src/components/agents/sessionTime'
@@ -22,8 +22,8 @@ function manualTimers() {
   let now = 0, serial = 0
   const queue = new Map<number, { at: number; fn: () => void }>()
   return {
-    set: ((fn: () => void, ms: number) => { queue.set(++serial, { at: now + ms, fn }); return serial }) as unknown as typeof setTimeout,
-    clear: ((id: number) => { queue.delete(id) }) as unknown as typeof clearTimeout,
+    set: (fn: () => void, ms: number) => { queue.set(++serial, { at: now + ms, fn }); return serial },
+    clear: (id: unknown) => { queue.delete(id as number) },
     advance(ms: number) {
       now += ms
       for (const [id, task] of [...queue].sort((a, b) => a[1].at - b[1].at)) if (task.at <= now) { queue.delete(id); task.fn() }
@@ -117,6 +117,23 @@ describe('holding while the person points', () => {
     live.value = [{ id: 'a', group: 'working' }]
     expect(ids(hold.views.value)).toEqual(['a'])
     expect(hold.pending.value).toBe(0)
+  })
+
+  it('calls the platform timers as plain functions: a browser refuses setTimeout with another this', async () => {
+    const receivers: unknown[] = []
+    vi.stubGlobal('setTimeout', function (this: unknown) { receivers.push(this); return 1 })
+    vi.stubGlobal('clearTimeout', function (this: unknown) { receivers.push(this) })
+    try {
+      const live = ref<Row[]>([{ id: 'a', group: 'working' }]), pointing = ref(true)
+      const scope = effectScope()
+      scope.run(() => useSessionHold(() => live.value, structure, () => pointing.value))
+      await nextTick()
+      pointing.value = false; await nextTick()
+      pointing.value = true; await nextTick()
+      scope.stop()
+      expect(receivers.length, 'the release was scheduled and cancelled').toBeGreaterThanOrEqual(2)
+      expect(receivers.every(receiver => receiver === undefined || receiver === globalThis)).toBe(true)
+    } finally { vi.unstubAllGlobals() }
   })
 
   it('cancels its timer when its scope ends', async () => {

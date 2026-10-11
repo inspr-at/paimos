@@ -962,11 +962,11 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 /* The track hangs from each parent's fold button (AEON-784). Each visible
    descendant carries its ancestors' tracks across row boundaries; the elbow
    ends on the child's fold centre, and the last child closes its track.
-   The name column starts after the state column. The row's 6px margin and the
-   name cell's 8px padding put the 24px fold's centre at state-width + 14px,
+   The name column is the first (AEON-1211). The row's 4px padding, the name
+   cell's 8px padding and half the 24px fold put the fold's centre at 24px,
    which is where the 1px stem sits (its centre stays within half a pixel).
    One tree step reaches the next fold's centre. */
-.row > .tree-lines { position: absolute; inset: 0 0 0 14px; padding: 0; pointer-events: none; color: var(--ink-3); }
+.row > .tree-lines { position: absolute; inset: 0 0 0 24px; padding: 0; pointer-events: none; color: var(--ink-3); }
 .tree-guide, .tree-stem { position: absolute; left: calc(var(--level) * var(--tree-step)); top: 0; bottom: 0; width: var(--tree-step); }
 .tree-guide.continues::before, .tree-guide.elbow::before { content: ''; position: absolute; top: 0; bottom: 0; width: 1px; background: currentColor; }
 .tree-guide.last::before { bottom: auto; height: calc(var(--tree-joint) - 4px); }
