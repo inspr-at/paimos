@@ -434,6 +434,8 @@
     ,
     "browser:tests/agents-harness-status.spec.ts:the specific pin_missing command is the row's fix at 390 light"
     ,
+    "browser:tests/agents-hierarchy.spec.ts:new workers update through the live channel; a stopped worker keeps its place for 10 minutes, then folds into recoverable history"
+    ,
     "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 1600px"
     ,
     "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 1600px with reported metadata"
@@ -443,6 +445,8 @@
     "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 390px with reported metadata"
     ,
     "browser:tests/agents-worker-tree.spec.ts:a Sessions fold stored before shows the list; a count and History lead straight into it without a preference write"
+    ,
+    "browser:tests/agents-worker-tree.spec.ts:idle follows working; a newly stopped worker keeps its place for 10 minutes, then joins its history; histories stay independent"
     ,
     "browser:tests/agents-worker-tree.spec.ts:the footer problem jump switches a Working filter to Problem and focuses the folded row"
     ,
@@ -5342,6 +5346,26 @@
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"the accounts chip opens three tiles that lead into Settings; its tooltip stays away while open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a refresh never adds, moves or removes a row under the pointer; the changes wait, then apply","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"an ended session keeps its place and end state for 10 minutes, then moves to Ended","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1024: the state lives in the avatar, Time sits beside the name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1440: the state lives in the avatar, Time sits beside the name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 390: compact rows open with the harness mark and end with the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"keyboard focus in a row holds changes like the pointer does","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1024: the state lives in the avatar, Time sits beside the name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1440: the state lives in the avatar, Time sits beside the name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 390: compact rows open with the harness mark and end with the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"touch › 390: every target in the Sessions card is 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -6124,7 +6148,7 @@
     ,
     {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"nested workers pass axe and fit a narrow viewport in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"new workers update through the live channel and stopped workers fold immediately into recoverable history","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"new workers update through the live channel; a stopped worker keeps its place for 10 minutes, then folds into recoverable history","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"returning to a visible tab refreshes immediately and failed reads keep the last success visible","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6216,7 +6240,7 @@
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"four live workers lead eight collapsed stopped workers, and labels distinguish their shared principal","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"idle follows working; newly stopped workers hide immediately and histories stay independent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"idle follows working; a newly stopped worker keeps its place for 10 minutes, then joins its history; histories stay independent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"nested live workers stay visible through stopped parents and each level closes its last connector","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -17771,6 +17795,28 @@
     {"kind":"vitest","file":"tests/session-confirm.unit.test.ts","name":"AEON-584: refreshing the same identity keeps confirmation of the captured delete","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-confirm.unit.test.ts","name":"AEON-584: sign-out cancels an open confirm before the logout response","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"ended sessions keep their place for 10 minutes > lingers under 10 minutes, never once removed","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"holding while the person points > Show now applies at once and holds what comes after","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"holding while the person points > applies 1.5 s after the pointer leaves, and not if it comes back first","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"holding while the person points > applies the person's own removal at once","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"holding while the person points > calls the platform timers as plain functions: a browser refuses setTimeout with another this","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"holding while the person points > cancels its timer when its scope ends","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"holding while the person points > follows the list while nobody points, and holds structure while someone does","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"the Time column > says running time, time since the end, and since when it rests","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"the frame > counts a new order as the fewest rows that moved","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"the frame > keeps members in place, a departed one as last seen, and counts every waiting change once","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-hold.unit.test.ts","name":"the frame > lets the person's own change through while the rest waits","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/session-order.unit.test.ts","name":"choosing, remembering and resetting the order > round-trips per viewer, resets, and ignores unusable storage","tier":"GATED-FULL"}
     ,
