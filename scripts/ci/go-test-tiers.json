@@ -3580,6 +3580,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyTrimTenantIsolationAndBoundedInput","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestLeadRuntimeProductionMiddleware","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestLeadSettingsAgentRoutesReadOnly","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestLeadSettingsProductionMiddleware","tier":"GATED-FULL"}

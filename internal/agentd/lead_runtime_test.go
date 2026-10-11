@@ -32,6 +32,9 @@ type leadFixtureAPI struct {
 }
 
 func (a *leadFixtureAPI) LeadDemand(context.Context, string) (*agentsetup.LeadDemand, error) {
+	if a.launch != nil {
+		return nil, nil
+	}
 	return &a.demand, nil
 }
 func (a *leadFixtureAPI) ClaimLead(_ context.Context, in agentsetup.LeadPickup) (agentsetup.LeadLaunch, error) {
@@ -171,8 +174,8 @@ func TestLeadRuntimePersistsOneNativeAttemptAndRequiresObservedExit(t *testing.T
 				if err != nil || len(data.Groups) != 1 {
 					t.Fatal("root not counted in shared dial", err, data)
 				}
-				if err := s.PollLeadRuntime(t.Context()); !errors.Is(err, ErrProcessesUnconfirmed) {
-					t.Fatal("attempted pickup was replayed", err)
+				if err := s.PollLeadRuntime(t.Context()); err != nil {
+					t.Fatal("live receipt could not be serviced", err)
 				}
 				if adapter.starts.Load() != 1 || len(lease.finished) != 0 {
 					t.Fatal("live lead released or replaced")
