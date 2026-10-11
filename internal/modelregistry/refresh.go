@@ -41,13 +41,15 @@ type SourceResult struct {
 	Seen  int    `json:"seen"`
 }
 type RefreshResult struct {
-	At             time.Time      `json:"at"`
-	NewLines       []string       `json:"new_lines"`
-	Added          int            `json:"added"`
-	AcceptedModels []string       `json:"accepted_models,omitempty"`
-	Proposed       int            `json:"proposed"`
-	Sources        []SourceResult `json:"sources"`
-	LadderChanged  bool           `json:"ladder_changed"`
+	At                     time.Time      `json:"at"`
+	NewLines               []string       `json:"new_lines"`
+	Added                  int            `json:"added"`
+	AcceptedModels         []string       `json:"accepted_models,omitempty"`
+	Proposed               int            `json:"proposed"`
+	Sources                []SourceResult `json:"sources"`
+	HarnessProbesQueued    int            `json:"harness_probes_queued"`
+	HarnessProbesTruncated bool           `json:"harness_probes_truncated"`
+	LadderChanged          bool           `json:"ladder_changed"`
 }
 
 // NewWithVault uses an independent derivation of the existing server key.
@@ -232,6 +234,12 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 			inputs = append(inputs, discoveryInput{DiscoverySource: DiscoverySource{Vendor: source}})
 		}
 
+		if cfg.AgentReportsEnabled {
+			out.HarnessProbesQueued, out.HarnessProbesTruncated, err = queueHarnessProbes(ctx, tx, p.TenantID, out.At)
+			if err != nil {
+				return err
+			}
+		}
 		_, err = tx.Exec(ctx, `UPDATE model_refresh_settings SET last_run_at=$1,last_manual_run_at=CASE WHEN $2 THEN $1 ELSE last_manual_run_at END`, out.At, !scheduled && p.Kind == tenant.Person)
 		reserved = err == nil
 		return err
@@ -611,6 +619,11 @@ func (m *Module) refreshStatus(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out["settings"] = cfg
+		harnessSources, limited, err := harnessProbeStatus(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		out["harness_sources"], out["harness_sources_truncated"] = harnessSources, limited
 		var at *time.Time
 		var raw json.RawMessage
 		if err := tx.QueryRow(r.Context(), `SELECT last_run_at,last_result FROM model_refresh_settings`).Scan(&at, &raw); err != nil {

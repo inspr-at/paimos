@@ -752,6 +752,26 @@
       }
     },
     {
+      "classification": "metadata",
+      "columns": {
+        "tenant_id": "metadata",
+        "account_id": "metadata",
+        "binding_revision": "metadata",
+        "request_id": "metadata",
+        "requested_at": "metadata",
+        "lease_until": "metadata",
+        "daemon_generation": "metadata",
+        "completed_at": "metadata",
+        "state": "metadata",
+        "model_count": "metadata",
+        "report_digest": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "model_harness_probes"
+    },
+    {
       "classification": "review",
       "columns": {
         "audit": "review",

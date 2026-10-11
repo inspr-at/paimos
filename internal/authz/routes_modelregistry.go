@@ -32,6 +32,8 @@ func init() {
 		"POST /api/model-preferences/tray/{line}/dismiss":            "models.read|model_prefs.manage",
 		"POST /api/models":                                           "models.manage",
 		"POST /api/models/proposals/accept":                          "models.manage",
+		"POST /api/models/harness-probes/claim":                      "models.report",
+		"POST /api/models/harness-probes/{accountId}":                "models.report",
 		"POST /api/models/refresh":                                   "models.refresh",
 		"POST /api/models/reports":                                   "models.report",
 		"POST /api/models/{id}/retire":                               "models.manage",

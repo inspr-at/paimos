@@ -832,6 +832,7 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 			failures = append(failures, errors.New("account probe unavailable"))
 		}
 	}
+	s.captureModelCatalogs(ctx)
 	for _, run := range runs {
 		if err := ctx.Err(); err != nil {
 			return err
