@@ -77,7 +77,7 @@ function submit() {
 </template>
 
 <style scoped>
-.np { display: grid; gap: 18px; padding-top: 8px; }.np-f { display: grid; gap: 6px; min-width: 0; }.np-f > b { font-size: 13px; font-weight: 600; }.np-f > small { font-size: 12px; line-height: 1.5; color: var(--ink-3); overflow-wrap: anywhere; }#np-key-h { height: 4.5em; overflow: auto; }.np-f .field { width: 100%; height: 38px; min-width: 0; }.np-k { display: flex; align-items: center; gap: 12px; }.np-k .field { width: 11ch; max-width: 100%; text-transform: uppercase; letter-spacing: .04em; }.faint { color: var(--ink-3); font-weight: 400; }
+.np { display: grid; gap: 18px; padding-top: 8px; }.np-f { display: grid; gap: 6px; min-width: 0; }.np-f > b { font-size: 13px; font-weight: 600; }.np-f > small { font-size: 12px; line-height: 1.5; color: var(--ink-3); overflow-wrap: anywhere; }#np-key-h { height: 4.5em; overflow: auto; }.np-f .field { width: 100%; height: 38px; min-width: 0; }.np-k { display: flex; align-items: center; gap: 12px; }.np-k .field { width: 170px; max-width: 100%; text-transform: uppercase; letter-spacing: .04em; }.faint { color: var(--ink-3); font-weight: 400; }
 .sh-note { display: flex; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface-sunken); font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }.sh-note svg { flex: none; margin-top: 2px; }.np-f > small.bad, .error { color: var(--danger); }.error { font-size: 12.5px; overflow-wrap: anywhere; }
 @media (pointer: coarse), (max-width: 600px) { .np-f .field { min-height: 44px; height: 44px; }.np-k .field { width: 100%; }.btn { min-height: 44px; } }
 </style>

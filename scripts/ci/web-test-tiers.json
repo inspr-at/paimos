@@ -816,13 +816,7 @@
     ,
     "browser:tests/phone-approvals.spec.ts:phone review requires an explicit tap and fresh passkey; cancellation records nothing"
     ,
-    "browser:tests/project-advanced.spec.ts:AEON-1235: Advanced writes preserve revisions, bounds and honest repair refusals"
-    ,
-    "browser:tests/project-advanced.spec.ts:AEON-1235: New project retains key conflicts and reports partial group assignment once"
-    ,
     "browser:tests/project-advanced.spec.ts:AEON-1235: approved P4 reference states and check.mjs audit against the build"
-    ,
-    "browser:tests/project-advanced.spec.ts:AEON-1235: stale project responses and missing authority cannot enable admin writes"
     ,
     "browser:tests/project-header.spec.ts:delayed assignee labels stay frozen until the filter popover closes"
     ,
