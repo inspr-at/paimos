@@ -66,20 +66,20 @@ func (a *qualificationAdapter) Start(ctx context.Context, in agentd.StartRequest
 	if err != nil {
 		return nil, err
 	}
-	output, err := cmd.StdoutPipe()
-	if err != nil {
-		_ = input.Close()
-		return nil, err
-	}
+	output, writer := io.Pipe()
+	cmd.Stdout = writer
 	child, err := ownedprocess.Start(ctx, cmd)
 	if err != nil {
 		_ = input.Close()
 		_ = output.Close()
+		_ = writer.Close()
 		return nil, err
 	}
 	a.starts.Add(1)
 	p := &qualificationProcess{child: child, input: input, cmd: cmd, done: make(chan error, 1), ready: make(chan string, 2)}
+	go func() { _ = writer.CloseWithError(child.Wait()) }()
 	go func() {
+		defer output.Close()
 		scanner := bufio.NewScanner(output)
 		scanner.Buffer(make([]byte, 1024), 8192)
 		if scanner.Scan() {
@@ -223,7 +223,7 @@ func TestRoutineControlledQualification(t *testing.T) {
 	f := d.fixture
 	prepareRoutineReviewer(t, f)
 	// The scoped daemon executes actions, but still cannot decide an approval.
-	f.agent.Scopes = append(f.agent.Scopes, "work_orders.write", "nodes.write", "approvals.propose", "approvals.read")
+	f.agent.Scopes = append(f.agent.Scopes, "run.read", "work_orders.write", "nodes.write", "approvals.propose", "approvals.read")
 	f.exec(`UPDATE agent_keys SET scopes=$2 WHERE principal_id=$1`, f.agent.ID, f.agent.Scopes)
 	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT id::text FROM agent_keys WHERE principal_id=$1`, f.agent.ID).Scan(&f.agent.KeyID))
 	f.agent.AuthKeyID = f.agent.KeyID
@@ -358,8 +358,25 @@ func TestRoutineControlledQualification(t *testing.T) {
 		}
 		headers := map[string]string{"Authorization": "Bearer " + f.token, agentpairing.LedgerGenerationHeader: g.LedgerGeneration}
 		call(f.agent, "POST", "/api/runs/"+run+"/claim", body, headers, 200)
-		restart() // A lost claim reply still returns the original committed recipe.
-		call(f.agent, "POST", "/api/runs/"+run+"/claim", body, headers, 200)
+		restart() // A lost claim reply must retain the original committed recipe.
+		raw, err := json.Marshal(body)
+		must(t, err)
+		retry := httptest.NewRequest("POST", "/api/runs/"+run+"/claim", strings.NewReader(string(raw))).WithContext(tenant.WithPrincipal(ctx, f.agent))
+		for key, value := range headers {
+			retry.Header.Set(key, value)
+		}
+		response := httptest.NewRecorder()
+		f.mux.ServeHTTP(response, retry)
+		if response.Code != 200 {
+			// Preserve the qualification failure while checking later phases.
+			// The daemon can still recover the original claim through GetRun.
+			t.Errorf("lost claim replay: got %d want 200: %s", response.Code, response.Body.String())
+		}
+		var original agentruns.Run
+		must(t, json.Unmarshal(call(f.agent, "GET", "/api/runs/"+run, nil, nil, 200), &original))
+		if original.ID != run || original.Status != "starting" || original.RoutineLaunchID == nil || *original.RoutineLaunchID != g.LaunchID {
+			t.Fatalf("lost claim lookup replaced its recipe: %+v", original)
+		}
 		return g
 	}
 	report := func(run string, g agentsetup.RoutineGrant, payload agentruns.Telemetry) {
