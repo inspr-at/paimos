@@ -201,8 +201,9 @@ function place() {
 /* The light dial unit (AEON-1209, design AEON-1196 r7): no outline and no fill; the mark and
    its number sit 4 px apart and bind the unit by proximity. − and + are muted, keep their room
    and show on hover or focus, so nothing moves. The number keeps a fixed slot, so a step never
-   moves a neighbour. --pm-w, --pm-gap and --plate-pad place − / + and the plate in a tight row. */
-.f-pm.du { --pm-size: 20px; --pm-w: 20px; --pm-gap: 1px; --plate-pad: 4px; --value-width: 22px; --value-height: 28px; --value-size: 13.5px; position: relative; height: 28px; gap: 0; border-radius: 999px; color: var(--ink); }
+   moves a neighbour. --pm-w, --pm-gap and --plate-pad place − / + and the plate in a tight row.
+   The unit itself is a plain box (no radius), so a tap anywhere in it reaches it. */
+.f-pm.du { --pm-size: 20px; --pm-w: 20px; --pm-gap: 1px; --plate-pad: 4px; --value-width: 22px; --value-height: 28px; --value-size: 13.5px; position: relative; height: 28px; gap: 0; color: var(--ink); }
 .du .du-mark { position: relative; z-index: 3; display: inline-grid; place-items: center; flex: none; margin: 0 4px 0 2px; }
 .du .value-slot, .du .f-num { position: relative; z-index: 3; color: var(--ink); font-weight: 650; }
 .du.is-none .value-slot, .du.is-off .value-slot { color: var(--ink-2); font-weight: 600; }

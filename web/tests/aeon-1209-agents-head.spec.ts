@@ -308,6 +308,7 @@ test('a search that hides the session under the cursor moves the cursor to a mat
   await expect(pauseSheet).toHaveCount(0)
   // The same p on a shown row does open its sheet, so the silence above is the guard, not a dead key.
   await search.fill('worker w12x')
+  await expect(row(12)).toHaveCount(1)
   await page.locator('h1').click()
   await page.keyboard.press('j')
   await expect(page.locator('.sessions .row.active')).toHaveAttribute('data-row', `s:${id(12)}`)

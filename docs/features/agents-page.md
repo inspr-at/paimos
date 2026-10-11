@@ -19,9 +19,15 @@ or a More item for it.
   units), with no outline and no fill. Each unit's − and + keep their room and
   show on hover or focus, so nothing moves. In a row under 900 px wide only the
   units show; hover, focus or a tap lifts that unit onto a plate above its
-  neighbours. Over pace and today's limit show as a flag after the number. The
-  unfolded dial opens as a card under the row (see
+  neighbours. At the edge of a line, where one end has no room, − and + both
+  sit on the side that has it. When the row cannot hold every unit (many
+  harnesses, a tablet), the units wrap onto further lines inside the control
+  instead of being cut off. Over pace and today's limit show as a flag after
+  the number. The unfolded dial opens as a card under the row (see
   [agents-daily-plan.md](agents-daily-plan.md)).
+- On touch, −, the number and + are three separate 44 px targets that never
+  overlap: − and + are 44 px wide, and the number's target takes in its mark.
+  In a tight row a closed unit is one target, and a tap opens its plate.
 - The accounts chip names the accounts and computers and flags what needs a
   person (sign-ins first). Its popover opens with three tiles into Settings ›
   Accounts, Computers and Capacity, each with its own state words; below them,
@@ -40,5 +46,8 @@ hairline shadow only, so no box changes. `?q=` carries the search.
 
 **Keys.** F or / focuses the search, Shift F opens the filter, Esc clears the
 search and then leaves the field. Plain keys never fire inside a text field.
+Enter, p and r act only on a session the list shows (or the one open in the
+panel); when a search or filter hides the session under the cursor, the cursor
+moves to the first match, or to none.
 One control height applies to the head, the capacity row and the card head:
 36 px, 44 px on touch and on phones.
