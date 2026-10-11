@@ -584,6 +584,30 @@
     ,
     "browser:tests/models-registry.spec.ts:screenshots of the card at 1440 and 400 px, light and dark"
     ,
+    "browser:tests/models-situations-shots.spec.ts:at 1024 › situations for everyone dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1024 › situations for everyone light"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1024 › situations on just me dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1024 › situations on just me light"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1440 › situations for everyone dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1440 › situations for everyone light"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1440 › situations on just me dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 1440 › situations on just me light"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 390 › situations for everyone dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 390 › situations for everyone light"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 390 › situations on just me dark"
+    ,
+    "browser:tests/models-situations-shots.spec.ts:at 390 › situations on just me light"
+    ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
     ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1440"
@@ -9308,29 +9332,29 @@
     ,
     {"kind":"browser","file":"tests/models-simple.spec.ts","name":"the picker lists every model by harness with its own thinking levels, and a click on a level picks both","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations for everyone dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations for everyone dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations for everyone light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations for everyone light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations on just me dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations on just me dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations on just me light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1024 › situations on just me light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations for everyone dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations for everyone dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations for everyone light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations for everyone light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations on just me dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations on just me dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations on just me light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 1440 › situations on just me light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations for everyone dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations for everyone dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations for everyone light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations for everyone light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations on just me dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations on just me dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations on just me light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/models-situations-shots.spec.ts","name":"at 390 › situations on just me light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/models-situations.spec.ts","name":"For everyone edits a cell in a popover that stays on screen and moves nothing; Undo restores it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
