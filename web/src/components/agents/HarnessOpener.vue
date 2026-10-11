@@ -4,8 +4,8 @@
 // column is hidden there, so the mark names the model, the harness and the account in its tooltip
 // and accessible name, e.g. "Opus 5.5 · xhigh · Claude · Claude Max".
 import { computed } from 'vue'
+import AppIcon from '../AppIcon.vue'
 import HarnessMark from './HarnessMark.vue'
-import ExecutionMark from './ExecutionMark.vue'
 import type { SessionExecution } from './sessionRow'
 const props = defineProps<{ harness: string; harnessLabel: string; exec: SessionExecution }>()
 const text = computed(() => (props.exec.kind === 'ai' ? [props.exec.modelLine, props.harnessLabel, props.exec.account] : [props.exec.accountLine, props.exec.model]).filter(Boolean).join(' · '))
@@ -14,7 +14,7 @@ const text = computed(() => (props.exec.kind === 'ai' ? [props.exec.modelLine, p
 <template>
   <span class="op-mark" role="img" :aria-label="text" :data-tip="text">
     <HarnessMark v-if="exec.kind === 'ai'" :harness="harness" :size="12" />
-    <ExecutionMark v-else :kind="exec.kind" provider="unknown" />
+    <AppIcon v-else :name="exec.kind === 'media' ? 'image' : 'terminal'" :size="12" />
   </span>
 </template>
 

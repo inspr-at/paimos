@@ -65,7 +65,7 @@ test('workers nest by session ID, display their label, harness and ticket, and e
   await expect(page.locator('.last-updated time')).toHaveAttribute('datetime', /T/)
 })
 
-test('new workers update through the live channel and stopped workers fold immediately into recoverable history', async ({ page }) => {
+test('new workers update through the live channel; a stopped worker keeps its place for 10 minutes, then folds into recoverable history', async ({ page }) => {
   const { data } = await setup(page)
   const worker = data.sessions.pop()!
   await page.clock.install()
@@ -78,6 +78,11 @@ test('new workers update through the live channel and stopped workers fold immed
   Object.assign(worker, { phase: 'stopped', stopped_at: new Date().toISOString(), stop_reason: 'process_exited' })
   await signal(page, 'harness.stopped')
   await page.clock.runFor(500)
+  // AEON-1211: it keeps its place and end state, and says when it moves; then, with the pointer away, it folds away.
+  await expect(row(page, child)).toHaveClass(/stopped/)
+  await expect(row(page, child).locator('.l2t')).toContainText('moves to Ended at')
+  await page.mouse.move(0, 0)
+  await page.clock.runFor(10 * 60_000 + 2_000)
   await expect(row(page, child)).toHaveCount(0)
   await row(page, lead).getByRole('button', { name: 'Show stopped workers of Release lead' }).click()
   await expect(row(page, child)).toBeVisible()

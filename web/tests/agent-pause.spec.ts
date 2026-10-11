@@ -119,7 +119,14 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await head(page).getByRole('button', { name: 'Cancel the wind-down', exact: true }).click()
     await expect.poll(() => mock.deletes.length).toBe(2); await expect(windButton(page)).toBeFocused()
     // Pause all… and Resume all… sit under "Right now" in the same popover.
-    await expect(page.getByRole('button', { name: 'Pause worker-1', exact: true })).toBeVisible()
+    // A phone's compact rows keep only ⋯; Pause… is in its menu (AEON-1211).
+    const pauseRow = async () => {
+      if (width !== 390) return page.getByRole('button', { name: 'Pause worker-1', exact: true }).click()
+      await page.getByRole('button', { name: 'Actions for worker-1', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Pause…', exact: true }).click()
+    }
+    if (width === 390) await expect(page.getByRole('button', { name: 'Actions for worker-1', exact: true })).toBeVisible()
+    else await expect(page.getByRole('button', { name: 'Pause worker-1', exact: true })).toBeVisible()
     await windButton(page).click(); const rightNow = formPopover(page)
     await expect(rightNow.getByRole('button', { name: /^Resume all…/ })).toHaveAttribute('aria-disabled', 'true'); await expect(rightNow).toContainText('Nothing is paused.')
     await rightNow.getByRole('button', { name: /^Pause all…/ }).click(); await expect(rightNow).toHaveCount(0)
@@ -129,14 +136,14 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     for (const level of ['Pause quickly', 'Wrap up', 'Stop now', 'Pause']) { await dialog.locator(`[data-level="${({ 'Pause quickly': 'pause_quickly', 'Wrap up': 'wrap_up', 'Stop now': 'stop_now', Pause: 'pause' } as Record<string, string>)[level]}"]`).click(); await stable(action, actionBounds); await stable(submit, submitBounds); await stable(cancel, cancelBounds); await stable(note, noteBounds) }
     await dialog.getByRole('combobox', { name: 'Level for worker-1' }).selectOption('wrap_up'); await stable(action, actionBounds)
     await note.fill('Commit work in progress before handing over.'); await note.press('Escape'); await expect(dialog).toBeVisible(); await dialog.press('Escape'); await expect(dialog).not.toBeVisible()
-    await page.getByRole('button', { name: 'Pause worker-1', exact: true }).click()
+    await pauseRow()
     const single = page.getByRole('dialog', { name: 'Pause worker-1', exact: true }); await expect(single.getByRole('radio', { name: /^Stop now/ })).toHaveCount(0)
     const singleBar = single.locator('.pause-actions'), singleBounds = await bounds(singleBar)
     for (const level of ['Wrap up', 'Pause quickly', 'Pause']) { await single.locator(`[data-level="${({ 'Pause quickly': 'pause_quickly', 'Wrap up': 'wrap_up', Pause: 'pause' } as Record<string, string>)[level]}"]`).click(); await stable(singleBar, singleBounds) }
     await screenshot(page, `${width}-${theme}-pause`)
     await single.locator('[data-submit]').click(); await expect.poll(() => mock.calls.length).toBe(3)
     expect(mock.calls[2]?.body.level).toBe('pause')
-    await expect(page.locator('.agents-page .row').filter({ hasText: 'worker-1' })).toContainText('Pausing')
+    await expect(page.locator('.agents-page .row').filter({ hasText: 'worker-1' }).locator('.ava')).toHaveAttribute('aria-label', /: Pausing$/)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true); expect(errors).toEqual([])
   })
 }

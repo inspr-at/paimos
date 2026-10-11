@@ -9,6 +9,8 @@ import { agentData, mockAgents } from './agents-fixtures'
 
 const now = Date.parse('2026-09-26T16:00:00Z')
 const ago = (seconds: number) => new Date(now - seconds * 1000).toISOString()
+// An ended session keeps its place for 10 minutes (AEON-1211); these ended before that.
+const longAgo = (seconds = 0) => ago(11 * 60 + seconds)
 const id = (n: number) => `5e000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const lead = id(1)
 const row = (page: Page, key: string) => page.locator(`[data-row="s:${key}"]`)
@@ -50,7 +52,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
   data.sessions.splice(0, data.sessions.length,
     session(1, { parent_harness_session_id: null, role: 'coordinator', display_label: 'Release lead', created_at: ago(1800) }),
     // Oldest starts and newest heartbeats belong to history: neither may lead.
-    ...Array.from({ length: 8 }, (_, index) => session(10 + index, { phase: 'stopped', stopped_at: ago(index), heartbeat_at: ago(index), created_at: ago(1200 + index) })),
+    ...Array.from({ length: 8 }, (_, index) => session(10 + index, { phase: 'stopped', stopped_at: longAgo(index), heartbeat_at: ago(index), created_at: ago(1200 + index) })),
     session(2, { display_label: 'ss1-handoff-supersession', heartbeat_at: ago(20) }),
     session(3, { display_label: 'Starting worker', phase: 'starting', heartbeat_at: ago(5) }),
     session(4, { display_label: 'Permission checks', heartbeat_at: ago(10) }),
@@ -98,9 +100,9 @@ test('four live workers lead eight collapsed stopped workers, and labels disting
   await expect(history(page)).toHaveAttribute('aria-expanded', 'false')
 })
 
-test('idle follows working; newly stopped workers hide immediately and histories stay independent', async ({ page }) => {
+test('idle follows working; a newly stopped worker keeps its place for 10 minutes, then joins its history; histories stay independent', async ({ page }) => {
   const { data, session } = await setup(page)
-  data.sessions.push(session(90, { role: 'coordinator', parent_harness_session_id: null, display_label: 'Second lead' }), session(91, { parent_harness_session_id: id(90), phase: 'stopped', stopped_at: ago(0) }))
+  data.sessions.push(session(90, { role: 'coordinator', parent_harness_session_id: null, display_label: 'Second lead' }), session(91, { parent_harness_session_id: id(90), phase: 'stopped', stopped_at: longAgo() }))
   Object.assign(data.sessions.find(s => s.id === id(4))!, { activity: 'idle', heartbeat_at: ago(0) })
   await page.goto('/agents')
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(5), id(4)])
@@ -111,6 +113,14 @@ test('idle follows working; newly stopped workers hide immediately and histories
   await history(page).click()
   Object.assign(data.sessions.find(s => s.id === id(5))!, { phase: 'stopped', stopped_at: ago(0) })
   await refresh(page)
+  // AEON-1211: it keeps its place with its end state; line 2 says when it moves.
+  await expect(row(page, id(5)).locator('.ava')).toHaveAttribute('aria-label', /: Ended$/)
+  await expect(row(page, id(5)).locator('.l2t')).toContainText('moves to Ended at')
+  await expect(history(page)).toHaveText('8 stopped')
+  await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead: 4 sub-agents, 2 working')
+  // Ten minutes later, with the pointer away from the list, it joins the stopped workers.
+  await page.mouse.move(0, 0)
+  await page.clock.runFor(10 * 60_000 + 2_000)
   await expect(row(page, id(5))).toHaveCount(0)
   await expect(history(page)).toHaveText('9 stopped')
   await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead: 3 sub-agents, 2 working')
@@ -119,7 +129,7 @@ test('idle follows working; newly stopped workers hide immediately and histories
 
 test('a lead with only stopped workers opens history only through its stopped count', async ({ page }) => {
   const { data } = await setup(page)
-  for (const worker of data.sessions.filter(s => s.id !== lead)) Object.assign(worker, { phase: 'stopped', stopped_at: ago(0) })
+  for (const worker of data.sessions.filter(s => s.id !== lead)) Object.assign(worker, { phase: 'stopped', stopped_at: longAgo() })
   await page.goto('/agents')
   await expect(children(page)).toHaveCount(0)
   // Nothing live to fold: no fold button, only the stopped count.
@@ -133,8 +143,8 @@ test('a lead with only stopped workers opens history only through its stopped co
 
 test('nested live workers stay visible through stopped parents and each level closes its last connector', async ({ page }) => {
   const { data, session } = await setup(page)
-  Object.assign(data.sessions.find(s => s.id === id(3))!, { phase: 'stopped', stopped_at: ago(0) })
-  data.sessions.push(session(100, { parent_harness_session_id: id(3), display_label: 'Nested scout' }), session(101, { parent_harness_session_id: id(3), phase: 'stopped', stopped_at: ago(0) }))
+  Object.assign(data.sessions.find(s => s.id === id(3))!, { phase: 'stopped', stopped_at: longAgo() })
+  data.sessions.push(session(100, { parent_harness_session_id: id(3), display_label: 'Nested scout' }), session(101, { parent_harness_session_id: id(3), phase: 'stopped', stopped_at: longAgo() }))
   await page.goto('/agents')
   await expect(row(page, id(100))).toHaveAttribute('data-depth', '2')
   await expect(row(page, id(101))).toHaveCount(0)
@@ -255,7 +265,7 @@ for (const theme of ['light', 'dark'] as const) {
 test('a stopped lead links its successor instead of claiming live workers', async ({ page }) => {
   const { data, session } = await setup(page)
   data.sessions.push(session(90, { role: 'coordinator', parent_harness_session_id: null, display_label: 'Resumed lead' }))
-  Object.assign(data.sessions.find(s => s.id === lead)!, { phase: 'stopped', stopped_at: ago(0), handed_over_to_id: id(90) })
+  Object.assign(data.sessions.find(s => s.id === lead)!, { phase: 'stopped', stopped_at: longAgo(), handed_over_to_id: id(90) })
   for (const worker of data.sessions.filter(s => s.parent_harness_session_id === lead && s.phase !== 'stopped')) {
     Object.assign(worker, { parent_harness_session_id: id(90), adopted_from_id: lead })
   }
