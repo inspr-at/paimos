@@ -201,20 +201,20 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 }
 
 func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, now time.Time) ([]catalogProfile, error) {
-	// Use the tenant's immutable profiles and role ladder, including expiring
-	// suppressions. Read-only: catalog initialization remains modelregistry's job.
+	// Use current model pauses and the review qualification rule. Catalog reads
+	// never initialize profiles or grant models dispatch authority.
 	rows, err := tx.Query(ctx, `
-		SELECT p.id::text,p.harness,p.model,p.family,p.effort,p.version,r.priority
-		FROM model_profiles p LEFT JOIN (`+ModelRoleRoutesSQL+`) r
-		  ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.role=$1
+		SELECT p.id::text,p.harness,p.model,p.family,p.effort,p.version,NULL::integer
+		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id LEFT JOIN (`+ModelPausesSQL+`) r
+		  ON r.tenant_id=p.tenant_id AND r.profile_id=p.id
 		LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
 		WHERE p.enabled
 		  AND p.model NOT IN ('gpt-6-terra','gpt-6.1-astra','gpt-6.1-luna','gpt-6.1-terra')
 		  AND (o.suppressed_until IS NULL OR o.suppressed_until <= $3)
-		  AND ($1 <> 'review-gate-security' OR p.family <> 'anthropic')
-		  AND ($1 NOT IN ('review-gate','review-gate-security') OR (p.family <> $2 AND p.family <> 'unknown' AND r.profile_id IS NOT NULL))
+		  AND ($1 <> 'review-gate-security' OR p.family <> $4)
+		  AND ($1 NOT IN ('review-gate','review-gate-security') OR (p.family <> $2 AND p.family <> 'unknown' AND p.tier IN ('strong','frontier') AND coalesce(p.registered_effort_level,d.effort_level)>=4))
 		  AND (r.state IS NULL OR r.state='available' OR r.valid_until <= $3)
-		ORDER BY p.harness,p.model,p.family,p.effort,p.created_at DESC,p.id`, role, authorFamily, now)
+		ORDER BY p.harness,p.model,p.family,p.effort,p.created_at DESC,p.id`, role, authorFamily, now, SecurityExcludedFamily)
 	if err != nil {
 		return nil, err
 	}

@@ -4,13 +4,16 @@ package modelregistry
 import (
 	"context"
 	"errors"
+	"slices"
+
+	"github.com/inspr-at/paimos/internal/modelprefs"
 
 	"github.com/jackc/pgx/v5"
 )
 
 const preferencePreviewLimit = 256
 
-var errPreferencePreviewIncomplete = errors.New("Model preview incomplete: catalog or role ladder exceeds 256 entries; live routing remains authoritative")
+var errPreferencePreviewIncomplete = errors.New("Model preview incomplete: catalog or Models order exceeds 256 entries; live routing remains authoritative")
 
 // A nil catalog preserves live resolution. Editor GET uses one bounded catalog
 // across all levels and selectors, and refuses to select from an incomplete set.
@@ -69,10 +72,8 @@ func pickerReviewProfiles(ctx context.Context, tx pgx.Tx, profiles []Profile) (m
 	for _, profile := range profiles {
 		ids = append(ids, profile.ID)
 	}
-	rows, err := tx.Query(ctx, `SELECT p.id::text FROM model_profiles p
-		WHERE p.id=ANY($1::uuid[]) AND EXISTS (
-			SELECT 1 FROM model_role_routes r WHERE r.tenant_id=p.tenant_id
-			AND r.profile_id=p.id AND r.role='review-gate')
+	rows, err := tx.Query(ctx, `SELECT p.id::text FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+		WHERE p.id=ANY($1::uuid[]) AND p.tier IN ('strong','frontier') AND coalesce(p.registered_effort_level,d.effort_level)>=4
 		ORDER BY p.id LIMIT $2`, ids, preferencePreviewLimit)
 	if err != nil {
 		return nil, err
@@ -87,4 +88,70 @@ func pickerReviewProfiles(ctx context.Context, tx pgx.Tx, profiles []Profile) (m
 		out[id] = true
 	}
 	return out, rows.Err()
+}
+
+// derivedRoleSteps retains the deprecated route response vocabulary while its
+// choices come from the current Models row, situations, Quick jobs and rules.
+func derivedRoleSteps(ctx context.Context, tx pgx.Tx, person *string, role string, limit int) ([]ladderStep, string, error) {
+	s, err := modelprefs.LoadBoardRouting(ctx, tx, person, "")
+	if err != nil {
+		return nil, "", err
+	}
+	c, err := loadBoardCatalog(ctx, tx)
+	if err != nil {
+		return nil, "", err
+	}
+	s = modelsBoardIdentities(s, c)
+	c = modelsCatalog(c)
+	s.Lines = c.lines
+	q := modelprefs.BoardQuery{Column: "other", Situation: "first"}
+	if role == "build-hard" {
+		q.Situation = "stuck"
+	}
+	if role == "review-gate" || role == "review-gate-security" {
+		q.Review = true
+	}
+	d := modelprefs.ResolveModelsBoard(s, q)
+	mode := reviewOrderSaved
+	if d.Automatic {
+		mode = reviewOrderLegacy
+		d.Steps = append(d.Steps, automaticReviewSteps(c, "")...)
+	}
+	if role == "scout" || role == "mechanical" {
+		definition, _ := roleByName(role)
+		quick, err := quickJobSteps(ctx, tx, c, definition.effort)
+		if err != nil {
+			return nil, "", err
+		}
+		d.Steps = append(quick, d.Steps...)
+	}
+	out := []ladderStep{}
+	seen := map[string]bool{}
+	for _, order := range d.Steps {
+		if slices.Contains(d.Not, order.Line) && order.Stage != "quick" {
+			continue
+		}
+		for _, profile := range modelsRouteCandidates(c.profiles[order.Line], order.Effort, order.Level, q.Review) {
+			if seen[profile.ID] || q.Review && (!qualifiedReviewProfile(profile) || role == "review-gate-security" && profile.Family == "anthropic") {
+				continue
+			}
+			if order.Stage == "quick" && profile.Tier != "fast" {
+				continue
+			}
+			if role == "build-hard" && profile.Tier != "strong" && profile.Tier != "frontier" {
+				continue
+			}
+			seen[profile.ID] = true
+			step, err := preferenceStep(ctx, tx, profile, role)
+			if err != nil {
+				return nil, "", err
+			}
+			step.Priority = len(out) + 1
+			out = append(out, step)
+			if limit > 0 && len(out) >= limit {
+				return out, mode, nil
+			}
+		}
+	}
+	return out, mode, nil
 }

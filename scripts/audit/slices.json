@@ -154,7 +154,10 @@
         "internal/agentd/queue_cadence_test.go",
         "internal/agentruns/queue_notifications.go",
         "internal/agentruns/queue_notifications_test.go",
-        "internal/runisolation/**"
+        "internal/runisolation/**",
+        "internal/db/migrations/1333_models_v2_migration.sql",
+        "internal/modelregistry/models_v2_migration_test.go",
+        "internal/modelregistry/legacy_deprecation_test.go"
       ]
     },
     {

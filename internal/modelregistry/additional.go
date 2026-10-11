@@ -31,7 +31,6 @@ func prepareAdditionalCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		return nil, err
 	}
 	added := []Profile{}
-	ids := map[string]string{}
 	for _, profile := range catalogProfiles() {
 		if profile.Harness != "gemini" && profile.Harness != "opencode" && !(profile.Harness == "grok" && profile.Model == "grok-4.7" && profile.Effort == "medium") {
 			continue
@@ -48,33 +47,12 @@ func prepareAdditionalCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal
 			return nil, err
 		}
 		added = append(added, row)
-		if row.Enabled {
-			ids[profile.Slug] = row.ID
-		}
+
 	}
 	if len(added) == 0 {
 		return nil, nil
 	}
 	routes := []Route{}
-	for _, route := range defaultRoutes(catalogProfiles()) {
-		id := ids[route.Slug]
-		if id == "" {
-			continue
-		}
-		var priority *int
-		if err := tx.QueryRow(ctx, `SELECT max(priority)+1 FROM model_role_routes WHERE role=$1`, route.Role).Scan(&priority); err != nil {
-			return nil, err
-		}
-		// An empty saved role is deliberate; upgrade must not refill it.
-		if priority == nil {
-			continue
-		}
-		stored := Route{Role: route.Role, Priority: *priority, ProfileID: id, State: "available"}
-		if err := insertRoute(ctx, tx, p.TenantID, stored); err != nil {
-			return nil, err
-		}
-		routes = append(routes, stored)
-	}
 	return []events.Change{{Type: evSeeded, After: struct {
 		Profiles []Profile `json:"profiles"`
 		Routes   []Route   `json:"routes"`
