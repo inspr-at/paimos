@@ -810,6 +810,8 @@
         ,
         {"file":"tests/crm.spec.ts","listedTests":25,"weightSeconds":55.487805,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/dead-screens.spec.ts","listedTests":12,"weightSeconds":30,"weightSource":"unmeasured-estimate"}
+        ,
         {"file":"tests/dead-sessions.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/decision-text.spec.ts","listedTests":36,"weightSeconds":79.902439,"weightSource":"unmeasured-test-rate"}
@@ -958,7 +960,7 @@
         ,
         {"file":"tests/quota-warnings.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/quote-collaboration.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/quote-collaboration.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/quote-dock-layout.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
