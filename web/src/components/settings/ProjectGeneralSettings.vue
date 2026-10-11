@@ -18,7 +18,7 @@ import ProjectSettingsExplainer from './ProjectSettingsExplainer.vue'
 
 const props = defineProps<{ project: Project }>()
 const router = useRouter(), route = useRoute(), projects = useProjects(), projectGroups = useProjectGroups()
-const scope = useIdentityScope(() => can('nodes.read', props.project.id)), reads = scope.lane()
+const scope = useIdentityScope(() => can('nodes.read', props.project.id)), reads = scope.lane(), groupReads = scope.lane()
 const node = ref<WorkNode | null>(null), name = ref(props.project.title), description = ref('')
 const groups = ref<SharedProjectGroup[]>([]), groupId = ref(''), groupsReady = ref(false), groupError = ref('')
 const loading = ref(true), busy = ref(false), loadError = ref('')
@@ -45,7 +45,10 @@ function fullDescription(value: WorkNode): string {
 function sayError(error: unknown, fallback: string): string {
   return error instanceof APIError && error.status === 412 ? 'The project changed. Reload it before saving; your draft stays here.' : error instanceof Error ? error.message : fallback
 }
-function apply(saved: WorkNode) { node.value = saved; projects.applyNode(saved) }
+function apply(saved: WorkNode) {
+  if (saved.id !== props.project.id) throw new Error('The response did not match this project. Reload before changing it again.')
+  node.value = saved; projects.applyNode(saved)
+}
 function refreshGroups() {
   const target = props.project.id
   return getProjectGroups().then(result => ({ target, result }))
@@ -57,12 +60,13 @@ function load(preserveDraft = false) {
   const keepDescription = preserveDraft && !!before && description.value !== fullDescription(before)
   void reads.run(({ after }) => after(getNode(target), value => {
     if (target !== props.project.id) return
+    if (value.id !== target) throw new Error('The response did not match this project.')
     node.value = value
     if (!keepName) name.value = value.title
     if (!keepDescription) description.value = fullDescription(value)
     if (route.hash === '#f-name') void nextTick(() => nameInput.value?.focus({ preventScroll: true }))
   }), { failed: error => { loadError.value = sayError(error, 'The project could not be read.'); }, settled: () => { loading.value = false } })
-  void scope.run(({ after }) => after(refreshGroups(), ({ target: readTarget, result }) => {
+  void groupReads.run(({ after }) => after(refreshGroups(), ({ target: readTarget, result }) => {
     if (readTarget !== props.project.id) return
     groups.value = result.items; groupId.value = result.items.find(group => group.project_ids.includes(readTarget))?.id ?? ''; groupsReady.value = true; groupError.value = ''
   }), { failed: () => { groupError.value = 'Shared groups could not be read. Nothing changed.'; groupsReady.value = false } })
@@ -108,7 +112,7 @@ function chooseGroup(event: Event) {
   const control = event.target as HTMLSelectElement, target = props.project.id, selected = control.value, before = groupId.value, owner = scope.owner.value
   control.value = before
   if (!groupWritable.value || busy.value || selected === before) return
-  busy.value = true
+  busy.value = true; groupReads.cancel()
   void scope.run(({ after }) => after(assignProjectGroup(selected || null, [target]), result => {
     groupId.value = selected; control.value = selected
     void projectGroups.load(true)

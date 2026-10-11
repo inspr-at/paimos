@@ -85,6 +85,14 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
   await expect(page.getByText('Group saved.', { exact: true })).toBeVisible()
   expect(world.assignments).toEqual([{ group_id: 'g-product', project_ids: ['p-pharos'] }])
   stable.done()
+  world.control.fail = true
+  await name.fill('Draft awaiting a reload'); await name.press('Enter')
+  await expect(page.getByText('The project changed. Reload it before saving; your draft stays here.', { exact: true })).toBeVisible()
+  await expect(name).toHaveValue('Draft awaiting a reload'); await expect(page.locator('#project-title')).toHaveText('Pharos')
+  world.control.fail = false
+  await page.getByRole('button', { name: 'Reload project', exact: true }).click()
+  await expect(name).toBeEnabled(); await expect(name).toHaveValue('Draft awaiting a reload')
+  await name.fill('Pharos'); await name.press('Enter')
   const freeze = page.locator('[data-life="freeze"]'), archive = page.locator('[data-life="archive"]'), del = page.locator('[data-life="delete"]')
   const lifeStable = await controlStability(page, { freeze, archive, del })
   await lifeStable.check(() => freeze.click())
@@ -148,7 +156,7 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
 
 test('AEON-1233: approved P1 reference states and check.mjs audit against the build', async ({ browser }, testInfo) => {
   test.setTimeout(240_000)
-  const lines = [`AEON-1233 P1 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit runs on the built P1 surface. Full mock flows for P2–P6 are outside this package.']
+  const lines = [`AEON-1233 P1 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit runs on the built P1 surface. Full mock flows for P2–P6 are outside this package.', 'Freeze dates/actors are absent from the project API: show the confirmed Frozen state without inventing a date or person. The key uses a ticket-number pattern when no actual ticket number is supplied.']
   for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
     const context = await browser.newContext({ viewport: { width, height: width < 600 ? 860 : 1000 }, hasTouch: width < 600, colorScheme: theme, reducedMotion: 'reduce' })
     try {
