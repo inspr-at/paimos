@@ -5570,6 +5570,10 @@
     ,
     {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 light 390: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 regression: failed layout reads retain the local handle until recovery merges shared fields","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 regression: the table uses the approved columns with the ticket in the session name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: a failed handle save is visible without moving the preset","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: a person change closes details and cancels the previous handle save","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

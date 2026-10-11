@@ -270,6 +270,73 @@ test('AEON-1213: a failed handle save is visible without moving the preset', asy
   guard.done()
 })
 
+// Data loss: a failed GET is not an empty shared preference. The local handle
+// must survive the outage without replacing folded_projects on the server.
+test('AEON-1213 regression: failed layout reads retain the local handle until recovery merges shared fields', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { data, work, calls } = await setup(page, 'light', 420)
+  let recover = false, reads = 0, release!: () => void
+  const recovery = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/preferences/**', async route => {
+    if (decodeURIComponent(new URL(route.request().url()).pathname).endsWith('/agents:layout') && route.request().method() === 'GET') {
+      reads++
+      if (!recover) return route.fulfill({ status: 503, json: { error: 'unavailable' } })
+      await recovery
+    }
+    await route.fallback()
+  })
+  const failedRead = page.waitForResponse(response => decodeURIComponent(new URL(response.url()).pathname).endsWith('/agents:layout') && response.status() === 503)
+  await page.goto(`/agents/${data.sessions[1]!.id}`)
+  await (await failedRead).finished()
+  await expect(pane(page)).toHaveClass(/docked/)
+  const separator = page.getByRole('separator', { name: 'Resize the session list' })
+  const before = await listWidth(page)
+  await separator.focus(); await page.keyboard.press('ArrowRight')
+  await expect.poll(() => listWidth(page)).toBe(before + 16)
+  await page.clock.runFor(500)
+  const writes = () => calls.filter(call => call.method === 'PUT' && call.path === '/api/preferences/agents:layout')
+  expect(writes()).toEqual([])
+  expect(work.preferences['agents:layout']).toEqual({ handle: 420, folded_projects: ['keep-this-preference'] })
+
+  recover = true
+  const previousReads = reads
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => reads).toBeGreaterThan(previousReads)
+  await page.clock.runFor(500)
+  expect(writes()).toEqual([])
+  await expect.poll(() => listWidth(page)).toBe(before + 32)
+  release()
+  await expect.poll(() => page.evaluate(async () => {
+    const path = '/src/lib/preferences.ts'
+    const { usePreference } = await import(path)
+    return usePreference('agents:layout').value.value?.handle
+  })).toBe(before + 32)
+  await page.clock.runFor(500)
+  await expect.poll(() => work.preferences['agents:layout']).toEqual({ handle: before + 32, folded_projects: ['keep-this-preference'] })
+  expect(writes()).toHaveLength(1)
+})
+
+// Approved table contract: fields and tracks must move together, so removing a
+// column cannot put model/computer/beat content under the wrong heading.
+test('AEON-1213 regression: the table uses the approved columns with the ticket in the session name', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { data } = await setup(page)
+  await page.goto('/agents')
+  const worker = row(page, data.sessions[1]!.id)
+  await expect(worker).toBeVisible()
+  await expect(page.locator('.sessions .thead [role="columnheader"]')).toHaveText(['Session', 'Time', 'Execution', 'Computer', 'Beat', 'Actions'])
+  await expect(worker.locator('.l1 .key-inline')).toHaveText(`${data.sessions[1]!.ticket!.key} ·`)
+  await expect(worker.locator('.l1 .key-inline')).toBeVisible()
+  await expect(page.locator('.sessions .c-ticket, .sessions .c-tier')).toHaveCount(0)
+  const header = page.locator('.sessions .thead')
+  for (const cell of ['c-time', 'c-exec', 'c-host', 'c-beat']) {
+    const heading = (await header.locator(`.${cell}`).boundingBox())!
+    const body = (await worker.locator(`.${cell}`).boundingBox())!
+    expect(body.x).toBeCloseTo(heading.x, 1)
+    expect(body.width).toBeCloseTo(heading.width, 1)
+  }
+})
+
 test.describe('touch', () => {
   test.use({ hasTouch: true })
   test('AEON-1213: the preset, divider hit area and phone Back target are 44 px', async ({ page }, info) => {
