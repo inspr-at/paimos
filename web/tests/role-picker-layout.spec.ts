@@ -214,11 +214,15 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
     const panel = sheet ? page.getByRole('dialog', { name: 'Parent for PHAROS-11' }) : page.locator('.floating[role="dialog"]')
     await expect(panel).toBeVisible()
     const list = panel.locator('.menu, .options, .picker-list')
+    const body = sheet ? panel.locator('.sheet-body') : panel
     const rows = list.locator('[role="option"], [role="menuitemradio"], [role="checkbox"], :scope > label')
     await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(8)
-    // Parent choices use the shared phone sheet with one scrolling list body.
-    if (sheet) expect(await list.evaluate(el => getComputedStyle(el).overflowY)).toBe('auto')
-    else expect(await list.evaluate(el => el.scrollHeight - el.clientHeight), 'no nested clipping').toBeLessThanOrEqual(1)
+    // Parent choices scroll in the shared sheet body; the list stays unclipped.
+    if (sheet) {
+      expect(await body.evaluate(el => getComputedStyle(el).overflowY)).toBe('auto')
+      expect(await body.evaluate(el => el.scrollHeight - el.clientHeight), 'long parent choices require body scrolling').toBeGreaterThan(1)
+    }
+    expect(await list.evaluate(el => el.scrollHeight - el.clientHeight), 'no nested clipping').toBeLessThanOrEqual(1)
     await insideViewport(panel, page)
     if (kind === 'label') await insideViewport(panel.getByRole('button', { name: 'Apply', exact: true }), page)
     await rows.last().scrollIntoViewIfNeeded()
@@ -240,8 +244,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
     const search = panel.locator('input:not([type="checkbox"])')
     const read = panel.locator('.read-name').last()
     await expectStableControls({
-      controls: { panel, group: list, row, ...(await search.count() ? { search } : {}), ...(await read.count() ? { read } : {}), ...(kind === 'label' ? { apply: panel.getByRole('button', { name: 'Apply', exact: true }) } : {}) },
-      scrollAreas: { panel, list },
+      controls: { panel, group: list, row, ...(sheet ? { body, cancel: panel.getByRole('button', { name: 'Cancel', exact: true }) } : {}), ...(await search.count() ? { search } : {}), ...(await read.count() ? { read } : {}), ...(kind === 'label' ? { apply: panel.getByRole('button', { name: 'Apply', exact: true }) } : {}) },
+      scrollAreas: { panel, body, list },
       interactions: [{ name: `read ${kind} option before choosing`, run: async () => {
         // A label toggle has already focused this row. Start a real keyboard
         // focus transition; focusing the same node cannot emit focusin again.

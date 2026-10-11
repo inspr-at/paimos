@@ -292,7 +292,7 @@
       "main_commit_that_broke_it": "d15114c1a",
       "owning_ticket": "AEON-1239 (source AEON-655 / AEON-624)",
       "stale-spec_or_real-regression": "stale-spec",
-      "smallest_fix": "Phone Parent picker uses the shared AccessSheet, not FloatingPanel. Measure its scrollable options body and preserve viewport, disclosure, event and stability checks.",
+      "smallest_fix": "Phone Parent picker uses the shared AccessSheet, not FloatingPanel. Assert overflow:auto on .sheet-body and actual body scrolling for the long fixture; retain the list no-clipping assertion. Include the body and pinned Cancel in the stability guard and the body in horizontal-overflow checks; preserve viewport, disclosure and selection-event assertions.",
       "source": "web/src/components/work/EpicPicker.vue",
       "disposition": "fixed locally; remote proof blocked"
     },
@@ -2295,5 +2295,63 @@
     "105454870 AEON-1239: bind the held Outline root page to unified work",
     "dd60cbf28 AEON-1239: migrate nightly coverage to canonical work and decision flows",
     "b9d66acab AEON-1239: align nightly specs with current controls and isolated artifacts"
-  ]
+  ],
+  "fix_round_2": {
+    "reviewed_head": "ca18b021a",
+    "blocking_finding": "Medium: phone Parent picker spec incorrectly expects overflow:auto on .options instead of AccessSheet .sheet-body.",
+    "resolution": "Correct the existing two phone theme cases to assert the real scrolling container, retain unclipped list coverage, and measure the body and pinned Cancel during disclosure.",
+    "regression_cases": [
+      "epic floating choices scroll as one panel at 390 light",
+      "epic floating choices scroll as one panel at 390 dark"
+    ],
+    "baseline_attempts": [
+      {
+        "runner": "remote-spec.sh",
+        "spec": "tests/role-picker-layout.spec.ts",
+        "grep": "epic floating choices scroll as one panel at 390",
+        "head": "ca18b021a",
+        "exit_code": 3,
+        "reason": "shared remote capacity full"
+      },
+      {
+        "runner": "remote-spec.sh",
+        "spec": "tests/role-picker-layout.spec.ts",
+        "grep": "epic floating choices scroll as one panel at 390",
+        "head": "ca18b021a",
+        "exit_code": 3,
+        "reason": "shared remote capacity full"
+      },
+      {
+        "runner": "remote-spec.sh",
+        "spec": "tests/role-picker-layout.spec.ts",
+        "grep": "epic floating choices scroll as one panel at 390",
+        "head": "ca18b021a",
+        "exit_code": 3,
+        "reason": "host level refusal after waiting and retrying"
+      }
+    ],
+    "baseline_execution": "Incomplete: no browser tests executed. The reviewer identifies both phone theme failures; source inspection confirms .options leaves overflow visible and .sheet-body has overflow:auto. No executed fail-before proof is claimed.",
+    "main_conflict_check": {
+      "fetched_origin_main": "928157260227550bfbf00014f75196e584ba63a8",
+      "command": "git merge-tree --write-tree HEAD origin/main",
+      "exit_code": 0,
+      "result": "conflict-free; no merge required by fix brief"
+    },
+    "checks": [
+      {
+        "command": "Node v24 stripTypeScriptTypes + vm.SourceTextModule syntax parse of web/tests/role-picker-layout.spec.ts",
+        "result": "passed; syntax only, no imports executed"
+      },
+      {
+        "command": "git diff --check",
+        "result": "passed"
+      },
+      {
+        "command": "remote-test.sh / web unit tests",
+        "result": "not affected: this round changes an existing browser spec and evidence only; no Go, application or unit-test code changed"
+      }
+    ],
+    "post_fix_validation": "Pending committed-HEAD remote-spec and ci-static-locked attempts.",
+    "ownership": "Same branch/worktree; AEON-1238 files and real-regression assertions untouched. No new/renamed tests, source files, manifests, production code, API, migrations, versions or release metadata. No origin push, deploy, review gate, model CLI or delegation."
+  }
 }
