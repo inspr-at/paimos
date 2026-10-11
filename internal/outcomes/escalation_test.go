@@ -625,7 +625,9 @@ func TestEscalationRetainsOriginalModelAcrossSelections(t *testing.T) {
 				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$1::uuid,$2::uuid] WHERE account_key='retry-claude'`, f.opus, fable); err != nil {
 					return err
 				}
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state,reason) VALUES($1,'build-hard',99,$2,'available','Explicit fixture build authority')`, f.p.TenantID, fable); err != nil {
+				// Explicit fixture build authority: a Stuck order of the two
+				// routes the account allows, ending in Wait (no Default tail).
+				if err := dbtest.ModelsOrder(t.Context(), tx, f.p.TenantID, "other", "stuck", "wait", f.opus, fable); err != nil {
 					return err
 				}
 				// Observe first while Fable is the original writer. It must survive a later session.
@@ -672,7 +674,10 @@ func TestEscalationRetainsOriginalModelAcrossSelections(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if pick.Profile != nil || pick.Trace.Blocked != "no allowed stronger route" {
+				// The escalation block is the whole walk's (the Decision Desk
+				// stores it as the route block); each held step names its own
+				// cause: Opus attempted by the retry, Fable as the retained original.
+				if pick.Profile != nil || pick.Trace.Blocked != "no allowed stronger route" || len(pick.Trace.Held) != 2 || pick.Trace.Held[0].Line != "anthropic:opus" || pick.Trace.Held[0].Reason != "already attempted" || pick.Trace.Held[1].Line != "anthropic:fable" || pick.Trace.Held[1].Reason != "already attempted" {
 					t.Fatal("original model returned to routing", pick)
 				}
 				if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {

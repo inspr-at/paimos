@@ -10,6 +10,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -62,16 +63,8 @@ func TestWorkLatestPinAndAutomaticResidencyReselection(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$1::uuid,$2::uuid] WHERE harness='codex'`, a.ID, b.ID); err != nil {
 			return err
 		}
-		scope, err := modelprefs.SaveScope(t.Context(), tx, p, modelprefs.Scope{Level: "default"})
-		if err != nil {
-			return err
-		}
-		kind, _, err := modelprefs.LookupKind(t.Context(), tx, "backend", "")
-		if err != nil {
-			return err
-		}
-		row := modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": {Mode: "latest", Family: "openai", Line: "sol", Effort: "xhigh"}}}
-		if err := modelprefs.PutRow(t.Context(), tx, p, scope, kind.ID, row); err != nil {
+		// A Models row names the Sol line; its routes run the newest version.
+		if err := dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "backend", "first", "default", b.ID); err != nil {
 			return err
 		}
 		q := WorkQuery{Role: "build", Area: "backend"}
@@ -80,30 +73,26 @@ func TestWorkLatestPinAndAutomaticResidencyReselection(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if got.Profile == nil || got.Profile.ID != b.ID || got.Role != "build" || got.Trace.LatestResolvedTo != b.ID || len(got.Trace.QualifyingAccountIDs) != 1 {
+		if got.Profile == nil || got.Profile.ID != b.ID || got.Role != "build" || len(got.Trace.QualifyingAccountIDs) != 1 {
 			t.Fatal("latest failed", got)
 		}
-		// Main's preference path must preserve refresh health policy for
-		// latest candidates and explicit pins, including profiles off-ladder.
+		// Refresh health policy still fences the newest version: the walk
+		// skips it with its cause and continues with the Default's order.
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_observations(tenant_id,harness,model,effort,failures,last_failing_at,suppressed_until,source) VALUES($1,$2,$3,$4,2,$5,$6,'agent')`, p.TenantID, b.Harness, b.Model, b.Effort, now, now.Add(time.Hour)); err != nil {
 			return err
 		}
-		for _, cell := range []modelprefs.Cell{row.Cells["normal"], {Mode: "pinned", ProfileID: b.ID}} {
-			if err := modelprefs.PutRow(t.Context(), tx, p, scope, kind.ID, modelprefs.Row{Cells: map[string]modelprefs.Cell{"normal": cell}}); err != nil {
-				return err
-			}
-			got, err = ResolveWork(t.Context(), tx, p, q, now)
-			if err != nil {
-				return err
-			}
-			if got.Profile == nil || got.Profile.ID == b.ID || len(got.Trace.PreferredCandidates) == 0 || got.Trace.PreferredCandidates[0].ProfileID != b.ID || !strings.Contains(strings.Join(got.Trace.PreferredCandidates[0].SkipReasons, "; "), "model invalid until") {
-				t.Fatal("preference bypassed model health", cell.Mode, got)
-			}
-		}
-		if _, err := tx.Exec(t.Context(), `UPDATE model_observations SET suppressed_until=$1`, now); err != nil {
+		got, err = ResolveWork(t.Context(), tx, p, q, now)
+		if err != nil {
 			return err
 		}
-		if err := modelprefs.PutRow(t.Context(), tx, p, scope, kind.ID, row); err != nil {
+		fenced := false
+		for _, c := range got.Ladder {
+			fenced = fenced || c.ProfileID == b.ID && !c.Selected && strings.Contains(strings.Join(c.SkipReasons, "; "), "model invalid until")
+		}
+		if got.Profile == nil || got.Profile.ID == b.ID || got.Profile.ID == a.ID || !fenced {
+			t.Fatal("preference bypassed model health", got)
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE model_observations SET suppressed_until=$1`, now); err != nil {
 			return err
 		}
 		got, err = ResolveWork(t.Context(), tx, p, q, now)
@@ -113,6 +102,7 @@ func TestWorkLatestPinAndAutomaticResidencyReselection(t *testing.T) {
 		if got.Profile == nil || got.Profile.ID != b.ID {
 			t.Fatal("expired health suppression still blocked latest", got)
 		}
+		// A retired newest version hands its uses to the next newest one.
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($1,$2,'old preference',$3)`, p.TenantID, b.ID, p.ID); err != nil {
 			return err
 		}
@@ -120,21 +110,19 @@ func TestWorkLatestPinAndAutomaticResidencyReselection(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if got.Profile == nil || got.Profile.ID != a.ID || got.Trace.Fallback != "" {
+		if got.Profile == nil || got.Profile.ID != a.ID {
 			t.Fatal("retired latest selected", got)
 		}
-		row.Cells["normal"] = modelprefs.Cell{Mode: "pinned", ProfileID: b.ID}
-		if err := modelprefs.PutRow(t.Context(), tx, p, scope, kind.ID, row); err != nil {
+		for _, c := range got.Ladder {
+			if c.ProfileID == b.ID {
+				t.Fatal("retired version stayed in the walk", got.Ladder)
+			}
+		}
+		if _, err := tx.Exec(t.Context(), `DELETE FROM model_pref_orders WHERE column_key='backend'`); err != nil {
 			return err
 		}
-		got, err = ResolveWork(t.Context(), tx, p, q, now)
+		scope, err := modelprefs.SaveScope(t.Context(), tx, p, modelprefs.Scope{Level: "default"})
 		if err != nil {
-			return err
-		}
-		if got.Profile == nil || got.Profile.ID == b.ID || !strings.Contains(got.Trace.Fallback, "retired") {
-			t.Fatal("retired pin did not fall back", got)
-		}
-		if _, err := tx.Exec(t.Context(), `DELETE FROM model_pref_rows WHERE scope_id=$1`, scope.ID); err != nil {
 			return err
 		}
 		eu := "eu"
