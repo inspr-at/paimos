@@ -22,8 +22,8 @@ import (
 // review advancement, budget escape through child orders, and infinite failed
 // fix pickup. A fix re-review must retain the original build range and reject
 // a completed artifact from a different checkout. Reuse the real consent,
-// dispatch, telemetry, parser, budget and
-// Decision Desk services; fixture process/usage receipts represent qualified
+// dispatch, telemetry, parser, budget and Decision Desk services; fixture
+// process/usage receipts represent qualified
 // adapter observations, never elapsed-time or sleep-based proof.
 func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	d := setupDispatchOn(t, setup(t, "both", false))
@@ -199,6 +199,29 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	fixedRange := reviewgate.CommitRange{Repository: cr.Repository, BaseSHA: cr.HeadSHA, HeadSHA: strings.Repeat("c", 40)}
 	fixFinished := report(fixRun, "completed", "", &fixedRange)
 	settle(fixRun)
+	var fixGrant []byte
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT trace->'routine_launch' FROM agent_runs WHERE id=$1`, fixRun).Scan(&fixGrant))
+	f.exec(`UPDATE agent_runs SET trace=trace #- '{routine_launch,lineage}' WHERE id=$1`, fixRun)
+	wait(fixFinished, "routine_lineage_unavailable")
+	f.exec(`UPDATE agent_runs SET trace=jsonb_set(trace,'{routine_launch}',$2::jsonb) WHERE id=$1`, fixRun, fixGrant)
+	f.exec(`UPDATE agent_runs SET trace=jsonb_set(trace,'{routine_launch,lineage,head_sha}',to_jsonb($2::text)) WHERE id=$1`, fixRun, strings.Repeat("d", 40))
+	wait(fixFinished, "fix_review_changed")
+	f.exec(`UPDATE agent_runs SET trace=jsonb_set(trace,'{routine_launch}',$2::jsonb) WHERE id=$1`, fixRun, fixGrant)
+	f.exec(`INSERT INTO cross_family_policies(tenant_id,project_id,mode,allowed_families,updated_by) VALUES($1,$2,'allowlist',ARRAY['anthropic'],$3)`, f.owner.TenantID, f.project, f.owner.ID)
+	wait(fixFinished, "review_policy_changed")
+	f.exec(`DELETE FROM cross_family_policies WHERE project_id=$1`, f.project)
+	f.exec(`UPDATE routine_effect_outbox SET payload=jsonb_set(payload,'{range,base_sha}',to_jsonb($2::text)) WHERE id=$1`, fixFinished, strings.Repeat("d", 40))
+	wait(fixFinished, "fix_artifact_lineage_changed")
+	f.exec(`UPDATE routine_effect_outbox SET payload=jsonb_set(payload,'{range,base_sha}',to_jsonb($2::text)) WHERE id=$1`, fixFinished, fixedRange.BaseSHA)
+	f.exec(`UPDATE routine_effect_outbox SET payload=jsonb_set(payload,'{range,repository}',to_jsonb($2::text)) WHERE id=$1`, fixFinished, "example/other")
+	wait(fixFinished, "fix_artifact_lineage_changed")
+	f.exec(`UPDATE routine_effect_outbox SET payload=jsonb_set(payload,'{range,repository}',to_jsonb($2::text)) WHERE id=$1`, fixFinished, fixedRange.Repository)
+	var roots int
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM routine_budget_grants WHERE run_id=$1 AND parent_id IS NULL`, f.run).Scan(&roots))
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM work_order_reviews WHERE ticket_node_id=$1`, f.work).Scan(&count))
+	if roots != 3 || count != 1 {
+		t.Fatalf("refused fix completion created reviews or charges: reviews=%d roots=%d", count, roots)
+	}
 	// The daemon reports only the fix's commits. The next reviewer must see
 	// the entire original build plus fix, including any unresolved finding.
 	rereview := advance(fixFinished, true)
@@ -214,6 +237,11 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 		t.Fatalf("fix re-review lost cumulative lineage: %+v", g)
 	}
 	advance(fixFinished, false)
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM routine_budget_grants WHERE run_id=$1 AND parent_id IS NULL`, f.run).Scan(&roots))
+	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM work_order_reviews WHERE ticket_node_id=$1`, f.work).Scan(&count))
+	if roots != 4 || count != 2 {
+		t.Fatalf("fix completion replay duplicated reviews or charges: reviews=%d roots=%d", count, roots)
+	}
 	rereviewFinished := report(rereviewRun, "completed", "FINDING: high internal/example.go:1 Still broken.\nVERDICT: changes", nil)
 	settle(rereviewRun)
 	// Permit a second fix for the retained finding, then keep the original

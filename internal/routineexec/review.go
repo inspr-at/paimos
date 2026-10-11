@@ -364,11 +364,30 @@ func (e *Executor) advance(ctx context.Context, tx pgx.Tx, tid string, r intent,
 			if err := authorProof(ctx, tx, c.AgentRunID); err != nil {
 				return nil, err
 			}
+			reviewRange := *c.Range
+			if role == "fix" {
+				var g agentsetup.RoutineGrant
+				if err := loadActorGrant(ctx, tx, c.AgentRunID, &g); err != nil {
+					return nil, err
+				}
+				if g.Lineage == nil || g.Lineage.Role != "fix" || g.AgentRunID != c.AgentRunID || g.RoutineRunID != r.id || g.ProjectID != r.project || g.TenantID != tid {
+					return nil, workorders.Fail(409, "routine_lineage_unavailable")
+				}
+				if err := e.validateContinuation(ctx, tx, g); err != nil {
+					return nil, err
+				}
+				if c.Range.Repository != g.Lineage.Repository || c.Range.BaseSHA != g.Lineage.HeadSHA {
+					return nil, workorders.Fail(409, "fix_artifact_lineage_changed")
+				}
+				// A fix starts at the rejected head, but the next review must
+				// include the original build and every fix in this lineage.
+				reviewRange.BaseSHA = g.Lineage.BaseSHA
+			}
 			pin, err := policyPin(ctx, tx, r.project)
 			if err != nil {
 				return nil, err
 			}
-			v, err := e.options.Reviews.CreateRoutineTx(ctx, tx, owner, r.id, r.work, crossreview.CreateInput{RequestID: c.AgentRunID, AuthorRunID: &c.AgentRunID, Repository: c.Range.Repository, BaseSHA: c.Range.BaseSHA, HeadSHA: c.Range.HeadSHA}, &pending)
+			v, err := e.options.Reviews.CreateRoutineTx(ctx, tx, owner, r.id, r.work, crossreview.CreateInput{RequestID: c.AgentRunID, AuthorRunID: &c.AgentRunID, Repository: reviewRange.Repository, BaseSHA: reviewRange.BaseSHA, HeadSHA: reviewRange.HeadSHA}, &pending)
 			if err != nil {
 				return nil, err
 			}
