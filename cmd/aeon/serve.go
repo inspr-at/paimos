@@ -498,6 +498,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			hours.New(pool, pluginRegistry),
 			directory.New(pool, pluginRegistry),
 		},
+		AuthProbe:  authMod.ProbeAuthentication,
 		Middleware: []func(http.Handler) http.Handler{authMod.Middleware, doctrineMod.CatalogMiddleware, events.PositionMiddleware(pool)},
 	}
 	if tokenMod.Keys != nil {
@@ -515,6 +516,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	}
 	srv := &http.Server{
 		Handler:           attachmentsMod.WrapSandbox(agentpairing.GuidePage(api.Handler(), webFS, cfg.PublicURL, cfg.PairingNixGuide)),
+		ConnContext:       api.ConnContext,
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       time.Minute,
 	}

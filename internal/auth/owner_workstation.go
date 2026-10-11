@@ -26,6 +26,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -262,10 +263,7 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 			writeBadRequest(w, "invalid action query")
 			return
 		}
-		controller := http.NewResponseController(w)
-		_ = controller.SetReadDeadline(time.Now().Add(15 * time.Second))
-		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, workstationBodyLimit))
-		_ = controller.SetReadDeadline(time.Time{})
+		body, err := httpapi.ReadRequestBody(w, r, workstationBodyLimit, 15*time.Second)
 		if err != nil {
 			if err := m.auditWorkstation(r, p, false, "invalid_body"); err != nil {
 				internalFailure(w, r, "serveWorkstation", err)
@@ -402,10 +400,10 @@ func (m *Module) handleOwnerWorkstation(w http.ResponseWriter, r *http.Request) 
 		writeBadRequest(w, "invalid id")
 		return
 	}
-	r.Body = http.MaxBytesReader(w, r.Body, 4096)
-	controller := http.NewResponseController(w)
-	_ = controller.SetReadDeadline(time.Now().Add(15 * time.Second))
-	defer controller.SetReadDeadline(time.Time{})
+	if err := httpapi.BufferRequestBodyTimeout(w, r, 4096, 15*time.Second); err != nil {
+		writeBadRequest(w, "invalid request")
+		return
+	}
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&body) != nil || decoder.Decode(new(any)) != io.EOF {

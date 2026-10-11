@@ -97,6 +97,28 @@ func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
 		WriteJSON(w, http.StatusServiceUnavailable, body)
 		return
 	}
+	if s.AuthProbe != nil {
+		err := s.AuthProbe(ctx)
+		// Client cancellations must not become a process health observation.
+		if r.Context().Err() != nil {
+			body.Reason = "database_unavailable"
+			WriteJSON(w, http.StatusServiceUnavailable, body)
+			return
+		}
+		now := time.Now()
+		if s.readyNow != nil {
+			now = s.readyNow()
+		}
+		if !s.authReady.observe(now, err != nil) {
+			body.Reason = "authentication_unavailable"
+			LogFailure(r, "readiness_authentication", err)
+			WriteJSON(w, http.StatusServiceUnavailable, body)
+			return
+		}
+		if err != nil {
+			LogFailure(r, "readiness_authentication", err)
+		}
+	}
 	// Drain can start while the ping is in flight. The check above would
 	// otherwise answer ready from a state that is already false.
 	if !s.accepting() {
