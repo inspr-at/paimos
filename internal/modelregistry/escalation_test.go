@@ -50,18 +50,18 @@ func TestModelsV2EscalationAdmissionWait(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		got, err := ResolveEscalation(ctx, tx, p, WorkQuery{Role: "build", Area: "frontend"}, nil, now)
+		got, err := ResolveEscalation(ctx, tx, p, WorkQuery{Role: "build", Area: "frontend", Column: "other"}, nil, now)
 		if err != nil {
 			return err
 		}
 		if got.Profile != nil || got.Trace.Blocked != "admission_wait" || got.OwnerRequired || len(got.Ladder) != 1 || len(got.Ladder[0].SkipReasons) != 1 || got.Ladder[0].SkipReasons[0] != "no qualified account with available capacity" {
 			t.Fatalf("capacity-only escalation did not wait: %+v", got)
 		}
-		got, err = ResolveEscalation(ctx, tx, p, WorkQuery{Role: "build", Area: "frontend"}, []string{opus}, now)
+		got, err = ResolveEscalation(ctx, tx, p, WorkQuery{Role: "build", Area: "frontend", Column: "other"}, []string{opus}, now)
 		if err != nil {
 			return err
 		}
-		if got.Profile != nil || got.Trace.Blocked == "admission_wait" || !got.OwnerRequired || !strings.Contains(strings.Join(got.Ladder[0].SkipReasons, ";"), "already attempted") {
+		if got.Profile != nil || got.Trace.Blocked == "admission_wait" || !got.OwnerRequired || len(got.Ladder) != 1 || !strings.Contains(strings.Join(got.Ladder[0].SkipReasons, ";"), "already attempted") {
 			t.Fatalf("attempted route became an admission wait: %+v", got)
 		}
 		return nil
