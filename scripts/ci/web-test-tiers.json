@@ -17256,6 +17256,10 @@
     ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses server review evidence, including newly qualified harnesses and per-model residency","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"AEON-1163: discovery drafts stay bound to their account and cannot be submitted after management access is lost","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"AEON-1163: discovery drafts survive access refresh but reset synchronously with the session and release their listener on unmount","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"How new models are found writes its settings with auto-update as the server holds it and never sends the matrix revision","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"Remove on a version asks one read about every level of every route it removes, then retires exactly those","tier":"GATED-FULL"}

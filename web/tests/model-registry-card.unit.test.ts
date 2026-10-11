@@ -15,6 +15,7 @@ vi.mock('../src/lib/api', () => ({ api: (path: string, init: RequestInit = {}) =
 import * as registry from '../src/lib/modelRegistry'
 import * as accountUse from '../src/lib/accountUse'
 import * as identityScope from '../src/lib/identityScope'
+import * as authz from '../src/lib/authz'
 
 type Profile = registry.RegistryProfile
 type Toasted = { message: string; options?: { tone?: string; action?: { label: string; run: () => void } } }
@@ -89,6 +90,85 @@ function setup(): Card {
   new Function('require', 'exports', ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)((id: string) => { if (!(id in modules)) throw new Error(id); return modules[id] }, exports)
   return exports.default!.setup({}, { expose: () => {} }) as Card
 }
+
+// The discovery fold owns a draft independently of the registry's saved state.
+// Risk: focus clears a live draft, or a reset/account change leaves it available
+// to another person or account. Exercise the real access boundary synchronously.
+interface Discovery {
+  accountId: Vue.Ref<string>; key: Vue.Ref<string>; sendKey(remove?: boolean): void
+}
+function mountDiscovery() {
+  const props = Vue.reactive({
+    accounts: [
+      { id: 'acc-codex', label: 'Codex', harness: 'codex', vendor: 'openai' },
+      { id: 'acc-claude', label: 'Claude', harness: 'claude', vendor: 'anthropic' },
+    ], manage: true, busy: false,
+  })
+  const emitted: unknown[][] = [], cleanup: (() => void)[] = []
+  const file = 'ModelDiscovery.vue'
+  const { descriptor } = parse(readFileSync(new URL(`../src/components/settings/models/${file}`, import.meta.url), 'utf8'))
+  const { content } = compileScript(descriptor, { id: file })
+  const imports: Record<string, unknown> = {
+    vue: { ...Vue, useId: () => 'discovery-test', onBeforeUnmount: (callback: () => void) => { cleanup.push(callback) } },
+    '../../AppIcon.vue': {}, '../../../lib/modelRegistry': registry, '../../../lib/authz': authz,
+  }
+  const exports: { default?: { setup: (props: object, ctx: object) => unknown } } = {}
+  new Function('require', 'exports', ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText)((id: string) => { if (!(id in imports)) throw new Error(id); return imports[id] }, exports)
+  const scope = Vue.effectScope(); scopes.push(scope)
+  const discovery = scope.run(() => exports.default!.setup(props, { expose: () => {}, emit: (...args: unknown[]) => { emitted.push(args) } })) as Discovery
+  return { discovery, props, emitted, unmount: () => { for (const stop of cleanup) stop(); scope.stop() } }
+}
+
+it('AEON-1163: discovery drafts survive access refresh but reset synchronously with the session and release their listener on unmount', async () => {
+  const base = http.handler
+  http.handler = (path, init) => path === '/me/permissions'
+    ? Promise.resolve(answer({ workspace: { permissions: ['models.read', 'models.manage'] }, project: null })) : base(path, init)
+  authz.clearPermissions()
+  const { discovery, emitted, unmount } = mountDiscovery()
+  try {
+    discovery.key.value = 'fixture-only-draft'
+    await authz.accessChanged()
+    expect(discovery.key.value).toBe('fixture-only-draft')
+    expect(discovery.accountId.value).toBe('acc-codex')
+    for (const reset of [authz.clearPermissions, authz.revokePermissions]) {
+      discovery.accountId.value = 'acc-claude'
+      discovery.key.value = 'fixture-only-draft'
+      reset()
+      expect(discovery.key.value).toBe('')
+      expect(discovery.accountId.value).toBe('')
+      discovery.sendKey(true)
+      expect(emitted).toEqual([])
+    }
+    unmount()
+    discovery.key.value = 'unmounted-fixture-draft'
+    authz.clearPermissions()
+    expect(discovery.key.value).toBe('unmounted-fixture-draft')
+  } finally { unmount(); authz.clearPermissions() }
+})
+
+it('AEON-1163: discovery drafts stay bound to their account and cannot be submitted after management access is lost', () => {
+  const { discovery, props, emitted, unmount } = mountDiscovery()
+  try {
+    discovery.key.value = 'fixture-only-draft'
+    props.accounts = props.accounts.map(account => ({ ...account }))
+    expect(discovery.key.value).toBe('fixture-only-draft')
+    discovery.accountId.value = 'acc-claude'
+    expect(discovery.key.value).toBe('')
+    discovery.key.value = 'fixture-only-draft'
+    props.manage = false
+    expect(discovery.key.value).toBe('')
+    // A stale DOM event may still arrive before Vue removes the control.
+    discovery.key.value = 'fixture-only-stale-event'
+    discovery.sendKey()
+    discovery.sendKey(true)
+    expect(emitted).toEqual([])
+    props.manage = true
+    discovery.key.value = 'fixture-only-new-draft'
+    discovery.sendKey()
+    expect(emitted).toEqual([['saveKey', props.accounts[1], 'fixture-only-new-draft']])
+    expect(discovery.key.value).toBe('')
+  } finally { unmount() }
+})
 async function mount() {
   const scope = Vue.effectScope(); scopes.push(scope)
   const card = scope.run(setup)!

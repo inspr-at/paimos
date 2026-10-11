@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref, useId, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
 import AppIcon from '../../AppIcon.vue'
+import { onAccessRevalidate } from '../../../lib/authz'
 import { HARNESS_NAME, intervalLabel, type Harness, type Observation, type RefreshSettings, type RefreshStatus } from '../../../lib/modelRegistry'
 
 // Settings › Models › Model registry › How new models are found (AEON-1163, merging the old Model catalog form per
@@ -33,14 +34,19 @@ const waiting = computed(() => (props.status.observations ?? []).filter(observat
 const failing = computed(() => (props.status.observations ?? []).some(observation => observation.failures >= 2))
 const harnessName = (harness: string) => HARNESS_NAME[harness as Harness] ?? harness
 
-// The key field is cleared once it is sent; a saved key is never shown again.
+// A key draft belongs to the current person and selected account. Focus refresh
+// keeps it; a session reset, another account or lost management access clears it.
 const accountId = ref(''), key = ref('')
-watch(() => props.accounts, list => { if (list && !list.some(account => account.id === accountId.value)) accountId.value = list[0]?.id ?? '' }, { immediate: true })
+watch(accountId, () => { key.value = '' }, { flush: 'sync' })
+watch(() => props.accounts, list => { if (!list?.some(account => account.id === accountId.value)) accountId.value = list?.[0]?.id ?? '' }, { immediate: true, flush: 'sync' })
+watch(() => props.manage, allowed => { if (!allowed) key.value = '' }, { flush: 'sync' })
+const stopAccess = onAccessRevalidate({ reset: () => { key.value = ''; accountId.value = '' } })
+onBeforeUnmount(stopAccess)
 const account = computed(() => props.accounts?.find(candidate => candidate.id === accountId.value) ?? null)
 const saved = computed(() => !!account.value && (props.status.sources ?? []).some(source => source.account_id === account.value!.id))
 function sendKey(remove = false) {
   const chosen = account.value
-  if (!chosen || props.busy || (!remove && !key.value)) return
+  if (!chosen || !props.manage || props.busy || (!remove && !key.value)) return
   const value = remove ? '' : key.value
   key.value = ''
   emit('saveKey', chosen, value)
