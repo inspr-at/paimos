@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 
 	"github.com/jackc/pgx/v5"
@@ -58,10 +59,45 @@ func ErrorClass(err error) string {
 	case errors.Is(err, context.DeadlineExceeded):
 		return "context_deadline"
 	case errors.As(err, &pgErr):
+		// A fabricated driver error must not smuggle arbitrary text through
+		// its Code field. SQLSTATE is exactly five uppercase ASCII letters/digits.
+		if len(pgErr.Code) != 5 {
+			return "postgres_unknown"
+		}
+		for _, ch := range pgErr.Code {
+			if !(ch >= '0' && ch <= '9' || ch >= 'A' && ch <= 'Z') {
+				return "postgres_unknown"
+			}
+		}
 		return "postgres_" + pgErr.Code
+	case errors.Is(err, pgconn.ErrConnClosed):
+		return "connection_closed"
 	case errors.Is(err, pgx.ErrNoRows):
 		return "no_rows"
 	default:
+		var network net.Error
+		if errors.As(err, &network) {
+			return "network_error"
+		}
 		return "internal"
 	}
 }
+
+// LogFailure records only fixed steps, route templates and error classes.
+// Error messages, URL values, credentials and response bodies stay out of logs.
+// Call at the failure site so a live request still retains a database SQLSTATE;
+// the outer status writer also provides a fallback for otherwise silent 5xx.
+func LogFailure(r *http.Request, step string, err error) {
+	if marker, ok := r.Context().Value(failureKey{}).(*bool); ok {
+		*marker = true
+	}
+	class := ErrorClass(err)
+	if err == nil {
+		class = "internal"
+	}
+	slog.ErrorContext(r.Context(), "request failed", "request_id", RequestID(r.Context()),
+		"route", requestLogRoute(r), "step", step, "error_class", class,
+		"request_context", ErrorClass(r.Context().Err()))
+}
+
+type failureKey struct{}

@@ -168,8 +168,12 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		r = r.WithContext(context.WithValue(conn, requestIDKey{}, id))
 		w.Header().Set(requestIDHeader, id)
 		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK, conn: conn}
+		r = r.WithContext(context.WithValue(r.Context(), failureKey{}, &sw.failureLogged))
 		start := time.Now()
 		defer func() {
+			if sw.status >= 500 && !sw.failureLogged {
+				LogFailure(r, "handler", conn.Err())
+			}
 			attrs := []any{
 				"method", r.Method,
 				"path", requestLogRoute(r),
@@ -185,12 +189,27 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 			}
 			slog.Info("request", attrs...)
 		}()
+		if deadOnArrival {
+			w.Header().Set("Retry-After", "1")
+			LogFailure(r, "connection_context", conn.Err())
+			sw.failureLogged = true
+			WriteError(sw, http.StatusServiceUnavailable, "service unavailable")
+			return
+		}
 		next.ServeHTTP(sw, r)
 		// A handler that wrote nothing gets its status line from net/http after
 		// this returns; the connection header must be set before that.
 		if !sw.wrote && conn.Err() != nil {
 			sw.closed = true
 			w.Header().Set("Connection", "close")
+		}
+		if conn.Err() != nil && sw.wrote && !sw.closeHeader {
+			// Headers committed before cancellation cannot be changed. Flush
+			// any buffered response, then let net/http abort this connection
+			// (or only this stream on HTTP/2), rather than return it to reuse.
+			sw.closed = true
+			_ = http.NewResponseController(w).Flush()
+			panic(http.ErrAbortHandler)
 		}
 	})
 }
@@ -246,10 +265,13 @@ func recoverMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
+				if rec == http.ErrAbortHandler {
+					panic(rec)
+				}
 				// Both the URL path and the panic value can contain a public
 				// capability or an upstream credential. The request ID is enough
 				// to correlate this failure without disclosing either value.
-				slog.Error("panic", "request_id", RequestID(r.Context()))
+				LogFailure(r, "panic", nil)
 				WriteError(w, http.StatusInternalServerError, "internal error")
 			}
 		}()
@@ -271,19 +293,25 @@ type statusWriter struct {
 	wrote  bool
 	// conn is the request context net/http derived from the connection. Once
 	// it is cancelled the connection must not carry another request.
-	conn   context.Context
-	closed bool
+	conn          context.Context
+	closed        bool
+	closeHeader   bool
+	failureLogged bool
 }
 
 func (w *statusWriter) WriteHeader(status int) {
 	if w.wrote {
 		return
 	}
-	w.status = status
-	w.wrote = true
+	final := status >= 200 || status == http.StatusSwitchingProtocols
+	if final {
+		w.status = status
+		w.wrote = true
+	}
 	if w.conn != nil && w.conn.Err() != nil {
 		w.closed = true
 		w.ResponseWriter.Header().Set("Connection", "close")
+		w.closeHeader = final
 	}
 	w.ResponseWriter.WriteHeader(status)
 }
@@ -298,7 +326,12 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 func (w *statusWriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
+	_ = w.FlushError()
+}
+
+func (w *statusWriter) FlushError() error {
+	if !w.wrote {
+		w.WriteHeader(http.StatusOK)
 	}
+	return http.NewResponseController(w.ResponseWriter).Flush()
 }

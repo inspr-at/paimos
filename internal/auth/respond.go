@@ -5,7 +5,6 @@ package auth
 import (
 	"encoding/json"
 	"io"
-	"log/slog"
 	"net/http"
 
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -60,17 +59,12 @@ func writeBadRequest(w http.ResponseWriter, msg string) {
 	writeJSON(w, http.StatusBadRequest, errorJSON{Error: msg})
 }
 
-func writeInternal(w http.ResponseWriter) {
-	writeJSON(w, http.StatusInternalServerError, errorJSON{Error: "internal"})
-}
-
 // internalFailure logs the class of a failure the auth boundary answers with
 // 500, next to the request id, without error text (AEON-1228: these answers
 // were silent, so an already cancelled request context stayed invisible).
 func internalFailure(w http.ResponseWriter, r *http.Request, step string, err error) {
-	slog.Error("auth boundary internal error", "request_id", httpapi.RequestID(r.Context()), "route", r.Pattern, "step", step,
-		"error_class", httpapi.ErrorClass(err), "request_context", httpapi.ErrorClass(r.Context().Err()))
-	writeInternal(w)
+	httpapi.LogFailure(r, step, err)
+	writeJSON(w, http.StatusInternalServerError, errorJSON{Error: "internal"})
 }
 
 // /api/me advertises public sign-in configuration even before a session exists.
