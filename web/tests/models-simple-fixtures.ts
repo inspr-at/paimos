@@ -107,14 +107,19 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
   }
   // A lock owns the whole order, so a member sees the workspace's (as the server does).
   const orderFor = (layer: 'mine' | 'default', column: string) => lockOf(column) ? inherited('default', column) : inherited(layer, column)
+  // The row's level as the server layers it: the person's column, the workspace column, then the person's and the
+  // workspace's default (a lock reads the workspace only). A line's own stored level wins over all of them.
+  const layered = (layer: 'mine' | 'default', column: string, locked: boolean) => (locked || layer === 'default'
+    ? [layers.default.get(column), layers.default.get('other')]
+    : [layers.mine.get(column), layers.default.get(column), layers.mine.get('other'), layers.default.get('other')]).find(order => order?.effort)?.effort ?? 'high'
   const first = (layer: 'mine' | 'default', column: string) => {
     const lock = lockOf(column), order = orderFor(layer, column), id = lock?.line ?? order.rank![0]!, item = line(id)!
-    const effort = nearest(item, order.efforts?.[id] ?? own(lock ? 'default' : layer, column)?.effort ?? (lock ? layers.default.get(column)?.effort : null) ?? order.effort ?? 'high')
-    return { id, item, effort, lock, order }
+    const base = layered(layer, column, !!lock)
+    return { id, item, effort: nearest(item, order.efforts?.[id] ?? base), lock, order, base }
   }
   const pick = (layer: 'mine' | 'default', column: string): SimpleRow => {
-    const { id, item, effort, lock, order } = first(layer, column)
-    const chain = (order.rank ?? []).filter(step => step !== id).map(step => ({ line: step, effort: line(step) ? nearest(line(step)!, order.efforts?.[step] ?? effort) : null }))
+    const { id, item, effort, lock, order, base } = first(layer, column)
+    const chain = (order.rank ?? []).filter(step => step !== id).map(step => ({ line: step, effort: line(step) ? nearest(line(step)!, order.efforts?.[step] ?? base) : null }))
     const never = [
       ...rules.filter(rule => rule.column === column && rule.lock === 'not').map(rule => ({ line: rule.line, by: rule.set_by, at: rule.set_at, why: rule.why })),
       ...order.not.map(not => ({ line: not, by: null, at: null, why: 'Saved exclusion' })),

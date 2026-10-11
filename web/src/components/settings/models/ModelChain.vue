@@ -147,12 +147,12 @@ function endKeys(event: KeyboardEvent) {
             <AppIcon name="wait" :size="15" />
             <span v-if="row.isDefault" class="ch-end-d solo"><b>Then wait.</b> Nothing outside this order runs.</span>
             <template v-else>
-              <span :id="`che-${row.key}`" class="ch-end-l">Then</span>
+              <span :id="`che-${row.key}`" class="ch-end-l">Then</span>{{ ' ' }}
               <span v-if="editable" class="seg sm" role="radiogroup" :aria-labelledby="`che-${row.key}`" @keydown="endKeys">
                 <button type="button" role="radio" :data-end="`${row.key}:default`" :aria-checked="row.end === 'default'" :tabindex="row.end === 'default' ? 0 : -1" @click="emit('end', 'default')">the default’s fallback</button>
                 <button type="button" role="radio" :data-end="`${row.key}:wait`" :aria-checked="row.end === 'wait'" :tabindex="row.end === 'wait' ? 0 : -1" @click="emit('end', 'wait')">wait</button>
               </span>
-              <b v-else>{{ endText(row.end, false) }}</b>
+              <b v-else>{{ endText(row.end, false) }}</b>{{ ' ' }}
               <span class="ch-end-d"><template v-if="row.end === 'default'"><template v-for="(part, index) in tail" :key="index"><AppIcon v-if="index" class="ar" name="arrow" :size="12" /><b v-if="index === tail.length - 1">{{ part }}</b><template v-else>{{ part }}</template></template></template><template v-else>Nothing outside this order runs.</template></span>
             </template>
           </div>

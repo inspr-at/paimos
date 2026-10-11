@@ -282,7 +282,7 @@ export function useModelsSimple() {
       if (row.isDefault || change.end === end) return false
       end = change.end
     }
-    const target = scope.value, who = person(), had = storedOrder(column)
+    const target = scope.value, who = person(), had = storedOrder(column), level = storedEffort(column)
     const known = (line: string) => !!entryFor(entries.value, line)
     // The pick's level is written only when the row holds its own; otherwise it keeps following the default.
     const ownPick = row.isDefault || column.stored_effort != null || !!row.entry && row.effort !== nearestEffort(row.entry, base.effort, effortLevel(base.entry, base.effort))
@@ -290,10 +290,13 @@ export function useModelsSimple() {
     const rank = (steps: SimpleStep[]) => [row.line!, ...steps.map(step => step.line)]
     const shared = target === 'me' && row.mine ? sharedRow(row.column) : null
     const followsAgain = !!shared && !orderBody(column).not.length && sameOrder({ line: row.line, effort: row.effort, chain, end }, { line: shared.line, effort: shared.effort, chain: shared.chain ?? [], end: shared.end ?? (row.isDefault ? 'wait' : 'default') })
-    const forward: Step[] = [followsAgain ? reset(target, who, row.column) : chainStep(target, who, row.column, { rank: rank(chain), ...(levels ? { efforts: efforts(chain) } : {}), ...(change.kind === 'end' ? { end } : {}) })]
+    // A write with levels replaces the order's own level, the one other rows inherit; the order's stored level is written
+    // back right after it, so a chain edit never changes what the rest of the page follows.
+    const write = (body: ChainBody): Step[] => [chainStep(target, who, row.column, body), ...(body.efforts && level ? [effortStep(target, who, row.column, level)] : [])]
+    const forward: Step[] = followsAgain ? [reset(target, who, row.column)] : write({ rank: rank(chain), ...(levels ? { efforts: efforts(chain) } : {}), ...(change.kind === 'end' ? { end } : {}) })
     // Undo writes back what the row showed: a level a removal or a reset dropped, and the ending it had.
     const previous: ChainBody = { rank: rank(row.chain), ...(levels || change.kind === 'remove' || followsAgain ? { efforts: efforts(row.chain) } : {}), ...(change.kind === 'end' || followsAgain ? { end: row.end } : {}) }
-    const backward: Step[] = [had ? chainStep(target, who, row.column, previous) : reset(target, who, row.column)]
+    const backward: Step[] = had ? write(previous) : [reset(target, who, row.column)]
     return commit({ forward, backward, announce })
   }
 

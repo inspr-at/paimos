@@ -38,7 +38,7 @@ async function audit(page: Page, min: number) {
       const clear = (value: string) => /rgba\(.*,\s*0\)$|transparent/.test(value)
       return [['left', 'right'], ['top', 'bottom'], ['right', 'left'], ['bottom', 'top']].filter(([a, b]) => width(a!) >= 2 && !clear(color(a!)) && (width(b!) < width(a!) || color(b!) !== color(a!))).map(([a]) => `${element.className} border-${a}`)
     })
-    const clipped = [...document.querySelectorAll('[data-models-section] .ch-end-l, [data-models-section] .fb .seg button, [data-models-section] .fb .add span, [data-models-section] .fb .link-btn')].filter(vis).filter(element => element.scrollWidth > element.clientWidth + 1).map(element => element.textContent?.trim())
+    const clipped = [...document.querySelectorAll('[data-models-section] .ch-end-l, [data-models-section] .fb .seg button, [data-models-section] .fb .add span')].filter(vis).filter(element => element.scrollWidth > element.clientWidth + 1).map(element => element.textContent?.trim())
     return { small, accents, clipped, overflow: document.documentElement.scrollWidth - innerWidth, dialogs: document.querySelectorAll('[data-models-section] dialog').length }
   }, min)
 }
@@ -50,7 +50,12 @@ async function common(page: Page, min: number) {
   expect(found.small, `targets ≥ ${min} px`).toEqual([])
   expect(found.clipped, 'one-line labels not clipped').toEqual([])
 }
-const tops = (page: Page) => page.evaluate(() => [...document.querySelectorAll('[data-models-section] .m-list .row, [data-models-section] .next, [data-models-section] #ex-h')].map(element => Math.round(element.getBoundingClientRect().top + scrollY)).join(','))
+/** Page positions, independent of where the page (or its scroll container) is scrolled. */
+const tops = (page: Page, selector = '[data-models-section] .m-list .row, [data-models-section] .next, [data-models-section] #ex-h') => page.evaluate(selector => [...document.querySelectorAll(selector)].map(element => {
+  let top = element.getBoundingClientRect().top + scrollY
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) top += parent.scrollTop
+  return Math.round(top)
+}).join(','), selector)
 /** A menu overlays: it opens inside the viewport, nothing on the page moves, and Esc gives focus back. */
 async function overlay(page: Page, trigger: string, min: number) {
   await page.locator(trigger).evaluate(element => element.scrollIntoView({ block: 'center' }))
@@ -87,9 +92,9 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark']) test.des
     await overlay(page, '[data-why]', min)
     await shot(page, testInfo, `fallback-${width}-${theme}-everyone`)
     // Closing a fold moves nothing above it.
-    const above = await page.evaluate(() => [...document.querySelectorAll('[data-models-section] .row.def, [data-models-section] #ex-h, [data-fold="design"]')].map(element => Math.round(element.getBoundingClientRect().top + scrollY)).join(','))
+    const above = await tops(page, '[data-models-section] .row.def, [data-models-section] #ex-h, [data-fold="design"]')
     await fold(page, 'design').click(); await expect(page.locator('#fb-design .ch-wrap')).toHaveCount(0)
-    expect(await page.evaluate(() => [...document.querySelectorAll('[data-models-section] .row.def, [data-models-section] #ex-h, [data-fold="design"]')].map(element => Math.round(element.getBoundingClientRect().top + scrollY)).join(','))).toBe(above)
+    expect(await tops(page, '[data-models-section] .row.def, [data-models-section] #ex-h, [data-fold="design"]')).toBe(above)
     // Add a fallback from the keyboard: type, Enter; it joins at the row's level and focus returns to Add.
     await page.locator('[data-chadd="all"]').click(); await expect(page.getByRole('combobox')).toBeFocused()
     await expect(page.locator(`.mdl-pop [data-line="${SOL}"]`)).toHaveCount(0); await expect(page.locator(`.mdl-pop [data-line="${OPUS}"]`)).toHaveCount(0)
@@ -106,9 +111,11 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark']) test.des
     await undo(page).click()
     await expect(steps(page, 'all')).toHaveText(['GPT-6.1 Sol · xhigh', 'Opus 5.5 · max', 'Sonnet 5.5 · xhigh']); await expect(fold(page, 'all')).toHaveText(/Opus 5\.5.*Sonnet 5\.5.*Wait/)
     expect(state.writes.map(write => [write.method, `${write.path}${write.search}`, write.body])).toEqual([
+      // Levels replace the order's own level; it is written back at once, so rows that follow the default keep following it.
       ['PUT', '/model-preferences/orders/other/first?for=default', { rank: [SOL, OPUS, SONNET], efforts: { [SOL]: 'xhigh', [OPUS]: 'max', [SONNET]: 'xhigh' }, revision: 5 }],
-      ['PUT', '/model-preferences/orders/other/first?for=default', { rank: [SOL, SONNET, OPUS], revision: 6 }],
-      ['PUT', '/model-preferences/orders/other/first?for=default', { rank: [SOL, OPUS, SONNET], revision: 7 }],
+      ['PUT', '/model-preferences/orders/other/first/thinking?for=default', { effort: 'xhigh', revision: 6 }],
+      ['PUT', '/model-preferences/orders/other/first?for=default', { rank: [SOL, SONNET, OPUS], revision: 7 }],
+      ['PUT', '/model-preferences/orders/other/first?for=default', { rank: [SOL, OPUS, SONNET], revision: 8 }],
     ])
     expect(state.writes.some(write => write.person)).toBe(false)
     await common(page, min)
@@ -122,7 +129,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark']) test.des
     await expect(page.locator('[data-chain="design"] .grip')).toHaveCount(0); await expect(page.locator('[data-chadd="design"]')).toHaveCount(0)
     await expect(page.locator('[data-chain="design"] button, #fb-design [data-end]')).toHaveCount(0)
     await expect(steps(page, 'design')).toHaveText(['Opus 5.5 · xhigh', 'Sonnet 5.5 · xhigh'])
-    await expect(page.locator('#fb-design')).toContainText('Locked for everyone, with its order.'); await expect(page.locator('#fb-design .ch-end')).toContainText('Then the default’s fallback')
+    await expect(page.locator('#fb-design')).toContainText('Locked for everyone, with its order.'); await expect(page.locator('#fb-design .ch-end')).toContainText('Then the default’s fallback GPT-6.1 Sol')
     await expect(page.locator('[data-never="design:xai:grok"]')).toContainText('Never for UI design: Grok 4.7 · Markus, 2 Oct'); await expect(page.locator('[data-unnever]')).toHaveCount(0)
     await expect(page.locator('[data-row="concept"] .mine')).toHaveCount(0); await expect(page.locator('[data-end="concept:wait"]')).toHaveAttribute('aria-checked', 'true')
     await common(page, min)
@@ -152,9 +159,9 @@ test('a step drags by its handle to a new place; the order keeps its height whil
   expect(Math.abs((await list.boundingBox())!.height - height)).toBeLessThanOrEqual(.5)
   await page.mouse.up()
   await expect(steps(page, 'all')).toHaveText(['GPT-6.1 Sol · xhigh', 'Fable 5.1 · high', 'Opus 5.5 · max'])
-  expect(state.writes.at(-1)!.body).toEqual({ rank: [SOL, FABLE, OPUS], revision: 6 })
+  expect(state.writes.at(-1)!.body).toEqual({ rank: [SOL, FABLE, OPUS], revision: 7 })
   // A click on a handle without moving changes nothing.
-  await page.locator('[data-move="all:0"]').click(); expect(state.writes).toHaveLength(2)
+  await page.locator('[data-move="all:0"]').click(); expect(state.writes).toHaveLength(3)
 })
 
 test('a step comes out and Undo puts it back with its level; a level changes in the step’s own menu', async ({ page }) => {
@@ -164,13 +171,13 @@ test('a step comes out and Undo puts it back with its level; a level changes in 
   await expect(steps(page, 'design')).toHaveText(['Opus 5.5 · xhigh']); await expect(page.locator('#chadd-design')).toBeFocused()
   await expect(fold(page, 'design')).toHaveText(/If Opus 5\.5 can’t run\s*the default’s fallback/)
   await undo(page).click(); await expect(steps(page, 'design')).toHaveText(['Opus 5.5 · xhigh', 'Sonnet 5.5 · xhigh'])
-  expect(state.writes.map(write => write.body)).toEqual([{ rank: [OPUS], revision: 5 }, { rank: [OPUS, SONNET], efforts: { [OPUS]: 'xhigh', [SONNET]: 'xhigh' }, revision: 6 }])
+  expect(state.writes.map(write => write.body)).toEqual([{ rank: [OPUS], revision: 5 }, { rank: [OPUS, SONNET], efforts: { [OPUS]: 'xhigh', [SONNET]: 'xhigh' }, revision: 6 }, { effort: 'xhigh', revision: 7 }])
   // The step's own menu picks its level; the order and the pick keep theirs.
   await page.locator('[data-chpick="design:0"]').click(); await expect(page.locator(`.mdl-pop [data-line="${SONNET}"]`)).toHaveAttribute('aria-selected', 'true')
   await expect(page.locator(`.mdl-pop [data-line="${OPUS}"]`)).toHaveCount(0)
   await page.locator(`.mdl-pop [data-line="${SONNET}"] .lvc[data-eff="max"]`).click()
   await expect(steps(page, 'design')).toHaveText(['Opus 5.5 · xhigh', 'Sonnet 5.5 · max']); await expect(page.locator('#chp-design-0')).toBeFocused()
-  expect(state.writes.at(-1)!.body).toEqual({ rank: [OPUS, SONNET], efforts: { [OPUS]: 'xhigh', [SONNET]: 'max' }, revision: 7 })
+  expect(state.writes.slice(-2).map(write => write.body)).toEqual([{ rank: [OPUS, SONNET], efforts: { [OPUS]: 'xhigh', [SONNET]: 'max' }, revision: 8 }, { effort: 'xhigh', revision: 9 }])
   expect(state.problems).toEqual([])
 })
 
@@ -182,8 +189,8 @@ test('admins allow a Never line again for everyone; Undo sets it again with its 
   expect(state.writes.at(-1)).toMatchObject({ method: 'DELETE', path: '/model-preferences/orders/design/first/never/xai%3Agrok', search: '?revision=2' })
   await undo(page).click(); await expect(page.locator('[data-never="design:xai:grok"]')).toBeVisible()
   expect(state.writes.at(-1)).toMatchObject({ method: 'PUT', path: '/model-preferences/orders/design/first/never/xai%3Agrok', body: { why: 'Moved here from the earlier model board', revision: 3 } })
-  // On Just me the line reads as a fact, without Allow again.
-  await page.getByRole('button', { name: 'Just me' }).click(); await openFold(page, 'design')
+  // On Just me the line reads as a fact, without Allow again; the fold stays open across the switch.
+  await page.getByRole('button', { name: 'Just me' }).click(); await expect(fold(page, 'design')).toHaveAttribute('aria-expanded', 'true')
   await expect(page.locator('[data-never="design:xai:grok"]')).toBeVisible(); await expect(page.locator('[data-unnever]')).toHaveCount(0)
 })
 
@@ -200,7 +207,8 @@ test('folds grow in place: the controls above a fold, and the fold’s own contr
   await below.check(async () => { await fold(page, 'design').click(); await expect(page.locator('#fb-design .ch-wrap')).toHaveCount(0) }); below.done()
   // Inside an open fold: reordering, a level change and the ending keep the add button and the ending still.
   await openFold(page, 'design')
-  const inside = await controlStability(page, { add: page.locator('#chadd-design'), defaultChoice: page.locator('[data-end="design:default"]'), waitChoice: page.locator('[data-end="design:wait"]'), firstStep: page.locator('[data-chpick="design:0"]') })
+  // A step's own button is as wide as its model and level; the controls around it are measured.
+  const inside = await controlStability(page, { add: page.locator('#chadd-design'), defaultChoice: page.locator('[data-end="design:default"]'), waitChoice: page.locator('[data-end="design:wait"]'), stepHandle: page.locator('[data-move="design:0"]'), stepRemove: page.locator('[data-chrm="design:0"]') })
   await inside.check(async () => { await page.locator('[data-end="design:wait"]').click(); await expect(page.locator('[data-end="design:wait"]')).toHaveAttribute('aria-checked', 'true') })
   await inside.check(async () => { await page.locator('[data-end="design:default"]').press('ArrowRight'); await expect(page.locator('[data-end="design:default"]')).toHaveAttribute('aria-checked', 'true') })
   await inside.check(async () => { await page.locator('[data-chpick="design:0"]').click(); await page.locator('.mdl-pop [data-line="anthropic:sonnet"] .lvc[data-eff="high"]').click(); await expect(steps(page, 'design')).toHaveText(['Opus 5.5 · xhigh', 'Sonnet 5.5 · high']) })

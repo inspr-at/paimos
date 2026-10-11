@@ -7,7 +7,7 @@ import {
   buildEntries, buildRows, causeShort, chainEfforts, defaultTail, fallbackSentence, lineRoutes, moveItem, neverWho, routeNote, sameOrder, stepStates,
   type RegistryProfile, type SimpleDocument, type SimpleRow, type TailBoard,
 } from '../src/lib/modelsSimple'
-import { deleteNever, getRegistry, getSimple, getTail, getWorkspaceRules, putChain, putNever, resetOrder } from '../src/lib/modelsSimpleApi'
+import { deleteNever, getRegistry, getSimple, getTail, getWorkspaceRules, putChain, putEffort, putNever, resetOrder } from '../src/lib/modelsSimpleApi'
 import { useModelsSimple } from '../src/lib/useModelsSimple'
 import { resetToasts, toasts } from '../src/lib/toast'
 import { KINDS, registry, simplePerson } from './models-simple-fixtures'
@@ -19,7 +19,7 @@ const state = vi.hoisted(() => ({
 vi.mock('../src/stores/session', () => ({ useSession: () => state.session }))
 vi.mock('../src/lib/authz', () => ({ can: (permission: string) => permission === 'model_prefs.manage' ? state.manage : permission !== 'members.read', onAccessChange: () => () => {} }))
 vi.mock('vue', async original => ({ ...await original<typeof import('vue')>(), onBeforeUnmount: (cleanup: () => void) => state.cleanups.push(cleanup) }))
-vi.mock('../src/lib/modelsSimpleApi', async original => ({ ...await original<typeof import('../src/lib/modelsSimpleApi')>(), getSimple: vi.fn(), getTail: vi.fn(), getRegistry: vi.fn(), getWorkspaceRules: vi.fn(), putChain: vi.fn(), resetOrder: vi.fn(), putNever: vi.fn(), deleteNever: vi.fn() }))
+vi.mock('../src/lib/modelsSimpleApi', async original => ({ ...await original<typeof import('../src/lib/modelsSimpleApi')>(), getSimple: vi.fn(), getTail: vi.fn(), getRegistry: vi.fn(), getWorkspaceRules: vi.fn(), putChain: vi.fn(), putEffort: vi.fn(), resetOrder: vi.fn(), putNever: vi.fn(), deleteNever: vi.fn() }))
 
 const SOL = 'openai:sol', OPUS = 'anthropic:opus', SONNET = 'anthropic:sonnet', FABLE = 'anthropic:fable', GROK = 'xai:grok'
 const settle = async () => { for (let index = 0; index < 20; index++) await Promise.resolve() }
@@ -95,6 +95,7 @@ describe('chain writes', () => {
     vi.mocked(getWorkspaceRules).mockResolvedValue({ revision: 2, rules: [] })
     vi.mocked(putChain).mockImplementation(async (_scope, _column, _body, revision) => ({ revision: revision + 1, person_id: simplePerson }))
     vi.mocked(resetOrder).mockImplementation(async (_scope, _column, revision) => ({ revision: revision + 1, person_id: simplePerson }))
+    vi.mocked(putEffort).mockImplementation(async (_scope, _column, _effort, revision) => ({ revision: revision + 1, person_id: simplePerson }))
     vi.mocked(deleteNever).mockImplementation(async (_column, _line, revision) => ({ revision: revision + 1, rules: [] }))
     vi.mocked(putNever).mockImplementation(async (_column, _line, _why, revision) => ({ revision: revision + 1, rules: [] }))
   })
@@ -147,6 +148,18 @@ describe('chain writes', () => {
     expect(putChain).not.toHaveBeenCalled(); expect(resetOrder).toHaveBeenCalledWith('me', 'concept', 3, simplePerson)
     toasts.at(-1)!.actions[0]!.run(); await settle()
     expect(putChain).toHaveBeenCalledWith('me', 'concept', { rank: [FABLE], efforts: { [FABLE]: 'max' }, end: 'default' }, 4, simplePerson)
+    expect(putEffort).toHaveBeenCalledWith('me', 'concept', 'max', 5, simplePerson)
+  })
+  it('writes the order’s own level back after a write with levels, so rows that follow it keep following it', async () => {
+    vi.mocked(getTail).mockResolvedValue(tail(['other'], { other: 'xhigh' }))
+    const model = await page('default')
+    after(4, tail(['other'], { other: 'xhigh' })); vi.mocked(getSimple).mockResolvedValue(doc({ revision: 5 })); vi.mocked(getTail).mockResolvedValue({ ...tail(['other'], { other: 'xhigh' }), revision: 5 })
+    expect(await model.editChain(find(model, 'all'), { kind: 'add', line: SONNET, effort: 'high' })).toBe(true)
+    expect(putChain).toHaveBeenCalledWith('default', 'other', { rank: [SOL, OPUS, SONNET], efforts: { [SOL]: 'xhigh', [OPUS]: 'max', [SONNET]: 'high' } }, 3, simplePerson)
+    expect(putEffort).toHaveBeenCalledWith('default', 'other', 'xhigh', 4, simplePerson)
+    toasts.at(-1)!.actions[0]!.run(); await settle()
+    expect(putChain).toHaveBeenLastCalledWith('default', 'other', { rank: [SOL, OPUS], efforts: { [SOL]: 'xhigh', [OPUS]: 'max' } }, 5, simplePerson)
+    expect(putEffort).toHaveBeenLastCalledWith('default', 'other', 'xhigh', 6, simplePerson)
   })
   it('refuses a locked row, a draft, a line already in the order and an ending on the default, without a write', async () => {
     const model = await page()
