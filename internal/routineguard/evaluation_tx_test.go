@@ -174,7 +174,20 @@ func newEvaluationFixture(t *testing.T) *evaluationFixture {
 		}
 		return out.Body.Bytes()
 	}
+	// Prepare the ID-only catalog, then own the author pin, the cross-family
+	// reviewer pin and its review route. Bootstrap supplies no dispatch policy.
 	call("GET", "/api/models", nil, 200)
+	in(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES
+			($1,'codex-6-1-sol-high','evaluation-fixture','codex','openai','gpt-6.1-sol','high','standard'),
+			($1,'claude-opus-xhigh','evaluation-fixture','claude','anthropic','opus','xhigh','strong')`, p.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state,reason)
+			SELECT $1,'review-gate',1,id,'available','Explicit fixture reviewer authority'
+			FROM model_profiles WHERE slug='claude-opus-xhigh'`, p.TenantID)
+		return err
+	})
 	input := recurrences.Input{ProjectID: project, ParentID: parent, Template: recurrences.Template{Title: "Inspect assigned source", Description: "Read code", Criteria: []string{"Report findings"}, EstimateHours: 1, Priority: "high", Type: "work"}, Trigger: recurrences.Trigger{Kind: "time", RRULE: "FREQ=WEEKLY;BYDAY=MO", TimeOfDay: "09:00", Timezone: "Europe/Vienna"}, QueueEach: true, OverlapPolicy: "create", CatchUpPolicy: "one", Definition: &recurrences.Definition{Scope: recurrences.DefinitionScope{Kind: "project", ProjectID: project}, OwnerPrincipalID: p.ID, Assignment: &recurrences.Assignment{Goal: "Review assigned source", Role: "build", WorkKindID: workKind, Sources: []recurrences.SourceReference{}, AllowedActions: []string{"pr.open"}, RuntimeRequirements: recurrences.RuntimeRequirements{NeedsNativeHost: true, RuntimeClass: "native_coding"}, Budget: recurrences.DefinitionBudget{Mode: "off"}}}}
 	var recurrence recurrences.Recurrence
 	if err := json.Unmarshal(call("POST", "/api/recurrences", input, 201), &recurrence); err != nil {
