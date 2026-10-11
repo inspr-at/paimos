@@ -1052,6 +1052,8 @@
         ,
         {"file":"tests/settings-agents.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/settings-computers-table.spec.ts","listedTests":8,"weightSeconds":24,"weightSource":"AEON-1174 estimate: seven mocked flows, one skipped evidence run"}
+        ,
         {"file":"tests/stability.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/state-colours.spec.ts","listedTests":12,"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
