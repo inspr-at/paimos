@@ -1239,7 +1239,7 @@ components:
       properties:
         preference_of: {type: object, required: [person, source], properties: {person: {type: [string, 'null'], format: uuid}, source: {type: string}}}
         column: {type: string}
-        situation: {type: string, enum: [first, fix, stuck]}
+        situation: {type: string, enum: [first, fix, stuck, small, review], description: "Models row or selected situation; small is the First build matrix override and review selects the author kind's review order."}
         card_index: {type: integer, minimum: 1}
         lock: {$ref: '#/components/schemas/ModelBoardLock'}
         held: {type: array, items: {type: object, required: [line, reason], properties: {line: {type: string}, reason: {type: string}}}}
