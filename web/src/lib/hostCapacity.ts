@@ -62,6 +62,10 @@ export const newStartsFoot = (policy: HostCapacityPolicy) => `Maximum agents: ${
 export const mayChangeNewStarts = (computer: Pick<PairingView, 'computer_state' | 'enrollments'>, manage: boolean) =>
   manage && computer.computer_state === 'connected' && computer.enrollments.some(e => e.can_verify === true)
 
+const POLICY_FIELDS = ['mode', 'maximum_agents', 'maximum_load', 'wait_when_busy', 'ease_on_battery', 'ease_when_hot', 'consider_activity'] as const
+/** The same stored policy, field by field (two reads need not agree on key order). */
+export const samePolicy = (a?: HostCapacityPolicy | null, b?: HostCapacityPolicy | null) => !!a && !!b && POLICY_FIELDS.every(field => a[field] === b[field])
+
 export interface HostCapacityWrite { expected_revision: number; policy: HostCapacityPolicy }
 /**
  * The chip's write: the panel's PUT with only the mode changed; every other policy field is

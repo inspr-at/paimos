@@ -8,7 +8,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { PairingView } from '../src/lib/agentPairing'
 import { computerLine, shortIdentity, signinCell } from '../src/lib/accountsGlance'
-import { HostCapacityWriteError, mayChangeNewStarts, newStartsChoices, newStartsLabel, newStartsWrite, saveHostPolicy, type HostCapacityPolicy } from '../src/lib/hostCapacity'
+import { HostCapacityWriteError, mayChangeNewStarts, newStartsChoices, newStartsLabel, newStartsWrite, samePolicy, saveHostPolicy, type HostCapacityPolicy } from '../src/lib/hostCapacity'
 
 const NOW = Date.parse('2026-10-11T12:00:00Z')
 // Every field differs from the defaults, so a write that fell back to them shows.
@@ -65,6 +65,12 @@ describe('the New starts chip writes only the mode', () => {
     expect(off!.detail).toBe('Starts without looking at load. Maximum agents still applies.')
     expect(newStartsChoices({ ...POLICY, maximum_agents: 0 })[2]!.detail).toBe('Starts without looking at load.')
     expect([newStartsLabel(POLICY), newStartsLabel(POLICY, 'fixed'), newStartsLabel(POLICY, 'off')]).toEqual(['Smart', 'Fixed · load 17.5', 'Off'])
+  })
+  it('Undo compares the stored policy field by field, whatever the key order', () => {
+    const reordered = Object.fromEntries(Object.entries(POLICY).reverse()) as unknown as HostCapacityPolicy
+    expect(samePolicy(POLICY, reordered)).toBe(true)
+    expect(samePolicy(POLICY, { ...POLICY, maximum_agents: 9 })).toBe(false)
+    expect(samePolicy(POLICY, undefined)).toBe(false)
   })
   it('is a control only for the owner with management on a connected computer', () => {
     expect(mayChangeNewStarts(computer(), true)).toBe(true)

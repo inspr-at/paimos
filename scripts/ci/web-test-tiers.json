@@ -15778,6 +15778,8 @@
     ,
     {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"a cell says the sign-in in one word > a check under way or a missing report is never called Ready","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the New starts chip writes only the mode > Undo compares the stored policy field by field, whatever the key order","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the New starts chip writes only the mode > is a control only for the owner with management on a connected computer","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the New starts chip writes only the mode > names only the waits this computer has switched on","tier":"GATED-FULL"}

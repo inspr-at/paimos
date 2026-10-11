@@ -243,7 +243,8 @@ onBeforeUnmount(() => { stageObserver?.disconnect(); cleanup() })
   <Teleport to="body">
     <div v-if="open" ref="panel" class="popover" :class="{ 'opens-up': opensUp, staged: mode === 'form' || confirming, 'content-scrolls': contentScrolls }" :role="role" :aria-label="confirming ? confirmation?.title ?? label : label" :aria-busy="busy || undefined" tabindex="-1" :style="{ ...position, visibility: placed ? 'visible' : 'hidden' }">
       <template v-if="mode === 'menu' && !confirming">
-        <h3 v-if="heading" class="mh">{{ heading }}</h3>
+        <!-- The menu's label already names it; inside role=menu the title is visual only. -->
+        <h3 v-if="heading" class="mh" aria-hidden="true">{{ heading }}</h3>
         <template v-for="item in items" :key="item.id">
           <span v-if="item.separated" class="sep" role="separator" />
           <div v-if="item.options" class="mi group" role="group" :aria-label="item.label"><AppIcon :name="item.icon ?? 'more'" /><span class="t">{{ item.label }}</span><span v-if="item.detail" class="d">{{ item.detail }}</span><span class="opts"><button v-for="option in item.options" :key="option.id" type="button" role="menuitem" :aria-label="option.name ?? option.label" :disabled="item.disabled" @click="chooseOption(item, option.id)"><span>{{ option.label }}</span><span class="hint">{{ option.hint }}</span></button></span></div>

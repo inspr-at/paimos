@@ -12,7 +12,7 @@ import { computed, nextTick, onBeforeUnmount, ref, toRefs, watch } from 'vue'
 import type { PairingView } from '../../lib/agentPairing'
 import type { OverviewAccount, SignInReference } from '../../lib/accountsOverview'
 import { computerLine, shortIdentity, signinCell } from '../../lib/accountsGlance'
-import { HostCapacityWriteError, mayChangeNewStarts, NEW_STARTS_MODES, NEW_STARTS_NAME, newStartsChoices, newStartsFoot, newStartsLabel, newStartsWrite, saveHostPolicy, type HostCapacityMode, type HostCapacityPolicy } from '../../lib/hostCapacity'
+import { HostCapacityWriteError, mayChangeNewStarts, NEW_STARTS_MODES, NEW_STARTS_NAME, newStartsChoices, newStartsFoot, newStartsLabel, newStartsWrite, samePolicy, saveHostPolicy, type HostCapacityMode, type HostCapacityPolicy } from '../../lib/hostCapacity'
 import { toast } from '../../lib/toast'
 import { useAccountsSettings } from '../../lib/useAccountsSettings'
 import { vClipTip } from '../../directives/clipTip'
@@ -122,7 +122,7 @@ async function setMode(c: PairingView, mode: HostCapacityMode) {
 async function undo(id: string, name: string, revision: number, saved: HostCapacityPolicy, before: HostCapacityPolicy) {
   const c = capacity.value.computers.find(x => x.computer_id === id)
   const now = c && current(c)
-  if (!c || busy.value || now?.revision !== revision || JSON.stringify(now.policy) !== JSON.stringify(saved)) { toast(`${name} changed since. Nothing was undone; New starts shows the current setting.`, { tone: 'error' }); return }
+  if (!c || busy.value || now?.revision !== revision || !samePolicy(now.policy, saved)) { toast(`${name} changed since. Nothing was undone; New starts shows the current setting.`, { tone: 'error' }); return }
   if (await write(c, revision, before, true)) toast(`New starts on ${name}: ${NEW_STARTS_NAME[before.mode]} again`)
 }
 watch(owner, () => { menuOpen.value = false; confirmed.value = new Map(); busy.value = '' })
@@ -145,7 +145,7 @@ watch(owner, () => { menuOpen.value = false; confirmed.value = new Map(); busy.v
             <tr v-for="c in computers" :key="c.computer_id!" :data-row="c.computer_id" :class="{ dim: line(c).tone === 'off', current: selected(c) }">
               <th scope="row"><button type="button" class="pc" :data-computer="c.computer_id" :aria-expanded="selected(c)" :aria-current="selected(c)" @click="show('computer', c.computer_id!, $event)"><AppIcon name="monitor" /><span class="who"><b v-clip-tip>{{ c.computer_name }}</b><small><span class="dot" :class="line(c).tone" /><span v-clip-tip>{{ line(c).text }}</span></small></span></button></th>
               <td v-for="a in accounts" :key="a.id" :class="{ none: !references(a, c).length }">
-                <button v-for="s in references(a, c)" :key="s.enrollment.account_id" type="button" class="si" :class="cell(s).tone" :data-signin="s.enrollment.account_id" :data-tip="cell(s).tip || undefined" :aria-label="`${signinName(a, s)} on ${c.computer_name}: ${cell(s).word}${cell(s).tip ? `. ${cell(s).tip}` : ''}`" @click="show('computer', c.computer_id!, $event, s.enrollment.account_id)"><span class="cl" aria-hidden="true"><HarnessMark :harness="a.harness" :size="16" /><span>{{ a.vendor }} · {{ shortIdentity(a.identity) }}</span></span><span class="sv"><span class="dot" :class="cell(s).tone" /><span class="w">{{ cell(s).word }}</span></span></button>
+                <button v-for="s in references(a, c)" :key="s.enrollment.account_id" type="button" class="si" :class="cell(s).tone" :data-signin="s.enrollment.account_id" :data-tip="cell(s).tip || undefined" :aria-label="`${signinName(a, s)} on ${c.computer_name}: ${cell(s).word}${cell(s).tip ? `. ${cell(s).tip}` : ''}`" @click="show('computer', c.computer_id!, $event, s.enrollment.account_id)"><span class="cl" aria-hidden="true"><HarnessMark :harness="a.harness" :size="16" /><span v-clip-tip="signinName(a, s)">{{ a.vendor }} · {{ shortIdentity(a.identity) }}</span></span><span class="sv"><span class="dot" :class="cell(s).tone" /><span class="w">{{ cell(s).word }}</span></span></button>
                 <span v-if="!references(a, c).length" class="si none"><AppIcon name="minus" :size="14" /><span class="sr-only">{{ a.vendor }} · {{ a.identity }} is not signed in on {{ c.computer_name }}</span></span>
               </td>
               <td class="nsc"><span class="cl" aria-hidden="true">New starts</span>
