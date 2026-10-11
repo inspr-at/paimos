@@ -139,7 +139,9 @@ func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
 			}
 		}
 		if len(cold) == 0 || !cold[0] {
-			rows, err := tx.Query(t.Context(), `SELECT profile_id::text FROM model_role_routes WHERE role='review-gate' ORDER BY priority`)
+			// The Models walk stops at the first runnable reviewer. Unavailable
+			// fallbacks precede the fixture reviewer so their causes stay visible.
+			rows, err := tx.Query(t.Context(), `SELECT profile_id::text FROM model_role_routes WHERE role='review-gate' ORDER BY profile_id=$1::uuid,priority`, f.profile)
 			if err != nil {
 				return err
 			}

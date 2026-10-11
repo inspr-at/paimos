@@ -3,6 +3,7 @@ package modelregistry
 
 import (
 	"encoding/json"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -197,8 +198,25 @@ func TestEscalationSkipsAccountlessHarnessForRunnableSuccessor(t *testing.T) {
 			return err
 		}
 		assertRunnableSuccessor(t, out, account, successor, "no qualified account with available capacity")
-		if len(out.Ladder) != 2 {
-			t.Fatalf("fixture did not exercise the two-route ladder: %+v", out.Ladder)
+		// The walk covers exactly the order's two lines; a line may have
+		// several harness routes.
+		walked, ordered := map[string]bool{}, map[string]bool{}
+		for _, id := range []string{first, successor} {
+			var line string
+			if err := tx.QueryRow(ctx, `SELECT aeon_models_line(family,harness,model) FROM model_profiles WHERE id=$1`, id).Scan(&line); err != nil {
+				return err
+			}
+			ordered[line] = true
+		}
+		for _, candidate := range out.Ladder {
+			var line string
+			if err := tx.QueryRow(ctx, `SELECT aeon_models_line(family,harness,model) FROM model_profiles WHERE id=$1`, candidate.ProfileID).Scan(&line); err != nil {
+				return err
+			}
+			walked[line] = true
+		}
+		if !reflect.DeepEqual(walked, ordered) || len(ordered) != 2 {
+			t.Fatalf("fixture did not exercise the two-line order: %+v", out.Ladder)
 		}
 		return nil
 	})
