@@ -1,6 +1,41 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # aeon:owner internal/modelregistry
 paths:
+  /models/lines/{harness}/{model}/pause:
+    parameters:
+      - {name: harness, in: path, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
+      - {name: model, in: path, required: true, schema: {type: string, maxLength: 128}}
+    put:
+      operationId: putModelPause
+      security: [{session: []}]
+      description: 'Person-only models.manage, rechecked under the tenant and catalog fences. Pauses all registered native levels of this harness/model route, including Cursor effort suffixes (up to 32 model ids). until null means until resumed; a timestamp must be in the future. Appends model.pause_changed after the mutation.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [until, reason]
+              properties:
+                until: {type: [string, 'null'], format: date-time}
+                reason: {type: string, minLength: 1, maxLength: 1000}
+      responses:
+        '200': {description: 'Saved model pause.', content: {application/json: {schema: {$ref: '#/components/schemas/ModelPauseResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: deleteModelPause
+      security: [{session: []}]
+      description: 'Person-only models.manage under the tenant and catalog fences. Resumes this route at every native level and appends model.pause_changed.'
+      responses:
+        '200': {description: 'Resumed model route.', content: {application/json: {schema: {$ref: '#/components/schemas/ModelPauseResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /models/lines/{harness}/{model}:
     parameters:
       - {name: harness, in: path, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
@@ -344,6 +379,21 @@ paths:
         '422': {$ref: '#/components/responses/Error'}
 components:
   schemas:
+    ModelPause:
+      type: object
+      required: [until, reason, by, at]
+      properties:
+        until: {type: [string, 'null'], format: date-time}
+        reason: {type: string, maxLength: 1000}
+        by: {type: [string, 'null'], format: uuid}
+        at: {type: string, format: date-time}
+    ModelPauseResult:
+      type: object
+      required: [harness, model, pause]
+      properties:
+        harness: {type: string}
+        model: {type: string}
+        pause: {oneOf: [{$ref: '#/components/schemas/ModelPause'}, {type: 'null'}]}
     ModelPreferenceDecision:
       type: object
       description: Additive resolution evidence returned only when preference placement parameters are supplied.

@@ -27,7 +27,7 @@ type ReviewRoute struct {
 	Trace         PreferenceTrace
 }
 
-var reviewFamilyRank = map[string]int{"openai": 0, "xai": 1, "anthropic": 2, "cursor": 3, "google": 4, "local": 5}
+var reviewFamilyRank = reviewgate.ReviewFamilyRanks()
 
 // ReviewFamilyRank exposes a copy of the built-in dispatch order. The Policies
 // read shares this source without allowing callers to change routing rules.

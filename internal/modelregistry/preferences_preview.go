@@ -24,6 +24,36 @@ type preferencePreviewCatalog struct {
 	ladders       map[string][]ladderStep
 	ladderErrors  map[string]error
 	orderModes    map[string]string
+	board         *boardCatalog
+	boardError    error
+}
+
+// previewBoardKey carries a preview's catalog into the Models walk.
+type previewBoardKey struct{}
+
+// routingBoard groups the preview's one bounded profile read into the
+// routing catalog every cell's Models walk reuses. An over-limit catalog
+// stays incomplete rather than being re-read unbounded per cell.
+func (c *preferencePreviewCatalog) routingBoard(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
+	if c.board == nil && c.boardError == nil {
+		profiles, err := c.profiles(ctx, tx)
+		if err != nil {
+			c.boardError = err
+		} else {
+			enabled := make([]Profile, 0, len(profiles))
+			for _, p := range profiles {
+				if p.Enabled {
+					enabled = append(enabled, p)
+				}
+			}
+			board := boardCatalogFrom(enabled, nil)
+			c.board = &board
+		}
+	}
+	if c.boardError != nil {
+		return boardCatalog{}, c.boardError
+	}
+	return *c.board, nil
 }
 
 func (c *preferencePreviewCatalog) profiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
@@ -41,17 +71,13 @@ func (c *preferencePreviewCatalog) profiles(ctx context.Context, tx pgx.Tx) ([]P
 	return c.profileRows, c.profilesError
 }
 
-// board is the Models catalog for one walk. A preview groups its single
-// bounded profile read; nil reads the live catalog.
-func (c *preferencePreviewCatalog) board(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
+// dispatchBoard shares a preview's bounded catalog with every walk; live
+// dispatch reads only enabled pins so archived history cannot exhaust it.
+func (c *preferencePreviewCatalog) dispatchBoard(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
 	if c == nil {
-		return loadBoardCatalog(ctx, tx)
+		return loadBoardCatalog(ctx, tx, true)
 	}
-	profiles, err := c.profiles(ctx, tx)
-	if err != nil {
-		return boardCatalog{}, err
-	}
-	return boardCatalogFrom(profiles, nil), nil
+	return c.routingBoard(ctx, tx)
 }
 
 func (c *preferencePreviewCatalog) ladder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, error) {
@@ -106,11 +132,26 @@ func pickerReviewProfiles(ctx context.Context, tx pgx.Tx, profiles []Profile) (m
 // derivedRoleSteps retains the deprecated route response vocabulary while its
 // choices come from the current Models row, situations, Quick jobs and rules.
 func derivedRoleSteps(ctx context.Context, tx pgx.Tx, person *string, role string, limit int) ([]ladderStep, string, error) {
-	s, err := modelprefs.LoadBoardRouting(ctx, tx, person, "")
+	c, err := loadBoardCatalog(ctx, tx)
 	if err != nil {
 		return nil, "", err
 	}
-	c, err := loadBoardCatalog(ctx, tx)
+	return derivedRoleStepsIn(ctx, tx, c, person, role, limit)
+}
+
+// routingRoleSteps derives the role's routes from the enabled catalog live
+// routing reads, so disabled history never counts toward its bound.
+func routingRoleSteps(ctx context.Context, tx pgx.Tx, person *string, role string) ([]ladderStep, error) {
+	c, err := loadBoardCatalog(ctx, tx, true)
+	if err != nil {
+		return nil, err
+	}
+	steps, _, err := derivedRoleStepsIn(ctx, tx, c, person, role, 0)
+	return steps, err
+}
+
+func derivedRoleStepsIn(ctx context.Context, tx pgx.Tx, c boardCatalog, person *string, role string, limit int) ([]ladderStep, string, error) {
+	s, err := modelprefs.LoadBoardRouting(ctx, tx, person, "")
 	if err != nil {
 		return nil, "", err
 	}
@@ -144,7 +185,7 @@ func derivedRoleSteps(ctx context.Context, tx pgx.Tx, person *string, role strin
 		if slices.Contains(d.Not, order.Line) && order.Stage != "quick" {
 			continue
 		}
-		for _, profile := range modelsRouteCandidates(c.profiles[order.Line], order.Effort, order.Level, q.Review) {
+		for _, profile := range modelsWalkCandidates(c.profiles[order.Line], order.Effort, order.Level, q.Review) {
 			if seen[profile.ID] || q.Review && (!qualifiedReviewProfile(profile) || role == "review-gate-security" && profile.Family == "anthropic") {
 				continue
 			}

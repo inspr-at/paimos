@@ -34,11 +34,12 @@ func (d Display) FullName() string { return strings.TrimSpace(d.DisplayName + " 
 
 // Profile is one immutable model pin.
 type Profile struct {
-	Source   string     `json:"source"`
-	Origin   string     `json:"origin"`
-	Note     string     `json:"note"`
-	RetireAt *time.Time `json:"retire_at"`
-	Retired  bool       `json:"retired"`
+	Source   string      `json:"source"`
+	Origin   string      `json:"origin"`
+	Note     string      `json:"note"`
+	RetireAt *time.Time  `json:"retire_at"`
+	Retired  bool        `json:"retired"`
+	Pause    *modelPause `json:"pause,omitempty"`
 	Display
 	EffortLevel *int      `json:"effort_level"`
 	Provider    string    `json:"provider"`
@@ -176,13 +177,17 @@ func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	return listProfilesLimit(ctx, tx, 0)
 }
 
-func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, error) {
+func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int, enabledOnly ...bool) ([]Profile, error) {
 	query := `
 		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.display_overrides->>'origin',''), coalesce(p.note,''),
  (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
- EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
+ EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now())),
+ (SELECT jsonb_build_object('until',x.until_at,'reason',x.reason,'by',x.set_by,'at',x.set_at) FROM model_pauses x WHERE x.harness=p.harness AND x.model=p.model AND (x.until_at IS NULL OR x.until_at>now()))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
 		ORDER BY p.slug, p.version, p.id`
+	if len(enabledOnly) > 0 && enabledOnly[0] {
+		query = strings.Replace(query, "ORDER BY p.slug", "WHERE p.enabled ORDER BY p.slug", 1)
+	}
 	if limit > 0 {
 		return readProfiles(ctx, tx, query+` LIMIT $1`, limit)
 	}
@@ -194,7 +199,8 @@ func listPickerProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	return readProfiles(ctx, tx, `
 		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', coalesce(p.registered_effort_level,d.effort_level), d.provider, coalesce(p.source,'auto'), coalesce(p.display_overrides->>'origin',''), coalesce(p.note,''),
  (SELECT r.retire_at FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id),
- EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
+ EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now())),
+ (SELECT jsonb_build_object('until',x.until_at,'reason',x.reason,'by',x.set_by,'at',x.set_at) FROM model_pauses x WHERE x.harness=p.harness AND x.model=p.model AND (x.until_at IS NULL OR x.until_at>now()))
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
 		WHERE NOT EXISTS (SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=now()))
 		ORDER BY p.slug, p.version, p.id LIMIT 257`)
@@ -209,7 +215,7 @@ func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 	out := []Profile{}
 	for rows.Next() {
 		var profile Profile
-		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Origin, &profile.Note, &profile.RetireAt, &profile.Retired); err != nil {
+		if err := rows.Scan(&profile.ID, &profile.Slug, &profile.Version, &profile.Harness, &profile.Family, &profile.Model, &profile.Effort, &profile.Tier, &profile.Enabled, &profile.CreatedAt, &profile.DisplayName, &profile.ShortName, &profile.ModelVersion, &profile.EffortLevel, &profile.Provider, &profile.Source, &profile.Origin, &profile.Note, &profile.RetireAt, &profile.Retired, &profile.Pause); err != nil {
 			return nil, err
 		}
 		profile.Source = profileSource(profile.Source)

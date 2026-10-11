@@ -38,12 +38,14 @@ type boardWriteResult struct {
 	RunningOutside     []string                `json:"running_outside"`
 }
 type boardOrderWrite struct {
-	Rank          []string `json:"rank"`
-	Not           []string `json:"not"`
-	Revision      *int64   `json:"revision"`
-	Thinking      *string  `json:"thinking"`
-	Effort        *string  `json:"effort"`
-	EffortPresent bool     `json:"-"`
+	Rank          []string          `json:"rank"`
+	Not           []string          `json:"not"`
+	Revision      *int64            `json:"revision"`
+	Thinking      *string           `json:"thinking"`
+	Effort        *string           `json:"effort"`
+	EffortPresent bool              `json:"-"`
+	Efforts       map[string]string `json:"efforts"`
+	End           *string           `json:"end"`
 }
 
 func boardFor(r *http.Request) (string, error) {
@@ -128,8 +130,20 @@ func validateBoardLines(c boardCatalog, rank, not []string) error {
 	return nil
 }
 func putBoardOrder(ctx context.Context, tx pgx.Tx, p tenant.Principal, profile modelprefs.BoardProfile, o modelprefs.BoardOrder) error {
-	_, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,not_allowed,thinking,effort,effort_level,set_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(tenant_id,profile_id,column_key,situation) DO UPDATE SET rank=excluded.rank,not_allowed=excluded.not_allowed,thinking=excluded.thinking,effort=excluded.effort,effort_level=excluded.effort_level,set_by=excluded.set_by,set_at=now()`, p.TenantID, profile.ID, o.Column, o.Situation, o.Rank, o.Not, o.Thinking, o.Effort, o.EffortLevel, p.ID)
+	_, err := tx.Exec(ctx, `INSERT INTO `+boardOrderTable(o.Situation)+`(tenant_id,profile_id,column_key,situation,rank,not_allowed,thinking,effort,effort_level,end_mode,efforts,set_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) ON CONFLICT(tenant_id,profile_id,column_key,situation) DO UPDATE SET rank=excluded.rank,not_allowed=excluded.not_allowed,thinking=excluded.thinking,effort=excluded.effort,effort_level=excluded.effort_level,end_mode=excluded.end_mode,efforts=excluded.efforts,set_by=excluded.set_by,set_at=now()`, p.TenantID, profile.ID, o.Column, o.Situation, o.Rank, o.Not, o.Thinking, o.Effort, o.EffortLevel, o.End, o.Efforts, p.ID)
 	return err
+}
+
+// Only these constants enter SQL; path values are never table identifiers.
+func boardOrderTable(situation string) string {
+	if situation == "small" || situation == "review" {
+		return "model_pref_situation_orders"
+	}
+	return "model_pref_orders"
+}
+
+func validModelsOrderSituation(s string) bool {
+	return validBoardSituation(s) || s == "small" || s == "review"
 }
 func boardResult(profile modelprefs.BoardProfile, person *string) boardWriteResult {
 	return boardWriteResult{PersonID: person, Profile: profile, Revision: profile.Revision, Moved: []boardMoved{}, RunningOutside: []string{}}
@@ -149,7 +163,7 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	column, situation := r.PathValue("column"), r.PathValue("situation")
-	if len(column) > 64 || !validBoardSituation(situation) {
+	if len(column) > 64 || !validModelsOrderSituation(situation) {
 		writePreferenceError(w, prefFail(400, "invalid_board_order"))
 		return
 	}
@@ -191,14 +205,30 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			var body struct {
-				Rank     []string `json:"rank"`
-				Not      []string `json:"not"`
-				Revision *int64   `json:"revision"`
+				Rank     []string        `json:"rank"`
+				Not      json.RawMessage `json:"not"`
+				Revision *int64          `json:"revision"`
+				Efforts  json.RawMessage `json:"efforts"`
+				End      json.RawMessage `json:"end"`
 			}
 			err = decodeJSON(w, r, &body)
-			in.Rank, in.Not, in.Revision = body.Rank, body.Not, body.Revision
-			if err == nil && (in.Rank == nil || in.Not == nil) {
+			in.Rank, in.Revision = body.Rank, body.Revision
+			if err == nil && len(body.Efforts) > 0 && (json.Unmarshal(body.Efforts, &in.Efforts) != nil || in.Efforts == nil) {
+				err = prefFail(422, "invalid_effort")
+			}
+			if err == nil && len(body.End) > 0 && (json.Unmarshal(body.End, &in.End) != nil || in.End == nil) {
+				err = prefFail(422, "invalid_end")
+			}
+			if err == nil && len(body.Not) > 0 {
+				if json.Unmarshal(body.Not, &in.Not) != nil || in.Not == nil {
+					err = prefFail(422, "rank_and_not_required")
+				}
+			}
+			if err == nil && in.Rank == nil {
 				err = prefFail(422, "rank_and_not_required")
+			}
+			if err == nil && len(in.Efforts) > 512 {
+				err = prefFail(413, "too_many_lines")
 			}
 		}
 		if err != nil {
@@ -224,6 +254,13 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 		if !validBoardColumn(s, column) {
 			return prefFail(422, "unknown_column")
 		}
+		if level == "person" {
+			for _, rule := range s.Rules {
+				if rule.Scope == "workspace" && rule.Column == column && rule.Lock == "top" {
+					return prefFail(http.StatusLocked, "column_locked")
+				}
+			}
+		}
 		profile := targetBoardProfile(s, level)
 		if err := checkBoardRevision(profile, in.Revision); err != nil {
 			return err
@@ -232,6 +269,7 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		c = modelsWriteCatalog(c)
 		if !thinking && r.Method != http.MethodDelete {
 			if err := validateBoardLines(c, in.Rank, in.Not); err != nil {
 				return err
@@ -245,6 +283,9 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 				break
 			}
 		}
+		if r.Method != http.MethodDelete && before == nil && len(s.Orders) >= 1536 {
+			return modelprefs.ErrBoardBounds
+		}
 		profile, err = persistBoardProfile(ctx, tx, p, profile)
 		if err != nil {
 			return err
@@ -256,17 +297,30 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 				o := *before
 				o.Rank, o.Not = nil, []string{}
 				o.Effort, o.EffortLevel = nil, nil
+				o.End, o.Efforts = "", nil
 				if err := putBoardOrder(ctx, tx, p, profile, o); err != nil {
 					return err
 				}
 				after = &o
 			} else {
-				if _, err := tx.Exec(ctx, `DELETE FROM model_pref_orders WHERE profile_id=$1 AND column_key=$2 AND situation=$3`, profile.ID, column, situation); err != nil {
+				if _, err := tx.Exec(ctx, `DELETE FROM `+boardOrderTable(situation)+` WHERE profile_id=$1 AND column_key=$2 AND situation=$3`, profile.ID, column, situation); err != nil {
 					return err
 				}
 			}
 		} else {
 			o := modelprefs.BoardOrder{ProfileID: profile.ID, Column: column, Situation: situation, Rank: in.Rank, Not: in.Not, Thinking: in.Thinking}
+			if !thinking && before == nil && level == "person" && situation == "first" {
+				workspace := s
+				workspace.Person, workspace.Lines = nil, c.lines
+				source := simpleEffectiveOrder(workspace, rawBoardDecision(workspace, column, "first"), column)
+				o.End, o.Efforts = source.End, copyOrderEfforts(source.Efforts, o.Rank)
+			}
+			if o.Not == nil {
+				o.Not = []string{}
+				if before != nil {
+					o.Not = before.Not
+				}
+			}
 			if thinking {
 				o.Not = []string{}
 				if before != nil {
@@ -279,6 +333,13 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 					if err := setNativeEffort(s, c, level, &o); err != nil {
 						return err
 					}
+					if len(o.Rank) > 0 {
+						o.Efforts = copyOrderEfforts(o.Efforts, o.Rank)
+						delete(o.Efforts, o.Rank[0])
+						if in.Effort != nil {
+							o.Efforts[o.Rank[0]] = *in.Effort
+						}
+					}
 				} else if before != nil {
 					// An omitted effort is not a clear. Only JSON null is.
 					o.Effort, o.EffortLevel = before.Effort, before.EffortLevel
@@ -288,6 +349,19 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 				o.Thinking = before.Thinking
 				o.Effort, o.EffortLevel = before.Effort, before.EffortLevel
 				if err := carryNativeEffort(c, &o); err != nil {
+					return err
+				}
+				o.End, o.Efforts = before.End, copyOrderEfforts(before.Efforts, o.Rank)
+			}
+			if !thinking {
+				if in.Efforts != nil {
+					o.Efforts = in.Efforts
+					o.Effort, o.EffortLevel = nil, nil
+				}
+				if in.End != nil {
+					o.End = *in.End
+				}
+				if err := validateModelsOrder(c, o); err != nil {
 					return err
 				}
 			}
@@ -586,8 +660,10 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if replace && before.ID != "" {
-			if _, err := tx.Exec(ctx, `DELETE FROM model_pref_orders WHERE profile_id=$1`, before.ID); err != nil {
-				return err
+			for _, table := range []string{"model_pref_orders", "model_pref_situation_orders"} {
+				if _, err := tx.Exec(ctx, `DELETE FROM `+table+` WHERE profile_id=$1`, before.ID); err != nil {
+					return err
+				}
 			}
 		}
 		if setup {

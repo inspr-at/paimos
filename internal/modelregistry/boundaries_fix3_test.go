@@ -349,3 +349,39 @@ func TestInvalidResolutionModeDoesNotPrepareCatalog(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveHarnessFilterIgnoresDisabledHistoryBound(t *testing.T) {
+	var p tenant.Principal
+	prefsFixture(t, func(tx pgx.Tx, who tenant.Principal) error {
+		p = who
+		return nil
+	})
+	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
+	fable := profileBySlug(profiles, "claude-fable-xhigh")
+	minimalAccount(t, p, fable)
+	var total, enabled int
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled)
+			SELECT $1,'disabled-history-'||n,'1','claude','anthropic','claude-opus-4','high','strong',false
+			FROM generate_series(1,513) n`, p.TenantID); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT count(*),count(*) FILTER (WHERE enabled) FROM model_profiles`).Scan(&total, &enabled)
+	})
+	if total <= 512 || enabled == 0 || enabled > 512 {
+		t.Fatalf("fixture must exceed the bound only through disabled history: total %d, enabled %d", total, enabled)
+	}
+	path := "/api/models/resolve?role=review-gate&author_family=openai"
+	filtered := decode[Resolution](t, &p, http.MethodGet, path+"&harness=claude", "", http.StatusOK)
+	if filtered.Profile == nil || filtered.Profile.ID != fable.ID || filtered.CommandTemplate == "" {
+		t.Fatalf("harness-filtered resolve lost its enabled route: %+v", filtered)
+	}
+	unfiltered := decode[Resolution](t, &p, http.MethodGet, path, "", http.StatusOK)
+	if unfiltered.Profile == nil || unfiltered.Profile.ID != fable.ID || unfiltered.CommandTemplate == "" {
+		t.Fatalf("unfiltered resolve lost its enabled route: %+v", unfiltered)
+	}
+	status, body := call(t, &p, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "")
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "role and harness combination is unsupported") {
+		t.Fatalf("harness outside the role's enabled routes: %d %s", status, body)
+	}
+}

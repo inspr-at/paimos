@@ -1142,8 +1142,10 @@ func resolvePlanRoutes(ctx context.Context, tx pgx.Tx, rows []planRow) (map[stri
 			// someone set; the workspace walk alone names no one.
 			if resolved.Trace.Selector != nil || resolved.Trace.SetBy == "person" {
 				setBy = resolved.Trace.SetBy
+			} else if resolved.Trace.PreferenceOf != nil && resolved.Trace.PreferenceOf.Source == "person" {
+				setBy = "person"
 			}
-			route.view = &planningRoute{Provider: p.Provider, Display: p.Display, EffortLevel: p.EffortLevel, Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision, SetBy: setBy, FollowsLatest: resolved.Trace.Mode == "latest", Pinned: resolved.Trace.Mode == "pinned"}
+			route.view = &planningRoute{Provider: p.Provider, Display: p.Display, EffortLevel: p.EffortLevel, Label: p.Label(), Profile: p.Slug, Harness: p.Harness, Model: p.Model, Effort: p.Effort, Revision: revision, SetBy: setBy, FollowsLatest: resolved.Trace.Mode == "latest" || resolved.Trace.PreferenceOf != nil, Pinned: resolved.Trace.Mode == "pinned"}
 			route.cell = usagedashboard.CellFor(p, resolved.Trace.Kind, resolved.Trace.Bucket)
 			route.key = routeKey{harness: p.Harness, model: modelregistry.ModelKey(p.Model), effort: strings.ToLower(p.Effort), learning: strings.Join([]string{p.ID, route.cell.Kind, route.cell.Bucket, route.cell.Version}, "|")}
 			var in, outRate, cached *float64

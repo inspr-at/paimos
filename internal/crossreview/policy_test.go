@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -359,5 +360,16 @@ func TestReviewPolicyUIRegistryAndRevisionFence(t *testing.T) {
 	f.call(t, f.person, "GET", "/api/settings/review-policy", nil, 200, &settings)
 	if settings.Effective.Mode != "other_family" {
 		t.Fatal("stale policy overwrote newer choice")
+	}
+	if !reflect.DeepEqual(settings.FamilyOrder, []string{"openai", "xai", "anthropic", "cursor", "google", "local"}) || !reflect.DeepEqual(settings.Floor.Tiers, []string{"strong", "frontier"}) || settings.Floor.MinEffortLevel != 4 || !reflect.DeepEqual(settings.SecurityExcludes, []string{"anthropic"}) {
+		t.Fatalf("dispatch rules missing from review policy: %+v", settings)
+	}
+	// These explain dispatcher behavior; the policy editor cannot change them.
+	for _, field := range []string{"family_order", "floor", "security_excludes"} {
+		f.call(t, f.person, "PUT", "/api/settings/review-policy", map[string]any{"mode": "off", "allowed_families": []string{}, field: nil}, 400, nil)
+	}
+	f.call(t, f.person, "GET", "/api/settings/review-policy", nil, 200, &settings)
+	if settings.Effective.Mode != "other_family" {
+		t.Fatal("read-only field write changed the policy")
 	}
 }

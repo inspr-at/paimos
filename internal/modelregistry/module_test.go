@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"reflect"
 	"slices"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
@@ -36,6 +38,12 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if output, err := exec.CommandContext(ctx, "node", "../../api/generate.mjs", "--write").CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "prepare OpenAPI: %v\n%s", err, output)
+		os.Exit(1)
+	}
 	code := m.Run()
 	if testDB != nil {
 		if err := testDB.Close(); err != nil {
@@ -292,16 +300,9 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("review without author %d %s", status, body)
 	}
-	// A harness filter never switches harnesses: no cursor route can run a
-	// Quick job or the Default here, so scout waits instead of running Luna.
-	cursorScout := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "", http.StatusOK)
-	if cursorScout.Profile != nil || !cursorScout.OwnerRequired || cursorScout.CommandTemplate != "" || len(cursorScout.Ladder) == 0 {
-		t.Fatalf("cursor scout switched harnesses: %+v", cursorScout)
-	}
-	for _, c := range cursorScout.Ladder {
-		if harness := profileByID(profiles, c.ProfileID).Harness; c.Selected || harness != "cursor" && !slices.Contains(c.SkipReasons, "harness filter") {
-			t.Fatalf("cursor scout considered a %s route: %+v", harness, c)
-		}
+	status, body = call(t, &agent, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "")
+	if status != http.StatusBadRequest || errorText(body) != "role and harness combination is unsupported" {
+		t.Fatalf("unsupported cursor scout %d %s", status, body)
 	}
 	// Automatic review takes the first family after the author's in the family
 	// order with a qualified no-tools adapter (Models v2): Codex cannot verify
@@ -480,4 +481,56 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func astra(profiles []Profile) Profile { return profileBySlug(profiles, "codex-astra-xhigh") }
+
+func reviewAccount(t *testing.T, p tenant.Principal, harness string) string {
+	t.Helper()
+	var id string
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var runner string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Review runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE key='admin'`, p.TenantID, runner); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2,$2,'review-runner',$3,'Review account',now(),true,'generation',$4) RETURNING id::text`, p.TenantID, harness, runner, p.ID).Scan(&id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted')`, p.TenantID, id); err != nil {
+			return err
+		}
+		schedule := capacity.DefaultSchedule()
+		for i := range schedule.Week {
+			schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+		}
+		schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+		raw, _ := json.Marshal(schedule)
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, id, raw); err != nil {
+			return err
+		}
+		if harness != "grok" {
+			return nil
+		}
+		// Native Grok reviews only through a macOS arm64 pairing enrollment.
+		var key, request, computer, profile string
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE harness='grok' AND enabled ORDER BY slug LIMIT 1`).Scan(&profile); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,created_by_principal_id) VALUES($1,$2,'Review fixture',gen_random_uuid()::text,'fixture-not-a-credential',$3) RETURNING id::text`, p.TenantID, runner, p.ID).Scan(&key); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
+ VALUES($1,gen_random_uuid(),'887887887',repeat('a',64),repeat('b',64),repeat('c',64),'{"platform":"darwin","arch":"arm64"}','fixture','redeemed',$2) RETURNING id::text`, p.TenantID, p.ID).Scan(&request); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,gen_random_uuid(),$2,$3,$4,'review-runner',repeat('c',64)) RETURNING id::text`, p.TenantID, request, runner, key).Scan(&computer); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) VALUES($1,$2,$3,$4,$5,now()+interval '1 hour',now())`, p.TenantID, id, computer, request, profile)
+		return err
+	})
+	return id
 }

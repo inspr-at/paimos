@@ -55,14 +55,37 @@ func (p FamilyPolicy) Decision(author, reviewer string) (bool, string) {
 }
 
 type FamilyPolicySettings struct {
-	ValidFamilies []string      `json:"valid_families"`
-	Workspace     FamilyPolicy  `json:"workspace"`
-	ProjectID     *string       `json:"project_id"`
-	Policy        *FamilyPolicy `json:"policy"`
-	Effective     FamilyPolicy  `json:"effective"`
-	Source        string        `json:"source"`
-	UpdatedBy     *string       `json:"updated_by"`
-	UpdatedAt     *time.Time    `json:"updated_at"`
+	FamilyOrder      []string      `json:"family_order"`
+	Floor            DispatchFloor `json:"floor"`
+	SecurityExcludes []string      `json:"security_excludes"`
+	ValidFamilies    []string      `json:"valid_families"`
+	Workspace        FamilyPolicy  `json:"workspace"`
+	ProjectID        *string       `json:"project_id"`
+	Policy           *FamilyPolicy `json:"policy"`
+	Effective        FamilyPolicy  `json:"effective"`
+	Source           string        `json:"source"`
+	UpdatedBy        *string       `json:"updated_by"`
+	UpdatedAt        *time.Time    `json:"updated_at"`
+}
+
+// These are dispatch rules, not writable family-policy settings.
+const ReviewMinEffortLevel = 4
+
+type DispatchFloor struct {
+	Tiers          []string `json:"tiers"`
+	MinEffortLevel int      `json:"min_effort_level"`
+}
+
+func ReviewFamilyOrder() []string {
+	return []string{"openai", "xai", "anthropic", "cursor", "google", "local"}
+}
+
+func ReviewFamilyRanks() map[string]int {
+	ranks := map[string]int{}
+	for i, family := range ReviewFamilyOrder() {
+		ranks[family] = i
+	}
+	return ranks
 }
 
 func localFamilyPolicy(ctx context.Context, tx pgx.Tx, project *string) (*FamilyPolicy, *string, *time.Time, error) {
@@ -87,7 +110,7 @@ func localFamilyPolicy(ctx context.Context, tx pgx.Tx, project *string) (*Family
 // default under the caller's tenant/project RLS. Callers own authorization and
 // write fences; this read never grants authority or caches a policy snapshot.
 func LoadFamilyPolicyTx(ctx context.Context, tx pgx.Tx, project *string) (FamilyPolicySettings, error) {
-	out := FamilyPolicySettings{ProjectID: project, Effective: DefaultFamilyPolicy(), Source: "default", ValidFamilies: ValidFamilies()}
+	out := FamilyPolicySettings{ProjectID: project, Effective: DefaultFamilyPolicy(), Source: "default", ValidFamilies: ValidFamilies(), FamilyOrder: ReviewFamilyOrder(), Floor: DispatchFloor{Tiers: []string{"strong", "frontier"}, MinEffortLevel: ReviewMinEffortLevel}, SecurityExcludes: []string{"anthropic"}}
 	workspace, _, _, err := localFamilyPolicy(ctx, tx, nil)
 	if err != nil {
 		return out, err

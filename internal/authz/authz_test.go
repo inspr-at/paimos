@@ -244,6 +244,10 @@ func TestModelLineAndSimplePreferenceRoutes(t *testing.T) {
 		{"GET /api/model-preferences/simple", "models.read"},
 		{"GET /api/models/lines/{harness}/{model}/usage", "models.read"},
 		{"PUT /api/models/lines/{harness}/{model}", "models.manage"},
+		{"PUT /api/models/lines/{harness}/{model}/pause", "models.manage"},
+		{"DELETE /api/models/lines/{harness}/{model}/pause", "models.manage"},
+		{"PUT /api/model-preferences/orders/{column}/first/never/{line}", "model_prefs.manage"},
+		{"DELETE /api/model-preferences/orders/{column}/first/never/{line}", "model_prefs.manage"},
 	} {
 		got, ok := PermissionForPattern(tc.route)
 		if !ok || got != tc.want {

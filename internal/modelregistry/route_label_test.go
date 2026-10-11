@@ -64,6 +64,13 @@ func TestRevisionFollowsRoutes(t *testing.T) {
 	if !regexp.MustCompile(`^[0-9a-f]{8}$`).MatchString(seeded) || revision(p) != seeded {
 		t.Fatalf("seeded revision %q", seeded)
 	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes WHERE role='scout' AND priority=1`)
+		return err
+	})
+	if unchanged := revision(p); unchanged != seeded {
+		t.Fatalf("retired ladder history changed the routing revision: %q → %q", seeded, unchanged)
+	}
 	if revision(twin) != seeded {
 		t.Fatalf("equal Models state named differently: %q and %q", seeded, revision(twin))
 	}

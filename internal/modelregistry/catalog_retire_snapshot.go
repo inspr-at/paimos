@@ -26,14 +26,14 @@ type retireTable struct {
 var retireTables = []retireTable{
 	{"model_pref_orders", []string{"profile_id", "column_key", "situation"}, false},
 	{"model_pref_situation_orders", []string{"profile_id", "column_key", "situation"}, false},
-	{"model_row_constraints", []string{"scope", "project_id", "column_key", "line"}, false},
-	{"model_pauses", []string{"harness", "model"}, false},
 	{"model_pref_profiles", []string{"id"}, true},
 	{"model_rules", []string{"scope", "project_id", "column_key", "line"}, false},
 	{"model_rule_revisions", []string{"scope", "scope_key"}, true},
-	{"model_role_routes", []string{"role", "priority"}, false},
-	{"model_security_role_routes", []string{"role", "priority"}, false},
+	{"model_row_constraints", []string{"scope", "project_id", "column_key", "line"}, false},
+	{"model_pauses", []string{"harness", "model"}, false},
 	{"model_pref_cells", []string{"scope_id", "kind_id", "bucket"}, false},
+	{"model_role_routes", []string{"role", "profile_id"}, false},
+	{"model_security_role_routes", []string{"role", "profile_id"}, false},
 	{"model_pref_scopes", []string{"id"}, true},
 	{"model_profile_retirements", []string{"profile_id"}, false},
 }
@@ -194,9 +194,9 @@ func retirementLines(model lifecycleModel, all []lifecycleModel) map[string]bool
 			continue
 		}
 		for _, p := range next.Profiles {
-			if !p.Retired && p.Enabled && compareCatalogVersions(next.Version, model.Version) > 0 {
+			line, _ := modelsLine(p)
+			if !p.Retired && p.Enabled && (lines[boardLineID(p)] || lines[line]) && compareCatalogVersions(next.Version, model.Version) > 0 {
 				delete(lines, boardLineID(p))
-				line, _ := modelsLine(p)
 				delete(lines, line)
 			}
 		}
@@ -249,18 +249,18 @@ func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel
 						label = "Except for"
 					}
 				}
-				add(label+" · "+rowString(row, "column_key")+" · "+rowString(row, "situation"), who, "", person)
+				add(label+" · "+rowString(row, "column_key")+" · "+rowString(row, "situation"), who, rowString(pref, "project_id"), person)
 			}
 		}
 		for _, line := range not {
 			if lines[line] {
-				add("never · "+rowString(row, "column_key"), who, "", person)
+				add("never · "+rowString(row, "column_key"), who, rowString(pref, "project_id"), person)
 			}
 		}
 	}
 	for _, raw := range s["model_rules"] {
 		row := rowFields(raw)
-		if lines[rowString(row, "line")] {
+		if lines[rowString(row, "line")] && string(row["moved_to_models"]) != "true" {
 			add("lock · "+rowString(row, "lock")+" · "+rowString(row, "column_key"), rowString(row, "set_by"), rowString(row, "project_id"), "")
 		}
 	}
@@ -274,7 +274,7 @@ func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel
 		row := rowFields(raw)
 		for _, profile := range model.Profiles {
 			if !profile.Retired && profile.Harness == rowString(row, "harness") && profile.Model == rowString(row, "model") {
-				add("pause", rowString(row, "set_by"), "", "")
+				add("pause · "+profile.Harness, rowString(row, "set_by"), "", "")
 				break
 			}
 		}
