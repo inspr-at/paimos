@@ -77,6 +77,27 @@ func TestModelsV2PageOpenAPIContract(t *testing.T) {
 		t.Fatal("row end contract changed")
 	}
 	page := properties("ModelSimplePreferences", false)
+	for _, field := range []string{"line", "effort"} {
+		if properties("ModelSimplePick", false)[field] == nil {
+			t.Errorf("pick.%s missing", field)
+		}
+	}
+	quick := object(object(page["quick"])["allOf"].([]any)[1])
+	for _, field := range []string{"harness", "trace"} {
+		if object(quick["properties"])[field] == nil {
+			t.Errorf("quick.%s missing", field)
+		}
+	}
+	outdated := object(object(page["outdated"])["properties"])
+	for _, field := range []string{"count", "named", "uses"} {
+		if outdated[field] == nil {
+			t.Errorf("outdated.%s missing", field)
+		}
+	}
+	named := object(object(object(outdated["named"])["items"])["properties"])
+	if named["line"] == nil || named["successor"] == nil {
+		t.Fatal("outdated names missing")
+	}
 	for _, name := range []string{"small", "fix", "stuck", "review"} {
 		cells := object(object(page["situations"])["additionalProperties"])
 		if object(cells["properties"])[name] == nil {
@@ -115,6 +136,16 @@ func TestModelsV2PageOpenAPIContract(t *testing.T) {
 	}
 	orderPath := object(paths["/model-preferences/orders/{column}/{situation}"])
 	for _, method := range []string{"put", "delete"} {
+		parameters := object(orderPath[method])["parameters"].([]any)
+		for _, parameter := range parameters {
+			p := object(parameter)
+			if p["name"] == "situation" {
+				values := object(p["schema"])["enum"].([]any)
+				if !slices.Contains(values, any("small")) || !slices.Contains(values, any("review")) {
+					t.Errorf("%s order lacks new situations", method)
+				}
+			}
+		}
 		if object(object(orderPath[method])["responses"])["423"] == nil {
 			t.Errorf("%s order missing locked status", method)
 		}

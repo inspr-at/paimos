@@ -575,7 +575,15 @@ func (m *Module) writeNeverRule(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		out.Rules = after.Rules
-		_, err = events.Append(ctx, tx, p, events.Change{Type: "model.rules_changed", Before: map[string]any{"column": column, "line": line, "rule": before}, After: out})
+		// Audit the affected row, like the retained rule editor. The read
+		// response can contain all workspace rows; an event stays bounded.
+		audit := rulesDocument{Revision: out.Revision, Rules: []modelprefs.Rule{}}
+		for _, rule := range after.Rules {
+			if rule.Column == column {
+				audit.Rules = append(audit.Rules, rule)
+			}
+		}
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "model.rules_changed", Before: map[string]any{"column": column, "line": line, "rule": before}, After: audit})
 		return err
 	})
 	if err != nil {

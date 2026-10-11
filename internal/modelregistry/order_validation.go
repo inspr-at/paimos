@@ -2,6 +2,7 @@
 package modelregistry
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 
@@ -19,6 +20,11 @@ func copyOrderEfforts(efforts map[string]string, rank []string) map[string]strin
 }
 
 func validateModelsOrder(c boardCatalog, o modelprefs.BoardOrder) error {
+	// Match the order reader's JSON bound, including PostgreSQL's whitespace.
+	encoded, err := json.Marshal(o.Efforts)
+	if err != nil || len(encoded)+2*len(o.Efforts) > 32768 {
+		return prefFail(413, "order_efforts_too_large")
+	}
 	if err := validateBoardLines(c, o.Rank, o.Not); err != nil {
 		return err
 	}
