@@ -1198,7 +1198,7 @@ func TestProjectLeadActionsTrackCurrentPersonAndGeneration(t *testing.T) {
 			if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'lead_actions_limited','Lead actions limited') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
 				return err
 			}
-			for _, permission := range []string{"harness.read", "harness.control"} {
+			for _, permission := range []string{"nodes.read", "harness.read", "harness.control"} {
 				if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, f.person.TenantID, role, permission); err != nil {
 					return err
 				}
