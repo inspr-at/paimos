@@ -17,6 +17,7 @@ export interface NeedsYouItem {
 import { computed, useId } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import VerificationButton from '../agents/VerificationButton.vue'
+import { VERIFICATION_PROGRESS_WIDEST } from '../../lib/useVerification'
 // hideWhenCalm (AEON-1171): nothing needs you means no block at all; a calm row kept after Verify again still shows.
 const props = defineProps<{ items: readonly NeedsYouItem[]; heading?: string; aside?: string; showCalm?: boolean; hideWhenCalm?: boolean }>()
 const emit = defineEmits<{ action: [id: string] }>()
@@ -32,6 +33,8 @@ const title = computed(() => props.heading ?? (count.value === 0 ? 'Nothing need
         <span class="att-icon" :class="item.count > 0 && item.tone !== 'waiting' ? 'warn' : 'mute'"><AppIcon :name="item.count === 0 ? 'check' : item.icon ?? 'alert'" /></span>
         <RouterLink v-if="item.count > 0 && item.href" :to="item.href" class="att-name">{{ item.name }}<AppIcon name="chevron-right" :size="12" /></RouterLink><span v-else class="att-name">{{ item.name }}</span>
         <p :role="item.action?.label === 'Verify again' ? 'status' : undefined">{{ item.detail }}</p>
+        <!-- On a phone the button sits below the detail: a Verify again row keeps the height of its longest progress line. -->
+        <template v-if="item.action?.label === 'Verify again'"><span v-for="(widest, i) in VERIFICATION_PROGRESS_WIDEST" :key="i" class="att-sizer" aria-hidden="true">{{ widest }}</span></template>
         <VerificationButton v-if="item.action?.label === 'Verify again'" class="sm" :class="{ primary: item.action.fixesProblem }" :busy="item.action.busy" :disabled="item.action.disabled" @click="emit('action', item.id)" />
         <button v-else-if="item.count > 0 && item.action" type="button" class="btn sm" :class="{ primary: item.action.fixesProblem }" :disabled="item.action.disabled" @click="emit('action', item.id)">{{ item.action.label }}</button>
       </li>
@@ -55,10 +58,11 @@ a.att-name > svg { flex: none; color: var(--ink-3); }
 a.att-name:hover { color: var(--teal-ink); }
 a.att-name:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
 .att-row p { grid-column: 2; grid-row: 2; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.att-sizer { display: none; grid-column: 2; grid-row: 2; visibility: hidden; font-size: 13px; overflow-wrap: anywhere; }
 .att-row > .btn { grid-column: 3; grid-row: 1; justify-self: end; }
 .calm .att-name { color: var(--ink-2); font-weight: 600; }.calm p { color: var(--ink-3); }
 /* Phone (Tick, AEON-1172): title, then detail, then the action button below them. */
-@container needs-you (max-width: 520px) { .att-row { grid-template-columns: 32px minmax(0, 1fr); padding: 14px; }.att-row > .btn { grid-column: 2; grid-row: 3; justify-self: start; margin-top: 10px; min-height: 44px; } }
+@container needs-you (max-width: 520px) { .att-sizer { display: block; } .att-row { grid-template-columns: 32px minmax(0, 1fr); padding: 14px; }.att-row > .btn { grid-column: 2; grid-row: 3; justify-self: start; margin-top: 10px; min-height: 44px; } }
 @media (pointer: coarse) { .btn, a.att-name { min-height: 44px; } a.att-name { display: flex; align-items: center; } }
 </style>
 <style scoped src="../../styles/settingsButtons.css"></style>
