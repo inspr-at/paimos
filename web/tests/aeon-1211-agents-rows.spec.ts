@@ -250,3 +250,125 @@ test('keyboard focus in a row holds changes like the pointer does', async ({ pag
   await page.clock.runFor(1600)
   await expect(row(page, '5e000000-0000-4000-8000-000000000034')).toBeVisible()
 })
+
+// Fix round 2 (gate on 87e23cad). Risk: the hold keeps a row's group but lets its membership,
+// its filter match, the empty list, its sibling order or its line 2 follow the live copy, so a
+// row still leaves or moves under the pointer, or says what it did before.
+const WORKER = (n: number) => `5e000000-0000-4000-8000-0000000000${n}`
+const APPROVAL = { kind: 'approval', scope: 'session', actor: 'person', count: 1, blocking: true, location: 'approvals' }
+type Data = Awaited<ReturnType<typeof setup>>
+// A working worker under the lead, without a run, so its own fields decide its state.
+const worker = (data: Data, n: number, fields: Record<string, unknown>) => ({ ...data.sessions[0]!, id: WORKER(n), role: 'worker', run_id: null, ticket_node_id: null, ticket: null, parent_harness_session_id: data.sessions[0]!.id, heartbeat_at: ago(0.1), ...fields })
+const rowIds = (page: Page) => rows(page).evaluateAll(els => els.map(el => el.getAttribute('data-row')))
+const childIds = (page: Page, parent: string) => page.locator(`.sessions .row[data-parent="${parent}"]`).evaluateAll(els => els.map(el => el.getAttribute('data-row')!.slice(2)))
+
+test('a nested ended worker stays under the pointer past its 10 minutes, then joins its lead\'s stopped count', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const data = await setup(page)
+  const lead = data.sessions[0]!.id
+  // Done nine minutes ago under the lead: it keeps its place until 10:01.
+  Object.assign(data.sessions.find(s => s.id === DONE)!, { parent_harness_session_id: lead, stopped_at: ago(9), heartbeat_at: ago(9.2) })
+  await page.goto('/agents')
+  const done = row(page, DONE)
+  await expect(done).toHaveAttribute('data-parent', lead)
+  await expect(done.locator('.l2t')).toContainText(/moves to Ended at \d{1,2}:01/)
+  await showList(page)
+  await row(page, lead).locator('.l2').hover()
+  const before = await rowIds(page)
+  await page.clock.runFor(2 * 60_000)
+  await expect(note(page)).toContainText(/wait/)
+  await expect(done, 'the pointer holds the row past 10:01').toBeVisible()
+  expect(await rowIds(page), 'no row left or moved').toEqual(before)
+  await expect(row(page, lead).locator('.history-toggle')).toHaveCount(0)
+  // The pointer leaves: 1.5 s later it joins the stopped workers.
+  await page.mouse.move(700, 8)
+  await page.clock.runFor(1600)
+  await expect(done).toHaveCount(0)
+  await expect(row(page, lead).locator('.history-toggle')).toHaveText('1 stopped')
+})
+
+test('a filtered row that stops matching waits under the pointer like any other change', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const data = await setup(page)
+  // One row starts asking (another group); one ends (it keeps its group, but no longer works).
+  data.sessions.push(worker(data, 44, { display_label: 'Ending worker', parent_harness_session_id: null, created_at: ago(30) }))
+  await page.goto('/agents')
+  await page.locator('.page-head [data-filter="working"]').click()
+  const lead = row(page, data.sessions[0]!.id), ending = row(page, WORKER(44))
+  await expect(lead).toBeVisible()
+  await expect(ending).toBeVisible()
+  await showList(page)
+  await lead.locator('.l2').hover()
+  const before = await rowIds(page)
+  Object.assign(data.sessions[0]!, { needs_attention: true, attention_reasons: [APPROVAL] })
+  Object.assign(data.sessions.find(s => s.id === WORKER(44))!, { phase: 'stopped', activity: 'idle', stopped_at: ago(0), stop_reason: 'completed', finished: true })
+  await page.clock.runFor(21_000)
+  await expect(lead.locator('.ava')).toHaveAttribute('aria-label', /: Needs something$/)
+  await expect(ending.locator('.ava')).toHaveAttribute('aria-label', /: Done$/)
+  await expect(note(page)).toContainText('2 changes wait')
+  expect(await rowIds(page), 'both stay while the pointer is here').toEqual(before)
+  await page.mouse.move(700, 8)
+  await page.clock.runFor(1600)
+  await expect(lead).toHaveCount(0)
+  await expect(ending).toHaveCount(0)
+})
+
+test('the last row stays under the pointer when the live list empties', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const data = await setup(page)
+  data.sessions.splice(1)
+  await page.goto('/agents')
+  const only = row(page, data.sessions[0]!.id)
+  await expect(only).toBeVisible()
+  await showList(page)
+  await only.locator('.l2').hover()
+  data.sessions.splice(0)
+  await page.clock.runFor(21_000)
+  await expect(note(page)).toContainText('1 change waits')
+  await expect(only, 'the table stays with its held row').toBeVisible()
+  await expect(page.locator('.sessions .connect')).toHaveCount(0)
+  await page.mouse.move(700, 8)
+  await page.clock.runFor(1600)
+  await expect(only).toHaveCount(0)
+  await expect(page.locator('.sessions .connect')).toBeVisible()
+})
+
+test('an ended worker keeps its place among its siblings for 10 minutes', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const data = await setup(page)
+  const lead = data.sessions[0]!.id
+  data.sessions.push(worker(data, 41, { display_label: 'Older worker', created_at: ago(60) }), worker(data, 42, { display_label: 'Younger worker', created_at: ago(20) }))
+  await page.goto('/agents')
+  await page.mouse.move(700, 8)
+  await expect.poll(() => childIds(page, lead)).toEqual([WORKER(41), WORKER(42)])
+  // The older one ends with the pointer away: no hold, yet it keeps its place.
+  Object.assign(data.sessions.find(s => s.id === WORKER(41))!, { phase: 'stopped', activity: 'idle', stopped_at: ago(0), stop_reason: 'completed', finished: true })
+  await page.clock.runFor(21_000)
+  await expect(row(page, WORKER(41)).locator('.ava')).toHaveAttribute('aria-label', /: Done$/)
+  expect(await childIds(page, lead), 'still ahead of its younger sibling').toEqual([WORKER(41), WORKER(42)])
+  await page.clock.runFor(10 * 60_000)
+  await expect(row(page, WORKER(41))).toHaveCount(0)
+})
+
+test('a held move shows the newest line 2: a working row that starts asking says its request', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const data = await setup(page)
+  data.sessions.push(worker(data, 43, { display_label: 'Asking worker', parent_harness_session_id: null, created_at: ago(30), agent_activity_mode: 'agent_summary', current_activity: { text: 'Editing the fleet list', source: 'auto', at: ago(1) } }))
+  await page.goto('/agents')
+  const asking = row(page, WORKER(43))
+  await expect(asking.locator('.l2t')).toHaveText('Editing the fleet list')
+  await showList(page)
+  await asking.locator('.l2').hover()
+  Object.assign(data.sessions.find(s => s.id === WORKER(43))!, { current_activity: null, needs_attention: true, attention_reasons: [APPROVAL] })
+  await page.clock.runFor(21_000)
+  // Its move to Needs attention waits; its badge and line 2 are the newest.
+  await expect(note(page)).toContainText('1 change waits')
+  await expect(asking.locator('.ava')).toHaveAttribute('aria-label', /: Needs something$/)
+  await expect(asking.locator('.l2t')).toContainText(/1 permission request awaiting a person.s decision/)
+  await expect(asking.locator('.l2t')).not.toContainText('Editing the fleet list')
+})

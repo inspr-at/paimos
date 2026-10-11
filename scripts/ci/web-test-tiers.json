@@ -5346,9 +5346,17 @@
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"the accounts chip opens three tiles that lead into Settings; its tooltip stays away while open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a filtered row that stops matching waits under the pointer like any other change","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a held move shows the newest line 2: a working row that starts asking says its request","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a nested ended worker stays under the pointer past its 10 minutes, then joins its lead's stopped count","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"a refresh never adds, moves or removes a row under the pointer; the changes wait, then apply","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"an ended session keeps its place and end state for 10 minutes, then moves to Ended","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"an ended worker keeps its place among its siblings for 10 minutes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"dark 1024: the state lives in the avatar, Time sits beside the name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -5363,6 +5371,8 @@
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 1440: the state lives in the avatar, Time sits beside the name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"light 390: compact rows open with the harness mark and end with the time","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"the last row stays under the pointer when the live list empties","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"touch › 390: every target in the Sessions card is 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
