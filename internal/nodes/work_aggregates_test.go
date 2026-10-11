@@ -2,12 +2,14 @@
 package nodes
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -71,6 +73,164 @@ func aggregateRead(t *testing.T, p tenant.Principal, ids ...string) (map[string]
 	}
 	return estimates, views
 }
+
+// Risk: moving the tenant setting out of the leaf projection can change stale
+// boundaries or include closed/archived evidence. Compare every returned field
+// with the released SQL and count actual interval calls, independent of time.
+func TestWorkAggregatesETAIntervalOnceAndParity(t *testing.T) {
+	w := planningSetup(t)
+	top := aggregateNode(t, w, "INTERVAL-1", w.root.ID, "open", nil)
+	states := []string{"open", "in_progress", "open", "done", "open", "archived", "open", "cancelled"}
+	leaves := make([]nodeJSON, len(states))
+	for i, state := range states {
+		leaves[i] = aggregateNode(t, w, fmt.Sprintf("INTERVAL-%d", i+2), top.ID, state, 1)
+		aggregateETA(t, w, leaves[i].ID, 40, time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2027, 1, 2, 0, 0, 0, 0, time.UTC))
+	}
+	// Another tenant's shortest interval must not override this tenant's default.
+	other := addPrincipal(t, "eta-interval-other")
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, other.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO eta_settings(tenant_id,interval_minutes) VALUES($1,1)`, other.TenantID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	released, err := os.ReadFile("../db/migrations/1230_work_leaf_aggregates.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Keep the immutable released implementation as the parity oracle. Temporary
+	// functions and the interval spy live only in a rolled-back app-role transaction.
+	legacySQL := func(name, next string) string {
+		t.Helper()
+		_, tail, ok := strings.Cut(string(released), "CREATE FUNCTION "+name+"(")
+		body, _, end := strings.Cut(tail, "\nCREATE "+next)
+		if !ok || !end {
+			t.Fatalf("released function %s not found", name)
+		}
+		return strings.ReplaceAll("CREATE FUNCTION "+name+"("+body, name+"(", "pg_temp."+name+"_before(")
+	}
+	legacyLeaf := legacySQL("aeon_leaf_eta", "FUNCTION aeon_work_aggregates(")
+	legacyAggregate := strings.ReplaceAll(legacySQL("aeon_work_aggregates", "OR REPLACE FUNCTION aeon_node_eta_progress("), "aeon_leaf_eta(", "pg_temp.aeon_leaf_eta_before(")
+	rollback := errors.New("rollback interval spy and temporary fixture changes")
+	for _, tc := range []struct {
+		name    string
+		minutes int
+	}{{"absent", 0}, {"default", 10}, {"custom", 3}, {"minimum", 1}, {"maximum", 240}} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+				if tc.minutes != 0 {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO eta_settings(tenant_id,interval_minutes) VALUES($1,$2)`, w.admin.TenantID, tc.minutes); err != nil {
+						return err
+					}
+				}
+				minutes := tc.minutes
+				if minutes == 0 {
+					minutes = 10
+				}
+				// now() is constant within this transaction: exact, one microsecond
+				// stale, and one microsecond fresh need neither sleeps nor tolerances.
+				for i, offset := range []int{0, -1, 1} {
+					if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET eta_reported_at=now()-make_interval(mins=>$2::int*2)+$3::int*interval '1 microsecond' WHERE ticket_node_id=$1`, leaves[i].ID, minutes, offset); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(t.Context(), `UPDATE ticket_live_eta SET reported_at=now()-make_interval(mins=>$2::int*2)+$3::int*interval '1 microsecond' WHERE node_id=$1`, leaves[i].ID, minutes, -offset); err != nil {
+						return err
+					}
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=now(),stop_reason='process_exited',progress_pct=100 WHERE ticket_node_id=$1`, leaves[4].ID); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET phase='stopped',stopped_at=now(),archived_at=now(),stop_reason='process_exited',progress_pct=100,recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest='fixture'::bytea,recovery_actor_id=agent_principal_id,recovery_reason='fixture' WHERE ticket_node_id=$1`, leaves[6].ID); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `CREATE TEMP SEQUENCE eta_interval_calls;
+ CREATE OR REPLACE FUNCTION aeon_eta_interval() RETURNS interval LANGUAGE plpgsql STABLE AS $$
+ BEGIN
+  PERFORM nextval('pg_temp.eta_interval_calls');
+  RETURN make_interval(mins=>coalesce((SELECT interval_minutes FROM eta_settings),10));
+ END;
+ $$;`+legacyLeaf+legacyAggregate); err != nil {
+					return err
+				}
+				read := func(function string, roots []string) ([]byte, int64, error) {
+					if _, err := tx.Exec(t.Context(), `SELECT setval('pg_temp.eta_interval_calls',1,false)`); err != nil {
+						return nil, 0, err
+					}
+					var raw []byte
+					if err := tx.QueryRow(t.Context(), `SELECT coalesce(jsonb_agg(to_jsonb(a) ORDER BY a.id),'[]') FROM `+function+`($1::uuid[]) a`, roots).Scan(&raw); err != nil {
+						return nil, 0, err
+					}
+					var calls int64
+					err := tx.QueryRow(t.Context(), `SELECT CASE WHEN is_called THEN last_value ELSE 0 END FROM pg_temp.eta_interval_calls`).Scan(&calls)
+					return raw, calls, err
+				}
+				roots := []string{w.root.ID, top.ID}
+				for _, leaf := range leaves {
+					roots = append(roots, leaf.ID)
+				}
+				for _, ids := range [][]string{{leaves[0].ID}, {top.ID}, roots} {
+					before, oldCalls, err := read("pg_temp.aeon_work_aggregates_before", ids)
+					if err != nil {
+						return err
+					}
+					after, calls, err := read("aeon_work_aggregates", ids)
+					if err != nil {
+						return err
+					}
+					if !bytes.Equal(before, after) {
+						return fmt.Errorf("aggregate parity: before=%s after=%s", before, after)
+					}
+					if calls != 1 || oldCalls < 2 {
+						return fmt.Errorf("interval calls: before=%d after=%d, want >=2 before and 1 after", oldCalls, calls)
+					}
+					t.Logf("%d roots: interval setting calls before=%d after=%d", len(ids), oldCalls, calls)
+					if len(ids) != len(roots) {
+						continue
+					}
+					var rows []struct {
+						ID string `json:"id"`
+						eta.View
+					}
+					if err := json.Unmarshal(after, &rows); err != nil {
+						return err
+					}
+					views := map[string]eta.View{}
+					for _, row := range rows {
+						views[row.ID] = row.View
+					}
+					if len(views) != len(roots) {
+						return fmt.Errorf("aggregate fixture lost roots: got %d, want %d", len(views), len(roots))
+					}
+					for i, leaf := range leaves[:3] {
+						v := views[leaf.ID]
+						if v.ReadyAt == nil || v.LiveAt == nil || v.ReadyStale != (i == 1) || v.LiveStale != (i == 2) {
+							return fmt.Errorf("boundary leaf %d: %+v", i, v)
+						}
+					}
+					parent := views[top.ID]
+					if parent.LeafCount != 6 || parent.ReadyLeaves != 3 || parent.LiveLeaves != 3 || parent.Progress == nil || *parent.Progress != 53 {
+						return fmt.Errorf("parent roll-up: %+v", parent)
+					}
+					completed := views[leaves[4].ID]
+					if !completed.Finished || completed.Progress == nil || *completed.Progress != 100 || completed.ReadyAt != nil || completed.LiveAt != nil {
+						return fmt.Errorf("completed leaf: %+v", completed)
+					}
+					for _, i := range []int{3, 5, 6, 7} {
+						v := views[leaves[i].ID]
+						if v.ReadyAt != nil || v.LiveAt != nil || v.ReadyStale || v.LiveStale || (i == 6 && (v.Progress != nil || v.Finished)) {
+							return fmt.Errorf("closed/archived leaf %d: %+v", i, v)
+						}
+					}
+				}
+				return rollback
+			})
+			if !errors.Is(err, rollback) {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestWorkAggregatesCoverageRegroupingCountsAndSort(t *testing.T) {
 	w := planningSetup(t)
 	top := aggregateNode(t, w, "AGG-1", w.root.ID, "open", 40)

@@ -75,8 +75,8 @@ export const useBusiness = defineStore('business', () => {
     if (!plugins.value || !hintKey.value) return
     try { localStorage.setItem(hintKey.value, anyOpen.value ? '1' : '0') } catch { /* private window: the place waits for the plugins */ }
   })
-  // The overview's first-run card stays until hours and rates are on; Customers
-  // and Quotes are added from Manage parts when a workspace wants them.
+  // The overview's parts status stays until hours and rates are on; Customers
+  // and Quotes are added in Settings › Business when a workspace wants them.
   const allOpen = computed(() => open.value.costs && open.value.hours)
   let pluginRequest: Promise<void> | null = null
   function loadPlugins(force = false): Promise<void> {
