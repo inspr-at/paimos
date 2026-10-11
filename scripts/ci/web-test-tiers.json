@@ -4886,6 +4886,8 @@
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"For new things folds into one line; opened, New model versions is read-only with a link to Models (desktop and phone)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"a cleared New tag keeps its room: with a long account name the clicked box, the rows below and Add context stay put through save, the read after it and Undo (desktop and phone)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"a competing change answers 409: nothing is claimed as saved and the server state is shown","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"a refused write takes its tick back at once, even when the matrix cannot be read again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}

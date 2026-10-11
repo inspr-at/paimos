@@ -49,6 +49,8 @@ const rulesOpen = ref(false), rulesMoving = ref(false), rulesInstant = ref(false
 /** The row "Choose where" brought to the person, tinted for a moment. */
 const flash = ref(''), pendingChoose = ref('')
 let flashTimer: ReturnType<typeof setTimeout> | undefined
+/** Accounts tagged New on this screen. A save ends the wait, but the tag keeps its room unseen until the screen opens anew, so a row never shrinks under the pointer. */
+const tagged = ref<Set<string>>(new Set())
 
 const columns = computed(() => matrix.value ? tickable(matrix.value.contexts) : [])
 const rows = computed(() => matrix.value?.accounts ?? [])
@@ -73,6 +75,8 @@ function load(quiet = false, report = !quiet) {
     // A read that started before our own save can answer after it; never step back.
     if (page.rules.revision < floor && matrix.value) return
     matrix.value = page; set.value = allowedSet(page.cells); state.value = 'ready'
+    const waits = page.accounts.filter(a => a.awaiting && !tagged.value.has(a.id))
+    if (waits.length) tagged.value = new Set([...tagged.value, ...waits.map(a => a.id)])
     if (pendingChoose.value) { const id = pendingChoose.value; pendingChoose.value = ''; void nextTick(() => choose(id)) }
   }), {
     failed: () => {
@@ -298,7 +302,7 @@ const onFocus = () => { if (!busy.value) load(true) }
 onMounted(() => { load(); window.addEventListener('keydown', pageKeys); window.addEventListener('focus', onFocus) })
 onBeforeUnmount(() => { sizes?.disconnect(); clearTimeout(flashTimer); window.removeEventListener('keydown', pageKeys); window.removeEventListener('focus', onFocus) })
 // Another person or workspace: drop the matrix, the Undo and any open form.
-watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new Set(); last.value = null; menu.value = null; form.value = null; said.value = ''; busy.value = ''; confirmedHere.value = false; flash.value = ''; pendingChoose.value = ''; if (owner) load() })
+watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new Set(); tagged.value = new Set(); last.value = null; menu.value = null; form.value = null; said.value = ''; busy.value = ''; confirmedHere.value = false; flash.value = ''; pendingChoose.value = ''; if (owner) load() })
 </script>
 
 <template>
@@ -363,7 +367,7 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
                 <div class="row-head">
                   <label class="tb"><input type="checkbox" class="tri" :data-r="ri + 1" :data-c="0" :checked="rowState(a.id, columns, set) === 'all'" :indeterminate="rowState(a.id, columns, set) === 'some'" :aria-label="`${accountName(a)} in every context`" @change="bulkRow($event, a.id)" /></label>
                   <HarnessMark :harness="a.harness" />
-                  <span class="who"><b><span class="nm">{{ accountName(a) }}</span><span v-if="a.awaiting" class="tag" data-use-new>New · ask first</span></b><small>{{ sub(a) }}</small></span>
+                  <span class="who"><b><span class="nm">{{ accountName(a) }}</span><span v-if="a.awaiting || tagged.has(a.id)" class="tag" :class="{ kept: !a.awaiting }" :aria-hidden="!a.awaiting || undefined" :data-use-new="a.awaiting ? '' : undefined">New · ask first</span></b><small>{{ sub(a) }}</small></span>
                 </div>
               </th>
               <td v-for="(c, ci) in columns" :key="c.id">
@@ -483,6 +487,8 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
 .who .nm { min-width: 0; }
 .who small { font-size: 11.5px; color: var(--ink-3); overflow-wrap: anywhere; }
 .tag { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 6px; font: 600 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; color: var(--teal-ink); background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+/* A cleared tag keeps its room: a wrapped tag's line stays, so the row's boxes and the rows below stay put. */
+.tag.kept { visibility: hidden; }
 .row-head { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 10px; min-height: 52px; padding: 6px 10px; }
 .cell { display: flex; align-items: center; justify-content: center; width: 100%; min-height: 52px; cursor: pointer; border-radius: var(--radius-row); }
 @media (hover: hover) { .cell:hover { background: var(--row-hover); } }

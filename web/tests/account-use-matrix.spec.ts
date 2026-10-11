@@ -614,3 +614,41 @@ test('"Choose where" from Needs you opens For new things and brings the new acco
   await expect(page.getByText('New account found: markus')).toHaveCount(0)
   expect(errors).toEqual([])
 })
+
+test('a cleared New tag keeps its room: with a long account name the clicked box, the rows below and Add context stay put through save, the read after it and Undo (desktop and phone)', async ({ page }) => {
+  const errors = watchErrors(page)
+  const w = await setup(page)
+  // The new account comes first, so other rows follow it; its long name pushes the tag onto a line of its own.
+  const fresh = w.accounts.find(a => a.id === ACCOUNTS.claude)!
+  fresh.label = 'Claude Max for Acme client work and nightly release builds'
+  w.accounts = [fresh, ...w.accounts.filter(a => a !== fresh)]
+  for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+    fresh.awaiting = true; w.holding = { count: 0, first: [] }
+    await page.setViewportSize(size)
+    await open(page)
+    const row = zone(page).locator(`[data-use-row="${ACCOUNTS.claude}"]`), tag = row.locator('[data-use-new]')
+    // The fixture holds the risk: the tag sits on a line below the name, so losing its room would shorten the row.
+    const name = (await row.locator('.nm').boundingBox())!, mark = (await tag.boundingBox())!
+    expect(mark.y, 'the tag wraps below the name').toBeGreaterThanOrEqual(name.y + name.height - 1)
+    const controls = {
+      clicked: cell(page, ACCOUNTS.claude, C.def), row: rowBox(page, ACCOUNTS.claude), below: cell(page, ACCOUNTS.main, C.acme),
+      lastRow: rowBox(page, ACCOUNTS.spare), lastCell: cell(page, ACCOUNTS.spare, C.beta), add: zone(page).getByRole('button', { name: 'Add context' }),
+    }
+    for (const control of Object.values(controls)) await control.scrollIntoViewIfNeeded()
+    const guard = await controlStability(page, controls)
+    // The save ends the wait: the tag and the tint go, the row keeps its height, also once the matrix is read
+    // again and the server no longer reports the wait (the project waiting since shows that read arrived).
+    w.holding = WAITING
+    await guard.check(async () => {
+      await controls.clicked.click()
+      await expect(page.locator('.toast').filter({ hasText: '1 cell changed' })).toBeVisible()
+      await expect(tag).toHaveCount(0); await expect(row).not.toHaveClass(/\bnew\b/)
+      await expect(zone(page).locator('[data-use-holding]')).toContainText('Waiting now: Website relaunch')
+    })
+    await guard.check(async () => { await page.locator('body').press('u'); await expect(page.locator('.toast').filter({ hasText: 'Undone:' })).toBeVisible() })
+    guard.done()
+    await expect(controls.clicked).not.toBeChecked()
+    expect(fresh.awaiting, 'Undo is a person\'s save as well: the wait stays ended').toBe(false)
+  }
+  expect(errors).toEqual([])
+})

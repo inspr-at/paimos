@@ -56,7 +56,8 @@ added under New accounts Ask first and no live context allows it; the mark is
 recorded with the account (migration 1336) and the first person save that
 touches its cells ends the wait. Such rows carry a tint and a New tag, and
 "Choose where" in Needs you opens For new things and brings the row with its
-first box focused. `holding_projects` counts the visible live projects in
+first box focused. When a save ends the wait, the tint and the tag go but the
+tag's room stays until the screen opens again, so the row keeps its height. `holding_projects` counts the visible live projects in
 Unassigned and names up to 20, newest first. On a phone each account is a
 stacked row with named context boxes, and nothing scrolls sideways. Running
 work outside the matrix is listed and keeps running. Project settings choose
