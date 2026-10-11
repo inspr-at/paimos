@@ -14898,6 +14898,10 @@
     ,
     {"kind":"node","file":"tests/work-aggregates.test.ts","name":"weighted progress rounded by the server to 100% retains ETA and staleness in every mode","tier":"NIGHTLY"}
     ,
+    {"kind":"node","file":"tests/work-icons.test.ts","name":"picker search matches names first, then search words, and keeps list order on ties","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/work-icons.test.ts","name":"the web offers the shared icon list, and AppIcon draws every icon in it","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/work-queue.test.ts","name":"adapts Part A ticket projection without retaining an unadmitted run or inventing capacity","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/work-queue.test.ts","name":"canonical work leaves retain release membership, cadence, ETA and queue predictions","tier":"GATED-FULL"}
@@ -20816,7 +20820,7 @@
     ,
     {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"serializes a deferred Reload with Save and leaves the saved revision visible","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"the icon picker shows every icon with its name and chooses one","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"the icon picker lists every icon after Default, finds them by word and chooses one","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/workspace-activity.unit.test.ts","name":"drops another person’s history and binds every delayed Undo result to the exact displayed event, ticket and revision","tier":"GATED-FULL"}
   ]

@@ -109,7 +109,8 @@ func TestWorkVocabularyProjectOnlyCreation(t *testing.T) {
 	if err := json.Unmarshal(request(http.MethodGet, path, "", writer, http.StatusOK), &defaults); err != nil {
 		t.Fatal(err)
 	}
-	if defaults.Revision != 0 || defaults.Leaf.Name != "" || defaults.Leaf.Icon != "" || defaults.Levels == nil || len(defaults.Levels) != 0 {
+	// AEON-1142: a new workspace starts with Epic / Ticket / Task (migration 1332).
+	if defaults.Revision != 1 || defaults.Leaf.Name != "Task" || defaults.Leaf.Icon != "task" || len(defaults.Levels) != 2 || defaults.Levels[0].Name != "Epic" || defaults.Levels[1].Icon != "ticket" {
 		t.Fatalf("unexpected default vocabulary: %+v", defaults)
 	}
 	request(http.MethodGet, path, "", unbound, http.StatusForbidden)
@@ -120,7 +121,7 @@ func TestWorkVocabularyProjectOnlyCreation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const vocabulary = `{"revision":0,"leaf":{"name":"Arbeitsschritt","icon":"check"},"levels":[{"name":"Vorhaben","icon":"tree"}]}`
+	const vocabulary = `{"revision":1,"leaf":{"name":"Arbeitsschritt","icon":"check"},"levels":[{"name":"Vorhaben","icon":"tree"}]}`
 	saved := request(http.MethodPut, path, vocabulary, owner, http.StatusOK)
 	for _, token := range []string{writer, reader, projectAdmin} {
 		if got := request(http.MethodGet, path, "", token, http.StatusOK); !bytes.Equal(got, saved) {
@@ -181,7 +182,7 @@ func TestWorkVocabularyProjectOnlyCreation(t *testing.T) {
 	if err := json.Unmarshal(request(http.MethodGet, path, "", other, http.StatusOK), &otherDefaults); err != nil {
 		t.Fatal(err)
 	}
-	if otherDefaults.Revision != 0 || otherDefaults.Leaf.Name != "" {
+	if otherDefaults.Revision != 1 || otherDefaults.Leaf.Name != "Task" {
 		t.Fatal("project reader received another tenant's vocabulary")
 	}
 }

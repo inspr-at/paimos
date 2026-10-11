@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import { parse, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as vocabulary from '../src/lib/workVocabulary'
+import * as icons from '../src/lib/workIcons'
 import { flatten, mountView, settle as viewSettle, textOf, type RenderNode } from './webcore-view-harness'
 const scopes: Vue.EffectScope[] = []
 const apps: Vue.App[] = []
@@ -96,10 +97,11 @@ it('Add level puts the new level directly above the leaf and saves levels[0] as 
   const put = card.api.mock.calls.find(call => call[1]?.method === 'PUT')!
   expect(JSON.parse(String(put[1]!.body)).levels.map((level: { name: string }) => level.name)).toEqual(['Vorhaben', 'Geschichte', '', ''])
 })
-it('the icon picker shows every icon with its name and chooses one', async () => {
+// AEON-1142: about 100 icons in a searchable grid, Default first.
+it('the icon picker lists every icon after Default, finds them by word and chooses one', async () => {
   const emitted: string[] = []
   const panel = { __esModule: true, default: { props: ['label'], setup: (p: { label: string }, { slots }: Vue.SetupContext) => () => Vue.h('div', { role: 'dialog', 'aria-label': p.label }, slots.default?.()) } }
-  const view = mountView('../src/components/settings/IconChoice.vue', { '../../lib/workVocabulary': vocabulary, '../AppIcon.vue': IconStub, '../work/FloatingPanel.vue': panel },
+  const view = mountView('../src/components/settings/IconChoice.vue', { '../../lib/workIcons': icons, '../AppIcon.vue': IconStub, '../work/FloatingPanel.vue': panel },
     { modelValue: 'tree', label: 'Level 2 icon', fallback: 'layers', 'onUpdate:modelValue': (value: string) => emitted.push(value) })
   apps.push(view.app); await viewSettle()
   const trigger = view.find(el => el.props['aria-haspopup'] === 'listbox')
@@ -109,12 +111,28 @@ it('the icon picker shows every icon with its name and chooses one', async () =>
   // ArrowDown opens it from the trigger, as a native select would.
   fire(trigger, 'onKeydown', { key: 'ArrowDown', preventDefault() {} }); await viewSettle()
   expect(flatten(view.root).find(el => el.props.role === 'dialog')!.props['aria-label']).toBe('Choose level 2 icon')
-  const options = flatten(view.root).filter(el => el.props.role === 'option')
-  expect(options.map(el => [norm(textOf(el)), iconOf(el)])).toEqual([['Default Layers', 'layers'], ['Ticket', 'ticket'], ['Epic', 'epic'], ['Task', 'task'], ['Layers', 'layers'], ['Tree', 'tree'], ['Folder', 'folder'], ['Check', 'check'], ['Box', 'box']])
-  expect(options.filter(el => el.props['aria-selected']).map(el => norm(textOf(el)))).toEqual(['Tree'])
+  const options = () => flatten(view.root).filter(el => el.props.role === 'option')
+  expect(options().map(el => el.props['aria-label'])).toEqual(['Default (Layers)', ...icons.WORK_ICON_LIST.map(icon => icon.label)])
+  expect(options().map(iconOf)).toEqual(['layers', ...icons.WORK_ICONS])
+  // One tab stop in the grid: the chosen icon.
+  expect(options().filter(el => el.props['aria-selected']).map(el => el.props['aria-label'])).toEqual(['Tree'])
+  expect(options().filter(el => el.props.tabindex === 0).map(el => el.props['aria-label'])).toEqual(['Tree'])
+  const search = flatten(view.root).find(el => el.tag === 'input')!
+  expect(search.props['aria-label']).toBe('Find an icon')
+  const find = async (text: string) => { fire(search, 'onUpdate:modelValue', text); await viewSettle() }
+  await find('rock')
+  expect(options().map(iconOf)).toEqual(['rocket'])
+  expect(options().filter(el => el.props.tabindex === 0).map(iconOf)).toEqual(['rocket'])
+  // Default stays first when the search names it or its icon.
+  await find('lay')
+  expect(options().map(el => el.props['aria-label'])).toEqual(['Default (Layers)', 'Layers'])
+  await find('zzz')
+  expect(options()).toHaveLength(0)
+  expect(norm(textOf(flatten(view.root).find(el => el.props.class === 'none')!))).toBe('No icon matches “zzz”. Try a word like goal, bug or team.')
+  await find('team')
   const focus = vi.fn(); Object.assign(trigger, { focus })
-  fire(options[2], 'onClick'); await viewSettle()
-  expect(emitted).toEqual(['epic'])
+  fire(options()[0], 'onClick'); await viewSettle()
+  expect(emitted).toEqual(['users'])
   expect(flatten(view.root).filter(el => el.props.role === 'listbox')).toHaveLength(0)
   expect(focus).toHaveBeenCalledOnce()
 })
