@@ -2,6 +2,7 @@
 package modelregistry
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -52,9 +53,24 @@ func TestDeniedEmptyCatalogSeedAdditionsAndUpgradeStayWithheld(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", 200)
-			if len(profiles) < len(catalogProfiles()) {
-				t.Fatalf("catalog incomplete: %d", len(profiles))
+			// Call production directly: the shared legacy decoder fixture must
+			// never turn an empty catalog into capability or activation authority.
+			read := func() []Profile {
+				t.Helper()
+				status, body := call(t, &p, http.MethodGet, "/api/models", "")
+				var profiles []Profile
+				if status != 200 || json.Unmarshal(body, &profiles) != nil {
+					t.Fatalf("catalog read: %d %s", status, body)
+				}
+				return profiles
+			}
+			profiles := read()
+			wantPins := 0
+			if oldCatalog {
+				wantPins = 39 // Exact historical subset arranged above.
+			}
+			if len(profiles) != wantPins {
+				t.Fatalf("catalog invented or removed pins: got %d want %d", len(profiles), wantPins)
 			}
 			for _, prof := range profiles {
 				if prof.Enabled {
@@ -68,7 +84,7 @@ func TestDeniedEmptyCatalogSeedAdditionsAndUpgradeStayWithheld(t *testing.T) {
 					if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM model_role_routes)+(SELECT count(*) FROM model_security_role_routes),(SELECT count(*) FROM model_observations),(SELECT count(*) FROM events WHERE type='model.activation_withheld' AND after->>'rule'='deny' AND after->>'cause'='shipped_catalog'),(SELECT count(*) FROM model_profiles p WHERE NOT EXISTS(SELECT 1 FROM model_observations o WHERE o.harness=p.harness AND o.model=p.model AND o.effort=p.effort))`).Scan(&routes, &observations, &audits, &unobserved); err != nil {
 						return err
 					}
-					if routes != 0 || observations != len(catalogProfiles()) || audits != len(profiles) || unobserved != 0 {
+					if routes != 0 || observations != wantPins || audits != len(profiles) || unobserved != 0 {
 						return fmt.Errorf("routes=%d observations=%d audits=%d profiles=%d unobserved=%d", routes, observations, audits, len(profiles), unobserved)
 					}
 					return nil
@@ -77,11 +93,19 @@ func TestDeniedEmptyCatalogSeedAdditionsAndUpgradeStayWithheld(t *testing.T) {
 				}
 			}
 			assertState()
-			again := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", 200)
+			again := read()
 			if len(again) != len(profiles) {
 				t.Fatal("catalog replay duplicated pins")
 			}
 			assertState()
+			// Explicit evidence is required for a person acceptance in a fresh
+			// tenant. An ID-only bootstrap supplies no effort proposal.
+			if !oldCatalog {
+				inRegistry(t, p, func(tx pgx.Tx) error {
+					_, err := tx.Exec(t.Context(), `INSERT INTO model_observations(tenant_id,harness,model,effort,source) VALUES($1,'codex','gpt-6.1-sol','high','fixture')`, p.TenantID)
+					return err
+				})
+			}
 			// The existing person acceptance flow can enable a withheld pin.
 			accepted := decode[Profile](t, &p, http.MethodPost, "/api/models/proposals/accept", `{"harness":"codex","model":"gpt-6.1-sol","effort":"high"}`, 200)
 			if !accepted.Enabled {
