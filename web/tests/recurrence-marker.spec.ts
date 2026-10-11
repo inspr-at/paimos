@@ -149,7 +149,7 @@ test.describe('touch permission changes', () => {
           } }],
         })
         expect((await pill.boundingBox())!.height).toBeGreaterThanOrEqual(44)
-        await expect(pill).toContainText('Recurring')
+        await expect(pill).toContainText('Routine')
         await expect(pill).not.toContainText('Wiederkehrend')
         await screenshot('after')
         expect(errors).toEqual([])
@@ -164,7 +164,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.emulateMedia({ colorScheme: theme })
     const locale = width === 390 ? 'de-AT' : 'en-GB'
     const { data, errors, recurrenceReads } = await setup(page, true, locale)
-    const label = 'Recurring · every Monday · #4'
+    const label = 'Routine · every Monday · #4'
     await page.goto('/p/PHAROS?sort=key&group=none')
     await expect(row(page).getByRole('img', { name: label, exact: true })).toBeVisible()
     await expect(page.locator('#row-n-4 .recurrence-dot')).toHaveCount(0)
@@ -207,7 +207,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.keyboard.press('Escape')
     await pill.click()
     await expect(page).toHaveURL(new RegExp(`/p/PRJ-17/settings\\?recurrence=${id}$`))
-    await expect(page.getByRole('heading', { name: 'Recurring work', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Routines', exact: true })).toBeVisible()
     await expect(page.locator(`#recurrence-${id}`)).toContainText('Website audit')
     await page.screenshot({ path: join(shots, `settings-${width}-${theme}.png`) })
     expect(errors).toEqual([])
@@ -217,7 +217,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
 test('readers and retired sources keep a marker without a management link', async ({ page }) => {
   const { data, errors } = await setup(page, false)
   await page.goto('/p/PHAROS/PHAROS-11')
-  await expect(workspace(page).getByRole('img', { name: 'Recurring · every Monday · #4' })).toBeVisible()
+  await expect(workspace(page).getByRole('img', { name: 'Routine · every Monday · #4' })).toBeVisible()
   await expect(workspace(page).locator('a.recurring-pill')).toHaveCount(0)
   data.nodes.find(node => node.id === 'n-1')!.recurrence!.retired = true
   await page.reload()
@@ -233,7 +233,7 @@ test('a manager cannot follow a retired source and header controls stay still ac
   data.nodes.find(node => node.id === 'n-1')!.recurrence!.retired = true
   await page.setViewportSize({ width: 390, height: 1000 })
   await page.goto('/p/PHAROS/PHAROS-11')
-  await expect(workspace(page).getByRole('img', { name: 'Recurring · every Monday · #4' })).toBeVisible()
+  await expect(workspace(page).getByRole('img', { name: 'Routine · every Monday · #4' })).toBeVisible()
   await expect(workspace(page).locator('a.recurring-pill')).toHaveCount(0)
   await expectStableControls({ controls: { 'header actions': workspace(page).getByRole('button', { name: 'More actions', exact: true }), 'copy key': workspace(page).locator('.key-chip') }, interactions: [
     { name: 'ordinary ticket in series', run: async () => { await page.goto('/p/PHAROS/PHAROS-14'); await expect(workspace(page).locator('.recurring-pill')).toHaveCount(0) } },
