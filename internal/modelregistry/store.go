@@ -533,10 +533,5 @@ func profileOrigin(p Profile, stored string) string {
 	if p.Source == "manual" {
 		return "manual"
 	}
-	for _, cp := range catalogProfiles() {
-		if cp.Slug == p.Slug && cp.Harness == p.Harness && cp.Model == p.Model && cp.Effort == p.Effort {
-			return "shipped"
-		}
-	}
 	return "harness"
 }
