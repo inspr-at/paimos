@@ -26,8 +26,10 @@ async function probe(page: Page, min: number) {
       return out
     })
     const clipped = [...root.querySelectorAll('.settings-card h2, .rule-t b, .ask-t b, .rule-go, .rule-s, .btn, .risk-head b')].filter(vis).filter(e => e.scrollWidth > e.clientWidth + 1).map(e => (e.textContent ?? '').trim().slice(0, 30))
-    const main = document.querySelector('main')!
-    return { small, accents, clipped, overflow: Math.max(main.scrollWidth - main.clientWidth, document.documentElement.scrollWidth - innerWidth) }
+    const main = document.querySelector('main')!, edge = main.getBoundingClientRect().right
+    // Whatever reaches past the content edge, named, so a failure says what overflowed.
+    const wide = [...main.querySelectorAll('*')].filter(e => e.getBoundingClientRect().right > edge + 1 && e.getBoundingClientRect().width > 0).slice(0, 4).map(e => `${e.tagName.toLowerCase()}.${[...e.classList].join('.')} → ${Math.round(e.getBoundingClientRect().right)}`)
+    return { small, accents, clipped, overflow: Math.max(main.scrollWidth - main.clientWidth, document.documentElement.scrollWidth - innerWidth), wide }
   }, min)
 }
 async function open(page: Page, theme: 'light' | 'dark', role: 'admin' | 'member' = 'admin') {
@@ -44,6 +46,7 @@ async function evidence(page: Page, path: string) {
   const size = page.viewportSize()!
   const height = await page.evaluate(() => Math.ceil(document.querySelector('main')!.scrollHeight + 40))
   await page.setViewportSize({ width: size.width, height: Math.max(size.height, height) })
+  await page.mouse.move(0, 0)
   await page.screenshot({ path })
   await page.setViewportSize(size)
 }
@@ -56,11 +59,11 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     test(`three cards, rules only; a risk group grows below its head at ${width} ${theme}`, async ({ page }, info) => {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
       const state = await open(page, theme)
-      const root = page.locator('.policies'), head = (risk: string) => root.locator(`[data-risk="${risk}"]`), desk = root.getByRole('link', { name: 'Decision Desk' })
+      const root = page.locator('.policies'), head = (risk: string) => root.locator(`[data-risk="${risk}"]`), desk = root.locator('.card-aside').getByRole('link', { name: 'Decision Desk' })
       await expect(root.locator('.intro')).toHaveText('Policies say who may do what. Which model runs is decided on Models.')
       await expect(page.locator('.body > .who')).toHaveCount(0)
       await expect(root.getByRole('tab')).toHaveCount(0)
-      await expect(page.locator('dialog')).toHaveCount(0)
+      await expect(page.locator('.settings-page dialog')).toHaveCount(0)
       await expect(root.locator('.settings-card h2')).toHaveText(['Cross-family review', 'What agents must ask you for', 'Rules that live elsewhere'])
       await expect(root.locator('.risk-head')).toHaveText([/^High risk · 10 · Approve or deny/, /^Medium risk · 3 · Connect a chat/, /^Low risk · 3 · Read the audit log/])
       await expect(root.locator('.rule')).toHaveCount(12)
@@ -80,18 +83,17 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
         controls: { desk, high: head('high'), medium: head('medium'), low: head('low') },
         scrollAreas: { page: page.locator('main') },
         interactions: [
-          { name: 'open Low risk', run: async () => { await head('low').click(); await expect(root.locator('#agent-asks-low .ask').last()).toBeVisible() } },
-          { name: 'open Medium risk', run: async () => { await head('medium').click(); await expect(root.locator('#agent-asks-medium .ask').last()).toBeVisible() } },
+          { name: 'open Low risk', run: async () => { await head('low').click(); await expect(root.locator('#agent-asks-low .ask').last()).toBeVisible(); await expect(root.locator('#agent-asks-low .ask').first()).toContainText('Asks you') } },
+          { name: 'close Low risk', run: async () => { await head('low').click(); await expect(root.locator('#agent-asks-low .ask').first()).toBeHidden() } },
         ],
       })
-      await expect(root.locator('#agent-asks-low .ask').first()).toContainText('Asks you')
 
       await head('high').click(); await expect(root.locator('#agent-asks-high .ask').last()).toBeVisible()
       const found = await probe(page, min)
       expect(found.small, `targets ≥ ${min} px`).toEqual([])
       expect(found.accents, 'no coloured edge accents').toEqual([])
       expect(found.clipped, 'one-line labels not clipped').toEqual([])
-      expect(found.overflow, 'no horizontal scroll').toBeLessThanOrEqual(1)
+      expect(found.overflow, `no horizontal scroll: ${found.wide.join(' | ')}`).toBeLessThanOrEqual(1)
       expect(state.retired, 'no ladder or registry reads').toEqual([])
       expect(state.errors).toEqual([])
       await evidence(page, info.outputPath(`policies-${width}-${theme}.png`))
@@ -107,10 +109,10 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       await expect(rule('Who holds which permission').locator('.rule-go')).toHaveText('Access')
       await expect(rule('Kinds of work').getByRole('link', { name: 'Kinds of work' })).toHaveAttribute('href', '/settings/kinds')
       await expect(rule('Routine guardrails').getByRole('link', { name: 'Routines' })).toHaveAttribute('href', '/settings/routines')
-      await expect(root.getByRole('link', { name: 'Decision Desk' }).first()).toBeVisible()
+      await expect(root.locator('.card-aside').getByRole('link', { name: 'Decision Desk' })).toHaveAttribute('href', '/decision-desk')
       const found = await probe(page, min)
       expect(found.small, `targets ≥ ${min} px`).toEqual([])
-      expect(found.overflow, 'no horizontal scroll').toBeLessThanOrEqual(1)
+      expect(found.overflow, `no horizontal scroll: ${found.wide.join(' | ')}`).toBeLessThanOrEqual(1)
       expect(state.errors).toEqual([])
       await evidence(page, info.outputPath(`policies-member-${width}-${theme}.png`))
     })

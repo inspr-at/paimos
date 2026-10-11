@@ -58,7 +58,8 @@ const rules = computed(() => ELSEWHERE_RULES.map(rule => ({ rule, to: ruleLink(r
 </template>
 
 <style scoped>
-.policies { display: grid; gap: 20px; min-width: 0; color: var(--ink); container: policies / inline-size; }
+/* One column that never outgrows the page: the folded previews are a single clipped line. */
+.policies { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; min-width: 0; color: var(--ink); container: policies / inline-size; }
 .intro { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 2px 4px 0; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .intro > svg { flex: none; margin-top: 3px; color: var(--ink-3); }
 /* Inline links keep the sentence's line height but a 24 px target (44 px on touch). */
