@@ -12,7 +12,10 @@ when their pick matches the workspace or personal Default.
 Order writes accept `rank: [pick, ...chain]`, `efforts: {line: nativeEffort}`,
 `end`, and the current profile `revision`. Existing `not` input remains
 supported and can be omitted. Omitted efforts/end preserve saved values;
-an empty efforts object restores automatic levels. A member can save a
+an empty efforts object restores automatic levels, and an empty `end` stores
+no ending (a person's first own order otherwise copies the workspace's). A
+personal order that stores `wait` owns its tail, so it drops the workspace's
+pinned steps; one that stores none keeps them. A member can save a
 workspace column with `for=me` and `If-Prefs-Person`; resetting removes the
 personal order. Workspace top locks return 423 for personal writes. Review
 orders must meet the strong/frontier floor at the highest native level.
@@ -20,7 +23,7 @@ Native efforts are validated across the registered harnesses of the line;
 legacy harness-derived line ids remain accepted. Stored effort maps are
 bounded to 32 KiB. The ranked board's `stored` order also returns the
 column's own `end` and `efforts`, so the page's Undo can write a reset order
-back whole.
+back whole, including an ending it never stored.
 
 Workspace administrators can set or lift a row exclusion with
 `PUT`/`DELETE /api/model-preferences/orders/{column}/first/never/{line}`.
