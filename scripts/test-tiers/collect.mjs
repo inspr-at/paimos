@@ -172,12 +172,10 @@ export function collectWeb({ fresh = false, browserOnly = false, cache = cacheEn
     if (listingKey(inputSnapshot(root, command), scope, identity) !== stamp) throw new Error('Web discovery inputs changed during collection; retry')
     return value
   }
-  if (!cache) return compute()
-  if (browserOnly) return reuse(browserMemo, stamp, () => {
-    collections.browser += 1
-    return cachedListing(stamp, compute, { fresh })
+  return reuse(browserOnly ? browserMemo : webMemo, `${stamp}:${cache ? 'cached' : 'native'}`, () => {
+    collections[browserOnly ? 'browser' : 'web'] += 1
+    return cachedListing(stamp, compute, { fresh, enabled: cache })
   }, { fresh })
-  return reuse(webMemo, stamp, () => { collections.web += 1; return cachedListing(stamp, compute, { fresh }) }, { fresh })
 }
 // Browser shards must not pay for Vitest or native Node registration. Full
 // collection remains the strict setup/classification authority for every kind.

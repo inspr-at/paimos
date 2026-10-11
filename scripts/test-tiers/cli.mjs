@@ -16,11 +16,22 @@ import { generateOpenAPI } from '../../api/generate.mjs'
 import { nightlyBrowserMap, gitTree, coverageSummary } from './browser-impact.mjs'
 import { browserBatches, browserCaseSeconds } from './web-batches.mjs'
 import { createGoRunner } from './go-runner.mjs'
+import { inputSnapshot, listingKey, cacheEnabled } from './listing-cache.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
-// The collectors own content-aware reuse, including across CLI processes.
-const target = (kind, options = {}) => kind === 'go' ? collectGo(options) : collectWeb(options)
+// Retain one collection per unchanged scope in a planner process, including
+// CI where persistent reuse is disabled. Content stamps reject edited inputs.
+const inventories = new Map()
+const target = (kind, options = {}) => {
+  const collect = () => kind === 'go' ? collectGo(options) : collectWeb(options)
+  if (options.cache === false || options.fresh) return kind === 'go' ? collectGo({ ...options, fresh: true }) : collectWeb({ ...options, fresh: true })
+  const scope = kind === 'go' ? 'go-source' : options.browserOnly ? 'web-browser' : 'web-all'
+  const stamp = listingKey(inputSnapshot(root, command), scope, cacheEnabled())
+  const previous = inventories.get(scope)
+  if (!previous || previous.stamp !== stamp) inventories.set(scope, { stamp, value: collect() })
+  return structuredClone(inventories.get(scope).value)
+}
 
 // Planner input is authoritative. Candidate uncertainty can widen it to full,
 // but candidate graph additions can never narrow the base planner's full gate.
