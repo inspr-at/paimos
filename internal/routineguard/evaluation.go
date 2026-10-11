@@ -75,8 +75,12 @@ func (b ActionBinding) valid() bool {
 	switch b.Kind {
 	case "work.create", "work.update", "knowledge.write":
 		return b.HeadSHA == ""
-	case "pr.open", "pipeline.request":
+	case "pr.open":
 		return reviewgate.ValidSHA(b.HeadSHA)
+	case "pipeline.request":
+		// Non-code catalogue results have an exact payload/result digest rather
+		// than a fabricated source commit. Code requests still carry their SHA.
+		return b.HeadSHA == "" || reviewgate.ValidSHA(b.HeadSHA)
 	}
 	return false
 }

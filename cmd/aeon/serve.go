@@ -396,10 +396,15 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	reviewMod := crossreview.New(pool, reviewPublisher)
 	reviewMod.ConfigureWebhook(cfg.ReviewWebhookSecret)
 	startWorker(func() { reviewMod.RunStatusReporter(workerCtx) })
-	deliveryMod := delivery.New(pool, reviewApp.Config, cfg.ReviewWebhookSecret, delivery.AppReader{App: reviewApp}, reviewMod.HandlePullChange)
+	deliveryMod := delivery.New(pool, reviewApp.Config, cfg.ReviewWebhookSecret, delivery.AppReader{App: reviewApp}, reviewMod.HandlePullChange).WithRoutineReviews(reviewMod)
+	routineActions := routineactions.New(pool, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, b routineactions.Binding, c routineguard.Context) (tenant.Principal, routineguard.Decision, string, error) {
+		return recurringWork.AuthorizeActionTx(ctx, tx, p, recurrences.ActionBinding(b), c)
+	}).WithPullRequests(crossreview.AppRoutinePullRequests{App: reviewApp}).WithPipeline(deliveryMod).WithObservation(func(ctx context.Context, tx pgx.Tx, p tenant.Principal, b routineactions.Binding) (tenant.Principal, error) {
+		return recurringWork.AuthorizeObservationTx(ctx, tx, p, recurrences.ActionBinding(b))
+	})
 	// Exact runtime/gate/CI readers remain unavailable until OPS qualification.
 	// The executor is inert on default-off projects and never enables a setting.
-	routineExecutor := routineexec.New(pool, routineexec.Options{Reviews: reviewMod})
+	routineExecutor := routineexec.New(pool, routineexec.Options{Reviews: reviewMod, Actions: routineActions})
 	runMod := agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun, reviewMod.PrepareForRun)
 	if err := routineExecutor.Bind(runMod); err != nil {
 		return err
@@ -476,9 +481,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			releases.New(pool),
 			statusAuto,
 			recurringWork,
-			routineactions.New(pool, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, b routineactions.Binding, c routineguard.Context) (tenant.Principal, routineguard.Decision, string, error) {
-				return recurringWork.AuthorizeActionTx(ctx, tx, p, recurrences.ActionBinding(b), c)
-			}),
+			routineActions,
 			intake.NewDelegated(pool, tokenMod.Keys, aithemaHost),
 			plugins.NewWithRegistry(pool, pluginRegistry),
 			// EvidenceLaunchChecks admits only from the recorded candidate artifact

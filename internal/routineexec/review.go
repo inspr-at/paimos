@@ -367,6 +367,24 @@ func (e *Executor) advance(ctx context.Context, tx pgx.Tx, tid string, r intent,
 			return e.park(ctx, tx, owner, r, "failed_fix_artifact_unverified")
 		} else {
 			if c.Range == nil {
+				if role == "build" {
+					ready, err := nonCodeLandingTx(ctx, tx, r.id)
+					if err != nil {
+						return nil, err
+					}
+					if ready {
+						if err := authorProof(ctx, tx, c.AgentRunID); err != nil {
+							return nil, err
+						}
+						if err := e.continuationFacts(ctx, tx, owner, r, c.AgentRunID); err != nil {
+							return nil, err
+						}
+						if _, err := tx.Exec(ctx, `UPDATE routine_runs SET state='awaiting_pipeline',updated_at=clock_timestamp() WHERE id=$1`, r.id); err != nil {
+							return nil, err
+						}
+						return map[string]any{"state": "awaiting_pipeline", "non_code": true}, nil
+					}
+				}
 				return nil, workorders.Fail(409, "completed_artifact_unavailable")
 			}
 			if err := authorProof(ctx, tx, c.AgentRunID); err != nil {

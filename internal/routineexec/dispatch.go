@@ -26,6 +26,7 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/recurrences"
+	"github.com/inspr-at/paimos/internal/routineactions"
 	"github.com/inspr-at/paimos/internal/routinebudget"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -41,6 +42,7 @@ const recoveryInterval = 30 * time.Second
 // runtime, qualified gate ages or CI readings means WAIT. No HTTP setting can
 // replace a collaborator or turn an advisory verdict into authority.
 type Options struct {
+	Actions       *routineactions.Broker
 	Reviews       *crossreview.Module
 	LeadRuntime   harness.LeadRuntimeChecks
 	Runtime       modelregistry.ExecutionRuntimeReader
@@ -270,6 +272,14 @@ func (e *Executor) RunTenant(ctx context.Context, tenantID string) (Pass, error)
 	out.Dispatched += continued.Dispatched
 	out.Waiting += continued.Waiting
 	out.Partial = out.Partial || continued.Partial
+	if err != nil {
+		failures = append(failures, err)
+	}
+	landed, err := e.landTenant(ctx, tenantID)
+	out.Scanned += landed.Scanned
+	out.Dispatched += landed.Dispatched
+	out.Waiting += landed.Waiting
+	out.Partial = out.Partial || landed.Partial
 	if err != nil {
 		failures = append(failures, err)
 	}
