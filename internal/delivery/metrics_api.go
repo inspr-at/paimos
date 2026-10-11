@@ -209,9 +209,11 @@ func githubCoverageEnd(s metricSourceRow, in metricInput, now time.Time) time.Ti
 
 func (m *Module) sourceView(tenantID string, s metricSourceRow, covered *time.Time) *MetricSource {
 	out := &MetricSource{Repository: s.Repository, CIWorkflow: s.CIWorkflow, NightlyWorkflow: s.NightlyWorkflow, AppConnected: m.appConnected(tenantID, s.Repository), Backfill: "not_started", BackfillSince: s.Since, BackfillDoneAt: s.DoneAt, CoveredSince: covered, LastReadError: s.LastReadError, LastEventAt: s.LastEventAt, RetryAt: s.RetryAt}
-	if s.DoneAt != nil {
+	if s.Cursor != nil && s.Cursor.Phase != "done" {
+		out.Backfill = "running"
+	} else if s.DoneAt != nil {
 		out.Backfill = "done"
-	} else if s.Cursor != nil {
+	} else if s.Pending || s.Cursor != nil {
 		out.Backfill = "running"
 	}
 	return out

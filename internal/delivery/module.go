@@ -15,18 +15,20 @@ import (
 )
 
 type Module struct {
-	pool                *pgxpool.Pool
-	config              crossreview.AppConfig
-	secret              []byte
-	github              GitHub
-	fanout              func(context.Context, []byte) error
-	now                 func() time.Time
-	queueAdmission      QueueAdmission
-	routineArtifacts    RoutineArtifactReader
-	routineReviews      *crossreview.Module
-	flowSlots           chan struct{}
-	metricsWake         chan struct{}
-	metricsTenantCursor string
+	pool                 *pgxpool.Pool
+	config               crossreview.AppConfig
+	secret               []byte
+	github               GitHub
+	fanout               func(context.Context, []byte) error
+	now                  func() time.Time
+	queueAdmission       QueueAdmission
+	routineArtifacts     RoutineArtifactReader
+	routineReviews       *crossreview.Module
+	flowSlots            chan struct{}
+	metricsWake          chan struct{}
+	metricsTenantCursor  string
+	metricsProjectCursor string
+	metricsProjectTenant string
 	// flowStreamNow is the live stream's authorization clock. Nil uses the
 	// wall clock, so a frozen business clock cannot expire every heartbeat.
 	flowStreamNow   func() time.Time

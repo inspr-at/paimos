@@ -136,6 +136,10 @@ func (m *Module) checkMetricSource(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) metricReadFailed(ctx context.Context, p tenant.Principal, project string, source *metricSourceRow, failure error) error {
+	// Read cancellation must not lose the diagnostic or leave a durable job
+	// hot-looping. Keep identity/connection context, but bound this final write.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	readError := metricError(failure, m.now())
 	raw, err := json.Marshal(readError)
 	if err != nil {
@@ -217,7 +221,12 @@ func (m *Module) sweepMetrics(ctx context.Context) {
 		return
 	}
 	for _, tid := range ids {
+		previousTenant := m.metricsTenantCursor
 		m.metricsTenantCursor = tid
+		projectAfter := ""
+		if m.metricsProjectTenant == tid {
+			projectAfter = m.metricsProjectCursor
+		}
 		service := db.AllProjects(op, "durable delivery history jobs")
 		type job struct {
 			project, actor, key string
@@ -228,7 +237,7 @@ func (m *Module) sweepMetrics(ctx context.Context) {
 			rows, err := tx.Query(op, `SELECT s.project_id::text,s.backfill_actor_id::text,coalesce(s.backfill_key_id::text,''),coalesce(s.backfill_days,30)
     FROM delivery_metric_sources s JOIN nodes n ON n.id=s.project_id
     WHERE s.backfill_pending AND s.backfill_actor_id IS NOT NULL AND n.deleted_at IS NULL
-    AND (s.backfill_retry_at IS NULL OR s.backfill_retry_at<=$1) ORDER BY s.updated_at,s.project_id LIMIT 16`, m.now())
+    AND (s.backfill_retry_at IS NULL OR s.backfill_retry_at<=$1) AND s.project_id::text>$2 ORDER BY s.project_id::text LIMIT 16`, m.now(), projectAfter)
 			if err != nil {
 				return err
 			}
@@ -244,6 +253,12 @@ func (m *Module) sweepMetrics(ctx context.Context) {
 		})
 		if err != nil {
 			continue
+		}
+		if len(jobs) == 16 {
+			m.metricsTenantCursor = previousTenant
+			m.metricsProjectTenant, m.metricsProjectCursor = tid, jobs[len(jobs)-1].project
+		} else {
+			m.metricsProjectTenant, m.metricsProjectCursor = "", ""
 		}
 		for _, j := range jobs {
 			// Only metadata IDs are stored. Reconstruct live key authority, never a
@@ -271,6 +286,9 @@ func (m *Module) sweepMetrics(ctx context.Context) {
 			if err != nil && op.Err() == nil {
 				slog.WarnContext(op, "delivery history step incomplete", "project_id", j.project)
 			}
+		}
+		if len(jobs) == 16 {
+			return
 		}
 	}
 }

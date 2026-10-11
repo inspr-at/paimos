@@ -45,7 +45,7 @@ func newMetricsFixture(t *testing.T) (*fixture, *metricsFake) {
 	f.m.github = g
 	var source MetricSource
 	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery/metrics/source", map[string]any{"repository": f.m.config.Repository}, 200, &source)
-	if !source.AppConnected || source.Backfill != "not_started" || source.CIWorkflow != defaultCIWorkflow {
+	if !source.AppConnected || source.Backfill != "running" || source.CIWorkflow != defaultCIWorkflow {
 		t.Fatalf("source: %+v", source)
 	}
 	return f, g

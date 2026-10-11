@@ -214,17 +214,18 @@ type metricSourceRow struct {
 	Revision                                int64
 	Since, DoneAt                           *time.Time
 	LastReadError                           *MetricReadError
+	Pending                                 bool
 	LastEventAt, RetryAt                    *time.Time
 }
 
 func loadMetricSourceTx(ctx context.Context, tx pgx.Tx, project string, lock bool) (*metricSourceRow, error) {
 	var s metricSourceRow
 	var raw, readError []byte
-	query := `SELECT project_id::text,repository,ci_workflow,nightly_workflow,backfill_cursor,backfill_revision,backfill_since,backfill_done_at,last_read_error,last_event_at,backfill_retry_at FROM delivery_metric_sources WHERE project_id=$1`
+	query := `SELECT project_id::text,repository,ci_workflow,nightly_workflow,backfill_cursor,backfill_revision,backfill_since,backfill_done_at,last_read_error,last_event_at,backfill_retry_at,coalesce(backfill_pending,false) FROM delivery_metric_sources WHERE project_id=$1`
 	if lock {
 		query += ` FOR NO KEY UPDATE`
 	}
-	err := tx.QueryRow(ctx, query, project).Scan(&s.Project, &s.Repository, &s.CIWorkflow, &s.NightlyWorkflow, &raw, &s.Revision, &s.Since, &s.DoneAt, &readError, &s.LastEventAt, &s.RetryAt)
+	err := tx.QueryRow(ctx, query, project).Scan(&s.Project, &s.Repository, &s.CIWorkflow, &s.NightlyWorkflow, &raw, &s.Revision, &s.Since, &s.DoneAt, &readError, &s.LastEventAt, &s.RetryAt, &s.Pending)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
