@@ -35,6 +35,8 @@ historical spend and session identities are unchanged.
 
 Work vocabulary (AEON-655) is managed in Workspace settings, independently of appearance. A leaf always uses the leaf name (default Ticket); parents use their project-relative level (Epic, Story, then Level N). Only live work children make a parent; a project resets depth. Naming and the parent status explanation use the existing `work-parent-status` flag, whose production activation remains owned by AEON-429. Create a work item; nesting decides its name. Lead status scripts must write leaves only.
 
+New workspaces start with a saved vocabulary (AEON-1142, migration 1332): Epic (layers icon) and Ticket (ticket icon) as the levels, Task (task icon) as the leaf. It is revision 1, written when the workspace is created. There is no backfill: a workspace that never saved a vocabulary keeps the fallback names above. The leaf name covers every item without children at any depth, so a childless item under an Epic reads Task and Ticket shows on level-2 items that have children. Each level picks one of 100 icons in a searchable grid (name, label or search word; arrows, Enter, Esc). The list is `internal/nodes/work_icons.json`: Go embeds it as the allow-list, the web imports it, and `node scripts/work-icons.mjs --write` writes its names into the `WorkLevel.icon` API enum. The 36 PAIMOS drawings stay as they were; 64 icons use Lucide path data (ISC, see NOTICE) scaled onto the 16 grid at stroke 1.8, some simplified for 16 px. `docs/design/icons-contact-sheet.html` shows them all.
+
 | Surface | Before migration | After work-kind migration |
 | --- | --- | --- |
 | REST `kind_id` | Configured Epic/Ticket/Task UUID | Canonical Work UUID; retired UUIDs are rejected, never guessed |

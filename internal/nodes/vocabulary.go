@@ -33,8 +33,6 @@ type workVocabulary struct {
 	Lead     *leadNames  `json:"lead,omitempty"`
 }
 
-var workIcons = map[string]bool{"": true, "ticket": true, "epic": true, "task": true, "layers": true, "tree": true, "folder": true, "check": true, "box": true}
-
 func validName(name string, max int) bool {
 	if !utf8.ValidString(name) || utf8.RuneCountInString(name) > max || strings.TrimSpace(name) != name {
 		return false

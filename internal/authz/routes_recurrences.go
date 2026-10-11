@@ -17,6 +17,8 @@ func init() {
 		"GET /api/recurrences":                                     "nodes.read|recurrences.manage",
 		"GET /api/recurrences/{recurrenceId}":                      "nodes.read|recurrences.manage",
 		"GET /api/recurrences/{recurrenceId}/history":              "nodes.read|recurrences.manage",
+		"GET /api/recurrences/{recurrenceId}/runs":                 "nodes.read|recurrences.manage",
+		"GET /api/recurrences/{recurrenceId}/runs/{runId}":         "nodes.read|recurrences.manage",
 		"GET /api/recurrences/{recurrenceId}/preview":              "nodes.read|recurrences.manage",
 		"GET /api/recurrences/{recurrenceId}/releases":             "nodes.read|recurrences.manage",
 		"POST /api/recurrences":                                    "recurrences.manage",
