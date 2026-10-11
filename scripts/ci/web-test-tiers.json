@@ -344,11 +344,17 @@
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: without the right to manage accounts the Accounts tile names the problem and offers no Verify"
     ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1166 1440 dark: at the limit the detail follows Settings › Models and the line keeps every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1166 1440 light: at the limit the detail follows Settings › Models and the line keeps every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1166 390 dark: at the limit the detail follows Settings › Models and the line keeps every control put"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1166 390 light: at the limit the detail follows Settings › Models and the line keeps every control put"
+    ,
     "browser:tests/agents-dial-daily.spec.ts:phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list"
     ,
-    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › At the limit works from the keyboard: the arrow keys pick the other option and take focus with them"
-    ,
-    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › At the limit: follow the model ladder or wait, and nothing else"
+    "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › AEON-1166: at the limit the dial follows Settings › Models: one line and a link, no choice of its own"
     ,
     "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › Boost today is read-only for accounts the person may not change; the server refuses that write too"
     ,
@@ -6054,11 +6060,17 @@
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: without the right to manage accounts the Accounts tile names the problem and offers no Verify","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 1440 dark: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 1440 light: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 390 dark: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 390 light: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › At the limit works from the keyboard: the arrow keys pick the other option and take focus with them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › At the limit: follow the model ladder or wait, and nothing else","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › AEON-1166: at the limit the dial follows Settings › Models: one line and a link, no choice of its own","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › Boost today is read-only for accounts the person may not change; the server refuses that write too","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15774,7 +15786,7 @@
     ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > never reports the limit for a stale, missing or private reading, although the server also refuses starts then","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > words what happens at the limit without inventing a ladder","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial may say about a daily reading > words what happens at the limit without inventing an order: Settings › Models decides","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agents-daily-limits.unit.test.ts","name":"what the dial remembers > keeps only known keys with the right type","tier":"ESSENTIAL"}
     ,

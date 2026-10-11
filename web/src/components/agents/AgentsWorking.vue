@@ -4,7 +4,8 @@
 // row as high as the other folded cards; open it is master and detail: the harnesses on
 // the left, the selected harness's usage on the right, and one info area under the head
 // that "● 11 running (1 waiting) ▾" opens. Low-priority facts live in hover and focus text;
-// only a state that needs attention (over pace, at today's limit) keeps a flag.
+// only a state that needs attention (over pace, at today's limit) keeps a flag. At the limit
+// new work follows Settings › Models (AEON-1166); the dial offers no choice of its own.
 import { computed, nextTick, reactive, ref, useId, watch } from 'vue'
 import { accountRoomCopy, accountRoomWords, limitMode, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepLimit, stepTotal, waitingCopy, workingAccountRoom, workingRows, type HarnessLimit, type LimitMode } from '../../lib/agentsWorking'
 import { can } from '../../lib/authz'

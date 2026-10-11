@@ -2630,11 +2630,13 @@
     ,
     {"kind":"go","package":"internal/agentplan","name":"TestCanStart","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentplan","name":"TestDailyAtLimitIsIgnoredAndReportedAsFollowsModels","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentplan","name":"TestDailyHarnessSummaryAndUnknownUsage","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentplan","name":"TestDailySettingsValidationLocalDayAndLimitMath","tier":"ESSENTIAL"}
     ,
-    {"kind":"go","package":"internal/agentplan","name":"TestDailyStartDecisionsFailClosedAndRespectLadderOrWait","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/agentplan","name":"TestDailyStartDecisionsFailClosedAndFollowModels","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentplan","name":"TestDecodePlanAndLegacyMapping","tier":"GATED-FULL"}
     ,
@@ -7415,6 +7417,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsWriteRechecksRevocation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMaximumRoutePriorityCanBeStored","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestMaximumRoutePriorityMigratesToModelsOrder","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestMinimalAutoAcceptOnlyUsedSuccessors","tier":"ESSENTIAL"}
     ,
