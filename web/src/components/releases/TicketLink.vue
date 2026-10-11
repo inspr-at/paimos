@@ -6,6 +6,7 @@ import { brand } from '../../lib/brand'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
 import { normalKey, showingTicketKeys, ticketRef, wantTicketKey } from '../../lib/ticketLinks'
 import { useProjects } from '../../stores/projects'
+import { ticketPath } from '../../lib/work'
 
 // One ticket key in release notes: a link to the ticket when this workspace has
 // it, plain text otherwise (earlier trackers, other products), never a dead link.
@@ -23,7 +24,7 @@ watchEffect(() => { if (ticketRef(props.ticketKey) === undefined) wantTicketKey(
 const ticket = computed(() => ticketRef(props.ticketKey))
 const href = computed(() => {
   const project = ticket.value ? projects.byId(ticket.value.projectId) : undefined
-  return ticket.value && project ? `/p/${encodeURIComponent(project.routeKey)}/${encodeURIComponent(ticket.value.key)}` : ''
+  return ticket.value && project ? ticketPath(project.routeKey, ticket.value.key) : ''
 })
 const open = computed(() => !!peek && peek.openKey.value === normalKey(props.ticketKey))
 const missing = computed(() => ticket.value === null ? `${props.ticketKey} is not a ticket in this ${brand.value.short_name} workspace` : undefined)

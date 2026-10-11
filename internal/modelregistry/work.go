@@ -10,6 +10,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -18,6 +19,8 @@ type WorkQuery struct {
 	// routineEval applies the mandatory family floor to board routing
 	// only for the internal routine resolver; ordinary routes retain their API.
 	routineEval      bool
+	Escalation       bool
+	ReviewPolicies   []reviewgate.FamilyPolicy
 	TicketID         string
 	Role             string
 	TicketRole       string
@@ -39,10 +42,8 @@ type WorkQuery struct {
 	// Column and OffHarnesses are supplied by shadow round routing only.
 	Column       string
 	OffHarnesses []string
-	// ExplicitBoard marks a caller that asked for board placement with
-	// mode=placement. A closed (revision-0) board answers it; dispatch,
-	// review and escalation callers leave it false and keep the legacy ladder
-	// until the board is adopted.
+	// ExplicitBoard is retained for placement callers during the S2 transition;
+	// initialized boards can be previewed before saved ladders migrate in S2.
 	WorkspaceOnly bool
 	ExplicitBoard bool
 }
@@ -151,13 +152,21 @@ func expandPreference(cell modelprefs.Cell, profiles []Profile) []Profile {
 	return out
 }
 
-// ResolveWork preserves resolveRole byte-for-byte with an empty matrix and an
-// any requirement. Placement chooses a cell; it never changes the role ladder.
+// ResolveWork routes every role through Models and the same live account policy.
 func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time) (WorkResolution, error) {
 	return resolveDailyWork(ctx, tx, p, q, now)
 }
 
 func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog) (WorkResolution, error) {
+	if catalog != nil {
+		// Editor previews retain their smaller, honest truncation boundary.
+		if _, err := catalog.profiles(ctx, tx); err != nil {
+			return WorkResolution{}, err
+		}
+		if q.PersonID == nil {
+			q.WorkspaceOnly = true
+		}
+	}
 	if q.TicketID != "" {
 		var fields []byte
 		var project *string
@@ -184,7 +193,7 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		}
 	}
 	q.Role = strings.TrimSpace(q.Role)
-	if q.PersonID == nil {
+	if q.PersonID == nil && !q.WorkspaceOnly {
 		q.PersonID = modelprefs.PrefsPerson(ctx, tx, p)
 	}
 	if q.Role != "review-gate" && q.Role != "review-gate-security" {
@@ -346,6 +355,7 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	}
 	return out, nil
 }
+
 func preferenceStep(ctx context.Context, tx pgx.Tx, profile Profile, role string) (ladderStep, error) {
 	step := ladderStep{Profile: profile, Route: Route{Role: role, ProfileID: profile.ID, State: "available"}}
 	err := tx.QueryRow(ctx, `SELECT coalesce(r.state,'available'),coalesce(r.reason,''),r.valid_until,

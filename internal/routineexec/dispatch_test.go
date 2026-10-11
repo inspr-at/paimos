@@ -312,6 +312,11 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 	f.exec(`UPDATE recurrence_definitions SET execute_consent=false WHERE recurrence_id=$1`, f.routine.ID)
 	wait("execution_consent_required", "", 0)
 	f.exec(`UPDATE recurrence_definitions SET execute_consent=true WHERE recurrence_id=$1`, f.routine.ID)
+	// Revoke this owner's binding while retaining a different active workspace
+	// owner, as required by the production last-owner guard.
+	var otherOwner string
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Other owner') RETURNING id::text`, f.owner.TenantID).Scan(&otherOwner))
+	dbtest.BindRole(t, f.d, f.owner.TenantID, otherOwner, "owner")
 	f.exec(`DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.owner.TenantID, f.owner.ID)
 	wait("owner_unavailable", "", 0)
 	dbtest.BindRole(t, f.d, f.owner.TenantID, f.owner.ID, "owner")
@@ -428,7 +433,7 @@ func TestRoutineDispatchRaceRecoveryAndAdmission(t *testing.T) {
 func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 	d := setupDispatch(t)
 	f := d.fixture
-	f.exec(`UPDATE agent_accounts SET quota_pool_fingerprint=repeat('e',64) WHERE id=$1`, f.account)
+	f.exec(`UPDATE agent_accounts SET quota_fingerprint=repeat('e',64),quota_pool_fingerprint=repeat('e',64) WHERE id=$1`, f.account)
 	f.exec(`INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model) VALUES($1,$2,clock_timestamp()-interval '1 hour',clock_timestamp()+interval '1 day','requests',1,0,'unrestricted')`, f.owner.TenantID, f.account)
 	var out agentruns.RoutineQueueResult
 	must(t, f.tx(func(tx pgx.Tx) error {
@@ -456,7 +461,7 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 	f.exec(`INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) SELECT tenant_id,principal_id,scope,$2::uuid::text,$2,schedule FROM account_capacity_schedules WHERE account_id=$1`, f.account, spare)
 	// A sibling sharing the quota still consumes the one paired slot. Exclude
 	// only this run, never all work on the selected account or quota pool.
-	f.exec(`UPDATE agent_accounts SET quota_pool_fingerprint=repeat('e',64) WHERE id=$1`, spare)
+	f.exec(`UPDATE agent_accounts SET quota_fingerprint=repeat('e',64),quota_pool_fingerprint=repeat('e',64) WHERE id=$1`, spare)
 	var sibling string
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,account_id,status) SELECT tenant_id,work_order_id,agent_principal_id,model_profile_id,$2,'queued' FROM agent_runs WHERE id=$1 RETURNING id::text`, d.agentRun, spare).Scan(&sibling))
 	err := f.tx(func(tx pgx.Tx) error {
@@ -529,8 +534,9 @@ func TestRoutineDispatchReservedAccountAdmission(t *testing.T) {
 	}
 }
 
-// Risk: one routine's WAIT must neither stall ordinary lead pickup with the
-// project flag off nor consume the turn of a later consented routine.
+// Risks: one routine's WAIT must neither stall ordinary lead pickup with the
+// project flag off nor consume the turn of a later consented routine. Scheduler
+// dispatch has no HTTP principal; queue admission must use the checked lead.
 func TestRoutineQueueWaitsDoNotBlockLaterWork(t *testing.T) {
 	d := setupDispatch(t)
 	f := d.fixture
@@ -598,6 +604,9 @@ func TestRoutineQueueWaitsDoNotBlockLaterWork(t *testing.T) {
 	var beforeEvents int
 	must(t, f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, f.owner.TenantID).Scan(&beforeEvents))
 	var waiting agentruns.RoutineQueueResult
+	if _, ok := tenant.PrincipalFrom(t.Context()); ok {
+		t.Fatal("scheduler regression requires a context without an HTTP principal")
+	}
 	must(t, f.tx(func(tx pgx.Tx) error {
 		var err error
 		waiting, err = d.e.DispatchTx(t.Context(), tx, f.owner.TenantID, later.Run.ID, d.session, 1)

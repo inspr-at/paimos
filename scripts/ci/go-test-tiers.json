@@ -926,6 +926,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResetUseAuditCountConfirmationAndVendorUndo","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestResidencyEvidenceBlockedStatementReadsFreshActivity","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResidencyEvidenceDefaultsAndExpires","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestResidencyEvidenceFenceUsesStoredEvidenceAndInjectedClock","tier":"GATED-FULL"}
@@ -5458,6 +5460,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestResetMigrationExpansionRollbackOldWriterAndRLS","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestRetiredModelAutoUpdateMigrationIsTenantScopedAndIdempotent","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestRoadmapPublicationMigrationPreservesCustomSchema","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestRowVersionInstallationBoundsLockWaitAndRetries","tier":"GATED-FULL"}
@@ -7086,6 +7090,10 @@
     ,
     {"kind":"go","package":"internal/modelprefs","name":"TestCellPrecedenceAndLockBounds","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelprefs","name":"TestModelsV2ExceptionDefaultContinuation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelprefs","name":"TestModelsV2RowOwnershipAndSituations","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelprefs","name":"TestPlacementDecodesJSONTokens","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelprefs","name":"TestRankedBoardCapabilityIsNotALockAndNearestEffortTiesUp","tier":"ESSENTIAL"}
@@ -7304,6 +7312,16 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelWaitReasonsRespectCurrentAccountSharing","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2EscalationAdmissionWait","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NativeLevelsPerRoute","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RolesRoutesAndWait","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2RoundRoutingCompatibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2UnadoptedSavedLadder","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestNewHarnessProfileValidation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestNormalizeAuthorFamily","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -7357,6 +7375,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestProfileLine","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestProjectQualifiedResolvePreservesLegacyLadder","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestRefreshAutoUpdateUsesCanonicalModelRule","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRefreshBoundsProfileAdditionsAndRejectsDisabledDiscoveryResults","tier":"GATED-FULL"}
     ,
@@ -8321,6 +8341,10 @@
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineConsentRechecksOwnerBehindAccessFence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineDefinitionScopeAuthorityAndInertRoundTrip","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineExecutionPrincipalEligibilityParityAndPagination","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineExecutionPrincipalPickerDoesNotWaitForWriterFences","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineGuardrailsPersonRevisionScopeAndStoredDecisions","tier":"ESSENTIAL"}
     ,

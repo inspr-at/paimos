@@ -451,7 +451,9 @@ func RouteRoutineQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, run
 		return out, workorders.Fail(409, "queue_inputs_partial")
 	}
 	m := module{}
-	entries, err := m.queueEntriesFor(ctx, tx, *t.ProjectID, "", true)
+	// Scheduler calls have no HTTP principal. Project the queue with the lead
+	// whose current authority was checked by the executor inside this write.
+	entries, err := m.queueEntriesFor(tenant.WithPrincipal(ctx, p), tx, *t.ProjectID, "", true)
 	if err != nil {
 		return out, err
 	}
