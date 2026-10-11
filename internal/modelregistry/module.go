@@ -294,6 +294,13 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 
 		query := WorkQuery{Role: q.Role, AuthorFamily: q.AuthorFamily, Harness: q.Harness, ProjectID: project, PersonID: modelprefs.PrefsPerson(r.Context(), tx, current)}
 		resolved, err := resolveDailyWith(r.Context(), tx, current, query, now, func(query WorkQuery) (WorkResolution, error) {
+			boardQuery := query
+			boardQuery.Area, boardQuery.Situation = "other", "first"
+			if board, err := resolveBoardWork(r.Context(), tx, current, boardQuery, now, nil); err != nil {
+				return WorkResolution{}, err
+			} else if board != nil {
+				return *board, nil
+			}
 			resolution, err := resolveRole(r.Context(), tx, resolveQuery{Role: query.Role, AuthorFamily: query.AuthorFamily, Harness: query.Harness, ProjectID: project, OffHarnesses: query.OffHarnesses}, now)
 			if err != nil {
 				return WorkResolution{}, err
