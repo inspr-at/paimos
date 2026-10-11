@@ -2276,7 +2276,8 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 			}
 			_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
 				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: operation, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
-			if (entry.managedPolicy || control.Kind == "tier" || queued) && operation != "force_stop" {
+			routineStop := entry.record.RoutineWorkspace != nil && control.Kind == "stop"
+			if (entry.managedPolicy || control.Kind == "tier" || queued || routineStop) && operation != "force_stop" {
 				switch {
 				case errors.Is(err, ErrControlExpired):
 					outcome, reason, err = "rejected", "authorization_expired", nil

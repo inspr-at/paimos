@@ -54,8 +54,23 @@ func QueueRoutineStopTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, 
 		return errors.New("routine stop receipt invalid")
 	}
 	if result.ControlID != "" {
-		return nil
-	} // The same control is reconciled, never reissued.
+		// Only a completed pre-delivery rejection proves this control never
+		// touched the child. Pending, claimed, missing or uncertain receipts
+		// retain the original intent; they cannot authorize another signal.
+		var undelivered bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM harness_controls
+   WHERE id=aeon_uuid_or_null($1) AND session_id=$2 AND kind='stop'
+    AND state='completed' AND outcome='rejected'
+    AND reason IN ('authorization_expired','authorization_revoked'))`, result.ControlID, session).Scan(&undelivered); err != nil {
+			return err
+		}
+		if !undelivered {
+			return nil
+		}
+		// Replacement and the outbox receipt commit together, after all current
+		// ownership/heartbeat/generation checks below. Repeated recovery sees
+		// that fresh control and cannot enqueue it again.
+	}
 	if ownership == nil || ownership.ProcessID == "" || ownership.RootPID < 1 || ownership.GroupID < 1 || ownership.StartedAt.IsZero() || heartbeat == nil || heartbeat.After(now) || now.Sub(*heartbeat) > time.Minute {
 		return nil
 	}
