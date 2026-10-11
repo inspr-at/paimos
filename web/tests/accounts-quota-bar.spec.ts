@@ -34,6 +34,7 @@ async function setup(page: Page, options: CapacityOptions = {}) {
   data.accounts = capacity.accounts as unknown as typeof data.accounts
   await mockAgents(page, data, { capacity })
   await page.route('**/api/agents/plan', route => route.request().method() === 'GET' ? route.fulfill({ json: PLAN }) : route.fallback())
+  await page.route('**/api/settings/quota-warnings', route => route.request().method() === 'GET' ? route.fulfill({ json: { early_percent: 10, urgent_percent: 3 } }) : route.fallback())
   await page.route('**/api/me/permissions*', route => {
     const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
     answer.workspace.permissions.push('account.read', 'account.manage', 'model_prefs.manage')
@@ -120,14 +121,16 @@ for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as cons
       await add.scrollIntoViewIfNeeded()
       const before = [await top(add), await top(heading)]
       await add.click(); await expect(add).toHaveAttribute('aria-expanded', 'true')
-      expect([await top(add), await top(heading)], 'Add an account moved what is above it').toEqual(before)
+      // ±0.5 px, the house tolerance for controls that stay put (AEON-541).
+      expect(Math.abs(await top(add) - before[0]), 'Add an account moved').toBeLessThanOrEqual(.5)
+      expect(Math.abs(await top(heading) - before[1]), 'Add an account moved what is above it').toBeLessThanOrEqual(.5)
       await add.click()
       const row = listRow(page, ACCOUNTS.main)
       await row.scrollIntoViewIfNeeded()
       const rowTop = await top(row)
       await row.click()
       await expect(pane(page).locator('[data-limits]')).toBeVisible()
-      expect(await top(row), 'the account panel moved the page').toBe(rowTop)
+      expect(Math.abs(await top(row) - rowTop), 'the account panel moved the page').toBeLessThanOrEqual(.5)
       const unnamed = await page.evaluate(() => [...document.querySelectorAll('.settings-page button, .settings-page input, .settings-page select, .settings-page [role="switch"], section.pane button, section.pane input, section.pane [role="switch"]')]
         .filter(e => (e as HTMLElement).offsetParent !== null)
         .filter(e => !(e.getAttribute('aria-label') || e.getAttribute('aria-labelledby') || e.textContent?.trim() || e.closest('label') || (e as HTMLElement).title))
