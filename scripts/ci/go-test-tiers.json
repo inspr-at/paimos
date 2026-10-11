@@ -1874,6 +1874,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineContinuationRetainsOriginalCheckout","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineCooperativeStopExactIdentityAndUncertainReplay","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineProviderBudgetBeforeCallsAndSettlement","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineProviderBudgetRefusesNativeBeforeLaunch","tier":"ESSENTIAL"}
@@ -8851,6 +8853,8 @@
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchReservedAccountAdmission","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineQueueWaitsDoNotBlockLaterWork","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineRecoveryRevocationReceiptsAndPendingNotice","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineReviewFixLineageAndFiniteEscalation","tier":"ESSENTIAL"}
     ,

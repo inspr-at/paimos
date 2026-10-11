@@ -2231,6 +2231,9 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 		}
 		for index := 0; index < len(entry.pending); {
 			control := entry.pending[index]
+			if control.ExpectedGeneration != "" && control.ExpectedGeneration != entry.harness.ID {
+				return ErrGeneration
+			}
 			entry.mu.Lock()
 			queued := entry.queueInput && control.Kind == "steer"
 			busy := entry.harness.Activity == "busy"
@@ -2579,7 +2582,7 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		return Receipt{}, errors.New("control replay capacity reached")
 	}
 	if req.Operation != "force_stop" && fromRecoveryQueue && (entry.managedPolicy || req.ExpectedOwnership != nil) {
-		if !entry.managedPolicy && req.Operation != "tier" {
+		if !entry.managedPolicy && req.Operation != "tier" && !(req.Operation == "stop" && entry.record.RoutineWorkspace != nil) {
 			return Receipt{}, ErrUnsupported
 		}
 		if entry.budgetStopReason() != "" {
@@ -2656,6 +2659,14 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		graceful, ok := entry.process.(GracefulProcess)
 		if !ok {
 			return Receipt{}, ErrUnsupported
+		}
+		if entry.record.RoutineWorkspace != nil {
+			// Persist uncertainty before touching this exact child. A lost
+			// cooperative-stop reply cannot signal the process a second time.
+			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true}
+			if err := s.journal.Put(entry.record); err != nil {
+				return Receipt{}, err
+			}
 		}
 		entry.stopRequested = true
 		entry.mu.Unlock()

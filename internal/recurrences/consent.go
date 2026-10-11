@@ -75,6 +75,14 @@ func routinePolicyTx(ctx context.Context, tx pgx.Tx, tenantID string, item Recur
 			return out, err
 		}
 	}
+	current, err := currentOutputTx(ctx, tx, item)
+	if err != nil {
+		return out, err
+	}
+	if !current {
+		out.WaitReason = "output_project_changed"
+		return out, nil
+	}
 	q, err := modelregistry.LoadRoutineQualificationTx(ctx, tx, item.ProjectID, *settings.QualificationID)
 	if err != nil {
 		return out, err

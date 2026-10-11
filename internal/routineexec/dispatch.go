@@ -51,6 +51,7 @@ type Options struct {
 type Executor struct {
 	pool    *pgxpool.Pool
 	options Options
+	cursors recoveryCursors
 }
 
 func New(pool *pgxpool.Pool, options Options) *Executor {
@@ -86,10 +87,12 @@ func (e *Executor) BindHarness(module *harness.Module) {
 
 // Pass reports partial work explicitly; a capped pass is never a complete scan.
 type Pass struct {
-	Scanned    int
-	Dispatched int
-	Waiting    int
-	Partial    bool
+	Scanned         int
+	Dispatched      int
+	Waiting         int
+	Partial         bool
+	RecoveryScanned int
+	RecoveryWaiting int
 }
 
 // Run combines transactional S05 notifications with bounded polling recovery.
@@ -206,6 +209,8 @@ func (e *Executor) RunTenant(ctx context.Context, tenantID string) (Pass, error)
 	out := Pass{}
 	ctx, cancel := context.WithTimeout(db.AllProjects(ctx, "routine intent recovery"), 25*time.Second)
 	defer cancel()
+	recovered, recoveryErr := e.recoverTenant(ctx, tenantID)
+	out.RecoveryScanned, out.RecoveryWaiting, out.Partial = recovered.Scanned, recovered.Waiting, recovered.Partial
 	ids := []string{}
 	err := db.InTenant(ctx, e.pool, tenantID, func(tx pgx.Tx) error {
 		if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
@@ -231,13 +236,16 @@ func (e *Executor) RunTenant(ctx context.Context, tenantID string) (Pass, error)
 		return rows.Err()
 	})
 	if err != nil {
-		return out, err
+		return out, errors.Join(err, recoveryErr)
 	}
 	if len(ids) > batchSize {
 		out.Partial = true
 		ids = ids[:batchSize]
 	}
 	var failures []error
+	if recoveryErr != nil {
+		failures = append(failures, recoveryErr)
+	}
 	for _, id := range ids {
 		out.Scanned++
 		var result agentruns.RoutineQueueResult

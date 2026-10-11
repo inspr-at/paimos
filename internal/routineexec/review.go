@@ -200,6 +200,11 @@ func (e *Executor) ContinueTx(ctx context.Context, tx pgx.Tx, tid, id string) (b
 			switch {
 			case errors.As(err, &refusal) && refusal.Status == 409:
 				result = map[string]any{"wait_reason": refusal.Message}
+				if refusal.Message == "routine_review_proof_unavailable" || refusal.Message == "review_policy_changed" || refusal.Message == "review_head_changed" || refusal.Message == "fix_review_changed" {
+					// Re-evaluate the original evidence on the next pass. A stale
+					// gate never authorizes another actor or broader permissions.
+					result["reevaluation_required"] = true
+				}
 			case errors.As(err, &pairing) && (pairing.Status == 409 || pairing.Status == 410):
 				result = map[string]any{"wait_reason": pairing.Code}
 			case errors.As(err, &use) && use.Status == 409:

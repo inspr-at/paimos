@@ -318,3 +318,7 @@ UUIDs return `404`. Sender and owner permissions are checked again before
 scheduling. Intake records an event only; neither intake nor the scheduler
 launches an agent. Explicit `queue_each` retains the existing inert queue
 handoff to coordinator routing. No schema migration or new secret is required.
+
+Execution recovery checks the current owner under the access fence. In an enabled project, loss of owner authority or an output-parent move pauses the routine and revokes execution consent. A durable, scope-protected pause receipt remains pending until a current project or workspace administrator receives an inbox notice, including when notification acceptance fails. Restoring rights does not resume execution: an interactive person must reload, resume, and give execution consent again.
+
+Recovery reconciles original launch, action and usage receipts in bounded passes. Unconfirmed process exit or usage retains its budget hold, slot and worktree; it never authorizes a replacement process or assumes zero cost. Cooperative stop requests bind the exact managed session, daemon generation and observed process identity. After three unresolved reconciliation passes, one durable administrator notice requests intervention. Capacity waits do not count as failed work attempts. Stale review evidence is checked again against current policy and the original commit range, without broadening permissions or creating another actor. Automatic execution remains disabled until the separate project qualification and person enablement steps.

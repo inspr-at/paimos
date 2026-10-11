@@ -175,7 +175,11 @@
         "internal/harness/lead_runtime_test.go",
         "internal/agentd/lead_runtime.go",
         "internal/agentd/lead_runtime_test.go",
-        "internal/modelregistry/routine_reads.go"
+        "internal/modelregistry/routine_reads.go",
+        "internal/routineexec/recovery.go",
+        "internal/routineexec/recovery_test.go",
+        "internal/harness/routine_stop.go",
+        "internal/agentd/routine_stop_test.go"
       ]
     },
     {
@@ -195,7 +199,8 @@
         "internal/cli/hook_subagent.go",
         "internal/cli/hook_subagent_unix.go",
         "internal/cli/hook_subagent_other.go",
-        "internal/cli/hook_subagent_unix_test.go"
+        "internal/cli/hook_subagent_unix_test.go",
+        "internal/inbox/routine_notice.go"
       ]
     },
     {
@@ -290,7 +295,8 @@
         "internal/recurrences/reads_test.go",
         "internal/decisiondesk/routine_consent_test.go",
         "internal/recurrences/run_history.go",
-        "internal/recurrences/run_history_test.go"
+        "internal/recurrences/run_history_test.go",
+        "internal/recurrences/owner_state.go"
       ]
     },
     {
