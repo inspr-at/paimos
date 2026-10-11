@@ -112,7 +112,7 @@ func TestCapacityPreviewMatchesSavedInheritance(t *testing.T) {
 }
 
 // The limiting reset includes the 5-hour window; legacy Sprint end dates
-// remain visible after retirement.
+// survive unchanged round-trips and rejected deadline extensions.
 func TestCapacityLimitingResetPreservesExistingSprintEnd(t *testing.T) {
 	admin, runner, token, accounts := capacityWorld(t, "limiting", "claude")
 	mod := accountsMod()
@@ -130,11 +130,24 @@ func TestCapacityLimitingResetPreservesExistingSprintEnd(t *testing.T) {
 	sprint.Override = "sprint"
 	sprint.OverrideUntil = limit
 	seedExistingSchedule(t, admin, scheduleOverride{Scope: "pool", Pool: "claude", Schedule: &sprint})
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "pool", Pool: "claude", Schedule: &sprint}), 400, nil)
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "pool", Pool: "claude", Schedule: &sprint}), 204, nil)
+	// Only new or changed overrides are retired (AEON-1177 M1). Keep the
+	// rejection assertion on an actual change, without changing the fixture.
+	extended := sprint
+	later := limit.Add(time.Hour)
+	extended.OverrideUntil = &later
+	var retired struct{ Error, Code string }
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "pool", Pool: "claude", Schedule: &extended}), 400, &retired)
+	if retired.Code != "override_retired" || retired.Error == "" {
+		t.Fatalf("Sprint extension rejected for the wrong reason: %+v", retired)
+	}
 	var entries []scheduleOverride
 	callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/capacity/schedule", "", 200, &entries)
 	if len(entries) != 1 || entries[0].Schedule.OverrideUntil == nil || !entries[0].Schedule.OverrideUntil.Equal(*limit) {
 		t.Fatalf("Sprint end %+v differs from limiting reset %v", entries, limit)
+	}
+	if entries[0].Scope != "pool" || entries[0].Pool != "claude" || encoded(t, entries[0].Schedule) != encoded(t, sprint) {
+		t.Fatalf("Sprint replay or rejected extension changed the stored schedule: %+v", entries)
 	}
 }
 
