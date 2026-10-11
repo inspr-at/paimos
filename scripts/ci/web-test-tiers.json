@@ -17264,6 +17264,8 @@
     ,
     {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"stale and late answers > names exactly the fields the server changed since the shown revision","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/routines-editor.unit.test.ts","name":"today’s route > reads as the Models page does: registry name and harness label, never a model or profile id","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/row-actions.unit.test.ts","name":"customer row actions > offers open, a new quote, the number and archive","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/row-actions.unit.test.ts","name":"customer row actions > restores an archived customer before a new quote","tier":"GATED-FULL"}
