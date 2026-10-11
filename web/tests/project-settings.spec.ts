@@ -84,6 +84,8 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
   await stable.check(() => page.getByLabel('Group', { exact: true }).selectOption('g-product'))
   await expect(page.getByText('Group saved.', { exact: true })).toBeVisible()
   expect(world.assignments).toEqual([{ group_id: 'g-product', project_ids: ['p-pharos'] }])
+  await stable.check(() => page.locator('.toast').filter({ hasText: 'Group saved.' }).getByRole('button', { name: 'Undo', exact: true }).click())
+  await expect(page.getByLabel('Group', { exact: true })).toHaveValue('g-platform')
   stable.done()
   world.control.fail = true
   await name.fill('Draft awaiting a reload'); await name.press('Enter')
@@ -193,6 +195,19 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       await page.locator('[data-life="freeze"]').click(); await capture('freeze-popover'); await page.keyboard.press('Escape')
       await page.locator('[data-life="archive"]').click(); await capture('archive-popover'); await page.keyboard.press('Escape')
       await page.locator('[data-life="delete"]').click(); await capture('delete-sheet'); await page.keyboard.press('Escape'); await page.keyboard.press('Escape')
+      const freeze = page.locator('[data-life="freeze"]'), archive = page.locator('[data-life="archive"]'), del = page.locator('[data-life="delete"]')
+      const lifecycleStable = await controlStability(page, { freeze, archive, del })
+      await lifecycleStable.check(async () => {
+        await freeze.click(); await page.getByRole('dialog', { name: 'Freeze Pharos?' }).getByRole('button', { name: 'Freeze', exact: true }).click()
+        await expect(freeze).toHaveAccessibleName('Unfreeze')
+      })
+      await lifecycleStable.check(async () => { await freeze.click(); await expect(freeze).toHaveAccessibleName('Freeze…') })
+      await lifecycleStable.check(async () => {
+        await archive.click(); await page.getByRole('dialog', { name: 'Archive Pharos?' }).getByRole('button', { name: 'Archive', exact: true }).click()
+        await expect(archive).toHaveAccessibleName('Restore')
+      })
+      await lifecycleStable.check(async () => { await archive.click(); await expect(archive).toHaveAccessibleName('Archive…') })
+      lifecycleStable.done()
       if (width <= 1000) { await nav.click(); await capture('nav-open'); await page.keyboard.press('Escape') }
       await navigate(page, '/p/AEON/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await capture('general-aeon')
       await navigate(page, '/p/PRJ-26/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await capture('general-prj26')
