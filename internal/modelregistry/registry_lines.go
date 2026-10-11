@@ -265,8 +265,21 @@ func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	if err := transferRetiredLadderReferences(ctx, tx, before, after); err != nil {
 		return err
 	}
+	// A pause belongs to its harness route and never switches harness or family.
+	// A paused route without a matching successor rejects instead of dropping it.
 	for _, old := range before {
-		if err := copyModelPause(ctx, tx, old, nearestProfile(after, old.Effort, old.EffortLevel)); err != nil {
+		candidates := sameRouteProfiles(after, old)
+		if len(candidates) == 0 {
+			var paused bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_pauses WHERE harness=$1 AND model=$2)`, old.Harness, old.Model).Scan(&paused); err != nil {
+				return err
+			}
+			if paused {
+				return fail(409, "successor has no matching harness route")
+			}
+			continue
+		}
+		if err := copyModelPause(ctx, tx, old, nearestProfile(candidates, old.Effort, old.EffortLevel)); err != nil {
 			return err
 		}
 	}
