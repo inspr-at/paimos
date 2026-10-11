@@ -108,7 +108,7 @@ function endKeys(event: KeyboardEvent) {
       <AppIcon class="fb-chev" name="chevron-right" :size="13" />
       <span v-clip-tip="sentenceText" class="fb-s">If {{ sentence.pick }} can’t run<template v-for="(part, index) in sentence.steps" :key="index"><AppIcon class="ar" name="arrow" :size="12" /><span class="fb-p">{{ part }}</span></template></span>
     </button>
-    <div :id="`fb-${row.key}`" ref="fold" class="fold" :class="{ open: expanded }" role="region" :aria-label="`Fallback for ${name}`">
+    <div :id="`fb-${row.key}`" ref="fold" class="fold" :class="{ open: expanded }" :role="mounted ? 'region' : undefined" :aria-label="mounted ? `Fallback for ${name}` : undefined">
       <div class="fold-in">
         <div v-if="mounted" class="ch-wrap">
           <ol ref="list" class="ch" :data-chain="row.key" :aria-label="`Order for ${name}`" @pointermove="drift" @pointerup="drop" @pointercancel="cancel" @lostpointercapture="cancel">

@@ -53,10 +53,14 @@ export interface MockOptions {
   fail?: number
   german?: boolean
   fallback?: boolean
+  /** Models v2 orders (AEON-1161): short fallbacks with their own levels and endings, and a Never rule on UI design. */
+  v2?: boolean
 }
-interface Order { rank: string[] | null; not: string[]; effort: string | null }
+interface Order { rank: string[] | null; not: string[]; effort: string | null; efforts?: Record<string, string>; end?: 'wait' | 'default' }
 const TEMPLATE = ['openai:sol', 'anthropic:opus', 'anthropic:sonnet', 'anthropic:fable', 'openai:astra', 'xai:grok', 'openai:luna', 'cursor:composer', 'unknown:openrouter/qwen/qwen3-coder']
 const REASON_DOWN = 'the Claude account is tied to another profile (AEON-1000)'
+/** A reset far enough ahead to read as a date in any time zone. */
+export const CAP_UNTIL = '2099-10-12T04:00:00Z'
 
 export async function mockModels(page: Page, options: MockOptions = {}) {
   const profiles = registry(options.fresh ? [NEW_LINE] : [])
@@ -79,6 +83,19 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     layers.mine.set('concept', { rank: ['anthropic:fable', 'anthropic:opus'], not: [], effort: 'high' })
     layers.mine.set('docs', { rank: ['anthropic:sonnet', 'openai:sol'], not: [], effort: 'high' })
   }
+  if (options.v2) {
+    // The approved mock's workspace: Sol then Opus for all work; UI design locked on Opus, then Sonnet, then the
+    // default's fallback, never Grok; Concepts on Fable alone, then wait. A member owns only Default and Docs.
+    layers.default.set('other', { rank: ['openai:sol', 'anthropic:opus'], not: [], effort: 'xhigh', efforts: { 'openai:sol': 'xhigh', 'anthropic:opus': 'max' }, end: 'wait' })
+    layers.default.set('design', { rank: ['anthropic:opus', 'anthropic:sonnet'], not: [], effort: 'xhigh', efforts: { 'anthropic:opus': 'xhigh', 'anthropic:sonnet': 'xhigh' }, end: 'default' })
+    layers.default.set('concept', { rank: ['anthropic:fable'], not: [], effort: 'max', efforts: { 'anthropic:fable': 'max' }, end: 'wait' })
+    rules.push({ scope: 'workspace', project_id: null, column: 'design', line: 'xai:grok', lock: 'not', position: 0, why: 'Moved here from the earlier model board', set_by: simplePerson, set_at: '2026-10-02T09:00:00Z' })
+    layers.mine.clear()
+    if (options.member) {
+      layers.mine.set('other', { rank: ['openai:sol', 'anthropic:sonnet'], not: [], effort: 'high', efforts: { 'openai:sol': 'high', 'anthropic:sonnet': 'high' }, end: 'wait' })
+      layers.mine.set('docs', { rank: ['anthropic:sonnet'], not: [], effort: 'high', end: 'default' })
+    }
+  }
   const lockOf = (column: string) => rules.find(rule => rule.column === column && rule.lock === 'top')
   const own = (layer: 'mine' | 'default', column: string) => layer === 'mine' ? layers.mine.get(column) : layers.default.get(column)
   const inherited = (layer: 'mine' | 'default', column: string): Order => {
@@ -88,18 +105,25 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     if (layer === 'mine' && workspace?.rank) return workspace
     return layer === 'mine' ? own('mine', 'other') ?? layers.default.get('other')! : layers.default.get('other')!
   }
+  // A lock owns the whole order, so a member sees the workspace's (as the server does).
+  const orderFor = (layer: 'mine' | 'default', column: string) => lockOf(column) ? inherited('default', column) : inherited(layer, column)
   const first = (layer: 'mine' | 'default', column: string) => {
-    const lock = lockOf(column), order = inherited(layer, column), id = lock?.line ?? order.rank![0]!, item = line(id)!
-    const effort = nearest(item, own(layer, column)?.effort ?? (lock ? layers.default.get(column)?.effort : null) ?? order.effort ?? 'high')
-    return { id, item, effort, lock }
+    const lock = lockOf(column), order = orderFor(layer, column), id = lock?.line ?? order.rank![0]!, item = line(id)!
+    const effort = nearest(item, order.efforts?.[id] ?? own(lock ? 'default' : layer, column)?.effort ?? (lock ? layers.default.get(column)?.effort : null) ?? order.effort ?? 'high')
+    return { id, item, effort, lock, order }
   }
   const pick = (layer: 'mine' | 'default', column: string): SimpleRow => {
-    const { id, item, effort, lock } = first(layer, column)
-    return { column, line: id, effort, harness: item.harness, model: item.model, mine: layer === 'mine' && !!layers.mine.get(column)?.rank, lock: lock ? { by: lock.set_by, at: lock.set_at, reason: lock.why } : null }
+    const { id, item, effort, lock, order } = first(layer, column)
+    const chain = (order.rank ?? []).filter(step => step !== id).map(step => ({ line: step, effort: line(step) ? nearest(line(step)!, order.efforts?.[step] ?? effort) : null }))
+    const never = [
+      ...rules.filter(rule => rule.column === column && rule.lock === 'not').map(rule => ({ line: rule.line, by: rule.set_by, at: rule.set_at, why: rule.why })),
+      ...order.not.map(not => ({ line: not, by: null, at: null, why: 'Saved exclusion' })),
+    ]
+    return { column, line: id, effort, harness: item.harness, model: item.model, mine: layer === 'mine' && !lock && !!layers.mine.get(column)?.rank, lock: lock ? { by: lock.set_by, at: lock.set_at, reason: lock.why } : null, chain, end: order.end ?? (column === 'other' ? 'wait' : 'default'), never }
   }
-  const unavailableFor = (rows: SimpleRow[]): SimpleUnavailable[] => rows.flatMap(row => {
-    if (options.down && row.line === 'anthropic:opus') return [{ column: row.column, line: row.line!, runs_instead: 'anthropic:sonnet', effort: nearest(line('anthropic:sonnet')!, row.effort ?? 'high'), reason: REASON_DOWN, ticket: null }]
-    if (row.line === 'xai:grok' && row.column !== 'concept' && row.column !== 'other') return [{ column: row.column, line: row.line, runs_instead: 'openai:sol', effort: 'high', reason: 'no tools in PAIMOS', ticket: null }]
+  const unavailableFor = (rows: SimpleRow[]): SimpleUnavailable[] => rows.flatMap((row): SimpleUnavailable[] => {
+    if (options.down && row.line === 'anthropic:opus') return [{ column: row.column, line: row.line!, runs_instead: 'anthropic:sonnet', effort: nearest(line('anthropic:sonnet')!, row.effort ?? 'high'), reason: REASON_DOWN, ticket: null, cause: 'daily_cap', until: CAP_UNTIL, route: 'claude', waits: false }]
+    if (row.line === 'xai:grok' && row.column !== 'concept' && row.column !== 'other') return [{ column: row.column, line: row.line, runs_instead: 'openai:sol', effort: 'high', reason: 'no tools in PAIMOS', ticket: null, cause: 'no_tools', until: null, route: 'grok', waits: false }]
     return []
   })
   function simple(layer: 'mine' | 'default'): SimpleDocument {
@@ -160,24 +184,44 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     if (path.startsWith('/model-rules/workspace/')) {
       const column = decodeURIComponent(path.split('/')[3]!), input = body as { top: { line: string; why: string }[]; bottom: { line: string; why: string }[]; not: Record<string, string>; revision: number }
       if (input.revision !== rulesRevision) return route.fulfill({ status: 409, json: { error: 'stale_revision' } })
+      const kept = rules.filter(rule => rule.column === column && rule.lock === 'not')
       rules = rules.filter(rule => rule.column !== column).concat(input.top.map((pin, position) => ({ scope: 'workspace' as const, project_id: null, column, line: pin.line, lock: 'top' as const, position, why: pin.why, set_by: simplePerson, set_at: '2026-10-09T09:00:00Z' })))
+        .concat(Object.entries(input.not ?? {}).map(([id, why], position) => ({ ...(kept.find(rule => rule.line === id) ?? { scope: 'workspace' as const, project_id: null, column, line: id, lock: 'not' as const, set_by: simplePerson, set_at: '2026-10-09T09:00:00Z' }), position, why })))
+      return route.fulfill({ json: { revision: ++rulesRevision, rules } })
+    }
+    // Never rules (AEON-1159): workspace only, against the rules revision; PUT needs a reason.
+    const neverPath = /^\/model-preferences\/orders\/([^/]+)\/first\/never\/([^/]+)$/.exec(path)
+    if (neverPath) {
+      const column = decodeURIComponent(neverPath[1]!), id = decodeURIComponent(neverPath[2]!), submitted = method === 'DELETE' ? Number(url.searchParams.get('revision')) : (body as { revision: number }).revision
+      if (!permissions.includes('model_prefs.manage')) return route.fulfill({ status: 403, json: { error: 'forbidden' } })
+      if (submitted !== rulesRevision) return route.fulfill({ status: 409, json: { error: 'stale_revision' } })
+      const before = rules.find(rule => rule.column === column && rule.line === id && rule.lock === 'not')
+      rules = rules.filter(rule => rule !== before)
+      if (method === 'PUT') rules.push({ scope: 'workspace', project_id: null, column, line: id, lock: 'not', position: 0, why: (body as { why: string }).why, set_by: simplePerson, set_at: '2026-10-11T08:00:00Z' })
       return route.fulfill({ json: { revision: ++rulesRevision, rules } })
     }
     if (layer === 'mine' && !person && path.startsWith('/model-preferences/')) return route.fulfill({ status: 428, json: { error: 'person_precondition_required' } })
     const target = layer, orders = layers[target]
     if (path.startsWith('/model-preferences/orders/')) {
       const column = decodeURIComponent(path.split('/')[3]!), submitted = method === 'DELETE' ? Number(url.searchParams.get('revision')) : (body as { revision: number }).revision
+      // A workspace lock freezes the pick and its order for everyone's own writes.
+      if (target === 'mine' && lockOf(column)) return route.fulfill({ status: 423, json: { error: 'column_locked' } })
       if (submitted !== revision[target]) return route.fulfill({ status: 409, json: { error: 'stale_revision' } })
       const before = orders.get(column)
       if (method === 'DELETE') orders.delete(column)
       else if (path.endsWith('/thinking')) {
         const effort = (body as { effort: string | null }).effort, item = line(first(target, column).id)!
         if (effort !== null && !item.efforts.includes(effort)) return route.fulfill({ status: 422, json: { error: 'invalid_effort' } })
-        orders.set(column, { rank: before?.rank ?? inherited(target, column).rank, not: before?.not ?? [], effort })
+        const rank = before?.rank ?? inherited(target, column).rank
+        orders.set(column, { ...before, rank, not: before?.not ?? [], effort, efforts: { ...before?.efforts, ...(rank?.[0] && effort ? { [rank[0]]: effort } : {}) } })
       } else {
-        const input = body as { rank: string[]; not: string[] }, item = line(input.rank[0])
+        const input = body as { rank: string[]; not?: string[]; efforts?: Record<string, string>; end?: 'wait' | 'default' }, item = line(input.rank[0])
+        // Omitted not, efforts and end keep what is stored; a first personal order copies the workspace's ending and levels.
+        const source = before ?? (target === 'mine' ? inherited('default', column) : undefined)
+        const kept = Object.fromEntries(Object.entries(source?.efforts ?? {}).filter(([id]) => input.rank.includes(id)))
+        if (input.efforts && Object.entries(input.efforts).some(([id, effort]) => !input.rank.includes(id) || !line(id)?.efforts.includes(effort))) return route.fulfill({ status: 422, json: { error: 'invalid_effort' } })
         // A new first line keeps the order's effort name, or the nearest level of the new line.
-        orders.set(column, { rank: input.rank, not: input.not, effort: before?.effort && item ? nearest(item, before.effort) : null })
+        orders.set(column, { rank: input.rank, not: input.not ?? before?.not ?? [], effort: input.efforts ? null : before?.effort && item ? nearest(item, before.effort) : null, efforts: input.efforts ?? kept, end: input.end ?? source?.end })
       }
       revision[target]++
       return route.fulfill({ json: { person_id: simplePerson, revision: revision[target], profile: tail(target).profile, dry_run: false, moved: [] } })

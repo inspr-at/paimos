@@ -9174,6 +9174,32 @@
     ,
     {"kind":"browser","file":"tests/model-refresh.spec.ts","name":"the Models page carries the registry card: the old freshness links land on it and Check now shows its cooldown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"a step comes out and Undo puts it back with its level; a level changes in the step’s own menu","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"a step drags by its handle to a new place; the order keeps its height while it moves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"admins allow a Never line again for everyone; Undo sets it again with its reason","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 dark › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 light › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 1440 light › C · a member: a locked row is read-only, an edit makes a workspace row hers","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 390 dark › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 390 dark › C · a member: a locked row is read-only, an edit makes a workspace row hers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 390 light › A · For everyone: folds, menus, keyboard reorder and Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"at 390 light › C · a member: a locked row is read-only, an edit makes a workspace row hers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"folds grow in place: the controls above a fold, and the fold’s own controls, never move (AEON-541)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-fallback.spec.ts","name":"the folds and their menus have no accessibility violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Add model with several levels registers them in order, and a failure after the first level is never reported as saved","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Add model: Undo removes what was added","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -16659,6 +16685,30 @@
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > restores levels and reports how many could not come back","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"writes > stops the next request when the captured person or workspace is gone","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > a member’s edit of a workspace row writes their own order with their person; Undo resets it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > adds a step with every step’s level; the pick’s level is written only when the row holds its own","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > allows a Never line again only for admins on For everyone, against the rules revision; Undo sets it with its reason","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > an own order edited back to the workspace’s follows it again; Undo brings the own order back as it was","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > moves a step with one rank-only write, says where it went, and Undo writes the order back","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > refuses a locked row, a draft, a line already in the order and an ending on the default, without a write","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"chain writes > says a lock refused the change, refreshes, and offers no Undo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"the fallback in words > lists each line’s routes in registry order, from its latest enabled version only","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"the fallback in words > reads the pick, every step and the ending; the default always ends in Wait","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"the fallback in words > says one cause per step in words, with its time, and never guesses about steps without evidence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"the fallback in words > stores step levels, keeps an inherited pick level inherited and leaves unknown lines automatic","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-fallback.unit.test.ts","name":"the fallback in words > treats a row from an older server as an empty order, and a draft as a new exception","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"binds every legacy person write to the captured canonical person","tier":"ESSENTIAL"}
     ,

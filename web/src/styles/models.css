@@ -201,6 +201,7 @@
 .models-section .ch-never > svg { flex: none; color: var(--ink-3); }
 .models-section .ch-never > span { flex: 1; min-width: 0; }
 .models-section .ch-never b { color: var(--ink); font-weight: 600; }
+.models-section .ch-never .link-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; min-height: 24px; min-width: 24px; padding: 0 3px; margin: -2px -3px; }
 .models-section .ch-hint { display: flex; align-items: center; gap: 6px; padding: 8px 4px 0; font-size: 11.5px; color: var(--ink-3); }
 .models-section .ch-hint svg { flex: none; }
 
@@ -265,6 +266,7 @@
   .models-section .lock, .models-section .x { min-width: 44px; }
   .models-section .grip, .models-section .ch-pick, .models-section .fb-sum, .models-section .add.sm, .models-section .seg.sm button { min-height: 44px; }
   .models-section .grip, .models-section .icon-btn.x.sm { min-width: 44px; min-height: 44px; }
+  .models-section .ch-never .link-btn { min-height: 44px; min-width: 44px; padding: 0 8px; margin: -12px -8px; }
   .mdl-pop .opt { grid-template-columns: 22px minmax(0, 1fr) 16px; }
   .mdl-pop .opt .lvp { display: none; }
   .mdl-pop .opt .ok { grid-column: 3; grid-row: 1; }
