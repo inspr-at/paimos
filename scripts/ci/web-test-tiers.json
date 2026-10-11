@@ -228,6 +228,12 @@
     ,
     "browser:tests/aeon-1209-agents-head.spec.ts:phone › dark 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head"
     ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:1024: long German names stay readable and never widen the page"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:1440: long German names stay readable and never widen the page"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:390: long German names stay readable and never widen the page"
+    ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:dark 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip"
     ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1024 dark: the grouped list, its menus and its folds"
@@ -1431,6 +1437,8 @@
     "vitest:tests/agent-pause-store.unit.test.ts:stop-only agents keep running unless Stop now is explicitly chosen"
     ,
     "vitest:tests/agent-pause-store.unit.test.ts:wind-down eligibility matches ownership while bulk permissions stay available"
+    ,
+    "vitest:tests/agent-projection.unit.test.ts:the store > reads every lead again once the projects list arrives after the page"
     ,
     "vitest:tests/agent-theme.unit.test.ts:a failed load after an identity reset uses defaults, never the legacy appearance cache"
     ,
@@ -5357,6 +5365,12 @@
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"phone › light 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"the accounts chip opens three tiles that lead into Settings; its tooltip stays away while open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"1024: long German names stay readable and never widen the page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"1440: long German names stay readable and never widen the page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"390: long German names stay readable and never widen the page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Collapse all folds every lead, Expand all opens them; the icon swaps in its fixed slot","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -15521,6 +15535,8 @@
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > batches named events into one reread of what they changed; a reconnect rereads everything","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > binds a lead band’s workers by parent from the project’s own session read when the Agents list is not loaded","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > reads every lead again once the projects list arrives after the page","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > reads open questions within five pages and says when more exist; a failed later page keeps the rest","tier":"ESSENTIAL"}
     ,
