@@ -16538,6 +16538,8 @@
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > groups profiles into one line per model, levels in the model's own order, retired profiles left out","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > keeps legacy auto provenance generic until the server names its origin","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > marks a discovered, disabled line New and shows a scheduled retirement, never both","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > names a level whose effort level is unknown after those that have one, and a missing display name falls back to the model id","tier":"GATED-FULL"}

@@ -29,18 +29,24 @@ func (p Policy) Validate() error {
 }
 
 type Signals struct {
-	Load           *float64 `json:"load"`
-	Cores          int      `json:"cores"`
-	MemoryPressure string   `json:"memory_pressure"`
-	MemoryUsedGB   *float64 `json:"memory_used_gb,omitempty"`
-	MemoryTotalGB  *float64 `json:"memory_total_gb,omitempty"`
-	Power          string   `json:"power"`
-	Thermal        string   `json:"thermal"`
-	InputActive    *bool    `json:"input_active,omitempty"`
+	Load           *float64           `json:"load"`
+	Cores          int                `json:"cores"`
+	MemoryPressure string             `json:"memory_pressure"`
+	MemoryUsedGB   *float64           `json:"memory_used_gb,omitempty"`
+	MemoryTotalGB  *float64           `json:"memory_total_gb,omitempty"`
+	Power          string             `json:"power"`
+	Thermal        string             `json:"thermal"`
+	InputActive    *bool              `json:"input_active,omitempty"`
+	Unattended     *UnattendedSignals `json:"unattended,omitempty"`
 }
 
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 func (s Signals) Validate() error {
+	if s.Unattended != nil {
+		if err := s.Unattended.Validate(); err != nil {
+			return err
+		}
+	}
 	if s.Cores < 1 || s.Cores > 4096 || s.Load != nil && (!finite(*s.Load) || *s.Load < 0 || *s.Load > 10000) {
 		return errors.New("invalid host load")
 	}
@@ -60,14 +66,15 @@ type Point struct {
 	Load float64   `json:"load"`
 }
 type View struct {
-	Policy     Policy     `json:"policy"`
-	Signals    *Signals   `json:"signals"`
-	ReportedAt *time.Time `json:"reported_at"`
-	Running    int        `json:"running"`
-	Queued     int        `json:"queued"`
-	Reason     string     `json:"reason"`
-	LoadLimit  float64    `json:"load_limit"`
-	History    []Point    `json:"history"`
+	Policy     Policy          `json:"policy"`
+	Signals    *Signals        `json:"signals"`
+	ReportedAt *time.Time      `json:"reported_at"`
+	Running    int             `json:"running"`
+	Queued     int             `json:"queued"`
+	Reason     string          `json:"reason"`
+	LoadLimit  float64         `json:"load_limit"`
+	History    []Point         `json:"history"`
+	Unattended *UnattendedView `json:"unattended,omitempty"`
 }
 
 // Evaluate uses an injected clock. Missing or old signals cannot authorize an

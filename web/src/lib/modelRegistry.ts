@@ -172,7 +172,10 @@ export function takenText(line: RegistryLine, now = new Date()): string {
 }
 export function metaParts(line: RegistryLine, now = new Date()): string[] {
   const label = routeLabel(line.route)
-  return [HARNESS_NAME[line.harness], ...(label && label !== HARNESS_NAME[line.harness] ? [label] : []), line.model, ({ shipped: 'Shipped', provider: 'From provider', harness: 'From harness', manual: 'Added by hand' }[line.origin ?? (line.source === 'manual' ? 'manual' : 'harness')]), ...(line.took ? [takenText(line, now)] : [])]
+  // Older servers only distinguish auto/manual; that cannot identify whether
+  // discovery came from a provider or a harness. Named origins stay explicit.
+  const source = line.origin ? { shipped: 'Shipped', provider: 'From provider', harness: 'From harness', manual: 'Added by hand' }[line.origin] : line.source === 'manual' ? 'Added by hand' : 'Auto-discovered'
+  return [HARNESS_NAME[line.harness], ...(label && label !== HARNESS_NAME[line.harness] ? [label] : []), line.model, source, ...(line.took ? [takenText(line, now)] : [])]
 }
 
 // ---------- the inline form ----------
