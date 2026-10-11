@@ -66,7 +66,7 @@ function save(row: Row, body: Settings) {
   void scope.run(({ after, signal }) => after(advancedRequest<Settings>(project, MACHINE_PATHS[row.id], signal, body), state => {
     if (project !== props.project.id || !writable(row)) return
     validate(row, state, project); row.state = state; toast(`${row.name} saved. Recorded in history.`)
-    if (row.id === 'queue') queueEdit.value = null
+    if (row.id === 'queue') { row.busy = false; queueEdit.value = null }
   }), { failed: error => failed(row, error), settled: () => { row.busy = false } })
 }
 function setMode(row: Row, value: ShadowMode) {
