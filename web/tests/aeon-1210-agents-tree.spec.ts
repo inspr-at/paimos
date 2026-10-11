@@ -23,7 +23,7 @@ async function setup(page: Page, options: { folded?: string[]; workers?: number 
   work.preferences['projects:order'] = { ids: ['p-aeon'] }
   if (options.folded) work.preferences['agents:layout'] = { folded_projects: options.folded }
   const calls = await mockWork(page, work, { admin: true })
-  const data = agentData({ me: me.id, now: Date.parse(NOW), projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
+  const data = agentData({ me: me.id, now: NOW, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   // PHAROS: the lead (session 1) with its workers; extra workers make the page long enough to stick.
   for (const session of data.sessions) if ([2, 5].includes(Number(session.id.slice(-2)))) (session as { parent_harness_session_id: string | null }).parent_harness_session_id = LEAD
   const base = data.sessions[1]!
@@ -40,7 +40,7 @@ async function setup(page: Page, options: { folded?: string[]; workers?: number 
     return leads[id] ? route.fulfill({ json: leads[id] }) : route.fulfill({ status: 404, json: { error: 'not found' } })
   })
   const queued = [...Array(4).fill('p-pharos'), ...Array(2).fill('p-aeon'), ...Array(3).fill('p-web')]
-  await page.route('**/api/queue', route => route.fulfill({ json: { items: queued.map((project, i) => ({ node_id: `q-${i}`, project_id: project, key: `Q-${i}`, title: 'Queued work', state: 'open', priority: 'normal', estimate_hours: 1, queued: { run_id: `r-${i}`, position: i + 1, by: { ...me, kind: 'person' }, at: NOW, target_agent_id: null, expected_agent_id: null, model_profile_id: null, expected_start_at: null, waiting: false, wait_reason: '' } })), manual_order: false, capacity: { queued_hours: 9, parallel_runs: 4, work_hours: null, warning: false } } }))
+  await page.route('**/api/queue', route => route.fulfill({ json: { items: queued.map((project, i) => ({ node_id: `q-${i}`, project_id: project, key: `Q-${i}`, title: 'Queued work', state: 'open', priority: 'normal', estimate_hours: 1, queued: { run_id: `r-${i}`, position: i + 1, by: { ...me, kind: 'person' }, at: new Date(NOW).toISOString(), target_agent_id: null, expected_agent_id: null, model_profile_id: null, expected_start_at: null, waiting: false, wait_reason: '' } })), manual_order: false, capacity: { queued_hours: 9, parallel_runs: 4, work_hours: null, warning: false } } }))
   return { data, work, calls }
 }
 
