@@ -113,9 +113,9 @@ const keptRank = (view: SessionView) => keepsPlace(view) ? lastRank.get(view.ses
 // applies to the live list; the search to History too.
 const stateFilter = computed(() => showRemoved.value ? null : props.filter ?? null)
 const terms = computed(() => (props.query ?? '').toLowerCase().split(/\s+/).filter(Boolean))
-// It judges the copy on screen: whether a row matches is part of its place, so a refresh that
-// changes it waits like any other move. Models match by the names the rows show (AEON-1211).
-const filtering = computed<((view: SessionView) => boolean) | null>(() => {
+// Whether a session matches now, read from its newest copy. Models match by the names the rows
+// show (AEON-1211). The list itself asks `filtering` below, which a hold answers first.
+const liveMatch = computed<((view: SessionView) => boolean) | null>(() => {
   const state = stateFilter.value, words = terms.value, models = names.value
   if (!state && !words.length) return null
   return view => {
@@ -132,10 +132,18 @@ const keyFocus = ref(false)
 const menuOpen = ref(false)
 const structure: Structure<SessionView> = {
   id: view => view.session.id,
-  key: view => `${view.status.group}|${view.session.parent_harness_session_id ?? ''}|${filtering.value ? Number(filtering.value(view)) : ''}`,
+  key: view => `${view.status.group}|${view.session.parent_harness_session_id ?? ''}`,
+  match: view => liveMatch.value?.(view) ?? true,
   order: views => { const ids: string[] = []; const walk = (b: Branch) => { ids.push(b.view.session.id); b.children.forEach(walk) }; orderForest(sessionForest([...views], props.now, keptRank), sort.value, props.now, false, names.value).forEach(walk); return ids },
 }
 const hold = useSessionHold(() => liveViews.value, structure, () => !showRemoved.value && (pointing.value || keyFocus.value || menuOpen.value))
+// Whether a row matches is part of its place: a row the hold keeps keeps the match it froze with,
+// so a refresh that changes it, a new copy or a renamed model alike, waits like any other move.
+const filtering = computed<((view: SessionView) => boolean) | null>(() => {
+  const live = liveMatch.value
+  if (!live || showRemoved.value) return live
+  return view => hold.matched(view.session.id) ?? live(view)
+})
 // The sessions the list lays out: a row the hold keeps keeps the table, so the live list emptying
 // under the pointer never swaps it for the connect hint.
 const total = computed(() => hold.views.value.length)
