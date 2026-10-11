@@ -493,7 +493,7 @@ test('AEON-385: an old parent page cannot restore the count after moving its las
   let hold = false, computed = 0, release!: () => void
   const wait = new Promise<void>(resolve => { release = resolve })
   await mockWork(page, data, { hold: call => {
-    if (hold && call.method === 'GET' && call.path === '/api/nodes' && call.query.get('kind') === 'epic' && call.query.get('parent_id') === 'p-pharos') return { until: wait, computed: () => { computed++ } }
+    if (hold && call.method === 'GET' && call.path === '/api/nodes' && call.query.get('kind') === 'work,epic,ticket,task' && call.query.get('parent_id') === 'p-pharos') return { until: wait, computed: () => { computed++ } }
   } })
   try {
     await page.goto('/p/PHAROS/tickets?view=outline&closed=1')
@@ -502,7 +502,7 @@ test('AEON-385: an old parent page cannot restore the count after moving its las
     hold = true
     await outlineGap(page)
     await expect.poll(() => computed).toBe(1)
-    await row(page, 'PHAROS-11').dragTo(outline(page).locator('.outline-group'))
+    await row(page, 'PHAROS-11').dragTo(outline(page).getByRole('row', { name: 'Project root drop destination' }))
     await expect(row(page, 'PHAROS-11')).toHaveAttribute('aria-level', '1')
     await expect(row(page, 'PHAROS-10').locator('.twisty')).toHaveCount(0)
     release()
