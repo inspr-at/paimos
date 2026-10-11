@@ -111,7 +111,15 @@ const legacySections: { title: string; rows: { keys: Key[][]; label: string; joi
   ] },
 ]
 const sections = computed(() => {
-  const entries = shortcutHelp()
+  // The approved map gives paired actions one label; keep that label verbatim
+  // and combine only their attached bindings into a single help row.
+  const grouped = new Map<string, ReturnType<typeof shortcutHelp>[number]>()
+  for (const entry of shortcutHelp()) {
+    const key = `${entry.scope}:${entry.label}`
+    const existing = grouped.get(key)
+    grouped.set(key, existing ? { ...existing, keys: [...existing.keys, ...entry.keys] } : entry)
+  }
+  const entries = [...grouped.values()]
   return [{ title: 'Anywhere', rows: [] }, ...legacySections].map(section => ({
     ...section,
     registered: entries.filter(entry => section.title === 'Anywhere' ? entry.scope.startsWith('app') : section.title === 'Agents' && entry.id.startsWith('agents.')),

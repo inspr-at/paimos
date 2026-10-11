@@ -430,7 +430,7 @@ test('AEON-1219: registry navigation and hints respect menus, fields, IME and na
   await page.keyboard.press('?')
   const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
   await expect(sheet).toBeVisible()
-  const next = sheet.locator('.row').filter({ has: page.locator('dd', { hasText: /^Next session$/ }) })
+  const next = sheet.locator('.row').filter({ has: page.locator('dd', { hasText: /^Next \/ previous session$/ }) })
   await expect(next).toContainText('J')
   await expect(next).toContainText('Down arrow')
   await expect(sheet.locator('dd', { hasText: /^Decision Desk$/ })).toBeVisible()
