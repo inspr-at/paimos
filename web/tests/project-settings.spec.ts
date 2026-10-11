@@ -15,7 +15,7 @@ async function setup(page: Page, readOnly = false) {
   const writes: { id: string; body: Record<string, unknown>; expected: string }[] = [], assignments: unknown[] = []
   const nodes = new Map(data.projects.map(p => [p.id, { id: p.id, key: p.key, title: p.title, body: p.description, state: p.state, fields: { classic: { key: p.classic, description: p.description }, preserved: 'keep me' }, updated_at: p.last, created_at: p.last, parent_id: null, kind_id: 'k-project', position: '0', deleted_at: null }]))
   const groups = [{ id: 'g-platform', name: 'Platform', project_ids: ['p-pharos'] }, { id: 'g-product', name: 'Product', project_ids: ['p-aeon'] }]
-  const control = { fail: false, held: null as null | { entered: () => void; until: Promise<void> } }
+  const control = { fail: false, contextFail: false, held: null as null | { entered: () => void; until: Promise<void> } }
   await page.route('**/api/nodes/p-*', async route => {
     const request = route.request(), id = new URL(request.url()).pathname.split('/').at(-1)!, node = nodes.get(id)
     if (!node) return route.fulfill({ status: 404, json: { error: 'Not found' } })
@@ -52,7 +52,9 @@ async function setup(page: Page, readOnly = false) {
   })
   // The existing Work context card remains the owner of this API.
   await page.route('**/api/projects/*/work-context', route => route.fulfill({ status: 404, json: { error: 'not assigned' } }))
-  await page.route('**/api/work-contexts**', route => route.fulfill({ json: { contexts: [], items: [], revision: 1, next_cursor: null } }))
+  await page.route('**/api/account-use**', route => control.contextFail
+    ? route.fulfill({ status: 503, json: { error: 'context read unavailable' } })
+    : route.fulfill({ json: { rules: { revision: 1, new_accounts: 'ask', new_contexts: 'ask', new_projects: 'holding', new_models: 'shipped_only', confirmation_required: false, enforced_at: null, confirmed_at: null }, contexts: [], accounts: [], cells: [], running_outside: [], running_outside_truncated: false, next_account: null, next_context: null } }))
   return { data, nodes, writes, assignments, control, errors }
 }
 async function navigate(page: Page, path: string) {
@@ -158,7 +160,7 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
 
 test('AEON-1233: approved P1 reference states and check.mjs audit against the build', async ({ browser }, testInfo) => {
   test.setTimeout(240_000)
-  const lines = [`AEON-1233 P1 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit runs on the built P1 surface. Full mock flows for P2–P6 are outside this package.', 'Freeze dates/actors are absent from the project API: show the confirmed Frozen state without inventing a date or person. The key uses a ticket-number pattern when no actual ticket number is supplied.']
+  const lines = [`AEON-1233 P1 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit runs on the built P1 surface. Full mock flows for P2–P6 are outside this package.', 'The public-source guard requires the approved Lead example’s operator host to become {C}, filled from the selected computer; other approved explainer text is retained.', 'Freeze dates/actors are absent from the project API: show the confirmed Frozen state without inventing a date or person. The key uses a ticket-number pattern when no actual ticket number is supplied.']
   for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
     const context = await browser.newContext({ viewport: { width, height: width < 600 ? 860 : 1000 }, hasTouch: width < 600, colorScheme: theme, reducedMotion: 'reduce' })
     try {
@@ -211,7 +213,11 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       if (width <= 1000) { await nav.click(); await capture('nav-open'); await page.keyboard.press('Escape') }
       await navigate(page, '/p/AEON/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await capture('general-aeon')
       await navigate(page, '/p/PRJ-26/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await capture('general-prj26')
-      await navigate(page, '/p/PHAROS/settings/agents'); await expect(page.locator('#project-work-context')).toBeVisible(); await capture('agents-pharos')
+      await navigate(page, '/p/PHAROS/settings/agents'); await expect(page.getByText('This project has no context yet, so no account may work on it. Choose one.', { exact: true })).toBeVisible(); await capture('agents-pharos')
+      world.control.contextFail = true
+      await navigate(page, '/p/PHAROS/settings/access'); await navigate(page, '/p/PHAROS/settings/agents')
+      await expect(page.locator('#project-work-context').getByRole('alert')).toContainText('The context could not be read.'); await capture('agents-error')
+      world.control.contextFail = false
       await navigate(page, '/p/PHAROS/settings/access'); await capture('access-pharos')
       await navigate(page, '/p/PHAROS/settings/routines'); await expect(page.locator('#recurring-work')).toBeVisible(); await capture('routines-pharos')
       expect(world.errors).toEqual([])
