@@ -13,6 +13,10 @@ const emit = defineEmits<{ change: [key: string, value: string | boolean]; edit:
 const uid = useId()
 const issues = computed(() => benefitIssues(props.fields))
 const invalidPills = computed(() => pillIssues(props.fields))
+// Read and edit views mount separate instances. Keep the persisted ticket's
+// incomplete context until this editor closes, so correcting the draft never
+// removes a guidance line and moves the fields beneath it.
+const completedGapOnOpen = props.editing && props.done && !props.parent && issues.value.length > 0
 const languages = [
   { key: 'en', label: 'English', short: 'EN', pill: 'e.g. Hosts in minutes', benefit: 'What people gain, in one or two sentences.' },
   { key: 'de', label: 'Deutsch', short: 'DE', pill: 'z. B. Hosts in Minuten', benefit: 'Was Menschen gewinnen, neutral formuliert, ohne direkte Anrede.' },
@@ -21,7 +25,7 @@ const text = (key: string) => typeof props.fields[key] === 'string' ? (props.fie
 const filled = computed(() => languages.filter(language => text(`pill_${language.key}`) || text(`benefit_${language.key}`)))
 const guidance = computed(() => {
   if (props.editing) return props.done
-    ? 'Each non-empty pill needs 2–4 words to save. Completing it again needs both languages and benefits.'
+    ? `${completedGapOnOpen ? 'This completed ticket has incomplete benefit fields. ' : ''}Each non-empty pill needs 2–4 words to save. Completing it again needs both languages and benefits.`
     : 'Each non-empty pill needs 2–4 words to save. Before Done, both languages and benefits are required.'
   if (props.parent || !issues.value.length) return ''
   return props.done
