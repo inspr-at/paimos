@@ -32,6 +32,9 @@ a registered successor on their existing harness. Equal role policies merge at
 their earliest priority. It reuses the line-reference
 transfer and account successor policy without widening account grants. It
 returns `{moved,removed,undo_token}`. Existing runs retain their immutable pins.
+Consumers retain the preview revision with the selected version IDs, display
+rejected writes as errors, and reload the catalog and preview after a successful
+retirement or Undo.
 
 `POST /api/models/outdated/undo` takes `{undo_token}` and requires current
 `models.manage`, `events.undo`, the corresponding preference/project authority,
