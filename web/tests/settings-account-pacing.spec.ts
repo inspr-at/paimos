@@ -44,6 +44,8 @@ async function accountMenu(page: Page, id: string) {
   await expect(menu).toBeVisible()
   return menu
 }
+// A Sprint or Hold entry copies the person's schedule without its Keep for you, as the old menu saved it.
+const shape = (capacity: ReturnType<typeof capacityWorld>) => { const { reserve: _r, reserve_percent: _p, ...rest } = capacity.schedules.find(e => e.scope === 'user')!.schedule; return rest }
 const pools = (capacity: ReturnType<typeof capacityWorld>) => capacity.puts.filter(p => (p as { scope: string }).scope === 'pool') as { pool: string; schedule: { override?: string; override_until?: string } | null }[]
 async function shots(page: Page, info: TestInfo, name: string) {
   if (!process.env.AEON786_SHOTS) return
@@ -65,7 +67,7 @@ test('no menu offers Sprint, Hold or Back to the plan, not even while an older S
   await expect(menu).not.toContainText(/Sprint|Hold|Back to the plan/)
   await shots(page, info, 'account-menu')
   await page.keyboard.press('Escape')
-  capacity.schedules.push({ scope: 'pool', pool: 'codex', schedule: { ...capacity.schedules.find(e => e.scope === 'user')!.schedule, override: 'sprint', override_until: '2026-09-30T16:02:00.000Z' } })
+  capacity.schedules.push({ scope: 'pool', pool: 'codex', schedule: { ...shape(capacity), override: 'sprint', override_until: '2026-09-30T16:02:00.000Z' } })
   await page.evaluate(() => window.dispatchEvent(new Event('focus')))
   await expect(page.locator('section.pane [data-held]')).toContainText('Sprint until reset')
   menu = await page.locator('section.pane').getByRole('button', { name: /^More actions for / }).click().then(() => page.getByRole('menu'))
@@ -79,7 +81,7 @@ test('an older Hold shows until it ends; End now ends it with the same write', a
   await page.setViewportSize({ width: 1280, height: 1000 })
   const { capacity } = await setup(page)
   const until = new Date(NOW + 2 * 3600e3 - (NOW % 60_000)).toISOString()
-  capacity.schedules.push({ scope: 'pool', pool: 'codex', schedule: { ...capacity.schedules.find(e => e.scope === 'user')!.schedule, override: 'hold', override_until: until } })
+  capacity.schedules.push({ scope: 'pool', pool: 'codex', schedule: { ...shape(capacity), override: 'hold', override_until: until } })
   await open(page)
   await listRow(page, ACCOUNTS.main).click()
   const held = page.locator('section.pane [data-held]')
@@ -99,7 +101,7 @@ test('an older Hold shows until it ends; End now ends it with the same write', a
 test('a failed End now is said as a failure, and the hold stays', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 1000 })
   const { capacity } = await setup(page)
-  capacity.schedules.push({ scope: 'pool', pool: 'claude', schedule: { ...capacity.schedules.find(e => e.scope === 'user')!.schedule, override: 'hold' } })
+  capacity.schedules.push({ scope: 'pool', pool: 'claude', schedule: { ...shape(capacity), override: 'hold' } })
   await page.route('**/api/agent-accounts/capacity/schedule', route => route.request().method() === 'PUT' ? route.fulfill({ status: 422, json: { error: 'schedule rejected' } }) : route.fallback())
   await open(page)
   await listRow(page, ACCOUNTS.claude).click()

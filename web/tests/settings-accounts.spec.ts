@@ -329,7 +329,7 @@ test('names that clash ask to be named, and a rename changes only the name', asy
 })
 
 test('an API key shows money, and no account offers a limit by hand', async ({ page }) => {
-  await setup(page, { apiKey: true, unread: true })
+  await setup(page, { apiKey: true })
   await open(page)
   const pi = await details(page, ACCOUNTS.pi)
   await expect(pi).toContainText('Spend$12.40 this month · no limit · list prices')

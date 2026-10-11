@@ -136,7 +136,7 @@ onBeforeUnmount(() => { scope.dispose(); unsubscribe() })
   .lim > .pct, .lim > .go { justify-self: start; }
   .go { margin-left: -6px; }
 }
-@media (pointer: coarse) {
+@media (max-width: 720px), (pointer: coarse) {
   .pct .field.n { height: 44px; min-height: 44px; }
   .go { min-height: 44px; min-width: 44px; }
 }
