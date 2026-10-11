@@ -219,12 +219,19 @@ func TestNativeBrowserCaptureBrokerBoundsAndReceipts(t *testing.T) {
 		"stale host": func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) {
 			a.runtime.ReportedAt = now.Add(-3 * time.Minute)
 		},
+		"expired grant": func(b *BrowserCaptureBroker, _ *captureFixtureAdapter) { b.Grant.ExpiresAt = now },
+		"missing capability": func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) {
+			a.runtime.Capabilities = []string{agentsetup.RoutineExecutionCapability}
+		},
 		"foreign mapping": func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) {
 			a.runtime.ProjectID = routineTestGrant("44").LaunchID
 		},
 		"missing Chrome pin": func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) { a.runtime.ChromeDigest = "" },
 		"changed Chrome pin": func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) {
 			a.runtime.ChromeDigest = strings.Repeat("4", 64)
+		},
+		"changed interpreter pin": func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) {
+			a.runtime.InterpreterDigest = strings.Repeat("4", 64)
 		},
 		"OPS not ready": func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) { a.runtime.LauncherReady = false },
 		"revoked owner": func(_ *BrowserCaptureBroker, a *captureFixtureAdapter) { a.runtime.OwnerApproved = false },
@@ -237,6 +244,19 @@ func TestNativeBrowserCaptureBrokerBoundsAndReceipts(t *testing.T) {
 			}
 		})
 	}
+	t.Run("foreign source and cancelled request never reserve or start", func(t *testing.T) {
+		b, a, s := fixture()
+		source := b.Grant
+		source.AgentRunID = routineTestGrant("44").AgentRunID
+		if _, err := b.RequestCapture(t.Context(), source, request("desktop")); !errors.Is(err, ErrBrowserCaptureScope) || a.starts != 0 || len(s.digests) != 0 {
+			t.Fatal("foreign source reached capture", err)
+		}
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		if _, err := b.RequestCapture(ctx, b.Grant, request("desktop")); !errors.Is(err, context.Canceled) || a.starts != 0 || len(s.digests) != 0 {
+			t.Fatal("cancelled request reached capture", err)
+		}
+	})
 	t.Run("private target redirect and size limits", func(t *testing.T) {
 		for _, path := range []string{"/escape", "/huge"} {
 			b, a, s := fixture()

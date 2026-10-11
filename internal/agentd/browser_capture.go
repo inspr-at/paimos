@@ -410,6 +410,9 @@ func (b *BrowserCaptureBroker) capture(ctx context.Context, in BrowserCaptureReq
 	}
 	ctx, cancel := context.WithTimeout(ctx, browserCaptureTimeout)
 	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return out, err
+	}
 	if err := b.Authorize(ctx, b.Grant); err != nil {
 		return out, err
 	}
@@ -435,6 +438,9 @@ func (b *BrowserCaptureBroker) capture(ctx context.Context, in BrowserCaptureReq
 		return out, err
 	}
 	if err := b.Adapter.Runtime().Require(b.Grant, b.Now()); err != nil {
+		return out, err
+	}
+	if err := ctx.Err(); err != nil {
 		return out, err
 	}
 	profile, err := os.MkdirTemp("", "aeon-browser-capture-")
