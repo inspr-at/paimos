@@ -1,6 +1,59 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # aeon:owner internal/recurrences
 paths:
+  /recurrences/templates:
+    get:
+      operationId: listRoutineTemplates
+      description: 'Discover immutable versioned routine templates with complete English and German copy. This fixed catalogue contains no tenant configuration and installs nothing. Applying a template is an explicit separate request; no template grants consent, qualification or launch authority.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Versioned catalogue', content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, maxItems: 3, items: {$ref: '#/components/schemas/RoutineTemplatePreset'}}}}}}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /recurrences/templates/{templateId}/{templateVersion}/preview:
+    parameters:
+      - {name: templateId, in: path, required: true, schema: {type: string, enum: [weekly-cleanup, test-review, website-release-update]}}
+      - {name: templateVersion, in: path, required: true, schema: {type: string, enum: ['1']}}
+    post:
+      operationId: previewRoutineTemplate
+      description: 'Render a pinned template with supplied tenant references, then use ordinary recurrence normalization, target and owner/source authorization and calendar preview. Returns an ordinary RecurrenceInput for inspection or POST /recurrences/preview. Writes no definition or event. English is the default language; both languages are in the catalogue.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoutineTemplateConfig'}}}}
+      responses:
+        '200': {description: 'Rendered definition and ordinary preview', content: {application/json: {schema: {type: object, required: [input, preview], properties: {input: {$ref: '#/components/schemas/RecurrenceInput'}, preview: {$ref: '#/components/schemas/RecurrencePreview'}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /recurrences/templates/{templateId}/{templateVersion}/apply:
+    parameters:
+      - {name: templateId, in: path, required: true, schema: {type: string, enum: [weekly-cleanup, test-review, website-release-update]}}
+      - {name: templateVersion, in: path, required: true, schema: {type: string, enum: ['1']}}
+    post:
+      operationId: applyRoutineTemplate
+      description: 'Explicitly create one ordinary paused, unconsented routine through the ordinary creation guards. A deterministic tenant/version/configuration identity under the tenant/tree fence prevents duplicate schedules even for concurrent retries or a lost response. Omitted start_date is excluded from retry identity. Exact replay returns the current record without overwriting edits, pause state or consent; retired identities return 409. Changed configuration creates a distinct routine. No agent, occurrence, execution identity, project enablement or companion weekly website audit is created.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RoutineTemplateConfig'}}}}
+      responses:
+        '201': {description: 'Created paused routine', content: {application/json: {schema: {$ref: '#/components/schemas/Recurrence'}}}}
+        '200': {description: 'Current routine for this configuration', content: {application/json: {schema: {$ref: '#/components/schemas/Recurrence'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /routine-guardrails:
+    get:
+      operationId: getDraftRoutineGuardrails
+      description: 'Read effective routine rules without saving a definition. Project scope requires current project read authority; workspace scope requires workspace read authority; personal scope uses only the signed-in canonical person and requires read authority in an accessible project. Returns the same compiled floor and applicable scope policy as a saved routine. No writes or execution grants.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: scope, in: query, required: true, schema: {type: string, enum: [personal, project, workspace]}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}, description: 'Required exactly for project scope; personal scope never accepts another owner.'}
+      responses:
+        '200': {description: 'Effective policy', content: {application/json: {schema: {$ref: '#/components/schemas/RoutineGuardPolicy'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /recurrences/{recurrenceId}/runs:
     parameters:
       - {name: recurrenceId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -286,6 +339,52 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
 components:
   schemas:
+    RoutineTemplateCopy:
+      type: object
+      additionalProperties: false
+      required: [name, title, description, goal, acceptance_criteria, pill, benefit]
+      properties:
+        name: {type: string, maxLength: 80}
+        title: {type: string, maxLength: 512}
+        description: {type: string, maxLength: 65536, description: 'Outputs, source instructions, allowed work and retained person/pipeline gates.'}
+        goal: {type: string, maxLength: 16384}
+        acceptance_criteria: {type: array, maxItems: 100, items: {type: string, maxLength: 4096}}
+        pill: {type: string, maxLength: 512}
+        benefit: {type: string, maxLength: 4096}
+    RoutineTemplatePreset:
+      type: object
+      additionalProperties: false
+      required: [id, version, en, de, scope, required_configuration, trigger, role, allowed_actions, runtime_requirements, budget, paused, execute_consent]
+      properties:
+        id: {type: string, enum: [weekly-cleanup, test-review, website-release-update]}
+        version: {type: string, enum: ['1']}
+        en: {$ref: '#/components/schemas/RoutineTemplateCopy'}
+        de: {$ref: '#/components/schemas/RoutineTemplateCopy'}
+        scope: {type: string, const: project}
+        required_configuration: {type: array, maxItems: 6, items: {type: string}}
+        trigger: {$ref: '#/components/schemas/RecurrenceTrigger'}
+        role: {type: string}
+        allowed_actions: {type: array, maxItems: 5, items: {type: string}}
+        runtime_requirements: {$ref: '#/components/schemas/RoutineRuntimeRequirements'}
+        budget: {$ref: '#/components/schemas/RoutineDefinitionBudget'}
+        paused: {type: boolean, const: true}
+        execute_consent: {type: boolean, const: false}
+    RoutineTemplateConfig:
+      type: object
+      additionalProperties: false
+      required: [project_id, parent_id, owner_principal_id, work_kind_id]
+      description: 'Tenant references are supplied explicitly and checked through ordinary definition guards. Project scope and output both use project_id; the owner must be a canonical person administrator. Website requires a different same-tenant source_project_id and supplied knowledge sources for the accepted site process. Source/tag order and UUID case do not affect retry identity. There is no activation or consent field.'
+      properties:
+        project_id: {type: string, format: uuid}
+        parent_id: {type: string, format: uuid}
+        owner_principal_id: {type: string, format: uuid}
+        work_kind_id: {type: string, format: uuid}
+        language: {type: string, enum: [en, de], default: en}
+        source_project_id: {type: string, format: uuid, description: 'Required only for website-release-update; supplies its sole release.published filter.project_ids entry.'}
+        sources: {type: array, maxItems: 32, items: {type: object, additionalProperties: false, required: [kind, id], properties: {kind: {type: string, enum: [node, knowledge]}, id: {type: string, format: uuid}}}}
+        tags: {type: array, maxItems: 50, uniqueItems: true, items: {type: string, format: uuid}}
+        trigger: {$ref: '#/components/schemas/RecurrenceTrigger', description: 'Optional time schedule override for cleanup and test review. Website uses its fixed release subscription and rejects overrides.'}
+        budget: {$ref: '#/components/schemas/RoutineDefinitionBudget'}
     RoutineExecutionPrincipalPage:
       type: object
       additionalProperties: false
@@ -348,6 +447,7 @@ components:
             updated_at: {type: string, format: date-time}
             last_result: {$ref: '#/components/schemas/RecurrenceResult'}
             open_previous: {$ref: '#/components/schemas/RecurrenceResult'}
+            last_run: {$ref: '#/components/schemas/RoutineLastRun'}
             execution_policy: {$ref: '#/components/schemas/RoutineExecutionPolicy'}
     RecurrenceHistoryEntry:
       type: object
@@ -386,6 +486,16 @@ components:
         reason: {type: string}
         created_at: {type: string, format: date-time}
         run: {$ref: '#/components/schemas/RoutineRunReceipt'}
+    RoutineLastRun:
+      type: object
+      additionalProperties: false
+      required: [id, state, reason, created_at]
+      description: 'Latest visible routine run by created_at then ID, resolved in a bounded join after recurrence paging. Omitted when no run exists. S21 states and reasons normalize legacy outcomes; successful execution requires confirmed process evidence. No assignments, accounts, host selectors or evidence payloads are exposed.'
+      properties:
+        id: {type: string, format: uuid}
+        state: {type: string, enum: [created, running, waiting_for_person, held, failed, done, skipped]}
+        reason: {type: string, description: 'S21 reason sentence; empty only for confirmed successful execution.'}
+        created_at: {type: string, format: date-time}
     RoutineRunReceipt:
       type: object
       additionalProperties: false

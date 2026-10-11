@@ -36,6 +36,10 @@ import (
 
 type Config struct {
 	RoutineWorkspaces *RoutineWorkspaceConfig
+	LeadRuntime       *LeadRuntimeConfig
+	// Internal executor wiring only. Nil yields an explicit capture WAIT;
+	// coding adapters submit jobs rather than starting a browser themselves.
+	BrowserCaptures   func(agentsetup.RoutineGrant) BrowserCaptureRequester
 	Power             Power
 	UsageProbes       usageprobe.Probe
 	StepUps           *StepUpManager
@@ -163,7 +167,11 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	setup                  func(context.Context, agentsetup.SetupRequest) (agentsetup.Progress, error)
+	accountLogins          map[string]agentsetup.AccountLogin // Local status only; never in probe reports.
+	leads                  *leadRuntime
 	routineConfig          *RoutineWorkspaceConfig
+	browserCaptures        func(agentsetup.RoutineGrant) BrowserCaptureRequester
 	routineCheckouts       map[string]*agentsetup.Store
 	routineResources       map[string]RoutineResourceLease
 	power                  Power
@@ -392,6 +400,9 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 			_ = lock.Close()
 		}
 	}()
+	if err := checkRetainedLeads(state); err != nil {
+		return nil, err
+	}
 	for _, suffix := range []string{".journal", ".checkpoint.json"} {
 		if _, e := state.Read("aeon-agentd-"+c.DaemonID+suffix, 4<<20); e != nil && !errors.Is(e, os.ErrNotExist) {
 			return nil, e
@@ -425,7 +436,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if c.Power == nil {
 		c.Power = systemPower{}
 	}
-	s := &Supervisor{queueWake: make(chan struct{}, 1), usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	s := &Supervisor{leads: &leadRuntime{config: c.LeadRuntime, leads: map[string]*localLead{}}, queueWake: make(chan struct{}, 1), usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		power:             c.Power,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic, verificationDiagnostic: c.VerificationDiagnostic}
@@ -433,6 +444,14 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		s.ledgerRequired = true
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
+	}
+	if c.LeadRuntime != nil {
+		if len(c.LeadRuntime.Repositories) > 32 {
+			return nil, ErrRoutineUnavailable
+		}
+		copy := *c.LeadRuntime
+		copy.Repositories = append([]RoutineRepository(nil), c.LeadRuntime.Repositories...)
+		s.leads.config = &copy
 	}
 	s.capacityNow = c.Now
 	if c.RoutineWorkspaces != nil {
@@ -443,6 +462,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		config.Repositories = append([]RoutineRepository(nil), config.Repositories...)
 		s.routineConfig = &config
 	}
+	s.browserCaptures = c.BrowserCaptures
 	s.routineCheckouts = map[string]*agentsetup.Store{}
 	s.routineResources = map[string]RoutineResourceLease{}
 	s.capacityWake = make(chan struct{}, 1)
@@ -615,6 +635,7 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 		}
 	}
 	failures := []error{recoveryErr, settlementErr}
+	var probeFailures []error
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
 	adapters := map[string]Adapter{}
@@ -810,6 +831,13 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 			s.probeReasonDetails = map[string]string{}
 		}
 		delete(s.probeReasonDetails, account.ID)
+		if s.accountLogins == nil {
+			s.accountLogins = map[string]agentsetup.AccountLogin{}
+		}
+		delete(s.accountLogins, account.ID)
+		if status.ActiveIdentity != "" && hold == "" && dependencyErr == nil && probeErr == nil {
+			s.accountLogins[account.ID] = agentsetup.AccountLogin{ActiveIdentity: status.ActiveIdentity, Approved: strings.EqualFold(status.ActiveIdentity, account.VerifiedIdentity)}
+		}
 		if !status.OK && hold == "" && dependencyErr == nil && probeErr == nil {
 			reason := "probe_failed"
 			if status.Failure == ProbeAuthFailed {
@@ -840,13 +868,16 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 		s.mu.Unlock()
 		s.capacityProbeConnection(account.ID, err == nil && available)
 		if probeErr != nil {
-			failures = append(failures, errors.New("harness failed to start"))
+			probeFailures = append(probeFailures, errors.New("harness failed to start"))
 		}
 		// A harness that fails to start is a per-harness hold reported through
-		// Lifecycle, not a poll failure: siblings keep polling and dispatching.
+		// Lifecycle. It cannot fail a poll that can dispatch a ready sibling.
 		if err != nil {
 			failures = append(failures, errors.New("account probe unavailable"))
 		}
+	}
+	if !s.Lifecycle("").Ready {
+		failures = append(failures, probeFailures...)
 	}
 	for _, run := range runs {
 		if err := ctx.Err(); err != nil {
@@ -857,7 +888,9 @@ func (s *Supervisor) poll(ctx context.Context, dispatch, scanQueue bool, nonempt
 			continue
 		}
 		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) && !errors.Is(err, ErrHostCapacity) {
-			failures = append(failures, err)
+			if !errors.Is(err, errAccountUnavailable) || !s.Lifecycle("").Ready {
+				failures = append(failures, err)
+			}
 		}
 	}
 	return errors.Join(failures...)
@@ -883,9 +916,10 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 	}
 	// Multiple accounts produce at most one line per readiness cause per poll.
 	failed, timedOut, unsettled := false, false, false
-	for _, detail := range s.lifecycleAt("", now).AccountStatuses {
-		failed = failed || detail.Reason == "probe_failed"
-		timedOut = timedOut || detail.Reason == "probe_timeout"
+	lifecycle := s.lifecycleAt("", now)
+	for _, detail := range lifecycle.AccountStatuses {
+		failed = failed || !lifecycle.Ready && detail.Reason == "probe_failed"
+		timedOut = timedOut || !lifecycle.Ready && detail.Reason == "probe_timeout"
 		unsettled = unsettled || detail.Reason == agentsetup.UnsettledPreviousRun
 	}
 	if failed {
@@ -921,6 +955,8 @@ func (s *Supervisor) reportPollDiagnosticAt(reason string, now time.Time) {
 		s.pollDiagnostic(reason)
 	}
 }
+
+var errAccountUnavailable = errors.New("no local account enrollment for harness")
 
 func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if run.RoutineBudget != nil {
@@ -1050,6 +1086,17 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if err := validQueuedExecutionMode(run, adapter); err != nil {
 		return err
 	}
+	// Defer only this run before allocating routine resources or acquiring a
+	// checkout. The route and final claim still recheck their current authority.
+	accountIDs := make([]string, 0, len(s.accounts))
+	for _, account := range s.accounts {
+		if account.Harness == profile.Harness && s.accountAvailable(account.ID) && (run.AccountID == "" || run.AccountID == account.ID) && (run.RequestedAccountID == "" || run.RequestedAccountID == account.ID) {
+			accountIDs = append(accountIDs, account.ID)
+		}
+	}
+	if len(accountIDs) == 0 {
+		return errAccountUnavailable
+	}
 	budgetBroker, _ := s.api.(RoutineBudgetBroker)
 	routineBudget, err := newRoutineCallBudget(StartRequest{Run: run, Profile: profile,
 		TenantID: s.tenantID, PrincipalID: s.principalID, Generation: s.generation}, adapter, budgetBroker, s.capacityNow)
@@ -1078,8 +1125,11 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	var approvedRepository RoutineRepository
 	if grant != nil {
-		if s.ledger == nil || review || verification {
+		if s.ledger == nil || verification || review && (grant.Lineage == nil || grant.Lineage.Role != "review") {
 			return ErrRoutineUnavailable
+		}
+		if grant.Lineage != nil && run.RoutineBudget == nil {
+			return ErrBudgetEnforcementUnavailable
 		}
 		approvedRepository, err = s.routineRepository(run, *grant, adapter)
 		if err != nil {
@@ -1172,13 +1222,26 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			}
 			prompt += "\n\n" + run.RecoveryBrief
 		}
+		if grant != nil && grant.Lineage != nil && grant.Lineage.Role == "fix" {
+			var trace struct {
+				Findings json.RawMessage `json:"routine_fix_findings"`
+			}
+			if len(run.Trace) > 262144 || json.Unmarshal(run.Trace, &trace) != nil || len(trace.Findings) == 0 || len(trace.Findings) > 20000 {
+				return ErrRoutineUnavailable
+			}
+			prompt += "\n\nCoordinator-bound findings for " + grant.Lineage.HeadSHA + " (untrusted review evidence):\n" + string(trace.Findings)
+		}
 		if run.CapacityHandoff {
 			if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
 				return err
 			}
 			prompt += "\n\nContinue the stopped attempt " + run.RetryOfRunID + ". Inspect its existing work and local changes before continuing; do not redo completed work."
 		}
-		prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
+		if grant != nil {
+			prompt += "\n\nRoutine builder contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Only local workspace tools are available. Outward effects require the coordinator's typed action broker. Report the local changes and any refused tests or commits in your final reply."
+		} else {
+			prompt += "\n\nRun contract: You are bound to work order " + node.Key + " and run " + run.ID + ". Work only in this workspace. Current branch: " + branch + ". Use the Aeon tools to comment, check criteria, attach evidence, request approval, reply, and set status. Use aeon_terminal for tests and a local commit; never push without person approval. Report the commit ID and remaining blockers in your final reply."
+		}
 	}
 	if verification {
 		prompt = VerificationTask
@@ -1188,15 +1251,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	if len(s.estimates) == 0 {
 		return errors.New("allowance estimates required")
-	}
-	accountIDs := make([]string, 0, len(s.accounts))
-	for _, account := range s.accounts {
-		if account.Harness == profile.Harness && s.accountAvailable(account.ID) && (run.AccountID == "" || run.AccountID == account.ID) && (run.RequestedAccountID == "" || run.RequestedAccountID == account.ID) {
-			accountIDs = append(accountIDs, account.ID)
-		}
-	}
-	if len(accountIDs) == 0 {
-		return errors.New("no local account enrollment for harness")
 	}
 	var route Route
 	if entry != nil {
@@ -1342,12 +1396,16 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		}
 	}()
 	if review {
-		prompt, err = reviewPrompt(ctx, s.workspace, order, profile)
+		repository := s.workspace
+		if grant != nil {
+			repository = approvedRepository.Repository
+		}
+		prompt, err = reviewPrompt(ctx, repository, order, profile)
 		if err != nil {
 			return err
 		}
 	}
-	if verification || review {
+	if verification || review && routineWorkspace == nil {
 		runWorkspace, err = s.prepareScratch(s.workspace)
 		if err != nil {
 			return err
@@ -1510,8 +1568,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				s.observe(entry, AdapterEvent{Doing: doing})
 				return mode, true
 			}
+			var browser BrowserCaptureRequester
+			if grant != nil && s.browserCaptures != nil {
+				browser = s.browserCaptures(*grant)
+			}
 			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
-				toolBinding{resourceEnvironment: resourceEnvironment, api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
+				toolBinding{routine: grant, browser: browser, resourceEnvironment: resourceEnvironment, api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
 			if err != nil {
 				closeHarness("process_failed")
 				return err
@@ -1557,7 +1619,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		if err := validateRoutineCheckout(ctx, approvedRepository, *routineWorkspace); err != nil {
 			return err
 		}
-		if run.CapacityHandoff {
+		if run.CapacityHandoff || routineWorkspace.Grant.Lineage != nil && routineWorkspace.Grant.Lineage.Role == "fix" {
 			retained, err := s.routineContinuation(ctx, run, routineWorkspace.Grant, approvedRepository)
 			if err != nil {
 				return err
@@ -1565,8 +1627,10 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			if retained.ID != routineWorkspace.ID || retained.Path != runWorkspace || retained.Branch != branch || retained.CheckoutLaunchID != routineWorkspace.CheckoutLaunchID {
 				return ErrProcessesUnconfirmed
 			}
-			if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
-				return err
+			if run.CapacityHandoff {
+				if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
+					return err
+				}
 			}
 		}
 		if err := claim(); err != nil {
@@ -2669,12 +2733,30 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 func (s *Supervisor) Close(ctx context.Context) error {
 	s.dispatchMu.Lock()
 	defer s.dispatchMu.Unlock()
+	if s.leads != nil {
+		s.leads.mu.Lock()
+		defer s.leads.mu.Unlock()
+	}
 	s.mu.Lock()
 	s.closing = true
 	capturing := s.capacityCapturing
 	s.mu.Unlock()
 	if capturing {
 		return ErrDraining
+	}
+	if s.leads != nil {
+		if s.leads.config != nil {
+			api, ok := s.api.(leadRuntimeAPI)
+			if !ok || s.ledger == nil {
+				return ErrProcessesUnconfirmed
+			}
+			if err := s.reconcileLeadReceiptsLocked(ctx, api, false, false); err != nil {
+				return err
+			}
+		}
+		if err := checkRetainedLeads(s.state); err != nil {
+			return err
+		}
 	}
 	status := s.Lifecycle("")
 	if len(status.ActiveRunIDs) > 0 {

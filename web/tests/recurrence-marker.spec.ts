@@ -149,7 +149,7 @@ test.describe('touch permission changes', () => {
           } }],
         })
         expect((await pill.boundingBox())!.height).toBeGreaterThanOrEqual(44)
-        await expect(pill).toContainText('Recurring')
+        await expect(pill).toContainText('Routine')
         await expect(pill).not.toContainText('Wiederkehrend')
         await screenshot('after')
         expect(errors).toEqual([])
@@ -164,7 +164,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.emulateMedia({ colorScheme: theme })
     const locale = width === 390 ? 'de-AT' : 'en-GB'
     const { data, errors, recurrenceReads } = await setup(page, true, locale)
-    const label = 'Recurring · every Monday · #4'
+    const label = 'Routine · every Monday · #4'
     await page.goto('/p/PHAROS?sort=key&group=none')
     await expect(row(page).getByRole('img', { name: label, exact: true })).toBeVisible()
     await expect(page.locator('#row-n-4 .recurrence-dot')).toHaveCount(0)
@@ -207,7 +207,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.keyboard.press('Escape')
     await pill.click()
     await expect(page).toHaveURL(new RegExp(`/p/PRJ-17/settings\\?recurrence=${id}$`))
-    await expect(page.getByRole('heading', { name: 'Recurring work', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Routines', exact: true })).toBeVisible()
     await expect(page.locator(`#recurrence-${id}`)).toContainText('Website audit')
     await page.screenshot({ path: join(shots, `settings-${width}-${theme}.png`) })
     expect(errors).toEqual([])
@@ -217,7 +217,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
 test('readers and retired sources keep a marker without a management link', async ({ page }) => {
   const { data, errors } = await setup(page, false)
   await page.goto('/p/PHAROS/PHAROS-11')
-  await expect(workspace(page).getByRole('img', { name: 'Recurring · every Monday · #4' })).toBeVisible()
+  await expect(workspace(page).getByRole('img', { name: 'Routine · every Monday · #4' })).toBeVisible()
   await expect(workspace(page).locator('a.recurring-pill')).toHaveCount(0)
   data.nodes.find(node => node.id === 'n-1')!.recurrence!.retired = true
   await page.reload()
@@ -233,7 +233,7 @@ test('a manager cannot follow a retired source and header controls stay still ac
   data.nodes.find(node => node.id === 'n-1')!.recurrence!.retired = true
   await page.setViewportSize({ width: 390, height: 1000 })
   await page.goto('/p/PHAROS/PHAROS-11')
-  await expect(workspace(page).getByRole('img', { name: 'Recurring · every Monday · #4' })).toBeVisible()
+  await expect(workspace(page).getByRole('img', { name: 'Routine · every Monday · #4' })).toBeVisible()
   await expect(workspace(page).locator('a.recurring-pill')).toHaveCount(0)
   await expectStableControls({ controls: { 'header actions': workspace(page).getByRole('button', { name: 'More actions', exact: true }), 'copy key': workspace(page).locator('.key-chip') }, interactions: [
     { name: 'ordinary ticket in series', run: async () => { await page.goto('/p/PHAROS/PHAROS-14'); await expect(workspace(page).locator('.recurring-pill')).toHaveCount(0) } },
@@ -258,7 +258,7 @@ for (const projection of ['retired', 'withheld'] as const) {
     if (projection === 'retired') {
       await expect(workspace(page).locator('.recurring-pill')).toBeVisible()
       await expect(workspace(page).locator('a.recurring-pill')).toHaveCount(0)
-      await expect(workspace(page).locator('.recurrence-provenance')).toContainText('a deleted recurrence')
+      await expect(workspace(page).locator('.recurrence-provenance')).toContainText('a deleted routine')
     } else {
       await expect(workspace(page).locator('.recurring-pill')).toHaveCount(0)
       await expect(workspace(page).locator('.recurrence-provenance')).toHaveCount(0)
@@ -299,8 +299,8 @@ test('a linked source outside page one is selected directly and stays selected w
   await expect(history.getByRole('heading', { name: target.template.name, exact: true })).toBeVisible()
   expect(gets).toBe(1)
   await expect(page.locator('#recurrence-first-0')).not.toHaveClass(/selected/)
-  await expectStableControls({ controls: { 'New recurring work': page.getByRole('button', { name: 'New…', exact: true }), 'first page row': page.locator('#recurrence-first-0'), 'first page actions': page.locator('#recurrence-first-0 .row-actions') }, interactions: [{ name: 'load the second page', run: async () => {
-    await page.getByRole('button', { name: 'More recurring work', exact: true }).click()
+  await expectStableControls({ controls: { 'New routine': page.getByRole('button', { name: 'New routine…', exact: true }), 'first page row': page.locator('#recurrence-first-0'), 'first page actions': page.locator('#recurrence-first-0 .row-actions') }, interactions: [{ name: 'load the second page', run: async () => {
+    await page.getByRole('button', { name: 'More routines', exact: true }).click()
     await expect(page.locator(`#recurrence-${id}`)).toHaveClass(/selected/)
     await expect(history.getByRole('heading', { name: target.template.name, exact: true })).toBeVisible()
   } }] })
@@ -318,7 +318,7 @@ test('moved ticket provenance and source editing use the receipt source project 
   await expect(line.getByRole('link', { name: 'Website audit' })).toHaveAttribute('href', `/p/PRJ-17/settings?recurrence=${id}`)
   await workspace(page).getByRole('button', { name: 'More actions', exact: true }).click()
   await page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true }).click()
-  const editor = page.getByRole('dialog', { name: 'Edit recurring work', exact: true })
+  const editor = page.getByRole('dialog', { name: 'Edit routine', exact: true })
   await expect(editor).toBeVisible()
   await expect(editor.getByRole('button', { name: 'Parent', exact: true })).toContainText('No parent (top level of the project)')
   await expect(editor.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Website audit')
@@ -347,7 +347,7 @@ test('withheld provenance closes an open source editor and clears its source-edi
   const more = workspace(page).getByRole('button', { name: 'More actions', exact: true })
   await more.click()
   await page.getByRole('menuitem', { name: 'Edit Website audit…', exact: true }).click()
-  const editor = page.getByRole('dialog', { name: 'Edit recurring work', exact: true })
+  const editor = page.getByRole('dialog', { name: 'Edit routine', exact: true })
   await expect(editor).toBeVisible()
   ticket.recurrence = undefined
   await page.evaluate(() => {
@@ -366,7 +366,7 @@ test('withheld provenance closes an open source editor and clears its source-edi
 test('a source link for another project exposes the error without selecting a substitute', async ({ page }) => {
   const { errors } = await setup(page)
   await page.goto(`/p/AEON/settings?recurrence=${id}`)
-  await expect(page.getByRole('alert')).toContainText('This recurrence belongs to another project.')
+  await expect(page.getByRole('alert')).toContainText('This routine belongs to another project.')
   await expect(page.getByRole('region', { name: 'Recurrence history' })).toHaveCount(0)
   expect(errors).toEqual([])
 })
@@ -421,7 +421,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       mkdirSync(shots, { recursive: true })
       await page.screenshot({ path: join(shots, `ticket-delayed-permissions-${width}-${theme}.png`) })
       await edit.click()
-      const editor = page.getByRole('dialog', { name: 'Edit recurring work', exact: true })
+      const editor = page.getByRole('dialog', { name: 'Edit routine', exact: true })
       await expect(editor).toBeVisible()
       await expect(editor.getByRole('textbox', { name: 'Name', exact: true })).toHaveValue('Website audit')
       expect(sourceReads()).toHaveLength(2)

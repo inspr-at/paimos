@@ -97,7 +97,7 @@ func TestRouterKeepsTheRunwayReserve(t *testing.T) {
 		if _, wait = admit(tx, noon, five(at(29, 13, 0), 50, noon), ""); wait == nil || wait.Code != "hold" || wait.Until == nil || !wait.Until.Equal(until) {
 			t.Fatalf("dated hold: %+v", wait)
 		}
-		later := until.Add(time.Minute)
+		later := until // the legacy Hold expires at its stored deadline
 		if _, wait = admit(tx, later, five(at(29, 13, 0), 50, later), ""); wait != nil {
 			t.Fatalf("hold survived its date: %+v", wait)
 		}
@@ -185,7 +185,7 @@ func TestKeepForYouScopesAwayAndPreview(t *testing.T) {
 	put(scheduleOverride{Scope: "pool", Pool: "codex", Schedule: &hold}, 400)
 	soon := now.Add(2 * time.Hour).Truncate(time.Second)
 	hold.OverrideUntil = &soon
-	put(scheduleOverride{Scope: "pool", Pool: "codex", Schedule: &hold}, 204)
+	seedExistingSchedule(t, admin, scheduleOverride{Scope: "pool", Pool: "codex", Schedule: &hold})
 	got = list()
 	if got[codex].Schedule.Override != "hold" || got[codex].Schedule.OverrideUntil == nil || !got[codex].Schedule.OverrideUntil.Equal(soon) || got[claude].Schedule.Override != "away" {
 		t.Fatalf("hold vs away: %+v / %+v", got[codex].Schedule, got[claude].Schedule)

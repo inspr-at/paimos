@@ -91,15 +91,17 @@ type UsageRecorder func(context.Context, pgx.Tx, tenant.Principal, Run, Telemetr
 type CompletionReviewer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange, *[]events.Change) error
 type CompletionPreparer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange) (bool, error)
 type module struct {
-	routines         RoutineLaunchChecks
-	queueHintMu      sync.Mutex
-	queueHintReaders map[string]int
-	queueTimeout     func(context.Context, time.Duration) (context.Context, context.CancelFunc)
-	leadAdmission    harness.LeadAdmission
-	reviews          CompletionReviewer
-	prepare          CompletionPreparer
-	pool             *pgxpool.Pool
-	usage            UsageRecorder
+	routineCompletion UsageRecorder
+	routines          RoutineLaunchChecks
+	routineQueue      RoutineQueueDispatcher
+	queueHintMu       sync.Mutex
+	queueHintReaders  map[string]int
+	queueTimeout      func(context.Context, time.Duration) (context.Context, context.CancelFunc)
+	leadAdmission     harness.LeadAdmission
+	reviews           CompletionReviewer
+	prepare           CompletionPreparer
+	pool              *pgxpool.Pool
+	usage             UsageRecorder
 }
 
 // New returns the /api/runs and /api/work-orders/{id}/runs module. The optional
@@ -754,7 +756,11 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 			return nil, workorders.Fail(409, "escalation waits for fresh measured account room")
 		}
 	}
-	if err := agentaccounts.ValidateReservedCapacity(ctx, tx, v.ID, *v.AccountID); err != nil {
+	var starts []agentaccounts.RoutineStartCheck
+	if v.RoutineLaunchID != nil && m.routines.Start != nil {
+		starts = append(starts, m.routines.Start(p))
+	}
+	if err := agentaccounts.ValidateReservedCapacity(ctx, tx, v.ID, *v.AccountID, starts...); err != nil {
 		if v.Purpose == "managed" && agentaccounts.ReservedRouteChanged(err) {
 			return releaseObsoleteClaim(ctx, tx, p, v, "account_moved_out_of_group")
 		}

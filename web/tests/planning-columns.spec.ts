@@ -384,7 +384,8 @@ test('planning fragment implementation in light and dark; phones retain the card
     for (const mode of ['saved', 'automatic']) {
       if (mode === 'automatic') {
         await page.getByRole('button', { name: 'Filters', exact: true }).click()
-        const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+        await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+        const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
         await sheet.getByRole('button', { name: 'Automatic', exact: true }).click()
         await expect.poll(() => data.preferences['list:p-pharos']?.visible).toBeUndefined()
         await sheet.locator('footer button').click()

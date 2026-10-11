@@ -164,10 +164,13 @@ type (`type=epic`, `ticket`, `task`) or Parents / Leaves open as Type; a Parents
 / Leaves or Depth filter that Type cannot express stays as its own pill and is
 offered in Filter only while it is applied.
 
-At widths up to 900 px, Filters includes Display controls for sorting, row
-height, columns and model display. Saved column visibility and order also apply
-to phone cards: optional values appear below Key and Title; Automatic restores
-the compact phone layout. Attachment Compare reserves its opacity control slot
+Display settings (grouping, sorting, row height, header density, columns and
+model display) have one home, the Display menu. At widths up to 900 px the
+Filters sheet keeps filtering only and links there with **Display settings…**:
+the sheet closes and the Display menu opens as a sheet, or, with the header
+collapsed, as the menu of the Display button beside New. Saved column
+visibility and order also apply to phone cards: optional values appear below
+Key and Title; Automatic restores the compact phone layout. Attachment Compare reserves its opacity control slot
 across Side by side, Slider and Onion skin so the mode buttons stay in place.
 Phone Compare and column reorder buttons have separate 44 px touch targets.
 Selection scroll clearance follows the measured bulk toolbar height, including

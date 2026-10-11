@@ -80,6 +80,50 @@ func TestMaximumRoutePriorityCanBeStored(t *testing.T) {
 	}
 }
 
+// Risk: a retained ladder row at the largest stored priority overflows or
+// loses its place when Models v2 migrates the ladder into the Default's order.
+func TestMaximumRoutePriorityMigratesToModelsOrder(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "priority-maximum", "person", "Owner", []string{"admin"})
+	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
+	last, first := profileBySlug(profiles, "claude-opus-xhigh"), profileBySlug(profiles, "codex-6-1-sol-high")
+	if last.ID == "" || first.ID == "" {
+		t.Fatal("missing catalog fixture")
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "build", Priority: math.MaxInt32, ProfileID: last.ID, State: "available"}); err != nil {
+			return err
+		}
+		if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "build", Priority: 1, ProfileID: first.ID, State: "available"}); err != nil {
+			return err
+		}
+		var priority int
+		if err := tx.QueryRow(t.Context(), `SELECT priority FROM model_role_routes WHERE role='build' AND profile_id=$1`, last.ID).Scan(&priority); err != nil {
+			return err
+		}
+		if priority != math.MaxInt32 {
+			t.Fatalf("maximum priority not stored: %d", priority)
+		}
+		if _, err := tx.Exec(t.Context(), `SELECT aeon_migrate_models_v2($1)`, p.TenantID); err != nil {
+			return err
+		}
+		var rank, want []string
+		if err := tx.QueryRow(t.Context(), `SELECT o.rank FROM model_pref_orders o JOIN model_pref_profiles w ON w.id=o.profile_id
+ WHERE w.scope='workspace' AND o.column_key='other' AND o.situation='first'`).Scan(&rank); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT array_agg(aeon_models_line(family,harness,model) ORDER BY id=$2::uuid) FROM model_profiles WHERE id IN ($1::uuid,$2::uuid)`, first.ID, last.ID).Scan(&want); err != nil {
+			return err
+		}
+		if !slices.Equal(rank, want) {
+			t.Fatalf("maximum priority lost its place: rank %v, want %v", rank, want)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPlacementSecurityReviewRejectsInvalidStructureBeforePreparation(t *testing.T) {
 	for _, tc := range []struct{ name, query, reason string }{
 		{"missing author", "&area=backend", "review-gate requires author_family"},

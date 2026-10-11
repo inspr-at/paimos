@@ -24,6 +24,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"slices"
 )
 
 var (
@@ -199,6 +200,45 @@ func profileBySlug(profiles []Profile, slug string) Profile {
 	return Profile{}
 }
 
+func profileByID(profiles []Profile, id string) Profile {
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return profile
+		}
+	}
+	return Profile{}
+}
+
+// nativeGrokAccount enrolls a Grok account through a darwin/arm64 pairing:
+// Grok reviews only through that native no-tools adapter.
+func nativeGrokAccount(t *testing.T, p tenant.Principal, profile Profile) string {
+	t.Helper()
+	account := minimalAccount(t, p, profile)
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		ctx := t.Context()
+		var runner, key, request, computer string
+		if err := tx.QueryRow(ctx, `SELECT registered_by_principal_id::text FROM agent_accounts WHERE id=$1`, account).Scan(&runner); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'Native Grok fixture',replace(gen_random_uuid()::text,'-',''),md5(random()::text)||md5(random()::text),ARRAY['models.read']) RETURNING id::text`, p.TenantID, runner).Scan(&key); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
+ VALUES($1,gen_random_uuid(),lpad(floor(random()*1000000000)::bigint::text,9,'0'),md5(random()::text)||md5(random()::text),repeat('b',64),repeat('c',64),'{"platform":"darwin","arch":"arm64"}','fixture','redeemed',$2) RETURNING id::text`, p.TenantID, p.ID).Scan(&request); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,gen_random_uuid(),$2,$3,$4,'native-grok-'||gen_random_uuid(),repeat('c',64)) RETURNING id::text`, p.TenantID, request, runner, key).Scan(&computer); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_requests SET computer_id=$2 WHERE id=$1`, request, computer); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) VALUES($1,$2,$3,$4,$5,clock_timestamp()+interval '1 hour',clock_timestamp())`, p.TenantID, account, computer, request, profile.ID)
+		return err
+	})
+	return account
+}
+
 func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
@@ -252,16 +292,39 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("review without author %d %s", status, body)
 	}
-	status, _ = call(t, &agent, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "")
-	if status != http.StatusBadRequest {
-		t.Fatal("cursor scout should be unsupported")
+	// A harness filter never switches harnesses: no cursor route can run a
+	// Quick job or the Default here, so scout waits instead of running Luna.
+	cursorScout := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "", http.StatusOK)
+	if cursorScout.Profile != nil || !cursorScout.OwnerRequired || cursorScout.CommandTemplate != "" || len(cursorScout.Ladder) == 0 {
+		t.Fatalf("cursor scout switched harnesses: %+v", cursorScout)
 	}
-	gate := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=anthropic", "", http.StatusOK)
-	astra := profileBySlug(profiles, "codex-astra-xhigh")
-	if gate.Profile == nil || gate.Profile.ID != astra.ID || gate.OwnerRequired ||
-		gate.CommandTemplate != "codex exec -m gpt-6-astra -c model_reasoning_effort=xhigh --sandbox read-only '{prompt}'" ||
-		len(gate.Ladder) != 7 || gate.Ladder[1].SkipReasons[0] != "author family" {
+	for _, c := range cursorScout.Ladder {
+		if harness := profileByID(profiles, c.ProfileID).Harness; c.Selected || harness != "cursor" && !slices.Contains(c.SkipReasons, "harness filter") {
+			t.Fatalf("cursor scout considered a %s route: %+v", harness, c)
+		}
+	}
+	// Automatic review takes the first family after the author's in the family
+	// order with a qualified no-tools adapter (Models v2): Codex cannot verify
+	// read-only and xAI wrote the work, so the enrolled Claude route reviews it.
+	fable := profileBySlug(profiles, "claude-fable-xhigh")
+	minimalAccount(t, admin, fable)
+	gate := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=xai", "", http.StatusOK)
+	fableCommand, err := commandTemplate(fable.Harness, fable.Model, fable.Effort, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gate.Profile == nil || gate.Profile.ID != fable.ID || gate.OwnerRequired || gate.CommandTemplate != fableCommand || len(gate.Ladder) < 2 {
 		t.Fatalf("gate %+v", gate)
+	}
+	for _, c := range gate.Ladder {
+		if family := profileByID(profiles, c.ProfileID).Family; family == "xai" || !c.Selected && len(c.SkipReasons) == 0 {
+			t.Fatalf("gate considered the author's family or skipped without a reason: %+v", c)
+		}
+	}
+	if slices.IndexFunc(gate.Ladder, func(c Candidate) bool {
+		return slices.Contains(c.SkipReasons, "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.")
+	}) < 0 {
+		t.Fatalf("gate skipped Codex without its adapter reason: %+v", gate.Ladder)
 	}
 	otherProfiles := decode[[]Profile](t, &other, http.MethodGet, "/api/models", "", http.StatusOK)
 	minimalAccount(t, other, profileBySlug(otherProfiles, "claude-fable-xhigh"))
@@ -278,6 +341,11 @@ func TestAuthorFamilyAliasesResolveAndReview(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "family-aliases", "person", "Ada", []string{"admin"})
 	profiles := decode[[]Profile](t, &admin, http.MethodGet, "/api/models", "", http.StatusOK)
+	// Models dispatches reviews only to enrolled accounts with a qualified
+	// no-tools adapter: Claude reviews OpenAI, xAI and Cursor work, Grok
+	// reviews Anthropic work (Models v2 has no account-less catalog preview).
+	minimalAccount(t, admin, profileBySlug(profiles, "claude-fable-xhigh"))
+	nativeGrokAccount(t, admin, profileBySlug(profiles, "grok-4-7-xhigh"))
 	now := time.Now()
 	for _, tc := range []struct{ input, family string }{
 		{"claude", "anthropic"}, {"codex", "openai"}, {"grok", "xai"},

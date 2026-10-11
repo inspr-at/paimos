@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import DeliveryRow from './DeliveryRow.vue'
 import DeliveryQueue from './DeliveryQueue.vue'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { createScope, scopeOwner } from '../../lib/identityScope'
 import { deliveryLanguage, liftDeliveryHold, minutesSince, readDelivery, sortDelivery, type DeliveryItem, type DeliveryPage } from '../../lib/delivery'
 import { useSession } from '../../stores/session'
@@ -58,7 +58,7 @@ function lift(item: DeliveryItem) {
   }), { failed: cause => { mutationError.value = cause instanceof Error ? cause.message : 'The hold could not be lifted.' }, settled: () => { busy.value = '' } })
 }
 watch([() => props.nodeId, () => props.projectId, () => scopeOwner(session.identity), read], () => { reset(); void load() }, { immediate:true, flush:'sync' })
-const stopAccess = onAccessChange(change => { if (change === 'reset') reset(); else void load() })
+const stopAccess = onAccessRevalidate({ reset, refresh: () => { void load() } })
 const poll = setInterval(() => { now.value = Date.now(); void load() }, 30_000)
 onBeforeUnmount(() => { scope.dispose(); clearInterval(poll); stopAccess() })
 </script>

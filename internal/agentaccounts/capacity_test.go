@@ -3,12 +3,14 @@ package agentaccounts
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -20,6 +22,255 @@ func encoded(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+// seedExistingSchedule represents a schedule saved by a release before the
+// Sprint/Hold write retirement. Live save assertions use the HTTP handler.
+func seedExistingSchedule(t *testing.T, person tenant.Principal, in scheduleOverride) {
+	t.Helper()
+	key := ""
+	var account any
+	switch in.Scope {
+	case "pool":
+		key = in.Pool
+	case "group":
+		key = in.GroupID
+	case "account":
+		key, account = in.AccountID, in.AccountID
+	}
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		if in.Scope == "account" {
+			if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET capacity_owner=COALESCE(capacity_owner,$2::uuid) WHERE id=$1`, key, person.ID); err != nil {
+				return err
+			}
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,principal_id,scope,scope_key) DO UPDATE SET schedule=EXCLUDED.schedule`, person.TenantID, person.ID, in.Scope, key, account, encoded(t, in.Schedule))
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func storedCapacitySchedule(t *testing.T, mod httpapi.Module, person tenant.Principal, target scheduleOverride) capacity.Schedule {
+	t.Helper()
+	var rows []scheduleOverride
+	callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/capacity/schedule", "", 200, &rows)
+	for _, row := range rows {
+		if row.Scope == target.Scope && row.Pool == target.Pool && row.AccountID == target.AccountID && row.GroupID == target.GroupID {
+			return *row.Schedule
+		}
+	}
+	t.Fatalf("stored schedule missing: %+v", target)
+	return capacity.Schedule{}
+}
+
+// An account save can copy the resolved user, pool or group schedule, as the
+// Settings action to use suggested work hours does. Other scopes use their
+// own stored entry, as the pool Keep for you action does.
+func legacyScheduleTarget(t *testing.T, scope string) (limitFixture, scheduleOverride, scheduleOverride) {
+	t.Helper()
+	f := limitWorld(t, "legacy-schedule", 3)
+	source := scheduleOverride{Scope: strings.TrimPrefix(scope, "account-from-")}
+	switch source.Scope {
+	case "pool":
+		source.Pool = "codex"
+	case "group":
+		var group AccountGroup
+		callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/groups", encoded(t, map[string]any{
+			"harness": "codex", "name": "Legacy", "account_ids": []string{f.account.ID},
+		}), 201, &group)
+		source.GroupID = group.ID
+	case "account":
+		source.AccountID = f.account.ID
+	}
+	target := source
+	if source.Scope != "account" {
+		callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: f.account.ID}), 204, nil)
+	}
+	if strings.HasPrefix(scope, "account-from-") {
+		target = scheduleOverride{Scope: "account", AccountID: f.account.ID}
+	}
+	return f, source, target
+}
+
+// AEON-1177 M1: saving reserve/work-hour changes may round-trip a legacy
+// override, but must keep its exact deadline, including an undated Hold.
+func TestRetiredCapacityOverridesRoundTripUnchanged(t *testing.T) {
+	now := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	for _, scope := range []string{"user", "pool", "group", "account", "account-from-user", "account-from-pool", "account-from-group"} {
+		t.Run(scope, func(t *testing.T) {
+			f, source, target := legacyScheduleTarget(t, scope)
+			for _, kind := range []string{"sprint", "hold"} {
+				for _, dated := range []bool{true, false} {
+					s := capacity.DefaultSchedule("Europe/Vienna")
+					s.Override = kind
+					if dated {
+						until := now.Add(90 * time.Minute)
+						s.OverrideUntil = &until
+					}
+					source.Schedule = &s
+					seedExistingSchedule(t, f.admin, source)
+					next := s
+					next.Reserve, next.ReservePercent = capacity.ReserveFixed, 40
+					next.Week = capacity.Preset(5)
+					next.Week[0].Start, next.Week[0].End = 9, 17
+					target.Schedule = &next
+					status, raw := callAt(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, target), now)
+					if status != 204 {
+						t.Fatalf("%s dated=%t round-trip: status %d: %s", kind, dated, status, raw)
+					}
+					if got := storedCapacitySchedule(t, f.mod, f.admin, target); encoded(t, got) != encoded(t, next) {
+						t.Fatalf("%s dated=%t changed deadline or lost edits: got %s, want %s", kind, dated, encoded(t, got), encoded(t, next))
+					}
+					if source.Scope != target.Scope {
+						if got := storedCapacitySchedule(t, f.mod, f.admin, source); encoded(t, got) != encoded(t, s) {
+							t.Fatal("account save changed its inherited source")
+						}
+						cleared := target
+						cleared.Schedule = nil
+						callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, cleared), 204, nil)
+					}
+				}
+			}
+		})
+	}
+}
+
+// AEON-1177 M1: expired raw overrides returned by schedule resolution cannot
+// permanently block work-hour saves. Expiry includes the exact deadline.
+func TestRetiredCapacityOverridesDropExpiredOnSave(t *testing.T) {
+	now := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	for _, scope := range []string{"user", "pool", "group", "account", "account-from-user", "account-from-pool", "account-from-group"} {
+		t.Run(scope, func(t *testing.T) {
+			f, source, target := legacyScheduleTarget(t, scope)
+			for _, kind := range []string{"sprint", "hold"} {
+				for _, elapsed := range []time.Duration{0, time.Hour} {
+					until := now.Add(-elapsed)
+					s := capacity.DefaultSchedule("Europe/Vienna")
+					s.Override, s.OverrideUntil = kind, &until
+					source.Schedule = &s
+					seedExistingSchedule(t, f.admin, source)
+					next := s
+					next.Week = capacity.Preset(5)
+					next.Week[0].Start, next.Week[0].End = 9, 17
+					target.Schedule = &next
+					status, raw := callAt(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, target), now)
+					if status != 204 {
+						t.Fatalf("%s elapsed=%s expired save: status %d: %s", kind, elapsed, status, raw)
+					}
+					next.Override, next.OverrideUntil = "", nil
+					if got := storedCapacitySchedule(t, f.mod, f.admin, target); encoded(t, got) != encoded(t, next) {
+						t.Fatalf("expired override survived or lost work hours: got %s, want %s", encoded(t, got), encoded(t, next))
+					}
+					if source.Scope != target.Scope {
+						if got := storedCapacitySchedule(t, f.mod, f.admin, source); encoded(t, got) != encoded(t, s) {
+							t.Fatal("account save changed its expired inherited source")
+						}
+						cleared := target
+						cleared.Schedule = nil
+						callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, cleared), 204, nil)
+					}
+				}
+			}
+		})
+	}
+}
+
+// AEON-1177: all schedule scopes reject creating or changing Sprint/Hold;
+// unchanged active overrides can round-trip, and ending one stays possible.
+func TestRetiredCapacityOverridesCanStillEnd(t *testing.T) {
+	f := limitWorld(t, "override-retired", 3)
+	path := "/api/agent-accounts/capacity/schedule"
+	var group AccountGroup
+	callStatus(t, f.mod, &f.admin, "", "POST", "/api/agent-accounts/groups", `{"harness":"codex","name":"Legacy"}`, 201, &group)
+	snapshot := func() string {
+		t.Helper()
+		var rows []scheduleOverride
+		callStatus(t, f.mod, &f.admin, "", "GET", path, "", 200, &rows)
+		return encoded(t, rows)
+	}
+	reject := func(in scheduleOverride) {
+		t.Helper()
+		before := snapshot()
+		var out struct{ Error, Code string }
+		callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, in), 400, &out)
+		if out.Code != "override_retired" || out.Error == "" {
+			t.Fatalf("%s %s: %+v", in.Scope, in.Schedule.Override, out)
+		}
+		if after := snapshot(); after != before {
+			t.Fatalf("rejected override changed schedules: %s -> %s", before, after)
+		}
+	}
+	for _, target := range []scheduleOverride{
+		{Scope: "user"}, {Scope: "pool", Pool: "codex"},
+		{Scope: "account", AccountID: f.account.ID}, {Scope: "group", GroupID: group.ID},
+	} {
+		for _, kind := range []string{"sprint", "hold"} {
+			s := capacity.DefaultSchedule("Europe/Vienna")
+			s.Override = kind
+			target.Schedule = &s
+			reject(target)
+			until := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+			s.OverrideUntil = &until
+			reject(target)
+			seedExistingSchedule(t, f.admin, target)
+			callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, target), 204, nil)
+			if got := storedCapacitySchedule(t, f.mod, f.admin, target); encoded(t, got) != encoded(t, s) {
+				t.Fatal("replay changed the existing override or deadline")
+			}
+			later := until.Add(time.Hour)
+			s.OverrideUntil = &later
+			reject(target) // extension also cannot change the stored deadline
+			earlier := until.Add(-time.Minute)
+			s.OverrideUntil = &earlier
+			reject(target)
+			s.OverrideUntil = nil
+			reject(target) // dropping the deadline would make it indefinite
+			s.OverrideUntil = &until
+			s.Override = "hold"
+			if kind == "hold" {
+				s.Override = "sprint"
+			}
+			reject(target)
+			s.Override = ""
+			callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, target), 204, nil)
+			var rows []scheduleOverride
+			callStatus(t, f.mod, &f.admin, "", "GET", path, "", 200, &rows)
+			found := false
+			for _, row := range rows {
+				if row.Scope == target.Scope && row.Pool == target.Pool && row.AccountID == target.AccountID && row.GroupID == target.GroupID {
+					found = true
+					if row.Schedule.Override != "" || row.Schedule.OverrideUntil != nil {
+						t.Fatalf("clear did not end override: %+v", row)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("clear removed the base schedule")
+			}
+			s.Override, s.OverrideUntil = kind, &until
+			seedExistingSchedule(t, f.admin, target)
+			target.Schedule = nil
+			callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, target), 204, nil)
+			callStatus(t, f.mod, &f.admin, "", "GET", path, "", 200, &rows)
+			for _, row := range rows {
+				if row.Scope == target.Scope && row.Pool == target.Pool && row.AccountID == target.AccountID && row.GroupID == target.GroupID {
+					t.Fatal("null schedule did not remove legacy override")
+				}
+			}
+		}
+	}
+	s := capacity.DefaultSchedule("Europe/Vienna")
+	s.Override = "hold"
+	in := scheduleOverride{Scope: "user", Schedule: &s}
+	callStatus(t, f.mod, nil, "", "PUT", path, encoded(t, in), 401, nil)
+	callStatus(t, f.mod, &f.runner, f.token, "PUT", path, encoded(t, in), 403, nil)
+	// Away and ordinary schedules continue to use the existing validation.
+	s.Override = "away"
+	until := time.Now().UTC().Add(time.Hour)
+	s.OverrideUntil = &until
+	callStatus(t, f.mod, &f.admin, "", "PUT", path, encoded(t, in), 204, nil)
 }
 
 func TestCapacityIngestRouteResetAndRLS(t *testing.T) {
@@ -73,7 +324,7 @@ func TestCapacityIngestRouteResetAndRLS(t *testing.T) {
 	}
 	schedule := capacity.DefaultSchedule()
 	schedule.Override = "sprint"
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, &schedule, false, ""}), 204, nil)
+	seedExistingSchedule(t, admin, scheduleOverride{"account", "", account.ID, &schedule, false, ""})
 	run := insertRun(t, admin, runner, profile)
 	route := mustRoute(t, mod, runner, token, run, "daemon-a", []Account{account}, map[string]int64{"requests": 1})
 	if len(route.Reservations) != 1 || route.Reservations[0].Unit != "percent" {
@@ -415,7 +666,11 @@ func TestCapacityEnforcesSchedulesSnapshotsAndResourceStops(t *testing.T) {
 		if scope == "pool" {
 			pool, id = "codex", ""
 		}
-		callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{scope, pool, id, &schedule, false, ""}), 204, nil)
+		if override != "" {
+			seedExistingSchedule(t, admin, scheduleOverride{scope, pool, id, &schedule, false, ""})
+		} else {
+			callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{scope, pool, id, &schedule, false, ""}), 204, nil)
+		}
 	}
 	route := func(status int) string {
 		t.Helper()
@@ -554,7 +809,7 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	check("Pacific/Auckland", "")
 	user := capacity.DefaultSchedule("Europe/Vienna")
 	user.Override = "hold"
-	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"user", "", "", &user, false, ""}), 204, nil)
+	seedExistingSchedule(t, person, scheduleOverride{"user", "", "", &user, false, ""})
 	check("Europe/Vienna", "hold")
 	pool := capacity.DefaultSchedule("America/New_York")
 	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", &pool, false, ""}), 204, nil)
@@ -577,6 +832,7 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	}
 	check("UTC", "")
 	// An explicitly saved owner remains authoritative even with multiple creators.
+	user.Override = ""
 	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, &user, false, ""}), 204, nil)
 	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"account", "", account.ID, nil, false, ""}), 204, nil)
 	check("America/New_York", "")
@@ -637,7 +893,7 @@ func TestCapacityPreviewPacesDraftWithoutSaving(t *testing.T) {
 	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"user", "", "", &saved, false, ""}), 204, nil)
 	hold := saved
 	hold.Override = "hold"
-	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{"pool", "codex", "", &hold, false, ""}), 204, nil)
+	seedExistingSchedule(t, admin, scheduleOverride{"pool", "codex", "", &hold, false, ""})
 
 	draft := capacity.DefaultSchedule("Europe/Vienna")
 	for i := range draft.Week {

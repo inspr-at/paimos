@@ -75,6 +75,7 @@ type Module struct {
 	heartbeatIsolation func(context.Context, pgx.Tx, string) (bool, error)
 	sessionRecovery    SessionRecovery
 	leadAdmission      LeadAdmission
+	leadRuntime        LeadRuntimeChecks
 	routineRuntime     modelregistry.ExecutionRuntimeReader
 	planningStart      func(context.Context, pgx.Tx, string, string) error
 	pool               *pgxpool.Pool
@@ -126,6 +127,9 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		status         int
 		fn             func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 	}{
+		{"GET /api/projects/{projectId}/lead-runtime", "harness.worker", true, 200, m.readLeadRuntime},
+		{"POST /api/projects/{projectId}/lead-runtime/claim", "harness.worker", true, 200, m.claimLeadRuntime},
+		{"POST /api/projects/{projectId}/lead-runtime/report", "harness.worker", true, 200, m.reportLeadRuntime},
 		{"GET /api/projects/{projectId}/lead", "harness.read", false, 200, m.readLead},
 		{"GET /api/projects/{projectId}/routine-execution-settings", "harness.read", false, 200, m.readRoutineExecution},
 		{"PUT /api/projects/{projectId}/routine-execution-settings", "harness.control", false, 200, m.writeRoutineExecution},
@@ -214,6 +218,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		handler := workorders.Endpoint(m.pool, route.scope, route.agent, route.status, route.fn)
 		if route.pattern == "GET /api/projects/{projectId}/harness-sessions/{sessionId}" || route.pattern == "POST /api/projects/{projectId}/harness-sessions/{sessionId}/heartbeat" {
 			handler = reportercontract.WithHeader(reportercontract.HarnessSession, handler)
+		} else if route.pattern == "GET /api/projects/{projectId}/lead" {
+			handler = reportercontract.WithHeader(reportercontract.ProjectLead, handler)
 		}
 		mux.HandleFunc(route.pattern, handler)
 	}

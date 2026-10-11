@@ -78,7 +78,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if !boardDispatchAdopted(s) && !(q.ExplicitBoard && boardInitialized(s)) {
 		return nil, nil
 	}
-	c, err := loadBoardCatalog(ctx, tx)
+	c, err := q.preview.board(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -156,6 +156,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	daily := modelsDailyAdmission{principal: p, snapshots: map[string]agentplan.Snapshot{}, unknown: map[string]bool{}}
 	seen := map[string]bool{}
 	admissionWait := false
+	residencyHeld := false
 	waitCode := ""
 	for _, order := range d.Steps {
 		key := order.Line
@@ -222,6 +223,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				admissionWait = true
 			}
 			ids := []string{}
+			residencyOnly := false
 			if len(reasons) == 0 {
 				if review {
 					capability := agentverification.For(profile.Harness, "darwin", "arm64")
@@ -232,9 +234,12 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 					}
 				} else {
 					ids, err = boardRouteAccounts(ctx, tx, profile, q.ProjectID, requirement, now)
-					if err == nil && q.Escalation {
-						ids, err = agentaccounts.EscalationRoomIDs(ctx, tx, ids, now)
-					}
+				}
+				if err == nil && len(reasons) == 0 && len(ids) == 0 && requirement != "any" {
+					residencyOnly, err = refusedForResidency(ctx, tx, profile, q.ProjectID, review, now)
+				}
+				if err == nil && !review && q.Escalation {
+					ids, err = agentaccounts.EscalationRoomIDs(ctx, tx, ids, now)
 				}
 				if err != nil {
 					return nil, err
@@ -254,7 +259,12 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				}
 			}
 			if len(reasons) == 0 && len(ids) == 0 {
-				reasons = append(reasons, "no qualified account with available capacity")
+				if residencyOnly {
+					reasons = append(reasons, "not allowed: "+requirement)
+					residencyHeld = true
+				} else {
+					reasons = append(reasons, "no qualified account with available capacity")
+				}
 			}
 			stage := order.Stage
 			if stage == "quick" || stage == "automatic" {
@@ -313,6 +323,17 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			if len(d.Held) > 0 {
 				out.Trace.Blocked = d.Held[0].Reason
 			}
+			if residencyHeld {
+				out.Trace.Blocked = "no " + requirement + " model route"
+			}
+			// An escalation outcome is the whole walk's, not its first line's:
+			// the Decision Desk stores it as the route block.
+			if q.Escalation {
+				out.Trace.Blocked = "no allowed stronger route"
+				if lockedEscalation {
+					out.Trace.Blocked = "locked model preference"
+				}
+			}
 		}
 		if roleName == "review-gate-security" {
 			out.Trace.Blocked = "no qualified security review profile/account"
@@ -327,6 +348,19 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		}
 	}
 	return &out, nil
+}
+
+// refusedForResidency reports whether accounts would run this route without
+// the residency requirement, so the walk names residency as the cause.
+func refusedForResidency(ctx context.Context, tx pgx.Tx, profile Profile, project string, review bool, now time.Time) (bool, error) {
+	var ids []string
+	var err error
+	if review {
+		ids, err = reviewQualifiedAccountIDs(ctx, tx, profile, project, "any", now)
+	} else {
+		ids, err = boardRouteAccounts(ctx, tx, profile, project, "any", now)
+	}
+	return len(ids) > 0, err
 }
 
 // Keep the queued-round policy and saved family review rows during the S2

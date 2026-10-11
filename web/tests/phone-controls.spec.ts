@@ -61,8 +61,10 @@ for (const width of [390, 768, 1024, 1440]) {
       const opener = page.getByRole('button', { name: sheet ? 'Filters' : 'Display: Display', exact: true })
       await expect(opener).toBeVisible()
       await opener.click()
-      const dialog = page.getByRole('dialog', { name: sheet ? 'Filters' : 'Display options', exact: true })
-      const scroll = sheet ? dialog.locator('.sheet-scroll') : dialog
+      // AEON-1188: the Filters sheet keeps filtering and links to the one Display menu, here a sheet.
+      if (sheet) await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+      const dialog = page.getByRole('dialog', { name: 'Display options', exact: true })
+      const scroll = sheet ? dialog.locator('.menu-body') : dialog
       const pinned = sheet ? { frame: dialog, header: dialog.locator('header'), done: dialog.locator('footer button') } : {}
       await expect(dialog.getByText('Row height', { exact: true })).toBeVisible()
       if (sheet) await expect(dialog.getByRole('heading', { name: 'Display' })).toBeVisible()
@@ -202,11 +204,13 @@ test('phone cards render saved column visibility and order at 390px', async ({ p
   const card = page.locator('#row-n-1')
   await expect(card.locator('.c-cost')).toHaveCount(0)
   const opener = page.getByRole('button', { name: 'Filters', exact: true })
-  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+  const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
   const columns = sheet.getByRole('list', { name: 'Columns', exact: true })
-  await opener.click()
+  // AEON-1188: columns live in the Display menu, reached through the Filters sheet's link.
+  const openDisplay = async () => { await opener.click(); await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click(); await expect(sheet).toBeVisible() }
+  await openDisplay()
   const cost = columns.getByRole('checkbox', { name: 'Cost unit', exact: true })
-  await expectStableControls({ controls: { sheet, done: sheet.locator('footer button'), columns, cost }, scrollAreas: { body: sheet.locator('.sheet-scroll') }, interactions: [
+  await expectStableControls({ controls: { sheet, done: sheet.locator('footer button'), columns, cost }, scrollAreas: { body: sheet.locator('.menu-body') }, interactions: [
     { name: 'show Cost unit on cards', run: async () => { await cost.check(); await expect(card.locator('.c-cost')).toContainText(costUnit) } },
   ] })
   await sheet.locator('footer button').click()
@@ -215,7 +219,7 @@ test('phone cards render saved column visibility and order at 390px', async ({ p
   await page.reload()
   await expect(card.locator('.c-cost')).toBeVisible()
   await expect(card.locator('.c-cost')).toContainText(costUnit)
-  await opener.click()
+  await openDisplay()
   for (const checkbox of await columns.getByRole('checkbox').all()) {
     if (await checkbox.isEnabled()) await checkbox.uncheck()
   }
@@ -230,7 +234,7 @@ test('phone cards render saved column visibility and order at 390px', async ({ p
   await expect(card.locator('.c-check [role=checkbox]')).toHaveAttribute('tabindex', '-1')
   await expect(card.locator('.c-key')).toContainText('PHAROS-11')
   await expect(card.locator('.c-title')).toContainText(data.nodes.find(n => n.id === 'n-1')!.title)
-  await opener.click()
+  await openDisplay()
   await columns.getByRole('checkbox', { name: 'Assignee', exact: true }).check()
   await columns.getByRole('checkbox', { name: 'Cost unit', exact: true }).check()
   const costRow = columns.locator('[data-column-row="cost"]')
@@ -255,7 +259,7 @@ test('phone cards render saved column visibility and order at 390px', async ({ p
     }
   }
   await page.setViewportSize({ width: 390, height: 900 })
-  await opener.click()
+  await openDisplay()
   await sheet.getByRole('button', { name: 'Automatic', exact: true }).click()
   await sheet.locator('footer button').click()
   await expect(card.locator('.c-cost, .c-assignee')).toHaveCount(0)
@@ -378,18 +382,19 @@ test.describe('fix3: phone regressions', () => {
       await page.goto('/p/PHAROS')
       await page.getByRole('button', { name: 'Filters', exact: true }).tap()
       expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
-      const sheet = page.getByRole('dialog', { name: 'Filters', exact: true }), columns = sheet.getByRole('list', { name: 'Columns', exact: true })
+      await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).tap()
+      const sheet = page.getByRole('dialog', { name: 'Display options', exact: true }), columns = sheet.getByRole('list', { name: 'Columns', exact: true })
       const cost = columns.getByRole('checkbox', { name: 'Cost unit', exact: true }), row = columns.locator('.row').filter({ has: page.getByRole('checkbox', { name: 'Cost unit', exact: true }) })
       const up = row.getByRole('button', { name: 'Move Cost unit up' }), down = row.getByRole('button', { name: 'Move Cost unit down' })
       await row.scrollIntoViewIfNeeded()
       await touchTargets([row.locator('.row-label'), up, down])
       const before = await columns.locator('input[data-column-row]').evaluateAll(els => els.map(el => (el as HTMLElement).dataset.columnRow))
-      await expectStableControls({ controls: { sheet, done: sheet.locator('footer button'), columns, row, cost, up, down }, scrollAreas: { body: sheet.locator('.sheet-scroll') }, interactions: [
+      await expectStableControls({ controls: { sheet, done: sheet.locator('footer button'), columns, row, cost, up, down }, scrollAreas: { body: sheet.locator('.menu-body') }, interactions: [
         { name: 'toggle the column without moving its targets', run: async () => { await cost.tap(); await expect(cost).toBeChecked() } },
       ] })
       // Reordering intentionally moves a row; measure the list frame and prove
       // the taps hit the requested direction rather than its neighbour.
-      await expectStableControls({ controls: { sheet, done: sheet.locator('footer button'), columns }, scrollAreas: { body: sheet.locator('.sheet-scroll') }, interactions: [
+      await expectStableControls({ controls: { sheet, done: sheet.locator('footer button'), columns }, scrollAreas: { body: sheet.locator('.menu-body') }, interactions: [
         { name: 'tap up', run: async () => { await up.tap(); await expect.poll(() => data.preferences['list:p-pharos']?.order?.indexOf('cost')).toBe(before.indexOf('cost') + 1) } },
         { name: 'tap down', run: async () => { await down.tap(); await expect.poll(() => data.preferences['list:p-pharos']?.order?.indexOf('cost')).toBe(before.indexOf('cost') + 2) } },
       ] })

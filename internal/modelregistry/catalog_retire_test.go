@@ -637,6 +637,92 @@ func TestCatalogOutdatedCompleteListingPresence(t *testing.T) {
 	}
 }
 
+// Risk: a version reachable through several harnesses moves a pi pause to the
+// successor's claude route by effort alone, pausing the wrong route and leaving
+// the successor's pi route open, or silently drops a pause with no pi successor.
+// The pi successor's native effort differs, so an effort-only pick is wrong.
+func TestCatalogOutdatedRetirePauseKeepsHarnessRoute(t *testing.T) {
+	setup := func(t *testing.T, piSuccessor bool) tenant.Principal {
+		admin, _, _ := retireFixture(t)
+		inRegistry(t, admin, func(tx pgx.Tx) error {
+			pins := []profileWrite{{Slug: "old-opus-pi", Version: "1", Harness: "pi", Family: "anthropic", Model: "anthropic/claude-opus-5", Effort: "high", Tier: "strong"}}
+			if piSuccessor {
+				pins = append(pins, profileWrite{Slug: "next-opus-pi", Version: "1", Harness: "pi", Family: "anthropic", Model: "anthropic/claude-opus-5.5", Effort: "xhigh", Tier: "strong"})
+			}
+			for _, pin := range pins {
+				prof, err := insertActivatedProfile(t.Context(), tx, admin, pin, true, modelactivation.Person)
+				if err != nil {
+					return err
+				}
+				if !prof.Enabled {
+					t.Fatal("fixture route is not enabled", pin.Slug)
+				}
+			}
+			_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by) VALUES($1,'pi','anthropic/claude-opus-5','OpenRouter budget',$2)`, admin.TenantID, admin.ID)
+			return err
+		})
+		routes := map[string]bool{}
+		inRegistry(t, admin, func(tx pgx.Tx) error {
+			models, err := loadLifecycleCatalog(t.Context(), tx, time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC))
+			for _, model := range models {
+				if model.Identity == "anthropic:claude-opus-5" || model.Identity == "anthropic:claude-opus-5.5" {
+					for _, prof := range model.Profiles {
+						routes[model.Identity+" "+prof.Harness+"/"+prof.Model] = true
+					}
+				}
+			}
+			return err
+		})
+		if !routes["anthropic:claude-opus-5 pi/anthropic/claude-opus-5"] || !routes["anthropic:claude-opus-5 claude/claude-opus-5"] || !routes["anthropic:claude-opus-5.5 claude/claude-opus-5.5"] || routes["anthropic:claude-opus-5.5 pi/anthropic/claude-opus-5.5"] != piSuccessor {
+			t.Fatalf("fixture did not group both harnesses under one version: %v", routes)
+		}
+		return admin
+	}
+	pauses := func(t *testing.T, p tenant.Principal) map[string]string {
+		out := map[string]string{}
+		inRegistry(t, p, func(tx pgx.Tx) error {
+			rows, err := tx.Query(t.Context(), `SELECT harness||'/'||model,reason FROM model_pauses ORDER BY harness,model`)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var route, reason string
+				if err := rows.Scan(&route, &reason); err != nil {
+					return err
+				}
+				out[route] = reason
+			}
+			return rows.Err()
+		})
+		return out
+	}
+	t.Run("pause follows its own harness", func(t *testing.T) {
+		admin := setup(t, true)
+		preview := outdatedPreview(t, admin)
+		boardDecode[retireResult](t, boardCall(t, admin, "POST", "/api/models/outdated/retire", retireWrite{Versions: []string{"anthropic:claude-opus-5"}, Revision: preview.Revision}, ""), 200)
+		got := pauses(t, admin)
+		if got["pi/anthropic/claude-opus-5.5"] != "OpenRouter budget" {
+			t.Fatalf("successor pi route left unpaused: %v", got)
+		}
+		if _, wrong := got["claude/claude-opus-5.5"]; wrong {
+			t.Fatalf("pi pause moved to the claude route: %v", got)
+		}
+	})
+	t.Run("paused route without a matching successor rejects", func(t *testing.T) {
+		admin := setup(t, false)
+		preview := outdatedPreview(t, admin)
+		before := retireState(t, admin)
+		rejected := boardCall(t, admin, "POST", "/api/models/outdated/retire", retireWrite{Versions: []string{"anthropic:claude-opus-5"}, Revision: preview.Revision}, "")
+		if rejected.Code != 409 || !strings.Contains(rejected.Body.String(), "successor has no matching harness route") {
+			t.Fatalf("paused pi route without successor: %d %s", rejected.Code, rejected.Body.String())
+		}
+		if !reflect.DeepEqual(before, retireState(t, admin)) || eventCount(t, admin, "model.outdated_retired") != 0 {
+			t.Fatal("rejected retirement changed state or reported success")
+		}
+	})
+}
+
 // Risk: authorization checked before the tenant fence survives a concurrent
 // role revocation. The lock waiter proves the mutation overlaps the revocation.
 func TestCatalogOutdatedRetireRevocationFence(t *testing.T) {

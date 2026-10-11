@@ -795,9 +795,14 @@ func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 		})
 	}
 	resetRoutingFixture()
-	// Shared demand with no model route also yields to a ready project.
+	// Shared demand with no model route also yields to a ready project. Scout
+	// work always has Quick jobs or the Default in Models v2, so the routeless
+	// demand is build-hard work whose explicit Stuck order is empty and waits.
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"route_role":"scout"}'::jsonb WHERE id=ANY($1::uuid[])`, tickets[:2])
+		if err := dbtest.ModelsOrder(t.Context(), tx, f.person.TenantID, "other", "stuck", "wait"); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"route_role":"build-hard"}'::jsonb WHERE id=ANY($1::uuid[])`, tickets[:2])
 		return err
 	})
 	next(1, tickets[2], "")

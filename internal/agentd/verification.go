@@ -77,6 +77,9 @@ func validQueuedExecutionMode(r Run, adapter Adapter) error {
 			return ErrBudgetEnforcementUnavailable
 		}
 	}
+	if err := validRoutineToolMode(r, adapter); err != nil {
+		return err
+	}
 	if r.ReadOnlyReview {
 		a, ok := adapter.(VerificationAdapter)
 		if !ok || !a.VerificationSupported() {

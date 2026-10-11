@@ -1867,7 +1867,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </div>
 
       <template v-if="settingsActive">
-        <RecurringWorkCard :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" />
+        <RecurringWorkCard :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" :consent="route.query.consent === '1'" />
         <ProjectWorkContextCard :key="project.id" :project="{ id: project.id, title: project.title }" />
       </template>
       <DeliveryView v-else-if="deliveryActive" :key="`${project.id}/${me?.id ?? ''}`" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" />
@@ -1931,12 +1931,9 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <StatusMenu :project-id="projectId ?? undefined" v-if="statusMenu" :anchor="statusMenu.anchor" :derived="statusMenu.row.status_derived" :children-count="statusMenu.row.work_children_count" :current="statusMenu.row.state" :known-states="knownStates" :ticket-key="statusMenu.row.key" @choose="chooseStatus" @close="closeStatus" />
       <FilterSheet
         ref="filterSheet" :summary="project" :filters="filters" :options="options" :loading="sheetLoading" :total="total" :view="graphActive ? 'graph' : outlineActive ? 'outline' : 'list'" :can-save="!graphActive && canSaveView"
-        :density="density" :columns="toolbarColumns" :project-header="ticketsHeader"
-        @sort="setSort" @density="setDensity" @columns="saveColumns" @columns-reset="resetColumns"
-        @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
-        @expand-all="outline.expandAll()" @collapse-all="outline.collapseAll()"
-        @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="manualShowClosed" @hide-states="setHideStates" @group="setGroup" @date="setDate"
-        @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el?.offsetParent ? viewBar.$el : anchor)"
+        :project-header="ticketsHeader"
+        @toggle="toggleValue" @exclude="excludeValue" @clear-all="clearFilters" @show-closed="manualShowClosed" @hide-states="setHideStates" @date="setDate"
+        @opened="sheetOpened" @save-view="anchor => startSave(viewBar?.$el?.offsetParent ? viewBar.$el : anchor)" @display="toolbar?.openDisplay()"
       />
       <SaveViewPanel
         v-if="savePanel" :key="`${savePanel.mode}-${savePanel.view?.id ?? 'new'}`" :anchor="savePanel.anchor" :mode="savePanel.mode" :name="savePanel.name" :project-title="project.title"

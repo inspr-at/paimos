@@ -200,8 +200,9 @@ func TestReviewOrderSavedFallbackPreferencesAndQualification(t *testing.T) {
 			{"author", "", "author family", WorkQuery{AuthorFamily: "anthropic"}},
 			{"adapter", "", "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.", WorkQuery{AuthorFamily: "xai"}},
 			{"harness", "", "harness filter", WorkQuery{AuthorFamily: "openai", Harness: "codex"}},
-			{"account", `UPDATE agent_accounts SET last_probe_ok=false`, "no qualified account with available capacity", q},
-			{"residency", "", "no qualified account with available capacity", WorkQuery{AuthorFamily: "openai", TicketResidency: "eu"}},
+			// Harness health names the account state; residency names itself.
+			{"account", `UPDATE agent_accounts SET last_probe_ok=false`, "Claude account cannot take new work right now", q},
+			{"residency", "", "not allowed: eu", WorkQuery{AuthorFamily: "openai", TicketResidency: "eu"}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				sub, err := tx.Begin(t.Context())

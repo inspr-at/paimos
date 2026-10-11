@@ -7,7 +7,7 @@
 import { parseHostCapacity, type HostCapacityView } from './hostCapacity.ts'
 import { parseJson } from './json.ts'
 import { api, resilientFetch } from './api.ts'
-import { onAccessChange } from './authz.ts'
+import { onAccessRevalidate } from './authz.ts'
 import { brand } from './brand.ts'
 
 function product(): string {
@@ -285,7 +285,7 @@ export function discardPairingReads(): void {
   personControllers.clear()
 }
 
-onAccessChange(change => { if (change === 'reset') discardPairingReads() })
+onAccessRevalidate({ reset: discardPairingReads })
 
 export function pairingPermissions(input: { permissions: readonly string[]; principalKind?: string }): PairingPermissions {
   const person = input.principalKind === undefined || input.principalKind === 'person'
@@ -307,9 +307,10 @@ export function isPublicPairingGuide(path: string): boolean {
 }
 
 /** Paths that must be registered before `/agents/:sessionId`, or that param captures them. */
-export function agentRouteKind(path: string): 'index' | 'usage' | 'register-agent' | 'session' | 'other' {
+export function agentRouteKind(path: string): 'index' | 'usage' | 'routines' | 'register-agent' | 'session' | 'other' {
   if (path === '/agents' || path === '/agents/') return 'index'
   if (path === '/agents/usage' || path.startsWith('/agents/usage/')) return 'usage'
+  if (path === '/agents/routines' || path.startsWith('/agents/routines/')) return 'routines'
   if (isPublicPairingGuide(path)) return 'register-agent'
   if (path.startsWith('/agents/')) return 'session'
   return 'other'

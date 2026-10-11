@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -80,9 +81,17 @@ type cursor struct {
 	Kind   string    `json:"kind"`
 }
 
-type Module struct{ pool *pgxpool.Pool }
+type Module struct {
+	pool           *pgxpool.Pool
+	routineRuntime recurrences.ExecutionRuntimeReader
+}
 
 func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
+
+func (m *Module) WithRoutineExecutionRuntime(reader recurrences.ExecutionRuntimeReader) *Module {
+	m.routineRuntime = reader
+	return m
+}
 
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/decision-desk/projection", m.projection)
@@ -114,8 +123,8 @@ func (m *Module) projection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	page, err := m.Read(r.Context(), p, limit, after)
-	if errors.Is(err, ErrCoverage) {
-		httpapi.WriteError(w, 422, "decision desk coverage exceeds 1000 projects")
+	if errors.Is(err, ErrCoverage) || errors.Is(err, recurrences.ErrConsentCoverage) {
+		httpapi.WriteError(w, 422, err.Error())
 		return
 	}
 	if err != nil {
@@ -149,19 +158,24 @@ func validID(id string) bool {
 }
 
 func validKind(kind string) bool {
-	return kind == "question" || kind == "approval" || kind == "action_request" || kind == "doctrine" || kind == "key_trim" || kind == "stepup" || kind == "tier_request" || kind == "account_matrix"
+	return kind == "question" || kind == "approval" || kind == "action_request" || kind == "doctrine" || kind == "key_trim" || kind == "stepup" || kind == "tier_request" || kind == "account_matrix" || kind == "routine_consent"
 }
 
 func (m *Module) Read(ctx context.Context, p tenant.Principal, limit int, after *cursor) (Page, error) {
+	ctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
 	page := Page{Items: []Item{}}
 	if p.Kind != tenant.Person || p.KeyCreatorID != "" || limit < 1 || limit > 100 {
 		return page, errors.New("invalid desk reader")
 	}
 	// Source-specific permissions below are authoritative, including callers
 	// whose questions.read does not include generic nodes.read.
-	err := db.InTenant(db.AllProjects(ctx, "decision desk: every source filtered by current recipient permissions"), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenantReadSnapshot(db.AllProjects(ctx, "decision desk: every source filtered by current recipient permissions"), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.SetLocalStatementTimeout(ctx, tx, 5*time.Second); err != nil {
+			return err
+		}
 		var err error
-		page, err = ReadTx(ctx, tx, p, limit, after)
+		page, err = ReadTx(ctx, tx, p, limit, after, m.routineRuntime)
 		return err
 	})
 	return page, err

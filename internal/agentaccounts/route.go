@@ -15,6 +15,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -44,8 +46,20 @@ func routineExitObservedTx(ctx context.Context, tx pgx.Tx, run runRow) (bool, er
 	if run.RoutineLaunchID == nil {
 		return true, nil
 	}
+	// A personal routine's intent is hidden from its daemon's projection; this
+	// internal read returns only whether the exact launch exit was observed.
+	var visibility, system string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.visible_projects',true),''),coalesce(current_setting('aeon.system',true),'')`).Scan(&visibility, &system); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true),set_config('aeon.system','on',true)`); err != nil {
+		return false, err
+	}
 	var observed bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_intents WHERE id=$1 AND agent_run_id=$2 AND state='exit_observed' AND exit_observed_at IS NOT NULL)`, *run.RoutineLaunchID, run.ID).Scan(&observed)
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_launch_intents WHERE id=$1 AND agent_run_id=$2 AND state='exit_observed' AND exit_observed_at IS NOT NULL)`, *run.RoutineLaunchID, run.ID).Scan(&observed); err != nil {
+		return false, err // caller rolls back, including visibility
+	}
+	_, err := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true),set_config('aeon.system',$2,true)`, visibility, system)
 	return observed, err
 }
 
@@ -168,6 +182,105 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 	if limitEstimates == nil {
 		limitEstimates = map[string]int64{}
 	}
+	result, err := persistReservation(ctx, tx, p, run, account, windows, limitEstimates, estimates, now)
+	if err != nil {
+		return RouteResult{}, err
+	}
+	if err := writeEvent(ctx, tx, p, evReserved, nil, result); err != nil {
+		return RouteResult{}, err
+	}
+	return result, nil
+}
+
+// ReserveRoutineAccountTx shares the router's exact account selection and
+// reservation write, without a network/daemon call or event append. The server
+// must hold tenant/tree/pairing and revalidate consent before entering. An
+// ordinary run cannot use this seam; current owned native enrollment is required.
+func ReserveRoutineAccountTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routine, runID, accountID string, actorRole ...string) (result RouteResult, change events.Change, err error) {
+	defer func() {
+		var refusal *httpError
+		if errors.As(err, &refusal) && refusal.status == http.StatusConflict {
+			reason := refusal.code
+			if reason == "" {
+				reason = "routine_account_unavailable"
+			}
+			err = workorders.Fail(409, reason)
+		}
+	}()
+	if p.Kind != tenant.Agent || !workorders.UUID(routine) || !workorders.UUID(runID) || !workorders.UUID(accountID) {
+		return RouteResult{}, events.Change{}, workorders.Fail(400, "invalid_routine_account_binding")
+	}
+	var bound bool
+	var project string
+	role := "build"
+	if len(actorRole) == 1 {
+		role = actorRole[0]
+	}
+	if len(actorRole) > 1 || role != "build" && role != "review" && role != "fix" {
+		return RouteResult{}, events.Change{}, workorders.Fail(400, "invalid_routine_actor")
+	}
+	if err := tx.QueryRow(ctx, `SELECT r.output_project_id::text,r.execute_consent AND r.consent_revision=r.definition_revision AND ar.agent_principal_id=$3 AND
+ ((r.agent_run_id=ar.id AND r.state IN ('created','pending') AND $4='build') OR
+ (r.state IN ('dispatched','starting','running') AND $4 IN ('review','fix') AND EXISTS(SELECT 1 FROM routine_attempts a JOIN routine_budget_orders b ON b.run_id=a.run_id AND b.work_order_id=ar.work_order_id WHERE a.run_id=r.id AND a.agent_run_id=ar.id AND a.role=$4 AND a.assignment_digest=r.assignment_digest)))
+ FROM routine_runs r JOIN agent_runs ar ON ar.tenant_id=r.tenant_id AND ar.id=$2 WHERE r.id=$1`, routine, runID, p.ID, role).Scan(&project, &bound); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	if !bound {
+		return RouteResult{}, events.Change{}, workorders.Fail(409, "routine_intent_required")
+	}
+	if err := authz.RequireTx(ctx, tx, p, "run.claim", authz.Scope{ProjectID: project}); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	if err := accountuse.LockShared(ctx, tx); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	run, err := lockRun(ctx, tx, runID)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	if run.Status != "queued" || run.AccountID != nil || run.ProfileID == nil {
+		return RouteResult{}, events.Change{}, workorders.Fail(409, "routine_account_unbound")
+	}
+	if err := accountuse.RequireRun(ctx, tx, accountID, runID); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	var daemon, harness string
+	err = tx.QueryRow(ctx, `SELECT a.daemon_id,m.harness FROM agent_accounts a JOIN model_profiles m ON m.tenant_id=a.tenant_id AND m.id=$2 WHERE a.id=$1 AND a.registered_by_principal_id=$3 AND m.enabled`, accountID, *run.ProfileID, p.ID).Scan(&daemon, &harness)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	// No daemon request supplies estimates here. Hold the account's learned
+	// per-unit usage, which its limit rules already project, so hand-set
+	// windows admit and hold the routine like any other run.
+	learned, err := learnedLimitEstimates(ctx, tx, accountID, nil)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	estimates := map[string]int64{}
+	for unit, n := range learned {
+		if validUnit(unit) {
+			estimates[unit] = n
+		}
+	}
+	account, windows, limits, err := selectAccount(ctx, tx, run, p.ID, harness, *run.ProfileID, daemon, []string{accountID}, estimates, now)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	if err = agentpairing.RunFence(ctx, tx, account.ID, run.ID, false); err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	result, err = persistReservation(ctx, tx, p, run, account, windows, limits, estimates, now)
+	return result, events.Change{Type: evReserved, After: result}, err
+}
+
+func persistReservation(ctx context.Context, tx pgx.Tx, p tenant.Principal, run runRow, account Account, windows []Window, limitEstimates, estimates map[string]int64, now time.Time) (RouteResult, error) {
+	if limitEstimates == nil {
+		limitEstimates = map[string]int64{}
+	}
 	rawEstimates, err := json.Marshal(limitEstimates)
 	if err != nil {
 		return RouteResult{}, err
@@ -211,9 +324,6 @@ func reserve(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Principal
 			return RouteResult{}, err
 		}
 		result.Reservations = append(result.Reservations, Reservation{ReservationID: id, WindowID: window.ID, Unit: window.Unit})
-	}
-	if err := writeEvent(ctx, tx, p, evReserved, nil, result); err != nil {
-		return RouteResult{}, err
 	}
 	return result, nil
 }

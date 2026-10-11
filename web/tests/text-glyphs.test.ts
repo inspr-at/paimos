@@ -21,7 +21,6 @@ const ALLOW: { file: string; includes: string; why: string }[] = [
   { file: 'lib/serviceTier.ts', includes: 'TIER_NAME[s.tier]} ×${s.price_multiplier}', why: 'frozen numerical price multiplier in approved AEON-436 fragment, not an icon (AEON-612)' },
   { file: 'components/agents/SessionMessages.vue', includes: 'identical posts`">×{{ m.count }}', why: 'multiplicity of identical messages (AEON-267), numerical text, not an icon' },
   { file: 'lib/quotes/prose.ts', includes: 'export const BULLETS', why: 'the bullets a quote prints in its document' },
-  { file: 'components/business/QuoteLines.vue', includes: 'class="rate-hint">× ', why: 'rate × quantity, a multiplication in text' },
   { file: 'components/work/AttachmentLightbox.vue', includes: '.width} × ${', why: 'image dimensions, 1200 × 800' },
   { file: 'lib/releaseStats.ts', includes: '${rate(r)}×`', why: 'a multiple in text, "3× the median gap" (AEON-488)' },
   { file: 'lib/modelsSimple.ts', includes: 'Locked in Settings › Models by', why: 'the stored reason of a lock, worded by the approved AEON-999 spec; a sentence in a rule, not an icon (AEON-1011)' },
@@ -34,6 +33,8 @@ const ALLOW: { file: string; includes: string; why: string }[] = [
   { file: 'lib/deliverySimple.ts', includes: '1 : 0)}× ${text.theTarget}', why: 'a multiple in text, "about 5× the target" (AEON-1003 verdict gap)' },
   { file: 'lib/deliverySimpleText.ts', includes: "const TO = '→'", why: 'approved AEON-994 Simple copy uses the arrow as the word "to" (start → end, PR opened → merged); text, not an icon' },
   { file: 'lib/workKindsCopy.ts', includes: 'Settings › Models', why: 'approved AEON-854 breadcrumb in the kinds lead; it names the Models board in a sentence and is not an icon' },
+  { file: 'components/recurrences/RecurringWorkCard.vue', includes: 'Every routine you can see: Agents › Routines<AppIcon name="chevron-right"', why: 'approved AEON-1192 link copy "Every routine you can see: Agents › Routines" names the page in a sentence; its chevron is the SVG after it' },
+  { file: 'components/business/areas.ts', includes: "SETUP_PLACE = 'Settings › Business'", why: 'AEON-1189 names the one place that sets Business up, in the link "Set up in Settings › Business" and its sentences; a breadcrumb in text, not an icon' },
 ]
 
 function files(dir: string): string[] {

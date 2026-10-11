@@ -41,6 +41,19 @@ func (c *preferencePreviewCatalog) profiles(ctx context.Context, tx pgx.Tx) ([]P
 	return c.profileRows, c.profilesError
 }
 
+// board is the Models catalog for one walk. A preview groups its single
+// bounded profile read; nil reads the live catalog.
+func (c *preferencePreviewCatalog) board(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
+	if c == nil {
+		return loadBoardCatalog(ctx, tx)
+	}
+	profiles, err := c.profiles(ctx, tx)
+	if err != nil {
+		return boardCatalog{}, err
+	}
+	return boardCatalogFrom(profiles, nil), nil
+}
+
 func (c *preferencePreviewCatalog) ladder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, error) {
 	steps, _, err := c.ladderSnapshot(ctx, tx, role)
 	return steps, err

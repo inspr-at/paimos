@@ -52,11 +52,11 @@ async function setup(page: Page, readOnly = false, canonical = false) {
   })
   return { errors, calls, items }
 }
-const editor = (page: Page) => page.getByRole('dialog', { name: /Repeat|Edit recurring work/ })
+const editor = (page: Page) => page.getByRole('dialog', { name: /Repeat|New routine|Edit routine|Let agents run it/ })
 const row = (page: Page, name = 'Weekly tool sweep') => page.getByRole('row', { name, exact: true })
 async function settings(page: Page) { await page.goto('/p/PHAROS/settings'); await expect(row(page)).toBeVisible() }
 async function newEditor(page: Page) {
-  await page.getByRole('button', { name: 'New…', exact: true }).click()
+  await page.getByRole('button', { name: 'New routine…', exact: true }).click()
   await editor(page).getByRole('textbox', { name: 'Name', exact: true }).fill('Weekly inspection')
   await editor(page).getByRole('textbox', { name: 'Title', exact: true }).fill('Inspect ')
   await editor(page).getByRole('button', { name: 'Date', exact: true }).click()
@@ -141,7 +141,7 @@ test('Run now confirms the open ticket, uses the codename picker and sends a bou
 })
 test('read-only people can see history and provenance, but cannot repeat or mutate', async ({ page }) => {
   const { calls } = await setup(page, true); await settings(page)
-  await expect(page.getByRole('button', { name: 'New…', exact: true })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'New routine…', exact: true })).toBeDisabled()
   await expect(row(page).getByRole('button', { name: 'Pause', exact: true })).toBeDisabled()
   await expect(page.getByRole('region', { name: 'Recurrence history' })).toContainText('PHAROS-11')
   await row(page).getByRole('button', { name: /^More/ }).click()
@@ -182,7 +182,7 @@ test('a delayed Run now read is discarded when the project changes', async ({ pa
   await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects', exact: true }).click()
   await page.locator('a[href="/p/AEON"]').first().click(); await page.getByRole('tab', { name: 'Settings', exact: true }).click()
   release()
-  await expect(page.getByText('No recurring work yet. Use New…, or Repeat… on a ticket.', { exact: true })).toBeVisible()
+  await expect(page.getByText('No routines yet. Use New routine…, or Repeat… on a ticket.', { exact: true })).toBeVisible()
   await expect(page.getByRole('dialog', { name: 'Run recurring work now' })).toHaveCount(0)
   expect(calls.filter(call => call.path.endsWith('/run-now'))).toHaveLength(0)
 })

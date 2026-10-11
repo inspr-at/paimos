@@ -115,20 +115,27 @@ func (s *Supervisor) routineRepository(run Run, g agentsetup.RoutineGrant, adapt
 	if found == nil || found.TenantID != g.TenantID || found.OwnerID != g.OwnerID || found.ComputerID != g.ComputerID || found.DaemonDigest != g.DaemonDigest || found.CapabilityDigest != g.CapabilityDigest || found.HostMappingDigest != g.HostMappingDigest {
 		return RoutineRepository{}, ErrRoutineUnavailable
 	}
-	for _, path := range []string{found.Repository, found.Root} {
-		physical, err := filepath.EvalSymlinks(path)
-		if err != nil || !filepath.IsAbs(path) || physical != filepath.Clean(path) {
-			return RoutineRepository{}, ErrRoutineUnavailable
-		}
-	}
-	info, err := os.Lstat(found.Root)
-	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 || pathWithin(found.Repository, found.Root) || pathWithin(found.Root, found.Repository) {
-		return RoutineRepository{}, ErrRoutineUnavailable
-	}
-	if len(found.BaseCommit) != 40 || strings.Trim(found.BaseCommit, "0123456789abcdef") != "" {
-		return RoutineRepository{}, ErrRoutineUnavailable
+	if err := validateRoutineRepository(*found); err != nil {
+		return RoutineRepository{}, err
 	}
 	return *found, nil
+}
+
+func validateRoutineRepository(repository RoutineRepository) error {
+	for _, path := range []string{repository.Repository, repository.Root} {
+		physical, err := filepath.EvalSymlinks(path)
+		if err != nil || !filepath.IsAbs(path) || physical != filepath.Clean(path) {
+			return ErrRoutineUnavailable
+		}
+	}
+	info, err := os.Lstat(repository.Root)
+	if err != nil || !info.IsDir() || info.Mode().Perm()&0077 != 0 || pathWithin(repository.Repository, repository.Root) || pathWithin(repository.Root, repository.Repository) {
+		return ErrRoutineUnavailable
+	}
+	if len(repository.BaseCommit) != 40 || strings.Trim(repository.BaseCommit, "0123456789abcdef") != "" {
+		return ErrRoutineUnavailable
+	}
+	return nil
 }
 
 func (s *Supervisor) prepareRoutineWorkspace(ctx context.Context, run Run, g agentsetup.RoutineGrant, repository RoutineRepository) (*RoutineWorkspace, error) {
@@ -136,7 +143,7 @@ func (s *Supervisor) prepareRoutineWorkspace(ctx context.Context, run Run, g age
 	id := fmt.Sprintf("%x", sha256.Sum256(raw))
 	w := RoutineWorkspace{Grant: g, ID: id, Path: filepath.Join(repository.Root, id), Branch: "routine/" + g.LaunchID}
 	predecessor := ""
-	if run.CapacityHandoff {
+	if run.CapacityHandoff || g.Lineage != nil && g.Lineage.Role == "fix" {
 		retained, err := s.routineContinuation(ctx, run, g, repository)
 		if err != nil {
 			return nil, err
@@ -282,7 +289,8 @@ func (s *Supervisor) routineContinuation(ctx context.Context, run Run, g agentse
 	previous.mu.Lock()
 	r, process := previous.record, previous.process
 	previous.mu.Unlock()
-	if r.RoutineWorkspace == nil || r.RunID != run.RetryOfRunID || r.WorkOrderID != run.WorkOrderID || r.TenantID != s.tenantID || r.PrincipalID != s.principalID || r.State != "failed" || !r.ExitObserved || r.Workspace != r.RoutineWorkspace.Path || r.LaunchBranch != r.RoutineWorkspace.Branch || validateLaunchRecord(r) != nil {
+	fix := g.Lineage != nil && g.Lineage.Role == "fix" && g.Lineage.PreviousRunID == run.RetryOfRunID
+	if r.RoutineWorkspace == nil || r.RunID != run.RetryOfRunID || r.WorkOrderID != run.WorkOrderID || r.TenantID != s.tenantID || r.PrincipalID != s.principalID || r.State != "failed" && !(fix && r.State == "completed") || !r.ExitObserved || r.Workspace != r.RoutineWorkspace.Path || r.LaunchBranch != r.RoutineWorkspace.Branch || validateLaunchRecord(r) != nil {
 		return nil, ErrProcessesUnconfirmed
 	}
 	old := r.RoutineWorkspace.Grant
@@ -296,6 +304,11 @@ func (s *Supervisor) routineContinuation(ctx context.Context, run Run, g agentse
 	if err := validateRoutineCheckout(ctx, repository, w); err != nil {
 		return nil, err
 	}
+	if fix {
+		if reviewRepositoryMustMatch(ctx, w.Path, g.Lineage) != nil {
+			return nil, ErrProcessesUnconfirmed
+		}
+	}
 	if err := s.confirmRoutineFixtureExit(r, process); err != nil {
 		return nil, err
 	}
@@ -304,6 +317,14 @@ func (s *Supervisor) routineContinuation(ctx context.Context, run Run, g agentse
 	}
 	w.Grant = g
 	return &w, nil
+}
+
+func reviewRepositoryMustMatch(ctx context.Context, workspace string, l *agentsetup.RoutineLineage) error {
+	head, err := routineGit(ctx, workspace, "rev-parse", "HEAD")
+	if err != nil || strings.TrimSpace(head) != l.HeadSHA {
+		return ErrProcessesUnconfirmed
+	}
+	return nil
 }
 
 // Persist exact allocation-bound fixture proof before transferring or releasing
@@ -581,7 +602,10 @@ func (s *Supervisor) routineEnvironment(runID string, g agentsetup.RoutineGrant)
 	if lease == nil {
 		return nil, ErrProcessesUnconfirmed
 	}
-	environment := lease.Environment()
+	return validateRoutineEnvironment(lease.Environment(), g)
+}
+
+func validateRoutineEnvironment(environment []string, g agentsetup.RoutineGrant) ([]string, error) {
 	if len(environment) != 8 {
 		return nil, ErrRoutineUnavailable
 	}
