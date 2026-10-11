@@ -435,7 +435,7 @@ test('AEON-1219: registry navigation and hints respect menus, fields, IME and na
   await expect(next).toContainText('Down arrow')
   await expect(sheet.locator('dd', { hasText: /^Decision Desk$/ })).toBeVisible()
   // AEON-1196 P1 now registers this handler; AEON-1219's pre-P1 absence is stale.
-  const listSearch = sheet.locator('.row').filter({ has: sheet.getByText('Search sessions (this list)', { exact: true }) })
+  const listSearch = sheet.locator('.row').filter({ has: page.locator('dd', { hasText: /^Search sessions \(this list\)$/ }) })
   await expect(listSearch).toBeVisible()
   await expect(listSearch).toContainText('F')
   await expect(listSearch).toContainText('/')
