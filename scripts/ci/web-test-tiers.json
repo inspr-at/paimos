@@ -1238,14 +1238,6 @@
     ,
     "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
     ,
-    "browser:tests/stability.spec.ts:Policies controls and detail sheet stay put at 1024px dark"
-    ,
-    "browser:tests/stability.spec.ts:Policies controls and detail sheet stay put at 1024px light"
-    ,
-    "browser:tests/stability.spec.ts:Policies lazy tab responses cannot overwrite a later tab"
-    ,
-    "browser:tests/stability.spec.ts:Policies tabs always reference an existing panel"
-    ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 dark"
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 light"
@@ -10474,9 +10466,27 @@
     ,
     {"kind":"browser","file":"tests/planning-columns.spec.ts","name":"unknown planned and used effort stays undrawn and is explained to hover and screen readers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"Policies Ladders tab links to Settings › Models and never calls the ladder endpoints","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"Policies links to Settings › Models and never calls the ladder endpoints","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"on a phone the moved link keeps a 44 px target inside its sentence","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/policies-ladders-moved.spec.ts","name":"on a phone › the Models link keeps a 44 px target inside its sentence","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 1440 dark › a member reads the permission note and links only where they open at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 1440 dark › three cards, rules only; a risk group grows below its head at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 1440 light › a member reads the permission note and links only where they open at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 1440 light › three cards, rules only; a risk group grows below its head at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 390 dark › a member reads the permission note and links only where they open at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 390 dark › three cards, rules only; a risk group grows below its head at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 390 light › a member reads the permission note and links only where they open at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"Policies at 390 light › three cards, rules only; a risk group grows below its head at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policies-rules.spec.ts","name":"“Rule in Policies” lands on the cross-family card and the next Tab stays inside it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/polish-round-two.spec.ts","name":"PL2 hours 390 dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
@@ -12623,26 +12633,6 @@
     {"kind":"browser","file":"tests/shell.spec.ts","name":"theme follows the OS and explicit choice wins without hover layout shift","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/shell.spec.ts","name":"version uses six-segment Pretty, keyboard reveal, exact clipboard and one request","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies announces state transitions through a persistent live region","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies lazy tab responses cannot overwrite a later tab","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies settings-only reader sees permission sentences and static ownership","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies tabs always reference an existing panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/stability.spec.ts","name":"at 1440px › an open session holds still while runs and messages land","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14870,29 +14860,19 @@
     ,
     {"kind":"node","file":"tests/playwright-policy.test.ts","name":"worker override is explicit and invalid overrides fail closed","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/policies.test.ts","name":"failures and invalid answers never report success; other tabs still work","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/policies.test.ts","name":"Policies names no model, says no Touch ID yet, and keeps one language","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/policies.test.ts","name":"identity, tenant, permission loss and disposal discard responses and clear read state","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/policies.test.ts","name":"reviewer sentences say the review-policy fields and nothing else","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/policies.test.ts","name":"live registry exclusions group by risk, and owner links need actual destination permissions","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/policies.test.ts","name":"the asks list is exactly the registry’s never-on-an-agent-key permissions, at their risk","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/policies.test.ts","name":"only Agent key limits has a source; the Ladders tab never requests /models/routes","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policies.test.ts","name":"tab switches discard slow successes and failures, even when aborted requests still resolve","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policies.test.ts","name":"truncation and suspension expiry are honest with an injected observation time","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/policies.test.ts","name":"twelve rules elsewhere; a link shows only when every permission of its place is held","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"403/permission_denied retains draft without auto-retry or success","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"409/stale_revision retains draft without auto-retry or success","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"422/locked_above retains draft without auto-retry or success","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"HTTP success alone cannot confirm wrong identity/revision","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"absent-scope scalar compensation uses null/false/false level PUT","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"closed builders preserve sibling fields, capture paths/person and never replace a whole level","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"confirmed save followed by denied preview 401 clears private snapshot and Undo","tier":"GATED-FULL"}
     ,
@@ -14910,25 +14890,15 @@
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"equal-revision person conflict discards old draft and Undo","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"ladder role CAS, expiry-clear Undo and actual normalized token","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"level writes remain serialized across two row editors and retain each captured revision","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"local picker invalidation keeps its document while dropping drafts, Undo and late writes","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"managed order drafts preserve holds and Undo restores rows plus captured mode","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"older read cannot replace newer snapshot/draft","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"response byte bounds precede JSON parsing","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"retired-kind compensation has the specific honest refusal","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"row Reset and new-row Undo send query revisions at default scope","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"row Reset and new-row Undo send query revisions at person scope","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/policy-editor.test.ts","name":"row Reset and new-row Undo send query revisions at project scope","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/policy-editor.test.ts","name":"same-identity preview refresh keeps the captured draft baseline and confirmed Undo revision","tier":"GATED-FULL"}
     ,
@@ -16516,6 +16486,8 @@
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"family eligibility comes from the server; empty allowlists never save and failed writes keep the draft","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"reviewer rules stay through a project switch and never land for another person","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"the paused step and configured check progress are shown without inventing a completed step","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"only the Display menu mounts the display editors","tier":"ESSENTIAL"}
@@ -17598,11 +17570,11 @@
     ,
     {"kind":"vitest","file":"tests/planning-states.unit.test.ts","name":"server list payload planning hovers > preserves the subscription marker beside an unreported session","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/policies-ladders-moved.unit.test.ts","name":"Policies links to Settings › Models and requests no ladder endpoint","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/policies-ladders-moved.unit.test.ts","name":"Policies no longer imports the ladder editor or its writer","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/policies-ladders-moved.unit.test.ts","name":"the Ladders tab shows the moved line with its Settings › Models link and requests no ladder endpoint","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/policies-ladders-moved.unit.test.ts","name":"without See models the tab says so and still requests no ladder endpoint","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/policies-ladders-moved.unit.test.ts","name":"without See models the Models rule names its owner without a link and requests no ladder endpoint","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/position.unit.test.ts","name":"a polled collection drops an answer below a newer one and re-reads one that predates a write","tier":"GATED-FULL"}
     ,
@@ -18257,6 +18229,14 @@
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-a\"},\"principal\":{\"id\":\"person-b\"}})","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-b\"},\"principal\":{\"id\":\"person-a\"}})","tags":[],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from a control rings and takes focus: false","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from nowhere rings and takes focus: true","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from the main landmark rings and takes focus: true","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a focusable deep-linked card arriving from the page rings and takes focus: true","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a new owner without Access cannot resurrect the previous owner’s shown section on expiry","tags":[],"tier":"GATED-FULL"}
     ,

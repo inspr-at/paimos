@@ -537,6 +537,8 @@
         {"file":"tests/models-simple.spec.ts","listedTests":21,"tierTiming":{"caseSeconds":{"max":2.142,"median":0.68,"min":0.466},"seconds":17.886,"selectedTests":22},"weightSeconds":12,"weightSource":"AEON-1011 local-single-worker-7.1s-plus-margin"}
         ,
         {"file":"tests/policies-ladders-moved.spec.ts","listedTests":2,"weightSeconds":4,"weightSource":"AEON-1204 local-single-worker-2.1s-plus-margin"}
+        ,
+        {"file":"tests/policies-rules.spec.ts","listedTests":9,"weightSeconds":20,"weightSource":"AEON-1165 estimate, 9 cases replacing the ladder editor spec"}
       ]
     }
     ,
