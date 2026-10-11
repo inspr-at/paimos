@@ -7142,6 +7142,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogNewPinsKeepUnknownAndLegacyMetadataReadable","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestCatalogScheduledRefreshRequiresOptInAndRechecksIt","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogSourcesPreserveNativePrecedenceAndUnknown","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogV3Ladders","tier":"GATED-FULL"}
