@@ -160,21 +160,47 @@ it('an incoming owner clears frozen Access before fresh permissions arrive', asy
   expect(input(root) === undefined, 'a new owner has no frozen Access while grants are pending').toBe(true)
 })
 
-it.each(['agent-activity', 'estimates', 'silent-sessions'])('legacy #%s highlights its consolidated field until the arrival expires', async anchor => {
-  vi.useFakeTimers()
-  const classes = new Set<string>(['frow'])
+// The deep-link target models the element API the arrival watcher uses,
+// including the attribute and focus calls a real element always has.
+function arrivalTarget(anchor: string, classNames: string[], attributes: string[] = []) {
+  const classes = new Set(classNames)
   const target = {
     classList: { contains: (name: string) => classes.has(name), add: (name: string) => classes.add(name), remove: (name: string) => classes.delete(name) },
-    querySelector: vi.fn(() => null), scrollIntoView: vi.fn(),
+    hasAttribute: (name: string) => attributes.includes(name),
+    querySelector: vi.fn(() => null), scrollIntoView: vi.fn(), focus: vi.fn(),
   }
   Object.assign(document, { getElementById: (id: string) => id === anchor ? target : null })
   Object.assign(window, { matchMedia: () => ({ matches: true }) })
+  return { classes, target }
+}
+
+it.each(['agent-activity', 'estimates', 'silent-sessions'])('legacy #%s highlights its consolidated field until the arrival expires', async anchor => {
+  vi.useFakeTimers()
+  const { classes, target } = arrivalTarget(anchor, ['frow'])
   route.params.section = 'agents'; route.hash = `#${anchor}`
   mount(); await flush()
   expect(target.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'start', behavior: 'auto' })
+  expect(target.focus, 'a field without tabindex leaves focus where it was').not.toHaveBeenCalled()
   expect(classes.has('arrived'), 'the bookmarked field has a visible arrival ring').toBe(true)
   await vi.advanceTimersByTimeAsync(1799)
   expect(classes.has('arrived')).toBe(true)
   await vi.advanceTimersByTimeAsync(1)
   expect(classes.has('arrived')).toBe(false)
+})
+
+const body = { id: '' }
+it.each([
+  { from: 'nowhere', active: null, focused: true },
+  { from: 'the page', active: body, focused: true },
+  { from: 'the main landmark', active: { id: 'main' }, focused: true },
+  { from: 'a control', active: { id: 'settings-search' }, focused: false },
+])('a focusable deep-linked card arriving from $from rings and takes focus: $focused', async ({ active, focused }) => {
+  const { classes, target } = arrivalTarget('cross-family-review', ['settings-card'], ['tabindex'])
+  Object.assign(document, { body, activeElement: active })
+  route.params.section = 'policies'; route.hash = '#cross-family-review'
+  mount(); await flush()
+  expect(target.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'start', behavior: 'auto' })
+  if (focused) expect(target.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true })
+  else expect(target.focus, 'a person already in a control keeps their focus').not.toHaveBeenCalled()
+  expect(classes.has('arrived'), 'the linked card has a visible arrival ring').toBe(true)
 })
