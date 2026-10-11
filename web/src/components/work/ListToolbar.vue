@@ -97,6 +97,9 @@ const open = ref<{ dimension: Dimension; anchor: HTMLElement } | null>(null)
 const dateAnchor = ref<HTMLElement | null>(null)
 const menuAnchor = ref<HTMLElement | null>(null)
 const displayAnchor = ref<HTMLElement | null>(null)
+const displayButton = ref<HTMLButtonElement>()
+const collapsedDisplayButton = ref<HTMLButtonElement>()
+const filtersButton = ref<HTMLButtonElement>()
 const attentionMenu = ref<{ field: 'kind' | 'project_id' | 'assignee'; anchor: HTMLElement } | null>(null)
 const attentionWord = (en: string, de: string) => props.attention?.locale === 'de' ? de : en
 const attentionFacets = computed(() => [{ field: 'kind', label: attentionWord('Kind', 'Art') }, { field: 'project_id', label: attentionWord('Project', 'Projekt') }, { field: 'assignee', label: attentionWord('Assignee', 'Zuständig') }] as const)
@@ -163,6 +166,9 @@ const displayWords = GROUPS.map(option => displayPhrase(option.value))
 const displayText = computed(() => props.view === 'outline' ? 'Display' : displayPhrase(props.filters.group))
 // The collapsed header's menu replaces the plain Display panel; the attention host keeps its own.
 const collapsedMenu = computed(() => !!props.collapsedHeader && !props.attention)
+// Opened away from its own buttons (the filter sheet's link), Display is a sheet of its own.
+const detachedDisplay = computed(() => !!displayAnchor.value && displayAnchor.value !== displayButton.value && displayAnchor.value !== collapsedDisplayButton.value)
+const displaySheet = computed(() => detachedDisplay.value || (collapsedMenu.value && sheetMode.value))
 const displayOn = computed(() => props.view === 'list' && props.filters.group !== 'none')
 // Folding or unfolding the header moves the Display button: its popovers anchor to the old place.
 watch(() => props.collapsedHeader, () => { displayAnchor.value = null; hideAnchor.value = null })
@@ -226,7 +232,14 @@ function searchKey(event: KeyboardEvent) {
   }
 }
 function closeOverlays() { closeAttention(false); closeDisplay(false) }
-defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
+// The filter sheet's "Display settings…" (AEON-1188). Display opens under the Display button the
+// window shows; with none in sight (a phone or tablet under an unfolded header) it opens as a
+// sheet, and closing it hands focus back to Filters.
+function openDisplay() {
+  const button = props.collapsedHeader ? collapsedDisplayButton.value : displayButton.value
+  displayAnchor.value = (button?.offsetParent ? button : null) ?? filtersButton.value ?? root.value ?? null
+}
+defineExpose({ focusSearch, openFilterMenu, openDisplay, input, closeOverlays })
 </script>
 
 <template>
@@ -299,7 +312,7 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
     ><AppIcon :name="filters.showClosed ? 'eye' : 'eye-off'" :size="14" /><HideLabel :states="filters.hideStates" /></button>
     <button type="button" class="hide-gear" aria-label="Choose what Hide hides" data-tip="Choose what Hide hides" aria-haspopup="dialog" :aria-expanded="!!hideAnchor" @click="hideAnchor = hideAnchor ? null : ($event.currentTarget as HTMLElement)"><AppIcon name="gear" :size="14" /></button>
     </div>
-    <button v-if="!graph" type="button" class="btn sm display-btn" :class="{ on: displayOn }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row and header height, and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+    <button v-if="!graph" ref="displayButton" type="button" class="btn sm display-btn" :class="{ on: displayOn }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row and header height, and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
       <AppIcon name="layers" :size="13" /><span class="display-label">{{ attention ? attention.group === 'project' ? attentionWord('By project', 'Nach Projekt') : attention.group === 'kind' ? attentionWord('By kind', 'Nach Art') : attentionWord('Display', 'Anzeige') : displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
@@ -308,12 +321,12 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
     <!-- Collapsed header: Display sits beside New. The other densities keep its place free, as an
          inert twin of the same size, so folding or unfolding the header moves nothing in this row. -->
     <div v-if="settingsTarget && !attention" class="collapsed-display" :class="{ reserved: !collapsedHeader }" :inert="!collapsedHeader" :aria-hidden="collapsedHeader ? undefined : 'true'">
-      <button type="button" class="btn sm display-btn" :class="{ on: displayOn }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor && collapsedHeader" :aria-label="`Display: ${displayLabel}`" data-tip="Sections, saved views, Hide closed, grouping, sort, row height and columns" :tabindex="collapsedHeader ? undefined : -1" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
+      <button ref="collapsedDisplayButton" type="button" class="btn sm display-btn" :class="{ on: displayOn }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor && collapsedHeader" :aria-label="`Display: ${displayLabel}`" data-tip="Sections, saved views, Hide closed, grouping, sort, row height and columns" :tabindex="collapsedHeader ? undefined : -1" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
         <AppIcon name="layers" :size="13" /><span class="display-label"><span class="display-current">{{ displayText }}</span><span class="display-sizer" aria-hidden="true"><span v-for="word in displayWords" :key="word">{{ word }}</span></span></span><AppIcon name="chevron" :size="12" class="facet-chevron" />
       </button>
     </div>
     <button v-if="!graph && !attention" type="button" class="btn primary new-btn" :aria-label="createLabel" aria-keyshortcuts="n" :data-tip="`${createLabel} · n`" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
-    <button v-if="!attention" type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" aria-haspopup="dialog" data-tip="Filters and display options" @click="emit('openSheet')">
+    <button v-if="!attention" ref="filtersButton" type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" aria-haspopup="dialog" data-tip="Filters and display options" @click="closeDisplay(false); emit('openSheet')">
       <AppIcon name="sliders" :size="14" /><span class="filters-label">Filters</span><span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
     </button>
 
@@ -337,10 +350,10 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
       <HideOptions :states="filters.hideStates" :summary="summary" :show-closed="filters.showClosed" @change="states => emit('hideStates', states)" />
     </FloatingPanel>
     <FloatingPanel
-      v-if="displayAnchor" :anchor="displayAnchor" :width="collapsedMenu ? menuPanelWidth(menuColumns) : 320" :tallest="collapsedMenu ? 4000 : 760" align="end" label="Display options"
-      :cycle="collapsedMenu" :sheet="collapsedMenu && sheetMode" @close="closeDisplay"
+      v-if="displayAnchor" :anchor="displayAnchor" :width="collapsedMenu ? menuPanelWidth(menuColumns) : 320" :tallest="collapsedMenu || displaySheet ? 4000 : 760" align="end" label="Display options"
+      :cycle="collapsedMenu || displaySheet" :sheet="displaySheet" @close="closeDisplay"
     >
-      <DisplayMenu :plain="!collapsedMenu" :anchor="displayAnchor" :sheet="sheetMode" @columns="count => menuColumns = count" @done="closeDisplay(true)">
+      <DisplayMenu :plain="!collapsedMenu" :anchor="displayAnchor" :sheet="displaySheet" @columns="count => menuColumns = count" @done="closeDisplay(true)">
         <template #nav><slot name="header-nav" :anchor="displayAnchor!" :close="closeDisplay" /></template>
         <template #hide>
           <div class="menu-hide">
@@ -355,7 +368,7 @@ defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
           v-if="!graph"
           :attention-group="attention?.group" :locale="attention?.locale" @attention-group="value => emit('attentionGroup', value)"
           :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
-          :project-header="projectHeader" :sheet="collapsedMenu && sheetMode" :stable-sort="collapsedMenu"
+          :project-header="projectHeader" :sheet="displaySheet" :stable-sort="collapsedMenu"
           @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
           @columns="(order, visible) => emit('columns', order, visible)" @columns-reset="emit('columnsReset')"
           @expand-all="emit('expandAll'); closeDisplay(false)" @collapse-all="emit('collapseAll'); closeDisplay(false)"

@@ -180,6 +180,20 @@
     ,
     "browser:tests/aeon-1062-qapolish.spec.ts:chat header light 620: actions wrap without overlap, stay put, and Stop reads in the theme"
     ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px dark"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:desktop Display buttons open the Display menu at 1440px light"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px dark"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 390px light"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px dark"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:the Filters sheet filters and links to the Display menu at 768px light"
+    ,
+    "browser:tests/aeon-1188-displayhome.spec.ts:with the header folded on a phone, the link opens the Display menu beside New"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -5207,6 +5221,20 @@
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1071-chat-live.spec.ts","name":"AEON-1071 streams in place, stops mid-stream and yields to the saved reply light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"desktop Display buttons open the Display menu at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"with the header folded on a phone, the link opens the Display menu beside New","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -16021,6 +16049,10 @@
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"family eligibility comes from the server; empty allowlists never save and failed writes keep the draft","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"the paused step and configured check progress are shown without inventing a completed step","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"only the Display menu mounts the display editors","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/display-home.unit.test.ts","name":"the Filters sheet filters and links to the Display menu instead of holding display settings","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/display-language.unit.test.ts","name":"has no app locale switches outside the shared helper","tier":"ESSENTIAL"}
     ,
