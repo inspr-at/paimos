@@ -5856,6 +5856,10 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryUIFactsHoldReplayAndAvailability","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookInternalRetry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookReceiptIntegrityAndClaims","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookSequenceRebuildIsolationAndHolds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookUnlinkedMetricSource","tier":"ESSENTIAL"}

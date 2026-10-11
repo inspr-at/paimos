@@ -4,7 +4,7 @@ paths:
   /github/webhook:
     post:
       operationId: deliveryGitHubWebhook
-      description: 'Public ingress authenticated solely by the host-owned GitHub App HMAC, delivery ID, installation and repository binding. Retains normalized facts only; deduplicates retries.'
+      description: 'Public ingress authenticated solely by the host-owned GitHub App HMAC, delivery ID, installation and repository binding. Stores verified payloads before processing, checkpoints completed steps and retries unfinished work internally. Reusing a delivery ID with different authenticated content is refused.'
       security: []
       parameters:
         - {name: X-Hub-Signature-256, in: header, required: true, schema: {type: string}}
@@ -16,6 +16,7 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
         '502': {$ref: '#/components/responses/Error'}
 components:

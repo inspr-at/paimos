@@ -99,8 +99,8 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 	// Risk: an unconfigured metric consumer rejects an authenticated delivery
 	// on an unnecessary Actions read, or suppresses linked checks/queue facts.
 	for _, tc := range []struct {
-		name                                                                                  string
-		linked, queue, projectedQueue, suiteRefs, suitePR, unrelated, delayed, unlinked, fail bool
+		name                                                                                                         string
+		linked, queue, projectedQueue, suiteRefs, suitePR, unrelated, delayed, unlinked, fail, reconciled, saturated bool
 	}{
 		{name: "read_available"},
 		{name: "read_unavailable", fail: true},
@@ -108,7 +108,9 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 		{name: "linked_checks_empty_suite_pulls", linked: true},
 		{name: "linked_checks_explicit_suite_pull", linked: true, suitePR: true},
 		{name: "delayed_empty_suite_after_synchronization", linked: true, delayed: true},
+		{name: "reconciled_then_synchronized_delayed_empty_suite", linked: true, delayed: true, reconciled: true},
 		{name: "delayed_suite_current_link_removed", linked: true, delayed: true, unlinked: true, fail: true},
+		{name: "saturated_history_all_links_removed", linked: true, delayed: true, unlinked: true, saturated: true, fail: true},
 		{name: "linked_queue_empty_suite_pulls", linked: true, queue: true},
 		{name: "linked_queue_refs_prefix", linked: true, queue: true, suiteRefs: true},
 		{name: "linked_queue_projected_head", linked: true, queue: true, projectedQueue: true},
@@ -124,7 +126,13 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 			p := f.pull()
 			if tc.linked {
 				f.gh.pulls[7] = p
-				auditSend(t, f, "pull_request", "unconfigured-pr-open", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": f.at.Add(-2 * time.Hour), "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+				if tc.reconciled {
+					if err := f.m.Reconcile(t.Context(), f.person.TenantID); err != nil {
+						t.Fatal(err)
+					}
+				} else {
+					auditSend(t, f, "pull_request", "unconfigured-pr-open", map[string]any{"action": "opened", "pull_request": map[string]any{"number": 7, "created_at": f.at.Add(-2 * time.Hour), "head": map[string]any{"sha": p.Head, "ref": p.Branch}, "base": map[string]any{"sha": p.Base, "ref": "main", "repo": map[string]any{"full_name": f.m.config.Repository}}}}, 204)
+				}
 				if item := f.item(t, 7); item.Ticket == nil || *item.Ticket != f.ticket {
 					t.Fatal("fixture pull is not linked to its ticket")
 				}
@@ -149,6 +157,14 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 				}
 				if tc.unlinked {
 					f.tx(t, func(tx pgx.Tx) error {
+						if tc.saturated {
+							_, err := tx.Exec(t.Context(), `INSERT INTO delivery_github_events(tenant_id,delivery_id,event,repository,head_sha,received_at,payload_sha256,observations,fanout_done,processed_at)
+								SELECT tenant_id,'saturated-'||n,event,repository,head_sha,received_at,payload_sha256,observations,true,processed_at
+								FROM delivery_github_events CROSS JOIN generate_series(1,101) n WHERE delivery_id='unconfigured-pr-open'`)
+							if err != nil {
+								return err
+							}
+						}
 						_, err := tx.Exec(t.Context(), `UPDATE delivery_items SET project_id=NULL,ticket_node_id=NULL WHERE repository=$1 AND pull_request=7`, f.m.config.Repository)
 						return err
 					})
@@ -222,8 +238,8 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 					t.Fatalf("required flow read failure: status=%d reads=%d flow events=%d", w.Code, len(g.calls), flowEventCount(t, f))
 				}
 				assertWebhookFailureLine(t, &logs, "check_suite", "completed", "flow", "github_unavailable", 502, nil)
-				// This is an explicit redelivery, not an internal retry. Durable
-				// retries remain blocked on the assigned ingress expansion.
+				// Explicit redelivery compatibility remains covered here;
+				// internal recovery has separate per-step receipt regressions.
 				unavailable = false
 				logs.Reset()
 				g.calls = nil

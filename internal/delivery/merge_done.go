@@ -2,12 +2,10 @@
 package delivery
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"regexp"
 	"slices"
@@ -41,53 +39,39 @@ func mergeKeys(title, branch string) ([]string, error) {
 	return slices.Compact(keys), nil
 }
 
-// Completion runs only after the original ingress has authenticated and
-// accepted. Its transaction/receipts are independent of the disposable
-// delivery projection, so a crash or redelivery retries the unfinished work.
+// mergeWebhook accepts a durable, verified receipt before any downstream work.
 func (m *Module) mergeWebhook(w http.ResponseWriter, r *http.Request) {
-	reader, enabled := m.github.(MergeReader)
-	if !enabled {
-		m.auditWebhook(w, r)
-		return
-	}
-	controller := http.NewResponseController(w)
-	_ = controller.SetReadDeadline(time.Now().Add(5 * time.Second))
-	defer controller.SetReadDeadline(time.Time{})
-	raw, err := io.ReadAll(io.LimitReader(r.Body, (2<<20)+1))
-	if err != nil || len(raw) > 2<<20 {
-		class := webhookClass("body_too_large")
-		if err != nil {
-			class = "body_read"
-		}
-		closeAfterFailedRead(w)
-		m.rejectWebhook(w, r, "unknown", "parse", 413, class)
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 4*time.Minute)
-	defer cancel()
-	r = r.WithContext(ctx)
-	r.Body = io.NopCloser(bytes.NewReader(raw))
-	response := &auditResponse{header: w.Header()}
-	m.auditWebhook(response, r)
-	if response.status != 204 {
-		w.WriteHeader(response.status)
-		return
-	}
-	m.finishMergeWebhook(w, r, raw, reader)
+	m.receiveWebhook(w, r)
 }
 
 // The authenticated audit phase has accepted before merge completion starts.
 func (m *Module) finishMergeWebhook(w http.ResponseWriter, r *http.Request, raw []byte, reader MergeReader) {
-	ctx := r.Context()
+	name := r.Header.Get("X-GitHub-Event")
+	if err := m.completeWebhook(r.Context(), name, raw, reader); err != nil {
+		step := "completion"
+		var failed *webhookStepError
+		if errors.As(err, &failed) {
+			step = failed.step
+		}
+		status := 502
+		if step == "parse" {
+			status = 400
+		}
+		m.rejectWebhook(w, r, webhookLogAction(raw, name), step, status, err)
+		return
+	}
+	w.WriteHeader(204)
+}
+
+func (m *Module) completeWebhook(ctx context.Context, name string, raw []byte, reader MergeReader) error {
 	var e envelope
 	if err := json.Unmarshal(raw, &e); err != nil {
-		m.rejectWebhook(w, r, webhookLogAction(raw, r.Header.Get("X-GitHub-Event")), "parse", 400, webhookClass("invalid_json"))
-		return
+		return &webhookStepError{step: "parse", err: webhookClass("invalid_json")}
 	}
 	var err error
 	step := ""
 	facts := []MergeFact{}
-	switch r.Header.Get("X-GitHub-Event") {
+	switch name {
 	case "pull_request":
 		if e.Action == "closed" {
 			step = "reader-MergedPull"
@@ -113,10 +97,9 @@ func (m *Module) finishMergeWebhook(w http.ResponseWriter, r *http.Request, raw 
 		err = m.completeMerges(ctx, facts)
 	}
 	if err != nil {
-		m.rejectWebhook(w, r, e.Action, step, 502, err)
-		return
+		return &webhookStepError{step: step, err: err}
 	}
-	w.WriteHeader(204)
+	return nil
 }
 
 // Queue refs can disappear before destroyed is delivered. The authenticated
