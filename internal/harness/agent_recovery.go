@@ -94,6 +94,8 @@ func (m *Module) agentDiagnosis(ctx context.Context, tx pgx.Tx, s Session) (Agen
 		// A queued registration has no process/daemon generation yet. Its
 		// principal's paired computer is evidence for dispatch advice only;
 		// it must never confer recovery authority on an unowned process.
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
 		var host, harness string
 		err := tx.QueryRow(ctx, `SELECT coalesce(nullif(c.display_name,''),q.details->>'computer_name','computer'),
  EXISTS(SELECT 1 FROM agent_keys k WHERE k.tenant_id=c.tenant_id AND k.id=c.key_id AND k.revoked_at IS NULL AND (k.expires_at IS NULL OR k.expires_at>$3)),

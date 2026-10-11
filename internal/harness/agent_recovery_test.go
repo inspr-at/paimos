@@ -109,6 +109,10 @@ func TestQueuedAgentDiagnosisUsesOnlyItsRunAccountAndFreshPairedHost(t *testing.
 		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at=clock_timestamp(),last_probe_ok=false,last_probe_failure='auth_failed',allowed_model_profile_ids=ARRAY[$2::uuid] WHERE id=$1`, v.account, v.profile); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_use_cells(tenant_id,account_id,context_id,source,set_by)
+ SELECT $1,$2,id,'person',$3 FROM work_contexts WHERE kind='default' ON CONFLICT DO NOTHING`, f.person.TenantID, v.account, f.person.ID); err != nil {
+			return err
+		}
 		// Other harness/account failures must not be attributed to this run.
 		_, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_probe_failure) VALUES($1,$2,'other-codex','codex','fixture',$3,'Other account',clock_timestamp(),false,'unavailable')`, f.person.TenantID, uid(), f.agent.ID)
 		return err
