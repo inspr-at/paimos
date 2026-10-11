@@ -393,6 +393,9 @@ func TestRoutineBudgetUnknownRetainsSlotAndChildBinding(t *testing.T) {
 // paid account launches, owner revocation races and tenant/personal leakage.
 func TestRoutineBudgetAdmissionAndOwnership(t *testing.T) {
 	f := setup(t, "both", true)
+	// Paired observation writes retain the enrollment's required one-slot
+	// binding; the generic budget fixture also serves unpaired slot tests.
+	f.exec(`UPDATE agent_accounts SET max_parallel_runs=1 WHERE id=$1`, f.account)
 	in := f.attempt("build", Amount{Tokens: 10, PaidMicroUSD: 10, RecoveryMS: 1000})
 	original := f.gate
 	f.gate.HostMaxAgeMS = 0

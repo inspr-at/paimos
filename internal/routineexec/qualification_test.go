@@ -373,7 +373,7 @@ func TestRoutineControlledQualification(t *testing.T) {
 			t.Errorf("lost claim replay: got %d want 200: %s", response.Code, response.Body.String())
 		}
 		var original agentruns.Run
-		must(t, json.Unmarshal(call(f.agent, "GET", "/api/runs/"+run, nil, nil, 200), &original))
+		must(t, json.Unmarshal(call(f.agent, "GET", "/api/runs/"+run, nil, headers, 200), &original))
 		if original.ID != run || original.Status != "starting" || original.RoutineLaunchID == nil || *original.RoutineLaunchID != g.LaunchID {
 			t.Fatalf("lost claim lookup replaced its recipe: %+v", original)
 		}
