@@ -7472,6 +7472,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRegistryEffortScale","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestRegistryRevisionAcceptsOrdersAndConstraintsAcrossOwners","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRegistrySeedsResolvesAndIsolates","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestReportsAreScopedIdempotentAndPreserveOverrides","tier":"GATED-FULL"}

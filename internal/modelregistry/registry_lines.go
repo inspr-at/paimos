@@ -60,7 +60,10 @@ func lineProfiles(c boardCatalog, h, model string) []Profile {
 
 // Editor tokens include all registry pins and preference/rule revisions.
 // Routing digests include only enabled pins, so archived history cannot exhaust
-// the live catalog's bounded input budget.
+// the live catalog's bounded input budget. Orders and row constraints enter
+// through the profile and rule revisions their writers bump: writes bound them
+// per board and project, so a tenant-wide count of their bodies could reject
+// configurations every writer accepted.
 func registryRevision(ctx context.Context, tx pgx.Tx, routingOnly ...bool) (string, error) {
 	profilesWhere, retirementsWhere := "", ""
 	if len(routingOnly) > 0 && routingOnly[0] {
@@ -74,9 +77,6 @@ func registryRevision(ctx context.Context, tx pgx.Tx, routingOnly ...bool) (stri
  (SELECT count(*)>512 FROM (SELECT 1 FROM model_profile_retirements r`+retirementsWhere+` LIMIT 513) r) OR
  (SELECT count(*)>4096 FROM (SELECT 1 FROM model_pref_profiles LIMIT 4097) p) OR
  (SELECT count(*)>1536 FROM (SELECT 1 FROM model_rule_revisions LIMIT 1537) r) OR
- (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_orders LIMIT 1537) o) OR
- (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_situation_orders LIMIT 1537) o) OR
- (SELECT count(*)>4096 FROM (SELECT 1 FROM model_row_constraints LIMIT 4097) r) OR
  (SELECT count(*)>512 FROM (SELECT 1 FROM model_pauses LIMIT 513) p)`).Scan(&large); err != nil {
 		return "", err
 	}
@@ -89,8 +89,6 @@ func registryRevision(ctx context.Context, tx pgx.Tx, routingOnly ...bool) (stri
  coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.profile_id) FROM model_profile_retirements r`+retirementsWhere+`),'[]'::jsonb),
  coalesce((SELECT jsonb_agg(jsonb_build_array(p.id,p.revision) ORDER BY p.id) FROM model_pref_profiles p),'[]'::jsonb),
  coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.scope,r.scope_key) FROM model_rule_revisions r),'[]'::jsonb),
- coalesce((SELECT jsonb_agg(to_jsonb(o) ORDER BY o.profile_id,o.column_key,o.situation) FROM (`+modelprefs.OrdersSQL+`) o),'[]'::jsonb),
- coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.scope,r.project_id,r.column_key,r.line) FROM model_row_constraints r),'[]'::jsonb),
  coalesce((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.harness,p.model) FROM model_pauses p),'[]'::jsonb))`).Scan(&raw)
 	if err != nil {
 		return "", err
