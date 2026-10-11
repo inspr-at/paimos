@@ -45,9 +45,28 @@ var appNumber = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
 var appToken = regexp.MustCompile(`^[A-Za-z0-9_.-]{8,255}$`)
 var errGitHub = errors.New("GitHub review status could not be confirmed")
 
+// ErrUnavailable identifies transport, permission and partial-read refusals
+// without exposing their request, response or credential contents.
+var ErrUnavailable = errGitHub
+
 // ErrNotFound is a confirmed absence of the requested GitHub resource.
 // Transport failures, permission failures and partial bodies stay errGitHub.
 var ErrNotFound = errors.New("GitHub resource not found")
+
+// GitHubHTTPError retains only content-free response metadata. Error and
+// Unwrap preserve the existing refusal/absence semantics for callers.
+type GitHubHTTPError struct {
+	StatusCode int
+	RequestID  string
+}
+
+func (e *GitHubHTTPError) Error() string { return e.Unwrap().Error() }
+func (e *GitHubHTTPError) Unwrap() error {
+	if e.StatusCode == http.StatusNotFound {
+		return ErrNotFound
+	}
+	return errGitHub
+}
 
 func (g *GitHubApp) Configured(tenantID, repository string) bool {
 	a := g.Config
@@ -86,18 +105,23 @@ func (g *GitHubApp) requestBounded(ctx context.Context, token, method, path stri
 		return errGitHub
 	}
 	defer res.Body.Close()
-	if res.StatusCode == http.StatusNotFound {
-		return ErrNotFound
+	id := res.Header.Get("X-GitHub-Request-Id")
+	// A request id is a bounded opaque identifier, never response text.
+	if len(id) > 128 || strings.IndexFunc(id, func(c rune) bool {
+		return !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == ':' || c == '-')
+	}) >= 0 {
+		id = ""
 	}
+	responseErr := &GitHubHTTPError{StatusCode: res.StatusCode, RequestID: id}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return errGitHub
+		return responseErr
 	}
 	raw, err = io.ReadAll(io.LimitReader(res.Body, limit+1))
 	if err != nil || int64(len(raw)) > limit {
-		return errGitHub
+		return responseErr
 	}
 	if out != nil && json.Unmarshal(raw, out) != nil {
-		return errGitHub
+		return responseErr
 	}
 	return nil
 }

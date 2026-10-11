@@ -192,6 +192,16 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				}
 			}
 			scope, controlled := coreAgentScope(r)
+			// Preference reads are a coordinator exception to the outer route
+			// ceiling. RequirePattern below still checks live grants and creator
+			// authority; a models.read-only key retains its placement ceiling.
+			if authz.IsCoordinatorKey(p.Scopes) {
+				switch r.Pattern {
+				case "GET /api/model-preferences", "GET /api/model-preferences/board", "GET /api/model-preferences/coverage",
+					"GET /api/model-preferences/evidence", "GET /api/model-preferences/simple", "GET /api/model-preferences/situations":
+					scope, controlled = "models.read", true
+				}
+			}
 			if authz.OwnerWorkstation(p) && workstationGovernance(r) && !strings.HasSuffix(r.Pattern, "/owner-workstation") {
 				scope, controlled = authz.RoutePermissions[r.Pattern], true
 			}
@@ -377,6 +387,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if len(parts) == 2 && parts[1] == "plan" && read {
 			return "agents.plan.read", true
 		}
+	case "status-autopilot":
+		if read && (len(parts) == 2 && (parts[1] == "attention" || parts[1] == "changes" || parts[1] == "projects" || parts[1] == "proposals") || len(parts) == 3 && parts[1] == "attention" && parts[2] == "groups") {
+			return "nodes.read", true
+		}
 	case "decision-desk":
 		if len(parts) == 1 && read {
 			return "questions.read", true
@@ -425,6 +439,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "status-autopilot":
+			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
+				return "nodes.read", true
+			}
 		case "lead-settings":
 			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
 				return "nodes.read", true
@@ -561,6 +579,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "search.read", true
 		}
 	case "settings":
+		if len(parts) == 2 && parts[1] == "status-autopilot" && read {
+			return "nodes.read", true
+		}
 		if len(parts) == 2 && parts[1] == "review-policy" {
 			if read {
 				return "reviewpolicy.read", true

@@ -209,7 +209,20 @@ export const retiringText = (entry: ModelEntry) => entry.retiring ? `Retiring ${
 
 /** A sentence in plain text for the "Can't run" line, from the server's own words. */
 export const reasonText = (reason: string) => {
-  const plain = reason.split('; ').map(part => part.replace(/^(column|default|role):\s*/, '').trim()).filter(Boolean).join('; ')
+  const words: Record<string, string> = {
+    allowance: 'the account is at its allowance or floor',
+    'account availability': 'the account has no recent successful sign-in check or free agent slot',
+    daily_limit: 'the account is at its daily cap',
+    daily_limit_unknown: 'the daily cap could not be checked',
+    policy: 'the model is disabled in Settings',
+    retired: 'the model has been retired',
+    'author family': 'the review needs a model from another family',
+    'harness filter': 'the model uses another harness',
+    'security review policy': 'the model does not meet the security review policy',
+  }
+  const parts = reason.split(';').map(part => part.trim().replace(/^(column|default|role):\s*/, '').trim()).filter(Boolean)
+    .map(part => words[part] ?? part)
+  const plain = [...new Set(parts)].join('; ')
   return plain ? plain.charAt(0).toLowerCase() + plain.slice(1) : 'no qualified account has room right now'
 }
 

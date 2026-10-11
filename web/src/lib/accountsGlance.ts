@@ -12,12 +12,14 @@ import type { QuotaWarningSettings } from './quotaWarnings.ts'
 export const DEFAULT_QUOTA_THRESHOLDS: Readonly<QuotaWarningSettings> = Object.freeze({ early_percent: 10, urgent_percent: 3 })
 
 /** The sign-in's words in Settings, e.g. "Ready"; empty when the account is not on that computer. */
-export function signinStatus(computer: PairingView, accountId: string): string {
+export function signinStatus(computer: PairingView, accountId: string, row?: AccountRow, now = Date.now()): string {
   const enrollment = computer.enrollments.find(e => e.account_id === accountId)
   if (!enrollment) return ''
   if (computer.computer_state === 'revoked' || enrollment.state === 'revoked') return 'Blocked'
   if (computer.computer_state === 'draining' || enrollment.state === 'draining') return 'Draining'
-  return describeEnrollmentStatus(computer, enrollment) || 'Not reported'
+  const label = describeEnrollmentStatus(computer, enrollment)
+  if (!label) return 'Not reported'
+  return row ? readiness(row, computer, now).text : label
 }
 
 export const verificationExpired = (s: SignInReference) => s.enrollment.verification_state === 'expired' && !s.enrollment.verification_expired_ready
@@ -150,9 +152,8 @@ function accountReady(account: OverviewAccount, now: number): boolean {
   const rows = new Map(account.rows.map(row => [row.id, row]))
   return account.signins.some(signin => {
     if (signin.computer.computer_state !== 'connected' || signin.enrollment.state !== 'connected') return false
-    if (signinStatus(signin.computer, signin.enrollment.account_id) !== 'Ready') return false
     const row = rows.get(signin.enrollment.account_id)
-    return readiness(row ? { ...bareRow(signin), ...row } : bareRow(signin), signin.computer, now).kind === 'ready'
+    return signinStatus(signin.computer, signin.enrollment.account_id, row ? { ...bareRow(signin), ...row } : bareRow(signin), now) === 'Ready'
   })
 }
 
