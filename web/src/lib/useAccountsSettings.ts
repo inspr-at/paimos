@@ -266,6 +266,8 @@ export function useAccountsSettings(part: AccountsPart) {
     if (id.startsWith('new:')) {
       // Owners and admins tick where it may work; others read the account.
       if (!choosesWhere.value) { if (accountOf(id.slice(4))) await show('account', id.slice(4)); return }
+      // The matrix opens For new things and brings the account's row to the person (AEON-1173).
+      if (revealWhere) { revealWhere(id.slice(4)); return }
       document.getElementById('account-use')?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
       return
     }
@@ -350,6 +352,9 @@ export function useAccountsSettings(part: AccountsPart) {
   // Capacity registers how its pacing editors take focus; elsewhere the editors are one part away.
   let revealPacing: (() => void) | null = null
   const bindPacing = (reveal: (() => void) | null) => { revealPacing = reveal }
+  // Accounts registers how "Choose where" reaches an account's row in Where accounts may work.
+  let revealWhere: ((accountId: string) => void) | null = null
+  const bindWhere = (reveal: ((accountId: string) => void) | null) => { revealWhere = reveal }
   /** "I'm away…" from a learned suggestion: the panel closes and the pacing editors take focus. */
   async function goPacing() {
     open.value = false
@@ -563,7 +568,7 @@ export function useAccountsSettings(part: AccountsPart) {
     bindRoot, computerState, status, references, mayVerify, verificationBusy, verificationMessage, retained, vendorName, expired,
     needs, counts, allReady, quota, paceWords, planFailed, heldOf, endHeld, computerSummary, windowLabel: (w: CapacityWindow) => windowLabel(w),
     agentsPlan: plan, paceBusy, savePace, saveDefaultPace,
-    show, actAttention, refresh, verify, goPacing, bindPacing, planCard, planBusy, confirmPlan, cardSecondary,
+    show, actAttention, refresh, verify, goPacing, bindPacing, bindWhere, planCard, planBusy, confirmPlan, cardSecondary,
     cleanupRemoval, renameOpen, renameName, menuOpen, menuAnchor, menuItems, menuContext, menuError, openMenu, renameComputer, menuAction,
     setAccount, primarySignin,
   })

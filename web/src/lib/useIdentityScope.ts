@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { computed, onScopeDispose, watch, type ComputedRef } from 'vue'
-import { onAccessChange } from './authz'
+import { onAccessRevalidate } from './authz'
 import { createScope, scopeOwner, type Scope } from './identityScope'
 import { useSession } from '../stores/session'
 
@@ -14,7 +14,7 @@ export function useIdentityScope(requires: () => boolean = () => true): Scope & 
   const owner = computed(() => requires() ? scopeOwner(session.identity) : '')
   const scope = createScope(() => session.authenticationCurrent() ? owner.value : '')
   const stopOwner = watch(owner, () => scope.reset(), { flush: 'sync' })
-  const stopAccess = onAccessChange(change => { if (change === 'reset') scope.reset() })
+  const stopAccess = onAccessRevalidate({ reset: scope.reset })
   onScopeDispose(() => { stopOwner(); stopAccess(); scope.dispose() })
   return { ...scope, owner }
 }

@@ -260,6 +260,7 @@ func TestWorkflowShardLayouts(t *testing.T) {
 			} `yaml:"strategy"`
 			Steps []struct {
 				Name string
+				If   string            `yaml:"if"`
 				Uses string            `yaml:"uses"`
 				Run  string            `yaml:"run"`
 				With map[string]any    `yaml:"with"`
@@ -288,8 +289,13 @@ func TestWorkflowShardLayouts(t *testing.T) {
 	if job.Env["AEON_GO_SHARD_COUNT"] != "${{ strategy.job-total }}" || job.Env["GOFLAGS"] != "${{ strategy.job-total == 4 && '-count=1' || '' }}" {
 		t.Fatal("shard commands must use the selected count and bypass persistent Mac test results")
 	}
-	if job.Steps[0].With["persist-credentials"] != false || job.Steps[1].With["cache"] != true || job.Steps[1].With["cache-dependency-path"] != "go.sum" {
-		t.Fatal("routed checkout must remain credential-free and Go caching must use go.sum")
+	if job.Steps[0].With["persist-credentials"] != false {
+		t.Fatal("routed checkout must remain credential-free")
+	}
+	// Pool runners retain their Go caches on disk; only hosted runners should
+	// transfer dependency and build caches through GitHub.
+	if job.Steps[1].With["cache"] != "${{ runner.environment == 'github-hosted' }}" || job.Steps[1].With["cache-dependency-path"] != "go.sum" {
+		t.Fatal("Go setup caching must be hosted-only and use go.sum")
 	}
 	foundCache := false
 	foundFreshTests := false
@@ -303,6 +309,9 @@ func TestWorkflowShardLayouts(t *testing.T) {
 		}
 		if strings.HasPrefix(step.Uses, "actions/cache@") {
 			foundCache = true
+			if step.If != "runner.environment == 'github-hosted'" {
+				t.Fatal("Go build cache restore and save must run only on GitHub-hosted runners")
+			}
 			if step.With["path"] != "${{ steps.go-cache-path.outputs.path }}" {
 				t.Fatal("cache must persist the actual GOCACHE path")
 			}

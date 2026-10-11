@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { ref } from 'vue'
 import { api, APIError } from './api'
-import { onAccessChange, permissionsRevoked } from './authz'
+import { onAccessRevalidate, permissionsRevoked } from './authz'
 
 export type FeatureKey = 'workspace-summary'
 export interface FeatureEvaluation {
@@ -81,8 +81,7 @@ export function refreshFeatures(projectId?: string, force = false): Promise<void
 
 // Identity/workspace changes and 401s discard in-flight results. Focus and
 // navigation re-evaluate known scopes through the existing access lifecycle.
-onAccessChange(change => {
-  if (change === 'reset') { clearFeatures(); return }
+onAccessRevalidate({ reset: clearFeatures, refresh: () => {
   const scopes = new Set([...cache.keys(), ...requests.keys()])
   for (const scope of scopes) void refreshFeatures(scope || undefined, true)
-})
+} })

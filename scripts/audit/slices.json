@@ -168,6 +168,13 @@
         "internal/agentruns/queue_notifications.go",
         "internal/agentruns/queue_notifications_test.go",
         "internal/runisolation/**",
+        "internal/agentd/routine_tools.go",
+        "internal/agentd/routine_tools_test.go",
+        "internal/routineexec/**",
+        "internal/harness/lead_runtime.go",
+        "internal/harness/lead_runtime_test.go",
+        "internal/agentd/lead_runtime.go",
+        "internal/agentd/lead_runtime_test.go",
         "internal/modelregistry/routine_reads.go"
       ]
     },
@@ -268,12 +275,15 @@
         "internal/recurrences/execution_principals.go",
         "internal/recurrences/execution_principals_test.go",
         "internal/routineguard/**",
+        "internal/routineguard/pathpolicy/path.go",
         "internal/routineguard/evaluation.go",
         "internal/routineguard/evaluation_test.go",
         "internal/routineguard/evaluation_tx_test.go",
         "internal/routineactions/**",
         "internal/recurrences/runs.go",
         "internal/recurrences/runs_test.go",
+        "internal/recurrences/templates.go",
+        "internal/recurrences/templates_test.go",
         "internal/routinebudget/**",
         "internal/recurrences/reads.go",
         "internal/recurrences/consent_reads.go",
@@ -350,6 +360,7 @@
         "web/src/lib/displayLanguage.ts",
         "web/tests/lead-adoption.unit.test.ts",
         "web/tests/lead-adoption.spec.ts",
+        "web/tests/access-refresh-panels.unit.test.ts",
         "web/src/stores/decisionDesk.ts"
       ],
       "exclude": [
