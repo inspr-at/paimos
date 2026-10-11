@@ -186,6 +186,7 @@ function finishLayout(event: TransitionEvent) {
 }
 async function cycleLayout() {
   if (!layoutEnabled.value) return false
+  const owner = person.value
   const next = nextPreset.value
   if (next === 'list') { await closePanel(); return }
   rememberHandle(next === 'focus' ? FOCUS_WIDTH : workWidth.value - DIVIDER - OVERVIEW_DETAILS)
@@ -195,6 +196,7 @@ async function cycleLayout() {
     if (row?.dataset.row) openSession(row.dataset.row.slice(2))
   }
   await nextTick()
+  if (owner !== person.value || !split.value) return
   ensureWorkTop(); placeRow()
   announce(`Layout: ${layouts[next][0]}`)
 }
@@ -359,6 +361,7 @@ function openSession(id: string) {
 // Focus returns to the session's row once the panel is gone.
 async function closePanel() {
   const id = sessionId.value
+  const owner = person.value
   if (id) cursor.value = `s:${id}`
   const back = openedFromList && typeof window.history.state?.back === 'string' && window.history.state.back.startsWith('/agents')
   openedFromList = false
@@ -369,7 +372,7 @@ async function closePanel() {
   }
   else await router.replace({ path: '/agents', query: route.query })
   await nextTick()
-  if (id) focusRow(cursor.value)
+  if (id && owner === person.value && !sessionId.value) focusRow(cursor.value)
 }
 
 // ---------- Keyboard: j/k move, Enter opens, Esc closes ----------
@@ -494,7 +497,7 @@ onBeforeUnmount(() => {
   stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
   shortcutDisposers.forEach(dispose => dispose())
 })
-watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true })
+watch(sessionId, id => { if (id) { cursor.value = `s:${id}`; lastSession = id } }, { immediate: true })
 </script>
 
 <template>
@@ -640,7 +643,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .layout-button:not([data-layout="list"]) { color: var(--teal-ink); }
 .layout-button[aria-disabled="true"] { opacity: .5; }
 .agents-split { display: flex; gap: 0; align-items: flex-start; }
-.agents-list-pane { flex: 0 0 100%; min-width: 0; transition: flex-basis 240ms ease; }
+.agents-list-pane { flex: 0 0 100%; min-width: 0; container: sessions / inline-size; transition: flex-basis 240ms ease; }
 .split .agents-list-pane { flex-basis: var(--list-w); position: sticky; top: 0; }
 .split { padding-bottom: 8px; }
 .agents-divider { position: relative; flex: 0 0 0; align-self: stretch; transition: flex-basis 240ms ease; }

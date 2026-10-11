@@ -738,7 +738,7 @@
         ,
         {"file":"tests/aeon-1211-agents-rows.spec.ts","listedTests":10,"weightSeconds":24,"weightSource":"local-single-worker-AEON-1211-15s-plus-margin"}
         ,
-        {"file":"tests/aeon-1213-agents-split.spec.ts","listedTests":9,"weightSeconds":40,"weightSource":"unmeasured-P5-one-worker-budget"}
+        {"file":"tests/aeon-1213-agents-split.spec.ts","listedTests":11,"weightSeconds":40,"weightSource":"unmeasured-P5-one-worker-budget"}
         ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,

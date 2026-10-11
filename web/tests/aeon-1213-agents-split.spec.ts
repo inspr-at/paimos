@@ -18,6 +18,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', handle?: num
   const data = agentData({ now: NOW, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   data.approvals = []
   data.sessions.forEach(s => Object.assign(s, { model: 'gpt-6.1-sol', reasoning_effort: 'xhigh', account_label: 'ChatGPT Pro' }))
+  Object.assign(data.sessions[4]!, { brief: 'Die Sicherungskopien aller Produktionsserver prüfen und die Ergebnisse mit den vorherigen Protokollen vergleichen. '.repeat(20) })
   // A long list and long German content test actual scrolling and text bounds.
   for (let i = 20; i < 42; i++) data.sessions.push({ ...data.sessions[1]!, id: `5e000000-0000-4000-8000-0000000000${i}`, display_label: `Worker ${i}: Sicherungskopien auf allen Produktionsservern überprüfen`, ticket_node_id: null, ticket: null, run_id: null, parent_harness_session_id: data.sessions[0]!.id })
   await mockAgents(page, data)
@@ -96,6 +97,7 @@ for (const theme of ['light', 'dark'] as const) {
     expect((await last.boundingBox())!.y).toBeCloseTo(before, 1)
     expect(await page.locator('main').evaluate(el => el.scrollTop)).toBe(pageScroll)
     await pane(page).locator('.scroll:visible').evaluate(el => { el.scrollTop = 200 })
+    await expect.poll(() => pane(page).locator('.scroll:visible').evaluate(el => el.scrollTop)).toBeGreaterThan(0)
     await body.evaluate(el => { el.scrollTop = 0 })
     await row(page, data.sessions[1]!.id).click()
     await expect.poll(() => pane(page).locator('.scroll:visible').evaluate(el => el.scrollTop)).toBe(0)
@@ -205,9 +207,48 @@ test('AEON-1213: the work-area threshold and 240 ms presets honor reduced motion
   expect(await page.locator('.agents-list-pane').evaluate(el => getComputedStyle(el).transitionDuration)).toBe('0.24s')
   await page.emulateMedia({ reducedMotion: 'reduce' })
   expect(await page.locator('.agents-list-pane').evaluate(el => getComputedStyle(el).transitionDuration)).toBe('0s')
-  const width = await page.locator('.agents-work').evaluate(el => el.getBoundingClientRect().width), gutter = 1440 - width
-  await page.setViewportSize({ width: 1055 + gutter, height: 1000 })
+  // Measure the work area itself, independent of the shell's responsive gutter.
+  await page.locator('.agents-work').evaluate(el => { (el as HTMLElement).style.width = '1055px' })
   await expect(pane(page)).toHaveClass(/sheet/); await expect(dock(page)).toBeHidden()
-  await page.setViewportSize({ width: 1056 + gutter, height: 1000 })
+  await page.locator('.agents-work').evaluate(el => { (el as HTMLElement).style.width = '1056px' })
   await expect(pane(page)).toHaveClass(/docked/); await expect(dock(page)).toBeVisible()
+})
+
+test('AEON-1213: a failed handle save is visible without moving the preset', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { data } = await setup(page)
+  await page.route('**/api/preferences/**', route => {
+    if (decodeURIComponent(new URL(route.request().url()).pathname).endsWith('/agents:layout') && route.request().method() === 'PUT') return route.fulfill({ status: 503, json: { error: 'unavailable' } })
+    return route.fallback()
+  })
+  await page.goto(`/agents/${data.sessions[1]!.id}`)
+  await expect(pane(page)).toHaveClass(/docked/)
+  const guard = await controlStability(page, { preset: dock(page) })
+  await guard.check(async () => {
+    await dragTo(page, 420)
+    await page.clock.runFor(500)
+    await expect(page.getByRole('status').filter({ hasText: 'The layout could not be saved' })).toBeVisible()
+  })
+  guard.done()
+})
+
+test.describe('touch', () => {
+  test.use({ hasTouch: true })
+  test('AEON-1213: the preset, divider hit area and phone Back target are 44 px', async ({ page }, info) => {
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    const { data } = await setup(page, 'dark')
+    await page.goto(`/agents/${data.sessions[1]!.id}`)
+    await expect(dock(page)).toBeVisible()
+    const box = (await dock(page).boundingBox())!
+    expect(box.width).toBeGreaterThanOrEqual(44); expect(box.height).toBeGreaterThanOrEqual(44)
+    const hitWidth = await page.locator('.agents-divider').evaluate(el => { const css = getComputedStyle(el, '::after'); return el.getBoundingClientRect().width - parseFloat(css.left) - parseFloat(css.right) })
+    expect(hitWidth).toBeGreaterThanOrEqual(44)
+    await page.screenshot({ path: info.outputPath('1440-dark-touch.png') })
+    await page.setViewportSize({ width: 390, height: 900 })
+    await expect(pane(page)).toHaveClass(/sheet/)
+    const back = (await page.getByRole('button', { name: 'Back to the list', exact: true }).boundingBox())!
+    expect(back.width).toBeGreaterThanOrEqual(44); expect(back.height).toBeGreaterThanOrEqual(44)
+    expect(await pane(page).evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+    await page.screenshot({ path: info.outputPath('390-dark-touch-sheet.png') })
+  })
 })

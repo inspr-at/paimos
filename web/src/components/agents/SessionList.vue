@@ -888,7 +888,9 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .lineage .history-toggle { flex-shrink: 0; }
 .sessions { overflow: clip; container: sessions / inline-size; padding: 0; }
 .sessions.has-layout-dock .tree-head { padding-right: 58px; }
-.sessions.pane { display: flex; flex-direction: column; height: var(--pane-h); }
+/* In a split the unbordered list pane is the query container: 560 means the handle's
+   560 px, without subtracting this card's two hairlines from the threshold. */
+.sessions.pane { container: none; display: flex; flex-direction: column; height: var(--pane-h); }
 .sessions.pane > * { flex-shrink: 0; }
 .sessions.pane > .table { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; align-content: start; }
 .sessions.pane .th-stick { position: static; }

@@ -5492,11 +5492,15 @@
     ,
     {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 light 390: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: a failed handle save is visible without moving the preset","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: a person change closes details and cancels the previous handle save","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: registered F, numpad slash, S and divider keys respect fields and native keys","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: the work-area threshold and 240 ms presets honor reduced motion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"touch › AEON-1213: the preset, divider hit area and phone Back target are 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
