@@ -181,13 +181,18 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     for (const session of data.sessions) Object.assign(session, { eta_ready_at: null, eta_reported_at: null, progress_pct: null })
     await page.goto('/agents')
     const lead = row(page, 1), worker = row(page, 2)
-    await expect(lead.locator('.eta-cell')).toHaveText('no ETA')
+    // A phone's compact rows (AEON-1211) have no ticket cell: the estimate is in the details, and the rows hold still.
+    const compact = width === 390
+    if (compact) await expect(lead.locator('.eta-cell')).toBeHidden()
+    else await expect(lead.locator('.eta-cell')).toHaveText('no ETA')
     await expect(lead.locator('.report-source')).not.toBeVisible()
     const refresh = async () => {
+      const read = page.waitForResponse(r => new URL(r.url()).pathname === '/api/harness-sessions')
       await page.evaluate(() => {
         Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
         document.dispatchEvent(new Event('visibilitychange'))
       })
+      await read
     }
     await expectStableControls({
       controls: { lead, workers: familyFold(page, 1), history: lead.locator('.history-toggle'), leadActions: lead.locator('.more'), nextWorker: worker, nextActions: worker.locator('.more') },
@@ -196,15 +201,18 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
         { name: 'first reported estimate', run: async () => {
           Object.assign(data.sessions[0]!, { revision: 3, eta_ready_at: new Date(NOW + 5 * 60_000).toISOString(), eta_reported_at: new Date(NOW).toISOString(), progress_pct: 80 })
           await refresh()
-          await expect(lead.locator('.report-source')).toBeVisible()
-          await expect(lead.locator('.report-source')).toHaveAttribute('tabindex', '0')
-          await expect(lead.locator('.pct')).toHaveText('80%')
+          if (compact) await expect(lead.locator('.eta-cell')).toBeHidden()
+          else {
+            await expect(lead.locator('.report-source')).toBeVisible()
+            await expect(lead.locator('.report-source')).toHaveAttribute('tabindex', '0')
+            await expect(lead.locator('.pct')).toHaveText('80%')
+          }
           await page.locator('.sessions').screenshot({ path: testInfo.outputPath(`first-report-${width}-${theme}.png`) })
         } },
         { name: 'report cleared', run: async () => {
           Object.assign(data.sessions[0]!, { revision: 4, eta_ready_at: null, eta_reported_at: null, progress_pct: null })
           await refresh()
-          await expect(lead.locator('.eta-cell')).toHaveText('no ETA')
+          if (!compact) await expect(lead.locator('.eta-cell')).toHaveText('no ETA')
           await expect(lead.locator('.report-source')).not.toBeVisible()
           await expect(lead.locator('.report-source')).not.toHaveAttribute('tabindex', '0')
         } },
@@ -221,8 +229,11 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.goto('/agents')
     await expect(liveCount(page)).toHaveText('4')
     await expect(dial(page).locator('.f-status')).toContainText('room for 16 more')
-    await expect(row(page, 2).locator('.report-source')).toBeVisible()
-    await expect(row(page, 2).locator('.pct')).toHaveText('80%')
+    // Compact rows (AEON-1211) leave the estimate to the details, checked below.
+    if (width !== 390) {
+      await expect(row(page, 2).locator('.report-source')).toBeVisible()
+      await expect(row(page, 2).locator('.pct')).toHaveText('80%')
+    }
     await expectStableControls({
       controls: { more: dial(page).getByRole('button', { name: 'One agent more at once' }), fewer: dial(page).getByRole('button', { name: 'One agent fewer at once' }), fold: dial(page).locator('.fs-tog') },
       scrollAreas: { dial: page.locator('.cdial'), page: page.locator('.agents-page') },
