@@ -17,7 +17,7 @@ const state = vi.hoisted(() => ({
   cleanups: [] as (() => void)[], manage: true,
 }))
 vi.mock('../src/stores/session', () => ({ useSession: () => state.session }))
-vi.mock('../src/lib/authz', () => ({ can: (permission: string) => permission === 'model_prefs.manage' ? state.manage : permission !== 'members.read', onAccessChange: () => () => {} }))
+vi.mock('../src/lib/authz', () => ({ can: (permission: string) => permission === 'model_prefs.manage' ? state.manage : permission !== 'members.read', onAccessRevalidate: () => () => {} }))
 vi.mock('vue', async original => ({ ...await original<typeof import('vue')>(), onBeforeUnmount: (cleanup: () => void) => state.cleanups.push(cleanup) }))
 vi.mock('../src/lib/modelsSimpleApi', async original => ({ ...await original<typeof import('../src/lib/modelsSimpleApi')>(), getSimple: vi.fn(), getTail: vi.fn(), getRegistry: vi.fn(), getWorkspaceRules: vi.fn(), putChain: vi.fn(), putOrder: vi.fn(), putEffort: vi.fn(), resetOrder: vi.fn(), putNever: vi.fn(), deleteNever: vi.fn(), putWorkspaceRules: vi.fn() }))
 

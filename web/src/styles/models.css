@@ -172,7 +172,7 @@
 .models-section .ch-it.over { background: var(--row-selected); }
 .models-section .ch-n { font: 500 11px/1 var(--mono); color: var(--ink-3); text-align: center; }
 .models-section .grip, .models-section .grip-sp { display: grid; place-items: center; width: 24px; height: 32px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); }
-.models-section .grip { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.models-section .grip { cursor: grab; touch-action: none; -webkit-user-select: none; user-select: none; }
 .models-section .ch-it.dragging .grip { cursor: grabbing; }
 .models-section .grip:hover { color: var(--ink); background: var(--row-hover); }
 .models-section .grip:focus-visible { outline: none; color: var(--ink); box-shadow: var(--focus-ring); }
