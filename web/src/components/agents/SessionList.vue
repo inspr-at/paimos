@@ -547,7 +547,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
           <button
             type="button" class="btn sm ghost quiet-btn" :aria-pressed="showRemoved"
             :aria-label="showRemoved ? 'Back to sessions' : 'Show history: every ended or removed session'" @click="toggleHistory"
-          ><template v-if="showRemoved"><AppIcon name="arrow-left" :size="13" /><span class="tool-label">Sessions</span></template><template v-else><AppIcon name="history" :size="13" /><span class="tool-label">History</span></template></button>
+          ><AppIcon :name="showRemoved ? 'arrow-left' : 'history'" :size="13" /><!-- Both words keep their room, so the toggle never changes width (AEON-541). --><span class="tool-label btn-label"><span :aria-hidden="showRemoved || undefined">History</span><span :aria-hidden="!showRemoved || undefined">Sessions</span></span></button>
         </span>
       </div>
       <!-- Applied filters sit under the head and stick with it; the state filter is the head count's (AEON-780). -->
