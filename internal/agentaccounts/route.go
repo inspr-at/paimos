@@ -232,14 +232,27 @@ func ReserveRoutineAccountTx(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	if err != nil {
 		return RouteResult{}, events.Change{}, err
 	}
-	account, windows, limits, err := selectAccount(ctx, tx, run, p.ID, harness, *run.ProfileID, daemon, []string{accountID}, nil, now)
+	// No daemon request supplies estimates here. Hold the account's learned
+	// per-unit usage, which its limit rules already project, so hand-set
+	// windows admit and hold the routine like any other run.
+	learned, err := learnedLimitEstimates(ctx, tx, accountID, nil)
+	if err != nil {
+		return RouteResult{}, events.Change{}, err
+	}
+	estimates := map[string]int64{}
+	for unit, n := range learned {
+		if validUnit(unit) {
+			estimates[unit] = n
+		}
+	}
+	account, windows, limits, err := selectAccount(ctx, tx, run, p.ID, harness, *run.ProfileID, daemon, []string{accountID}, estimates, now)
 	if err != nil {
 		return RouteResult{}, events.Change{}, err
 	}
 	if err = agentpairing.RunFence(ctx, tx, account.ID, run.ID, false); err != nil {
 		return RouteResult{}, events.Change{}, err
 	}
-	result, err = persistReservation(ctx, tx, p, run, account, windows, limits, nil, now)
+	result, err = persistReservation(ctx, tx, p, run, account, windows, limits, estimates, now)
 	return result, events.Change{Type: evReserved, After: result}, err
 }
 
