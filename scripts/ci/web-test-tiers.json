@@ -416,6 +416,8 @@
     ,
     "browser:tests/business.spec.ts:a partly set up overview shows status only, and its one link to Settings › Business stays put"
     ,
+    "browser:tests/business.spec.ts:a role that manages plugins but not settings switches the parts in Settings › Business"
+    ,
     "browser:tests/business.spec.ts:members see a partly set up overview without the parts status or the settings link"
     ,
     "browser:tests/business.spec.ts:the overview includes open periods older than a year in its waiting count"
@@ -6509,6 +6511,8 @@
     {"kind":"browser","file":"tests/bulk.spec.ts","name":"the bulk bar and its menus have no axe violations in light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"a partly set up overview shows status only, and its one link to Settings › Business stays put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/business.spec.ts","name":"a role that manages plugins but not settings switches the parts in Settings › Business","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/business.spec.ts","name":"an admin enables Business: every part with the compiled digests","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -14861,6 +14865,8 @@
     {"kind":"node","file":"tests/sessionRow.test.ts","name":"media and terminal use their execution label and never infer an AI vendor","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/settings.test.ts","name":"Accounts, Computers and Capacity are three sections, each for people who may read accounts (AEON-1171)","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/settings.test.ts","name":"Business opens to people who may manage plugins, for its parts card (AEON-1189)","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/settings.test.ts","name":"Personal, Developer and Policies are for everyone; workspace sections follow their grants","tier":"GATED-FULL"}
     ,

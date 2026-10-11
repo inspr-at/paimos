@@ -134,6 +134,31 @@ test('a partly set up overview shows status only, and its one link to Settings �
   expect(errors).toEqual([])
 })
 
+// AEON-1189: a custom role may manage plugins without managing the workspace
+// settings. The overview's link takes it to the parts switches in Settings ›
+// Business, never to a closed page; the cards for workspace admins stay closed.
+test('a role that manages plugins but not settings switches the parts in Settings › Business', async ({ page }) => {
+  const errors = watchErrors(page)
+  const { calls } = await setup(page, { role: 'member', grant: ['plugins.manage'], enabled: ['business_costs'] })
+  await page.goto('/business')
+  const overview = page.getByRole('region', { name: 'Business', exact: true })
+  await expect(overview.getByRole('region', { name: 'Business parts' })).toBeVisible()
+  await overview.getByRole('link', { name: 'Set up in Settings › Business' }).click()
+  await expect(page).toHaveURL('/settings/business#parts')
+  await expect(page.getByRole('navigation', { name: 'Settings sections' }).getByRole('link', { name: /^Business/ })).toHaveAttribute('aria-current', 'page')
+  const parts = page.locator('#parts')
+  const hours = parts.getByRole('checkbox', { name: 'Hours enabled' })
+  await expect(hours).toBeEnabled()
+  await expect(page.getByRole('heading', { name: 'Business settings are for workspace admins' })).toHaveCount(0)
+  await hours.click()
+  await expect(hours).toBeChecked()
+  expect(calls.filter(c => c.method === 'PUT').map(c => c.path)).toEqual(['/api/plugins/business_costs/installation', '/api/plugins/business_hours/installation'])
+  await expect(page.getByRole('heading', { name: 'Quote settings' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Document profiles' })).toHaveCount(0)
+  await expect(page.locator('#customers')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
 test('members see a partly set up overview without the parts status or the settings link', async ({ page }) => {
   await setup(page, { role: 'member', enabled: ['business_costs'] })
   await page.goto('/business')

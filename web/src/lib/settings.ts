@@ -6,8 +6,10 @@ import { sessionGone } from './authz.ts'
 export type SectionId = 'personal' | 'theme' | 'developer' | 'policies' | 'models' | 'workspace' | 'vocabulary' | 'kinds' | 'access' | 'agents' | 'agent-rules' | 'accounts' | 'computers' | 'capacity' | 'autopilot' | 'business' | 'portal'
 export const SETTINGS_GROUPS = ['You', 'Workspace', 'Agents and automation', 'Business'] as const
 export type SettingsGroup = typeof SETTINGS_GROUPS[number]
-// Explicit grants keep Access, rules and accounts independent of admin role.
-export interface SettingsSection { id: SectionId; group: SettingsGroup; label: string; summary: string; who: string; admin: boolean; permission?: string | string[]; deniedTitle?: string; denied?: string; fresh?: boolean }
+// Explicit grants keep Access, rules and accounts independent of admin role. An
+// admin section may also open to one grant (alsoFor) for the cards that grant
+// covers: people who manage plugins switch the Business parts (AEON-1189).
+export interface SettingsSection { id: SectionId; group: SettingsGroup; label: string; summary: string; who: string; admin: boolean; permission?: string | string[]; alsoFor?: string; deniedTitle?: string; denied?: string; fresh?: boolean }
 export const anyOf = (permission: string | string[], allowed: (permission: string) => boolean) => (Array.isArray(permission) ? permission : [permission]).some(allowed)
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'personal', group: 'You', label: 'Personal', summary: 'Mode, greeting and keys', who: 'Everyone has this section. Changes apply only to you.', admin: false },
@@ -26,7 +28,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'computers', group: 'Agents and automation', label: 'Computers', summary: 'Where agents run', who: 'People who may read accounts see this section. Managing computers and their sign-ins needs the manage permission.', admin: false, permission: 'account.read', deniedTitle: 'Computers need permission to read accounts', denied: 'Computers and their sign-ins are visible to people who can read accounts.' },
   { id: 'capacity', group: 'Agents and automation', label: 'Capacity', summary: 'How much, and when', who: 'People who may read accounts see this section. Changing the plan needs permission to manage accounts.', admin: false, permission: 'account.read', deniedTitle: 'Capacity needs permission to read accounts', denied: 'When agents work and how much they may use is visible to people who can read accounts.' },
   { id: 'autopilot', group: 'Agents and automation', label: 'Autopilot', summary: 'Moves tickets on its own', who: 'Admins only change the rules and overrides. Everyone who can edit a ticket works the flagged ones.', admin: true },
-  { id: 'business', group: 'Business', label: 'Business', summary: 'Parts and quote settings', who: 'Admins only see and change this section.', admin: true },
+  { id: 'business', group: 'Business', label: 'Business', summary: 'Parts and quote settings', who: 'Admins see and change this section. People who may manage plugins see only the Business parts and switch them.', admin: true, alsoFor: 'plugins.manage' },
   { id: 'portal', group: 'Business', label: 'Product portal', summary: 'Public catalog', who: 'Admins only see and change this section.', admin: true },
 ]
 export function sectionOf(param: unknown): SectionId {
@@ -34,8 +36,12 @@ export function sectionOf(param: unknown): SectionId {
   if (value === 'projects') return 'vocabulary'
   return SETTINGS_SECTIONS.find(section => section.id === value)?.id ?? 'personal'
 }
+export const sectionGranted = (section: SettingsSection, admin: boolean, allowed: (permission: string) => boolean) =>
+  section.permission ? anyOf(section.permission, allowed) : admin || !section.admin || (!!section.alsoFor && allowed(section.alsoFor))
+// No grant opens it to anyone but admins.
+export const adminOnly = (section: SettingsSection) => section.admin && !section.permission && !section.alsoFor
 export const visibleSections = (admin: boolean, allowed: (permission: string) => boolean = () => false) =>
-  SETTINGS_SECTIONS.filter(section => section.permission ? anyOf(section.permission, allowed) : admin || !section.admin)
+  SETTINGS_SECTIONS.filter(section => sectionGranted(section, admin, allowed))
 // Deep links into a section: /settings/business#quotes.
 export const settingsLink = (section: SectionId, anchor?: string) => `/settings/${section}${anchor ? `#${anchor}` : ''}`
 

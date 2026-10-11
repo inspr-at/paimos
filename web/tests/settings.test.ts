@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { keyState, sectionOf, senderLine, settingsLink, visibleSections, type AgentKey } from '../src/lib/settings.ts'
+import { SETTINGS_SECTIONS, adminOnly, keyState, sectionGranted, sectionOf, senderLine, settingsLink, visibleSections, type AgentKey } from '../src/lib/settings.ts'
 
 test('Personal, Developer and Policies are for everyone; workspace sections follow their grants', () => {
   assert.deepEqual(visibleSections(false).map(s => s.id), ['personal', 'theme', 'developer', 'vocabulary', 'policies'])
@@ -23,6 +23,17 @@ test('Personal, Developer and Policies are for everyone; workspace sections foll
   assert.equal(settingsLink('business', 'quotes'), '/settings/business#quotes')
   assert.equal(visibleSections(false, permission => permission === 'rules.read').some(section => section.id === 'agent-rules'), true)
   assert.equal(visibleSections(true).some(section => section.id === 'agent-rules'), false)
+})
+
+test('Business opens to people who may manage plugins, for its parts card (AEON-1189)', () => {
+  const plugins = visibleSections(false, permission => permission === 'plugins.manage').map(section => section.id)
+  assert.deepEqual(plugins, ['personal', 'theme', 'developer', 'vocabulary', 'policies', 'business'])
+  assert.equal(visibleSections(false, permission => permission === 'plugins.read').some(section => section.id === 'business'), false)
+  const business = SETTINGS_SECTIONS.find(section => section.id === 'business')!
+  assert.equal(sectionGranted(business, false, permission => permission === 'plugins.manage'), true)
+  assert.equal(sectionGranted(business, false, () => false), false)
+  assert.equal(adminOnly(business), false)
+  assert.equal(adminOnly(SETTINGS_SECTIONS.find(section => section.id === 'portal')!), true)
 })
 
 test('Accounts, Computers and Capacity are three sections, each for people who may read accounts (AEON-1171)', () => {
