@@ -10,6 +10,8 @@ import type { AccountResetState, ResetPolicy } from '../src/lib/accountResets'
 
 // AEON-1037 (AEON-1030 draft 6): the account posture is gone (Pace on the dial replaces it); the
 // floor and the vendor-reported Resets card are the per-account overrides, and neither moves a control.
+// AEON-1172: they are rows of "Limits on this account"; the floor saves on change or ⌘↵ / Ctrl+↵, and
+// a failed save says so in a toast instead of a line that would push the panel.
 test.use({ timezoneId: 'Europe/Vienna' })
 const credits = { count: 2, expires_at: ['2026-10-04T08:00:00Z', '2026-11-06T09:00:00Z'], source: 'vendor' as const }
 const plan = { planned_at: '2026-10-03T16:00:00Z', raised_pace_points: 18, raised_pace_until: '2026-10-03T22:00:00Z' }
@@ -48,21 +50,25 @@ for (const width of [400, 1024, 1440]) for (const theme of ['light', 'dark']) te
   // ?lang=de does not translate the app (AEON-998). The account controls below the card must not move
   // while the plan line changes between off, planned and nothing planned yet (gate fix 2).
   const account = page.locator(`.use-sec [data-account="${ACCOUNTS.main}"]`)
-  const guard = await controlStability(page, { floor: usage.getByRole('spinbutton'), save: usage.getByRole('button', { name: /Save floor/ }), resets: card.locator('.rs-sw'), summary: card.locator('[data-reset-summary]'), accountSwitch: account.getByRole('switch', { name: /^Agents may use it · / }), accountDetails: account.getByRole('button', { name: /^Details for / }) })
+  const dismiss = async () => { for (const close of await page.locator('.toast .toast-close').all()) await close.click() }
+  const guard = await controlStability(page, { floor: usage.getByRole('spinbutton'), resets: card.locator('.rs-sw'), summary: card.locator('[data-reset-summary]'), accountSwitch: page.locator(`[data-use="${ACCOUNTS.main}"]`).getByRole('switch', { name: /^Agents may use it · / }), accountDetails: account.getByRole('button', { name: /^Details for / }) })
   await guard.check(async () => { await toggle.click(); await expect(toggle).toBeChecked(); await expect(card.locator('[data-reset-plan]')).toHaveText('Planned: Sat ~18:00, then +18 percentage points a day until Sun.') })
   if (width === 1440) await page.screenshot({ path: testInfo.outputPath(`resets-on-${width}-${theme}.png`), fullPage: true })
   await guard.check(async () => { await toggle.click(); await expect(toggle).not.toBeChecked(); await expect(card.locator('[data-reset-plan]')).toHaveText('Off: PAIMOS only suggests.') })
   await guard.check(async () => {
-    const input = usage.getByRole('spinbutton'), save = usage.getByRole('button', { name: /Save floor/ })
+    const input = usage.getByRole('spinbutton')
+    // Plain Enter does not save; Esc puts the saved floor back and leaves the field.
     await input.fill('25'); await input.press('Enter'); expect(writes).toHaveLength(2)
-    await input.press('Escape'); await expect(save).toBeFocused()
-    await input.focus(); await input.press(await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) ? 'Meta+Enter' : 'Control+Enter')
-    await expect(usage.locator('.policy-note')).toContainText('Floor: 25%.')
+    await input.press('Escape'); await expect(input).toHaveValue('10'); await expect(input).not.toBeFocused(); expect(writes).toHaveLength(2)
+    await input.fill('25'); await input.press(await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) ? 'Meta+Enter' : 'Control+Enter')
+    await expect(page.locator('.toast').filter({ hasText: 'Floor saved: 25 %.' }).getByRole('button', { name: 'Undo' })).toBeVisible()
+    await expect(input).toHaveValue('25')
+    await dismiss()
   })
   fail = true
-  await guard.check(async () => { await toggle.click(); await expect(usage.locator('[role="alert"]')).toBeVisible(); await expect(toggle).not.toBeChecked() })
+  await guard.check(async () => { await toggle.click(); await expect(page.locator('.toast.error')).toContainText('could not be confirmed'); await expect(toggle).not.toBeChecked(); await dismiss() })
   fail = false
-  await guard.check(async () => { await toggle.click(); await expect(toggle).toBeChecked(); await expect(usage.locator('[role="alert"]')).toHaveCount(0) })
+  await guard.check(async () => { await toggle.click(); await expect(toggle).toBeChecked() })
   await guard.check(async () => { await toggle.click(); await expect(toggle).not.toBeChecked(); await expect(card.locator('[data-reset-plan]')).toHaveText('Off: PAIMOS only suggests.') })
   planned = false
   await guard.check(async () => { await toggle.click(); await expect(toggle).toBeChecked(); await expect(card.locator('[data-reset-plan]')).toHaveText('On: nothing planned yet. PAIMOS plans the moment once the window is nearly used.') }); guard.done()

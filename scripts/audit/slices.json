@@ -98,6 +98,8 @@
       "title": "Agent runtime, harnesses and runs",
       "paths": [
         "internal/agentd/**",
+        "internal/agentd/routine_budget.go",
+        "internal/agentd/routine_budget_test.go",
         "internal/agentsetup/**",
         "internal/harness/**",
         "internal/harness/lead_remove_test.go",
