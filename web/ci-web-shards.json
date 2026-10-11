@@ -111,19 +111,19 @@
       ]
       ,
       "specs": [
-        {"file":"tests/brand.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":1.88,"median":1.384,"min":0.888},"seconds":2.895969,"selectedTests":2},"weightSeconds":2.552486,"weightSource":"web-4"}
+        {"file":"tests/brand.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":3.453,"median":2.247,"min":1.041},"seconds":4.494,"selectedTests":2},"weightSeconds":2.552486,"weightSource":"web-4"}
         ,
-        {"file":"tests/header-menus.spec.ts","listedTests":92,"tierTiming":{"caseSeconds":{"max":4.504,"median":0,"min":0},"seconds":67.417583,"selectedTests":92},"weightSeconds":114.861878,"weightSource":"web-4"}
+        {"file":"tests/header-menus.spec.ts","listedTests":92,"tierTiming":{"caseSeconds":{"max":3.984,"median":0,"min":0},"seconds":63.63,"selectedTests":92},"weightSeconds":114.861878,"weightSource":"web-4"}
         ,
-        {"file":"tests/release-codenames.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":5.85,"median":1.7745,"min":1.213},"seconds":76.126791,"selectedTests":24},"weightSeconds":30.62983392,"weightSource":"web-4"}
+        {"file":"tests/release-codenames.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":5.118,"median":1.502,"min":1.213},"seconds":65.286,"selectedTests":24},"weightSeconds":30.62983392,"weightSource":"web-4"}
         ,
-        {"file":"tests/release-header.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":4.276,"median":1.983,"min":0.905},"seconds":48.126901,"selectedTests":23},"weightSeconds":29.35359084,"weightSource":"web-4"}
+        {"file":"tests/release-header.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":4.367,"median":2.435,"min":1.321},"seconds":55.21,"selectedTests":23},"weightSeconds":29.35359084,"weightSource":"web-4"}
         ,
-        {"file":"tests/release-presentation.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":1.762,"median":1.392,"min":1.188},"seconds":11.323162,"selectedTests":7},"weightSeconds":8.933702,"weightSource":"web-4"}
+        {"file":"tests/release-presentation.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":1.26,"median":1.094,"min":0.968},"seconds":7.779,"selectedTests":7},"weightSeconds":8.933702,"weightSource":"web-4"}
         ,
-        {"file":"tests/releases.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":2.369,"median":1.479,"min":0.89},"seconds":38.644366,"selectedTests":22},"weightSeconds":28.077347692,"weightSource":"web-4"}
+        {"file":"tests/releases.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":2.668,"median":1.619,"min":1.125},"seconds":38.636,"selectedTests":22},"weightSeconds":28.077347692,"weightSource":"web-4"}
         ,
-        {"file":"tests/version-reveal.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":3.177,"median":1.456,"min":1.049},"seconds":14.20598,"selectedTests":6},"weightSeconds":7.657459,"weightSource":"web-4"}
+        {"file":"tests/version-reveal.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":2.569,"median":1.564,"min":1.48},"seconds":7.177,"selectedTests":4},"weightSeconds":7.657459,"weightSource":"web-4"}
       ]
     }
     ,
@@ -147,7 +147,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/service-tier.spec.ts","listedTests":44,"tierTiming":{"caseSeconds":{"max":5.255,"median":2.296,"min":1.647},"seconds":110.591375,"selectedTests":41},"weightSeconds":91,"weightSource":"web-6"}
+        {"file":"tests/service-tier.spec.ts","listedTests":44,"tierTiming":{"caseSeconds":{"max":3.609,"median":2.166,"min":1.137},"seconds":92.286,"selectedTests":41},"weightSeconds":91,"weightSource":"web-6"}
       ]
     }
     ,
@@ -181,19 +181,19 @@
       ]
       ,
       "specs": [
-        {"file":"tests/access.spec.ts","listedTests":42,"tierTiming":{"caseSeconds":{"max":18.737,"median":2.363,"min":1.211},"seconds":171.773265,"selectedTests":42},"weightSeconds":111.435484,"weightSource":"web-8"}
+        {"file":"tests/access.spec.ts","listedTests":42,"tierTiming":{"caseSeconds":{"max":19.208,"median":2.4125,"min":1.344},"seconds":170.844,"selectedTests":42},"weightSeconds":111.435484,"weightSource":"web-8"}
         ,
-        {"file":"tests/key-dialog.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":7.161,"median":3.041,"min":2.153},"seconds":39.268633,"selectedTests":9},"weightSeconds":23.879032,"weightSource":"web-8"}
+        {"file":"tests/key-dialog.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":5.057,"median":2.641,"min":1.75},"seconds":30.902,"selectedTests":9},"weightSeconds":23.879032,"weightSource":"web-8"}
         ,
-        {"file":"tests/key-expiry.spec.ts","listedTests":13,"tierTiming":{"caseSeconds":{"max":5.704,"median":1.946,"min":1.67},"seconds":36.975882,"selectedTests":13},"weightSeconds":34.491935,"weightSource":"web-8"}
+        {"file":"tests/key-expiry.spec.ts","listedTests":13,"tierTiming":{"caseSeconds":{"max":7.646,"median":2.268,"min":1.755},"seconds":42.265,"selectedTests":13},"weightSeconds":34.491935,"weightSource":"web-8"}
         ,
-        {"file":"tests/key-full-access.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":6.268,"median":3.6495,"min":2.445},"seconds":85.345406,"selectedTests":20},"weightSeconds":53.064516,"weightSource":"web-8"}
+        {"file":"tests/key-full-access.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":13.044,"median":3.41,"min":2.097},"seconds":135.007,"selectedTests":22},"weightSeconds":53.064516,"weightSource":"web-8"}
         ,
-        {"file":"tests/key-scopes.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":5.013,"median":4.179,"min":0.754},"seconds":57.795015,"selectedTests":16},"weightSeconds":42.451613,"weightSource":"web-8"}
+        {"file":"tests/key-scopes.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":4.698,"median":3.012,"min":0.911},"seconds":71.382,"selectedTests":23},"weightSeconds":42.451613,"weightSource":"web-8"}
         ,
-        {"file":"tests/new-agent.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":3.595,"median":1.5415,"min":1.009},"seconds":25.672507,"selectedTests":12},"weightSeconds":31.83871,"weightSource":"web-8"}
+        {"file":"tests/new-agent.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":5.551,"median":1.817,"min":1.352},"seconds":34.567,"selectedTests":13},"weightSeconds":31.83871,"weightSource":"web-8"}
         ,
-        {"file":"tests/scope-codes.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":3.276,"median":2.078,"min":1.928},"seconds":29.742261,"selectedTests":12},"weightSeconds":31.83871,"weightSource":"web-8"}
+        {"file":"tests/scope-codes.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":2.848,"median":1.736,"min":1.436},"seconds":24.067,"selectedTests":12},"weightSeconds":31.83871,"weightSource":"web-8"}
       ]
     }
     ,
@@ -216,7 +216,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/key-layout.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":7.039,"median":3.522,"min":2.322},"seconds":49.120865,"selectedTests":12},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/key-layout.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":2.942,"median":1.918,"min":1.44},"seconds":44.965,"selectedTests":24},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -240,7 +240,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/planning-columns.spec.ts","listedTests":14,"tierTiming":{"caseSeconds":{"max":9.513,"median":2.821,"min":1.686},"seconds":52.521732,"selectedTests":14},"weightSeconds":31,"weightSource":"web-9"}
+        {"file":"tests/planning-columns.spec.ts","listedTests":14,"tierTiming":{"caseSeconds":{"max":6.882,"median":2.756,"min":1.257},"seconds":44.309,"selectedTests":14},"weightSeconds":31,"weightSource":"web-9"}
       ]
     }
     ,
@@ -264,7 +264,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/work-queue.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":14.201,"median":2.2685,"min":1.665},"seconds":80.005592,"selectedTests":24},"weightSeconds":29,"weightSource":"web-10"}
+        {"file":"tests/work-queue.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":11.202,"median":1.5205,"min":1.024},"seconds":53.363,"selectedTests":24},"weightSeconds":29,"weightSource":"web-10"}
       ]
     }
     ,
@@ -288,11 +288,11 @@
       ]
       ,
       "specs": [
-        {"file":"tests/start-agent.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":4.493,"median":1.901,"min":1.441},"seconds":49.726457,"selectedTests":21},"weightSeconds":36.078431,"weightSource":"web-11"}
+        {"file":"tests/start-agent.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":4.051,"median":2.213,"min":1.746},"seconds":49.674,"selectedTests":21},"weightSeconds":36.078431,"weightSource":"web-11"}
         ,
-        {"file":"tests/ticket-panel.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":102.533,"median":2.1055,"min":1.652},"seconds":153.073566,"selectedTests":22},"weightSeconds":34.509803565,"weightSource":"web-11"}
+        {"file":"tests/ticket-panel.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":94.816,"median":2.067,"min":1.65},"seconds":156.256,"selectedTests":23},"weightSeconds":34.509803565,"weightSource":"web-11"}
         ,
-        {"file":"tests/ticket-workers.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":11.485,"median":2.098,"min":1.213},"seconds":40.719097,"selectedTests":11},"weightSeconds":19.843137,"weightSource":"web-11"}
+        {"file":"tests/ticket-workers.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":13.203,"median":2.236,"min":1.812},"seconds":44.561,"selectedTests":11},"weightSeconds":19.843137,"weightSource":"web-11"}
       ]
     }
     ,
@@ -318,31 +318,31 @@
       ]
       ,
       "specs": [
-        {"file":"tests/accounts-computers.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":4.348,"median":2.018,"min":1.197},"seconds":30.144583,"selectedTests":13},"weightSeconds":32.233918,"weightSource":"web-13"}
+        {"file":"tests/accounts-computers.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":17.351,"median":4.669,"min":2.259},"seconds":145.906,"selectedTests":23},"weightSeconds":32.233918,"weightSource":"web-13"}
         ,
-        {"file":"tests/agent-recovery.spec.ts","listedTests":9,"weightSeconds":20}
+        {"file":"tests/agent-recovery.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":6.14,"median":5.111,"min":2.547},"seconds":43.118,"selectedTests":9},"weightSeconds":20}
         ,
-        {"file":"tests/agents-top.spec.ts","listedTests":4,"tierTiming":{"caseSeconds":{"max":7.262,"median":2.31,"min":0},"seconds":74.572143,"selectedTests":33},"weightSeconds":81.824561,"weightSource":"web-13"}
+        {"file":"tests/agents-top.spec.ts","listedTests":4,"tierTiming":{"caseSeconds":{"max":3.545,"median":2.2135,"min":1.709},"seconds":9.681,"selectedTests":4},"weightSeconds":81.824561,"weightSource":"web-13"}
         ,
-        {"file":"tests/approval-feedback.spec.ts","listedTests":18,"tierTiming":{"caseSeconds":{"max":7.243,"median":3.129,"min":0.039},"seconds":58.110583,"selectedTests":13},"weightSeconds":32.233918,"weightSource":"web-13"}
+        {"file":"tests/approval-feedback.spec.ts","listedTests":18,"tierTiming":{"caseSeconds":{"max":7.05,"median":5.43,"min":2.155},"seconds":86.557,"selectedTests":18},"weightSeconds":32.233918,"weightSource":"web-13"}
         ,
-        {"file":"tests/managed-controls.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":3.674,"median":1.823,"min":1.574},"seconds":50.762087,"selectedTests":25},"weightSeconds":61.988304,"weightSource":"web-13"}
+        {"file":"tests/managed-controls.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":3.896,"median":2.507,"min":2.352},"seconds":65.324,"selectedTests":25},"weightSeconds":61.988304,"weightSource":"web-13"}
         ,
-        {"file":"tests/no-shift-agents.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":19.97,"median":5.109,"min":3.681},"derivedFrom":"tests/no-shift.spec.ts","estimatedTests":7,"measuredTests":16,"overheadSeconds":2.707689,"seconds":160.639111,"selectedTests":23},"weightSeconds":67.322244,"weightSource":"tierTiming:37377299349"}
+        {"file":"tests/no-shift-agents.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":22.178,"median":6.7085,"min":2.703},"estimatedTests":3,"measuredTests":20,"seconds":194.4282,"selectedTests":23},"weightSeconds":67.322244,"weightSource":"tierTiming:37377299349"}
         ,
-        {"file":"tests/no-shift-dialogs.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":6.489,"median":3.533,"min":2.056},"derivedFrom":"tests/no-shift.spec.ts","estimatedTests":0,"measuredTests":22,"overheadSeconds":2.707689,"seconds":87.247689,"selectedTests":22},"weightSeconds":36.564633,"weightSource":"tierTiming:37377299349"}
+        {"file":"tests/no-shift-dialogs.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":5.68,"median":3.5155,"min":2.121},"seconds":81.696,"selectedTests":22},"weightSeconds":36.564633,"weightSource":"tierTiming:37377299349"}
         ,
-        {"file":"tests/no-shift.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":5.356,"median":2.966,"min":0.151},"derivedFrom":"tests/no-shift.spec.ts","estimatedTests":12,"measuredTests":8,"overheadSeconds":2.707689,"seconds":64.270689,"selectedTests":20},"weightSeconds":40.171603,"weightSource":"tierTiming:37377299349 plus conservative AEON-569 estimate for twelve new cases"}
+        {"file":"tests/no-shift.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":4.067,"median":2.9725,"min":0.116},"seconds":55.7,"selectedTests":20},"weightSeconds":40.171603,"weightSource":"tierTiming:37377299349 plus conservative AEON-569 estimate for twelve new cases"}
         ,
         {"file":"tests/record-ownership.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/relations.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":25.417,"median":3.777,"min":2.175},"seconds":74.004906,"selectedTests":7},"weightSeconds":17.356725,"weightSource":"web-13"}
+        {"file":"tests/relations.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":24.542,"median":3.351,"min":2.416},"seconds":64.983,"selectedTests":7},"weightSeconds":17.356725,"weightSource":"web-13"}
         ,
-        {"file":"tests/session-recovery.spec.ts","listedTests":15,"tierTiming":{"caseSeconds":{"max":4.771,"median":2.686,"min":2.012},"seconds":47.393598,"selectedTests":15},"weightSeconds":37.192982,"weightSource":"web-13"}
+        {"file":"tests/session-recovery.spec.ts","listedTests":15,"tierTiming":{"caseSeconds":{"max":5.064,"median":3.02,"min":2.316},"seconds":45.607,"selectedTests":15},"weightSeconds":37.192982,"weightSource":"web-13"}
         ,
-        {"file":"tests/ticket-outcomes.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":3.098,"median":2.322,"min":1.546},"seconds":4.832397,"selectedTests":2},"weightSeconds":4.959064,"weightSource":"web-13"}
+        {"file":"tests/ticket-outcomes.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":4.524,"median":3.3355,"min":2.147},"seconds":6.671,"selectedTests":2},"weightSeconds":4.959064,"weightSource":"web-13"}
         ,
-        {"file":"tests/views-filters.spec.ts","listedTests":32,"tierTiming":{"caseSeconds":{"max":12.895,"median":2.377,"min":1.202},"seconds":61.40423,"selectedTests":17},"weightSeconds":42.152047,"weightSource":"web-13"}
+        {"file":"tests/views-filters.spec.ts","listedTests":32,"tierTiming":{"caseSeconds":{"max":9.619,"median":2.1505,"min":1.266},"seconds":94.87,"selectedTests":32},"weightSeconds":42.152047,"weightSource":"web-13"}
       ]
     }
     ,
@@ -370,9 +370,9 @@
       ]
       ,
       "specs": [
-        {"file":"tests/recurrence-marker.spec.ts","listedTests":37,"weightSeconds":45,"weightSource":"estimate"}
+        {"file":"tests/recurrence-marker.spec.ts","listedTests":37,"tierTiming":{"caseSeconds":{"max":10.554,"median":9.7945,"min":9.035},"seconds":19.589,"selectedTests":2},"weightSeconds":45,"weightSource":"estimate"}
         ,
-        {"file":"tests/recurrences.spec.ts","weightSeconds":45,"weightSource":"estimate"}
+        {"file":"tests/recurrences.spec.ts","tierTiming":{"caseSeconds":{"max":17.297,"median":17.297,"min":17.297},"seconds":17.297,"selectedTests":1},"weightSeconds":45,"weightSource":"estimate"}
       ]
     }
     ,
@@ -400,13 +400,13 @@
       ]
       ,
       "specs": [
-        {"file":"tests/decision-desk-fix2.spec.ts","listedTests":8,"weightSeconds":40,"weightSource":"AEON-569 regression port; conservative initial estimate"}
+        {"file":"tests/decision-desk-fix2.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":14.157,"median":13.709,"min":1.981},"seconds":86.743,"selectedTests":8},"weightSeconds":40,"weightSource":"AEON-569 regression port; conservative initial estimate"}
         ,
-        {"file":"tests/decision-desk-fix3.spec.ts","listedTests":9,"weightSeconds":40,"weightSource":"AEON-569 regression port; conservative initial estimate"}
+        {"file":"tests/decision-desk-fix3.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":5.193,"median":5.007,"min":1.858},"seconds":38.466,"selectedTests":9},"weightSeconds":40,"weightSource":"AEON-569 regression port; conservative initial estimate"}
         ,
-        {"file":"tests/decision-desk-project.spec.ts","listedTests":14,"weightSeconds":40,"weightSource":"AEON-1057 project and refresh regressions; conservative initial estimate"}
+        {"file":"tests/decision-desk-project.spec.ts","listedTests":14,"tierTiming":{"caseSeconds":{"max":18.858,"median":4.248,"min":2.151},"seconds":81.17,"selectedTests":14},"weightSeconds":40,"weightSource":"AEON-1057 project and refresh regressions; conservative initial estimate"}
         ,
-        {"file":"tests/decision-desk.spec.ts","listedTests":60,"tierTiming":{"caseSeconds":{"max":13.265,"median":1.782,"min":1.257},"seconds":133.356542,"selectedTests":35},"weightSeconds":128,"weightSource":"web-14"}
+        {"file":"tests/decision-desk.spec.ts","listedTests":60,"tierTiming":{"caseSeconds":{"max":15.827,"median":2.739,"min":1.449},"seconds":324.203,"selectedTests":60},"weightSeconds":128,"weightSource":"web-14"}
       ]
     }
     ,
@@ -434,15 +434,15 @@
       ]
       ,
       "specs": [
-        {"file":"tests/account-link.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.299,"median":1.7945,"min":0.733},"seconds":20.685759,"selectedTests":10},"weightSeconds":19.833333,"weightSource":"web-15"}
+        {"file":"tests/account-link.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.555,"median":1.797,"min":0.966},"seconds":18.322,"selectedTests":10},"weightSeconds":19.833333,"weightSource":"web-15"}
         ,
-        {"file":"tests/attach-discoverable.spec.ts","listedTests":47,"tierTiming":{"caseSeconds":{"max":9.262,"median":2.303,"min":1.11},"seconds":119.445446,"selectedTests":41},"weightSeconds":81.316667,"weightSource":"web-15"}
+        {"file":"tests/attach-discoverable.spec.ts","listedTests":47,"tierTiming":{"caseSeconds":{"max":9.469,"median":2.55,"min":1.31},"seconds":124.966,"selectedTests":41},"weightSeconds":81.316667,"weightSource":"web-15"}
         ,
-        {"file":"tests/attach-security.spec.ts","listedTests":50,"tierTiming":{"caseSeconds":{"max":6.215,"median":1.3445,"min":0.84},"seconds":86.253166,"selectedTests":50},"weightSeconds":99.166667,"weightSource":"web-15"}
+        {"file":"tests/attach-security.spec.ts","listedTests":50,"tierTiming":{"caseSeconds":{"max":5.834,"median":1.4985,"min":0.929},"seconds":92.195,"selectedTests":50},"weightSeconds":99.166667,"weightSource":"web-15"}
         ,
-        {"file":"tests/attach-watch.spec.ts","listedTests":31,"tierTiming":{"caseSeconds":{"max":4.473,"median":2.897,"min":1.262},"seconds":86.085955,"selectedTests":31},"weightSeconds":61.483333,"weightSource":"web-15"}
+        {"file":"tests/attach-watch.spec.ts","listedTests":31,"tierTiming":{"caseSeconds":{"max":4.499,"median":3.228,"min":1.315},"seconds":87.304,"selectedTests":31},"weightSeconds":61.483333,"weightSource":"web-15"}
         ,
-        {"file":"tests/classic-invite.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":4.058,"median":2.0525,"min":0.881},"seconds":16.546452,"selectedTests":6},"weightSeconds":11.9,"weightSource":"web-15"}
+        {"file":"tests/classic-invite.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":1.972,"median":1.648,"min":1.016},"seconds":9.483,"selectedTests":6},"weightSeconds":11.9,"weightSource":"web-15"}
       ]
     }
     ,
@@ -468,13 +468,13 @@
       ]
       ,
       "specs": [
-        {"file":"tests/developer-settings.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":7.875,"median":2.7355,"min":1.056},"seconds":29.211495,"selectedTests":8},"weightSeconds":5.593496,"weightSource":"footer-ui-2"}
+        {"file":"tests/developer-settings.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":7.522,"median":3.431,"min":3.076},"seconds":27.406,"selectedTests":7},"weightSeconds":5.593496,"weightSource":"footer-ui-2"}
         ,
-        {"file":"tests/footer-release-pill.spec.ts","listedTests":40,"tierTiming":{"caseSeconds":{"max":8.312,"median":2.0035,"min":0.89},"seconds":87.614969,"selectedTests":40},"weightSeconds":27.96748,"weightSource":"footer-ui-2"}
+        {"file":"tests/footer-release-pill.spec.ts","listedTests":40,"tierTiming":{"caseSeconds":{"max":4.265,"median":2.105,"min":1.002},"seconds":78.761,"selectedTests":39},"weightSeconds":27.96748,"weightSource":"footer-ui-2"}
         ,
-        {"file":"tests/shell.spec.ts","listedTests":32,"tierTiming":{"caseSeconds":{"max":3.212,"median":1.001,"min":0.774},"seconds":43.094797,"selectedTests":32},"weightSeconds":22.373984,"weightSource":"footer-ui-2"}
+        {"file":"tests/shell.spec.ts","listedTests":32,"tierTiming":{"caseSeconds":{"max":3.35,"median":1.211,"min":0.909},"seconds":49.2,"selectedTests":38},"weightSeconds":22.373984,"weightSource":"footer-ui-2"}
         ,
-        {"file":"tests/tenant-brand.spec.ts","listedTests":15,"tierTiming":{"caseSeconds":{"max":3.203,"median":1.249,"min":0},"seconds":19.747428,"selectedTests":15},"weightSeconds":10.487805,"weightSource":"footer-ui-2"}
+        {"file":"tests/tenant-brand.spec.ts","listedTests":15,"tierTiming":{"caseSeconds":{"max":3.305,"median":1.193,"min":0},"seconds":19.711,"selectedTests":15},"weightSeconds":10.487805,"weightSource":"footer-ui-2"}
       ]
     }
     ,
@@ -500,7 +500,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/status-help.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":3.973,"median":1.401,"min":1.065},"seconds":15.042065,"selectedTests":7},"weightSeconds":24,"weightSource":"status-help-ui-2"}
+        {"file":"tests/status-help.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":4.09,"median":2.346,"min":1.75},"seconds":19.356,"selectedTests":7},"weightSeconds":24,"weightSource":"status-help-ui-2"}
       ]
     }
     ,
@@ -524,17 +524,17 @@
       ]
       ,
       "specs": [
-        {"file":"tests/account-resets.spec.ts","listedTests":6,"weightSeconds":12,"weightSource":"local-single-worker-AEON-1037-6.2s-plus-margin"}
+        {"file":"tests/account-resets.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":3.046,"median":2.0435,"min":1.869},"seconds":13.596,"selectedTests":6},"weightSeconds":12,"weightSource":"local-single-worker-AEON-1037-6.2s-plus-margin"}
         ,
-        {"file":"tests/model-provider.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":3.347,"median":1.572,"min":0.533},"seconds":7.45261,"selectedTests":3},"weightSeconds":10.5,"weightSource":"e2e-4"}
+        {"file":"tests/model-provider.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":2.247,"median":1.538,"min":0.88},"seconds":4.665,"selectedTests":3},"weightSeconds":10.5,"weightSource":"e2e-4"}
         ,
-        {"file":"tests/model-refresh.spec.ts","listedTests":1,"tierTiming":{"caseSeconds":{"max":4.248,"median":4.248,"min":4.248},"seconds":7.561739,"selectedTests":1},"weightSeconds":3.5,"weightSource":"e2e-4"}
+        {"file":"tests/model-refresh.spec.ts","listedTests":1,"tierTiming":{"caseSeconds":{"max":1.449,"median":1.449,"min":1.449},"seconds":1.449,"selectedTests":1},"weightSeconds":3.5,"weightSource":"e2e-4"}
         ,
-        {"file":"tests/models-registry.spec.ts","listedTests":26,"weightSeconds":22,"weightSource":"AEON-1012 fix3 adds the revision-snapshot spec to the fix2 16.0s run"}
+        {"file":"tests/models-registry.spec.ts","listedTests":26,"tierTiming":{"caseSeconds":{"max":5.706,"median":0.594,"min":0.244},"seconds":23.353,"selectedTests":26},"weightSeconds":22,"weightSource":"AEON-1012 fix3 adds the revision-snapshot spec to the fix2 16.0s run"}
         ,
-        {"file":"tests/models-simple-shots.spec.ts","listedTests":18,"weightSeconds":8,"weightSource":"AEON-1011 local-single-worker-5.3s-plus-margin"}
+        {"file":"tests/models-simple-shots.spec.ts","listedTests":18,"tierTiming":{"caseSeconds":{"max":1.402,"median":0.8975,"min":0.644},"seconds":16.304,"selectedTests":18},"weightSeconds":8,"weightSource":"AEON-1011 local-single-worker-5.3s-plus-margin"}
         ,
-        {"file":"tests/models-simple.spec.ts","listedTests":21,"weightSeconds":12,"weightSource":"AEON-1011 local-single-worker-7.1s-plus-margin"}
+        {"file":"tests/models-simple.spec.ts","listedTests":21,"tierTiming":{"caseSeconds":{"max":2.142,"median":0.68,"min":0.466},"seconds":17.886,"selectedTests":22},"weightSeconds":12,"weightSource":"AEON-1011 local-single-worker-7.1s-plus-margin"}
         ,
         {"file":"tests/policies-ladders-moved.spec.ts","listedTests":2,"weightSeconds":4,"weightSource":"AEON-1204 local-single-worker-2.1s-plus-margin"}
       ]
@@ -564,15 +564,15 @@
       ]
       ,
       "specs": [
-        {"file":"tests/agent-activity.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":12.795,"median":5.039,"min":2.291},"seconds":62.717406,"selectedTests":11},"weightSeconds":35.820513,"weightSource":"status-autopilot-ui-2"}
+        {"file":"tests/agent-activity.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":14.914,"median":6.647,"min":1.436},"seconds":71.61,"selectedTests":11},"weightSeconds":35.820513,"weightSource":"status-autopilot-ui-2"}
         ,
         {"file":"tests/features.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/settings.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":3.461,"median":1.774,"min":1.431},"seconds":14.45241,"selectedTests":6},"weightSeconds":32.564102381,"weightSource":"status-autopilot-ui-2"}
+        {"file":"tests/settings.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":2.921,"median":1.626,"min":1.177},"seconds":32.619,"selectedTests":19},"weightSeconds":32.564102381,"weightSource":"status-autopilot-ui-2"}
         ,
-        {"file":"tests/status-autopilot.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":10.514,"median":2.467,"min":0.771},"seconds":29.300782,"selectedTests":8},"weightSeconds":35.820513,"weightSource":"AEON-696 proportional estimate from status-autopilot-ui-2"}
+        {"file":"tests/status-autopilot.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":7.551,"median":1.728,"min":0.662},"seconds":23.425,"selectedTests":11},"weightSeconds":35.820513,"weightSource":"AEON-696 proportional estimate from status-autopilot-ui-2"}
         ,
-        {"file":"tests/workspace-activity.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/workspace-activity.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":4.384,"median":1.489,"min":1.145},"seconds":33.579,"selectedTests":13},"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -595,7 +595,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/performance.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":6.164,"median":5.4585,"min":4.753},"seconds":13.05212,"selectedTests":2},"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/performance.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":6.723,"median":5.768,"min":4.813},"seconds":11.536,"selectedTests":2},"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -622,23 +622,23 @@
       ]
       ,
       "specs": [
-        {"file":"tests/aeon-632b-clip-settings.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":29.754,"median":17.17,"min":10.052},"seconds":224.199013,"selectedTests":12},"weightSeconds":41.277104,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/aeon-632b-clip-settings.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":23.697,"median":13.7615,"min":8.947},"seconds":177.682,"selectedTests":12},"weightSeconds":41.277104,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/aeon-632b-clip-touch.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":5.561,"median":4.496,"min":4.378},"derivedFrom":"tests/aeon-632b-clip.spec.ts","estimatedTests":0,"measuredTests":6,"overheadSeconds":4.735013,"seconds":32.709013,"selectedTests":6},"weightSeconds":8.023393,"weightSource":"tierTiming:37377299349"}
+        {"file":"tests/aeon-632b-clip-touch.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":5.596,"median":4.431,"min":4.102},"seconds":27.409,"selectedTests":6},"weightSeconds":8.023393,"weightSource":"tierTiming:37377299349"}
         ,
-        {"file":"tests/aeon-632b-clip.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":25.32,"median":24.638,"min":23.619},"derivedFrom":"tests/aeon-632b-clip.spec.ts","estimatedTests":0,"measuredTests":6,"overheadSeconds":4.735013,"seconds":151.900013,"selectedTests":6},"weightSeconds":37.260479,"weightSource":"tierTiming:37377299349"}
+        {"file":"tests/aeon-632b-clip.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":17.04,"median":16.233,"min":15.69},"seconds":97.79,"selectedTests":6},"weightSeconds":37.260479,"weightSource":"tierTiming:37377299349"}
         ,
-        {"file":"tests/clip-tip-disclosure.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":2.106,"median":1.372,"min":1.19},"derivedFrom":"tests/clip-tip.spec.ts","estimatedTests":0,"measuredTests":24,"overheadSeconds":5.225002,"seconds":40.872002,"selectedTests":24},"weightSeconds":22.425751,"weightSource":"tierTiming:37377299349"}
+        {"file":"tests/clip-tip-disclosure.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":2.064,"median":1.3915,"min":1.216},"seconds":35.93,"selectedTests":24},"weightSeconds":22.425751,"weightSource":"tierTiming:37377299349"}
         ,
-        {"file":"tests/clip-tip-overflow.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":3.063,"median":2.269,"min":1.236},"derivedFrom":"tests/clip-tip.spec.ts","estimatedTests":0,"measuredTests":24,"overheadSeconds":5.225002,"seconds":52.913002,"selectedTests":24},"weightSeconds":29.032436,"weightSource":"tierTiming:37377299349"}
+        {"file":"tests/clip-tip-overflow.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":2.852,"median":1.7365,"min":1.094},"seconds":44.254,"selectedTests":24},"weightSeconds":29.032436,"weightSource":"tierTiming:37377299349"}
         ,
-        {"file":"tests/clip-tip-touch.spec.ts","listedTests":39,"tierTiming":{"caseSeconds":{"max":23.431,"median":1.322,"min":0.791},"derivedFrom":"tests/clip-tip.spec.ts","estimatedTests":0,"measuredTests":39,"overheadSeconds":5.225002,"seconds":105.837002,"selectedTests":39},"weightSeconds":58.070907,"weightSource":"tierTiming:37377299349"}
+        {"file":"tests/clip-tip-touch.spec.ts","listedTests":39,"tierTiming":{"caseSeconds":{"max":20.545,"median":1.098,"min":0.652},"seconds":82.904,"selectedTests":39},"weightSeconds":58.070907,"weightSource":"tierTiming:37377299349"}
         ,
-        {"file":"tests/clip-tip.spec.ts","listedTests":72,"tierTiming":{"caseSeconds":{"max":8.661,"median":1.772,"min":0.853},"derivedFrom":"tests/clip-tip.spec.ts","estimatedTests":0,"measuredTests":72,"overheadSeconds":5.225002,"seconds":163.065002,"selectedTests":72},"weightSeconds":89.470907,"weightSource":"tierTiming:37377299349"}
+        {"file":"tests/clip-tip.spec.ts","listedTests":72,"tierTiming":{"caseSeconds":{"max":7.578,"median":1.591,"min":0.693},"seconds":141.108,"selectedTests":72},"weightSeconds":89.470907,"weightSource":"tierTiming:37377299349"}
         ,
-        {"file":"tests/key-trim.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":3.607,"median":2.179,"min":1.115},"seconds":17.02266,"selectedTests":7},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/key-trim.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":4.65,"median":3.616,"min":1.756},"seconds":22.35,"selectedTests":7},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/model-prefs.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":2.069,"median":1.71,"min":1.443},"seconds":5.565677,"selectedTests":3},"weightEvidence":{"attempt":1,"collectionPlanningSeconds":0.231546,"launchOverheadSeconds":0.112131,"marginFactor":1.2,"nativeSeconds":5.222,"runId":"37948687065","sha":"63841419452e1bfb206e6505b8051b8083527654"},"weightSeconds":7,"weightSource":"hosted-CI-37948687065-with-20-percent-margin"}
+        {"file":"tests/model-prefs.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":2.43,"median":2.263,"min":1.997},"seconds":6.69,"selectedTests":3},"weightEvidence":{"attempt":1,"collectionPlanningSeconds":0.231546,"launchOverheadSeconds":0.112131,"marginFactor":1.2,"nativeSeconds":5.222,"runId":"37948687065","sha":"63841419452e1bfb206e6505b8051b8083527654"},"weightSeconds":7,"weightSource":"hosted-CI-37948687065-with-20-percent-margin"}
       ]
     }
     ,
@@ -687,7 +687,7 @@
       "project": null
       ,
       "specs": [
-        {"file":"tests/needs-attention.spec.ts","listedTests":41,"weightSeconds":46.609756,"weightSource":"estimate"}
+        {"file":"tests/needs-attention.spec.ts","listedTests":41,"tierTiming":{"caseSeconds":{"max":69.995,"median":2.738,"min":1.315},"seconds":203.936,"selectedTests":41},"weightSeconds":46.609756,"weightSource":"estimate"}
       ]
     }
     ,
@@ -712,9 +712,9 @@
       ]
       ,
       "specs": [
-        {"file":"tests/a11y.spec.ts","listedTests":80,"weightSeconds":230.829268,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/a11y.spec.ts","listedTests":80,"tierTiming":{"caseSeconds":{"max":4.081,"median":2.519,"min":2.225},"seconds":21.242,"selectedTests":8},"weightSeconds":230.829268,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/account-use-matrix.spec.ts","listedTests":13,"weightSeconds":40,"weightSource":"AEON-1054 estimate: thirteen mocked matrix flows, one skipped evidence run"}
+        {"file":"tests/account-use-matrix.spec.ts","listedTests":13,"tierTiming":{"caseSeconds":{"max":6.707,"median":1.8485,"min":1.243},"seconds":36.472,"selectedTests":14},"weightSeconds":40,"weightSource":"AEON-1054 estimate: thirteen mocked matrix flows, one skipped evidence run"}
         ,
         {"file":"tests/accounts-card-fit.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
         ,
@@ -730,7 +730,7 @@
         ,
         {"file":"tests/aeon-1062-qapolish.spec.ts","listedTests":20,"weightSeconds":24,"weightSource":"local-single-worker-AEON-1062-18.8s-plus-margin"}
         ,
-        {"file":"tests/aeon-1071-chat-live.spec.ts","listedTests":9,"weightSeconds":14,"weightSource":"local-single-worker-AEON-1071-9s-plus-margin"}
+        {"file":"tests/aeon-1071-chat-live.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":4.333,"median":1.9425,"min":1.631},"seconds":38.567,"selectedTests":16},"weightSeconds":14,"weightSource":"local-single-worker-AEON-1071-9s-plus-margin"}
         ,
         {"file":"tests/aeon-1188-displayhome.spec.ts","listedTests":8,"weightSeconds":20,"weightSource":"local-single-worker-AEON-1188-15s-plus-margin"}
         ,
@@ -738,7 +738,7 @@
         ,
         {"file":"tests/aeon-908-polish.spec.ts","weightSeconds":120}
         ,
-        {"file":"tests/aeon-974-typefilter.spec.ts","listedTests":14,"weightSeconds":24,"weightSource":"local-single-worker-AEON-974-11.8s-plus-margin"}
+        {"file":"tests/aeon-974-typefilter.spec.ts","listedTests":14,"tierTiming":{"caseSeconds":{"max":4.712,"median":2.639,"min":2.002},"seconds":26.386,"selectedTests":9},"weightSeconds":24,"weightSource":"local-single-worker-AEON-974-11.8s-plus-margin"}
         ,
         {"file":"tests/agent-done-state.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
         ,
@@ -746,15 +746,15 @@
         ,
         {"file":"tests/agent-names.spec.ts","listedTests":3,"weightSeconds":6.658536,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/agent-pairing.spec.ts","listedTests":35,"tierTiming":{"caseSeconds":{"max":1.871,"median":1.871,"min":1.871},"seconds":3.943477,"selectedTests":1},"weightSeconds":77.682927,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agent-pairing.spec.ts","listedTests":35,"tierTiming":{"caseSeconds":{"max":1.507,"median":1.507,"min":1.507},"seconds":1.507,"selectedTests":1},"weightSeconds":77.682927,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/agent-rules-budget-clients.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/agent-rules-doctrine.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agent-rules-doctrine.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":8.943,"median":5.0845,"min":1.226},"seconds":10.169,"selectedTests":2},"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/agent-rules-flow.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/agent-rules-import.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":4.266,"median":4.266,"min":4.266},"seconds":7.591252,"selectedTests":1},"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agent-rules-import.spec.ts","listedTests":9,"tierTiming":{"caseSeconds":{"max":3.521,"median":3.521,"min":3.521},"seconds":3.521,"selectedTests":1},"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/agent-rules-shots.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
         ,
@@ -790,21 +790,23 @@
         ,
         {"file":"tests/agents-worker-tree.spec.ts","listedTests":10,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/agents.spec.ts","listedTests":35,"weightSeconds":64.365854,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agents.spec.ts","listedTests":35,"tierTiming":{"caseSeconds":{"max":3.636,"median":2.408,"min":1.583},"seconds":25.679,"selectedTests":11},"weightSeconds":64.365854,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/attachments.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":8.707,"median":6.187,"min":3.667},"seconds":15.877279,"selectedTests":2},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/attachments.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":8.552,"median":5.434,"min":2.316},"seconds":10.868,"selectedTests":2},"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/authz.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":3.394,"median":2.5475,"min":1.701},"seconds":7.35399,"selectedTests":2},"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/authz.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":2.167,"median":1.979,"min":1.791},"seconds":3.958,"selectedTests":2},"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/avatar-upload-bounds.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/avatars.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/bulk.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":28.544,"median":15.335,"min":2.126},"seconds":33.050812,"selectedTests":2},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/bulk.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":27.042,"median":14.592,"min":2.142},"seconds":29.184,"selectedTests":2},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/business.spec.ts","listedTests":7,"weightSeconds":13.317073,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/capacity-learning.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/capacity-pace.spec.ts","listedTests":13,"weightSeconds":39,"weightSource":"AEON-1175 estimate: thirteen mocked Capacity and dial flows, six at three widths and two themes with the pacing editors"}
         ,
         {"file":"tests/connect-verification.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
@@ -818,29 +820,29 @@
         ,
         {"file":"tests/decision-text.spec.ts","listedTests":36,"weightSeconds":79.902439,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/delivery-arion-v5.spec.ts","listedTests":14,"weightSeconds":20,"weightSource":"aeon-1016-estimate"}
+        {"file":"tests/delivery-arion-v5.spec.ts","listedTests":14,"tierTiming":{"caseSeconds":{"max":5.802,"median":2.516,"min":1.903},"seconds":37.889,"selectedTests":14},"weightSeconds":20,"weightSource":"aeon-1016-estimate"}
         ,
-        {"file":"tests/delivery-flow-lanes.spec.ts","listedTests":11,"weightSeconds":12,"weightSource":"aeon-1005-estimate"}
+        {"file":"tests/delivery-flow-lanes.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":4.57,"median":2.643,"min":1.953},"seconds":29.219,"selectedTests":11},"weightSeconds":12,"weightSource":"aeon-1005-estimate"}
         ,
-        {"file":"tests/delivery-flow-modes.spec.ts","listedTests":11,"weightSeconds":20,"weightSource":"aeon-1006-estimate"}
+        {"file":"tests/delivery-flow-modes.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":14.787,"median":6.68,"min":1.787},"seconds":124.329,"selectedTests":19},"weightSeconds":20,"weightSource":"aeon-1006-estimate"}
         ,
         {"file":"tests/delivery-guarantee.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/delivery-numbers.spec.ts","listedTests":14,"weightSeconds":30,"weightSource":"aeon-1002-estimate"}
+        {"file":"tests/delivery-numbers.spec.ts","listedTests":14,"tierTiming":{"caseSeconds":{"max":5.977,"median":2.8905,"min":1.378},"seconds":41.343,"selectedTests":14},"weightSeconds":30,"weightSource":"aeon-1002-estimate"}
         ,
-        {"file":"tests/delivery-polish.spec.ts","listedTests":18,"weightSeconds":45,"weightSource":"aeon-1007-estimate"}
+        {"file":"tests/delivery-polish.spec.ts","listedTests":18,"tierTiming":{"caseSeconds":{"max":14.382,"median":5.915,"min":1.697},"seconds":74.446,"selectedTests":12},"weightSeconds":45,"weightSource":"aeon-1007-estimate"}
         ,
         {"file":"tests/delivery-rating.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/delivery-simple.spec.ts","listedTests":11,"weightSeconds":26,"weightSource":"aeon-1003-estimate"}
+        {"file":"tests/delivery-simple.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":16.364,"median":2.53,"min":1.627},"seconds":46.322,"selectedTests":11},"weightSeconds":26,"weightSource":"aeon-1003-estimate"}
         ,
-        {"file":"tests/delivery-ui.spec.ts","listedTests":16,"weightSeconds":25,"weightSource":"aeon-853-estimate"}
+        {"file":"tests/delivery-ui.spec.ts","listedTests":16,"tierTiming":{"caseSeconds":{"max":6.349,"median":5.584,"min":1.96},"seconds":81.395,"selectedTests":17},"weightSeconds":25,"weightSource":"aeon-853-estimate"}
         ,
         {"file":"tests/deploy-target.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/display-language.spec.ts","listedTests":5,"weightSeconds":35,"weightSource":"AEON-998 targeted spot checks, five views with six sizes/themes each"}
+        {"file":"tests/display-language.spec.ts","listedTests":5,"tierTiming":{"caseSeconds":{"max":5.094,"median":3.496,"min":2.679},"seconds":18.086,"selectedTests":5},"weightSeconds":35,"weightSource":"AEON-998 targeted spot checks, five views with six sizes/themes each"}
         ,
-        {"file":"tests/doctrine-inbox.spec.ts","listedTests":7,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/doctrine-inbox.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":8.195,"median":3.575,"min":3.161},"seconds":28.941,"selectedTests":7},"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/done-gate.spec.ts","listedTests":20,"weightSeconds":44.390244,"weightSource":"unmeasured-test-rate"}
         ,
@@ -880,7 +882,7 @@
         ,
         {"file":"tests/hours.spec.ts","listedTests":12,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/html-sandbox.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.983,"median":3.983,"min":3.983},"seconds":5.420008,"selectedTests":1},"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/html-sandbox.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":1.967,"median":1.967,"min":1.967},"seconds":1.967,"selectedTests":1},"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/indicator-controls.spec.ts","listedTests":15,"weightSeconds":33.292683158,"weightSource":"unmeasured-test-rate"}
         ,
@@ -916,7 +918,7 @@
         ,
         {"file":"tests/models-fallback.spec.ts","listedTests":13,"weightSeconds":14,"weightSource":"AEON-1161 mbp2606 single worker: with models-simple and its shots (20s weight) the three specs ran in 30.1s; plus margin"}
         ,
-        {"file":"tests/multiple-account-pairing.spec.ts","listedTests":6,"weightSeconds":13.317072,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/multiple-account-pairing.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":1.722,"median":1.5945,"min":1.491},"seconds":9.596,"selectedTests":6},"weightSeconds":13.317072,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/nav.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
         ,
@@ -968,7 +970,7 @@
         ,
         {"file":"tests/quote-dock-layout.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/quote-editor-core.spec.ts","listedTests":4,"tierTiming":{"caseSeconds":{"max":0.817,"median":0.817,"min":0.817},"seconds":2.007406,"selectedTests":1},"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/quote-editor-core.spec.ts","listedTests":4,"tierTiming":{"caseSeconds":{"max":0.926,"median":0.926,"min":0.926},"seconds":0.926,"selectedTests":1},"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/quote-editor-input.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
         ,
@@ -986,7 +988,7 @@
         ,
         {"file":"tests/quote-public.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/quote-save-state.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":3.965,"median":3.965,"min":3.965},"seconds":5.094495,"selectedTests":1},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/quote-save-state.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":3.646,"median":3.646,"min":3.646},"seconds":3.646,"selectedTests":1},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/quote-showcase.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1014,9 +1016,9 @@
         ,
         {"file":"tests/release-tenant-notes.spec.ts","listedTests":20,"weightSeconds":44.390244,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/release-ticket-links.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/release-ticket-links.spec.ts","listedTests":15,"tierTiming":{"caseSeconds":{"max":7.074,"median":7.074,"min":7.074},"seconds":7.074,"selectedTests":1},"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/release-update-notice.spec.ts","listedTests":16,"tierTiming":{"caseSeconds":{"max":1.481,"median":1.481,"min":1.481},"seconds":2.918008,"selectedTests":1},"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/release-update-notice.spec.ts","listedTests":16,"tierTiming":{"caseSeconds":{"max":1.545,"median":1.545,"min":1.545},"seconds":1.545,"selectedTests":1},"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/reserved-versions.spec.ts","listedTests":12,"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1034,7 +1036,7 @@
         ,
         {"file":"tests/session-chat-cli.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/session-chat.spec.ts","listedTests":43,"weightSeconds":95.439023,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/session-chat.spec.ts","listedTests":43,"tierTiming":{"caseSeconds":{"max":4.661,"median":2.728,"min":1.828},"seconds":109.865,"selectedTests":38},"weightSeconds":95.439023,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/session-ended.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1048,15 +1050,15 @@
         ,
         {"file":"tests/session-rows.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/settings-account-pacing.spec.ts","listedTests":10,"weightSeconds":22.19512,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/settings-account-pacing.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":2.345,"median":2.061,"min":1.777},"seconds":4.122,"selectedTests":2},"weightSeconds":22.19512,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/settings-account-parts.spec.ts","listedTests":13,"weightSeconds":30,"weightSource":"AEON-1171 estimate: eleven mocked flows (14.5s on mbp2606 with two workers, plus margin), two skipped evidence runs"}
+        {"file":"tests/settings-account-parts.spec.ts","listedTests":13,"tierTiming":{"caseSeconds":{"max":9.733,"median":9.733,"min":9.733},"seconds":9.733,"selectedTests":1},"weightSeconds":30,"weightSource":"AEON-1171 estimate: eleven mocked flows (14.5s on mbp2606 with two workers, plus margin), two skipped evidence runs"}
         ,
-        {"file":"tests/settings-accounts.spec.ts","listedTests":24,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/settings-accounts.spec.ts","listedTests":24,"tierTiming":{"caseSeconds":{"max":4.134,"median":2.057,"min":1.675},"seconds":9.923,"selectedTests":4},"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/settings-agents.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/settings-computers-table.spec.ts","listedTests":8,"weightSeconds":24,"weightSource":"AEON-1174 estimate: seven mocked flows, one skipped evidence run"}
+        {"file":"tests/settings-computers-table.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":2.244,"median":1.456,"min":1.325},"seconds":11.264,"selectedTests":7},"weightSeconds":24,"weightSource":"AEON-1174 estimate: seven mocked flows, one skipped evidence run"}
         ,
         {"file":"tests/stability.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1123,7 +1125,7 @@
       "specs": [
         {"file":"tests/dialog-full-text.spec.ts","listedTests":52,"weightSeconds":115.414634,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/dialog-scale.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/dialog-scale.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":14.73,"median":12.795,"min":0.003},"seconds":27.528,"selectedTests":3},"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/dialog-widths.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1151,9 +1153,9 @@
       "specs": [
         {"file":"tests/theme-agents.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/theme-apply.spec.ts","listedTests":10,"weightSeconds":19.5,"weightSource":"local-serial-runtime-estimate"}
+        {"file":"tests/theme-apply.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":9.252,"median":8.152,"min":1.804},"seconds":60.268,"selectedTests":10},"weightSeconds":19.5,"weightSource":"local-serial-runtime-estimate"}
         ,
-        {"file":"tests/theme-control-geometry.spec.ts","listedTests":2,"weightSeconds":2,"weightSource":"local-serial-runtime-estimate"}
+        {"file":"tests/theme-control-geometry.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":0.198,"median":0.163,"min":0.128},"seconds":0.326,"selectedTests":2},"weightSeconds":2,"weightSource":"local-serial-runtime-estimate"}
       ]
     }
     ,
@@ -1177,7 +1179,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/phone-approvals.spec.ts","listedTests":11,"weightSeconds":7.48,"weightSource":"aeon-903-local-serial-wall"}
+        {"file":"tests/phone-approvals.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":9.112,"median":3.941,"min":1.441},"seconds":31.381,"selectedTests":7},"weightSeconds":7.48,"weightSource":"aeon-903-local-serial-wall"}
       ]
     }
     ,
@@ -1197,7 +1199,7 @@
       "project": null
       ,
       "specs": [
-        {"file":"tests/agent-pause.spec.ts","listedTests":15,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agent-pause.spec.ts","listedTests":15,"tierTiming":{"caseSeconds":{"max":4.524,"median":4.119,"min":3.983},"seconds":25.033,"selectedTests":6},"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -1223,7 +1225,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/knowledge.spec.ts","listedTests":16,"tierTiming":{"caseSeconds":{"max":13.298,"median":2.843,"min":2.057},"seconds":67.98165,"selectedTests":15},"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/knowledge.spec.ts","listedTests":16,"tierTiming":{"caseSeconds":{"max":13.848,"median":2.828,"min":2.052},"seconds":67.127,"selectedTests":15},"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -1270,27 +1272,27 @@
       "project": null
       ,
       "specs": [
-        {"file":"tests/parent-benefits.spec.ts","tierTiming":{"caseSeconds":{"max":4.248,"median":2.3735,"min":1.232},"seconds":42.459187,"selectedTests":16},"weightSeconds":60}
+        {"file":"tests/parent-benefits.spec.ts","tierTiming":{"caseSeconds":{"max":19.653,"median":3.7325,"min":2.193},"seconds":70.659,"selectedTests":16},"weightSeconds":60}
         ,
-        {"file":"tests/work-aggregates.spec.ts","tierTiming":{"caseSeconds":{"max":5.106,"median":3.728,"min":1.586},"seconds":106.028338,"selectedTests":29},"weightSeconds":60}
+        {"file":"tests/work-aggregates.spec.ts","tierTiming":{"caseSeconds":{"max":5.889,"median":4.003,"min":2.43},"seconds":115.25,"selectedTests":29},"weightSeconds":60}
         ,
-        {"file":"tests/work-history-fix5.spec.ts","tierTiming":{"caseSeconds":{"max":5.921,"median":4.3555,"min":4.16},"seconds":30.961454,"selectedTests":6},"weightSeconds":30.961454,"weightSource":"hosted-tier-timing"}
+        {"file":"tests/work-history-fix5.spec.ts","tierTiming":{"caseSeconds":{"max":4.5,"median":4.244,"min":4.099},"seconds":25.598,"selectedTests":6},"weightSeconds":30.961454,"weightSource":"hosted-tier-timing"}
         ,
-        {"file":"tests/work-lifecycle-header.spec.ts","tierTiming":{"caseSeconds":{"max":4.433,"median":3.8555,"min":2.824},"seconds":38.484393,"selectedTests":10},"weightSeconds":60}
+        {"file":"tests/work-lifecycle-header.spec.ts","tierTiming":{"caseSeconds":{"max":5.09,"median":4.1575,"min":3.316},"seconds":41.967,"selectedTests":10},"weightSeconds":60}
         ,
-        {"file":"tests/work-lifecycle.spec.ts","tierTiming":{"caseSeconds":{"max":8.857,"median":7.909,"min":1.746},"seconds":54.687758,"selectedTests":8},"weightSeconds":60}
+        {"file":"tests/work-lifecycle.spec.ts","tierTiming":{"caseSeconds":{"max":9.826,"median":8.776,"min":2.269},"seconds":59.398,"selectedTests":8},"weightSeconds":60}
         ,
-        {"file":"tests/work-parent-releases.spec.ts","tierTiming":{"caseSeconds":{"max":9.332,"median":8.0815,"min":7.604},"seconds":51.890498,"selectedTests":6},"weightSeconds":60}
+        {"file":"tests/work-parent-releases.spec.ts","tierTiming":{"caseSeconds":{"max":8.826,"median":7.77,"min":7.269},"seconds":47.145,"selectedTests":6},"weightSeconds":60}
         ,
-        {"file":"tests/work-parent-status.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":3.868,"median":2.7835,"min":2.54},"seconds":19.092666,"selectedTests":6},"weightSeconds":16.082,"weightSource":"hosted-CI-37321154870"}
+        {"file":"tests/work-parent-status.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":3.15,"median":2.755,"min":2.27},"seconds":16.488,"selectedTests":6},"weightSeconds":16.082,"weightSource":"hosted-CI-37321154870"}
         ,
-        {"file":"tests/work-surfaces-fix2.spec.ts","tierTiming":{"caseSeconds":{"max":4.636,"median":3.728,"min":2.678},"seconds":45.858333,"selectedTests":12},"weightSeconds":60}
+        {"file":"tests/work-surfaces-fix2.spec.ts","tierTiming":{"caseSeconds":{"max":4.891,"median":3.191,"min":2.09},"seconds":41.304,"selectedTests":12},"weightSeconds":60}
         ,
-        {"file":"tests/work-surfaces-fix3.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":4.953,"median":3.3495,"min":2.696},"seconds":23.904779,"selectedTests":6},"weightSeconds":16.211,"weightSource":"hosted-CI-37321154870"}
+        {"file":"tests/work-surfaces-fix3.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":2.607,"median":2.3345,"min":2.106},"seconds":13.949,"selectedTests":6},"weightSeconds":16.211,"weightSource":"hosted-CI-37321154870"}
         ,
-        {"file":"tests/work-surfaces-fix4.spec.ts","tierTiming":{"caseSeconds":{"max":8.031,"median":6.7135,"min":6.15},"seconds":44.704208,"selectedTests":6},"weightSeconds":60}
+        {"file":"tests/work-surfaces-fix4.spec.ts","tierTiming":{"caseSeconds":{"max":6.877,"median":6.2805,"min":5.226},"seconds":36.508,"selectedTests":6},"weightSeconds":60}
         ,
-        {"file":"tests/work-vocabulary.spec.ts","tierTiming":{"caseSeconds":{"max":17.401,"median":3.472,"min":3.072},"seconds":134.573486,"selectedTests":18},"weightSeconds":60}
+        {"file":"tests/work-vocabulary.spec.ts","tierTiming":{"caseSeconds":{"max":15.964,"median":5.4775,"min":3.015},"seconds":177.673,"selectedTests":24},"weightSeconds":60}
       ]
     }
     ,
@@ -1315,9 +1317,9 @@
       ]
       ,
       "specs": [
-        {"file":"tests/settings-host-capacity.spec.ts","listedTests":12,"weightSeconds":24,"weightSource":"unmeasured-test-count-estimate"}
+        {"file":"tests/settings-host-capacity.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":5.532,"median":4.6885,"min":2.007},"seconds":49.642,"selectedTests":12},"weightSeconds":24,"weightSource":"unmeasured-test-count-estimate"}
         ,
-        {"file":"tests/settings-shared.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":6.613,"median":0.701,"min":0.409},"seconds":38.002851,"selectedTests":23},"weightSeconds":20,"weightSource":"unmeasured-test-count-estimate"}
+        {"file":"tests/settings-shared.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":6.609,"median":0.685,"min":0.399},"seconds":32.482,"selectedTests":23},"weightSeconds":20,"weightSource":"unmeasured-test-count-estimate"}
       ]
     }
     ,
@@ -1345,7 +1347,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/coarse-hit-area.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/coarse-hit-area.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":0.367,"median":0.243,"min":0.23},"seconds":0.84,"selectedTests":3},"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -1371,15 +1373,15 @@
       ]
       ,
       "specs": [
-        {"file":"tests/lead-adoption.spec.ts","listedTests":10,"weightSeconds":24,"weightSource":"local-targeted-run"}
+        {"file":"tests/lead-adoption.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":7.551,"median":6.173,"min":2.09},"seconds":57.464,"selectedTests":10},"weightSeconds":24,"weightSource":"local-targeted-run"}
         ,
-        {"file":"tests/lead-card.spec.ts","listedTests":18,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
+        {"file":"tests/lead-card.spec.ts","listedTests":18,"tierTiming":{"caseSeconds":{"max":8.89,"median":2.779,"min":1.873},"seconds":59.253,"selectedTests":18},"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
         ,
-        {"file":"tests/lead-flow.spec.ts","listedTests":15,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
+        {"file":"tests/lead-flow.spec.ts","listedTests":15,"tierTiming":{"caseSeconds":{"max":7.984,"median":2.943,"min":1.468},"seconds":66.038,"selectedTests":19},"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
         ,
-        {"file":"tests/lead-remove.spec.ts","listedTests":7,"weightSeconds":25.5,"weightSource":"measured-local-targeted"}
+        {"file":"tests/lead-remove.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":8.918,"median":8.41,"min":2.178},"seconds":51.715,"selectedTests":7},"weightSeconds":25.5,"weightSource":"measured-local-targeted"}
         ,
-        {"file":"tests/lead-start.spec.ts","listedTests":7,"weightSeconds":10,"weightSource":"unmeasured-test-count-estimate"}
+        {"file":"tests/lead-start.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":18.801,"median":17.205,"min":5.636},"seconds":111.049,"selectedTests":7},"weightSeconds":10,"weightSource":"unmeasured-test-count-estimate"}
       ]
     }
     ,
@@ -1403,7 +1405,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/usage-dashboard.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.25,"median":1.125,"min":1.018},"seconds":19.134431,"selectedTests":10},"weightSeconds":14.8,"weightSource":"web-2"}
+        {"file":"tests/usage-dashboard.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":1.727,"median":0.9265,"min":0.793},"seconds":10.234,"selectedTests":10},"weightSeconds":14.8,"weightSource":"web-2"}
       ]
     }
   ]
@@ -1487,15 +1489,41 @@
   "ticket": "OPS-257"
   ,
   "tierTimingSource": {
-    "basis": "Serial per-case result.duration seconds plus group stats.duration residual and apportioned tier execution residual, divided equally across collected cases. All 12 shard artifacts supplied; unmeasured specs keep historical serial estimates. Each clip half conservatively retains the full original launch overhead. weightSeconds preserves the historical exact-spec allocation, divided proportionally between the clip halves; tierTiming schedules the measured tier lane."
+    "basis": "Median native first-pass result.duration seconds per current gated browser case from three green full merge-group runs (all 12 shard artifacts per run). Native owner seconds sum those per-case medians; split-owner tier estimates retain their complete catalogue count and extrapolate unmeasured cases using the measured owner mean; the unchanged serial tier planner scales partial and nightly selections by selected case count. Nightly-only owners retain prior estimates. Launch and shard residuals are measured separately, never multiplied by owner or case count in the wall prediction. Historical exact-spec weightSeconds, membership and launch policies are unchanged."
     ,
-    "runId": "37377299349"
+    "runs": [
+      {
+        "attempt": 1
+        ,
+        "event": "merge_group"
+        ,
+        "runId": "38145006230"
+        ,
+        "sha": "9eb6bb385639eb5473102387e7c0afd4b792d8d5"
+      }
+      ,
+      {
+        "attempt": 1
+        ,
+        "event": "merge_group"
+        ,
+        "runId": "38145006789"
+        ,
+        "sha": "babfb1a3134e4f0c8e88857cafe7e70b8ac2fcc6"
+      }
+      ,
+      {
+        "attempt": 1
+        ,
+        "event": "merge_group"
+        ,
+        "runId": "38147167205"
+        ,
+        "sha": "0bbc01c0e14fb54b5236b0b0cefec589ffd9b277"
+      }
+    ]
     ,
-    "sha": "b2f9935a4264e932eae0fa2acd07c71e8d1fc417"
-    ,
-    "splitBasis": "Per-case duration from the pinned run; full original owner residual retained for each split. Unmeasured current cases use original owner seconds/selectedTests."
-    ,
-    "splitTicket": "AEON-1024"
+    "ticket": "AEON-1221"
   }
   ,
   "timingSource": {

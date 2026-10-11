@@ -339,6 +339,11 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',2,$2)`, admin.TenantID, older.ID); err != nil {
 			return err
 		}
+		for _, model := range []string{old.Model, older.Model} {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by,set_at) VALUES($1,'claude',$2,'Fixture pause',$3,'2026-10-11T00:00:00Z')`, admin.TenantID, model, admin.ID); err != nil {
+				return err
+			}
+		}
 		var scope, kind string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO work_kinds(tenant_id,slug,label) VALUES($1,'retire-kind','Retire kind') RETURNING id::text`, admin.TenantID).Scan(&kind); err != nil {
 			return err
@@ -355,11 +360,11 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 	before := retireState(t, admin)
 	preview := outdatedPreview(t, admin)
 	version := requireOutdated(t, preview, "anthropic:claude-opus-5")
-	if version.State == nil || *version.State != "superseded" || version.Successor == nil || *version.Successor != "anthropic:claude-opus-5.5" || version.Source != "aeon_model_line/aeon_model_version_newer" || len(version.Uses) != 2 {
+	if version.State == nil || *version.State != "superseded" || version.Successor == nil || *version.Successor != "anthropic:claude-opus-5.5" || version.Source != "aeon_model_line/aeon_model_version_newer" || len(version.Uses) != 3 {
 		t.Fatal(version)
 	}
 	result := boardDecode[retireResult](t, boardCall(t, admin, "POST", "/api/models/outdated/retire", retireWrite{Versions: []string{version.Version, "anthropic:claude-opus-4"}, Revision: preview.Revision}, ""), 200)
-	if len(result.Removed) != 2 || len(result.Moved) != 3 || result.UndoToken == "" || eventCount(t, admin, "model.outdated_retired") != 1 {
+	if len(result.Removed) != 2 || len(result.Moved) != 5 || result.UndoToken == "" || eventCount(t, admin, "model.outdated_retired") != 1 {
 		t.Fatal(result)
 	}
 	inRegistry(t, admin, func(tx pgx.Tx) error {
@@ -377,6 +382,13 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 		}
 		if routes != 1 {
 			t.Fatal("compatible successor routes were not deduplicated", routes)
+		}
+		var pauses int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_pauses WHERE harness='claude' AND model=$1 AND reason='Fixture pause' AND set_by=$2 AND until_at IS NULL AND set_at='2026-10-11T00:00:00Z'`, next.Model, admin.ID).Scan(&pauses); err != nil {
+			return err
+		}
+		if pauses != 1 {
+			t.Fatal("compatible successor pauses were not preserved and deduplicated", pauses)
 		}
 
 		if err := tx.QueryRow(t.Context(), `SELECT profile_id::text FROM model_pref_cells WHERE mode='pinned'`).Scan(&pin); err != nil {
@@ -424,7 +436,7 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 	preview = outdatedPreview(t, admin)
 	second := boardDecode[retireResult](t, boardCall(t, admin, "POST", "/api/models/outdated/retire", retireWrite{Versions: []string{version.Version}, Revision: preview.Revision}, ""), 200)
 	inRegistry(t, admin, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET reason='Later edit' WHERE role='build'`)
+		_, err := tx.Exec(t.Context(), `UPDATE model_pauses SET reason='Later edit' WHERE model='claude-opus-5.5'`)
 		return err
 	})
 	edited := retireState(t, admin)
@@ -434,6 +446,22 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 	}
 	if !reflect.DeepEqual(edited, retireState(t, admin)) {
 		t.Fatal("stale Undo wrote partial restoration")
+	}
+	// Check the legacy role fence independently of the pause edit.
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE model_pauses SET reason='Fixture pause' WHERE model='claude-opus-5.5'`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET reason='Later edit' WHERE role='build'`)
+		return err
+	})
+	edited = retireState(t, admin)
+	rejected = boardCall(t, admin, "POST", "/api/models/outdated/undo", map[string]any{"undo_token": second.UndoToken}, "")
+	if rejected.Code != 409 || !strings.Contains(rejected.Body.String(), "references changed") {
+		t.Fatal("wrong stale role Undo result", rejected.Body.String())
+	}
+	if !reflect.DeepEqual(edited, retireState(t, admin)) {
+		t.Fatal("stale role Undo wrote partial restoration")
 	}
 }
 

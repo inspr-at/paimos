@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +29,16 @@ import (
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
+
+func TestMain(m *testing.M) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if output, err := exec.CommandContext(ctx, "node", "../../api/generate.mjs", "--write").CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "prepare OpenAPI: %v\n%s", err, output)
+		os.Exit(1)
+	}
+	os.Exit(m.Run())
+}
 
 func uid() string {
 	var b [16]byte

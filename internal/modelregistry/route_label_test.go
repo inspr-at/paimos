@@ -64,6 +64,13 @@ func TestRevisionFollowsRoutes(t *testing.T) {
 	if !regexp.MustCompile(`^[0-9a-f]{8}$`).MatchString(seeded) || revision(p) != seeded {
 		t.Fatalf("seeded revision %q", seeded)
 	}
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes WHERE role='scout' AND priority=1`)
+		return err
+	})
+	if unchanged := revision(p); unchanged != seeded {
+		t.Fatalf("retired ladder history changed the routing revision: %q → %q", seeded, unchanged)
+	}
 	if revision(twin) != seeded {
 		t.Fatalf("equal Models state named differently: %q and %q", seeded, revision(twin))
 	}
@@ -94,13 +101,7 @@ func TestRevisionFollowsRoutes(t *testing.T) {
 		}
 	}
 	change(p, `INSERT INTO model_pauses(tenant_id,harness,model,reason) SELECT tenant_id,harness,model,'paused' FROM model_profiles WHERE slug='claude-opus-xhigh' LIMIT 1`)
-	paused := revision(p)
-	if paused == ordered || paused == "" {
+	if paused := revision(p); paused == ordered || paused == "" {
 		t.Fatalf("revision did not follow the pause: %q → %q", ordered, paused)
-	}
-	// Retained ladder rows are history: Models inputs alone define routing.
-	change(p, `DELETE FROM model_role_routes WHERE role='scout' AND priority=1`)
-	if unchanged := revision(p); unchanged != paused {
-		t.Fatalf("retired ladder history changed the routing revision: %q → %q", paused, unchanged)
 	}
 }

@@ -3,6 +3,7 @@ package modelregistry
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -173,51 +174,6 @@ func editorError(t *testing.T, w *httptest.ResponseRecorder, status int, code st
 }
 func editorJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 
-// retiredLadderWrite asserts the retired ladder writer's only answer: 410 Gone
-// with its successor, before any body read, catalog preparation or write
-// (approved Models v2 design: PUT /models/routes is gone after the migration).
-func retiredLadderWrite(t *testing.T, h *editorHTTP, p tenant.Principal, path, body string, headers map[string]string) {
-	t.Helper()
-	w := h.call(t, p, "PUT", path, body, headers)
-	if w.Code != http.StatusGone || w.Header().Get("Deprecation") != "true" || w.Header().Get("Link") != `</api/model-preferences/orders>; rel="successor-version"` {
-		t.Fatalf("retired ladder writer answered %d: %s", w.Code, w.Body.String())
-	}
-}
-
-// errorText is a refusal's decoded message. JSON escapes ">" in "Settings >
-// Models", so a raw body never contains the words a client reads.
-func errorText(raw []byte) string {
-	var out struct {
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal(raw, &out); err != nil || out.Error == "" {
-		return string(raw)
-	}
-	return out.Error
-}
-
-// modelsState is everything Models routing reads, plus the retained ladder
-// tables, route events and the tenant's event counter.
-func modelsState(t *testing.T, p tenant.Principal) string {
-	t.Helper()
-	var state string
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
- 'profiles',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_profiles p),
- 'prefs',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_pref_profiles p),
- 'orders',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_orders o),
- 'situations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_situation_orders o),
- 'pauses',(SELECT jsonb_agg(to_jsonb(o) ORDER BY harness,model) FROM model_pauses o),
- 'constraints',(SELECT jsonb_agg(to_jsonb(o) ORDER BY scope,column_key,line) FROM model_row_constraints o),
- 'ladders',(SELECT jsonb_agg(to_jsonb(r) ORDER BY role,priority) FROM model_role_routes r),
- 'events',(SELECT count(*) FROM events WHERE type=$1),
- 'counter',(SELECT to_jsonb(c) FROM event_counters c))::text`, evRoutes).Scan(&state)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	return state
-}
-
 func editorFixture(t *testing.T) (tenant.Principal, *editorHTTP) {
 	t.Helper()
 	var p tenant.Principal
@@ -251,74 +207,73 @@ func editorKind(t *testing.T, doc preferenceDocument, slug string) string {
 	return ""
 }
 
-// Risk: the retired ladder writer still saves, audits or changes Models rows.
-// Every former save shape (equal, changed, stale, whole tenant, empty) is 410,
-// and the deprecated derived reads stay as they were.
+// Risk: an equal, changed, whole-tenant or clearing write through the retired
+// ladder writer changes a role, issues an edit token or writes an audit event.
 func TestEditorRoleCASLegacyNoopAndAudit(t *testing.T) {
 	p, h := editorFixture(t)
 	build, other := h.ladder(t, p, "build"), h.ladder(t, p, "scout")
-	if build.EditToken != nil || build.CanEdit || len(build.Routes) == 0 {
-		t.Fatalf("derived ladder is not read-only Models content: %+v", build)
+	if build.EditToken != nil || build.CanEdit || other.EditToken != nil || other.CanEdit {
+		t.Fatal("compatibility read still grants editing")
 	}
-	before := modelsState(t, p)
-	token := routeEditToken("build", build.Routes)
-	changed := append([]Route{}, build.Routes...)
-	changed[0].Priority = 100
 	path := "/api/models/routes?role=build"
-	for _, put := range []struct {
+	token := map[string]string{"If-Match": `"` + strings.Repeat("f", 64) + `"`}
+	want := append([]Route{}, build.Routes...)
+	for i := range want {
+		want[i].Priority += 100
+	}
+	before, events := catalogSetupState(t, p), eventCount(t, p, evRoutes)
+	for _, tc := range []struct {
 		path, body string
 		headers    map[string]string
-	}{
-		{path, editorJSON(build.Routes), map[string]string{"If-Match": token}},
-		{path, editorJSON(changed), map[string]string{"If-Match": token}},
-		{path, editorJSON(build.Routes), map[string]string{"If-Match": `"stale"`}},
-		{"/api/models/routes", editorJSON(changed), nil},
-		{path, "[]", map[string]string{"If-Match": token}},
-	} {
-		retiredLadderWrite(t, h, p, put.path, put.body, put.headers)
+	}{{path, editorJSON(build.Routes), token}, {path, editorJSON(want), token}, {"/api/models/routes", editorJSON(want), nil}, {path, "[]", token}} {
+		w := h.call(t, p, "PUT", tc.path, tc.body, tc.headers)
+		editorRetired(t, w)
+		if w.Header().Get("ETag") != "" {
+			t.Fatal("retired writer issued an edit token")
+		}
 	}
-	if modelsState(t, p) != before {
-		t.Fatal("retired writer changed Models storage or audited a route change")
-	}
-	if !reflect.DeepEqual(h.ladder(t, p, "build").Routes, build.Routes) || !reflect.DeepEqual(h.ladder(t, p, "scout").Routes, other.Routes) {
-		t.Fatal("derived reads changed")
+	if catalogSetupState(t, p) != before || eventCount(t, p, evRoutes) != events || !reflect.DeepEqual(h.ladder(t, p, "build").Routes, build.Routes) || !reflect.DeepEqual(h.ladder(t, p, "scout").Routes, other.Routes) {
+		t.Fatal("retired writer changed a role or wrote an audit event")
 	}
 }
 
-// Risk: holds moved to model pauses (approved Models v2 design) but the
-// retired writer still stores a hold or an expiry compensation, or the
-// deprecated read loses a pause's reason or full-precision expiry.
+// Risk: an expiring hold or an expiry-policy compensation sent to the retired
+// ladder writer still reaches its clock or storage. Holds are Models pauses
+// now; retained content tokens still bind full-precision expiry and reason.
 func TestEditorExpiryTokensAndCompensation(t *testing.T) {
-	p, h := editorFixture(t)
+	p, _ := editorFixture(t)
+	clock := time.Date(2030, 1, 1, 0, 0, 0, 123456000, time.UTC)
+	sampled := false
+	h := newEditorHTTP(t, &Module{pool: appPool, validationClock: func(context.Context, pgx.Tx) (time.Time, error) { sampled = true; return clock, nil }})
 	initial := h.ladder(t, p, "build")
-	if len(initial.Routes) == 0 {
-		t.Fatal("fixture has no derived build route")
+	if initial.EditToken != nil || initial.CanEdit || len(initial.Routes) == 0 {
+		t.Fatal("compatibility read still grants editing")
 	}
-	expiry := time.Date(2030, 1, 1, 0, 0, 0, 123456000, time.UTC)
-	held := append([]Route{}, initial.Routes...)
-	held[0].State, held[0].Reason, held[0].ValidUntil = "conserved", "quota", &expiry
-	before := modelsState(t, p)
-	retiredLadderWrite(t, h, p, "/api/models/routes?role=build", editorJSON(held), map[string]string{"If-Match": routeEditToken("build", initial.Routes)})
-	retiredLadderWrite(t, h, p, "/api/models/routes?role=build&expiry_policy=clear", editorJSON(held), map[string]string{"If-Match": routeEditToken("build", held)})
-	if modelsState(t, p) != before {
-		t.Fatal("retired writer stored a hold")
+	expiry := clock.Add(time.Second)
+	held := []Route{{Role: "build", Priority: 1, ProfileID: "00000000-0000-0000-0000-000000000001", State: "conserved", Reason: "quota", ValidUntil: &expiry}}
+	before, events := catalogSetupState(t, p), eventCount(t, p, evRoutes)
+	token := map[string]string{"If-Match": `"` + strings.Repeat("1", 64) + `"`}
+	for _, path := range []string{"/api/models/routes?role=build", "/api/models/routes?role=build&expiry_policy=clear", "/api/models/routes?role=build&expiry_policy=preserve"} {
+		editorRetired(t, h.call(t, p, "PUT", path, editorJSON(held), token))
 	}
-	// The successor is a model pause; the deprecated read reports it exactly.
+	if sampled || catalogSetupState(t, p) != before || eventCount(t, p, evRoutes) != events {
+		t.Fatal("retired writer sampled its clock or changed stored holds")
+	}
+	// The Models successor preserves the exact reason and native expiry.
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by) SELECT tenant_id,harness,model,$2,'quota',$3 FROM model_profiles WHERE id=$1`, held[0].ProfileID, expiry, p.ID)
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by) SELECT tenant_id,harness,model,$2,'quota',$3 FROM model_profiles WHERE id=$1`, initial.Routes[0].ProfileID, expiry, p.ID)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
-	paused := h.ladder(t, p, "build")
 	found := false
-	for _, row := range paused.Routes {
-		if row.ProfileID == held[0].ProfileID {
+	for _, row := range h.ladder(t, p, "build").Routes {
+		if row.ProfileID == initial.Routes[0].ProfileID {
 			found = row.State == "unavailable" && row.Reason == "quota" && row.ValidUntil != nil && row.ValidUntil.Equal(expiry)
 		}
 	}
 	if !found {
-		t.Fatalf("deprecated read lost the pause: %+v", paused.Routes)
+		t.Fatal("deprecated read lost the Models pause")
 	}
 	// Full-precision and reason-only changes must bind different content.
 	a := held
@@ -335,8 +290,9 @@ func TestEditorExpiryTokensAndCompensation(t *testing.T) {
 	}
 }
 
-// Risk: a cold read seeds the catalog, or the retired writer parses
-// preconditions, queries or oversized bodies (and seeds) before refusing.
+// Risk: a cold compatibility read seeds the catalog or hands out an edit
+// token, or a malformed, unconditional or over-bound write to the retired
+// ladder writer prepares the catalog instead of answering 410.
 func TestEditorBoundsPreconditionsAndReadOnlyCold(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "editor-cold", "person", "Owner", []string{"admin"})
@@ -346,24 +302,30 @@ func TestEditorBoundsPreconditionsAndReadOnlyCold(t *testing.T) {
 	if cold.Setup || cold.CanEdit || cold.EditToken != nil || catalogSetupState(t, p) != before {
 		t.Fatal("cold read side effects")
 	}
-	for _, header := range []string{"", "*", `W/"token"`, `"a", "b"`} {
+	for _, header := range []string{"", "*", "W/\"x\"", `"` + strings.Repeat("0", 64) + `", "` + strings.Repeat("0", 64) + `"`} {
 		headers := map[string]string{"If-Match": header}
 		if header == "" {
 			headers = nil
 		}
-		retiredLadderWrite(t, h, p, "/api/models/routes?role=build", "[]", headers)
+		editorRetired(t, h.call(t, p, "PUT", "/api/models/routes?role=build", "[]", headers))
 	}
 	for _, q := range []string{"?role=build&expiry_policy=invalid", "?expiry_policy=clear", "?role=build&role=scout", "?role=unknown"} {
-		retiredLadderWrite(t, h, p, "/api/models/routes"+q, "[]", nil)
+		editorRetired(t, h.call(t, p, "PUT", "/api/models/routes"+q, "[]", nil))
 	}
-	retiredLadderWrite(t, h, p, "/api/models/routes", editorJSON(make([]Route, 251)), nil)
+	rows := make([]Route, 251)
+	editorRetired(t, h.call(t, p, "PUT", "/api/models/routes", editorJSON(rows), nil))
+	rows = rows[:51]
+	for i := range rows {
+		rows[i].Role = "build"
+	}
+	editorRetired(t, h.call(t, p, "PUT", "/api/models/routes", editorJSON(rows), nil))
 	if catalogSetupState(t, p) != before {
 		t.Fatal("retired writer seeded catalog")
 	}
 	displayRoutesFixture(t, p, 51)
 	large := h.ladder(t, p, "review-gate")
 	if !large.Truncated || large.EditToken != nil || large.CanEdit || len(large.Routes) != 50 {
-		t.Fatal("partial snapshot editable or not truncated")
+		t.Fatal("partial snapshot editable")
 	}
 }
 
@@ -528,4 +490,42 @@ type legacyPreferenceTestModule struct{ *Module }
 
 func (m legacyPreferenceTestModule) Mount(mux *http.ServeMux) {
 	m.Module.mount(mux, m.Module.writePreferences)
+}
+
+func errorText(raw []byte) string {
+	var out struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil || out.Error == "" {
+		return string(raw)
+	}
+	return out.Error
+}
+
+func modelsState(t *testing.T, p tenant.Principal) string {
+	t.Helper()
+	var state string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT jsonb_build_object(
+ 'profiles',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_profiles p),
+ 'prefs',(SELECT jsonb_agg(to_jsonb(p) ORDER BY id) FROM model_pref_profiles p),
+ 'orders',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_orders o),
+ 'situations',(SELECT jsonb_agg(to_jsonb(o) ORDER BY profile_id,column_key,situation) FROM model_pref_situation_orders o),
+ 'pauses',(SELECT jsonb_agg(to_jsonb(o) ORDER BY harness,model) FROM model_pauses o),
+ 'constraints',(SELECT jsonb_agg(to_jsonb(o) ORDER BY scope,column_key,line) FROM model_row_constraints o),
+ 'ladders',(SELECT jsonb_agg(to_jsonb(r) ORDER BY role,priority) FROM model_role_routes r),
+ 'events',(SELECT count(*) FROM events WHERE type=$1),
+ 'counter',(SELECT to_jsonb(c) FROM event_counters c))::text`, evRoutes).Scan(&state)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return state
+}
+
+func retiredLadderWrite(t *testing.T, h *editorHTTP, p tenant.Principal, path, body string, headers map[string]string) {
+	t.Helper()
+	w := h.call(t, p, "PUT", path, body, headers)
+	if w.Code != http.StatusGone || w.Header().Get("Deprecation") != "true" || w.Header().Get("Link") != `</api/model-preferences/orders>; rel="successor-version"` {
+		t.Fatalf("retired ladder writer answered %d: %s", w.Code, w.Body.String())
+	}
 }

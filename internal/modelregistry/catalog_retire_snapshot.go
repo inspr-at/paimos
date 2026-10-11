@@ -26,14 +26,14 @@ type retireTable struct {
 var retireTables = []retireTable{
 	{"model_pref_orders", []string{"profile_id", "column_key", "situation"}, false},
 	{"model_pref_situation_orders", []string{"profile_id", "column_key", "situation"}, false},
-	{"model_row_constraints", []string{"scope", "project_id", "column_key", "line"}, false},
-	{"model_pauses", []string{"harness", "model"}, false},
 	{"model_pref_profiles", []string{"id"}, true},
 	{"model_rules", []string{"scope", "project_id", "column_key", "line"}, false},
 	{"model_rule_revisions", []string{"scope", "scope_key"}, true},
-	{"model_role_routes", []string{"role", "priority"}, false},
-	{"model_security_role_routes", []string{"role", "priority"}, false},
+	{"model_row_constraints", []string{"scope", "project_id", "column_key", "line"}, false},
+	{"model_pauses", []string{"harness", "model"}, false},
 	{"model_pref_cells", []string{"scope_id", "kind_id", "bucket"}, false},
+	{"model_role_routes", []string{"role", "profile_id"}, false},
+	{"model_security_role_routes", []string{"role", "profile_id"}, false},
 	{"model_pref_scopes", []string{"id"}, true},
 	{"model_profile_retirements", []string{"profile_id"}, false},
 }
@@ -194,9 +194,9 @@ func retirementLines(model lifecycleModel, all []lifecycleModel) map[string]bool
 			continue
 		}
 		for _, p := range next.Profiles {
-			if !p.Retired && p.Enabled && compareCatalogVersions(next.Version, model.Version) > 0 {
+			line, _ := modelsLine(p)
+			if !p.Retired && p.Enabled && (lines[boardLineID(p)] || lines[line]) && compareCatalogVersions(next.Version, model.Version) > 0 {
 				delete(lines, boardLineID(p))
-				line, _ := modelsLine(p)
 				delete(lines, line)
 			}
 		}
@@ -272,9 +272,9 @@ func retirementUses(model lifecycleModel, s retireSnapshot, all []lifecycleModel
 	}
 	for _, raw := range s["model_pauses"] {
 		row := rowFields(raw)
-		for _, p := range model.Profiles {
-			if !p.Retired && p.Harness == rowString(row, "harness") && p.Model == rowString(row, "model") {
-				add("pause · "+p.Harness, rowString(row, "set_by"), "", "")
+		for _, profile := range model.Profiles {
+			if !profile.Retired && profile.Harness == rowString(row, "harness") && profile.Model == rowString(row, "model") {
+				add("pause · "+profile.Harness, rowString(row, "set_by"), "", "")
 				break
 			}
 		}

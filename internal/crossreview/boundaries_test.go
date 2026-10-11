@@ -573,7 +573,7 @@ func TestModelInitializerAdaptersReauthorizeBeforeColdOrAdditiveSetup(t *testing
 			{"model list", "GET", "/api/models", nil, "models.read"},
 			{"legacy resolver", "GET", "/api/models/resolve?role=build", nil, "models.read"},
 			{"profile management", "POST", "/api/models", map[string]any{"slug": "boundary-extra", "version": "99", "harness": "codex", "family": "openai", "model": "gpt-test", "effort": "high", "tier": "strong"}, "models.manage"},
-			{"Models order", "PUT", "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{}, "revision": 0, "end": "wait"}, "model_prefs.manage"},
+			{"legacy replacement", "PUT", "/api/models/routes", []any{}, "models.manage"},
 		} {
 			t.Run(route.name+map[bool]string{true: " cold", false: " additive"}[cold], func(t *testing.T) {
 				f := newCatalogFixture(t, false, cold)
@@ -891,7 +891,7 @@ func TestCompletionDrainResourcesAndCancellationJoinAtomicBatch(t *testing.T) {
 }
 
 func TestCompletionFinalFenceSerializesConnectedWriters(t *testing.T) {
-	for _, operation := range []string{"manual_review", "models_order", "legacy_ladder", "access", "account_lifecycle", "duplicate_completion"} {
+	for _, operation := range []string{"manual_review", "legacy_ladder", "access", "account_lifecycle", "duplicate_completion"} {
 		t.Run(operation, func(t *testing.T) {
 			f := newCatalogFixture(t, false)
 			run, report := f.completion(t)
@@ -910,13 +910,6 @@ func TestCompletionFinalFenceSerializesConnectedWriters(t *testing.T) {
 			case "manual_review":
 				r = boundaryRequest(ctx, "/api/nodes/"+f.ticket+"/reviews", f.input(), "", cookie)
 				want = 201
-			case "models_order":
-				var revision int64
-				f.tx(t, func(tx pgx.Tx) error {
-					return tx.QueryRow(t.Context(), `SELECT revision FROM model_pref_profiles WHERE scope='workspace'`).Scan(&revision)
-				})
-				r = boundaryRequest(ctx, "/api/model-preferences/orders/other/first?for=default", map[string]any{"rank": []string{}, "revision": revision, "end": "wait"}, "", cookie)
-				r.Method = "PUT"
 			case "legacy_ladder":
 				// Retired by Models v2: no longer a connected writer. It answers
 				// 410 at once while the completion holds its fence.

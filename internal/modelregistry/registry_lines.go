@@ -58,16 +58,22 @@ func lineProfiles(c boardCatalog, h, model string) []Profile {
 	return out
 }
 
-// Unlike the role-ladder token, this digest includes all registry pins and
-// preference/rule revisions, including lines that no ladder currently uses.
-func registryRevision(ctx context.Context, tx pgx.Tx) (string, error) {
-	if err := registryBounds(ctx, tx); err != nil {
+// Editor tokens include all registry pins and preference/rule revisions.
+// Routing digests include only enabled pins, so archived history cannot exhaust
+// the live catalog's bounded input budget.
+func registryRevision(ctx context.Context, tx pgx.Tx, routingOnly ...bool) (string, error) {
+	profilesWhere, retirementsWhere := "", ""
+	if len(routingOnly) > 0 && routingOnly[0] {
+		profilesWhere = " WHERE p.enabled"
+		retirementsWhere = " WHERE EXISTS(SELECT 1 FROM model_profiles p WHERE p.id=r.profile_id AND p.tenant_id=r.tenant_id AND p.enabled)"
+	}
+	if err := registryBounds(ctx, tx, len(routingOnly) > 0 && routingOnly[0]); err != nil {
 		return "", err
 	}
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT jsonb_build_array(
- coalesce((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id) FROM model_profiles p),'[]'::jsonb),
- coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.profile_id) FROM model_profile_retirements r),'[]'::jsonb),
+ coalesce((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id) FROM model_profiles p`+profilesWhere+`),'[]'::jsonb),
+ coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.profile_id) FROM model_profile_retirements r`+retirementsWhere+`),'[]'::jsonb),
  coalesce((SELECT jsonb_agg(jsonb_build_array(p.id,p.revision) ORDER BY p.id) FROM model_pref_profiles p),'[]'::jsonb),
  coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.scope,r.scope_key) FROM model_rule_revisions r),'[]'::jsonb),
  coalesce((SELECT jsonb_agg(to_jsonb(o) ORDER BY o.profile_id,o.column_key,o.situation) FROM (`+modelprefs.OrdersSQL+`) o),'[]'::jsonb),
@@ -81,10 +87,12 @@ func registryRevision(ctx context.Context, tx pgx.Tx) (string, error) {
 }
 
 // registryBounds limits every set a registry digest reads before building it.
-// Routing digests bound only enabled pins, so archived history cannot exhaust
-// the live catalog's bounded input budget.
 func registryBounds(ctx context.Context, tx pgx.Tx, routingOnly ...bool) error {
-	profilesWhere, retirementsWhere := routingPinFilters(routingOnly...)
+	profilesWhere, retirementsWhere := "", ""
+	if len(routingOnly) > 0 && routingOnly[0] {
+		profilesWhere = " WHERE p.enabled"
+		retirementsWhere = " WHERE EXISTS(SELECT 1 FROM model_profiles p WHERE p.id=r.profile_id AND p.tenant_id=r.tenant_id AND p.enabled)"
+	}
 	var large bool
 	if err := tx.QueryRow(ctx, `SELECT
  (SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles p`+profilesWhere+` LIMIT 513) p) OR
@@ -102,15 +110,6 @@ func registryBounds(ctx context.Context, tx pgx.Tx, routingOnly ...bool) error {
 		return modelprefs.ErrBoardBounds
 	}
 	return nil
-}
-
-// routingPinFilters restricts registry pins and their retirements to enabled
-// pins when a digest names live routing only.
-func routingPinFilters(routingOnly ...bool) (profiles, retirements string) {
-	if len(routingOnly) > 0 && routingOnly[0] {
-		return " WHERE p.enabled", " WHERE EXISTS(SELECT 1 FROM model_profiles p WHERE p.id=r.profile_id AND p.tenant_id=r.tenant_id AND p.enabled)"
-	}
-	return "", ""
 }
 
 func validateLineWrite(in lineWrite, h, oldModel string) error {
@@ -274,6 +273,7 @@ func boardLineID(p Profile) string { f, l, _ := ProfileLine(p); return f + ":" +
 
 // Caller holds the tenant and registry fences. All transfers precede events.
 func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile, moveLines ...bool) error {
+	moveLine := len(moveLines) == 0 || moveLines[0]
 	if err := transferRetiredLadderReferences(ctx, tx, before, after); err != nil {
 		return err
 	}
@@ -295,7 +295,7 @@ func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			return err
 		}
 	}
-	if len(moveLines) > 0 && !moveLines[0] {
+	if !moveLine {
 		return nil
 	}
 	newLine, _ := modelsLine(after[0])

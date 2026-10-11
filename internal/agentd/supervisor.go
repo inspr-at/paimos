@@ -2260,6 +2260,9 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 		}
 		for index := 0; index < len(entry.pending); {
 			control := entry.pending[index]
+			if entry.record.RoutineWorkspace != nil && control.ExpectedGeneration != "" && control.ExpectedGeneration != entry.harness.ID {
+				return ErrGeneration
+			}
 			entry.mu.Lock()
 			queued := entry.queueInput && control.Kind == "steer"
 			busy := entry.harness.Activity == "busy"
@@ -2293,7 +2296,8 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 			}
 			_, err := s.control(ctx, ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
 				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: control.ID, Operation: operation, Text: control.Text, Value: control.Value, ExpectedOwnership: control.ExpectedOwnership, ExpiresAt: control.ExpiresAt, deadline: control.deadline}, true)
-			if (entry.managedPolicy || control.Kind == "tier" || queued) && operation != "force_stop" {
+			routineStop := entry.record.RoutineWorkspace != nil && control.Kind == "stop"
+			if (entry.managedPolicy || control.Kind == "tier" || queued || routineStop) && operation != "force_stop" {
 				switch {
 				case errors.Is(err, ErrControlExpired):
 					outcome, reason, err = "rejected", "authorization_expired", nil
@@ -2608,10 +2612,10 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		return Receipt{}, errors.New("control replay capacity reached")
 	}
 	if req.Operation != "force_stop" && fromRecoveryQueue && (entry.managedPolicy || req.ExpectedOwnership != nil) {
-		if !entry.managedPolicy && req.Operation != "tier" {
+		if !entry.managedPolicy && req.Operation != "tier" && !(req.Operation == "stop" && entry.record.RoutineWorkspace != nil) {
 			return Receipt{}, ErrUnsupported
 		}
-		if entry.budgetStopReason() != "" {
+		if entry.budgetStopReason() != "" && !(req.Operation == "stop" && entry.record.RoutineWorkspace != nil) {
 			return Receipt{}, ErrBudgetExhausted
 		}
 		if req.ExpectedOwnership == nil || req.ExpiresAt == nil {
@@ -2630,6 +2634,9 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		}
 		current, e := recovery.Ownership()
 		if e != nil || current.ProcessID != expected.ProcessID || current.RootPID != expected.RootPID || current.GroupID != expected.GroupID || !current.StartedAt.Equal(expected.StartedAt) {
+			return Receipt{}, ErrNotOwned
+		}
+		if req.Operation == "stop" && entry.record.RoutineWorkspace != nil && (current.DaemonID != expected.DaemonID || current.Generation != expected.Generation) {
 			return Receipt{}, ErrNotOwned
 		}
 	}
@@ -2685,6 +2692,14 @@ func (s *Supervisor) controlInbox(ctx context.Context, req ControlRequest, fromR
 		graceful, ok := entry.process.(GracefulProcess)
 		if !ok {
 			return Receipt{}, ErrUnsupported
+		}
+		if entry.record.RoutineWorkspace != nil {
+			// Persist uncertainty before touching this exact child. A lost
+			// cooperative-stop reply cannot signal the process a second time.
+			entry.record.Controls[req.CorrelationID] = replay{Digest: key, Rejected: true}
+			if err := s.journal.Put(entry.record); err != nil {
+				return Receipt{}, err
+			}
 		}
 		entry.stopRequested = true
 		entry.mu.Unlock()

@@ -21,7 +21,6 @@ func TestResolveTicketRoute(t *testing.T) {
 	}
 	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
 	minimalAccount(t, p, profileBySlug(profiles, "codex-6-1-sol-high"))
-	minimalAccount(t, p, profileBySlug(profiles, "codex-luna-medium"))
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		if err := modelprefs.SeedKinds(t.Context(), tx, p.TenantID); err != nil {
 			return err

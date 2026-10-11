@@ -781,7 +781,7 @@ func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 
 	resetRoutingFixture := func() {
 		f.tx(t, f.person, func(tx pgx.Tx) error {
-			if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields-'route_role'-'area' WHERE id=ANY($1::uuid[])`, tickets[:2]); err != nil {
+			if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields-'route_role' WHERE id=ANY($1::uuid[])`, tickets[:2]); err != nil {
 				return err
 			}
 			if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_target_agent_id=NULL,agent_principal_id=tenant_id,model_profile_id=NULL WHERE id=ANY($1::uuid[])`, runs[:2]); err != nil {

@@ -57,12 +57,11 @@ func ModelKey(model string) string {
 	return key
 }
 
-// Revision names the Models state routing reads: enabled registry pins and
-// their retirements, preference profiles and orders, rules, row constraints and
+// Revision names the Models state routing reads: registry pins and
+// retirements (enabled pins only), preference profiles and orders, rules, row constraints and
 // pauses. It digests content (slugs, owners, lines, words), never row ids or
-// write stamps, so equal state has an equal revision in every tenant. Archived
-// history cannot consume the live routing digest budget. Empty before the
-// registry is set up; ErrBoardBounds beyond the Models bounds.
+// write stamps, so equal state has an equal revision in every tenant. Empty
+// before the registry is set up; ErrBoardBounds beyond the Models bounds.
 func Revision(ctx context.Context, tx pgx.Tx) (string, error) {
 	var setup bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles)`).Scan(&setup); err != nil {

@@ -33,12 +33,8 @@ type previewBoardKey struct{}
 
 // routingBoard groups the preview's one bounded profile read into the
 // routing catalog every cell's Models walk reuses. An over-limit catalog
-// stays incomplete rather than being re-read unbounded per cell. nil reads the
-// live routing catalog for each walk.
+// stays incomplete rather than being re-read unbounded per cell.
 func (c *preferencePreviewCatalog) routingBoard(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
-	if c == nil {
-		return loadBoardCatalog(ctx, tx, true)
-	}
 	if c.board == nil && c.boardError == nil {
 		profiles, err := c.profiles(ctx, tx)
 		if err != nil {
@@ -73,6 +69,15 @@ func (c *preferencePreviewCatalog) profiles(ctx context.Context, tx pgx.Tx) ([]P
 		}
 	}
 	return c.profileRows, c.profilesError
+}
+
+// dispatchBoard shares a preview's bounded catalog with every walk; live
+// dispatch reads only enabled pins so archived history cannot exhaust it.
+func (c *preferencePreviewCatalog) dispatchBoard(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
+	if c == nil {
+		return loadBoardCatalog(ctx, tx, true)
+	}
+	return c.routingBoard(ctx, tx)
 }
 
 func (c *preferencePreviewCatalog) ladder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, error) {

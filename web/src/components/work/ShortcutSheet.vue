@@ -1,7 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import AppIcon, { type IconName } from '../AppIcon.vue'
+import KeyCap from '../KeyCap.vue'
+import { shortcutCaps, shortcutHelp } from '../../lib/shortcuts'
 
 type Key = string | { icon: IconName; label: string }
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
@@ -9,15 +11,7 @@ const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const MOD: Key = mac ? { icon: 'command', label: 'Command' } : 'Ctrl'
 const ALT: Key = mac ? { icon: 'option', label: 'Option' } : 'Alt'
 const BACKSPACE: Key = { icon: 'backspace', label: 'Backspace' }
-const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: string }[] }[] = [
-  { title: 'Anywhere', rows: [
-    { keys: [[MOD, 'K']], label: 'Search tickets, projects and actions' },
-    { keys: [['/']], label: 'Search, on pages without a list' },
-    { keys: [['g'], ['p']], joiner: 'then', label: 'Go to Projects' },
-    { keys: [['g'], ['a']], joiner: 'then', label: 'Go to Agents' },
-    { keys: [['g'], ['b']], joiner: 'then', label: 'Go to Business' },
-    { keys: [['?']], label: 'This sheet' },
-  ] },
+const legacySections: { title: string; rows: { keys: Key[][]; label: string; joiner?: string }[] }[] = [
   { title: 'Work queue', rows: [
     { keys: [['q']], label: 'Queue or remove the focused ticket; queue a selection' },
     { keys: [[ALT, { icon: 'arrow-up', label: 'Up arrow' }], [ALT, { icon: 'arrow-down', label: 'Down arrow' }]], label: 'In the Queue view: move the ticket up or down' },
@@ -37,9 +31,7 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [[BACKSPACE]], label: 'Search all projects, not only this one' },
   ] },
   { title: 'Agents', rows: [
-    { keys: [['j'], ['k']], label: 'Next and previous request or session' },
     { keys: [['a'], ['d']], label: 'Approve or deny a permission; resolve or dismiss a held request' },
-    { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Open the selected session' },
   ] },
   { title: 'Hours', rows: [
     { keys: [['l']], label: 'Log time' },
@@ -118,6 +110,21 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [['1'], ['8']], joiner: 'to', label: 'Choose a status in the status menu' },
   ] },
 ]
+const sections = computed(() => {
+  // The approved map gives paired actions one label; keep that label verbatim
+  // and combine only their attached bindings into a single help row.
+  const grouped = new Map<string, ReturnType<typeof shortcutHelp>[number]>()
+  for (const entry of shortcutHelp()) {
+    const key = `${entry.scope}:${entry.label}`
+    const existing = grouped.get(key)
+    grouped.set(key, existing ? { ...existing, keys: [...existing.keys, ...entry.keys] } : entry)
+  }
+  const entries = [...grouped.values()]
+  return [{ title: 'Anywhere', rows: [] }, ...legacySections].map(section => ({
+    ...section,
+    registered: entries.filter(entry => section.title === 'Anywhere' ? entry.scope.startsWith('app') : section.title === 'Agents' && entry.id.startsWith('agents.')),
+  })).filter(section => section.rows.length || section.registered.length)
+})
 const dialog = ref<HTMLDialogElement>()
 const closeButton = ref<HTMLButtonElement>()
 let opener: HTMLElement | null = null
@@ -143,6 +150,18 @@ defineExpose({ open, close })
       <section v-for="section in sections" :key="section.title">
         <p class="eyebrow">{{ section.title }}</p>
         <dl>
+          <div v-for="row in section.registered" :key="row.id" class="row">
+            <dt>
+              <template v-for="(binding, b) in row.keys" :key="binding">
+                <span v-if="b" class="or">or</span>
+                <template v-for="(combo, c) in shortcutCaps(binding)" :key="c">
+                  <span v-if="c" class="or">then</span>
+                  <span class="combo"><KeyCap v-for="(key, k) in combo" :key="k" :k="key" /></span>
+                </template>
+              </template>
+            </dt>
+            <dd><template v-for="(part, p) in row.labelParts ?? [row.label]" :key="p"><template v-if="p"><AppIcon name="arrow" :size="12" class="label-arrow" /><span class="sr-only"> to </span></template>{{ part }}</template></dd>
+          </div>
           <div v-for="row in section.rows" :key="row.label" class="row">
             <dt>
               <template v-for="(combo, c) in row.keys" :key="c">
@@ -176,8 +195,8 @@ dl { margin: 0; }
 .row:last-child { border-bottom: 0; }
 dt { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 dd { margin: 0; font-size: 13.5px; color: var(--ink); }
+.label-arrow { margin-inline: .25em; vertical-align: -.1em; }
 .combo { display: inline-flex; gap: 3px; }
-.keycap { min-width: 20px; height: 20px; font-size: 11px; }
 .or { font-size: 11px; color: var(--ink-3); }
 @media (max-width: 600px) { .sheet-card { padding: 18px; } .row { grid-template-columns: 116px 1fr; } }
 </style>

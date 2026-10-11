@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -473,6 +474,15 @@ func (m *Module) setPaused(w http.ResponseWriter, r *http.Request, paused, retir
 		}
 		if in.Revision < 1 || in.Revision != before.Revision {
 			return workorders.Fail(409, "recurrence revision changed")
+		}
+		if !paused && before.Definition != nil && before.Definition.Assignment != nil {
+			var recoveryPause bool
+			if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM events WHERE type='recurrence.paused' AND metadata->>'recurrence_id'=$1 AND metadata->>'owner_pause'='true')`, before.ID).Scan(&recoveryPause); err != nil {
+				return err
+			}
+			if recoveryPause && (!modelregistry.InteractivePerson(p) || r.Header.Get("Authorization") != "") {
+				return workorders.Fail(403, "interactive_person_required")
+			}
 		}
 		out = before
 		if !retire && before.Paused == paused {

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"reflect"
 	"slices"
 	"strings"
@@ -37,6 +38,12 @@ var (
 )
 
 func TestMain(m *testing.M) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if output, err := exec.CommandContext(ctx, "node", "../../api/generate.mjs", "--write").CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "prepare OpenAPI: %v\n%s", err, output)
+		os.Exit(1)
+	}
 	code := m.Run()
 	if testDB != nil {
 		if err := testDB.Close(); err != nil {
@@ -201,8 +208,6 @@ func profileBySlug(profiles []Profile, slug string) Profile {
 	return Profile{}
 }
 
-func astra(profiles []Profile) Profile { return profileBySlug(profiles, "codex-astra-xhigh") }
-
 func profileByID(profiles []Profile, id string) Profile {
 	for _, profile := range profiles {
 		if profile.ID == id {
@@ -295,11 +300,9 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("review without author %d %s", status, body)
 	}
-	// A harness filter never switches harnesses: a role whose Models routes
-	// never use that harness is refused rather than run on another one.
 	status, body = call(t, &agent, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "")
-	if status != http.StatusBadRequest || !strings.Contains(string(body), "role and harness combination is unsupported") {
-		t.Fatalf("cursor scout should be unsupported: %d %s", status, body)
+	if status != http.StatusBadRequest || errorText(body) != "role and harness combination is unsupported" {
+		t.Fatalf("unsupported cursor scout %d %s", status, body)
 	}
 	// Automatic review takes the first family after the author's in the family
 	// order with a qualified no-tools adapter (Models v2): Codex cannot verify
@@ -333,58 +336,6 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	if otherGate.Profile.ID == gate.Profile.ID {
 		t.Fatal("profile ids leaked across tenants")
 	}
-}
-
-// reviewAccount enrolls an approved runner's account for every model on a
-// harness, with room today. Models review needs a qualified account.
-func reviewAccount(t *testing.T, p tenant.Principal, harness string) string {
-	t.Helper()
-	var id string
-	inRegistry(t, p, func(tx pgx.Tx) error {
-		var runner string
-		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Review runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE key='admin'`, p.TenantID, runner); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2,$2,'review-runner',$3,'Review account',now(),true,'generation',$4) RETURNING id::text`, p.TenantID, harness, runner, p.ID).Scan(&id); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted')`, p.TenantID, id); err != nil {
-			return err
-		}
-		schedule := capacity.DefaultSchedule()
-		for i := range schedule.Week {
-			schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
-		}
-		schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
-		raw, _ := json.Marshal(schedule)
-		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, id, raw); err != nil {
-			return err
-		}
-		if harness != "grok" {
-			return nil
-		}
-		// Native Grok reviews only through a macOS arm64 pairing enrollment.
-		var key, request, computer, profile string
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE harness='grok' AND enabled ORDER BY slug LIMIT 1`).Scan(&profile); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,created_by_principal_id) VALUES($1,$2,'Review fixture',gen_random_uuid()::text,'fixture-not-a-credential',$3) RETURNING id::text`, p.TenantID, runner, p.ID).Scan(&key); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
- VALUES($1,gen_random_uuid(),'887887887',repeat('a',64),repeat('b',64),repeat('c',64),'{"platform":"darwin","arch":"arm64"}','fixture','redeemed',$2) RETURNING id::text`, p.TenantID, p.ID).Scan(&request); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,gen_random_uuid(),$2,$3,$4,'review-runner',repeat('c',64)) RETURNING id::text`, p.TenantID, request, runner, key).Scan(&computer); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) VALUES($1,$2,$3,$4,$5,now()+interval '1 hour',now())`, p.TenantID, id, computer, request, profile)
-		return err
-	})
-	return id
 }
 
 func TestAuthorFamilyAliasesResolveAndReview(t *testing.T) {
@@ -442,33 +393,113 @@ func TestAuthorFamilyAliasesResolveAndReview(t *testing.T) {
 	}
 }
 
-// Risk: a Models pause, its expiry, a stale account probe or a full
-// allowance is not reported as the skipped route's cause, or a pause leaks
-// into another tenant.
+// Risk: a model pause (a ladder hold before Models v2) is ignored or outlives
+// its expiry, an unhealthy or exhausted account's route still runs, or a
+// pause leaks to another tenant. Quick jobs then run the next cheapest model.
 func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
-	agent := addPrincipal(t, admin.TenantID, "agent", "runner", []string{"admin"})
 	profiles := decode[[]Profile](t, &admin, http.MethodGet, "/api/models", "", http.StatusOK)
-	luna := profileBySlug(profiles, "codex-luna-medium")
-	haiku := profileBySlug(profiles, "claude-haiku-medium")
-	// The Models walk admits accounts, not catalog previews: both routes
-	// have one, and the Codex account's health drives the later causes.
-	minimalAccount(t, admin, haiku)
+	accounts := map[string]string{}
+	for _, slug := range []string{"codex-luna-medium", "claude-haiku-medium"} {
+		profile := profileBySlug(profiles, slug)
+		accounts[profile.ID] = minimalAccount(t, admin, profile)
+	}
+	// Shared accounts expose their exact admission cause to the reader.
 	inRegistry(t, admin, func(tx pgx.Tx) error {
-		var account string
-		if err := tx.QueryRow(t.Context(), `
-			INSERT INTO agent_accounts
-				(tenant_id, account_key, harness, daemon_id, registered_by_principal_id, label, state,
-				 last_probe_at, last_probe_ok, last_daemon_generation, share_usage, capacity_owner)
-			VALUES ($1::uuid, 'local-codex', 'codex', 'daemon-a', $2::uuid, 'Codex', 'available',
-			        now(), true, 'gen-1', true, $3) RETURNING id::text`, admin.TenantID, agent.ID, admin.ID).Scan(&account); err != nil {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=true`)
+		return err
+	})
+	scout := decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
+	if scout.Profile == nil || accounts[scout.Profile.ID] == "" {
+		t.Fatalf("fixture must run an enrolled Quick job: %+v", scout)
+	}
+	first := *scout.Profile
+	var second Profile
+	for id := range accounts {
+		if id != first.ID {
+			second = profileByID(profiles, id)
+		}
+	}
+	label := map[string]string{"codex": "Codex", "claude": "Claude"}[first.Harness]
+	candidate := func(r Resolution) Candidate {
+		t.Helper()
+		for _, c := range r.Ladder {
+			if c.ProfileID == first.ID {
+				return c
+			}
+		}
+		t.Fatalf("paused model left the walk: %+v", r)
+		return Candidate{}
+	}
+	until := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason) VALUES($1,$2,$3,$4,'hold')`, admin.TenantID, first.Harness, first.Model, until)
+		return err
+	})
+	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
+	if c := candidate(scout); scout.Profile == nil || scout.Profile.ID != second.ID || c.Selected || !reflect.DeepEqual(c.SkipReasons, []string{"paused until " + until.Format(time.RFC3339) + ": hold"}) {
+		t.Fatalf("paused %+v", scout)
+	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE model_pauses SET until_at = now() - interval '1 minute'`)
+		return err
+	})
+	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
+	if c := candidate(scout); scout.Profile == nil || scout.Profile.ID != first.ID || !c.Selected || len(c.SkipReasons) != 0 {
+		t.Fatalf("expired pause still skipped: %+v", scout)
+	}
+
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at = now() - interval '10 minutes' WHERE id=$1`, accounts[first.ID])
+		return err
+	})
+	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
+	if c := candidate(scout); scout.Profile == nil || scout.Profile.ID != second.ID || len(c.SkipReasons) == 0 || c.SkipReasons[0] != label+" account has no recent successful sign-in check" {
+		t.Fatalf("stale probe %+v", scout)
+	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at = now() WHERE id=$1`, accounts[first.ID]); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `
-			INSERT INTO account_allowance_windows
-				(tenant_id, account_id, starts_at, ends_at, unit, allowance, used, pace_model, burst_ratio)
-			VALUES ($1::uuid, $2, now() - interval '1 hour', now() + interval '1 hour', 'requests', 10, 0, 'unrestricted', 0)`, admin.TenantID, account); err != nil {
+		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET allowance=10,used=10,burst_ratio=0 WHERE account_id=$1`, accounts[first.ID])
+		return err
+	})
+	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
+	if c := candidate(scout); scout.Profile == nil || scout.Profile.ID != second.ID || len(c.SkipReasons) == 0 || !strings.HasPrefix(c.SkipReasons[0], label+" account is at its allowance or floor until ") {
+		t.Fatalf("full allowance %+v", scout)
+	}
+	other := makePrincipal(t, "beta", "person", "Bea", []string{"admin"})
+	decode[[]Profile](t, &other, http.MethodGet, "/api/models", "", http.StatusOK)
+	inRegistry(t, other, func(tx pgx.Tx) error {
+		var pauses int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_pauses`).Scan(&pauses); err != nil {
+			return err
+		}
+		if pauses != 0 {
+			t.Fatalf("another tenant read %d model pauses", pauses)
+		}
+		return nil
+	})
+}
+
+func astra(profiles []Profile) Profile { return profileBySlug(profiles, "codex-astra-xhigh") }
+
+func reviewAccount(t *testing.T, p tenant.Principal, harness string) string {
+	t.Helper()
+	var id string
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		var runner string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Review runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE key='admin'`, p.TenantID, runner); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2,$2,'review-runner',$3,'Review account',now(),true,'generation',$4) RETURNING id::text`, p.TenantID, harness, runner, p.ID).Scan(&id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted')`, p.TenantID, id); err != nil {
 			return err
 		}
 		schedule := capacity.DefaultSchedule()
@@ -477,51 +508,29 @@ func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 		}
 		schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
 		raw, _ := json.Marshal(schedule)
-		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, admin.TenantID, admin.ID, account, raw); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, id, raw); err != nil {
 			return err
 		}
-		return dbtest.SetModelOrder(t.Context(), tx, admin.TenantID, "", "other", "first", luna.ID, haiku.ID)
+		if harness != "grok" {
+			return nil
+		}
+		// Native Grok reviews only through a macOS arm64 pairing enrollment.
+		var key, request, computer, profile string
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE harness='grok' AND enabled ORDER BY slug LIMIT 1`).Scan(&profile); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,created_by_principal_id) VALUES($1,$2,'Review fixture',gen_random_uuid()::text,'fixture-not-a-credential',$3) RETURNING id::text`, p.TenantID, runner, p.ID).Scan(&key); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
+ VALUES($1,gen_random_uuid(),'887887887',repeat('a',64),repeat('b',64),repeat('c',64),'{"platform":"darwin","arch":"arm64"}','fixture','redeemed',$2) RETURNING id::text`, p.TenantID, p.ID).Scan(&request); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,gen_random_uuid(),$2,$3,$4,'review-runner',repeat('c',64)) RETURNING id::text`, p.TenantID, request, runner, key).Scan(&computer); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) VALUES($1,$2,$3,$4,$5,now()+interval '1 hour',now())`, p.TenantID, id, computer, request, profile)
+		return err
 	})
-	until := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
-	decode[modelPauseResult](t, &admin, http.MethodPut, "/api/models/lines/codex/"+luna.Model+"/pause", fmt.Sprintf(`{"until":%q,"reason":"hold"}`, until.Format(time.RFC3339)), http.StatusOK)
-	build := decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=build", "", http.StatusOK)
-	if build.Profile == nil || build.Profile.ID != haiku.ID || len(build.Ladder) == 0 || build.Ladder[0].ProfileID != luna.ID || !strings.HasPrefix(build.Ladder[0].SkipReasons[0], "paused until ") || !strings.HasSuffix(build.Ladder[0].SkipReasons[0], ": hold") {
-		t.Fatalf("paused %+v", build)
-	}
-	expire := func(sql string) {
-		t.Helper()
-		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-			_, err := tx.Exec(t.Context(), sql)
-			return err
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
-	expire(`UPDATE model_pauses SET until_at = now() - interval '1 minute' WHERE harness='codex'`)
-	build = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=build", "", http.StatusOK)
-	if build.Profile == nil || build.Profile.ID != luna.ID || len(build.Ladder[0].SkipReasons) != 0 {
-		t.Fatalf("expired pause still skipped: %+v", build)
-	}
-	expire(`UPDATE agent_accounts SET last_probe_at = now() - interval '10 minutes' WHERE account_key = 'local-codex'`)
-	build = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=build", "", http.StatusOK)
-	if build.Profile == nil || build.Profile.ID != haiku.ID || build.Ladder[0].SkipReasons[0] != "Codex account has no recent successful sign-in check" {
-		t.Fatalf("stale probe %+v", build)
-	}
-	expire(`UPDATE agent_accounts SET last_probe_at = now() WHERE account_key = 'local-codex'`)
-	expire(`UPDATE account_allowance_windows SET used = allowance WHERE account_id = (SELECT id FROM agent_accounts WHERE account_key = 'local-codex')`)
-	build = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=build", "", http.StatusOK)
-	if build.Profile == nil || build.Profile.ID != haiku.ID || !strings.HasPrefix(build.Ladder[0].SkipReasons[0], "Codex account is at its allowance or floor until ") {
-		t.Fatalf("full allowance %+v", build)
-	}
-	other := makePrincipal(t, "beta", "person", "Bea", []string{"admin"})
-	inRegistry(t, other, func(tx pgx.Tx) error {
-		var pauses int
-		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_pauses`).Scan(&pauses); err != nil {
-			return err
-		}
-		if pauses != 0 {
-			t.Fatal("pause crossed tenants")
-		}
-		return nil
-	})
+	return id
 }

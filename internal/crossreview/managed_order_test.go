@@ -28,7 +28,7 @@ func TestManagedOrderActivationOnlyChangesFutureReviewBindings(t *testing.T) {
 	input := f.input()
 	f.call(t, f.person, "POST", "/api/nodes/"+f.ticket+"/reviews", input, 201, &first)
 	if first.RunID == nil || first.ProfileID == nil || *first.ProfileID != f.profile {
-		t.Fatal("saved fixture review binding changed", first)
+		t.Fatal("legacy review binding changed", first)
 	}
 	stored := func() string {
 		var raw string
@@ -102,7 +102,7 @@ func TestManagedSavedOrderFinishedTelemetryThroughProductionMiddleware(t *testin
 	source, report := f.completion(t)
 	handler := f.boundaryHandler(t, f.d.App)
 	cookie := f.boundaryCookie(t)
-	read := httptest.NewRequest("GET", "/api/model-preferences/simple?for=default", nil)
+	read := httptest.NewRequest("GET", "/api/models/routes?role=review-gate", nil)
 	read.AddCookie(cookie)
 	response := serveBoundary(handler, read)
 	if response.Code != 200 {
