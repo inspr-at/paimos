@@ -106,7 +106,9 @@ func TestDeliveryHistoryFirstReadFailurePreservesSelectedWindow(t *testing.T) {
 				}
 				return nil
 			})
-			for i := 0; i < 10 && historySource(t, f).Backfill != "done"; i++ {
+			// Each bounded read handles 40 calls; the 90-day window needs seven
+			// steps across three workflows. Tenant-page wrap takes a sweep too.
+			for i := 0; i < 20 && historySource(t, f).Backfill != "done"; i++ {
 				fresh.sweepMetrics(t.Context())
 			}
 			if source := historySource(t, f); source.Backfill != "done" || source.BackfillSince == nil || !source.BackfillSince.Equal(wantSince) || source.LastReadError != nil || source.RetryAt != nil {
