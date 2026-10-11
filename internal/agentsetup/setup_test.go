@@ -69,6 +69,7 @@ const testAccount = "44444444-4444-4444-8444-444444444444"
 const otherAccount = "55555555-5555-4555-8555-555555555555"
 
 type setupAPI struct {
+	nextAccountID   string
 	prior           View
 	request         DeviceRequest
 	createCount     int
@@ -118,6 +119,9 @@ func (a *setupAPI) Redeem(_ context.Context, r ProofRequest) (View, error) {
 			id := testAccount
 			if i > 0 || a.request.ExistingComputerID != "" {
 				id = otherAccount
+				if a.nextAccountID != "" {
+					id = a.nextAccountID
+				}
 			}
 			v.Enrollments = append(v.Enrollments, Enrollment{AccountID: id, AccountKey: c.Key, Harness: c.Harness, Label: c.Label, State: "connected", VerificationState: "not_selected"})
 		}
@@ -457,5 +461,214 @@ func TestAddManagedHarnessRequiresFreshPersonApproval(t *testing.T) {
 	config, err := ReadRuntimeConfig(e.Store.Path())
 	if err != nil || len(config.Accounts) != 1 || config.Accounts[0].Harness != "codex" {
 		t.Fatal("unapproved harness reached runtime")
+	}
+}
+
+type pendingLoginAPI struct {
+	*setupAPI
+	state   string
+	err     error
+	redeems int
+}
+
+func (a *pendingLoginAPI) Redeem(ctx context.Context, proof ProofRequest) (View, error) {
+	a.redeems++
+	if a.err != nil {
+		return View{}, a.err
+	}
+	v, err := a.setupAPI.Redeem(ctx, proof)
+	if a.state != "" {
+		v.State = a.state
+	}
+	return v, err
+}
+
+// Risk: an ended pending login (or an updated executable) blocks every later
+// login, or its approval is inherited. Poll with an injected clock and retain
+// the original computer authority and runtime while the new login waits.
+func TestRunningEnrollmentReconcilesDifferentPendingLogin(t *testing.T) {
+	for _, tc := range []struct {
+		name, state string
+		updatedPath bool
+		pollError   bool
+	}{
+		{name: "expired", state: "expired"},
+		{name: "denied", state: "denied"},
+		{name: "revoked", state: "revoked"},
+		{name: "connected", state: "redeemed"},
+		{name: "updated executable", state: "expired", updatedPath: true},
+		{name: "still pending", state: "pending"},
+		{name: "poll unavailable", pollError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, api, _, opts, executor := engineFixture(t)
+			_, node, sdk := claudeFixture(t)
+			opts.NodePath, opts.ClaudeSDKPath = node, sdk
+			opts.Candidates[0].Harness = "claude"
+			approveFixture(t, e, api, opts)
+			serviceCalls := len(executor.calls)
+			e.RunningService, e.Services = true, nil
+			api.approved = false
+			now := e.now()
+			e.Now = func() time.Time { return now }
+			candidate := opts.Candidates[0]
+			candidate.Label, candidate.Identity = "a@example.test", "a@example.test"
+			request := func(c Candidate) SetupRequest {
+				return SetupRequest{Operation: "add_harness", Candidates: []LocalCandidate{{Candidate: c, Path: c.Path, Home: c.Home, Identity: c.Identity, Version: c.Version}}}
+			}
+			p, err := e.SetupExisting(t.Context(), request(candidate))
+			e.Store.Unlock()
+			if err != nil || p.Stage != "awaiting_approval" || api.createCount != 2 {
+				t.Fatalf("login A did not await approval: %s %v", p.Stage, err)
+			}
+			pending, err := e.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			before, err := ReadRuntimeConfig(e.Store.Path())
+			if err != nil {
+				t.Fatal(err)
+			}
+			pollAPI := &pendingLoginAPI{setupAPI: api, state: tc.state}
+			if tc.pollError {
+				pollAPI.err = errors.New("approval server unavailable")
+			}
+			e.API = pollAPI
+			api.approved = tc.state == "redeemed"
+			now = now.Add(10 * time.Second)
+			if tc.updatedPath {
+				candidate.Path = filepath.Join(filepath.Dir(candidate.Path), "updated-claude")
+				if err := os.WriteFile(candidate.Path, []byte("updated fixture"), 0700); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				candidate.Label, candidate.Identity = "b@example.test", "b@example.test"
+			}
+			p, err = e.SetupExisting(t.Context(), request(candidate))
+			e.Store.Unlock()
+			if pollAPI.redeems != 1 {
+				t.Fatalf("pending request was not polled before changing logins: %d polls, %v", pollAPI.redeems, err)
+			}
+			if tc.pollError {
+				if !errors.Is(err, pollAPI.err) {
+					t.Fatalf("approval uncertainty hidden: %v", err)
+				}
+			} else if tc.state == "pending" {
+				if err == nil || !strings.Contains(err.Error(), "another login enrollment is pending") || !strings.Contains(err.Error(), "a@example.test") || !strings.Contains(err.Error(), pending.Response.UserCode) || !strings.Contains(err.Error(), pending.Response.VerificationURI) {
+					t.Fatalf("pending login lacks its approval details: %v", err)
+				}
+			} else if err != nil || p.Stage != "awaiting_approval" || p.RequestID == pending.Request.RequestID || api.createCount != 3 || len(api.request.Accounts) != 1 || api.request.Accounts[0].Label != candidate.Label {
+				t.Fatalf("new login did not receive a fresh approval request: %s %v", p.Stage, err)
+			}
+			after, err := e.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.Runtime != pending.Runtime || after.Lifecycle != pending.Lifecycle || after.LifecycleRequestID != pending.LifecycleRequestID || after.BoundComputer != pending.BoundComputer || after.BoundDaemon != pending.BoundDaemon || after.BoundPrincipal != pending.BoundPrincipal || len(executor.calls) != serviceCalls {
+				t.Fatal("pending-login recovery changed computer authority or controlled its service")
+			}
+			if tc.pollError || tc.state == "pending" {
+				if api.createCount != 2 || after.Request.RequestID != pending.Request.RequestID || after.Device != pending.Device {
+					t.Fatal("unresolved approval was replaced")
+				}
+			}
+			runtime, err := ReadRuntimeConfig(e.Store.Path())
+			wantAccounts := 1
+			if tc.state == "redeemed" {
+				wantAccounts = 2
+			}
+			if err != nil || len(runtime.Accounts) != wantAccounts || runtime.Accounts[0] != before.Accounts[0] {
+				t.Fatal("recovery changed an approved account or added an unapproved login")
+			}
+			if tc.state == "redeemed" && runtime.Accounts[1].Identity != "a@example.test" {
+				t.Fatal("old request's approval was applied to the new login")
+			}
+		})
+	}
+}
+
+// Risk: a second login silently inherits the first login's approval or mutates
+// the running service. Advance the same request with an injected clock.
+func TestRunningEnrollmentKeepsEachClaudeLoginPersonGated(t *testing.T) {
+	e, api, _, opts, x := engineFixture(t)
+	_, node, sdk := claudeFixture(t)
+	opts.NodePath, opts.ClaudeSDKPath = node, sdk
+	opts.Candidates[0].Harness = "claude"
+	opts.Candidates[0].Label, opts.Candidates[0].Identity = "a@example.test", "a@example.test"
+	approveFixture(t, e, api, opts)
+	serviceCalls := len(x.calls)
+	e.Store.Unlock()
+	before, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	api.approved = false
+	e.RunningService = true
+	// Simulate a paired, owner-managed running service. Its receipt and start
+	// choice must survive; no service manager is provided to the running lane.
+	saved, err := e.load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved.StartService = true
+	if err := e.save(saved, false); err != nil {
+		t.Fatal(err)
+	}
+	e.Services = nil
+	c := opts.Candidates[0]
+	c.Label, c.Identity = "b@example.test", "b@example.test"
+	req := SetupRequest{Operation: "add_harness", Candidates: []LocalCandidate{{Candidate: c, Path: c.Path, Home: c.Home, Identity: c.Identity, Version: c.Version}}}
+	p, err := e.SetupExisting(t.Context(), req)
+	e.Store.Unlock()
+	if err != nil || p.Stage != "awaiting_approval" || api.createCount != 2 {
+		t.Fatalf("new login did not await its own approval: %s %v", p.Stage, err)
+	}
+	pending, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil || len(pending.Accounts) != 1 || pending.Accounts[0] != before.Accounts[0] {
+		t.Fatal("unapproved login changed runtime")
+	}
+	requestID := p.RequestID
+	other := req
+	other.Candidates = append([]LocalCandidate(nil), req.Candidates...)
+	other.Candidates[0].Identity, other.Candidates[0].Candidate.Label = "c@example.test", "c@example.test"
+	if _, err := e.SetupExisting(t.Context(), other); err == nil || !strings.Contains(err.Error(), "another login enrollment is pending") {
+		t.Fatalf("different pending login accepted: %v", err)
+	}
+	e.Store.Unlock()
+	if _, err := e.SetupExisting(t.Context(), SetupRequest{Operation: "step", RequestID: "stale"}); err == nil || !strings.Contains(err.Error(), "pairing request changed") {
+		t.Fatalf("stale poll accepted: %v", err)
+	}
+	e.Store.Unlock()
+	api.approved = true
+	now := e.now().Add(10 * time.Second)
+	e.Now = func() time.Time { return now }
+	p, err = e.SetupExisting(t.Context(), SetupRequest{Operation: "step", RequestID: requestID})
+	e.Store.Unlock()
+	if err != nil || p.Stage != "connected" {
+		t.Fatalf("approved login did not connect: %s %v", p.Stage, err)
+	}
+	after, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil || len(after.Accounts) != 2 || after.Accounts[0] != before.Accounts[0] || after.Accounts[1].Identity != "b@example.test" || after.Accounts[1].Home != before.Accounts[0].Home || len(x.calls) != serviceCalls {
+		t.Fatal("login approval lost identity isolation or touched service")
+	}
+	api.approved, api.nextAccountID = false, "66666666-6666-4666-8666-666666666666"
+	p, err = e.SetupExisting(t.Context(), other)
+	e.Store.Unlock()
+	if err != nil || p.Stage != "awaiting_approval" || api.createCount != 3 {
+		t.Fatalf("third login did not need approval: %v", err)
+	}
+	pending, err = ReadRuntimeConfig(e.Store.Path())
+	if err != nil || len(pending.Accounts) != 2 {
+		t.Fatal("third login inherited approval")
+	}
+	api.approved = true
+	now = now.Add(10 * time.Second)
+	if _, err := e.SetupExisting(t.Context(), SetupRequest{Operation: "step", RequestID: p.RequestID}); err != nil {
+		t.Fatal(err)
+	}
+	e.Store.Unlock()
+	third, err := ReadRuntimeConfig(e.Store.Path())
+	if err != nil || len(third.Accounts) != 3 || third.Accounts[0] != after.Accounts[0] || third.Accounts[1] != after.Accounts[1] || third.Accounts[2].Identity != "c@example.test" || third.Accounts[2].Home != before.Accounts[0].Home {
+		t.Fatal("third approved login replaced a sibling")
 	}
 }

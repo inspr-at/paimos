@@ -536,7 +536,7 @@
         ,
         {"file":"tests/models-simple.spec.ts","listedTests":21,"weightSeconds":12,"weightSource":"AEON-1011 local-single-worker-7.1s-plus-margin"}
         ,
-        {"file":"tests/policy-editors.spec.ts","listedTests":32,"weightSeconds":73,"weightSource":"local-single-worker-AEON-879-60.8s-plus-margin"}
+        {"file":"tests/policies-ladders-moved.spec.ts","listedTests":2,"weightSeconds":4,"weightSource":"AEON-1204 local-single-worker-2.1s-plus-margin"}
       ]
     }
     ,

@@ -44,7 +44,7 @@ func ResolveEscalation(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Wor
 	}
 	// Bound fan-out before decoding profiles or projecting account windows.
 	var tooLarge bool
-	if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM (SELECT 1 FROM model_profiles LIMIT 513) p)>512 OR (SELECT count(*) FROM (SELECT 1 FROM agent_accounts LIMIT 257) a)>256 OR (SELECT count(*) FROM (SELECT 1 FROM model_role_routes WHERE role='build-hard' LIMIT 65) r)>64 OR (SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows WHERE NOT pairing_verification AND NOT capacity_retired AND removed_at IS NULL LIMIT 4097) w)>4096`).Scan(&tooLarge); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM (SELECT 1 FROM model_profiles LIMIT 513) p)>512 OR (SELECT count(*) FROM (SELECT 1 FROM agent_accounts LIMIT 257) a)>256 OR (SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows WHERE NOT pairing_verification AND NOT capacity_retired AND removed_at IS NULL LIMIT 4097) w)>4096`).Scan(&tooLarge); err != nil {
 		return out, err
 	}
 	if tooLarge {

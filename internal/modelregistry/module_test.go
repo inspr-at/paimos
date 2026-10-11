@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -199,6 +200,45 @@ func profileBySlug(profiles []Profile, slug string) Profile {
 	return Profile{}
 }
 
+func profileByID(profiles []Profile, id string) Profile {
+	for _, profile := range profiles {
+		if profile.ID == id {
+			return profile
+		}
+	}
+	return Profile{}
+}
+
+// nativeGrokAccount enrolls a Grok account through a darwin/arm64 pairing:
+// Grok reviews only through that native no-tools adapter.
+func nativeGrokAccount(t *testing.T, p tenant.Principal, profile Profile) string {
+	t.Helper()
+	account := minimalAccount(t, p, profile)
+	inRegistry(t, p, func(tx pgx.Tx) error {
+		ctx := t.Context()
+		var runner, key, request, computer string
+		if err := tx.QueryRow(ctx, `SELECT registered_by_principal_id::text FROM agent_accounts WHERE id=$1`, account).Scan(&runner); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'Native Grok fixture',replace(gen_random_uuid()::text,'-',''),md5(random()::text)||md5(random()::text),ARRAY['models.read']) RETURNING id::text`, p.TenantID, runner).Scan(&key); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
+ VALUES($1,gen_random_uuid(),lpad(floor(random()*1000000000)::bigint::text,9,'0'),md5(random()::text)||md5(random()::text),repeat('b',64),repeat('c',64),'{"platform":"darwin","arch":"arm64"}','fixture','redeemed',$2) RETURNING id::text`, p.TenantID, p.ID).Scan(&request); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,gen_random_uuid(),$2,$3,$4,'native-grok-'||gen_random_uuid(),repeat('c',64)) RETURNING id::text`, p.TenantID, request, runner, key).Scan(&computer); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_requests SET computer_id=$2 WHERE id=$1`, request, computer); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at) VALUES($1,$2,$3,$4,$5,clock_timestamp()+interval '1 hour',clock_timestamp())`, p.TenantID, account, computer, request, profile.ID)
+		return err
+	})
+	return account
+}
+
 func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
@@ -252,16 +292,39 @@ func TestRegistrySeedsResolvesAndIsolates(t *testing.T) {
 	if status != http.StatusBadRequest {
 		t.Fatalf("review without author %d %s", status, body)
 	}
-	status, _ = call(t, &agent, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "")
-	if status != http.StatusBadRequest {
-		t.Fatal("cursor scout should be unsupported")
+	// A harness filter never switches harnesses: no cursor route can run a
+	// Quick job or the Default here, so scout waits instead of running Luna.
+	cursorScout := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=scout&harness=cursor", "", http.StatusOK)
+	if cursorScout.Profile != nil || !cursorScout.OwnerRequired || cursorScout.CommandTemplate != "" || len(cursorScout.Ladder) == 0 {
+		t.Fatalf("cursor scout switched harnesses: %+v", cursorScout)
 	}
-	gate := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=anthropic", "", http.StatusOK)
-	astra := profileBySlug(profiles, "codex-astra-xhigh")
-	if gate.Profile == nil || gate.Profile.ID != astra.ID || gate.OwnerRequired ||
-		gate.CommandTemplate != "codex exec -m gpt-6-astra -c model_reasoning_effort=xhigh --sandbox read-only '{prompt}'" ||
-		len(gate.Ladder) != 7 || gate.Ladder[1].SkipReasons[0] != "author family" {
+	for _, c := range cursorScout.Ladder {
+		if harness := profileByID(profiles, c.ProfileID).Harness; c.Selected || harness != "cursor" && !slices.Contains(c.SkipReasons, "harness filter") {
+			t.Fatalf("cursor scout considered a %s route: %+v", harness, c)
+		}
+	}
+	// Automatic review takes the first family after the author's in the family
+	// order with a qualified no-tools adapter (Models v2): Codex cannot verify
+	// read-only and xAI wrote the work, so the enrolled Claude route reviews it.
+	fable := profileBySlug(profiles, "claude-fable-xhigh")
+	minimalAccount(t, admin, fable)
+	gate := decode[Resolution](t, &agent, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=xai", "", http.StatusOK)
+	fableCommand, err := commandTemplate(fable.Harness, fable.Model, fable.Effort, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gate.Profile == nil || gate.Profile.ID != fable.ID || gate.OwnerRequired || gate.CommandTemplate != fableCommand || len(gate.Ladder) < 2 {
 		t.Fatalf("gate %+v", gate)
+	}
+	for _, c := range gate.Ladder {
+		if family := profileByID(profiles, c.ProfileID).Family; family == "xai" || !c.Selected && len(c.SkipReasons) == 0 {
+			t.Fatalf("gate considered the author's family or skipped without a reason: %+v", c)
+		}
+	}
+	if slices.IndexFunc(gate.Ladder, func(c Candidate) bool {
+		return slices.Contains(c.SkipReasons, "Codex read-only sandboxing does not isolate inherited MCP tools and startup hooks.")
+	}) < 0 {
+		t.Fatalf("gate skipped Codex without its adapter reason: %+v", gate.Ladder)
 	}
 	otherProfiles := decode[[]Profile](t, &other, http.MethodGet, "/api/models", "", http.StatusOK)
 	minimalAccount(t, other, profileBySlug(otherProfiles, "claude-fable-xhigh"))
@@ -278,6 +341,11 @@ func TestAuthorFamilyAliasesResolveAndReview(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "family-aliases", "person", "Ada", []string{"admin"})
 	profiles := decode[[]Profile](t, &admin, http.MethodGet, "/api/models", "", http.StatusOK)
+	// Models dispatches reviews only to enrolled accounts with a qualified
+	// no-tools adapter: Claude reviews OpenAI, xAI and Cursor work, Grok
+	// reviews Anthropic work (Models v2 has no account-less catalog preview).
+	minimalAccount(t, admin, profileBySlug(profiles, "claude-fable-xhigh"))
+	nativeGrokAccount(t, admin, profileBySlug(profiles, "grok-4-7-xhigh"))
 	now := time.Now()
 	for _, tc := range []struct{ input, family string }{
 		{"claude", "anthropic"}, {"codex", "openai"}, {"grok", "xai"},
@@ -324,77 +392,92 @@ func TestAuthorFamilyAliasesResolveAndReview(t *testing.T) {
 	}
 }
 
+// Risk: a model pause (a ladder hold before Models v2) is ignored or outlives
+// its expiry, an unhealthy or exhausted account's route still runs, or a
+// pause leaks to another tenant. Quick jobs then run the next cheapest model.
 func TestRouteSuppressionAccountSkipsAndExpiry(t *testing.T) {
 	reset(t)
 	admin := makePrincipal(t, "alpha", "person", "Ada", []string{"admin"})
-	agent := addPrincipal(t, admin.TenantID, "agent", "runner", []string{"admin"})
 	profiles := decode[[]Profile](t, &admin, http.MethodGet, "/api/models", "", http.StatusOK)
-	luna := profileBySlug(profiles, "codex-luna-medium")
-	haiku := profileBySlug(profiles, "claude-haiku-medium")
-	until := time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
-	body := fmt.Sprintf(`[{"role":"scout","priority":1,"profile_id":%q,"state":"conserved","reason":"hold","valid_until":%q},{"role":"scout","priority":2,"profile_id":%q,"state":"available","reason":"","valid_until":null}]`, luna.ID, until, haiku.ID)
-	routes := decode[[]Route](t, &admin, http.MethodPut, "/api/models/routes", body, http.StatusOK)
-	if len(routes) != 2 || routes[0].State != "conserved" {
-		t.Fatalf("routes %+v", routes)
+	accounts := map[string]string{}
+	for _, slug := range []string{"codex-luna-medium", "claude-haiku-medium"} {
+		profile := profileBySlug(profiles, slug)
+		accounts[profile.ID] = minimalAccount(t, admin, profile)
 	}
-	if eventCount(t, admin, evRoutes) != 1 {
-		t.Fatal("missing route event")
-	}
-	scout := decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != haiku.ID || !strings.Contains(scout.Ladder[0].SkipReasons[0], "conserved until") {
-		t.Fatalf("suppressed %+v", scout)
-	}
-	err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET valid_until = now() - interval '1 minute' WHERE state = 'conserved'`)
+	// Shared accounts expose their exact admission cause to the reader.
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=true`)
 		return err
 	})
-	if err != nil {
-		t.Fatalf("expire: %v", err)
+	scout := decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
+	if scout.Profile == nil || accounts[scout.Profile.ID] == "" {
+		t.Fatalf("fixture must run an enrolled Quick job: %+v", scout)
 	}
+	first := *scout.Profile
+	var second Profile
+	for id := range accounts {
+		if id != first.ID {
+			second = profileByID(profiles, id)
+		}
+	}
+	label := map[string]string{"codex": "Codex", "claude": "Claude"}[first.Harness]
+	candidate := func(r Resolution) Candidate {
+		t.Helper()
+		for _, c := range r.Ladder {
+			if c.ProfileID == first.ID {
+				return c
+			}
+		}
+		t.Fatalf("paused model left the walk: %+v", r)
+		return Candidate{}
+	}
+	until := time.Now().Add(2 * time.Hour).UTC().Truncate(time.Second)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason) VALUES($1,$2,$3,$4,'hold')`, admin.TenantID, first.Harness, first.Model, until)
+		return err
+	})
 	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != luna.ID || len(scout.Ladder[0].SkipReasons) != 0 {
-		t.Fatalf("expired suppression still skipped: %+v", scout)
+	if c := candidate(scout); scout.Profile == nil || scout.Profile.ID != second.ID || c.Selected || !reflect.DeepEqual(c.SkipReasons, []string{"paused until " + until.Format(time.RFC3339) + ": hold"}) {
+		t.Fatalf("paused %+v", scout)
+	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE model_pauses SET until_at = now() - interval '1 minute'`)
+		return err
+	})
+	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
+	if c := candidate(scout); scout.Profile == nil || scout.Profile.ID != first.ID || !c.Selected || len(c.SkipReasons) != 0 {
+		t.Fatalf("expired pause still skipped: %+v", scout)
 	}
 
-	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `
-			INSERT INTO agent_accounts
-				(tenant_id, account_key, harness, daemon_id, registered_by_principal_id, label, state,
-				 last_probe_at, last_probe_ok, last_daemon_generation, share_usage)
-			VALUES ($1::uuid, 'local-codex', 'codex', 'daemon-a', $2::uuid, 'Codex', 'available',
-			        now() - interval '10 minutes', true, 'gen-1', true)`, admin.TenantID, agent.ID)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at = now() - interval '10 minutes' WHERE id=$1`, accounts[first.ID])
 		return err
 	})
-	if err != nil {
-		t.Fatalf("account: %v", err)
-	}
 	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != haiku.ID || scout.Ladder[0].SkipReasons[0] != "Codex account has no recent successful sign-in check" {
+	if c := candidate(scout); scout.Profile == nil || scout.Profile.ID != second.ID || len(c.SkipReasons) == 0 || c.SkipReasons[0] != label+" account has no recent successful sign-in check" {
 		t.Fatalf("stale probe %+v", scout)
 	}
-	err = db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `
-			UPDATE agent_accounts SET last_probe_at = now() WHERE account_key = 'local-codex'`)
-		if err != nil {
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET last_probe_at = now() WHERE id=$1`, accounts[first.ID]); err != nil {
 			return err
 		}
-		_, err = tx.Exec(t.Context(), `
-			INSERT INTO account_allowance_windows
-				(tenant_id, account_id, starts_at, ends_at, unit, allowance, used, pace_model, burst_ratio)
-			SELECT $1::uuid, id, now() - interval '1 hour', now() + interval '1 hour', 'requests', 10, 10, 'unrestricted', 0
-			FROM agent_accounts WHERE account_key = 'local-codex'`, admin.TenantID)
+		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET allowance=10,used=10,burst_ratio=0 WHERE account_id=$1`, accounts[first.ID])
 		return err
 	})
-	if err != nil {
-		t.Fatalf("window: %v", err)
-	}
 	scout = decode[Resolution](t, &admin, http.MethodGet, "/api/models/resolve?role=scout", "", http.StatusOK)
-	if scout.Profile == nil || scout.Profile.ID != haiku.ID || !strings.HasPrefix(scout.Ladder[0].SkipReasons[0], "Codex account is at its allowance or floor until ") {
+	if c := candidate(scout); scout.Profile == nil || scout.Profile.ID != second.ID || len(c.SkipReasons) == 0 || !strings.HasPrefix(c.SkipReasons[0], label+" account is at its allowance or floor until ") {
 		t.Fatalf("full allowance %+v", scout)
 	}
 	other := makePrincipal(t, "beta", "person", "Bea", []string{"admin"})
-	status, raw := call(t, &other, http.MethodPut, "/api/models/routes", fmt.Sprintf(`[{"role":"scout","priority":1,"profile_id":%q,"state":"available"}]`, luna.ID))
-	if status != http.StatusBadRequest {
-		t.Fatalf("cross-tenant route %d %s", status, raw)
-	}
+	decode[[]Profile](t, &other, http.MethodGet, "/api/models", "", http.StatusOK)
+	inRegistry(t, other, func(tx pgx.Tx) error {
+		var pauses int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_pauses`).Scan(&pauses); err != nil {
+			return err
+		}
+		if pauses != 0 {
+			t.Fatalf("another tenant read %d model pauses", pauses)
+		}
+		return nil
+	})
 }

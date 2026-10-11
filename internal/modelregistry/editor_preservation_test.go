@@ -210,11 +210,13 @@ func TestEditorRetiredKindUndoAndEventFailureRollback(t *testing.T) {
 			t.Fatal("failure did not reach injected event insert", err)
 		}
 	}
+	// The retired ladder writer never reaches the event insert: 410, no change.
 	ladder := h.ladder(t, p, "build")
-	routesBefore := catalogSetupState(t, p)
-	w := h.call(t, p, "PUT", "/api/models/routes?role=build", "[]", map[string]string{"If-Match": *ladder.EditToken})
-	if w.Code != 500 || catalogSetupState(t, p) != routesBefore {
-		t.Fatal("event failure left partial ladder mutation", w.Code)
+	routesBefore := modelsState(t, p)
+	retiredLadderWrite(t, h, p, "/api/models/routes?role=build", "[]", map[string]string{"If-Match": routeEditToken("build", ladder.Routes)})
+	var calls int
+	if err := adminPool.QueryRow(t.Context(), `SELECT last_value FROM editor_event_probe`).Scan(&calls); err != nil || calls != 2 || modelsState(t, p) != routesBefore {
+		t.Fatal("retired ladder writer reached the event insert or changed state", err, calls)
 	}
 }
 
@@ -248,9 +250,14 @@ func TestEditorMutationFinalPermissionRevocation(t *testing.T) {
 			path, body := "/api/model-preferences/levels/default", `{"revision":0,"residency":"eu"}`
 			headers := prefHeaders(p.ID)
 			if ladder {
+				// The retired writer refuses before reading its body (410).
+				beforeModels := modelsState(t, p)
 				r := h.ladder(t, p, "build")
-				path, body = "/api/models/routes?role=build", "[]"
-				headers = map[string]string{"If-Match": *r.EditToken}
+				retiredLadderWrite(t, h, p, "/api/models/routes?role=build", "[]", map[string]string{"If-Match": routeEditToken("build", r.Routes)})
+				if modelsState(t, p) != beforeModels {
+					t.Fatal("retired writer changed state")
+				}
+				return
 			}
 			beforePref, beforeRoutes := preferenceStorage(t, p), catalogSetupState(t, p)
 			barrier := &stalledEndpointBody{entered: make(chan struct{}), release: make(chan struct{}), reader: strings.NewReader(body)}

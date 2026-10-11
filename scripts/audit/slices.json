@@ -168,6 +168,8 @@
         "internal/agentruns/queue_notifications.go",
         "internal/agentruns/queue_notifications_test.go",
         "internal/runisolation/**",
+        "internal/modelregistry/models_v2_migration_test.go",
+        "internal/modelregistry/legacy_deprecation_test.go",
         "internal/agentd/routine_tools.go",
         "internal/agentd/routine_tools_test.go",
         "internal/agentd/browser_capture.go",
@@ -179,7 +181,12 @@
         "internal/harness/lead_runtime_test.go",
         "internal/agentd/lead_runtime.go",
         "internal/agentd/lead_runtime_test.go",
-        "internal/modelregistry/routine_reads.go"
+        "internal/modelregistry/routine_reads.go",
+        "internal/routineexec/landing.go",
+        "internal/delivery/routine.go",
+        "internal/delivery/routine_test.go",
+        "internal/crossreview/routine_pr.go",
+        "internal/crossreview/routine_pr_app.go"
       ]
     },
     {
@@ -294,7 +301,11 @@
         "internal/recurrences/reads_test.go",
         "internal/decisiondesk/routine_consent_test.go",
         "internal/recurrences/run_history.go",
-        "internal/recurrences/run_history_test.go"
+        "internal/recurrences/run_history_test.go",
+        "internal/routineactions/pr.go",
+        "internal/routineactions/evidence/evidence.go",
+        "internal/routineactions/pipeline.go",
+        "internal/routineactions/pr_test.go"
       ]
     },
     {

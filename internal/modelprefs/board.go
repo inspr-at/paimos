@@ -217,7 +217,9 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 	}
 	baseOwned := owned
 	exact, hasExact := boardOrder(owned, owner, column, q.Situation)
-	if !hasExact && row.Source == "follows" {
+	// A kind without a saved row is the Default, whether the Default is saved
+	// ("follows") or still its template: both use the Default's situations.
+	if !hasExact && (row.Source == "follows" || row.Source == "template") {
 		exact, hasExact = boardOrder(owned, owner, "other", q.Situation)
 	}
 	hasExact = hasExact && exact.Rank != nil
@@ -290,6 +292,11 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 			}
 			d.Steps = append(d.Steps, BoardStep{id, e, level, stage})
 		}
+	}
+	// An explicit personal chain ending in Wait owns its tail. A migrated
+	// workspace pin-bottom must not refill the empty chain from a saved dial.
+	if found && order.End == "wait" && owner.Scope == "person" {
+		d.Rank = slices.Clone(order.Rank)
 	}
 	appendSteps(d.Rank, d.Effort, d.EffortLevel, order.Efforts, "column")
 	end := "wait"

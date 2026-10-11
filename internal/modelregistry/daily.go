@@ -290,8 +290,8 @@ func (d *modelsDailyAdmission) filter(ctx context.Context, tx pgx.Tx, profile Pr
 			kept = append(kept, a.id)
 			continue
 		}
-		// Until S2 carries saved Wait settings into order ends, exhaust this
-		// model's sibling routes but do not advance to another model at a cap.
+		// Bridge the live dial until its at-limit switch is retired. Saved
+		// Models endings still apply; an unreadable plan always refuses.
 		if reason == "daily_limit_unknown" || reason == "daily_limit" && snapshot.Daily[profile.Harness].AtLimit == "wait" {
 			d.wait = true
 		}

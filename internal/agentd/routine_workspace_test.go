@@ -411,6 +411,33 @@ func routineSupervisorFixture(t *testing.T) (*Supervisor, *routineReplayAPI, *fa
 	return s, api, process, base, allocations
 }
 
+// Risk: S13/S14 admitted builders must use the same per-account probe gate
+// without allocating workspaces for a failed account or holding ready siblings.
+func TestRoutineDispatchIsolatesFailedHarnessProbe(t *testing.T) {
+	for _, failure := range []string{"probe_failed", "login_required", "harness_failed"} {
+		t.Run(failure, func(t *testing.T) {
+			s, api, _, _, allocations := routineSupervisorFixture(t)
+			blocked := &isolationProbeAdapter{fakeAdapter: &fakeAdapter{}, statuses: map[string]ProbeStatus{"bad": probeUnavailable}}
+			if failure == "login_required" {
+				blocked.statuses["bad"] = probeAuthFailed
+			}
+			if failure == "harness_failed" {
+				blocked.probeErr = errors.New("fixture launcher failed")
+			}
+			s.accounts = append([]EnrolledAccount{{ID: "blocked", Key: "bad", Harness: Claude}}, s.accounts...)
+			s.adapters[Claude] = blocked
+			if err := s.PollScheduledOnce(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			// Admission and the final pre-fork authority check repeat the same
+			// idempotent claim, while creating exactly one workspace and process.
+			if len(api.claims) != 2 || api.claims[0] != api.claims[1] || api.claims[0].LaunchID != api.grant.LaunchID || len(api.pickups) != 1 || len(s.runs) != 1 || s.runs[api.run.ID].process == nil || *allocations != 1 || len(blocked.starts) != 0 || s.accountAvailable("blocked") || s.Lifecycle("").AccountStatuses["blocked"].Reason != failure {
+				t.Fatalf("sibling failure stopped qualified routine dispatch: claims=%v allocations=%d", api.claims, *allocations)
+			}
+		})
+	}
+}
+
 // Risk: a committed route with a lost response must keep its pickup, checkout,
 // resource lease and single ledger hold, rather than deleting the allocation.
 func TestRoutineSupervisorReplaysInterruptedRouting(t *testing.T) {

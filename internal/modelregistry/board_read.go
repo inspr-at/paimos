@@ -36,11 +36,6 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
 	if err != nil {
 		return out, err
 	}
-	for _, p := range profiles {
-		family, line, _ := ProfileLine(p)
-		id := family + ":" + line
-		out.profiles[id] = append(out.profiles[id], p)
-	}
 	rows, err := tx.Query(ctx, `SELECT p.id::text,coalesce(d.introduced_at,p.created_at) FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id LIMIT 513`)
 	if err != nil {
 		return out, err
@@ -60,6 +55,19 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
 	if err != nil {
 		return out, err
 	}
+	return boardCatalogFrom(profiles, stamp), nil
+}
+
+// boardCatalogFrom groups profiles into lines. A nil stamp map (a preview's
+// shared, bounded catalog) leaves introduction dates unknown; routing never
+// reads them, only the board's cards do.
+func boardCatalogFrom(profiles []Profile, stamp map[string]time.Time) boardCatalog {
+	out := boardCatalog{profiles: map[string][]Profile{}, introduced: map[string]time.Time{}, lines: []modelprefs.BoardLine{}}
+	for _, p := range profiles {
+		family, line, _ := ProfileLine(p)
+		id := family + ":" + line
+		out.profiles[id] = append(out.profiles[id], p)
+	}
 	keys := []string{}
 	for id := range out.profiles {
 		keys = append(keys, id)
@@ -72,9 +80,11 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
 			l.Tools = false
 		}
 		for _, p := range ps {
-			at := stamp[p.ID]
-			if out.introduced[id].IsZero() || at.Before(out.introduced[id]) {
-				out.introduced[id] = at
+			if stamp != nil {
+				at := stamp[p.ID]
+				if out.introduced[id].IsZero() || at.Before(out.introduced[id]) {
+					out.introduced[id] = at
+				}
 			}
 			if p.Effort == "xhigh" && (p.Tier == "strong" || p.Tier == "frontier") {
 				l.Review = true
@@ -82,7 +92,7 @@ func loadBoardCatalog(ctx context.Context, tx pgx.Tx) (boardCatalog, error) {
 		}
 		out.lines = append(out.lines, l)
 	}
-	return out, nil
+	return out
 }
 func (c boardCatalog) candidates(id string, level int, review bool) []Profile {
 	return c.effortCandidates(id, "", level, review)
