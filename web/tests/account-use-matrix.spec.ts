@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-1054 (concept AEON-1044 §2.5, slice S4): Settings › Accounts › "Where
-// accounts may work". Risk: the screen shows a tick, a switch value or an Undo
-// the server did not store, or a control moves while a person works the matrix.
+// AEON-1054 (concept AEON-1044 §2.5, slice S4), calmer in AEON-1173 (design
+// AEON-1149): Settings › Accounts › "Where accounts may work". Risk: the screen
+// shows a tick, a rule value or an Undo the server did not store, a rule save
+// carries new_models, or a control moves while a person works the matrix.
 // The mock below keeps the server's contract: every write carries the matrix
 // revision, a competing change answers 409 and saves nothing, bulk scopes cover
-// every account or context, and Undo is an ordinary revision-checked save.
+// every account or context, a rule save names only its rules, and Undo is an
+// ordinary revision-checked save.
 // AEON1054_SHOTS=1 also writes screenshots to the test's output folder.
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
@@ -20,7 +22,7 @@ const RUN = 'a1000000-0000-4000-8000-000000000001'
 type Cell = { account_id: string; context_id: string; allowed: boolean }
 interface UseWorld {
   rules: { new_accounts: string; new_contexts: string; new_projects: string; new_models: string; revision: number; enforced_at: string | null; confirmation_required: boolean; confirmed_at: string | null }
-  accounts: { id: string; label: string; harness: string; plan: string | null; billing_mode: string; owner_id: string | null }[]
+  accounts: { id: string; label: string; harness: string; plan: string | null; billing_mode: string; owner_id: string | null; awaiting?: boolean }[]
   contexts: { id: string; name: string; kind: string; new_accounts_override: string | null; archived_at: string | null; revision: number }[]
   cells: Set<string>
   running: { run_id: string; account_id: string; node_id: string | null }[]
@@ -31,6 +33,7 @@ interface UseWorld {
   project: { context_id: string } | null
   /** Matrix reads fail (the server is unreachable after a write). */
   failReads: boolean
+  holding: { count: number; first: { project_id: string; key: string; name: string }[] }
 }
 const key = (a: string, c: string) => `${a}:${c}`
 function useWorld(over: Partial<UseWorld> = {}): UseWorld {
@@ -48,7 +51,7 @@ function useWorld(over: Partial<UseWorld> = {}): UseWorld {
       { id: C.hold, name: 'Unassigned', kind: 'holding', new_accounts_override: null, archived_at: null, revision: 1 },
     ],
     cells: new Set([key(ACCOUNTS.main, C.def), key(ACCOUNTS.main, C.acme), key(ACCOUNTS.main, C.beta), key(ACCOUNTS.spare, C.def)]),
-    running: [], truncated: false, conflict: false, writes: [], project: null, failReads: false, ...over,
+    running: [], truncated: false, conflict: false, writes: [], project: null, failReads: false, holding: { count: 0, first: [] }, ...over,
   }
 }
 const tickableIds = (w: UseWorld) => w.contexts.filter(c => c.kind !== 'holding' && !c.archived_at).map(c => c.id)
@@ -66,6 +69,7 @@ function matrixJSON(w: UseWorld, query: URLSearchParams) {
     rules: w.rules, accounts: accounts.items, contexts: contexts.items,
     cells: [...w.cells].map(k => { const [account_id, context_id] = k.split(':'); return { account_id, context_id, allowed: true } }).filter(c => inPage.has(c.account_id!) && inPage.has(c.context_id!)),
     next_account: accounts.next, next_context: w.truncated ? C.hold : contexts.next, running_outside: w.running, running_outside_truncated: w.truncated,
+    holding_projects: w.holding,
   }
 }
 async function mockUse(page: Page, w: UseWorld) {
@@ -85,6 +89,7 @@ async function mockUse(page: Page, w: UseWorld) {
       if (bulk) changes = w.accounts.filter(a => !bulk.account_id || a.id === bulk.account_id).flatMap(a => tickableIds(w).filter(c => !bulk.context_id || c === bulk.context_id).map(c => ({ account_id: a.id, context_id: c, allowed: bulk.allowed })))
       const undo = changes!.map(c => ({ ...c, allowed: w.cells.has(key(c.account_id, c.context_id)) }))
       for (const c of changes!) { if (c.allowed) w.cells.add(key(c.account_id, c.context_id)); else w.cells.delete(key(c.account_id, c.context_id)) }
+      for (const a of w.accounts) if (changes!.some(c => c.account_id === a.id)) a.awaiting = false
       w.rules.revision++
       return route.fulfill({ json: { revision: w.rules.revision, changes, undo } })
     }
@@ -148,21 +153,33 @@ const zone = (page: Page) => page.locator('#account-use')
 const cell = (page: Page, account: string, context: string) => zone(page).locator(`[data-use-cell="${account}:${context}"]`)
 const rowBox = (page: Page, account: string) => zone(page).locator(`[data-use-row="${account}"] th input`)
 const colBox = (page: Page, context: string) => zone(page).locator(`[data-use-col="${context}"] input`)
+const corner = (page: Page) => zone(page).locator('[data-use-all]')
 const sw = (page: Page, title: string) => zone(page).getByRole('radiogroup', { name: title })
+const rulesToggle = (page: Page) => zone(page).getByRole('button', { name: /^For new things/ })
+const toastUndo = (page: Page, text: string | RegExp) => page.locator('.toast').filter({ hasText: text }).getByRole('button', { name: 'Undo' })
 async function open(page: Page) {
   await page.goto('/settings/accounts')
   await expect(zone(page).getByRole('table', { name: 'Where accounts may work' })).toBeVisible()
 }
+async function openRules(page: Page) {
+  await rulesToggle(page).click()
+  await expect(rulesToggle(page)).toHaveAttribute('aria-expanded', 'true')
+  await expect(sw(page, 'New accounts')).toBeVisible()
+}
 const indeterminate = (page: Page, account: string) => rowBox(page, account).evaluate(el => (el as HTMLInputElement).indeterminate)
 const lastWrite = (w: UseWorld) => w.writes.at(-1)
 
-test('bulk, tri-state rows and columns, single cells and Undo all save with the matrix revision', async ({ page }) => {
+test('bulk, tri-state corner, rows and columns, single cells and Undo all save with the matrix revision', async ({ page }) => {
   const errors = watchErrors(page)
   const w = await setup(page)
   await open(page)
-  // Columns: Default first, then by name; Unassigned never gets a column.
+  // Columns: Default first, then by name; Unassigned never gets a column. The footnotes explain both.
   await expect(zone(page).locator('thead th[data-use-col] b')).toHaveText(['Default', 'Acme client work', 'Beta'])
-  await expect(zone(page).getByText('Unassigned holds projects waiting for a decision.')).toBeVisible()
+  await expect(zone(page).locator('.foot-notes')).toContainText('Default also covers work without a project.')
+  await expect(zone(page).locator('[data-use-holding]')).toHaveText('Unassigned holds projects waiting for a context; no account works there.')
+  // The column sub-lines are gone except "new accounts: never".
+  await expect(zone(page).locator('thead th[data-use-col] small')).toHaveText(['new accounts: never'])
+  expect(await corner(page).evaluate(el => (el as HTMLInputElement).indeterminate)).toBe(true)
   await expect(rowBox(page, ACCOUNTS.main)).toBeChecked()
   expect(await indeterminate(page, ACCOUNTS.spare)).toBe(true)
   await expect(rowBox(page, ACCOUNTS.claude)).not.toBeChecked()
@@ -180,13 +197,16 @@ test('bulk, tri-state rows and columns, single cells and Undo all save with the 
   await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 6, changes: [{ account_id: ACCOUNTS.claude, context_id: C.acme, allowed: true }] })
   await expect(colBox(page, C.acme)).toBeChecked()
 
-  // Undo sends the inverse with the revision its own save returned.
-  const undo = zone(page).getByRole('button', { name: /^Undo/ })
-  await expect(undo).toBeEnabled()
-  await undo.click()
+  // Undo in the save's message sends the inverse with the revision its own save returned.
+  await expect(zone(page).getByRole('button', { name: /^Undo/ })).toHaveCount(0)
+  await toastUndo(page, 'Allowed markus in Acme client work').click()
   await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 7, changes: [{ account_id: ACCOUNTS.claude, context_id: C.acme, allowed: false }] })
   await expect(cell(page, ACCOUNTS.claude, C.acme)).not.toBeChecked()
-  await expect(undo).toBeDisabled()
+  // Undone once: U finds nothing more to undo.
+  const undone = w.writes.length
+  await page.locator('body').press('u')
+  await expect(page.locator('.toast').filter({ hasText: 'Undone: Allowed markus in Acme client work' })).toBeVisible()
+  expect(w.writes.length).toBe(undone)
 
   // A fully ticked column resolves to "no account" for that context.
   await colBox(page, C.def).click()
@@ -196,21 +216,28 @@ test('bulk, tri-state rows and columns, single cells and Undo all save with the 
   await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 9, bulk: { scope: 'context', context_id: C.def, allowed: false } })
   await expect(colBox(page, C.def)).not.toBeChecked()
 
-  // Allow none, then Undo from the toast: every cell comes back as stored before.
+  // The corner box replaces Allow all and Allow none: part-ticked resolves to every account everywhere.
+  await expect(zone(page).getByRole('button', { name: /^Allow (all|none)$/ })).toHaveCount(0)
   const before = [...w.cells].sort()
-  await zone(page).getByRole('button', { name: 'Allow none' }).click()
-  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 10, bulk: { scope: 'all', allowed: false } })
-  await expect(zone(page).locator('[data-use-cell]:checked')).toHaveCount(0)
-  await page.locator('.toast').filter({ hasText: 'Allow none' }).getByRole('button', { name: 'Undo' }).click()
+  await corner(page).click()
+  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 10, bulk: { scope: 'all', allowed: true } })
+  await expect(zone(page).locator('[data-use-cell]:checked')).toHaveCount(9)
+  await expect(corner(page)).toBeChecked()
+  // Undo from the toast: every cell comes back as stored before.
+  await toastUndo(page, 'Allowed every account everywhere').click()
   await expect.poll(() => [...w.cells].sort()).toEqual(before)
   await expect.poll(() => lastWrite(w)?.body.expected_revision).toBe(11)
   await expect(zone(page).locator('[data-use-cell]:checked')).toHaveCount(before.length)
 
-  // Allow all, then U (outside a text field) undoes it.
-  await zone(page).getByRole('button', { name: 'Allow all' }).click()
-  await expect(zone(page).locator('[data-use-cell]:checked')).toHaveCount(9)
+  // Fully ticked, the corner allows no account anywhere; U (outside a text field) undoes it.
+  await corner(page).click()
+  await expect(corner(page)).toBeChecked()
+  await corner(page).click()
+  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 13, bulk: { scope: 'all', allowed: false } })
+  await expect(zone(page).locator('[data-use-cell]:checked')).toHaveCount(0)
   await page.locator('body').press('u')
-  await expect.poll(() => [...w.cells].sort()).toEqual(before)
+  await expect.poll(() => w.cells.size).toBe(9)
+  await expect(zone(page).locator('[data-use-cell]:checked')).toHaveCount(9)
   expect(errors).toEqual([])
 })
 
@@ -224,7 +251,10 @@ test('a competing change answers 409: nothing is claimed as saved and the server
   // The optimistic tick is gone and the competing save (Main leaves Acme) is shown.
   await expect(cell(page, ACCOUNTS.claude, C.beta)).not.toBeChecked()
   await expect(cell(page, ACCOUNTS.main, C.acme)).not.toBeChecked()
-  await expect(zone(page).getByRole('button', { name: /^Undo/ })).toBeDisabled()
+  // Nothing was saved, so there is nothing to undo.
+  const writes = w.writes.length
+  await page.locator('body').press('u')
+  expect(w.writes.length).toBe(writes)
   expect(w.cells.has(key(ACCOUNTS.claude, C.beta))).toBe(false)
   // The next save uses the revision the server now has.
   await cell(page, ACCOUNTS.claude, C.beta).click()
@@ -261,66 +291,75 @@ test('archive sends the revision the menu opened on: a rename meanwhile is refus
   expect(w.contexts.find(c => c.id === C.acme)).toMatchObject({ name: 'Acme renamed', new_accounts_override: 'deny', archived_at: null })
 })
 
-test('leaving the migrated model value keeps the switch and everything after it in place (desktop and phone)', async ({ page }) => {
-  const w = await setup(page)
+test('For new things folds into one line; opened, New model versions is read-only with a link to Models (desktop and phone)', async ({ page }) => {
+  const w = await setup(page, { rules: { ...useWorld().rules, new_models: 'shipped_only' } })
   for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
-    w.rules.new_models = 'shipped_only'
     await page.setViewportSize(size)
     await open(page)
-    const models = sw(page, 'New model versions'), retired = models.getByRole('radio', { name: 'Only with PAIMOS updates' })
-    const controls = {
-      models, allow: models.getByRole('radio', { name: 'Allow automatically' }), ask: models.getByRole('radio', { name: 'Ask first' }), retired,
-      allowAll: zone(page).getByRole('button', { name: 'Allow all' }), add: zone(page).getByRole('button', { name: 'Add context' }), cell: cell(page, ACCOUNTS.main, C.def),
-    }
-    for (const control of Object.values(controls)) await control.scrollIntoViewIfNeeded()
-    const guard = await controlStability(page, controls)
-    await guard.check(async () => {
-      await controls.ask.click()
-      await expect(page.locator('.toast').filter({ hasText: 'New model versions: Ask first. Saved' })).toBeVisible()
+    // Folded: one quiet line that says what the three rules give.
+    await expect(rulesToggle(page)).toHaveAttribute('aria-expanded', 'false')
+    await expect(rulesToggle(page)).toContainText('accounts ask first · contexts start empty · projects go to Default')
+    await expect(sw(page, 'New accounts')).toBeHidden()
+    const head = zone(page).locator('#account-use-title')
+    const top = () => head.evaluate(el => {
+      let y = el.getBoundingClientRect().top + window.scrollY
+      for (let parent = el.parentElement; parent; parent = parent.parentElement) y += parent.scrollTop
+      return y
     })
-    // Kept in place, but no longer a choice: a click saves nothing and the arrows skip it.
-    await expect(retired).toBeDisabled()
-    await expect(retired).toHaveAttribute('aria-checked', 'false')
-    const writes = w.writes.length
-    await retired.click({ force: true })
-    expect(w.writes.length).toBe(writes)
-    await guard.check(async () => {
-      await controls.ask.focus(); await page.keyboard.press('ArrowRight')
-      await expect(controls.allow).toHaveAttribute('aria-checked', 'true')
-      await expect(controls.allow).toBeFocused()
-    })
-    expect(lastWrite(w)?.body.new_models).toBe('allow')
-    guard.done()
+    await rulesToggle(page).scrollIntoViewIfNeeded()
+    const above = await top()
+    await openRules(page)
+    expect(Math.abs(await top() - above), 'the fold moved what is above it').toBeLessThanOrEqual(.5)
+    await expect(zone(page).locator('[data-use-rule]')).toHaveCount(4)
+    await expect(zone(page).locator('[data-use-say="new_accounts"]')).toHaveText('A new login runs nothing until you tick where it may work. For example, you sign in to Claude with another login on one of your computers, and it waits in the table below, unticked.', { useInnerText: true })
+    // The model rule is shown as stored, never as a switch; Models is its editor.
+    await expect(sw(page, 'New model versions')).toHaveCount(0)
+    const models = zone(page).locator('[data-use-rule="new_models"]')
+    await expect(models.locator('[data-use-models]')).toHaveText('Only with PAIMOS updates')
+    await expect(models.getByRole('link', { name: 'set in Models' })).toHaveAttribute('href', '/settings/models#model-refresh')
+    expect(w.writes).toEqual([])
   }
+  w.rules.new_models = 'deny'
+  await open(page); await openRules(page)
+  await expect(zone(page).locator('[data-use-models]')).toHaveText('Ask first')
 })
 
-test('switch changes save all four persisted rules with the revision; keyboard moves within a switch', async ({ page }) => {
-  const w = await setup(page, { rules: { ...useWorld().rules, new_models: 'shipped_only' } })
+test('a rule switch saves only its own rule with the revision, never new_models; keyboard moves within it and Undo restores it', async ({ page }) => {
+  const w = await setup(page)
   await open(page)
+  await openRules(page)
+  await expect(sw(page, 'New accounts').getByRole('radio')).toHaveText(['Automatic', 'Ask first'])
   await expect(sw(page, 'New accounts').getByRole('radio', { name: 'Ask first' })).toHaveAttribute('aria-checked', 'true')
-  // A migrated workspace shows its third model value; it is not a fresh choice elsewhere.
-  await expect(sw(page, 'New model versions').getByRole('radio')).toHaveText(['Allow automatically', 'Ask first', 'Only with PAIMOS updates'])
-  await expect(sw(page, 'New model versions').getByRole('radio', { name: 'Only with PAIMOS updates' })).toHaveAttribute('aria-checked', 'true')
-  await expect(sw(page, 'New accounts').getByRole('radio')).toHaveCount(2)
 
-  await sw(page, 'New accounts').getByRole('radio', { name: 'Allow automatically' }).click()
-  await expect.poll(() => lastWrite(w)).toEqual({ method: 'PUT', path: '/api/account-use/rules', body: { expected_revision: 5, new_accounts: 'allow', new_contexts: 'ask', new_projects: 'default', new_models: 'shipped_only' } })
-  await expect(sw(page, 'New accounts').getByRole('radio', { name: 'Allow automatically' })).toHaveAttribute('aria-checked', 'true')
-  await expect(page.locator('.toast').filter({ hasText: 'New accounts: Allow automatically. Saved and recorded in the audit log.' })).toBeVisible()
+  await sw(page, 'New accounts').getByRole('radio', { name: 'Automatic' }).click()
+  await expect.poll(() => lastWrite(w)).toEqual({ method: 'PUT', path: '/api/account-use/rules', body: { expected_revision: 5, new_accounts: 'allow' } })
+  await expect(sw(page, 'New accounts').getByRole('radio', { name: 'Automatic' })).toHaveAttribute('aria-checked', 'true')
+  await expect(zone(page).locator('[data-use-say="new_accounts"]')).toContainText('A new login may work in every context at once.')
+  await expect(page.locator('.toast').filter({ hasText: 'New accounts: Automatic. Saved and recorded in the audit log.' })).toBeVisible()
 
   // Keyboard: arrows move the choice inside the focused switch.
-  await sw(page, 'New projects').getByRole('radio', { name: 'Follow automatically' }).focus()
+  await sw(page, 'New projects').getByRole('radio', { name: 'Automatic' }).focus()
   await page.keyboard.press('ArrowRight')
-  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 6, new_accounts: 'allow', new_contexts: 'ask', new_projects: 'holding', new_models: 'shipped_only' })
+  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 6, new_projects: 'holding' })
   await expect(sw(page, 'New projects').getByRole('radio', { name: 'Ask first' })).toHaveAttribute('aria-checked', 'true')
   await expect(sw(page, 'New projects').getByRole('radio', { name: 'Ask first' })).toBeFocused()
+  await expect(zone(page).locator('[data-use-say="new_projects"]')).toContainText('A new project waits in Unassigned')
 
-  // A stale switch change is refused and the shown value stays the stored one.
+  // Undo in the message puts the rule back, again naming only that rule.
+  await toastUndo(page, 'New projects: Ask first').click()
+  await expect.poll(() => lastWrite(w)?.body).toEqual({ expected_revision: 7, new_projects: 'default' })
+  await expect(sw(page, 'New projects').getByRole('radio', { name: 'Automatic' })).toHaveAttribute('aria-checked', 'true')
+
+  // A stale rule change is refused and the shown value stays the stored one.
   w.conflict = true
-  await sw(page, 'New contexts').getByRole('radio', { name: 'Allow automatically' }).click()
+  await sw(page, 'New contexts').getByRole('radio', { name: 'Automatic' }).click()
   await expect(page.locator('.toast').filter({ hasText: 'Someone changed the matrix meanwhile' })).toBeVisible()
   await expect(sw(page, 'New contexts').getByRole('radio', { name: 'Ask first' })).toHaveAttribute('aria-checked', 'true')
   expect(w.rules.new_contexts).toBe('ask')
+  const ruleWrites = w.writes.filter(x => x.path === '/api/account-use/rules')
+  expect(ruleWrites).toHaveLength(4)
+  for (const x of ruleWrites) expect(Object.keys(x.body), 'a rule save never carries new_models').not.toContain('new_models')
+  expect(w.rules.new_models).toBe('allow')
 })
 
 test('grid keyboard: arrows move between boxes and Space toggles; U never fires inside a text field', async ({ page }) => {
@@ -359,7 +398,7 @@ test('context menu sets "never" for new accounts; confirmation and running work 
   await open(page)
   const confirm = zone(page).getByRole('region', { name: 'Confirm the matrix' })
   await expect(confirm).toContainText('Looks right? The matrix was carried over so every account kept working as before.')
-  const guard = await controlStability(page, { newAccounts: sw(page, 'New accounts'), allowAll: zone(page).getByRole('button', { name: 'Allow all' }), firstCell: cell(page, ACCOUNTS.main, C.def) })
+  const guard = await controlStability(page, { rules: rulesToggle(page), corner: corner(page), firstCell: cell(page, ACCOUNTS.main, C.def) })
   await guard.check(() => confirm.getByRole('button', { name: 'Looks right' }).click())
   await expect(confirm).toContainText('Confirmed')
   await expect.poll(() => lastWrite(w)).toEqual({ method: 'POST', path: '/api/account-use/confirm', body: { expected_revision: 5 } })
@@ -369,36 +408,39 @@ test('context menu sets "never" for new accounts; confirmation and running work 
   await expect(outside).toContainText('keeps running')
   await expect(outside.locator(`[data-use-outside="${RUN}"]`)).toContainText('Main')
   await expect(outside).toContainText('Only the first 200 runs are listed.')
-  await expect(zone(page).getByText('Showing the first 200 accounts and contexts.')).toBeVisible()
+  await expect(zone(page).getByText('Showing the first 200 accounts and contexts. The corner box, rows and columns still apply to all of them.')).toBeVisible()
 
   await zone(page).getByRole('button', { name: 'More for Acme client work' }).click()
   await page.getByRole('menuitemcheckbox', { name: 'New accounts: never' }).click()
   await expect.poll(() => lastWrite(w)).toEqual({ method: 'PATCH', path: `/api/work-contexts/${C.acme}`, body: { expected_revision: 6, name: 'Acme client work', new_accounts_override: 'deny', archived: false } })
-  await expect(zone(page).locator(`[data-use-col="${C.acme}"] small`)).toHaveText('New accounts: never')
+  await expect(zone(page).locator(`[data-use-col="${C.acme}"] small`)).toHaveText('new accounts: never')
   await zone(page).getByRole('button', { name: 'More for Default' }).click()
   await expect(page.getByRole('menuitem', { name: 'Archive…' })).toHaveCount(0)
   await page.keyboard.press('Escape')
 })
 
-test('controls never move while cells, rows, switches and Undo are used (desktop and phone)', async ({ page }) => {
+test('controls never move while cells, rows, the corner, rule switches and Undo are used (desktop and phone)', async ({ page }) => {
   await setup(page)
   for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
     await page.setViewportSize(size)
     await open(page)
+    await openRules(page)
     const controls = {
-      allowAll: zone(page).getByRole('button', { name: 'Allow all' }), allowNone: zone(page).getByRole('button', { name: 'Allow none' }),
-      undo: zone(page).getByRole('button', { name: /^Undo/ }), add: zone(page).getByRole('button', { name: 'Add context' }),
-      accounts: sw(page, 'New accounts'), contexts: sw(page, 'New contexts'), projects: sw(page, 'New projects'), models: sw(page, 'New model versions'),
-      row: rowBox(page, ACCOUNTS.spare), column: colBox(page, C.acme), cell: cell(page, ACCOUNTS.claude, C.beta),
+      rules: rulesToggle(page), corner: corner(page), add: zone(page).getByRole('button', { name: 'Add context' }),
+      accounts: sw(page, 'New accounts'), contexts: sw(page, 'New contexts'), projects: sw(page, 'New projects'), models: zone(page).getByRole('link', { name: 'set in Models' }),
+      row: rowBox(page, ACCOUNTS.spare), column: colBox(page, C.acme), cell: cell(page, ACCOUNTS.claude, C.beta), lastCell: cell(page, ACCOUNTS.claude, C.def),
     }
     for (const control of Object.values(controls)) await control.scrollIntoViewIfNeeded()
     const guard = await controlStability(page, controls)
     await guard.check(() => controls.cell.click())
     await guard.check(() => controls.row.click())
-    await guard.check(() => controls.undo.click())
-    await guard.check(() => controls.accounts.getByRole('radio', { name: 'Allow automatically' }).click())
-    await guard.check(() => controls.models.getByRole('radio', { name: 'Ask first' }).click())
+    await guard.check(async () => { await page.locator('body').press('u'); await expect(page.locator('.toast').filter({ hasText: 'Undone:' })).toBeVisible() })
+    // Switching a rule moves nothing: its sentence changes in place, the matrix below stays where it was.
+    await guard.check(() => controls.accounts.getByRole('radio', { name: 'Automatic' }).click())
+    await guard.check(() => controls.projects.getByRole('radio', { name: 'Ask first' }).click())
+    await guard.check(() => controls.contexts.getByRole('radio', { name: 'Automatic' }).click())
     await guard.check(() => controls.column.click())
+    await guard.check(() => controls.corner.click())
     guard.done()
   }
 })
@@ -476,4 +518,137 @@ test('screenshots of the matrix, light and dark', async ({ page }, testInfo) => 
     await zone(page).scrollIntoViewIfNeeded()
     await zone(page).screenshot({ path: testInfo.outputPath(`account-use-${width}-${theme}.png`) })
   }
+})
+
+// AEON-1173 (design AEON-1149, acc/check.mjs on the built page): the fold grows downward and moves nothing
+// above it; a rule switch changes its sentence in place; a new account that asks first is tinted with a New
+// tag and "Choose where" brings its row; projects in Unassigned are named with a way to choose their context;
+// every control has a name, touch targets are at least 44 px and nothing scrolls sideways.
+const WAITING = { count: 3, first: [{ project_id: 'f0000000-0000-4000-8000-000000000001', key: 'WEB-1', name: 'Website relaunch' }] }
+for (const [width, touch] of [[1440, false], [1024, false], [390, true]] as const) for (const theme of ['light', 'dark'] as const) {
+  test.describe(`where ${width} ${theme}`, () => {
+    test.use({ viewport: { width, height: width > 600 ? 1000 : 860 }, hasTouch: touch, isMobile: touch, colorScheme: theme })
+    test(`where ${width} ${theme}: the design's checks hold on the built page`, async ({ page }, info) => {
+      const errors = watchErrors(page)
+      const w = await setup(page, { holding: WAITING })
+      w.accounts.find(a => a.id === ACCOUNTS.claude)!.awaiting = true
+      await open(page)
+      const z = zone(page), newRow = z.locator(`[data-use-row="${ACCOUNTS.claude}"]`)
+      await expect(newRow).toHaveClass(/\bnew\b/)
+      await expect(newRow.locator('[data-use-new]')).toHaveText('New · ask first')
+      await expect(z.locator(`[data-use-row="${ACCOUNTS.main}"] [data-use-new]`)).toHaveCount(0)
+      await expect(z.locator('[data-use-holding]')).toContainText('Waiting now: Website relaunch and 2 more · Choose their contexts')
+      await expect(z.locator('[data-use-holding]').getByRole('link', { name: 'Choose their contexts' })).toHaveAttribute('href', '/p/WEB-1/settings#project-work-context')
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 'sideways scroll').toBeLessThanOrEqual(0)
+      // Evidence for the visual review: the whole card, in a window tall enough to hold it (the width, and so the layout, stays).
+      const shot = async (name: string) => {
+        const size = page.viewportSize()!
+        await page.setViewportSize({ width: size.width, height: 3000 })
+        await z.screenshot({ path: info.outputPath(`${name}-${width}-${theme}.png`) })
+        await page.setViewportSize(size)
+      }
+      await shot('where-folded')
+
+      // The fold grows downward: nothing above it moves (measured in scroll-container coordinates).
+      const top = (locator: ReturnType<Page['locator']>) => locator.evaluate(el => {
+        let y = el.getBoundingClientRect().top + window.scrollY
+        for (let parent = el.parentElement; parent; parent = parent.parentElement) y += parent.scrollTop
+        return y
+      })
+      const above = [page.locator('#accounts-list-title'), z.locator('#account-use-title'), rulesToggle(page)]
+      await rulesToggle(page).scrollIntoViewIfNeeded()
+      const before = await Promise.all(above.map(top))
+      await openRules(page)
+      const after = await Promise.all(above.map(top))
+      before.forEach((y, i) => expect(Math.abs(after[i]! - y), `fold moved ${i}`).toBeLessThanOrEqual(.5))
+      expect((await z.locator('#use-rules').boundingBox())!.height, 'fold opened').toBeGreaterThan(100)
+      await shot('where-open')
+
+      // A rule switch changes its sentence in place; the switch and the matrix below stay put.
+      const radio = sw(page, 'New accounts').getByRole('radio', { name: 'Automatic' }), first = cell(page, ACCOUNTS.main, C.def)
+      await radio.scrollIntoViewIfNeeded()
+      const guard = await controlStability(page, { radio, ask: sw(page, 'New accounts').getByRole('radio', { name: 'Ask first' }), first, add: z.getByRole('button', { name: 'Add context' }) })
+      await guard.check(async () => { await radio.click(); await expect(z.locator('[data-use-say="new_accounts"]')).toContainText('A new login may work in every context at once.') })
+      guard.done()
+      expect(lastWrite(w)?.body).toEqual({ expected_revision: 5, new_accounts: 'allow' })
+
+      const unnamed = await z.evaluate(root => [...root.querySelectorAll('button, input, a, [role="radio"]')]
+        .filter(e => (e as HTMLElement).offsetParent !== null)
+        .filter(e => !(e.getAttribute('aria-label') || e.getAttribute('aria-labelledby') || e.textContent?.trim() || e.closest('label') || (e as HTMLElement).title))
+        .map(e => e.outerHTML.slice(0, 90)))
+      expect(unnamed, 'every control has a name').toEqual([])
+      if (touch) {
+        const small = await z.evaluate(root => [...root.querySelectorAll('button, a, input')]
+          .filter(e => (e as HTMLElement).offsetParent !== null)
+          .map(e => { const box = ((e as HTMLInputElement).type === 'checkbox' ? e.closest('label') ?? e : e).getBoundingClientRect(); return { e: e.outerHTML.slice(0, 70), w: box.width, h: box.height } })
+          .filter(r => r.w && r.h && (r.w < 43.5 || r.h < 43.5)))
+        expect(small, 'touch targets of at least 44 px').toEqual([])
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 'sideways scroll').toBeLessThanOrEqual(0)
+      expect(errors).toEqual([])
+    })
+  })
+}
+
+test('"Choose where" from Needs you opens For new things and brings the new account\'s row, its first box focused (desktop and phone)', async ({ page }) => {
+  const errors = watchErrors(page)
+  const w = await setup(page)
+  w.accounts.find(a => a.id === ACCOUNTS.claude)!.awaiting = true
+  for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(size)
+    await open(page)
+    const choose = page.getByRole('button', { name: 'Choose where' })
+    await expect(page.getByText('New account found: markus')).toBeVisible()
+    await choose.click()
+    await expect(rulesToggle(page)).toHaveAttribute('aria-expanded', 'true')
+    const row = zone(page).locator(`[data-use-row="${ACCOUNTS.claude}"]`)
+    await expect(row).toBeInViewport()
+    await expect(row).toHaveClass(/\bflash\b/)
+    await expect(cell(page, ACCOUNTS.claude, C.def)).toBeFocused()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), 'sideways scroll').toBeLessThanOrEqual(0)
+  }
+  // A tick is the person's choice: the tag goes and Needs you no longer names the account.
+  await cell(page, ACCOUNTS.claude, C.def).click()
+  await expect(zone(page).locator(`[data-use-row="${ACCOUNTS.claude}"] [data-use-new]`)).toHaveCount(0)
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(page.getByText('New account found: markus')).toHaveCount(0)
+  expect(errors).toEqual([])
+})
+
+test('a cleared New tag keeps its room: with a long account name the clicked box, the rows below and Add context stay put through save, the read after it and Undo (desktop and phone)', async ({ page }) => {
+  const errors = watchErrors(page)
+  const w = await setup(page)
+  // The new account comes first, so other rows follow it; its long name pushes the tag onto a line of its own.
+  const fresh = w.accounts.find(a => a.id === ACCOUNTS.claude)!
+  fresh.label = 'Claude Max for Acme client work and nightly release builds'
+  w.accounts = [fresh, ...w.accounts.filter(a => a !== fresh)]
+  for (const size of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
+    fresh.awaiting = true; w.holding = { count: 0, first: [] }
+    await page.setViewportSize(size)
+    await open(page)
+    const row = zone(page).locator(`[data-use-row="${ACCOUNTS.claude}"]`), tag = row.locator('[data-use-new]')
+    // The fixture holds the risk: the tag sits on a line below the name, so losing its room would shorten the row.
+    const name = (await row.locator('.nm').boundingBox())!, mark = (await tag.boundingBox())!
+    expect(mark.y, 'the tag wraps below the name').toBeGreaterThanOrEqual(name.y + name.height - 1)
+    const controls = {
+      clicked: cell(page, ACCOUNTS.claude, C.def), row: rowBox(page, ACCOUNTS.claude), below: cell(page, ACCOUNTS.main, C.acme),
+      lastRow: rowBox(page, ACCOUNTS.spare), lastCell: cell(page, ACCOUNTS.spare, C.beta), add: zone(page).getByRole('button', { name: 'Add context' }),
+    }
+    for (const control of Object.values(controls)) await control.scrollIntoViewIfNeeded()
+    const guard = await controlStability(page, controls)
+    // The save ends the wait: the tag and the tint go, the row keeps its height, also once the matrix is read
+    // again and the server no longer reports the wait (the project waiting since shows that read arrived).
+    w.holding = WAITING
+    await guard.check(async () => {
+      await controls.clicked.click()
+      await expect(page.locator('.toast').filter({ hasText: '1 cell changed' })).toBeVisible()
+      await expect(tag).toHaveCount(0); await expect(row).not.toHaveClass(/\bnew\b/)
+      await expect(zone(page).locator('[data-use-holding]')).toContainText('Waiting now: Website relaunch')
+    })
+    await guard.check(async () => { await page.locator('body').press('u'); await expect(page.locator('.toast').filter({ hasText: 'Undone:' })).toBeVisible() })
+    guard.done()
+    await expect(controls.clicked).not.toBeChecked()
+    expect(fresh.awaiting, 'Undo is a person\'s save as well: the wait stays ended').toBe(false)
+  }
+  expect(errors).toEqual([])
 })

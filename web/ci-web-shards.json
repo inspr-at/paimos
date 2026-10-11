@@ -290,7 +290,7 @@
       "specs": [
         {"file":"tests/start-agent.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":4.493,"median":1.901,"min":1.441},"seconds":49.726457,"selectedTests":21},"weightSeconds":36.078431,"weightSource":"web-11"}
         ,
-        {"file":"tests/ticket-panel.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":102.533,"median":2.1055,"min":1.652},"seconds":153.073566,"selectedTests":22},"weightSeconds":34.509803565,"weightSource":"web-11"}
+        {"file":"tests/ticket-panel.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":102.533,"median":2.1055,"min":1.652},"seconds":153.073566,"selectedTests":22},"weightSeconds":34.509803565,"weightSource":"web-11"}
         ,
         {"file":"tests/ticket-workers.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":11.485,"median":2.098,"min":1.213},"seconds":40.719097,"selectedTests":11},"weightSeconds":19.843137,"weightSource":"web-11"}
       ]
@@ -536,7 +536,7 @@
         ,
         {"file":"tests/models-simple.spec.ts","listedTests":21,"weightSeconds":12,"weightSource":"AEON-1011 local-single-worker-7.1s-plus-margin"}
         ,
-        {"file":"tests/policy-editors.spec.ts","listedTests":32,"weightSeconds":73,"weightSource":"local-single-worker-AEON-879-60.8s-plus-margin"}
+        {"file":"tests/policies-ladders-moved.spec.ts","listedTests":2,"weightSeconds":4,"weightSource":"AEON-1204 local-single-worker-2.1s-plus-margin"}
       ]
     }
     ,
@@ -732,6 +732,8 @@
         ,
         {"file":"tests/aeon-1071-chat-live.spec.ts","listedTests":9,"weightSeconds":14,"weightSource":"local-single-worker-AEON-1071-9s-plus-margin"}
         ,
+        {"file":"tests/aeon-1188-displayhome.spec.ts","listedTests":8,"weightSeconds":20,"weightSource":"local-single-worker-AEON-1188-15s-plus-margin"}
+        ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/aeon-908-polish.spec.ts","weightSeconds":120}
@@ -748,7 +750,7 @@
         ,
         {"file":"tests/agent-rules-budget-clients.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/agent-rules-doctrine.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agent-rules-doctrine.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/agent-rules-flow.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1012,7 +1014,7 @@
         ,
         {"file":"tests/release-tenant-notes.spec.ts","listedTests":20,"weightSeconds":44.390244,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/release-ticket-links.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/release-ticket-links.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/release-update-notice.spec.ts","listedTests":16,"tierTiming":{"caseSeconds":{"max":1.481,"median":1.481,"min":1.481},"seconds":2.918008,"selectedTests":1},"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1021,6 +1023,8 @@
         {"file":"tests/resilient-polling.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/routines-editor.spec.ts","listedTests":5,"weightSeconds":40,"weightSource":"AEON-1182 estimate: five mocked routine editor flows, one worker"}
+        ,
+        {"file":"tests/routines-tab.spec.ts","listedTests":11,"weightSeconds":22,"weightSource":"AEON-1192 estimate: eleven mocked Routines page flows (seven measured in 12 s), one worker"}
         ,
         {"file":"tests/row-actions.spec.ts","listedTests":12,"weightSeconds":26.634146,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1051,6 +1055,8 @@
         {"file":"tests/settings-accounts.spec.ts","listedTests":24,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/settings-agents.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/settings-computers-table.spec.ts","listedTests":8,"weightSeconds":24,"weightSource":"AEON-1174 estimate: seven mocked flows, one skipped evidence run"}
         ,
         {"file":"tests/stability.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
         ,
@@ -1369,7 +1375,7 @@
         ,
         {"file":"tests/lead-card.spec.ts","listedTests":18,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
         ,
-        {"file":"tests/lead-flow.spec.ts","listedTests":14,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
+        {"file":"tests/lead-flow.spec.ts","listedTests":15,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
         ,
         {"file":"tests/lead-remove.spec.ts","listedTests":7,"weightSeconds":25.5,"weightSource":"measured-local-targeted"}
         ,

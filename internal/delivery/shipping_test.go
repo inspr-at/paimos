@@ -129,7 +129,7 @@ func shipFixture(t *testing.T) (*fixture, Round, *shipTestReader) {
 	f.build(t)
 	in, source := reviewSource(t, f, "ship-test", "first_build", 1, strings.Repeat("b", 40))
 	profile := seedReviewRoute(t, f)
-	gate := ReviewRound{ReviewInput: in, ID: requestID(301), Project: f.project, Ticket: f.ticket, Slug: source.Slug, Key: source.Key, State: "completed", Position: 1, AuthorFamily: "openai", Route: &ReviewRoute{Profile: profile, Family: "anthropic", Harness: "claude", Model: "shadow-review-model"}, Action: "ready_to_ship", EffectiveVerdict: "ok", Revision: 3, Updated: f.at, VerdictInput: &ReviewVerdictInput{Profile: profile, Head: in.Head, Verdict: "ok", Findings: []reviewgate.Finding{}}}
+	gate := ReviewRound{ReviewInput: in, ID: requestID(301), Project: f.project, Ticket: f.ticket, Slug: source.Slug, Key: source.Key, State: "completed", Position: 1, AuthorFamily: "openai", Route: &ReviewRoute{Profile: profile, Family: "anthropic", Harness: "claude", Model: "claude-shadow-review-1"}, Action: "ready_to_ship", EffectiveVerdict: "ok", Revision: 3, Updated: f.at, VerdictInput: &ReviewVerdictInput{Profile: profile, Head: in.Head, Verdict: "ok", Findings: []reviewgate.Finding{}}}
 	f.tx(t, func(tx pgx.Tx) error { return saveReviewTx(t.Context(), tx, f.person.TenantID, gate) })
 	g := &shipTestReader{fakeGitHub: f.gh, facts: greenShipFacts(in.Head)}
 	f.m.github = g

@@ -6,7 +6,7 @@ import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import TicketLink from '../components/releases/TicketLink.vue'
 import StatusIcon from '../components/work/StatusIcon.vue'
 import { api } from '../lib/api'
-import { onAccessChange } from '../lib/authz'
+import { onAccessRevalidate } from '../lib/authz'
 import { useIdentityScope } from '../lib/useIdentityScope'
 import { useWorkspaceActivity } from '../lib/useWorkspaceActivity'
 import { automaticTarget } from '../lib/statusAutopilot'
@@ -29,14 +29,14 @@ const projectLane = projectScope.lane()
 const projects = ref<{ id: string; key: string; title: string }[]>([])
 const projectError = ref('')
 function loadProjects() {
-  projects.value = []; projectError.value = ''
+  projectError.value = ''
   void projectLane.run(({ after, signal }) => after(api('/projects', { signal }), response => {
     if (!response.ok) throw new Error('Project filters could not be loaded.')
     return after(response.json() as Promise<{ items: typeof projects.value }>, page => { projects.value = page.items })
   }), { failed: () => { projectError.value = 'Project filters could not be loaded.' } })
 }
-watch(projectScope.owner, loadProjects, { immediate: true, flush: 'sync' })
-const stopProjectAccess = onAccessChange(loadProjects)
+watch(projectScope.owner, () => { projects.value = []; loadProjects() }, { immediate: true, flush: 'sync' })
+const stopProjectAccess = onAccessRevalidate({ reset: () => { projectScope.reset(); projects.value = []; projectError.value = '' }, refresh: loadProjects })
 function setFilter(key: string, value: string) {
   const query = { ...route.query }
   if (value) query[key] = value
@@ -87,7 +87,7 @@ onBeforeUnmount(() => { clearTimeout(timer); observer?.disconnect(); stopProject
         <label><span class="sr-only">Rule</span><select aria-label="Rule" :value="filters.rule" @change="setFilter('rule', ($event.target as HTMLSelectElement).value)"><option value="">Rule: all</option><option v-for="rule in rules" :key="rule[0]" :value="rule[0]">{{ rule[1] }}</option></select></label>
         <label><span class="sr-only">Project</span><select aria-label="Project" :value="filters.project_id" @change="setFilter('project_id', ($event.target as HTMLSelectElement).value)"><option value="">Project: all</option><option v-if="filters.project_id && !projects.some(p => p.id === filters.project_id)" :value="filters.project_id">Selected project</option><option v-for="project in projects" :key="project.id" :value="project.id">{{ project.key }} {{ project.title }}</option></select></label>
       </div>
-      <button class="btn sm" type="button" :disabled="loading || loadingOlder || pending.size > 0" @click="load">Reload</button>
+      <button class="btn sm" type="button" :disabled="loading || loadingOlder || pending.size > 0" @click="load()">Reload</button>
     </div>
     <div class="activity-content" :aria-busy="loading || loadingOlder">
       <p v-if="loading" class="activity-note" role="status">Loading Activity…</p>

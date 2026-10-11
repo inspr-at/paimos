@@ -284,8 +284,10 @@ type StartRequest struct {
 }
 
 type RunTools struct {
-	URL   string `json:"url"`
-	Token string `json:"token"`
+	URL                string `json:"url"`
+	Token              string `json:"token"`
+	Routine            bool   `json:"routine,omitempty"`
+	BrowserCaptureOnly bool   `json:"browser_capture_only,omitempty"`
 }
 
 type AdapterEvent struct {
@@ -355,8 +357,9 @@ type AccountProber interface {
 // and ProbeIdentityMismatch describe confirmed authentication failures. Local
 // measurement failures never imply sign-out. The historical account-probe API
 // retains auth_failed/unavailable; lifecycle details can retain finer causes.
-// Vendor identity and output never leave the daemon.
+// Vendor identity is local diagnostics only; vendor output never leaves the daemon.
 type ProbeStatus struct {
+	ActiveIdentity    string `json:"-"` // Validated local login label; never sent to Aeon.
 	BillingMode       string
 	OpenRouterCredits *openrouter.Credits
 	OK                bool

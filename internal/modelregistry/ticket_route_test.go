@@ -64,17 +64,23 @@ func TestResolveTicketRoute(t *testing.T) {
 		if routesAfter != routes || eventsAfter != events {
 			t.Fatalf("resolve wrote state: routes %d→%d events %d→%d", routes, routesAfter, events, eventsAfter)
 		}
-		// Pausing the only runnable build model leaves build without a route.
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by) SELECT tenant_id,harness,model,'Build fixture paused',$2 FROM model_profiles WHERE id=$1`, backend.Profile.ID, p.ID); err != nil {
+		// A kind whose saved order runs nothing waits (a deleted build ladder
+		// before Models v2). Quick jobs and the Default stay available to scout.
+		if err := dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "infra", "first", "wait"); err != nil {
 			return err
 		}
 		missing, err := ResolveTicketRoute(t.Context(), tx, "build", "infra", now)
 		if err != nil || missing != nil {
 			t.Fatalf("missing route: %#v %v", missing, err)
 		}
-		still, err := ResolveTicketRoute(t.Context(), tx, "scout", "docs", now)
-		if err != nil || still == nil || still.Profile.Model == "" {
-			t.Fatalf("other roles removed: %#v %v", still, err)
+		if other, err := ResolveTicketRoute(t.Context(), tx, "build", "backend", now); err != nil || other == nil || other.Profile.ID != backend.Profile.ID {
+			t.Fatalf("other kinds lost their route: %#v %v", other, err)
+		}
+		for _, area := range []string{"docs", "infra"} {
+			still, err := ResolveTicketRoute(t.Context(), tx, "scout", area, now)
+			if err != nil || still == nil || still.Profile.Model == "" {
+				t.Fatalf("other roles removed on %s: %#v %v", area, still, err)
+			}
 		}
 		return nil
 	})

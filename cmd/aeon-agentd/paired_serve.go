@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"reflect"
@@ -224,6 +225,8 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 		return fmt.Errorf("ledger enrollment unconfirmed: %w", err)
 	}
 	diagnostic("", "", "daemon_ready", "")
+	lifecycle := &pairedSetup{root: root, origin: c.Origin, supervisor: s, gate: make(chan struct{}, 1)}
+	s.SetSetupHandler(lifecycle.setup)
 	watches, err := pairedAttach(root, c, remote)
 	if err != nil {
 		slog.Warn("attach disabled; restart agentd after updating agentd or Aeon to retry", "error", err)
@@ -263,7 +266,7 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	stopping := false
-	diagnostics := pairedDiagnostics{}
+	diagnostics := pairedDiagnostics{sync: lifecycle.sync}
 	for {
 		if stopping || ctx.Err() != nil {
 			stopping = true
@@ -300,7 +303,10 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 
 // The vocabulary bounds both log contents and the lifetime deduplication set.
 // Repeated failures remain visible in status without flooding service stderr.
-type pairedDiagnostics struct{ seen map[string]bool }
+type pairedDiagnostics struct {
+	seen map[string]bool
+	sync func(context.Context) error
+}
 
 func (d *pairedDiagnostics) report(s *agentd.Supervisor, detail string, err error) {
 	detail = agentsetup.SafePairingDetail(detail)
@@ -320,7 +326,11 @@ func (d *pairedDiagnostics) report(s *agentd.Supervisor, detail string, err erro
 func pairedPollIteration(ctx context.Context, s *agentd.Supervisor, root string, c agentsetup.RuntimeConfig, diagnostics *pairedDiagnostics, poll ...func(context.Context) error) (agentsetup.RuntimeConfig, error) {
 	// Reserve time for account health checks even if lifecycle HTTP times out.
 	op, cancel := context.WithTimeout(ctx, 5*time.Second)
-	err := syncPairing(op, root, c.Origin, s)
+	sync := diagnostics.sync
+	if sync == nil {
+		sync = func(ctx context.Context) error { return syncPairing(ctx, root, c.Origin, s) }
+	}
+	err := sync(op)
 	cancel()
 	if err != nil {
 		diagnostics.report(s, agentsetup.PairingFailureDetail(err), err)
@@ -344,6 +354,11 @@ func pairedPollIteration(ctx context.Context, s *agentd.Supervisor, root string,
 	current, err := pollPairedRuntime(ctx, s, root, c, next, poll...)
 	if err != nil {
 		diagnostics.report(s, agentsetup.PairingRuntimeUnavailable, err)
+	}
+	if err == nil {
+		err = s.PollLeadRuntime(ctx)
+	} else {
+		err = errors.Join(err, s.ReconcileLeadRuntime(ctx))
 	}
 	return current, err
 }
@@ -602,6 +617,87 @@ func syncPairing(ctx context.Context, root, origin string, s *agentd.Supervisor)
 	defer store.Close()
 	e := agentsetup.Engine{Store: store, API: agentsetup.HTTPClient{Origin: origin}, Local: localPairing{root: root, supervisor: s}, InstallMethod: installMethod()}
 	return e.SyncFences(ctx)
+}
+
+// A bounded, cancellable lane keeps socket enrollment and poll reconciliation
+// from competing for setup.lock. Separate Store descriptors still protect
+// against an offline helper; no lock is kept over a person's approval wait.
+type pairedSetup struct {
+	root, origin string
+	supervisor   *agentd.Supervisor
+	gate         chan struct{}
+}
+
+func (p *pairedSetup) enter(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return errors.New("enrollment lifecycle is busy; retry the same command")
+	}
+	select {
+	case p.gate <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return errors.New("enrollment lifecycle is busy; retry the same command")
+	}
+}
+
+func (p *pairedSetup) sync(ctx context.Context) error {
+	if err := p.enter(ctx); err != nil {
+		return err
+	}
+	defer func() { <-p.gate }()
+	return syncPairing(ctx, p.root, p.origin, p.supervisor)
+}
+
+func (p *pairedSetup) setup(ctx context.Context, req agentsetup.SetupRequest) (agentsetup.Progress, error) {
+	if err := p.enter(ctx); err != nil {
+		return agentsetup.Progress{}, err
+	}
+	defer func() { <-p.gate }()
+	store, err := agentsetup.OpenStore(p.root, false)
+	if err != nil {
+		return agentsetup.Progress{}, err
+	}
+	defer store.Close()
+	e := &agentsetup.Engine{Store: store, API: agentsetup.HTTPClient{Origin: p.origin}, Local: localPairing{root: p.root, supervisor: p.supervisor}, RunningService: true, InstallMethod: installMethod()}
+	if req.Operation == "add_harness" {
+		// A socket caller can propose enrollment, but cannot assert sign-in or
+		// label another login as the one the person is about to approve.
+		if len(req.Candidates) == 0 || len(req.Candidates) > 7 {
+			return agentsetup.Progress{}, errors.New("select one to seven harness logins")
+		}
+		saved, err := e.SavedOptions()
+		if err != nil {
+			return agentsetup.Progress{}, err
+		}
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return agentsetup.Progress{}, errors.New("owner home unavailable")
+		}
+		home, err = filepath.EvalSymlinks(home)
+		if err != nil {
+			return agentsetup.Progress{}, err
+		}
+		for _, local := range req.Candidates {
+			if len(local.Path) > 4096 || len(local.Home) > 4096 || !agentsetup.ValidLoginLabel(local.Identity) {
+				return agentsetup.Progress{}, errors.New("invalid local login binding")
+			}
+			d := agentsetup.Discovery{Home: home, PiHome: local.Home, NodePath: local.Candidate.Interpreter().Path, Workspace: saved.Workspace,
+				LookPath: func(name string) (string, error) {
+					if name == "node" {
+						return exec.LookPath(name)
+					}
+					return local.Path, nil
+				}}
+			verified, err := d.Detect(ctx, local.Candidate.Harness, local.Identity)
+			if err != nil {
+				return agentsetup.Progress{}, err
+			}
+			if verified.Path != local.Path || verified.Home != local.Home || verified.Identity != local.Identity || verified.Label != local.Candidate.Label || verified.Interpreter() != local.Candidate.Interpreter() {
+				return agentsetup.Progress{}, errors.New("vendor login changed before enrollment; rerun add-harness for the active login")
+			}
+		}
+	}
+	return e.SetupExisting(ctx, req)
 }
 
 // installMethod reports which add-harness entry point reaches this daemon, so

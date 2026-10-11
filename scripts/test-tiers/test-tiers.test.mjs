@@ -20,6 +20,7 @@ import { buildBrowserMap } from './browser-impact.mjs'
 import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import './browser-impact.test.mjs'
 import './manifests.test.mjs'
+import './listing-cache.test.mjs'
 import './tiers-merge-driver.test.mjs'
 import '../merge-drivers/merge-drivers.test.mjs'
 import '../nightly-ticket.test.mjs'
@@ -891,7 +892,7 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   const git=args=>execFileSync('git',args,{cwd:directory,env,encoding:'utf8'})
   const file=(path,source)=>{mkdirSync(resolve(directory,path,'..'),{recursive:true});writeFileSync(resolve(directory,path),source)}
   git(['init','-q'])
-  for(const name of ['core.mjs','diff.mjs','collect.mjs','inputs.mjs','browser-impact.mjs','migration.mjs','manifests.mjs','failures.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
+  for(const name of ['core.mjs','diff.mjs','collect.mjs','listing-cache.mjs','inputs.mjs','browser-impact.mjs','migration.mjs','manifests.mjs','failures.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
   file('scripts/ci/web-test-tiers.json',JSON.stringify({tests:[]}))
   file('scripts/ci/go-test-tiers.json',JSON.stringify({tests:[]}))
   file('web/src/unused.ts','export {}')

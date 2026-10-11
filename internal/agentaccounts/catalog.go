@@ -18,7 +18,6 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/reviewgate"
-	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // ModelsForRun projects the same catalog as /agent-accounts/catalog, scoped to
@@ -103,7 +102,6 @@ type CatalogEffort struct {
 type catalogProfile struct {
 	ID, Harness, Model, Family, Effort, Version string
 	Priority                                    *int
-	NativeLevel                                 *int
 }
 
 func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +148,9 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 		}
 		profiles, err := catalogProfiles(r.Context(), tx, role, family, now)
 		if err != nil {
+			return err
+		}
+		if err := catalogPriorities(r.Context(), tx, role, family, projectID, now, profiles); err != nil {
 			return err
 		}
 		out = buildCatalog(accounts, profiles, used, role, now)
@@ -214,7 +215,7 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 		return nil, fail(http.StatusRequestEntityTooLarge, "model catalog input limit exceeded")
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT p.id::text,p.harness,p.model,p.family,p.effort,p.version,coalesce(p.registered_effort_level,d.effort_level),aeon_models_line(p.family,p.harness,p.model)
+		SELECT p.id::text,p.harness,p.model,p.family,p.effort,p.version
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id LEFT JOIN (`+ModelPausesSQL+`) r
 		  ON r.tenant_id=p.tenant_id AND r.profile_id=p.id
 		LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
@@ -231,11 +232,9 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 	}
 	defer rows.Close()
 	profiles := []catalogProfile{}
-	lines := []string{}
 	for rows.Next() {
 		var p catalogProfile
-		var line string
-		if err := rows.Scan(&p.ID, &p.Harness, &p.Model, &p.Family, &p.Effort, &p.Version, &p.NativeLevel, &line); err != nil {
+		if err := rows.Scan(&p.ID, &p.Harness, &p.Model, &p.Family, &p.Effort, &p.Version); err != nil {
 			return nil, err
 		}
 		family := harnesslaunch.ModelFamily(p.Harness, p.Model)
@@ -243,79 +242,107 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 			continue
 		}
 		profiles = append(profiles, p)
-		lines = append(lines, line)
 	}
-	err = rows.Err()
-	rows.Close()
+	return profiles, rows.Err()
+}
+
+// catalogPriorities ranks profiles by the workspace Models walk for the role:
+// its row and situation order, then on each step the profiles dispatch would
+// run, chosen by the same rule (modelprefs.RouteCandidates) over the line's
+// whole registry: the latest active model version only, at the step's effort
+// or the nearest level, ties up; reviews take the highest. A candidate the
+// catalog does not offer (paused, suppressed or unqualified) preselects
+// nothing on that step, since dispatch skips it rather than run an older
+// version. Quick jobs and an Automatic review keep no saved order, so nothing
+// is preselected. A board or registry beyond its bounds preselects nothing
+// rather than failing the catalog.
+func catalogPriorities(ctx context.Context, tx pgx.Tx, role, authorFamily, project string, now time.Time, profiles []catalogProfile) error {
+	q := modelprefs.BoardQuery{Column: "other", Situation: "first"}
+	switch role {
+	case "scout", "mechanical":
+		return nil
+	case "build-hard":
+		q.Situation = "stuck"
+	case "review-gate", "review-gate-security":
+		q.Review, q.AuthorFamily = true, authorFamily
+	}
+	s, err := modelprefs.LoadBoardRouting(ctx, tx, nil, project)
+	if errors.Is(err, modelprefs.ErrBoardBounds) {
+		return nil
+	}
 	if err != nil {
-		return nil, err
+		return err
 	}
-	principal, _ := tenant.PrincipalFrom(ctx)
-	state, err := modelprefs.LoadBoardRouting(ctx, tx, modelprefs.PrefsPerson(ctx, tx, principal), "")
+	lines, err := catalogRouteLines(ctx, tx, now)
+	if errors.Is(err, modelprefs.ErrBoardBounds) {
+		return nil
+	}
 	if err != nil {
-		return nil, err
+		return err
 	}
-	query := modelprefs.BoardQuery{Column: "other", Situation: "first", AuthorFamily: authorFamily, Review: strings.HasPrefix(role, "review-gate")}
-	if role == "build-hard" {
-		query.Situation = "stuck"
+	offered := make(map[string]int, len(profiles))
+	for i, p := range profiles {
+		offered[p.ID] = i
 	}
-	decision := modelprefs.ResolveModelsBoard(state, query)
-	review := strings.HasPrefix(role, "review-gate")
-	if review && decision.Automatic {
-		// The shared review family order is also the catalog's default hint.
-		// Exact saved Review situations retain their Models order instead.
-		ranks := reviewgate.ReviewFamilyRanks()
-		order := slices.Clone(profiles)
-		sort.SliceStable(order, func(i, j int) bool {
-			if ranks[order[i].Family] != ranks[order[j].Family] {
-				return ranks[order[i].Family] < ranks[order[j].Family]
-			}
-			return order[i].Model < order[j].Model
-		})
-		for _, p := range order {
-			for i, profile := range profiles {
-				if profile.ID == p.ID {
-					decision.Steps = append(decision.Steps, modelprefs.BoardStep{Line: lines[i], Level: reviewgate.ReviewMinEffortLevel})
-					break
-				}
-			}
-		}
-	}
-	for i := range profiles {
-		if slices.Contains(decision.Not, lines[i]) {
+	d := modelprefs.ResolveModelsBoard(s, q)
+	for n, step := range d.Steps {
+		line := lines[step.Line]
+		if line == nil || slices.Contains(d.Not, step.Line) {
 			continue
 		}
-		for position, step := range decision.Steps {
-			if step.Line == lines[i] {
-				// Efforts are native per harness route. An absent exact native
-				// effort follows the nearest level; reviews take the highest.
-				levels := []int{}
-				exact := false
-				for j, p := range profiles {
-					if lines[j] == step.Line && p.Harness == profiles[i].Harness && p.Model == profiles[i].Model {
-						if p.NativeLevel != nil {
-							levels = append(levels, *p.NativeLevel)
-						}
-						exact = exact || step.Effort != "" && p.Effort == step.Effort
-					}
-				}
-				level := modelprefs.NearestEffort(step.Level, levels)
-				if review {
-					exact = false
-					for _, v := range levels {
-						level = max(level, v)
-					}
-				}
-				if exact && profiles[i].Effort != step.Effort || !exact && level >= 0 && (profiles[i].NativeLevel == nil || *profiles[i].NativeLevel != level) {
-					continue
-				}
-				priority := position + 1
-				profiles[i].Priority = &priority
-				break
+		for _, c := range modelprefs.RouteCandidates(line.routes, step.Effort, step.Level, q.Review) {
+			i, ok := offered[line.ids[c]]
+			if !ok || profiles[i].Priority != nil {
+				continue
 			}
+			priority := n
+			profiles[i].Priority = &priority
 		}
 	}
-	return profiles, nil
+	return nil
+}
+
+type catalogLine struct {
+	ids    []string
+	routes []modelprefs.RouteProfile
+}
+
+// catalogRouteLines reads the registry dispatch walks: every profile by its
+// Models line in registry order, active when enabled and not retired, within
+// the same 512-profile bound.
+func catalogRouteLines(ctx context.Context, tx pgx.Tx, now time.Time) (map[string]*catalogLine, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT p.id::text,p.harness,p.model,p.family,p.effort,coalesce(p.registered_effort_level,d.effort_level)::integer,
+		  p.enabled AND NOT EXISTS (SELECT 1 FROM model_profile_retirements r WHERE r.tenant_id=p.tenant_id AND r.profile_id=p.id AND (r.retire_at IS NULL OR r.retire_at<=$1))
+		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
+		ORDER BY p.slug,p.version,p.id LIMIT 513`, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]*catalogLine{}
+	count := 0
+	for rows.Next() {
+		if count++; count > 512 {
+			return nil, modelprefs.ErrBoardBounds
+		}
+		var id, harness, model, family, effort string
+		var level *int
+		var active bool
+		if err := rows.Scan(&id, &harness, &model, &family, &effort, &level, &active); err != nil {
+			return nil, err
+		}
+		if harness == "gemini" {
+			level = harnesslaunch.GeminiEffortLevel(effort)
+		}
+		key, _ := modelprefs.ModelsLine(family, harness, model)
+		if out[key] == nil {
+			out[key] = &catalogLine{}
+		}
+		out[key].ids = append(out[key].ids, id)
+		out[key].routes = append(out[key].routes, modelprefs.NewRouteProfile(family, harness, model, effort, level, active))
+	}
+	return out, rows.Err()
 }
 
 func buildCatalog(accounts []Account, profiles []catalogProfile, occupancy map[string]int, role string, now time.Time) Catalog {

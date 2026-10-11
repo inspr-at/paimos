@@ -228,9 +228,9 @@ The Tickets project header defaults to Compact: project details, sections with
 saved views and Hide/Display, then the toolbar. Comfortable gives the title and
 description more reading room; Collapsed retains the toolbar. The centered
 app-bar switch selects all three on desktop. Phones fold with the project badge
-and chevron, and choose Comfortable/Compact in the Filters sheet's Display
-section. Command+Shift+Period on macOS or Ctrl+Shift+Period elsewhere toggles
-Collapsed and restores the last roomy choice, including while typing. It uses
+and chevron, and choose Comfortable/Compact in the Display menu, which the
+Filters sheet opens with Display settings…. Command+Shift+Period on macOS or
+Ctrl+Shift+Period elsewhere toggles Collapsed and restores the last roomy choice, including while typing. It uses
 the physical Period key; Escape and scrolling do not unfold or fold the header.
 The choice stays on this device, separately for each person and workspace,
 across projects; row height and saved views remain independent. Active filter

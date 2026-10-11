@@ -4,7 +4,6 @@ package modelregistry
 import (
 	"context"
 	"encoding/json"
-	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -15,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"net/http/httptest"
 )
 
 // reviewOrderPut sends a review-order write to the retired ladder writer.
@@ -25,6 +25,18 @@ func reviewOrderPut(t *testing.T, h *editorHTTP, p tenant.Principal, mode string
 		path += "&order_mode=" + mode
 	}
 	return h.call(t, p, "PUT", path, editorJSON(rows), map[string]string{"If-Match": `"` + strings.Repeat("2", 64) + `"`})
+}
+
+// reviewOrderSave saves the workspace Review order, Models v2's saved review
+// fallback (a saved-mode review ladder before). No profiles clears it, so
+// reviews return to Automatic (the former legacy mode).
+func reviewOrderSave(t *testing.T, tx pgx.Tx, p tenant.Principal, profiles ...string) error {
+	t.Helper()
+	if len(profiles) == 0 {
+		_, err := tx.Exec(t.Context(), `DELETE FROM model_pref_situation_orders WHERE column_key='other' AND situation='review'`)
+		return err
+	}
+	return dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "other", "review", "wait", profiles...)
 }
 
 // Risk: the retired ladder writer activates or resets the managed review
@@ -106,8 +118,9 @@ func TestReviewOrderEventFailureRollsBackRowsAndMode(t *testing.T) {
 	}
 }
 
-// One qualified Claude account, with a strong profile before a frontier profile.
-// Saved mode can change their fallback rank, never their qualification.
+// One qualified Claude account, with a strong and a frontier profile on lines
+// of their own. A saved Review order can change their rank, never their
+// qualification.
 func reviewOrderProfiles(t *testing.T, tx pgx.Tx, p tenant.Principal) (Profile, Profile) {
 	t.Helper()
 	strong, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: "order-strong", Version: "1", Harness: "claude", Family: "anthropic", Model: "opus-order-strong", Effort: "xhigh", Tier: "strong"})
@@ -117,14 +130,6 @@ func reviewOrderProfiles(t *testing.T, tx pgx.Tx, p tenant.Principal) (Profile, 
 	frontier, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: "order-frontier", Version: "1", Harness: "claude", Family: "anthropic", Model: "opus-order-frontier", Effort: "xhigh", Tier: "frontier"})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if _, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes WHERE role='review-gate'`); err != nil {
-		t.Fatal(err)
-	}
-	for i, profile := range []Profile{strong, frontier} {
-		if err := insertRoute(t.Context(), tx, p.TenantID, Route{Role: "review-gate", Priority: i + 1, ProfileID: profile.ID, State: "available"}); err != nil {
-			t.Fatal(err)
-		}
 	}
 	var runner, account string
 	if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Order runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {

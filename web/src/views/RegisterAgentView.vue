@@ -9,7 +9,7 @@ import PairingUsePreview from '../components/agents/PairingUsePreview.vue'
 import { resilientFetch } from '../lib/api'
 import { brand } from '../lib/brand'
 import { harnessLabel } from '../lib/agentState'
-import { myPermissions, onAccessChange, refreshPermissions } from '../lib/authz'
+import { myPermissions, onAccessRevalidate, refreshPermissions } from '../lib/authz'
 import { rememberSignInReturn } from '../lib/signInReturn'
 import { useSession } from '../stores/session'
 import { PairingFollow } from '../lib/pairingFollow'
@@ -164,7 +164,7 @@ function browserStorage(): Storage | null {
 function rememberInstall(value: string) {
   writePairingInstallMethod(browserStorage(), value)
 }
-const stopAccess = onAccessChange(change => { if (change === 'reset') clearSignedInPreview() })
+const stopAccess = onAccessRevalidate({ reset: clearSignedInPreview })
 watch(() => session.requiresSignIn, ended => { if (ended) clearSignedInPreview() })
 
 onMounted(async () => {

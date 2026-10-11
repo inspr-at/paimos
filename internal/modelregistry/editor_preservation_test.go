@@ -210,12 +210,13 @@ func TestEditorRetiredKindUndoAndEventFailureRollback(t *testing.T) {
 			t.Fatal("failure did not reach injected event insert", err)
 		}
 	}
-	// The retired ladder writer answers before any resource or event write.
-	routesBefore := catalogSetupState(t, p)
-	editorRetired(t, h.call(t, p, "PUT", "/api/models/routes?role=build", "[]", map[string]string{"If-Match": `"` + strings.Repeat("d", 64) + `"`}))
-	var probes int
-	if err := adminPool.QueryRow(t.Context(), `SELECT last_value FROM editor_event_probe`).Scan(&probes); err != nil || probes != 2 || catalogSetupState(t, p) != routesBefore {
-		t.Fatal("retired ladder writer reached the event insert or mutated storage", probes, err)
+	// The retired ladder writer never reaches the event insert: 410, no change.
+	ladder := h.ladder(t, p, "build")
+	routesBefore := modelsState(t, p)
+	retiredLadderWrite(t, h, p, "/api/models/routes?role=build", "[]", map[string]string{"If-Match": routeEditToken("build", ladder.Routes)})
+	var calls int
+	if err := adminPool.QueryRow(t.Context(), `SELECT last_value FROM editor_event_probe`).Scan(&calls); err != nil || calls != 2 || modelsState(t, p) != routesBefore {
+		t.Fatal("retired ladder writer reached the event insert or changed state", err, calls)
 	}
 }
 

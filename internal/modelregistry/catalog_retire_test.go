@@ -298,7 +298,7 @@ func retireFixture(t *testing.T) (tenant.Principal, Profile, Profile) {
 		if err := RecordCatalogFacts(t.Context(), tx, admin.TenantID, append(recorded.Facts, future...)); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by,set_at) VALUES($1,'claude',$2,'Fixture pause',$3,'2026-10-11T00:00:00Z')`, admin.TenantID, old.Model, admin.ID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, admin.TenantID, old.ID); err != nil {
 			return err
 		}
 		return flushCatalogChanges(t.Context(), tx, admin, pending)
@@ -336,7 +336,7 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by,set_at) VALUES($1,'claude',$2,'Fixture pause',$3,'2026-10-11T00:00:00Z')`, admin.TenantID, older.Model, admin.ID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',2,$2)`, admin.TenantID, older.ID); err != nil {
 			return err
 		}
 		var scope, kind string
@@ -365,12 +365,18 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 	inRegistry(t, admin, func(tx pgx.Tx) error {
 		var pin string
 		var granted, eligible bool
-		var pauses int
-		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_pauses WHERE harness='claude' AND model=$1 AND reason='Fixture pause' AND set_by=$2 AND until_at IS NULL AND set_at='2026-10-11T00:00:00Z'`, next.Model, admin.ID).Scan(&pauses); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT profile_id::text FROM model_role_routes WHERE role='build' AND priority=1`).Scan(&pin); err != nil {
 			return err
 		}
-		if pauses != 1 {
-			t.Fatal("compatible successor pauses were not preserved and deduplicated", pauses)
+		if pin != next.ID {
+			t.Fatal("role reference did not move", pin)
+		}
+		var routes int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM model_role_routes WHERE role='build'`).Scan(&routes); err != nil {
+			return err
+		}
+		if routes != 1 {
+			t.Fatal("compatible successor routes were not deduplicated", routes)
 		}
 
 		if err := tx.QueryRow(t.Context(), `SELECT profile_id::text FROM model_pref_cells WHERE mode='pinned'`).Scan(&pin); err != nil {
@@ -418,7 +424,7 @@ func TestCatalogOutdatedBulkRetireAndUndo(t *testing.T) {
 	preview = outdatedPreview(t, admin)
 	second := boardDecode[retireResult](t, boardCall(t, admin, "POST", "/api/models/outdated/retire", retireWrite{Versions: []string{version.Version}, Revision: preview.Revision}, ""), 200)
 	inRegistry(t, admin, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_pauses SET reason='Later edit' WHERE model='claude-opus-5.5'`)
+		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET reason='Later edit' WHERE role='build'`)
 		return err
 	})
 	edited := retireState(t, admin)
@@ -466,6 +472,16 @@ func TestCatalogOutdatedRetireSafetyAndPrivacy(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_rules(tenant_id,scope,column_key,line,lock,why,set_by) VALUES($1,'workspace','other','anthropic:opus','top','Keep locked',$2)`, admin.TenantID, admin.ID); err != nil {
 			return err
 		}
+		// The merge retains retirement/Undo across the Models v2 storage split.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pref_situation_orders(tenant_id,profile_id,column_key,situation,rank,efforts,end_mode) VALUES($1,$2,'backend','review',ARRAY['anthropic:opus'],'{"anthropic:opus":"high"}','wait')`, admin.TenantID, workspace); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_row_constraints(tenant_id,scope,column_key,line,kind,why,set_by) VALUES($1,'workspace','frontend','anthropic:opus','never','Keep the Models reason',$2)`, admin.TenantID, admin.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by) VALUES($1,'claude',$2,'Keep the pause',$3)`, admin.TenantID, old.Model, admin.ID); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO model_rule_revisions(tenant_id,scope,scope_key) VALUES($1,'workspace','')`, admin.TenantID)
 		return err
 
@@ -498,7 +514,7 @@ func TestCatalogOutdatedRetireSafetyAndPrivacy(t *testing.T) {
 	}
 	beforeMove := retireState(t, admin)
 	moved := boardDecode[retireResult](t, boardCall(t, admin, "POST", "/api/models/outdated/retire", body, ""), 200)
-	if len(moved.Moved) != 6 {
+	if len(moved.Moved) != 9 {
 		t.Fatal("preview omitted a Default, fallback, never, lock or person reference", moved.Moved)
 	}
 	inRegistry(t, admin, func(tx pgx.Tx) error {
@@ -515,6 +531,16 @@ func TestCatalogOutdatedRetireSafetyAndPrivacy(t *testing.T) {
 		}
 		if count != 0 {
 			t.Fatal("fallback or never reference did not move")
+		}
+		var complete bool
+		if err := tx.QueryRow(t.Context(), `SELECT
+ (SELECT rank=ARRAY['anthropic:sonnet'] AND efforts='{"anthropic:sonnet":"high"}'::jsonb AND end_mode='wait' FROM model_pref_situation_orders WHERE column_key='backend' AND situation='review')
+ AND EXISTS(SELECT 1 FROM model_row_constraints WHERE column_key='frontend' AND line='anthropic:sonnet' AND kind='never' AND why='Keep the Models reason' AND set_by=$1)
+ AND EXISTS(SELECT 1 FROM model_pauses new JOIN model_pauses old ON old.harness=new.harness WHERE old.model=$2 AND new.model='claude-sonnet-5' AND new.until_at IS NULL AND new.reason=old.reason AND new.set_by=old.set_by AND new.set_at=old.set_at)`, admin.ID, old.Model).Scan(&complete); err != nil {
+			return err
+		}
+		if !complete {
+			t.Fatal("retirement stranded a Models situation, constraint or pause")
 		}
 		return nil
 	})
@@ -609,6 +635,92 @@ func TestCatalogOutdatedCompleteListingPresence(t *testing.T) {
 			t.Fatal("returned active model remains in outdated tray", version)
 		}
 	}
+}
+
+// Risk: a version reachable through several harnesses moves a pi pause to the
+// successor's claude route by effort alone, pausing the wrong route and leaving
+// the successor's pi route open, or silently drops a pause with no pi successor.
+// The pi successor's native effort differs, so an effort-only pick is wrong.
+func TestCatalogOutdatedRetirePauseKeepsHarnessRoute(t *testing.T) {
+	setup := func(t *testing.T, piSuccessor bool) tenant.Principal {
+		admin, _, _ := retireFixture(t)
+		inRegistry(t, admin, func(tx pgx.Tx) error {
+			pins := []profileWrite{{Slug: "old-opus-pi", Version: "1", Harness: "pi", Family: "anthropic", Model: "anthropic/claude-opus-5", Effort: "high", Tier: "strong"}}
+			if piSuccessor {
+				pins = append(pins, profileWrite{Slug: "next-opus-pi", Version: "1", Harness: "pi", Family: "anthropic", Model: "anthropic/claude-opus-5.5", Effort: "xhigh", Tier: "strong"})
+			}
+			for _, pin := range pins {
+				prof, err := insertActivatedProfile(t.Context(), tx, admin, pin, true, modelactivation.Person)
+				if err != nil {
+					return err
+				}
+				if !prof.Enabled {
+					t.Fatal("fixture route is not enabled", pin.Slug)
+				}
+			}
+			_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by) VALUES($1,'pi','anthropic/claude-opus-5','OpenRouter budget',$2)`, admin.TenantID, admin.ID)
+			return err
+		})
+		routes := map[string]bool{}
+		inRegistry(t, admin, func(tx pgx.Tx) error {
+			models, err := loadLifecycleCatalog(t.Context(), tx, time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC))
+			for _, model := range models {
+				if model.Identity == "anthropic:claude-opus-5" || model.Identity == "anthropic:claude-opus-5.5" {
+					for _, prof := range model.Profiles {
+						routes[model.Identity+" "+prof.Harness+"/"+prof.Model] = true
+					}
+				}
+			}
+			return err
+		})
+		if !routes["anthropic:claude-opus-5 pi/anthropic/claude-opus-5"] || !routes["anthropic:claude-opus-5 claude/claude-opus-5"] || !routes["anthropic:claude-opus-5.5 claude/claude-opus-5.5"] || routes["anthropic:claude-opus-5.5 pi/anthropic/claude-opus-5.5"] != piSuccessor {
+			t.Fatalf("fixture did not group both harnesses under one version: %v", routes)
+		}
+		return admin
+	}
+	pauses := func(t *testing.T, p tenant.Principal) map[string]string {
+		out := map[string]string{}
+		inRegistry(t, p, func(tx pgx.Tx) error {
+			rows, err := tx.Query(t.Context(), `SELECT harness||'/'||model,reason FROM model_pauses ORDER BY harness,model`)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var route, reason string
+				if err := rows.Scan(&route, &reason); err != nil {
+					return err
+				}
+				out[route] = reason
+			}
+			return rows.Err()
+		})
+		return out
+	}
+	t.Run("pause follows its own harness", func(t *testing.T) {
+		admin := setup(t, true)
+		preview := outdatedPreview(t, admin)
+		boardDecode[retireResult](t, boardCall(t, admin, "POST", "/api/models/outdated/retire", retireWrite{Versions: []string{"anthropic:claude-opus-5"}, Revision: preview.Revision}, ""), 200)
+		got := pauses(t, admin)
+		if got["pi/anthropic/claude-opus-5.5"] != "OpenRouter budget" {
+			t.Fatalf("successor pi route left unpaused: %v", got)
+		}
+		if _, wrong := got["claude/claude-opus-5.5"]; wrong {
+			t.Fatalf("pi pause moved to the claude route: %v", got)
+		}
+	})
+	t.Run("paused route without a matching successor rejects", func(t *testing.T) {
+		admin := setup(t, false)
+		preview := outdatedPreview(t, admin)
+		before := retireState(t, admin)
+		rejected := boardCall(t, admin, "POST", "/api/models/outdated/retire", retireWrite{Versions: []string{"anthropic:claude-opus-5"}, Revision: preview.Revision}, "")
+		if rejected.Code != 409 || !strings.Contains(rejected.Body.String(), "successor has no matching harness route") {
+			t.Fatalf("paused pi route without successor: %d %s", rejected.Code, rejected.Body.String())
+		}
+		if !reflect.DeepEqual(before, retireState(t, admin)) || eventCount(t, admin, "model.outdated_retired") != 0 {
+			t.Fatal("rejected retirement changed state or reported success")
+		}
+	})
 }
 
 // Risk: authorization checked before the tenant fence survives a concurrent

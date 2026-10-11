@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -107,34 +108,69 @@ func TestModelsV2UnadoptedSavedLadder(t *testing.T) {
 	}
 }
 
+// enrollHarnesses gives each harness one healthy account with room for every
+// profile, so the Models walk can run (it has no account-less preview).
+func enrollHarnesses(t *testing.T, tx pgx.Tx, p tenant.Principal, harnesses ...string) {
+	t.Helper()
+	var runner string
+	if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Work runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
+		t.Fatal(err)
+	}
+	schedule := capacity.DefaultSchedule()
+	schedule.Override, schedule.Reserve = "sprint", capacity.ReserveOff
+	raw, _ := json.Marshal(schedule)
+	for _, h := range harnesses {
+		var account string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner)
+ VALUES($1,$2,$2,'work-runner',$3,$2,now(),true,'work-generation',$4) RETURNING id::text`, p.TenantID, h, runner, p.ID).Scan(&account); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model)
+ VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted')`, p.TenantID, account); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule)
+ VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, account, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Risk: with nothing saved, a ticket's kind or size changes a role's route,
+// or ticket routes and reviews disagree with dispatch. Models v2 sends every
+// unsaved kind through the Default (no role ladder), so each kind and size
+// must resolve exactly like the Default.
 func TestResolveWorkEmptyMatrixEquivalence(t *testing.T) {
 	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+		enrollHarnesses(t, tx, p, "codex", "claude")
 		now := time.Now()
-		// With nothing saved, complexity buckets are historical evidence: they
-		// never change a Models route, and ticket routes match dispatch.
 		for _, role := range []string{"scout", "mechanical", "build", "build-hard"} {
 			for _, h := range []string{"", "codex", "claude"} {
-				for _, area := range []string{"backend", "frontend", "full-stack", "infra", "design", "docs", "security", "firmware", "", "review", "other"} {
-					original, err := ResolveWork(t.Context(), tx, p, WorkQuery{Role: role, Area: area, Harness: h}, now)
-					if err != nil {
-						return err
-					}
-					for _, c := range []string{"", "S", "M", "L"} {
+				defaultRoute, err := ResolveWork(t.Context(), tx, p, WorkQuery{Role: role, Harness: h}, now)
+				if err != nil {
+					return err
+				}
+				original := defaultRoute.Resolution
+				if h == "" && original.Profile == nil {
+					t.Fatalf("%s has no Default route: %+v", role, original)
+				}
+				for _, c := range []string{"", "S", "M", "L"} {
+					for _, area := range []string{"backend", "frontend", "full-stack", "infra", "design", "docs", "security", "firmware", "", "review", "other"} {
 						got, err := ResolveWork(t.Context(), tx, p, WorkQuery{Role: role, Area: area, Complexity: c, Harness: h}, now)
 						if err != nil {
 							return err
 						}
-						a, _ := json.Marshal(original.Resolution)
+						a, _ := json.Marshal(original)
 						b, _ := json.Marshal(got.Resolution)
 						if string(a) != string(b) {
-							t.Fatalf("%s/%s/%s/%s changed route: %s != %s", role, h, c, area, a, b)
+							t.Fatalf("%s/%s/%s/%s changed ladder: %s != %s", role, h, c, area, a, b)
 						}
 						if known, err := KnownRouteArea(t.Context(), tx, area, ""); err == nil && known && h == "" {
 							ticket, err := ResolveTicketRoute(t.Context(), tx, role, area, now)
 							if err != nil {
 								return err
 							}
-							if (ticket == nil) != (got.Profile == nil) || ticket != nil && ticket.Profile.ID != got.Profile.ID {
+							if ticket == nil || got.Profile == nil || ticket.Profile.ID != got.Profile.ID {
 								t.Fatal("known area route changed")
 							}
 						}
@@ -168,59 +204,74 @@ func TestResolveWorkEmptyMatrixEquivalence(t *testing.T) {
 	})
 }
 
-// Risk: a paused or retired Models choice still runs, or a residency
-// requirement without a qualifying route lets any role or review dispatch.
+// Risk: a paused or retired model in a saved order still runs instead of the
+// order's next step, or a residency requirement lets any role run on an
+// account outside it. Pauses are Models v2's ladder holds.
 func TestPreferenceFallbackAndResidencyBlocksEveryRole(t *testing.T) {
 	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
-		// A dedicated line: Models lines resolve to their newest version.
-		pin := Profile{Harness: "codex", Model: "gpt-6-residencypin"}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled,registered_effort_level) VALUES($1,'residency-pin','1','codex','openai',$2,'xhigh','strong',true,4) RETURNING id::text`, p.TenantID, pin.Model).Scan(&pin.ID); err != nil {
-			return err
-		}
-		scope, err := modelprefs.SaveScope(t.Context(), tx, p, modelprefs.Scope{Level: "default"})
+		enrollHarnesses(t, tx, p, "codex", "claude")
+		profiles, err := listProfiles(t.Context(), tx)
 		if err != nil {
 			return err
 		}
-		if err := dbtest.SetModelOrder(t.Context(), tx, p.TenantID, "", "backend", "first", pin.ID); err != nil {
+		pin, opus := profileBySlug(profiles, "codex-sol-xhigh"), profileBySlug(profiles, "claude-opus-xhigh")
+		if err := dbtest.ModelsOrder(t.Context(), tx, p.TenantID, "backend", "first", "wait", pin.ID, opus.ID); err != nil {
 			return err
 		}
-		pinReasons := func(got WorkResolution) string {
-			for _, c := range got.Ladder {
-				if c.ProfileID == pin.ID {
-					if c.Selected {
-						t.Fatalf("suppressed choice selected: %+v", got)
-					}
-					return strings.Join(c.SkipReasons, "; ")
+		pinLine, _ := modelsLine(pin)
+		opusLine, _ := modelsLine(opus)
+		held := func(got WorkResolution, reason string) bool {
+			for _, h := range got.Trace.Held {
+				if h.Line == pinLine && strings.Contains(h.Reason, reason) {
+					return true
 				}
 			}
-			t.Fatalf("choice missing from the walk: %+v", got)
-			return ""
-		}
-		// The pause applies to the model across roles and native levels.
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by) VALUES($1,$2,$3,now()+interval '1 hour','test suppressed',$4)`, p.TenantID, pin.Harness, pin.Model, p.ID); err != nil {
-			return err
+			return false
 		}
 		got, err := ResolveWork(t.Context(), tx, p, WorkQuery{Role: "build", Area: "backend"}, time.Now())
 		if err != nil {
 			return err
 		}
-		if got.Profile != nil && got.Profile.ID == pin.ID || !strings.Contains(pinReasons(got), ": test suppressed") {
-			t.Fatalf("suppression bypass: %+v", got)
+		if got.Profile == nil {
+			t.Fatalf("fixture must run the pinned line: %+v", got)
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($1,$2,'retired fixture',$3)`, p.TenantID, pin.ID, p.ID); err != nil {
+		if line, _ := modelsLine(*got.Profile); line != pinLine {
+			t.Fatalf("fixture must run the pinned line: %+v", got)
+		}
+		chosen := *got.Profile
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason) VALUES($1,$2,$3,now()+interval '1 hour','test suppressed')`, p.TenantID, chosen.Harness, chosen.Model); err != nil {
 			return err
 		}
 		got, err = ResolveWork(t.Context(), tx, p, WorkQuery{Role: "build", Area: "backend"}, time.Now())
 		if err != nil {
 			return err
 		}
-		if got.Profile != nil && got.Profile.ID == pin.ID || !strings.Contains(pinReasons(got), "retired") {
-			t.Fatal("retired choice ran", got)
+		if got.Profile == nil || got.Profile.Model == chosen.Model || !held(got, "test suppressed") {
+			t.Fatalf("pause bypass: %+v", got)
+		}
+		if line, _ := modelsLine(*got.Profile); line != opusLine {
+			t.Fatalf("pause did not fall to the order's next step: %+v", got)
+		}
+		if _, err := tx.Exec(t.Context(), `DELETE FROM model_pauses`); err != nil {
+			return err
+		}
+		// Retiring every version of the line leaves it no route to run.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by)
+ SELECT tenant_id,id,'retired fixture',$2 FROM model_profiles WHERE aeon_models_line(family,harness,model)=$1`, pinLine, p.ID); err != nil {
+			return err
+		}
+		got, err = ResolveWork(t.Context(), tx, p, WorkQuery{Role: "build", Area: "backend"}, time.Now())
+		if err != nil {
+			return err
+		}
+		if got.Profile == nil || !held(got, "no registered route for this line") {
+			t.Fatalf("retired line ran or lost its cause: %+v", got)
+		}
+		if line, _ := modelsLine(*got.Profile); line != opusLine {
+			t.Fatalf("retirement did not fall to the order's next step: %+v", got)
 		}
 		eu := "eu"
-		scope.Residency = &eu
-		scope, err = modelprefs.SaveScope(t.Context(), tx, p, scope)
-		if err != nil {
+		if _, err := modelprefs.SaveScope(t.Context(), tx, p, modelprefs.Scope{Level: "default", Residency: &eu}); err != nil {
 			return err
 		}
 		for _, role := range []string{"scout", "mechanical", "build", "build-hard"} {
@@ -228,13 +279,18 @@ func TestPreferenceFallbackAndResidencyBlocksEveryRole(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if got.Profile != nil || !got.OwnerRequired || got.Residency != "eu" || got.Trace.Blocked == "" || got.CommandTemplate != "" {
+			if got.Profile != nil || !got.OwnerRequired || got.Trace.Blocked != "no eu model route" || got.CommandTemplate != "" || got.Residency != "eu" {
 				t.Fatalf("%s escaped residency: %+v", role, got)
 			}
+			refused := false
 			for _, c := range got.Ladder {
 				if c.Selected {
 					t.Fatal("blocked step selected")
 				}
+				refused = refused || slices.Contains(c.SkipReasons, "not allowed: eu")
+			}
+			if !refused {
+				t.Fatalf("%s did not name residency on a refused route: %+v", role, got.Ladder)
 			}
 		}
 		for _, q := range []WorkQuery{{AuthorFamily: "openai", Area: "security"}, {AuthorFamily: "openai", Role: "review-gate-security"}} {

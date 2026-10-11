@@ -5,6 +5,7 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { mockRules } from './rules-fixtures'
+import { controlStability } from './control-stability'
 
 const COMMIT = '21b814057825c06b7f1e93f9deacdb4c549e11c6'
 const PRIVATE_COMMIT = '3333333333333333333333333333333333333333'
@@ -75,6 +76,59 @@ async function setup(page: Page, options: { manage: boolean; layer: { sources: u
 }
 
 const section = (page: Page) => page.getByRole('region', { name: 'Doctrine' })
+
+test('AEON-1195: focus replaces the proposal state and approval commit in place', async ({ page }, info) => {
+  await setup(page, { manage: true, layer: { sources: [READY], proposals_enabled: true } })
+  let proposal: Record<string, unknown>
+  let release!: () => void
+  let held: Promise<void> | undefined
+  let reads = 0
+  const approved: unknown[] = []
+  await page.route('**/api/rules/doctrine/proposals**', async route => {
+    const request = route.request()
+    if (request.method() === 'GET') {
+      const snapshot = { ...proposal }
+      reads++
+      if (held) await held
+      return route.fulfill({ json: { proposals: [snapshot] } })
+    }
+    expect(new URL(request.url()).pathname).toMatch(/\/approve$/)
+    approved.push(request.postDataJSON())
+    return route.fulfill({ json: { ...proposal, state: 'merged', gate_ready: false, release_requested: true } })
+  })
+  for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
+    proposal = { id: 'proposal', repository: READY.repository, pr_number: 12, pr_url: 'https://github.com/inspr-at/inspr-modules/pull/12', head_sha: '1'.repeat(40), state: 'proposed', gate_ready: true, pinned_machines: 0 }
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ colorScheme })
+    await page.goto('/settings/agent-rules')
+    const proposals = section(page).getByLabel('Proposals', { exact: true })
+    await expect(proposals.getByText('Proposed', { exact: true })).toBeVisible()
+    const approve = proposals.getByRole('button', { name: 'Approve & merge inspr-at/inspr-modules PR #12', exact: true })
+    await approve.scrollIntoViewIfNeeded()
+    const guard = await controlStability(page, {
+      refresh: proposals.getByRole('button', { name: 'Refresh inspr-at/inspr-modules PR #12', exact: true }), approve,
+    })
+    const before = reads
+    proposal = { ...proposal, state: 'in_review', head_sha: '2'.repeat(40) }
+    held = new Promise<void>(done => { release = done })
+    try {
+      await guard.check(async () => {
+        await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+        await expect.poll(() => reads).toBeGreaterThan(before)
+        await expect(proposals.getByText('Proposed', { exact: true })).toBeVisible()
+      })
+    } finally { release(); held = undefined }
+    await guard.check(async () => {
+      await expect(proposals.getByText('In review', { exact: true })).toBeVisible()
+      await expect(approve).toHaveAttribute('title', `Approve commit ${'2'.repeat(40)}`)
+    })
+    guard.done()
+    await proposals.screenshot({ path: info.outputPath(`aeon-1195-proposals-focus-${width}-${colorScheme}.png`) })
+    await approve.click()
+    await expect(proposals.getByText('Merged', { exact: true })).toBeVisible()
+    expect(approved.at(-1)).toEqual({ head_sha: '2'.repeat(40) })
+  }
+})
 
 test('the doctrine layer shows each rule as git holds it, read-only, linked to its lines', async ({ page }) => {
   const errors = watchErrors(page)

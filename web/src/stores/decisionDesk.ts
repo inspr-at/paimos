@@ -2,7 +2,7 @@
 import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useSession } from './session'
-import { onAccessChange } from '../lib/authz'
+import { onAccessRevalidate } from '../lib/authz'
 import { loadDeskProjection, type DeskProjection } from '../lib/decisionDesk'
 
 // The badge uses the server's total, never session presence or a loaded page.
@@ -32,7 +32,7 @@ export const useDecisionDesk = defineStore('decisionDesk', () => {
     return flight
   }
   watch(owner, () => { invalidate(); void refresh() }, { immediate: true, flush: 'sync' })
-  const stopAccess = onAccessChange(change => { if (change === 'reset') { invalidate(); void refresh() } })
+  const stopAccess = onAccessRevalidate({ reset: invalidate, refresh: () => { void refresh() } })
   onScopeDispose(() => { stopAccess(); invalidate() })
   return { projection, error, loading, refresh, invalidate, count: computed(() => projection.value?.counts.open ?? null) }
 })
