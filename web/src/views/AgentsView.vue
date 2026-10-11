@@ -50,6 +50,7 @@ import { countedLive, jumpTarget } from '../components/agents/sessionTree'
 import { useFooterSummary } from '../lib/footerSummary'
 import { clockTime, liveSession } from '../lib/agentPause'
 import { onAction, shortcutCaps, shortcutKeys, type ShortcutAction } from '../lib/shortcuts'
+import { usePreference, preferenceSaves } from '../lib/preferences'
 
 // Markus's desk for agents (AEON-1209, design AEON-1196): the head line whose counts filter
 // Sessions; the capacity row (the dial and the accounts chip) that scrolls with the page;
@@ -139,6 +140,97 @@ const ticketPeek = inject(TICKET_PEEK, null)
 const ticketPeekOpen = computed(() => !!ticketPeek?.openKey.value)
 const sessionId = computed(() => typeof route.params.sessionId === 'string' ? route.params.sessionId : '')
 const selected = computed(() => [...agents.views, ...agents.historyViews].find(v => v.session.id === sessionId.value))
+// AEON-1196 r7: the handle is the list's width, never a global panel width.
+const LIST_MIN = 280, DETAILS_MIN = 380, FORM_AT = 560, DIVIDER = 16, FOCUS_WIDTH = 320, OVERVIEW_DETAILS = 480
+const layoutPref = usePreference<{ handle?: number; [key: string]: unknown }>('agents:layout')
+const person = computed(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : '')
+const work = ref<HTMLElement>(), divider = ref<HTMLElement>(), listPane = ref<HTMLElement>()
+const workWidth = ref(0), paneHeight = ref(0)
+const canSplit = computed(() => workWidth.value >= FORM_AT + DIVIDER + OVERVIEW_DETAILS)
+const split = computed(() => !!sessionId.value && agents.loaded && !ticketPeekOpen.value && canSplit.value)
+const maxHandle = computed(() => workWidth.value - DIVIDER - DETAILS_MIN)
+const clampHandle = (width: number) => Math.round(Math.max(LIST_MIN, Math.min(maxHandle.value, width)))
+const savedHandle = computed(() => {
+  const width = layoutPref.value.value?.handle
+  return typeof width === 'number' && Number.isFinite(width) ? width : workWidth.value - DIVIDER - OVERVIEW_DETAILS
+})
+const dragWidth = ref<number | null>(null)
+const handle = computed(() => dragWidth.value ?? clampHandle(savedHandle.value))
+const preset = computed(() => !split.value ? 'list' : handle.value < FORM_AT ? 'focus' : 'overview')
+const layouts = { focus: ['Focus', 'sessions narrow, details wide'], overview: ['Overview', 'sessions wide, details narrow'], list: ['List only', 'no details'] } as const
+const nextPreset = computed(() => ({ list: 'focus', focus: 'overview', overview: 'list' } as const)[preset.value])
+const layoutKeys = computed(() => shortcutKeys('agents.layout.preset'))
+const layoutTip = computed(() => [layouts[preset.value][0], `Next: ${layouts[nextPreset.value][0]}`, ...layoutKeys.value.flatMap(shortcutCaps).flat()].join(' · '))
+const layoutEnabled = computed(() => canSplit.value && agents.loaded && !!(sessionId.value || agents.views.length || agents.historyViews.length) && !ticketPeekOpen.value)
+const willClose = computed(() => dragWidth.value !== null && workWidth.value - DIVIDER - handle.value < DETAILS_MIN)
+const layoutSaveFailed = computed(() => preferenceSaves.failed.has(`${person.value}/agents:layout`))
+let lastSession = '', layoutResize: ResizeObserver | undefined
+let rowAnchor: { id: string; top: number } | null = null
+let drag: { pointer: number; x: number; width: number; person: string } | null = null
+function rememberHandle(width: number) { layoutPref.save({ ...(layoutPref.value.value ?? {}), handle: clampHandle(width) }) }
+function ensureWorkTop() {
+  const main = work.value?.closest('main')
+  if (main && work.value) main.scrollTo({ top: main.scrollTop + work.value.getBoundingClientRect().top - main.getBoundingClientRect().top, behavior: 'instant' })
+}
+function placeRow() {
+  if (!split.value) return
+  const row = listPane.value?.querySelector<HTMLElement>(`[data-row="s:${CSS.escape(sessionId.value)}"]`)
+  const body = listPane.value?.querySelector<HTMLElement>('.table')
+  if (!row || !body) return
+  const box = body.getBoundingClientRect(), rowBox = row.getBoundingClientRect()
+  const top = rowAnchor?.id === sessionId.value && rowAnchor.top >= box.top && rowAnchor.top + rowBox.height <= box.bottom ? rowAnchor.top : Math.max(box.top, Math.min(box.bottom - rowBox.height, rowBox.top))
+  body.scrollTop += rowBox.top - top
+}
+function finishLayout(event: TransitionEvent) {
+  if (event.target === listPane.value && event.propertyName === 'flex-basis') placeRow()
+}
+async function cycleLayout() {
+  if (!layoutEnabled.value) return false
+  const next = nextPreset.value
+  if (next === 'list') { await closePanel(); return }
+  rememberHandle(next === 'focus' ? FOCUS_WIDTH : workWidth.value - DIVIDER - OVERVIEW_DETAILS)
+  if (!sessionId.value) {
+    const visible = rows().filter(row => row.dataset.row?.startsWith('s:'))
+    const row = visible.find(row => row.dataset.row === `s:${lastSession}`) ?? visible.find(row => row.dataset.row === cursor.value) ?? visible[0]
+    if (row?.dataset.row) openSession(row.dataset.row.slice(2))
+  }
+  await nextTick()
+  ensureWorkTop(); placeRow()
+  announce(`Layout: ${layouts[next][0]}`)
+}
+function startDrag(event: PointerEvent) {
+  if (event.button !== 0 || !split.value) return
+  event.preventDefault()
+  divider.value?.focus({ preventScroll: true })
+  divider.value?.setPointerCapture(event.pointerId)
+  drag = { pointer: event.pointerId, x: event.clientX, width: handle.value, person: person.value }
+  dragWidth.value = handle.value
+}
+function moveDivider(event: PointerEvent) {
+  if (!drag || drag.pointer !== event.pointerId || drag.person !== person.value || !split.value) return
+  dragWidth.value = Math.round(Math.max(LIST_MIN, Math.min(workWidth.value - DIVIDER - 120, drag.width + event.clientX - drag.x)))
+}
+function endDrag(event: PointerEvent) {
+  if (!drag || drag.pointer !== event.pointerId) return
+  const current = drag, width = handle.value
+  drag = null; dragWidth.value = null
+  if (current.person !== person.value || event.type === 'pointercancel' || !split.value) return
+  if (workWidth.value - DIVIDER - width < DETAILS_MIN) void closePanel()
+  else { rememberHandle(width); announce(`List width ${clampHandle(width)} pixels`) }
+}
+function moveHandle(width: number) { rememberHandle(width); announce(`List width ${clampHandle(width)} pixels`) }
+watch(person, (_next, previous) => {
+  drag = null; dragWidth.value = null; rowAnchor = null; lastSession = ''; openedFromList = false; cursor.value = ''
+  if (previous && sessionId.value) void router.replace({ path: '/agents', query: {} })
+})
+watch([sessionId, canSplit, () => agents.loaded], async ([id, fits, loaded], previous) => {
+  if (!id || !fits || !loaded) return
+  const owner = person.value
+  await nextTick()
+  if (id !== sessionId.value || owner !== person.value || !split.value) return
+  if (!previous?.[0] || !previous[1] || !previous[2]) ensureWorkTop()
+  placeRow()
+}, { flush: 'post' })
 // A link to a session that ended more than a day ago finds it in History,
 // reading older pages until it appears or the server has no more.
 watch([sessionId, () => agents.loaded, () => agents.historyState], ([id, loaded, state]) => {
@@ -256,6 +348,9 @@ useFooterSummary(() => {
 // sessions replaces it, and closing goes back to the list entry instead of adding one.
 let openedFromList = false
 function openSession(id: string) {
+  const row = listPane.value?.querySelector<HTMLElement>(`[data-row="s:${CSS.escape(id)}"]`)
+  rowAnchor = row ? { id, top: row.getBoundingClientRect().top } : null
+  lastSession = id
   cursor.value = `s:${id}`
   if (sessionId.value) { void router.replace({ path: `/agents/${id}`, query: route.query }); return }
   openedFromList = true
@@ -319,11 +414,17 @@ function pauseSelected(action: 'pause' | 'resume') {
   pause.open(action, [view.session])
 }
 const shortcutDisposers = [
+  onAction('agents.search.focus', () => sessionList.value?.focusSearch() ?? false, actionScope),
+  onAction('agents.filter.add', () => sessionList.value?.openFilter() ?? false, actionScope),
+  onAction('agents.layout.preset', () => { void cycleLayout() }, { ...actionScope, enabled: () => layoutEnabled.value }),
+  ...(['left', 'right', 'min', 'max'] as const).map(direction => onAction(`agents.divider.${direction}`, () => {
+    moveHandle(direction === 'min' ? LIST_MIN : direction === 'max' ? maxHandle.value : handle.value + (direction === 'left' ? -16 : 16))
+  }, { enabled: () => split.value, when: event => event.target === divider.value })),
   onAction('agents.row.next', () => { move(1) }, actionScope),
   onAction('agents.row.prev', () => { move(-1) }, actionScope),
   onAction('agents.row.open', event => {
     if (event.target instanceof HTMLElement && event.target.closest('a, button, summary')) return false
-    if (!cursor.value.startsWith('s:')) return false
+    if (!cursor.value.startsWith('s:') || !onScreen(cursor.value)) return false
     openSession(cursor.value.slice(2))
   }, actionScope),
   onAction('agents.session.pause', () => pauseSelected('pause'), actionScope),
@@ -339,6 +440,8 @@ const hintGroups: { actions: ShortcutAction[]; label: string }[] = [
   { actions: ['agents.row.next', 'agents.row.prev'], label: 'move' },
   { actions: ['agents.group.fold', 'agents.group.unfold'], label: 'fold' },
   { actions: ['agents.row.open'], label: 'open' },
+  { actions: ['agents.search.focus'], label: 'search' },
+  { actions: ['agents.layout.preset'], label: 'layout' },
   { actions: ['agents.session.pause'], label: 'pause' },
   { actions: ['agents.session.resume'], label: 'resume' },
 ]
@@ -368,6 +471,14 @@ function changed(event?: string, identity?: AgentEventIdentity) {
 }
 let stopTierWatch: (() => void) | undefined
 onMounted(() => {
+  layoutResize = new ResizeObserver(() => {
+    workWidth.value = Math.floor(work.value?.getBoundingClientRect().width ?? 0)
+    paneHeight.value = Math.max(0, (work.value?.closest('main')?.clientHeight ?? 0) - 8)
+    if (!canSplit.value) { drag = null; dragWidth.value = null }
+  })
+  if (work.value) layoutResize.observe(work.value)
+  const main = work.value?.closest('main')
+  if (main) layoutResize.observe(main)
   stopTierWatch = serviceTiers.watchPage()
   document.addEventListener('visibilitychange', evidenceVisible)
   void agents.loadAll()
@@ -377,6 +488,7 @@ onMounted(() => {
   clock = setInterval(() => agents.tick(), 1000)
 })
 onBeforeUnmount(() => {
+  layoutResize?.disconnect(); drag = null; dragWidth.value = null
   evidenceRefresh.stop(); document.removeEventListener('visibilitychange', evidenceVisible)
   stopTierWatch?.()
   stop?.(); poller.stop(); clearInterval(clock); clearTimeout(debounce)
@@ -386,7 +498,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 </script>
 
 <template>
-  <section class="agents-page" :class="{ 'panel-open': !!sessionId && !ticketPeekOpen }" aria-labelledby="agents-title">
+  <section class="agents-page" :class="{ split, dragging: dragWidth !== null, 'will-close': willClose }" :style="{ '--list-w': `${handle}px`, '--pane-h': `${paneHeight}px` }" aria-labelledby="agents-title">
     <!-- One line (AEON-780): title, the counts as filters, then the controls. -->
     <header class="page-head">
       <h1 id="agents-title" ref="pageTitle" tabindex="-1">Agents</h1>
@@ -443,25 +555,36 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         </AttachPending>
         <LeadsList v-if="agents.loaded" ref="leadsList" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
+      </div>
+    </div>
+    <div ref="work" class="agents-work" :data-layout="preset">
+      <!-- One sticky dock. Both heads reserve its box; it never changes parents. -->
+      <div v-show="canSplit" class="layout-dock">
+        <button type="button" class="icon-btn raised layout-button" data-layout-cycle :data-layout="preset" :aria-disabled="!layoutEnabled" :aria-label="`Layout: ${layouts[preset][0]}, ${layouts[preset][1]}. Next: ${layouts[nextPreset][0]}`" :aria-keyshortcuts="layoutKeys.join(' ') || undefined" :data-tip="layoutTip" @click="cycleLayout"><AppIcon :name="`layout-${preset}`" :size="17" /></button>
+      </div>
+      <div class="agents-split">
+        <div ref="listPane" class="agents-list-pane" @transitionend="finishLayout">
         <SessionList
           v-if="agents.loaded" ref="sessionList"
           :groups="agents.grouped" :history="agents.historyViews" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
-          :loaded="agents.loaded" :controls="agents.controls" :can-start="manualStart" :can-lead="canStart" :filter="filter" :query="query"
+          :loaded="agents.loaded" :controls="agents.controls" :can-start="manualStart" :can-lead="canStart" :filter="filter" :query="query" :layout-dock="canSplit && !split" :pane="split"
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()" @history="agents.loadHistory(true)" @older="agents.loadOlderHistory()" @clear-filter="clearFilter"
           @filter="setFilter" @search="setQuery"
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
         <RunQueue v-if="agents.loaded" ref="runQueue" @emptied="pageTitle?.focus()" />
-        <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
+        <p v-if="agents.loaded && (agents.views.length || agents.pending.length) && !split" class="hint" aria-hidden="true">
           <template v-for="(hint, index) in activeHints" :key="hint.label"><span v-if="index"> · </span><KeyCap v-for="key in hint.keys" :key="key" :k="key" /> {{ hint.label }}</template>
         </p>
+        </div>
+        <div ref="divider" class="agents-divider" :role="split ? 'separator' : undefined" :aria-hidden="split ? undefined : true" :aria-orientation="split ? 'vertical' : undefined" :tabindex="split ? 0 : undefined" :aria-label="split ? 'Resize the session list' : undefined" :aria-valuemin="split ? LIST_MIN : undefined" :aria-valuemax="split ? maxHandle : undefined" :aria-valuenow="split ? handle : undefined" :aria-valuetext="split ? `List width ${handle} pixels` : undefined" :data-tip="split ? 'Drag to resize the session list' : undefined" @pointerdown="startDrag" @pointermove="moveDivider" @pointerup="endDrag" @pointercancel="endDrag"><span class="grip" /></div>
+        <SessionPanel
+          v-if="sessionId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="!selected && (agents.historyState === 'loading' || (agents.historyState === 'ready' && agents.historyMore))" :now="agents.now" :can-write="writable" :control-block="controlBlock" :docked="split" :sheet="!canSplit"
+          @close="closePanel" @control="control" @review="review"
+        />
       </div>
+      <p v-if="layoutSaveFailed" class="layout-error" role="status">The layout could not be saved. It lasts for this visit.</p>
     </div>
-
-    <SessionPanel
-      v-if="sessionId && agents.loaded && !ticketPeekOpen" :view="selected" :loading="!selected && (agents.historyState === 'loading' || (agents.historyState === 'ready' && agents.historyMore))" :now="agents.now" :can-write="writable" :control-block="controlBlock"
-      @close="closePanel" @control="control" @review="review"
-    />
     <p class="sr-only" role="status" aria-live="polite">{{ announcement }}</p>
     <ChangeTierPopover v-if="serviceTiers.dialog" :key="serviceTiers.dialog.instance" />
     <TierToast />
@@ -510,10 +633,30 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .inline-error { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); font-size: 13px; color: var(--danger); }
 .hint { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 5px; padding: 4px 0; font-size: 12px; color: var(--ink-3); }
 .hint .keycap + .keycap { margin-left: 2px; }
-/* Wide screens dock the session panel: the page reflows beside it. */
-@media (min-width: 1100px) {
-  .agents-page.panel-open { margin: 0; padding-right: calc(var(--panel-w) + 22px); }
-}
+/* Geometry and dock match the approved round-7 HTML; the main scroller starts below the header. */
+.agents-work { position: relative; margin-top: 14px; }
+.layout-dock { position: sticky; top: 0; z-index: 25; height: 0; }
+.layout-button { position: absolute; top: 15px; right: 11px; width: var(--ctl-h); height: var(--ctl-h); color: var(--ink-2); }
+.layout-button:not([data-layout="list"]) { color: var(--teal-ink); }
+.layout-button[aria-disabled="true"] { opacity: .5; }
+.agents-split { display: flex; gap: 0; align-items: flex-start; }
+.agents-list-pane { flex: 0 0 100%; min-width: 0; transition: flex-basis 240ms ease; }
+.split .agents-list-pane { flex-basis: var(--list-w); position: sticky; top: 0; }
+.split { padding-bottom: 8px; }
+.agents-divider { position: relative; flex: 0 0 0; align-self: stretch; transition: flex-basis 240ms ease; }
+.split .agents-divider { flex-basis: 16px; cursor: col-resize; touch-action: none; }
+.split .agents-divider::before { content: ''; position: absolute; top: 8px; bottom: 8px; left: 7.5px; width: 1px; background: var(--line); }
+.grip { display: none; }
+.split .grip { position: sticky; top: 45vh; display: block; width: 6px; height: 36px; margin: 40vh auto 0; border-radius: 999px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); }
+.agents-divider:is(:hover, :focus-visible) .grip, .dragging .grip { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+.agents-divider:focus-visible { outline: none; }
+.agents-divider:focus-visible::before { background: var(--teal); }
+.dragging .agents-list-pane, .dragging .agents-divider { transition: none; }
+.dragging, .dragging * { cursor: col-resize !important; user-select: none; }
+.will-close :deep(.session-panel.docked) { opacity: .5; }
+.layout-error { position: absolute; right: 0; top: 58px; z-index: 26; padding: 6px 10px; background: var(--surface-raised); color: var(--danger); font-size: 12px; }
+@media (pointer: coarse) { .split .agents-divider::after { content: ''; position: absolute; inset: 0 -14px; } }
+@media (prefers-reduced-motion: reduce) { .agents-list-pane, .agents-divider { transition: none; } }
 @media (max-width: 720px) {
   .agents-page { --page-x: 12px; padding: 16px var(--page-x) 20px; }
   .hint { display: none; }

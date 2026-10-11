@@ -52,6 +52,35 @@ moves to the first match, or to none.
 One control height applies to the head, the capacity row and the card head:
 36 px, 44 px on touch and on phones.
 
+## The split, the fixed preset dock and keys (AEON-1213, P5)
+
+The divider sets the list's width continuously: 280 px minimum, compact rows
+below 560 px, table rows from 560 px. Releasing with less than 380 px left for
+details closes them and retains the last valid handle. The handle is stored in
+the person's `agents:layout.handle` preference; other fields in that preference
+are preserved. A person change closes details and cancels the old person's drag
+and queued preference write. A failed save says the layout lasts for this visit.
+
+One sticky button stays at the work area's top-right corner. Both heads reserve
+its space. It jumps through Focus (list 320 px), Overview (details 480 px) and
+List only; its icon follows the current list form and its tooltip names the next
+preset. Presets take 240 ms, or no animation with reduced motion. Selecting from
+List only reopens the remembered handle, with Overview as the first default.
+Escape and the close button return directly to List only.
+
+A split fits at 1056 px of work area (560 + 16 + 480). Below that threshold,
+details open over the list as a sheet and the preset button hides. Phones have a
+full-height sheet with a 44 px Back control and safe-area padding. In a split,
+the work area comes directly under the app header; the list and details have
+viewport-high panes with separate scrolling. A new selection resets the details
+to their top while the picked row stays in view.
+
+F and / (including numpad slash) search this list; S jumps the presets when they
+fit. These actions, their hints and the focused divider's Left/Right (16 px),
+Home (list 280 px) and End (details 380 px) use the shared shortcut registry.
+Fields and browser shortcuts keep their native behavior. The app header leaves
+slash to `/agents` and its session routes while retaining the Desk split button.
+
 ## State in the avatar, compact rows and calm enter/leave (AEON-1211, P3)
 
 **The avatar carries the state.** Each session row shows the person's live

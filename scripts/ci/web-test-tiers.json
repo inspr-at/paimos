@@ -5480,6 +5480,24 @@
     ,
     {"kind":"browser","file":"tests/aeon-1211-agents-rows.spec.ts","name":"touch › 390: every target in the Sessions card is 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 dark 1024: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 dark 1440: one dock, presets, live divider and top-starting panes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 dark 390: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 light 1024: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 light 1440: one dock, presets, live divider and top-starting panes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 light 390: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: a person change closes details and cancels the previous handle save","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: registered F, numpad slash, S and divider keys respect fields and native keys","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: the work-area threshold and 240 ms presets honor reduced motion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}

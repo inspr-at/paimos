@@ -47,6 +47,8 @@ import { below, countedLive, shownBelow, treeRows, type TreeRow } from './sessio
 import { useServiceTiers } from '../../stores/serviceTiers'
 import { TIER_NAME } from '../../lib/serviceTier'
 import { FILTER_LABEL, matchesFilter, type HeadFilter } from './headCounts'
+import KeyCap from '../KeyCap.vue'
+import { shortcutCaps, shortcutHint, shortcutKeys } from '../../lib/shortcuts'
 const serviceTiers = useServiceTiers()
 
 // Session families stay together across status groups. Each lead's history is
@@ -56,6 +58,7 @@ const props = defineProps<{
   loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean; canLead?: boolean; filter?: HeadFilter | null
   /** The card head's search (AEON-1209): it filters this list only. */
   query?: string
+  layoutDock?: boolean; pane?: boolean
 }>()
 const agentRecovery = useAgentRecovery()
 const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: []; clearFilter: []; filter: [filter: HeadFilter]; search: [query: string] }>()
@@ -513,6 +516,9 @@ function revealSession(id: string) {
 // It sticks inside the card under the app header; the pills and the column heads stick
 // with it. Sticking adds a hairline shadow only, so its box never changes.
 const search = ref<HTMLInputElement>()
+const searchKeys = computed(() => shortcutKeys('agents.search.focus'))
+const searchCaps = computed(() => searchKeys.value.slice(0, 1).flatMap(shortcutCaps).flat())
+const filterKeys = computed(() => shortcutKeys('agents.filter.add'))
 const draft = ref(props.query ?? '')
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 watch(() => props.query, value => { if ((value ?? '') !== draft.value.trim()) draft.value = value ?? '' })
@@ -605,7 +611,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 </script>
 
 <template>
-  <section ref="root" class="sessions glass-card" aria-labelledby="sessions-title" @pointerenter="pointing = true" @pointerleave="pointing = false">
+  <section ref="root" class="sessions glass-card" :class="{ 'has-layout-dock': layoutDock, pane }" aria-labelledby="sessions-title" @pointerenter="pointing = true" @pointerleave="pointing = false">
     <!-- The card head (AEON-1209, design AEON-1196): the list's own tools. It sticks inside the card,
          at the card's width, under the app header; the pills and the column heads stick with it. -->
     <div ref="stick" class="th-stick" :class="{ stuck }" data-stick>
@@ -616,14 +622,14 @@ function sessionLinkClick(event: MouseEvent, id: string) {
             <AppIcon name="search" :size="14" />
             <input
               id="sessions-q" ref="search" v-model="draft" class="field" type="search" placeholder="Search sessions" maxlength="200" autocomplete="off" spellcheck="false"
-              aria-label="Search sessions in this list" aria-keyshortcuts="F /" data-tip="Filters this list · F or /" @keydown="searchKey"
+              aria-label="Search sessions in this list" :aria-keyshortcuts="searchKeys.join(' ') || undefined" :data-tip="['Filters this list', shortcutHint('agents.search.focus')].filter(Boolean).join(' · ')" @keydown="searchKey"
             />
-            <kbd v-if="!draft" class="keycap sk-cap" aria-hidden="true">F</kbd>
+            <span v-if="!draft && searchCaps.length" class="sk-cap" aria-hidden="true"><KeyCap v-for="key in searchCaps" :key="key" :k="key" /></span>
             <button v-else type="button" class="clear-q" aria-label="Clear the search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
           </label>
           <button
             ref="filterButton" type="button" class="btn facet-btn tool-btn" :class="{ on: !!stateFilter }" aria-haspopup="menu" :aria-expanded="!!filterMenu"
-            aria-label="Filter" aria-keyshortcuts="Shift+F" :data-tip="filterMenu ? undefined : 'Add a filter · Shift F'" @click="openFilter"
+            aria-label="Filter" :aria-keyshortcuts="filterKeys.join(' ') || undefined" :data-tip="filterMenu ? undefined : ['Add a filter', shortcutHint('agents.filter.add')].filter(Boolean).join(' · ')" @click="openFilter"
           ><AppIcon name="filter" :size="13" /><span class="bl">Filter</span></button>
           <button
             type="button" class="btn facet-btn tool-btn sort-tool" :class="{ on: !!sort }" aria-haspopup="dialog" :aria-expanded="!!sortMenu" :aria-disabled="!sortable || undefined"
@@ -881,6 +887,12 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .lineage a:hover, .lineage.adopted:hover { text-decoration: underline; }
 .lineage .history-toggle { flex-shrink: 0; }
 .sessions { overflow: clip; container: sessions / inline-size; padding: 0; }
+.sessions.has-layout-dock .tree-head { padding-right: 58px; }
+.sessions.pane { display: flex; flex-direction: column; height: var(--pane-h); }
+.sessions.pane > * { flex-shrink: 0; }
+.sessions.pane > .table { flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; align-content: start; }
+.sessions.pane .th-stick { position: static; }
+.sessions.pane .thead { top: 0; }
 /* The card head (AEON-1209, design AEON-1196): sticky inside the card, at the card's width, right
    under the app header. Sticking adds a hairline shadow only; its box and insides never change. */
 .th-stick { position: sticky; top: 0; z-index: 20; padding: 6px 8px 0; border-radius: var(--radius) var(--radius) 0 0; background: color-mix(in srgb, var(--surface-raised) 94%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transition: box-shadow .15s ease; }
