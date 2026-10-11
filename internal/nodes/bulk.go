@@ -420,6 +420,10 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			}
 			issues, err := benefitTransition(ctx, tx, current.KindID, target.kindSlug, current.State, state, fields)
 			if err != nil {
+				if he, ok := err.(*httpError); ok && he.status == http.StatusUnprocessableEntity {
+					skip(he.msg)
+					continue
+				}
 				return err
 			}
 			if len(issues) > 0 {
@@ -657,6 +661,9 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 		old := before.Items[i]
 		issues, err := benefitTransition(ctx, tx, now.KindID, kinds[now.ID], now.State, old.State, old.Fields)
 		if err != nil {
+			if he, ok := err.(*httpError); ok && he.status == http.StatusUnprocessableEntity {
+				return events.Change{}, events.ErrConflict
+			}
 			return events.Change{}, err
 		}
 		if len(issues) > 0 {

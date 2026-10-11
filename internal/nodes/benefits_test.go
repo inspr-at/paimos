@@ -89,6 +89,15 @@ func TestTicketPillsValidatedAtWriteTime(t *testing.T) {
 			t.Fatal("rejected transition changed nodes or audit events")
 		}
 	}
+	before := snapshot()
+	code, raw := call(t, &p, http.MethodPost, "/api/nodes/bulk", fmt.Sprintf(`{"ids":[%q],"state":"in_progress"}`, n.ID))
+	result := decode[bulkResult](t, code, raw, http.StatusOK)
+	if len(result.Items) != 0 || len(result.Skipped) != 1 || result.Skipped[0].ID != n.ID || result.Skipped[0].Reason != "pill_en must contain 2–4 words" {
+		t.Fatalf("bulk must report invalid pills as skipped: %s", raw)
+	}
+	if !sameJSON(before, snapshot()) {
+		t.Fatal("skipped bulk transition changed nodes or audit events")
+	}
 }
 
 func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
