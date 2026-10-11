@@ -1297,6 +1297,7 @@ components:
             origin: {type: string, enum: [shipped, provider, harness, manual], readOnly: true, description: "Immutable model origin; later usage reports do not relabel shipped profiles."}
             retire_at: {type: [string, 'null'], format: date-time, readOnly: true}
             retired: {type: boolean, readOnly: true}
+            pause: {$ref: '#/components/schemas/ModelPause', readOnly: true, description: 'Active pause for this harness/model route, shared by its native levels. Omitted after expiry or resume.'}
     ModelProfileWrite:
       type: object
       description: Family must match the fixed harness provider or an explicitly supported provider/model binding. Ambiguous multi-provider pins may use unknown and cannot perform independent review. Existing inconsistent immutable profiles are excluded from routing and review approval.

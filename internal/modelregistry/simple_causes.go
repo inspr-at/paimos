@@ -29,7 +29,7 @@ func simpleCause(reason string) (string, *time.Time) {
 		cause = "no_tools"
 	case strings.Contains(text, "retired"), strings.Contains(text, "no registered route"), strings.Contains(text, "known invalid model"), strings.Contains(text, "model invalid until"):
 		cause = "retired"
-	case strings.HasPrefix(text, "unavailable until "), strings.HasPrefix(text, "conserved until "), strings.HasPrefix(text, "budget_limited until "), strings.HasPrefix(text, "model paused"):
+	case strings.HasPrefix(text, "unavailable until "), strings.HasPrefix(text, "conserved until "), strings.HasPrefix(text, "budget_limited until "), strings.HasPrefix(text, "model paused"), strings.HasPrefix(text, "paused:"), strings.HasPrefix(text, "paused until "):
 		cause = "paused"
 	case strings.HasPrefix(text, "not allowed: "), strings.Contains(text, "residency"):
 		cause = "residency"

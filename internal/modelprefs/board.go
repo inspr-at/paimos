@@ -30,9 +30,9 @@ type BoardOrder struct {
 	Thinking    *string  `json:"thinking"`
 	Effort      *string  `json:"effort"`
 	EffortLevel *int     `json:"effort_level"`
-	// Populated by the v2 order reader; kept internal until the S3 contract.
-	End     string            `json:"-"`
-	Efforts map[string]string `json:"-"`
+	// Native effort per step and the continuation after the saved chain.
+	End     string            `json:"end"`
+	Efforts map[string]string `json:"efforts"`
 }
 type Rule struct {
 	Scope     string    `json:"scope"`

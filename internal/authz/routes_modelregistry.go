@@ -5,6 +5,8 @@ package authz
 // Route and scope declarations for modelregistry.
 func init() {
 	registerRoutes("modelregistry", map[string]string{
+		"PUT /api/models/lines/{harness}/{model}/pause":                    "models.manage",
+		"DELETE /api/models/lines/{harness}/{model}/pause":                 "models.manage",
 		"PUT /api/model-preferences/orders/{column}/first/never/{line}":    "model_prefs.manage",
 		"DELETE /api/model-preferences/orders/{column}/first/never/{line}": "model_prefs.manage",
 		"DELETE /api/model-preferences/levels/{level}":                     "models.read|model_prefs.manage",

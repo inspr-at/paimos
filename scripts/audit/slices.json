@@ -157,7 +157,12 @@
         "internal/runisolation/**",
         "internal/db/migrations/1333_models_v2_migration.sql",
         "internal/modelregistry/models_v2_migration_test.go",
-        "internal/modelregistry/legacy_deprecation_test.go"
+        "internal/modelregistry/legacy_deprecation_test.go",
+        "internal/modelregistry/contract_v2_test.go",
+        "internal/modelregistry/order_validation.go",
+        "internal/modelregistry/pause.go",
+        "internal/modelregistry/simple_causes.go",
+        "internal/modelregistry/simple_outdated.go"
       ]
     },
     {
@@ -274,6 +279,7 @@
         "internal/releases/**",
         "internal/releasesettlement/**",
         "internal/reportercontract/**",
+        "internal/reportercontract/models_v2_test.go",
         "internal/ciproof/**",
         "internal/ciexecutor/**",
         "internal/deploytarget/**",

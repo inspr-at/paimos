@@ -495,7 +495,7 @@ func (m *Module) writeNeverRule(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		in.Why = strings.TrimSpace(in.Why)
-		if in.Why == "" || !boundedText(in.Why, 1000) {
+		if in.Why == "" || !boundedText(in.Why, 1000) || strings.ContainsRune(in.Why, '\x00') {
 			writePreferenceError(w, prefFail(422, "invalid_rule"))
 			return
 		}
@@ -540,7 +540,10 @@ func (m *Module) writeNeverRule(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if r.Method == http.MethodDelete {
-			if _, err := tx.Exec(ctx, `DELETE FROM model_rules WHERE scope='workspace' AND column_key=$1 AND line=$2 AND lock='not'`, column, line); err != nil {
+			if _, err := tx.Exec(ctx, `DELETE FROM model_rules WHERE scope='workspace' AND column_key=$1 AND line=$2 AND lock='not' AND moved_to_models IS NOT TRUE`, column, line); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM model_row_constraints WHERE scope='workspace' AND column_key=$1 AND line=$2 AND kind='never'`, column, line); err != nil {
 				return err
 			}
 		} else {
@@ -554,11 +557,13 @@ func (m *Module) writeNeverRule(w http.ResponseWriter, r *http.Request) {
 			if before == nil && (count >= 512 || len(s.Rules) >= 4096) {
 				return modelprefs.ErrBoardBounds
 			}
-			if before != nil {
-				if _, err := tx.Exec(ctx, `UPDATE model_rules SET why=$3,set_by=$4,set_at=now() WHERE scope='workspace' AND column_key=$1 AND line=$2 AND lock='not'`, column, line, in.Why, p.ID); err != nil {
-					return err
-				}
-			} else if _, err := tx.Exec(ctx, `INSERT INTO model_rules(tenant_id,scope,column_key,line,lock,why,set_by) VALUES($1,'workspace',$2,$3,'not',$4,$5)`, p.TenantID, column, line, in.Why, p.ID); err != nil {
+			if _, err := tx.Exec(ctx, `DELETE FROM model_rules WHERE scope='workspace' AND column_key=$1 AND line=$2 AND lock='not' AND moved_to_models IS NOT TRUE`, column, line); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM model_row_constraints WHERE scope='workspace' AND column_key=$1 AND line=$2 AND kind='never'`, column, line); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO model_row_constraints(tenant_id,scope,column_key,line,kind,why,set_by) VALUES($1,'workspace',$2,$3,'never',$4,$5)`, p.TenantID, column, line, in.Why, p.ID); err != nil {
 				return err
 			}
 		}

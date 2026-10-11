@@ -28,7 +28,8 @@ func pickProfile(p *Profile) simplePick {
 	if p == nil {
 		return simplePick{}
 	}
-	line, effort := boardLineID(*p), p.Effort
+	line, _ := modelsLine(*p)
+	effort := p.Effort
 	return simplePick{Line: &line, Effort: &effort, Harness: p.Harness, Model: p.Model}
 }
 
@@ -110,6 +111,7 @@ type simpleDocument struct {
 	PersonID      *string                                `json:"person_id"`
 	Situations    *map[string]map[string]simpleSituation `json:"situations,omitempty"`
 	Quick         simpleQuick                            `json:"quick"`
+	Outdated      simpleOutdated                         `json:"outdated"`
 }
 
 func simpleRowFor(s modelprefs.BoardState, c boardCatalog, column string) simpleRow {
@@ -130,7 +132,7 @@ func simpleRowFor(s modelprefs.BoardState, c boardCatalog, column string) simple
 	}
 	if s.Person != nil {
 		for _, o := range s.Orders {
-			if o.ProfileID == s.Person.ID && o.Column == column && o.Situation == "first" {
+			if o.ProfileID == s.Person.ID && o.Column == column && o.Situation == "first" && o.Rank != nil {
 				row.Mine = true
 			}
 		}
@@ -138,7 +140,7 @@ func simpleRowFor(s modelprefs.BoardState, c boardCatalog, column string) simple
 	if len(d.Rank) > 0 {
 		id := d.Rank[0]
 		row.Line = &id
-		ps := c.effortCandidates(id, simpleStepEffort(order, id, d.Effort), d.EffortLevel, false)
+		ps := modelsRouteCandidates(c.profiles[id], simpleStepEffort(order, id, d.Effort), d.EffortLevel, false)
 		if len(ps) > 0 {
 			row.simplePick = pickProfile(&ps[0])
 		}
@@ -147,7 +149,7 @@ func simpleRowFor(s modelprefs.BoardState, c boardCatalog, column string) simple
 		}
 	}
 	for _, id := range d.Rank[min(1, len(d.Rank)):] {
-		pick := simpleLinePick(c, id, simpleStepEffort(order, id, d.Effort), d.EffortLevel)
+		pick := simpleLinePick(c, id, simpleStepEffort(order, id, d.Effort), d.EffortLevel, false)
 		row.Chain = append(row.Chain, simpleStep{Line: id, Effort: pick.Effort})
 	}
 	for _, rule := range s.Rules {
@@ -185,8 +187,8 @@ func simpleStepEffort(order modelprefs.BoardOrder, line, fallback string) string
 	return fallback
 }
 
-func simpleLinePick(c boardCatalog, line, effort string, level int) simplePick {
-	ps := c.effortCandidates(line, effort, level, false)
+func simpleLinePick(c boardCatalog, line, effort string, level int, review bool) simplePick {
+	ps := modelsRouteCandidates(c.profiles[line], effort, level, review)
 	if len(ps) > 0 {
 		return pickProfile(&ps[0])
 	}
@@ -220,7 +222,7 @@ func simpleTraceFor(out *WorkResolution, c boardCatalog) []simpleTrace {
 				if p.ID != step.ProfileID {
 					continue
 				}
-				line := boardLineID(p)
+				line, _ := modelsLine(p)
 				if !step.Selected && seen[line] {
 					continue
 				}
@@ -266,7 +268,20 @@ func (m *Module) simple(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		s = modelsBoardIdentities(s, c)
+		c = modelsCatalog(c)
 		s.Lines = c.lines
+		for _, order := range s.Orders {
+			for _, line := range order.Rank {
+				if !slices.ContainsFunc(s.Lines, func(l modelprefs.BoardLine) bool { return l.ID == line }) {
+					s.Lines = append(s.Lines, modelprefs.BoardLine{ID: line})
+				}
+			}
+		}
+		out.Outdated, err = simpleOutdatedFor(ctx, tx, person, c)
+		if err != nil {
+			return err
+		}
 		if level == "default" {
 			s.Person = nil
 			cells := map[string]map[string]simpleSituation{}
@@ -284,7 +299,7 @@ func (m *Module) simple(w http.ResponseWriter, r *http.Request) {
 				}
 				d := rawBoardDecision(s, order.Column, order.Situation)
 				for i, line := range order.Rank {
-					pick := simpleLinePick(c, line, simpleStepEffort(order, line, d.Effort), d.EffortLevel)
+					pick := simpleLinePick(c, line, simpleStepEffort(order, line, d.Effort), d.EffortLevel, order.Situation == "review")
 					if i == 0 {
 						cell.simplePick = pick
 					} else {

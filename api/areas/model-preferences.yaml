@@ -204,12 +204,12 @@ paths:
     put:
       operationId: putModelBoardOrder
       security: *auth
-      description: "One revision-checked write and event. Personal Not allowed is additive to rules. Agents cannot write."
+      description: "Rank is the pick followed by its chain. Per-line efforts and end are optional; omitted values preserve existing settings. Personal writes on a workspace row create only the canonical caller's own order; locked columns return 423. Agents cannot write."
       parameters:
         - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
         - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
         - {name: column, in: path, required: true, schema: {type: string, maxLength: 64}}
-        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, fix, stuck]}}
+        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, small, fix, stuck, review]}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelBoardOrderWrite'}}}}
       responses:
         '423': {description: 'The workspace locks this column and its order.'}
@@ -224,12 +224,12 @@ paths:
     delete:
       operationId: resetModelBoardOrder
       security: *auth
-      description: "Reset to the inherited order with the profile revision, preserving the separate column thinking override."
+      description: "Reset the row to inheritance, or a situation to same as the row (review to automatic), using the selected profile revision. Column thinking is preserved. Personal changes on a workspace row create or reset only the canonical caller's own order; workspace locks return 423."
       parameters:
         - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
         - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
         - {name: column, in: path, required: true, schema: {type: string, maxLength: 64}}
-        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, fix, stuck]}}
+        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, small, fix, stuck, review]}}
         - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
       responses:
         '423': {description: 'The workspace locks this column and its order.'}
@@ -250,7 +250,7 @@ paths:
         - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
         - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
         - {name: column, in: path, required: true, schema: {type: string, maxLength: 64}}
-        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, fix, stuck]}}
+        - {name: situation, in: path, required: true, schema: {type: string, enum: [first, small, fix, stuck, review]}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelColumnThinkingWrite'}}}}
       responses:
         '423': {description: 'The workspace locks this column and its order.'}
@@ -404,8 +404,10 @@ components:
     ModelBoardOrderWrite:
       type: object
       additionalProperties: false
-      required: [rank, not, revision]
+      required: [rank, revision]
       properties:
+        efforts: {type: object, maxProperties: 512, additionalProperties: {type: string, maxLength: 32}, description: 'Native effort for ranked lines only. Omitted preserves matching stored entries; an empty object restores automatic levels.'}
+        end: {type: string, enum: [wait, default, row, auto], description: 'Rows use wait or default (the Default itself uses wait); situations may use row and review may use auto. Omitted preserves the current ending.'}
         rank: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
         not: {type: array, maxItems: 512, uniqueItems: true, items: {type: string, maxLength: 128}}
         revision: {type: integer, format: int64, minimum: 0}
@@ -506,7 +508,7 @@ components:
             end: {type: string, enum: [wait, default, row, auto]}
     ModelSimplePreferences:
       type: object
-      required: [all, exceptions, reviews, next, unavailable, new_lines, quick, revision, rules_revision, person_id]
+      required: [all, exceptions, reviews, next, unavailable, new_lines, quick, outdated, revision, rules_revision, person_id]
       properties:
         situations:
           type: object
@@ -520,6 +522,14 @@ components:
               fix: {$ref: '#/components/schemas/ModelSimpleSituation'}
               stuck: {$ref: '#/components/schemas/ModelSimpleSituation'}
               review: {$ref: '#/components/schemas/ModelSimpleSituation'}
+        outdated:
+          type: object
+          required: [count, named, uses]
+          description: 'Registered older versions with a newer active successor, grouped across routes and levels. Named entries use representative immutable profile ids. Uses counts explicit pinned settings in the workspace and canonical caller scopes; latest-line orders already follow the successor. Detailed lifecycle facts remain on the catalog API.'
+          properties:
+            count: {type: integer, minimum: 0, maximum: 512}
+            named: {type: array, maxItems: 512, items: {type: object, required: [line, successor], properties: {line: {type: string, format: uuid}, successor: {type: string, format: uuid}}}}
+            uses: {type: integer, minimum: 0, maximum: 10000}
         quick:
           allOf:
             - {$ref: '#/components/schemas/ModelSimplePick'}
