@@ -160,9 +160,13 @@ export function knowledgeFooter(k: KnowledgeFooter): FooterSummary {
 }
 
 // ---------- Settings ----------
-// How many things need this person in Accounts and computers; that section keeps it while it is open.
+// How many things need this person in the open part of Accounts, Computers and
+// Capacity (AEON-1171); that part keeps it while it is open.
 export const settingsNeeds = ref(0)
-export interface SettingsFooter { saving: boolean; failed: boolean; needs: number; act: { retry: () => void; needs: () => void } }
+// Each part's count for the Settings nav, while one of the three parts is open; null otherwise.
+export const accountsNeeds = ref<Readonly<Record<'accounts' | 'computers' | 'capacity', number>> | null>(null)
+// where names the part the action opens, e.g. "Computers".
+export interface SettingsFooter { saving: boolean; failed: boolean; needs: number; where?: string; act: { retry: () => void; needs: () => void } }
 // Calm says nothing: the centre stays empty.
 export function settingsFooter(s: SettingsFooter): FooterSummary | null {
   // Saving and a failed save come and go. The phone release stays as the summary
@@ -172,7 +176,7 @@ export function settingsFooter(s: SettingsFooter): FooterSummary | null {
   if (s.saving) return { ...build('idle', [said('Saving…')], [said('Saving…')], 'Saving.'), transient: true, phone }
   if (s.needs) {
     const x = `${s.needs} ${s.needs === 1 ? 'needs' : 'need'} you`
-    return build('attention', [exception(x)], [exception(x)], `${x}. Open Accounts and computers at Needs you.`, s.act.needs)
+    return build('attention', [exception(x)], [exception(x)], `${x}. Open ${s.where ?? 'Settings'} at Needs you.`, s.act.needs)
   }
   return null
 }
