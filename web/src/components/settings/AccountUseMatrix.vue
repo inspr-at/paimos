@@ -227,7 +227,7 @@ function toggleNever() {
   if (!snap) return
   closeMenu()
   const { context } = snap, never = context.new_accounts_override !== 'deny'
-  write(`${context.name}: new accounts ${never ? 'never' : 'follow the switch'}`, (expected, signal) => updateContext(context, expected, { new_accounts_override: never ? 'deny' : null }, signal), contextSaved, snap.revision)
+  write(`${context.name}: new accounts ${never ? 'never' : 'follow the rule'}`, (expected, signal) => updateContext(context, expected, { new_accounts_override: never ? 'deny' : null }, signal), contextSaved, snap.revision)
 }
 async function archive() {
   const snap = menu.value, owner = scope.owner.value
@@ -403,7 +403,7 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
     <FloatingPanel v-if="form" :anchor="form.anchor" :width="320" align="end" :label="form.mode === 'add' ? 'Add a context' : `Rename ${form.context?.name}`" cycle field-escape @close="form = null">
       <form class="name-form" @submit.prevent="submitForm" @keydown="formKeys">
         <label>{{ form.mode === 'add' ? 'Name of the new context' : 'Name' }}<input v-model="form.name" class="field" maxlength="128" data-autofocus :disabled="!!busy" /></label>
-        <p v-if="form.mode === 'add'" class="hint">{{ matrix?.rules.new_contexts === 'allow' ? 'Every account starts allowed here (New contexts: allow automatically).' : 'No account starts allowed here (New contexts: ask first).' }}</p>
+        <p v-if="form.mode === 'add'" class="hint">{{ matrix?.rules.new_contexts === 'allow' ? 'Every account starts allowed here (New contexts: Automatic).' : 'No account starts allowed here (New contexts: Ask first).' }}</p>
         <p class="hint error" role="alert">{{ form.error }}</p>
         <div class="buttons"><button class="btn primary" type="submit" :disabled="!!busy">Save <KeyCap k="mod" /><KeyCap k="enter" /></button><button class="btn" type="button" @click="form = null">Cancel</button></div>
       </form>
