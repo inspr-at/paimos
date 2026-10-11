@@ -116,6 +116,14 @@ export async function ensurePermissions(projectId?: string): Promise<'known' | '
 }
 export function permissionsAvailable(): boolean { revision.value; return !!cache.get('') }
 export function myWorkspaceRole(): Grant['role'] { revision.value; return cache.get('')?.workspace.role ?? null }
+// My role bound on one project (null without a binding), for hints such as who may
+// own a project routine (AEON-1182). The server still decides every write.
+export function myProjectRole(projectId: string): Grant['role'] {
+  revision.value
+  const answer = cache.get(keyOf(projectId))
+  if (answer === undefined && !revoked) void refreshPermissions(projectId)
+  return answer?.project?.role ?? null
+}
 export function myPermissions(projectId?: string): Set<string> {
   revision.value
   if (!projectId) return new Set(cache.get('')?.workspace.permissions ?? [])

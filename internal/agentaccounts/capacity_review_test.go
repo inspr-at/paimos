@@ -66,7 +66,7 @@ func TestCapacityPreviewMatchesSavedInheritance(t *testing.T) {
 	put(scheduleOverride{Scope: "pool", Pool: "grok", Schedule: &grok}, 204)
 	hold := user
 	hold.Override = "hold"
-	put(scheduleOverride{Scope: "pool", Pool: "codex", Schedule: &hold}, 204)
+	seedExistingSchedule(t, admin, scheduleOverride{Scope: "pool", Pool: "codex", Schedule: &hold})
 	// An ended Sprint left behind on a pool without accounts.
 	ended := user
 	ended.Override = "sprint"
@@ -111,9 +111,9 @@ func TestCapacityPreviewMatchesSavedInheritance(t *testing.T) {
 	put(scheduleOverride{Scope: "pool", Pool: "codex", Schedule: &draft, CarryOverrides: true}, 400)
 }
 
-// Review blocker 4: the Sprint end the UI promises is the server's limiting
-// reset, which includes the 5-hour window.
-func TestCapacityLimitingResetIsTheSprintEnd(t *testing.T) {
+// The limiting reset includes the 5-hour window; legacy Sprint end dates
+// survive unchanged round-trips and rejected deadline extensions.
+func TestCapacityLimitingResetPreservesExistingSprintEnd(t *testing.T) {
 	admin, runner, token, accounts := capacityWorld(t, "limiting", "claude")
 	mod := accountsMod()
 	now := time.Now().UTC()
@@ -128,11 +128,26 @@ func TestCapacityLimitingResetIsTheSprintEnd(t *testing.T) {
 	}
 	sprint := capacity.DefaultSchedule()
 	sprint.Override = "sprint"
+	sprint.OverrideUntil = limit
+	seedExistingSchedule(t, admin, scheduleOverride{Scope: "pool", Pool: "claude", Schedule: &sprint})
 	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "pool", Pool: "claude", Schedule: &sprint}), 204, nil)
+	// Only new or changed overrides are retired (AEON-1177 M1). Keep the
+	// rejection assertion on an actual change, without changing the fixture.
+	extended := sprint
+	later := limit.Add(time.Hour)
+	extended.OverrideUntil = &later
+	var retired struct{ Error, Code string }
+	callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "pool", Pool: "claude", Schedule: &extended}), 400, &retired)
+	if retired.Code != "override_retired" || retired.Error == "" {
+		t.Fatalf("Sprint extension rejected for the wrong reason: %+v", retired)
+	}
 	var entries []scheduleOverride
 	callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/capacity/schedule", "", 200, &entries)
 	if len(entries) != 1 || entries[0].Schedule.OverrideUntil == nil || !entries[0].Schedule.OverrideUntil.Equal(*limit) {
 		t.Fatalf("Sprint end %+v differs from limiting reset %v", entries, limit)
+	}
+	if entries[0].Scope != "pool" || entries[0].Pool != "claude" || encoded(t, entries[0].Schedule) != encoded(t, sprint) {
+		t.Fatalf("Sprint replay or rejected extension changed the stored schedule: %+v", entries)
 	}
 }
 
