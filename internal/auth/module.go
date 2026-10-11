@@ -624,6 +624,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		return "inbox.send", true
 	case "models":
+		if r.Method == http.MethodPost && len(parts) == 3 && parts[1] == "harness-probes" && (parts[2] == "claim" || validRouteUUID(parts[2])) {
+			return "models.report", true
+		}
 		if r.Method == http.MethodPost && len(parts) == 2 {
 			if parts[1] == "refresh" {
 				return "models.refresh", true

@@ -39,6 +39,7 @@ type Remote struct {
 	accountLinkProof     string
 	ledgerGeneration     string
 	ledgerPeerTelemetry  bool
+	catalogRetryAt       time.Time // Negative capability cache; never discovery authority.
 	probeBatchRetryAt    time.Time // Negative capability cache only; never dispatch authority.
 	// Host capacity is negotiated from the server's own computer view; see
 	// hostCapacitySupported. now is injectable for tests.
