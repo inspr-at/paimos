@@ -295,5 +295,12 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 		if notices != 1 || retained != 257 {
 			t.Fatalf("bounded evidence lost uncertainty or repeated escalation: %d %d", notices, retained)
 		}
+		must(t, f.tx(func(tx pgx.Tx) error {
+			out, err := d.e.DispatchTx(t.Context(), tx, f.owner.TenantID, f.run, "", 0)
+			if err == nil && (out.Routed || out.WaitReason != "routine_recovery_unconfirmed") {
+				t.Fatalf("unknown outcomes authorized another actor: %+v", out)
+			}
+			return err
+		}))
 	})
 }

@@ -286,6 +286,9 @@ func (e *Executor) advance(ctx context.Context, tx pgx.Tx, tid string, r intent,
 	if !r.consent || r.consentRevision != r.revision || principal != r.principal {
 		return nil, workorders.Fail(409, "routine_execution_consent_required")
 	}
+	if err := routineRecoveryGuardTx(ctx, tx, r.id); err != nil {
+		return nil, err
+	}
 	owner := tenant.Principal{ID: r.owner, TenantID: tid, Kind: tenant.Person}
 	for _, perm := range []string{"nodes.write", "run.create", "work_orders.write"} {
 		if err := authz.RequireTx(ctx, tx, owner, perm, authz.Scope{ProjectID: r.project}); err != nil {

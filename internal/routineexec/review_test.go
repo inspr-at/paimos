@@ -146,6 +146,11 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 		t.Fatalf("disabled continuation created grants: %d", provisional)
 	}
 	f.exec(`UPDATE project_routine_execution_settings SET automatic_launch_enabled=true WHERE project_id=$1`, f.project)
+	// Unknown external outcomes close final continuation even before the next
+	// recovery scan. Reconcile that original receipt before creating an actor.
+	f.exec(`INSERT INTO routine_effect_outbox(tenant_id,run_id,effect_key,kind,state,payload) VALUES($1,$2,'fixture:unknown','fixture.external','unknown','{}')`, f.owner.TenantID, f.run)
+	wait(finished, "routine_recovery_unconfirmed")
+	f.exec(`UPDATE routine_effect_outbox SET state='succeeded',result='{"original_outcome":"confirmed"}' WHERE run_id=$1 AND effect_key='fixture:unknown'`, f.run)
 	first := advance(finished, true)
 	reviewRun := first["agent_run_id"].(string)
 	reviewOrder := first["review_order_id"].(string)

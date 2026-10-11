@@ -17,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/recurrences"
 	"github.com/inspr-at/paimos/internal/systemactor"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -201,6 +202,22 @@ type recoveryResult struct {
 	Reason          string `json:"wait_reason"`
 	Reconciliations int    `json:"reconciliations"`
 	Escalated       bool   `json:"escalated"`
+	Uncertain       bool   `json:"uncertain"`
+}
+
+// A recovery scan cannot itself grant retry authority. Final actor mutations
+// also fence the original unknown evidence and unresolved recovery receipt.
+// Reconciliation clears uncertainty only after re-reading current receipts.
+func routineRecoveryGuardTx(ctx context.Context, tx pgx.Tx, run string) error {
+	var uncertain bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM routine_budget_grants WHERE run_id=$1 AND state='unknown')
+   OR EXISTS(SELECT 1 FROM routine_actions WHERE run_id=$1 AND state='unknown')
+   OR EXISTS(SELECT 1 FROM routine_effect_outbox WHERE run_id=$1 AND (state='unknown'
+    OR effect_key='recovery' AND kind='routine.reconcile' AND result->>'uncertain'='true'))`, run).Scan(&uncertain)
+	if err == nil && uncertain {
+		return workorders.Fail(409, "routine_recovery_unconfirmed")
+	}
+	return err
 }
 
 func (e *Executor) recoverRun(ctx context.Context, tid, id string) error {
@@ -377,6 +394,7 @@ func recoveryReceiptTx(ctx context.Context, tx pgx.Tx, tid, id, reason string, u
 		return errors.New("routine recovery receipt invalid")
 	}
 	result.Reason = reason
+	result.Uncertain = uncertain
 	// Reconciliation uncertainty is distinct from failed work. Capacity waits
 	// never increment this counter or the routine's finite actor-attempt budget.
 	if uncertain {

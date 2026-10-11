@@ -401,6 +401,9 @@ func (e *Executor) dispatch(ctx context.Context, tx pgx.Tx, tenantID string, r i
 	if !r.consent || r.consentRevision != r.revision || principal != r.principal || r.assignment == nil {
 		return out, workorders.Fail(409, "routine_execution_consent_required")
 	}
+	if err := routineRecoveryGuardTx(ctx, tx, r.id); err != nil {
+		return out, err
+	}
 	owner := tenant.Principal{ID: r.owner, TenantID: tenantID, Kind: tenant.Person}
 	for _, permission := range []string{"nodes.read", "nodes.write", "run.create", "work_orders.write"} {
 		if err := authz.RequireTx(ctx, tx, owner, permission, authz.Scope{ProjectID: r.project}); err != nil {
