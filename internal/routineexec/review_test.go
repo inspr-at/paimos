@@ -120,8 +120,12 @@ func TestRoutineReviewFixLineageAndFiniteEscalation(t *testing.T) {
 	}
 	wait := func(receipt, reason string) {
 		t.Helper()
-		if out := advance(receipt, false); out["wait_reason"] != reason {
+		out := advance(receipt, false)
+		if out["wait_reason"] != reason {
 			t.Fatalf("wait=%+v want %s", out, reason)
+		}
+		if (reason == "routine_review_proof_unavailable" || reason == "review_policy_changed" || reason == "review_head_changed" || reason == "fix_review_changed") && out["reevaluation_required"] != true {
+			t.Fatalf("stale review was not retained for reevaluation: %+v", out)
 		}
 	}
 	cr := reviewgate.CommitRange{Repository: "example/routine", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40)}

@@ -102,10 +102,11 @@ func (e *Executor) recoverTenant(ctx context.Context, tid string) (Pass, error) 
 		rows, err := tx.Query(ctx, `SELECT r.id::text FROM routine_runs r LEFT JOIN routine_effect_outbox o ON o.run_id=r.id AND o.effect_key='recovery'
    WHERE (r.state NOT IN ('done','completed','succeeded','failed','skipped','cancelled')
     OR EXISTS(SELECT 1 FROM routine_launch_intents l WHERE l.routine_run_id=r.id AND l.claimed_at IS NOT NULL AND l.exit_observed_at IS NULL)
-    OR EXISTS(SELECT 1 FROM routine_budget_grants g WHERE g.run_id=r.id AND g.state='unknown'))
+    OR EXISTS(SELECT 1 FROM routine_budget_grants g WHERE g.run_id=r.id AND g.state<>'settled')
+    OR EXISTS(SELECT 1 FROM routine_effect_outbox unknown_effect WHERE unknown_effect.run_id=r.id AND unknown_effect.state='unknown'))
    AND (o.id IS NULL OR o.reconcile_after<=clock_timestamp())
    AND (coalesce((SELECT automatic_launch_enabled FROM project_routine_execution_settings WHERE project_id=r.output_project_id),false)
-    OR EXISTS(SELECT 1 FROM routine_launch_intents l WHERE l.routine_run_id=r.id AND l.claimed_at IS NOT NULL AND l.exit_observed_at IS NULL)
+    OR EXISTS(SELECT 1 FROM routine_launch_intents l WHERE l.routine_run_id=r.id AND l.claimed_at IS NOT NULL)
     OR EXISTS(SELECT 1 FROM routine_effect_outbox n WHERE n.run_id=r.id AND n.kind='routine.stop' AND n.state='pending'))
    ORDER BY coalesce(o.reconcile_after,r.created_at),r.id LIMIT 33`)
 		if err != nil {
