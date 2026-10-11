@@ -40,9 +40,30 @@ export function openingTab(input: { forced?: PanelTab | null; lead: boolean; ask
 }
 
 const LABEL: Record<GateKind, string> = { dial: 'Dial', harness: 'Harness limits', account_room: 'Account room', host_load: 'Host load' }
-const PREFIX: Record<GateKind, string> = { dial: 'dial', harness: 'harness', account_room: 'account', host_load: 'host' }
-export interface AdmissionRow { kind: GateKind; label: string; state: 'passed' | 'held' | 'unreadable' | 'unknown'; detail: string }
+export interface AdmissionRow { kind: GateKind; label: string; state: 'passed' | 'held' | 'unreadable' | 'unknown'; detail: string; reason?: string }
 export interface AdmissionHistory { caption: string; tone: 'rest' | 'held' | 'unreadable' | 'stale'; rows: AdmissionRow[]; note: string }
+const FULL: Record<GateKind, string> = { dial: 'the dial was full', harness: 'a harness limit was reached', account_room: 'no account had room', host_load: 'the computer was too busy' }
+const REASON_KIND: Record<string, GateKind> = { dial: 'dial', harness: 'harness', account: 'account_room', account_room: 'account_room', host: 'host_load', host_load: 'host_load' }
+interface AdmissionReason { kind?: GateKind; state: AdmissionRow['state']; text: string }
+const OTHER_REASONS: Record<string, AdmissionReason> = {
+  daily_limit: { kind: 'account_room', state: 'held', text: 'the daily cap was reached' },
+  daily_cap: { kind: 'account_room', state: 'held', text: 'the daily cap was reached' },
+  daily_limit_unknown: { kind: 'account_room', state: 'unreadable', text: 'the daily cap could not be checked' },
+  capacity_full: { kind: 'account_room', state: 'held', text: FULL.account_room },
+  capacity_unavailable: { kind: 'account_room', state: 'unreadable', text: 'account room could not be read' },
+  forecast_unavailable: { kind: 'account_room', state: 'unreadable', text: 'account room could not be read' },
+  admission_unavailable: { state: 'unreadable', text: 'the start checks could not be read' },
+  start_checks_unavailable: { state: 'unreadable', text: 'the start checks could not be read' },
+}
+function admissionReason(code: string): AdmissionReason | undefined {
+  const known = Object.hasOwn(OTHER_REASONS, code) ? OTHER_REASONS[code] : undefined
+  if (known) return known
+  const match = /^(dial|harness|account_room|account|host_load|host)_(full|unavailable|unreadable|stale)$/.exec(code)
+  if (!match) return undefined
+  const kind = REASON_KIND[match[1]!]!
+  if (match[2] === 'full') return { kind, state: 'held', text: FULL[kind] }
+  return { kind, state: match[2] === 'stale' ? 'unknown' : 'unreadable', text: `${LABEL[kind].toLowerCase()} ${match[2] === 'stale' ? 'was out of date' : 'could not be read'}` }
+}
 const time = (at: number) => new Date(at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
 export function admissionHistory(decisions: readonly LeadDecision[], input: { complete: boolean; error: string; sessionStarted?: string | null; now: number }): AdmissionHistory {
   const empty = (caption: string, tone: AdmissionHistory['tone'], note: string): AdmissionHistory => ({ caption, tone, rows: [], note })
@@ -54,14 +75,19 @@ export function admissionHistory(decisions: readonly LeadDecision[], input: { co
   const kinds = [...new Set([...(report.request.gates ?? []).map(g => g.kind), ...report.gate_freshness.map(g => g.kind)])].filter(k => k in LABEL)
   if (!Number.isFinite(at) || !kinds.length) return empty("Couldn't read the last start", 'unreadable', 'The admission report has no readable gate evidence.')
   const reasons = [...new Set([...report.reason_codes, ...report.request.reason_codes])]
+  const unspecified = reasons.find(reason => reason !== 'gates_ready' && !admissionReason(reason)?.kind)
   const rows = kinds.map((kind): AdmissionRow => {
     const gate = report.request.gates?.find(g => g.kind === kind), fresh = report.gate_freshness.find(g => g.kind === kind)?.freshness
-    const reason = reasons.find(r => r === `${PREFIX[kind]}_full` || r === `${kind}_full` || r === `${PREFIX[kind]}_unavailable` || r === `${kind}_unavailable`)
-    const held = gate?.state === 'full' || reason?.endsWith('_full')
-    const unreadable = gate?.state === 'unreadable' || fresh === 'unreadable' || reason?.endsWith('_unavailable')
-    const passed = gate?.state === 'ready' || fresh === 'fresh'
+    const candidates = reasons.filter(reason => admissionReason(reason)?.kind === kind)
+    // Keep a reported daily/account cause ahead of the gate's generic full code.
+    const reason = candidates.find(reason => Object.hasOwn(OTHER_REASONS, reason)) ?? candidates[0] ?? (gate?.state === 'full' || report.outcome === 'wait' && kind === kinds[0] ? unspecified : undefined)
+    const words = reason ? admissionReason(reason) : undefined
+    const held = gate?.state === 'full' || words?.state === 'held'
+    const unreadable = gate?.state === 'unreadable' || fresh === 'unreadable' || words?.state === 'unreadable'
+    const passed = !reason && (gate?.state === 'ready' || fresh === 'fresh')
     return { kind, label: LABEL[kind], state: held ? 'held' : unreadable ? 'unreadable' : passed ? 'passed' : 'unknown',
-      detail: held ? `${LABEL[kind]} held it: ${reason ?? 'full in the admission report'}` : unreadable ? `${LABEL[kind]} couldn't be read at that start` : passed ? LABEL[kind] : `${LABEL[kind]}: evidence unknown` }
+      detail: held ? `${LABEL[kind]} held it: ${words?.text ?? (reason ? 'a check said no' : FULL[kind])}` : unreadable ? `${LABEL[kind]} couldn't be read at that start` : passed ? LABEL[kind] : `${LABEL[kind]}: ${words?.text ?? (reason ? 'a check said no' : 'evidence unknown')}`,
+      ...(reason ? { reason } : {}) }
   })
   const sessionAt = Date.parse(input.sessionStarted ?? ''), stale = at < sessionAt || input.now - at > 24 * 60 * 60_000 || report.gate_freshness.some(g => g.freshness === 'stale')
   if (stale) return { caption: `Last start: ${new Date(at).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}, ${time(at)} · may be out of date`, tone: 'stale', rows, note: '' }

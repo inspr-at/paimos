@@ -153,7 +153,7 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
         <button v-if="history.tone === 'unreadable' && !history.rows.length" type="button" class="btn sm ghost" @click="leads.load(projectId)">Try again</button>
         <p v-if="history.note" class="small">{{ history.note }}</p>
         <ul v-if="history.rows.length" class="checks">
-          <li v-for="row in history.rows" :key="row.kind" :class="{ 'bad-row': row.state === 'held' || row.state === 'unreadable' }" :data-check="row.kind">
+          <li v-for="row in history.rows" :key="row.kind" :class="{ 'bad-row': row.state === 'held' || row.state === 'unreadable' }" :data-check="row.kind" :data-tip="row.reason" :tabindex="row.reason ? 0 : undefined">
             <AppIcon :name="row.state === 'passed' ? 'check' : row.state === 'held' ? 'pause' : row.state === 'unreadable' ? 'alert' : 'clock'" :size="14" /><span>{{ row.detail }}</span>
           </li>
         </ul>

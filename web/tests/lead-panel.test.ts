@@ -55,6 +55,8 @@ test('AEON-1212: admission uses four real gates and a timestamp; no report, unre
   const unknown = report({ outcome: 'wait', reason_codes: ['future_check'], request: { stage: 'admission', outcome: 'wait', reason_codes: ['future_check'], attempt: 1, gates: [{ kind: 'dial', state: 'full' }] } })
   assert.equal(admissionHistory([unknown], read).rows[0]?.detail, 'Dial held it: a check said no')
   assert.equal(admissionHistory([unknown], read).rows[0]?.reason, 'future_check')
+  const daily = admissionHistory([report({ reason_codes: ['account_room_full'], request: { stage: 'admission', outcome: 'wait', reason_codes: ['daily_limit'], attempt: 1 } })], read)
+  assert.equal(daily.rows.find(row => row.kind === 'account_room')?.detail, 'Account room held it: the daily cap was reached')
   const unknownWithoutGate = admissionHistory([report({ outcome: 'wait', reason_codes: ['future_check'] })], read)
   assert.equal(unknownWithoutGate.rows[0]?.detail, 'Dial: a check said no')
   assert.doesNotMatch(unknownWithoutGate.caption, /All passed/)
