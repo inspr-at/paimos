@@ -552,7 +552,7 @@ watch(() => scope.owner.value, owner => { matrix.value = null; set.value = new S
   .cell .cl { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--ink-2); text-align: left; }
   .scroll-hint { display: none; }
 }
-@media (pointer: coarse) {
+@media (max-width: 720px), (pointer: coarse) {
   /* Links inside sentences keep the line height and still give a 44 px target (design §touch). */
   .link-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 8px; margin: -12px -8px; vertical-align: middle; }
   .nt-r .seg button, .add { min-height: 44px; }
