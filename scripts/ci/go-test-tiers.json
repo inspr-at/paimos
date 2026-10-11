@@ -574,6 +574,10 @@
     ,
     {"kind":"go","package":"internal/accountuse","name":"TestAccountUseLegacyEntryGuardEmptyAndPopulatedPools","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/accountuse","name":"TestAccountUseReportsAwaitingAccountsAndWaitingProjects","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/accountuse","name":"TestAccountUseRuleSaveKeepsTheRulesItDoesNotName","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/accountuse","name":"TestAccountUseSelectionCallSiteGuard","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/accountuse","name":"TestAccountUseSwitchChangesAreAuditedWithPersistedValues","tier":"ESSENTIAL"}
