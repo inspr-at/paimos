@@ -13,6 +13,8 @@ export interface SettingsMenuItem {
   separated?: boolean
   /** Choices under this item (Hold: for 2 hours, until tomorrow, …); the item itself only heads them. */
   options?: readonly { id: string; label: string; hint?: string; name?: string }[]
+  /** One of a set of choices that applies at once (New starts, AEON-1174): a radio item, checked when current. */
+  checked?: boolean
 }
 </script>
 <script setup lang="ts">
@@ -28,6 +30,8 @@ const props = withDefaults(defineProps<{
   /** Boundaries of the Settings frame; defaults to the viewport. */
   frame?: HTMLElement | null
   label: string
+  /** A visible title above a menu's items (a choice menu names what it sets). */
+  heading?: string
   mode?: 'menu' | 'form' | 'confirmation'
   items?: readonly SettingsMenuItem[]
   confirmation?: SettingsMenuItem['confirmation']
@@ -191,7 +195,7 @@ function keys(event: KeyboardEvent) {
   if (props.mode === 'form' && event.key === 'Enter' && event.target instanceof HTMLInputElement) { event.preventDefault(); return }
   if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || role.value !== 'menu') return
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
-  const items = [...panel.value.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')]
+  const items = [...panel.value.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled), [role="menuitemradio"]:not(:disabled)')]
   if (!items.length) return
   event.preventDefault(); event.stopImmediatePropagation()
   const index = items.indexOf(document.activeElement as HTMLButtonElement)
@@ -239,9 +243,11 @@ onBeforeUnmount(() => { stageObserver?.disconnect(); cleanup() })
   <Teleport to="body">
     <div v-if="open" ref="panel" class="popover" :class="{ 'opens-up': opensUp, staged: mode === 'form' || confirming, 'content-scrolls': contentScrolls }" :role="role" :aria-label="confirming ? confirmation?.title ?? label : label" :aria-busy="busy || undefined" tabindex="-1" :style="{ ...position, visibility: placed ? 'visible' : 'hidden' }">
       <template v-if="mode === 'menu' && !confirming">
+        <h3 v-if="heading" class="mh">{{ heading }}</h3>
         <template v-for="item in items" :key="item.id">
           <span v-if="item.separated" class="sep" role="separator" />
           <div v-if="item.options" class="mi group" role="group" :aria-label="item.label"><AppIcon :name="item.icon ?? 'more'" /><span class="t">{{ item.label }}</span><span v-if="item.detail" class="d">{{ item.detail }}</span><span class="opts"><button v-for="option in item.options" :key="option.id" type="button" role="menuitem" :aria-label="option.name ?? option.label" :disabled="item.disabled" @click="chooseOption(item, option.id)"><span>{{ option.label }}</span><span class="hint">{{ option.hint }}</span></button></span></div>
+          <button v-else-if="item.checked !== undefined" type="button" class="mi radio" role="menuitemradio" :aria-checked="item.checked" :data-autofocus="item.checked || undefined" :disabled="item.disabled" @click="choose(item)"><span class="r" aria-hidden="true" /><span class="t">{{ item.label }}</span><span v-if="item.detail" class="d">{{ item.detail }}</span></button>
           <button v-else type="button" class="mi" :class="{ danger: item.confirmation }" role="menuitem" :disabled="item.disabled" @click="choose(item)"><AppIcon :name="item.icon ?? 'more'" /><span class="t">{{ item.label }}</span><span v-if="item.detail" class="d">{{ item.detail }}</span></button>
         </template>
       </template>
@@ -271,6 +277,10 @@ onBeforeUnmount(() => { stageObserver?.disconnect(); cleanup() })
 .t { font-size: 13.5px; font-weight: 600; }.d { font-size: 12px; line-height: 1.4; color: var(--ink-3); }.danger .t, .danger svg { color: var(--danger); }
 .mi:disabled .t, .mi:disabled svg { color: var(--ink-3); }
 .sep { display: block; height: 1px; margin: 4px 8px; background: var(--line); }
+.mh { padding: 8px 10px 4px; font-size: 13px; overflow-wrap: anywhere; }
+.radio[aria-checked="true"] { background: var(--row-selected); }
+.radio .r { grid-row: span 2; width: 14px; height: 14px; margin: 3px 0 0 3px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--line-2); }
+.radio[aria-checked="true"] .r { box-shadow: inset 0 0 0 4px var(--teal); }
 .opts { grid-column: 1 / -1; display: grid; gap: 1px; margin: 6px -4px 0 26px; }
 .opts button { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 550; text-align: left; }
 .opts button:hover:not(:disabled), .opts button:focus-visible { background: var(--row-hover); outline: none; }

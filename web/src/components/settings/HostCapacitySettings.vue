@@ -1,20 +1,21 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+// The computer panel's New starts (titled "Capacity and load" before AEON-1174): open by
+// default, the full editor behind the chip on each Computers row. Both use the same write.
 import { computed, ref, watch } from 'vue'
-import { api } from '../../lib/api'
 import type { PairingView } from '../../lib/agentPairing'
-import { defaultHostPolicy, hostCapacityReason, validHostPolicy, type HostCapacityPolicy } from '../../lib/hostCapacity'
+import { defaultHostPolicy, hostCapacityReason, HostCapacityWriteError, saveHostPolicy, validHostPolicy, type HostCapacityPolicy } from '../../lib/hostCapacity'
 import { settingsSubmitKey } from '../../lib/settingsOverlays'
 import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 const props = defineProps<{ computer: PairingView; manage: boolean; ownerKey: string }>()
 const emit = defineEmits<{ saved: [] }>()
-const expanded = ref(false), busy = ref(false), message = ref('')
+const expanded = ref(true), busy = ref(false), message = ref('')
 const draft = ref<HostCapacityPolicy>(defaultHostPolicy())
 const revision = ref(0)
 const key = computed(() => `${props.ownerKey}/${props.computer.computer_id}`)
-watch(key, () => { draft.value = { ...(props.computer.host_capacity?.policy ?? defaultHostPolicy()) }; revision.value = props.computer.revision ?? 0; expanded.value = false; message.value = ''; busy.value = false }, { immediate: true })
+watch(key, () => { draft.value = { ...(props.computer.host_capacity?.policy ?? defaultHostPolicy()) }; revision.value = props.computer.revision ?? 0; expanded.value = true; message.value = ''; busy.value = false }, { immediate: true })
 const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(props.computer.host_capacity?.policy ?? defaultHostPolicy()))
 watch(() => props.computer.revision, () => { if (!dirty.value && !busy.value) { draft.value = { ...(props.computer.host_capacity?.policy ?? defaultHostPolicy()) }; revision.value = props.computer.revision ?? 0 } })
 const summary = computed(() => {
@@ -24,18 +25,19 @@ const summary = computed(() => {
   return `${v.policy.mode === 'fixed' ? `Fixed limit ${v.policy.maximum_load}` : v.policy.mode === 'smart' ? 'Smart' : 'Off'}${v.reason ? ` · waiting: ${hostCapacityReason(v.reason)}` : ' · new starts allowed'}`
 })
 async function save() {
-  if (!props.manage || busy.value || !dirty.value || !validHostPolicy(draft.value) || !revision.value) return
-  const owner = key.value, computer = props.computer.computer_id, reviewed = revision.value, policy = { ...draft.value }
+  const computer = props.computer.computer_id
+  if (!props.manage || busy.value || !dirty.value || !validHostPolicy(draft.value) || !revision.value || !computer) return
+  const owner = key.value, reviewed = revision.value, policy = { ...draft.value }
   busy.value = true; message.value = ''
   try {
-    const response = await api(`/agent-pairing/computers/${computer}/capacity`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: reviewed, policy }) })
-    if (!response.ok) throw new Error(response.status === 409 ? 'Computer changed. Reopen its settings before applying.' : 'Capacity settings could not be saved.')
+    const saved = await saveHostPolicy(computer, { expected_revision: reviewed, policy })
     if (key.value !== owner) return
-    const body = await response.json()
+    draft.value = { ...saved }; message.value = 'All changes saved'; toast('New starts saved. Running agents keep working.'); emit('saved')
+  } catch (error) {
     if (key.value !== owner) return
-    if (!body?.policy || !validHostPolicy(body.policy)) throw new Error('Saved settings could not be confirmed. Refresh the computer.')
-    draft.value = { ...body.policy }; message.value = 'All changes saved'; toast('Capacity settings saved. Running agents keep working.'); emit('saved')
-  } catch (error) { if (key.value === owner) message.value = error instanceof Error ? error.message : 'Capacity settings could not be saved.' }
+    const status = error instanceof HostCapacityWriteError ? error.status : -1
+    message.value = status === 409 ? 'Computer changed. Reopen its settings before applying.' : status === 0 ? 'Saved settings could not be confirmed. Refresh the computer.' : 'New starts could not be saved.'
+  }
   finally { if (key.value === owner) busy.value = false }
 }
 function keys(event: KeyboardEvent) {
@@ -52,8 +54,8 @@ function modeKeys(event: KeyboardEvent) {
 }
 </script>
 <template>
-  <section class="capacity-settings" aria-label="Capacity and load" @keydown="keys">
-    <button class="disclosure" type="button" :aria-expanded="expanded" aria-controls="host-capacity-form" @click="expanded = !expanded"><AppIcon name="chevron-right" :class="{ opened: expanded }" /><b>Capacity and load</b><span>{{ summary }}</span></button>
+  <section class="capacity-settings" aria-label="New starts" @keydown="keys">
+    <button class="disclosure" type="button" :aria-expanded="expanded" aria-controls="host-capacity-form" @click="expanded = !expanded"><AppIcon name="chevron-right" :class="{ opened: expanded }" /><b>New starts</b><span>{{ summary }}</span></button>
     <div v-if="expanded" id="host-capacity-form" class="cap-body">
       <template v-if="manage && computer.computer_state === 'connected'">
         <div class="cap-row">

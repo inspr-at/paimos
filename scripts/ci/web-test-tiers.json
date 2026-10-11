@@ -1062,6 +1062,8 @@
     ,
     "browser:tests/settings-accounts.spec.ts:old windows set by hand show as Set by you with Remove, and never repeat"
     ,
+    "browser:tests/settings-computers-table.spec.ts:evidence: the Computers part at 1440 and 390, light and dark"
+    ,
     "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 dark"
@@ -12044,6 +12046,22 @@
     ,
     {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"stored agent settings stay together; bounds, failures, Undo and Models link stay honest","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/settings-computers-table.spec.ts","name":"a changed computer: the chip says so and saves nothing; Undo never overwrites a newer change","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-computers-table.spec.ts","name":"an expired sign-in says Expired in its cell and Needs you verifies it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-computers-table.spec.ts","name":"evidence: the Computers part at 1440 and 390, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-computers-table.spec.ts","name":"on a phone › each computer is a stack of rows, nothing scrolls sideways, targets are 44 px and the chip moves nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-computers-table.spec.ts","name":"one table: a row per computer, a column per account; every cell and list action of the old grid and list is reachable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-computers-table.spec.ts","name":"past six accounts the computer column stays in view while the table scrolls sideways","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-computers-table.spec.ts","name":"the New starts chip saves the mode with every other field kept, without moving anything, and Undo restores it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-computers-table.spec.ts","name":"without management the chip only reads, and cells still open the computer","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"Needs you verifies the expired sign-in once and reports a failed request honestly","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"a matching login joins the shared quota from the account panel and Sign out everywhere covers it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -15751,6 +15769,28 @@
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"waits from the server routing > the only account busy is \"0 of 1 ready\", and a warning elsewhere still warns","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"words > caption, pacing summary and middle ellipsis","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"a cell says the sign-in in one word > Expired stays Expired on an offline computer: it still needs verifying","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"a cell says the sign-in in one word > Offline, Draining and Blocked say why in the tip","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"a cell says the sign-in in one word > Ready only for a reported, connected, verified sign-in","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"a cell says the sign-in in one word > a check under way or a missing report is never called Ready","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the New starts chip writes only the mode > is a control only for the owner with management on a connected computer","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the New starts chip writes only the mode > names only the waits this computer has switched on","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the New starts chip writes only the mode > sends the full policy as last reported, with only the mode changed, at the reviewed revision","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the New starts chip writes only the mode > uses the same PUT as the panel and reports a conflict or an unconfirmed answer honestly","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the New starts chip writes only the mode > writes nothing for the mode already set, without a reported policy, or without a revision","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the computer cell and the column heads > says agents running, why new starts wait, or when it was last seen","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computers-table.unit.test.ts","name":"the computer cell and the column heads > shortens an address to its name; a plain name stays whole","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/crm-undo-receipt.unit.test.ts","name":"S9-002: a save receipt keeps event 10 when event 11 arrives before Undo","tier":"NIGHTLY"}
     ,
