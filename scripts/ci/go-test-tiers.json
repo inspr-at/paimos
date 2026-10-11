@@ -1888,6 +1888,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineContinuationRetainsOriginalCheckout","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRoutineCooperativeStopExactIdentityAndUncertainReplay","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineDispatchIsolatesFailedHarnessProbe","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRoutineProviderBudgetBeforeCallsAndSettlement","tier":"ESSENTIAL"}
@@ -8292,6 +8294,8 @@
     ,
     {"kind":"go","package":"internal/profile","name":"TestCompressedImageBombs","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/profile","name":"TestDefaultPaceIsBoundedAndUndoable","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/profile","name":"TestImageAdmissionRejectsCanceledAndInvalid","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/profile","name":"TestImageAdmissionReleasedOnErrors","tier":"GATED-FULL"}
@@ -8303,6 +8307,8 @@
     {"kind":"go","package":"internal/profile","name":"TestJPEGEXIFOrientation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/profile","name":"TestManifest","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/profile","name":"TestProfilePatchGuardedByExpectedRevision","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/profile","name":"TestProfileTenantUniquenessAvatarAndUndo","tier":"ESSENTIAL"}
     ,
@@ -8937,6 +8943,8 @@
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineDispatchReservedAccountAdmission","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineQueueWaitsDoNotBlockLaterWork","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineRecoveryRevocationReceiptsAndPendingNotice","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineReviewFixLineageAndFiniteEscalation","tier":"ESSENTIAL"}
     ,
