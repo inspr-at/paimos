@@ -482,7 +482,7 @@ func TestCatalogDefaultFollowsDispatchLatestVersion(t *testing.T) {
 	seed(func(tx pgx.Tx) error {
 		for i, model := range models {
 			if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier)
-			 VALUES($1,$2,'1','codex','openai',$3,'xhigh','frontier') RETURNING id::text`, admin.TenantID, "codex-"+model+"-xhigh", model).Scan(&ids[i]); err != nil {
+			 VALUES($1,$2,'1','codex','openai',$3,'xhigh','frontier') RETURNING id::text`, admin.TenantID, "codex-"+strings.ReplaceAll(model, ".", "-")+"-xhigh", model).Scan(&ids[i]); err != nil {
 				return err
 			}
 		}
