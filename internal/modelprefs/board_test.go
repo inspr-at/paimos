@@ -293,7 +293,7 @@ func TestModelsV2RowOwnershipAndSituations(t *testing.T) {
 		situation string
 		level     int
 	}{
-		{"row", BoardQuery{Column: "backend"}, []string{"anthropic:opus", "openai:sol"}, "first", 3},
+		{"row", BoardQuery{Column: "backend"}, []string{"anthropic:opus", "openai:sol", "openai:astra"}, "first", 3},
 		{"small", BoardQuery{Column: "backend", EstimateHours: 2}, []string{"anthropic:sonnet", "openai:astra"}, ModelsSmallSituation, 3},
 		{"fix", BoardQuery{Column: "backend", FixRound: 1}, []string{"openai:astra"}, "fix", 3},
 		{"stuck", BoardQuery{Column: "backend", FixRound: 4}, []string{"anthropic:fable"}, "stuck", 3},

@@ -18,13 +18,20 @@ import (
 // resolveDailyWork admits each route inside the Models walk before moving to
 // the next model. Reservation rechecks owner policy under its write fence.
 func resolveDailyWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time) (WorkResolution, error) {
-	return resolveWorkWithCatalog(ctx, tx, p, q, now, nil)
+	return resolveDailyWith(ctx, tx, p, q, now, func(query WorkQuery) (WorkResolution, error) {
+		return resolveWorkWithCatalog(ctx, tx, p, query, now, nil)
+	})
 }
 
 func resolveDailyWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, resolve func(WorkQuery) (WorkResolution, error)) (WorkResolution, error) {
 	out, err := resolve(q)
 	if err != nil {
 		return out, err
+	}
+	// Models already checked each account owner's daily plan route by route.
+	// The legacy wrapper remains only until saved ladders migrate in S2.
+	if out.Trace.PreferenceOf != nil {
+		return out, nil
 	}
 	person := q.PersonID
 	if out.Trace.PersonID != nil {
@@ -188,9 +195,13 @@ type modelsDailyAdmission struct {
 	principal tenant.Principal
 	snapshots map[string]agentplan.Snapshot
 	unknown   map[string]bool
+	wait      bool
+	blocked   string
 }
 
 func (d *modelsDailyAdmission) filter(ctx context.Context, tx pgx.Tx, profile Profile, ids []string, now time.Time) ([]string, string, error) {
+	d.wait = false
+	d.blocked = ""
 	if len(ids) == 0 {
 		return ids, "", nil
 	}
@@ -279,7 +290,13 @@ func (d *modelsDailyAdmission) filter(ctx context.Context, tx pgx.Tx, profile Pr
 			kept = append(kept, a.id)
 			continue
 		}
+		// Until S2 carries saved Wait settings into order ends, exhaust this
+		// model's sibling routes but do not advance to another model at a cap.
+		if reason == "daily_limit" && snapshot.Daily[profile.Harness].AtLimit == "wait" {
+			d.wait = true
+		}
 		if firstCause == "" {
+			d.blocked = reason
 			wait := &agentaccounts.CapacityWait{Code: reason}
 			if reason == "daily_limit" {
 				wait.Until = &snapshot.DailyUntil

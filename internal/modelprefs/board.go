@@ -293,6 +293,9 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 	}
 	appendSteps(d.Rank, d.Effort, d.EffortLevel, order.Efforts, "column")
 	end := "wait"
+	if column != "other" {
+		end = "default"
+	}
 	if found && order.End != "" {
 		end = order.End
 	} else if hasExact && q.Situation != "first" {
@@ -304,6 +307,9 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 	if end == "row" && hasExact && !review {
 		appendSteps(row.Rank, row.Effort, row.EffortLevel, rowOrder.Efforts, "column")
 		end = rowOrder.End
+		if end == "" && column != "other" {
+			end = "default"
+		}
 	}
 	if end == "auto" && review {
 		d.Automatic = true

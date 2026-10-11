@@ -24,6 +24,16 @@ type preferenceOwner struct {
 	Source string  `json:"source"`
 }
 
+// Preserve saved ladders until S2 migrates them. Merely opening Models creates
+// a revision-zero profile and must not adopt a different routing policy.
+func boardDispatchAdopted(s modelprefs.BoardState) bool {
+	return len(s.Orders) > 0 || len(s.Rules) > 0 || s.Workspace.Revision > 0 || s.Person != nil && s.Person.Revision > 0
+}
+
+func boardInitialized(s modelprefs.BoardState) bool {
+	return s.Workspace.ID != "" || s.Person != nil && s.Person.ID != ""
+}
+
 func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, excluded []string) (*WorkResolution, error) {
 	// Bound account/window fan-out before any availability projection.
 	var large bool
@@ -61,6 +71,9 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	}
 	if q.WorkspaceOnly {
 		s.Person = nil
+	}
+	if !boardDispatchAdopted(s) && !(q.ExplicitBoard && boardInitialized(s)) {
+		return nil, nil
 	}
 	c, err := loadBoardCatalog(ctx, tx)
 	if err != nil {
@@ -131,6 +144,8 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	}
 	daily := modelsDailyAdmission{principal: p, snapshots: map[string]agentplan.Snapshot{}, unknown: map[string]bool{}}
 	seen := map[string]bool{}
+	admissionWait := false
+	waitCode := ""
 	for _, order := range d.Steps {
 		key := order.Line
 		if order.Stage == "quick" {
@@ -145,13 +160,20 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			d.Held = append(d.Held, modelprefs.HeldLine{Line: order.Line, Reason: "no registered route for this line"})
 			continue
 		}
+		if waitCode != "" {
+			out.Trace.Blocked = waitCode
+			break
+		}
 		firstCause := ""
+		dailyWait := ""
 		for _, profile := range profiles {
 			step, err := preferenceStep(ctx, tx, profile, roleName)
 			if err != nil {
 				return nil, err
 			}
 			reasons := skipReasons(step, role, resolveQuery{Role: roleName, AuthorFamily: q.AuthorFamily, Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, health)
+			availabilityReasons := len(reasons)
+			policyAllowed := len(skipReasons(step, role, resolveQuery{Role: roleName, AuthorFamily: q.AuthorFamily, Harness: q.Harness, OffHarnesses: q.OffHarnesses}, now, nil)) == 0
 			if order.Stage == "quick" && profile.Tier != "fast" {
 				reasons = append(reasons, "Quick jobs requires fast tier")
 			}
@@ -180,6 +202,9 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			if slices.Contains(excluded, profile.ID) || excludedIdentity[profile.Harness+":"+profile.Model+":"+profile.Effort] {
 				reasons = append(reasons, "already attempted")
 			}
+			if q.Escalation && policyAllowed && len(reasons) == availabilityReasons {
+				admissionWait = true
+			}
 			ids := []string{}
 			if len(reasons) == 0 {
 				if review {
@@ -207,6 +232,9 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				}
 				if cause != "" {
 					reasons = append(reasons, cause)
+					if daily.wait || q.Harness != "" {
+						dailyWait = daily.blocked
+					}
 				}
 			}
 			if len(reasons) == 0 && len(ids) == 0 {
@@ -239,6 +267,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			break
 		}
 		d.Held = append(d.Held, modelprefs.HeldLine{Line: order.Line, Reason: firstCause})
+		waitCode = dailyWait
 	}
 	out.Trace.PreferenceOf = &preferenceOwner{d.PreferenceOf.Person, d.PreferenceOf.Source}
 	out.Trace.Column, out.Trace.Situation, out.Trace.CardIndex, out.Trace.Lock, out.Trace.Held = d.Column, d.Situation, d.CardIndex, d.Lock, d.Held
@@ -260,9 +289,19 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			return nil, err
 		}
 	} else {
-		out.Trace.Blocked = "no model in the ranked order can run now"
-		if len(d.Held) > 0 {
-			out.Trace.Blocked = d.Held[0].Reason
+		if out.Trace.Blocked == "" {
+			out.Trace.Blocked = "no model in the ranked order can run now"
+			if len(d.Held) > 0 {
+				out.Trace.Blocked = d.Held[0].Reason
+			}
+		}
+		if roleName == "review-gate-security" {
+			out.Trace.Blocked = "no qualified security review profile/account"
+			out.Trace.Hard = []string{"security_review"}
+		}
+		if q.Escalation && admissionWait {
+			out.Trace.Blocked = "admission_wait"
+			out.OwnerRequired = false
 		}
 	}
 	return &out, nil

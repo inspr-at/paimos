@@ -13,7 +13,6 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
-	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 // Resolution is the role choice exposed by GET /api/models/resolve.
@@ -81,9 +80,53 @@ func resolveRoleWithCatalog(ctx context.Context, tx pgx.Tx, q resolveQuery, now 
 	if err != nil {
 		return Resolution{}, err
 	}
-	p, _ := tenant.PrincipalFrom(ctx)
-	out, err := resolveWorkWithCatalog(ctx, tx, p, WorkQuery{Role: q.Role, AuthorFamily: q.AuthorFamily, Harness: q.Harness, ProjectID: q.ProjectID, OffHarnesses: q.OffHarnesses, Area: "other", Situation: "first"}, now, catalog)
-	return out.Resolution, err
+	role, _ := roleByName(q.Role)
+	steps, err := catalog.ladder(ctx, tx, q.Role)
+	if err != nil {
+		return Resolution{}, err
+	}
+	if q.Harness != "" && !ladderHasHarness(steps, q.Harness) {
+		return Resolution{}, fail(http.StatusBadRequest, "role and harness combination is unsupported")
+	}
+	health, err := agentaccounts.HarnessHealthAt(ctx, tx, now, q.ProjectID)
+	if err != nil {
+		return Resolution{}, err
+	}
+	out := Resolution{Role: q.Role, AuthorFamily: q.AuthorFamily, Ladder: []Candidate{}, Source: "aeon"}
+	for _, step := range steps {
+		reasons := skipReasons(step, role, q, now, health)
+		// Retain catalog-only previews until a harness has an account pool.
+		// Enrolled pools use the board's exact allowance, project and capacity
+		// check, rather than accepting any healthy account of this harness.
+		if len(reasons) == 0 && health[step.Profile.Harness].Accounts > 0 {
+			ids, err := agentaccounts.QualifyingAccountIDs(ctx, tx, step.ProfileID, step.Profile.Harness, q.ProjectID, "any", now)
+			if err != nil {
+				return Resolution{}, err
+			}
+			if len(ids) == 0 {
+				reasons = append(reasons, "no qualified account with available capacity")
+			}
+		}
+		candidate := Candidate{ProfileID: step.ProfileID, SkipReasons: reasons}
+		if len(reasons) == 0 && out.Profile == nil {
+			profile := step.Profile
+			candidate.Selected = true
+			out.Profile = &profile
+			command, err := commandTemplate(profile.Harness, profile.Model, profile.Effort, role.readOnly)
+			if err != nil {
+				return Resolution{}, fail(http.StatusBadRequest, "profile has no command template")
+			}
+			out.Preview = health[profile.Harness].Accounts == 0
+			if !out.Preview {
+				out.CommandTemplate = command
+			}
+		}
+		out.Ladder = append(out.Ladder, candidate)
+	}
+	if out.Profile == nil && role.cross {
+		out.OwnerRequired = true
+	}
+	return out, nil
 }
 
 func loadLadder(ctx context.Context, tx pgx.Tx, role string) ([]ladderStep, error) {
