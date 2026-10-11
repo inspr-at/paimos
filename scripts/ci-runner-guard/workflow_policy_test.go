@@ -178,7 +178,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		}
 	}
 
-	for _, id := range []string{"go-test", "go-timing", "go-static", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run", "go", "web", "release-check", "e2e", "tier-measurements"} {
+	for _, id := range []string{"go-test", "go-timing", "go-static", "web-catalogue", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run", "go", "web", "release-check", "e2e", "tier-measurements"} {
 		add("raw-lane-consumer/"+id, "ci.yml", "effective tier-plan lane", func(w map[string]any) {
 			job := mapping(mapping(w["jobs"])[id])
 			if condition, ok := job["if"].(string); ok && strings.Contains(condition, "needs.tier-plan.outputs.lane") {
@@ -214,7 +214,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	}
 	// All contexts and supporting job identities are reserved, even on a
 	// path-filtered workflow, and even when a different id sets a reserved name.
-	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-setup", "web-unit", "web-shard", "e2e-run", "release-check-run", "cross-family", "gate/cross-family"} {
+	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-catalogue", "web-setup", "web-unit", "web-shard", "e2e-run", "release-check-run", "cross-family", "gate/cross-family"} {
 		for _, identity := range []string{id, strings.ToUpper(id)} {
 			add("reserved-id/"+identity, "extra.yaml", "reserved to ci.yml", func(w map[string]any) {
 				w["jobs"] = map[string]any{identity: map[string]any{"runs-on": "ubuntu-latest"}}
@@ -356,7 +356,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	add("non-pr-shared-group", "ci.yml", "reviewed concurrency policy", func(w map[string]any) {
 		mapping(w["concurrency"])["group"] = "ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}"
 	})
-	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-setup", "web-unit", "web-shard", "e2e-run", "release-check-run", "migration-compat"} {
+	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-catalogue", "web-setup", "web-unit", "web-shard", "e2e-run", "release-check-run", "migration-compat"} {
 		for _, rename := range []bool{false, true} {
 			add(fmt.Sprintf("missing-or-renamed/%s/%t", id, rename), "ci.yml", "is missing", func(w map[string]any) {
 				jobs := mapping(w["jobs"])
@@ -405,7 +405,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		mapping(mapping(mapping(mapping(w["jobs"])["web-shard"])["strategy"])["matrix"])["shard"] = []any{1}
 	})
 	add("web-units-omitted-from-aggregate", "ci.yml", "web must gate setup, every unit shard", func(w map[string]any) {
-		mapping(mapping(w["jobs"])["web"])["needs"] = []any{"ci-plan", "web-setup", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}
+		mapping(mapping(w["jobs"])["web"])["needs"] = []any{"ci-plan", "web-catalogue", "web-setup", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}
 	})
 	for _, mutate := range []string{"matrix", "fail-fast", "continue-on-error"} {
 		add("web-unit-weakened/"+mutate, "ci.yml", "four blocking shards", func(w map[string]any) {
@@ -636,7 +636,7 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 	if checkout["fetch-depth"] != "${{ github.event_name == 'pull_request' && '0' || '1' }}" || checkout["persist-credentials"] != false {
 		t.Fatal("classifier checkout must keep PR-only history and no persisted credentials")
 	}
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-catalogue", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
 		steps := mapping(jobs[id])["steps"].([]any)
 		if depth := mapping(mapping(steps[0])["with"])["fetch-depth"]; depth != nil {
 			t.Fatalf("%s heavy checkout must retain shallow history; got %v", id, depth)
@@ -700,7 +700,7 @@ func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
 	if mapping(mapping(jobs["tier-plan"])["outputs"])["layout"] != "${{ steps.tiers.outputs.layout }}" {
 		t.Fatal("tier-plan must publish the layout output")
 	}
-	for id, static := range map[string]bool{"go-test": true, "go-timing": true, "web-shard": true, "e2e-run": true, "go-static": false, "web-setup": false, "web-unit": false, "release-check-run": false} {
+	for id, static := range map[string]bool{"go-test": true, "go-timing": true, "web-shard": true, "e2e-run": true, "go-static": false, "web-catalogue": false, "web-setup": false, "web-unit": false, "release-check-run": false} {
 		condition, _ := mapping(jobs[id])["if"].(string)
 		if strings.Contains(condition, "needs.tier-plan.outputs.layout != 'static'") != static {
 			t.Fatalf("%s static-layout gate = %v, want %v", id, !static, static)
@@ -726,8 +726,8 @@ func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
 			rejected: []map[string]string{{"GO_TEST": "success"}, {"GO_TEST": "failure"}, {"GO_TIMING": "success"}, {"GO_STATIC": "skipped"}, {"GO_STATIC": "failure"}, {"GITHUB_EVENT_NAME": "merge_group"}, {"GITHUB_EVENT_NAME": "push"}, {"CI_LANE": "spec-only"}, {"TIER_LAYOUT": "bogus"}, {"TIER_LAYOUT": ""}, {"TIER_PLAN": "failure"}},
 		},
 		"web": {
-			accepted: map[string]string{"WEB_SETUP": "success", "WEB_UNIT": "success", "WEB_SHARD": "skipped"},
-			rejected: []map[string]string{{"WEB_SHARD": "success"}, {"WEB_SHARD": "failure"}, {"WEB_UNIT": "skipped"}, {"WEB_UNIT": "failure"}, {"WEB_SETUP": "skipped"}, {"GITHUB_EVENT_NAME": "merge_group"}, {"TIER_LAYOUT": "bogus"}, {"TIER_LAYOUT": ""}},
+			accepted: map[string]string{"WEB_CATALOGUE": "success", "WEB_SETUP": "success", "WEB_UNIT": "success", "WEB_SHARD": "skipped"},
+			rejected: []map[string]string{{"WEB_CATALOGUE": "failure"}, {"WEB_CATALOGUE": "cancelled"}, {"WEB_CATALOGUE": "skipped"}, {"WEB_CATALOGUE": ""}, {"WEB_SHARD": "success"}, {"WEB_SHARD": "failure"}, {"WEB_UNIT": "skipped"}, {"WEB_UNIT": "failure"}, {"WEB_SETUP": "skipped"}, {"GITHUB_EVENT_NAME": "merge_group"}, {"TIER_LAYOUT": "bogus"}, {"TIER_LAYOUT": ""}},
 		},
 		"e2e": {
 			accepted: map[string]string{"CHECK_RESULT": "skipped"},

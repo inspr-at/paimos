@@ -385,7 +385,7 @@ function evaluate(expression, context) {
 }
 
 test('effective lane precedence and real workflow execution agree for all 90 flag/event/lane/mode combinations', () => {
-  const heavy = ['go-test', 'go-static', 'go-timing', 'web-setup', 'web-unit', 'web-shard', 'e2e-run', 'release-check-run'];
+  const heavy = ['go-test', 'go-static', 'go-timing', 'web-catalogue', 'web-setup', 'web-unit', 'web-shard', 'e2e-run', 'release-check-run'];
   const summary = join(mkdtempSync(join(tmpdir(), 'aeon-effective-lanes-')), 'summary');
   let combinations = 0;
   for (const flag of ['on', 'off']) for (const event of ['pull_request', 'merge_group', 'push'])
@@ -438,6 +438,13 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
         const run = gate.split('        run: |\n')[1].split('\n      - ')[0].replace(/^          /gm, '');
         const result = spawnSync('bash', ['-c', run], {env, encoding: 'utf8', timeout: 10_000});
         assert.equal(result.status, 0, `${label}/${id}: ${result.stderr}`);
+        // Risk: healthy runtime/shards could hide failed or omitted discovery.
+        // Execute the actual gate with every other dependency still healthy.
+        if (id === 'web') for (const catalogue of ['failure', 'cancelled', '', lane === 'docs-only' ? 'success' : 'skipped']) {
+          const failed = spawnSync('bash', ['-c', run], {env: {...env, WEB_CATALOGUE: catalogue}, encoding: 'utf8', timeout: 10_000});
+          assert.notEqual(failed.status, 0, `${label}/web accepted catalogue=${catalogue}`);
+          assert.equal(failed.signal, null, `${label}/web catalogue rejection must not rely on a timeout`);
+        }
         // A full planner cannot accept omitted heavy work through an old exemption.
         if (flag === 'on' && mode === 'full') {
           const resultKey = id === 'go' ? 'GO_TEST' : id === 'web' ? 'WEB_SHARD' : 'CHECK_RESULT';
@@ -502,7 +509,7 @@ test('every CI lane and tier runner consumer uses the single effective publisher
       assert.match(body, /^          AEON_TEST_TIER_LAYOUT: \$\{\{ needs.tier-plan.outputs.layout \}\}$/m, id);
     }
   }
-  assert.deepEqual(consumers, ['go-test', 'go-timing', 'go-static', 'go', 'web-setup', 'web-unit', 'web-shard', 'web', 'release-check', 'release-check-run', 'e2e', 'e2e-run', 'tier-measurements']);
+  assert.deepEqual(consumers, ['go-test', 'go-timing', 'go-static', 'go', 'web-catalogue', 'web-setup', 'web-unit', 'web-shard', 'web', 'release-check', 'release-check-run', 'e2e', 'e2e-run', 'tier-measurements']);
   const newSpec = classifyPaths(['web/tests/new-feature.spec.ts']);
   assert.equal(newSpec.lane, 'spec-only');
   assert.equal(effectiveLane(newSpec.lane, {mode: 'full', event: 'pull_request', affectedLane: 'on'}), 'full');
