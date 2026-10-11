@@ -6,11 +6,50 @@ import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockReleases, releaseHistory } from './releases-fixtures'
+import { controlStability } from './control-stability'
 
 const sheet = (page: Page) => page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
 const panel = (page: Page) => sheet(page).getByRole('complementary', { name: 'Ticket details' })
 const chips = (page: Page) => sheet(page).locator('.detail .changes')
 const TITLE = 'Connect Hetzner Cloud for managed provisioning'
+
+test('AEON-1195: focus during ticket lookup keeps the panel controls and resolves the ticket', async ({ page }, info) => {
+  const data = fixtures()
+  data.nodes.find(node => node.key === 'PHAROS-11')!.title = 'Verwaltete Bereitstellung mit Hetzner Cloud zuverlässig verbinden'
+  await mockWork(page, data)
+  const dock = page.getByRole('complementary', { name: 'Ticket details' })
+  for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ colorScheme })
+    let release!: () => void
+    const held = new Promise<void>(done => { release = done })
+    let lookups = 0
+    const holdLookup = async (route: import('@playwright/test').Route) => {
+      lookups++
+      await held
+      await route.fallback()
+    }
+    await page.route('**/api/nodes/lookup**', holdLookup)
+    try {
+      await page.goto('/?peek=PHAROS-11')
+      await expect(dock.getByRole('status', { name: 'Loading ticket' })).toBeVisible()
+      await expect.poll(() => lookups).toBeGreaterThan(0)
+      const before = lookups
+      const guard = await controlStability(page, { close: dock.getByRole('button', { name: 'Close ticket details' }) })
+      await guard.check(async () => {
+        await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+        await expect.poll(() => lookups).toBeGreaterThan(before)
+        await expect(dock.getByRole('status', { name: 'Loading ticket' })).toBeVisible()
+      })
+      release()
+      await expect(dock.getByRole('heading', { name: data.nodes.find(node => node.key === 'PHAROS-11')!.title })).toBeVisible()
+      await expect(dock.getByRole('heading', { name: 'This ticket could not be opened' })).toHaveCount(0)
+      await guard.check(async () => { await page.evaluate(() => window.dispatchEvent(new Event('focus'))) })
+      guard.done()
+      await dock.screenshot({ path: info.outputPath(`aeon-1195-ticket-focus-${width}-${colorScheme}.png`) })
+    } finally { release(); await page.unroute('**/api/nodes/lookup**', holdLookup) }
+  }
+})
 
 // The second release names AEON-74 (no such ticket here) and PHAROS-11 (a ticket here).
 async function open(page: Page, data = fixtures()) {

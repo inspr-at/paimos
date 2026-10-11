@@ -3,9 +3,10 @@ package routineguard
 
 import (
 	"fmt"
-	"path"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/inspr-at/paimos/internal/routineguard/pathpolicy"
 )
 
 type ArtifactChange struct {
@@ -61,15 +62,7 @@ func (d Decision) CanExecute() bool {
 	return d.evaluationBinding != "" && d.evaluationVerified != "" && d.evaluationVerified == Digest(d) && d.Checkpoint == "action" && d.Result == Allow && d.RequiredEvaluation != nil && d.RequiredEvaluation.RuleID == "hard.different_family_v1" && d.RequiredEvaluation.Version == HardVersion && d.RequiredEvaluation.PolicyDigest == d.PolicyDigest && d.RequiredEvaluation.ContextDigest == d.ContextDigest && d.HardVersion == HardVersion
 }
 func validatePath(p string) error {
-	if p == "" || len(p) > MaxPathBytes || !utf8.ValidString(p) || strings.ContainsAny(p, "\\\x00\r\n:%?#") || strings.HasPrefix(p, "/") || path.Clean(p) != p {
-		return fmt.Errorf("guardrail paths must be bounded canonical repository-relative paths")
-	}
-	for _, segment := range strings.Split(p, "/") {
-		if segment == ".." || segment == "." || strings.EqualFold(segment, ".git") {
-			return fmt.Errorf("unsafe guardrail path")
-		}
-	}
-	return nil
+	return pathpolicy.Validate(p)
 }
 func ValidateContext(c Context) error {
 	if (c.Checkpoint != "save" && c.Checkpoint != "action") || len(c.Action) > 80 || len(c.Text) > MaxTextBytes || !utf8.ValidString(c.Text) || c.PayloadBytes < 0 || c.PayloadBytes > MaxTextBytes || len(c.Paths) > MaxPaths || len(c.Artifacts) > MaxPaths {
@@ -113,18 +106,7 @@ func contextPaths(c Context) []string {
 	return out
 }
 func protected(p string) bool {
-	p = strings.ToLower(p)
-	for _, prefix := range []string{"internal/routineguard", "internal/routineactions", "internal/recurrences", "internal/agentd", "internal/auth", "internal/authz", "internal/db/migrations", "api/areas/recurrences.yaml", "scripts/ci", "scripts/ci-static.mjs", "scripts/check-migrations.mjs", "scripts/check-attached-policy-mutations.py", "claudeassets", "internal/recurrences/guardrails.go", "scripts/test-tiers", "scripts/audit", ".github/workflows", ".aeon", ".inspr"} {
-		if p == prefix || strings.HasPrefix(p, prefix+"/") {
-			return true
-		}
-	}
-	for _, segment := range strings.Split(p, "/") {
-		if segment == "agents.md" || segment == "claude.md" || strings.Contains(segment, "guardrail") || strings.Contains(segment, "gate") || strings.Contains(segment, "guard") || segment == "rules" || strings.HasPrefix(segment, "rules.") {
-			return true
-		}
-	}
-	return false
+	return pathpolicy.Protected(p)
 }
 func matches(r Rule, c Context, paths []string) bool {
 	switch r.Method {
