@@ -61,7 +61,8 @@ func removeComputerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, comput
 	}
 	var unsettled bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN agent_pairing_enrollments e ON e.tenant_id=r.tenant_id AND e.account_id=r.account_id
-  WHERE e.computer_id=$1 AND r.status IN ('starting','running','waiting'))`, computer).Scan(&unsettled); err != nil {
+  WHERE e.computer_id=$1 AND (r.status IN ('starting','running','waiting')
+   OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))`, computer).Scan(&unsettled); err != nil {
 		return err
 	}
 	if unsettled {
@@ -108,7 +109,8 @@ func DisconnectAccount(ctx context.Context, tx pgx.Tx, p tenant.Principal, accou
 		return err
 	}
 	var active bool
-	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id=$1 AND status IN ('starting','running','waiting'))`, account).Scan(&active); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id=$1 AND (status IN ('starting','running','waiting')
+  OR trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))`, account).Scan(&active); err != nil {
 		return err
 	}
 	if active {
