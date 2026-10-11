@@ -419,10 +419,10 @@ test('AEON-1219: registry navigation and hints respect menus, fields, IME and na
   await page.keyboard.press('Escape')
   await expect(page).toHaveURL('/agents')
   await expect(row(page, nova)).toBeFocused()
-  // The page's search/layout packages attach later: bare / must not open the
-  // global palette on the Agents list, even before a search handler exists.
+  // P5 attaches the page search: bare / stays with the list, never the palette.
   await page.keyboard.press('/')
   await expect(page.getByRole('dialog', { name: 'Search and commands' })).toHaveCount(0)
+  await expect(page.getByRole('searchbox', { name: 'Search sessions in this list' })).toBeFocused()
   await page.keyboard.press('Control+k')
   const palette = page.getByRole('dialog', { name: 'Search and commands' })
   await expect(palette).toBeVisible()
@@ -439,8 +439,8 @@ test('AEON-1219: registry navigation and hints respect menus, fields, IME and na
   await expect(next).toContainText('J')
   await expect(next).toContainText('Down arrow')
   await expect(sheet.locator('dd', { hasText: /^Decision Desk$/ })).toBeVisible()
-  await expect(sheet.getByText('Search sessions (this list)', { exact: true })).toHaveCount(0)
-  await expect(sheet.locator('dd', { hasText: /^Jump the divider:/ })).toHaveCount(0)
+  await expect(sheet.getByText('Search sessions (this list)', { exact: true })).toBeVisible()
+  await expect(sheet.locator('dd', { hasText: /^Jump the divider:/ })).toBeVisible()
   const closeLabel = sheet.getByText('Close the details to List only', { exact: true })
   await expect(closeLabel).toBeVisible()
   await expect(closeLabel.locator('svg')).toHaveCount(1)
@@ -610,10 +610,17 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.getByRole('button', { name: 'Actions for nova' }).click()
     await page.getByRole('menuitem', { name: /^Interrupt/ }).click()
     await expect.poll(() => calls.some(path => path.endsWith(`/harness-sessions/${nova}/controls/interrupt`))).toBe(true)
+    // P1 moved Desk to the app header and Usage/keys into More. Verify the
+    // destinations, then measure the persistent header controls through P5's sheet.
+    const more = page.getByRole('button', { name: 'More agent actions', exact: true })
+    await more.click()
+    await expect(page.getByRole('menuitem', { name: /^Usage/ })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: /^Agent keys/ })).toBeVisible()
+    await page.keyboard.press('Escape')
     await expectStableControls({ controls: {
-      desk: page.locator('.head-links').getByRole('link', { name: 'Decision Desk', exact: true }),
-      usage: page.locator('.head-links').getByRole('link', { name: 'Usage', exact: true }),
-      keys: page.locator('.head-links').getByRole('link', { name: 'Agent keys', exact: true }),
+      desk: page.getByRole('link', { name: 'Decision Desk, 4 open', exact: true }),
+      more,
+      new: page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }),
     }, interactions: [
       { name: 'open a full-height session', run: async () => { await row(page, camy).locator('.c-agent a').click(); await expect(panel(page)).toBeVisible(); expect(await panel(page).boundingBox()).toEqual({ x: 0, y: 0, width: 390, height: 844 }) } },
       { name: 'return to the phone overview', run: async () => { await page.keyboard.press('Escape'); await expect(panel(page)).toHaveCount(0) } },

@@ -66,18 +66,26 @@ for (const theme of ['light', 'dark'] as const) {
     await page.goto('/agents')
     await expect(row(page, data.sessions[0]!.id)).toBeVisible()
     await toWork(page)
+    const dockBox = (await dock(page).boundingBox())!
+    for (const amount of [400, 1000]) {
+      await page.locator('main').evaluate((el, amount) => { el.scrollTop += amount }, amount)
+      const after = (await dock(page).boundingBox())!
+      for (const dimension of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(after[dimension] - dockBox[dimension])).toBeLessThanOrEqual(.5)
+    }
+    await toWork(page)
     const stability = await controlStability(page, { preset: dock(page) })
     await dock(page).evaluate(el => { (window as unknown as { p5Dock: Element }).p5Dock = el })
     await stability.check(async () => { await dock(page).click(); await preset(page, 'focus') })
     expect(await listWidth(page)).toBe(320)
     await expect(page.locator('.sessions .thead')).toBeHidden()
+    await page.screenshot({ path: info.outputPath(`focus-1440-${theme}.png`) })
     await stability.check(async () => { await dock(page).click(); await preset(page, 'overview') })
     const width = await page.locator('.agents-work').evaluate(el => el.getBoundingClientRect().width)
     expect(await listWidth(page)).toBe(width - 16 - 480)
     await expect(page.locator('.sessions .thead')).toBeVisible()
     const dimensions = await pane(page).evaluate(el => ({ top: el.getBoundingClientRect().top, height: el.getBoundingClientRect().height, want: document.querySelector('main')!.clientHeight - 8, header: document.querySelector('main')!.getBoundingClientRect().top }))
     expect(dimensions.top).toBe(dimensions.header); expect(dimensions.height).toBe(dimensions.want)
-    await page.screenshot({ path: info.outputPath(`1440-${theme}-overview.png`) })
+    await page.screenshot({ path: info.outputPath(`overview-1440-${theme}.png`) })
     // The divider is continuous; crossing 560 changes the rows, without moving the dock.
     await stability.check(async () => { await dragTo(page, 559); expect(await listWidth(page)).toBe(559) })
     await expect(page.locator('.sessions .thead')).toBeHidden()
@@ -87,6 +95,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect.poll(() => work.preferences['agents:layout']?.handle).toBe(560)
     expect(work.preferences['agents:layout']?.folded_projects).toEqual(['keep-this-preference'])
     await stability.check(async () => { await dragTo(page, 50); expect(await listWidth(page)).toBe(280) })
+    await dragTo(page, width - 16 - 480)
     const body = page.locator('.sessions .table')
     await body.evaluate(el => { el.scrollTop = el.scrollHeight })
     const last = page.locator('.sessions .row[data-row]').last(), lastId = (await last.getAttribute('data-row'))!.slice(2)
@@ -96,12 +105,13 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(page).toHaveURL(new RegExp(lastId))
     expect((await last.boundingBox())!.y).toBeCloseTo(before, 1)
     expect(await page.locator('main').evaluate(el => el.scrollTop)).toBe(pageScroll)
+    await page.screenshot({ path: info.outputPath(`pick-last-row-1440-${theme}.png`) })
     await pane(page).locator('.scroll:visible').evaluate(el => { el.scrollTop = 200 })
     await expect.poll(() => pane(page).locator('.scroll:visible').evaluate(el => el.scrollTop)).toBeGreaterThan(0)
     await body.evaluate(el => { el.scrollTop = 0 })
     await row(page, data.sessions[1]!.id).click()
     await expect.poll(() => pane(page).locator('.scroll:visible').evaluate(el => el.scrollTop)).toBe(0)
-    await page.screenshot({ path: info.outputPath(`1440-${theme}-focus.png`) })
+    await dragTo(page, 280)
     await stability.check(async () => {
       await dragTo(page, width - 16 - 379, false)
       await expect(page.locator('.agents-page')).toHaveClass(/will-close/)
@@ -118,7 +128,7 @@ for (const theme of ['light', 'dark'] as const) {
     expect(probe.edges).toEqual([]); expect(probe.glyphs).toEqual([]); expect(probe.english).toEqual([]); expect(probe.overflow).toBeLessThanOrEqual(1)
     expect(probe.avatars.length).toBeGreaterThan(3)
     for (const avatar of probe.avatars) { expect(avatar.name).toBeTruthy(); expect(avatar.badges).toBe(1); expect(avatar.harness).toBe(0) }
-    await page.screenshot({ path: info.outputPath(`1440-${theme}-list.png`) })
+    await page.screenshot({ path: info.outputPath(`list-1440-${theme}.png`) })
     expect(errors).toEqual([])
   })
 
@@ -137,14 +147,22 @@ for (const theme of ['light', 'dark'] as const) {
       const box = (await pane(page).boundingBox())!
       if (width === 390) { expect(box.y).toBe(0); expect(box.height).toBe(900); expect((await page.getByRole('button', { name: 'Back to the list', exact: true }).boundingBox())!.height).toBeGreaterThanOrEqual(44) }
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
-      await page.screenshot({ path: info.outputPath(`${width}-${theme}-sheet.png`) })
+      await page.screenshot({ path: info.outputPath(`sheet-${width}-${theme}.png`) })
+      // Tick's reference comparison uses 400 px phones and a 1000 px tablet.
+      const referenceWidth = width === 390 ? 400 : 1000
+      await page.setViewportSize({ width: referenceWidth, height: 1000 })
+      await expect(pane(page)).toHaveClass(/sheet/)
+      await expect(dock(page)).toBeHidden()
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+      await page.screenshot({ path: info.outputPath(`${referenceWidth === 1000 ? '1000-sheet' : 'sheet'}-${referenceWidth}-${theme}.png`) })
+      await page.setViewportSize({ width, height: 900 })
       await page.keyboard.press('s'); await expect(pane(page)).toHaveClass(/sheet/)
       await page.keyboard.press('Escape'); await expect(pane(page)).toHaveCount(0)
       await expect(row(page, data.sessions[1]!.id)).toBeFocused()
       await toWork(page)
       const probe = await designProbe(page)
       expect(probe.edges).toEqual([]); expect(probe.glyphs).toEqual([]); expect(probe.english).toEqual([]); expect(probe.overflow).toBeLessThanOrEqual(1)
-      await page.screenshot({ path: info.outputPath(`${width}-${theme}-list.png`) })
+      await page.screenshot({ path: info.outputPath(`list-${width}-${theme}.png`) })
     })
   }
 }
