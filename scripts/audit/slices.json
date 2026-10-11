@@ -84,6 +84,7 @@
         "internal/agentpairing/ledger_test.go",
         "cmd/aeon-agentd/ledger.go",
         "cmd/aeon-agentd/ledger_test.go",
+        "internal/agentpairing/routine_launch.go",
         "internal/agentaccounts/probe_batch.go",
         "internal/agentaccounts/probe_batch_test.go"
       ],
@@ -152,6 +153,9 @@
         "internal/agentd/chat_acp_test.go",
         "internal/harness/routine_execution.go",
         "internal/harness/routine_execution_test.go",
+        "internal/agentd/routine_workspace.go",
+        "internal/agentsetup/routine_launch.go",
+        "internal/agentruns/routine_launch.go",
         "internal/agentd/probe_batch.go",
         "internal/agentd/queue_cadence.go",
         "internal/agentd/queue_cadence_test.go",
