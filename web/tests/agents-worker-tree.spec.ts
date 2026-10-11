@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Coordinator: PLAYWRIGHT_PORT=5835 WT1_SCREENSHOT_DIR=<scratchpad> npm test -- agents-worker-tree.spec.ts agents-hierarchy.spec.ts
-import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import type { HarnessSession } from '../src/lib/agents'
@@ -72,7 +70,8 @@ test('four live workers lead eight collapsed stopped workers, and labels disting
   await expect(history(page)).toHaveAttribute('aria-expanded', 'false')
   // Equal start times: session ID decides, never the latest heartbeat (AEON-468).
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(4), id(5)])
-  await expect(row(page, id(2)).getByRole('link', { name: 'Claude ss1-handoff-supersession, Working' })).toBeVisible()
+  // AEON-1160 (dbf44284b) names the harness Claude Code; labels still distinguish workers.
+  await expect(row(page, id(2)).getByRole('link', { name: 'Claude Code ss1-handoff-supersession, Working' })).toBeVisible()
   await expect(children(page)).not.toContainText(['aeon-coordinator'])
   await history(page).focus()
   await page.keyboard.press('Enter')
@@ -287,14 +286,13 @@ for (const theme of ['light', 'dark'] as const) {
       await page.goto('/agents')
       await expect(row(page, id(100))).toBeVisible()
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
-      const dir = process.env.WT1_SCREENSHOT_DIR ?? testInfo.outputDir
       for (const state of ['live', 'history']) {
         if (state === 'history') await history(page).click()
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
         expect(await page.locator('.sessions .row').evaluateAll(rows => rows.filter(row => row.scrollWidth > row.clientWidth + 1).map(row => row.getAttribute('data-row')))).toEqual([])
         const axe = await new AxeBuilder({ page }).include('.sessions').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'best-practice']).analyze()
         expect(axe.violations).toEqual([])
-        await page.locator('.sessions').screenshot({ path: join(dir, `wt1-${width}-${theme}-${state}.png`), animations: 'disabled' })
+        await page.locator('.sessions').screenshot({ path: testInfo.outputPath(`wt1-${width}-${theme}-${state}.png`), animations: 'disabled' })
       }
     })
   }
