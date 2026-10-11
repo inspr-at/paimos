@@ -94,7 +94,7 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 	must(t, dbtest.Await(t, raceCtx, revoked))
 	err = dbtest.Await(t, raceCtx, attempted)
 	var refusal *workorders.Error
-	if !errors.As(err, &refusal) || refusal.Message != "definition_unavailable" {
+	if !errors.As(err, &refusal) || refusal.Status != 409 || refusal.Message != "owner_unavailable" {
 		t.Fatalf("revocation refused for wrong reason: %v", err)
 	}
 	must(t, d.e.recoverOwner(ctx, f.owner.TenantID, f.routine.ID))
@@ -236,7 +236,11 @@ func TestRoutineRecoveryRevocationReceiptsAndPendingNotice(t *testing.T) {
 					return err
 				})
 				var refusal *workorders.Error
-				if !errors.As(err, &refusal) || refusal.Status != 409 || (refusal.Message != "output_project_changed" && refusal.Message != "owner_unavailable" && refusal.Message != "definition_unavailable") {
+				want := "output_project_changed"
+				if cause == "role_loss" {
+					want = "definition_unavailable"
+				}
+				if !errors.As(err, &refusal) || refusal.Status != 409 || refusal.Message != want {
 					t.Fatalf("live final guard refused for wrong reason: %v", err)
 				}
 				must(t, d.e.recoverOwner(ctx, f.owner.TenantID, f.routine.ID))
