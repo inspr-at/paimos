@@ -5572,6 +5572,8 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestRevocationDecisionExpiryAndFinishedWork","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/decisiondesk","name":"TestRoutineConsentProjectionMatchesNativePolicyAndPages","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestScopeDeniedApprovalReceivesTerminalSkippedClaim","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestSourceClaimDoesNotScanProjectionAndCoverageIsExplicit","tier":"GATED-FULL"}
@@ -8337,6 +8339,8 @@
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineIntentAtomicReplayAndAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRoutineInvalidDefinitionPreservesSafetyControls","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRoutineUIReadsScopeLatestRunAndDraftPolicy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestSixMonthSpringGapWalksPastOneYear","tier":"NIGHTLY"}
     ,

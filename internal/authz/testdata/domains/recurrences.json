@@ -19,7 +19,8 @@
     "POST /api/recurrences/preview": true
   },
   "project_filtered": {
-    "GET /api/recurrences": true
+    "GET /api/recurrences": true,
+    "GET /api/routine-guardrails": true
   },
   "registry": [
     {
@@ -43,6 +44,7 @@
     "GET /api/recurrences/{recurrenceId}/history": "nodes.read|recurrences.manage",
     "GET /api/recurrences/{recurrenceId}/preview": "nodes.read|recurrences.manage",
     "GET /api/recurrences/{recurrenceId}/releases": "nodes.read|recurrences.manage",
+    "GET /api/routine-guardrails": "nodes.read|recurrences.manage",
     "POST /api/recurrences": "recurrences.manage",
     "POST /api/recurrences/preview": "recurrences.manage",
     "POST /api/recurrences/{recurrenceId}/events": "recurrences.manage",

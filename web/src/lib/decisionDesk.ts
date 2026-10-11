@@ -93,7 +93,7 @@ export function submitModifier(event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' 
 }
 
 export interface DeskProjectionItem {
-  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix'; project_id?: string
+  id: string; kind: 'question' | 'approval' | 'action_request' | 'doctrine' | 'tier_request' | 'key_trim' | 'stepup' | 'account_matrix' | 'routine_consent'; project_id?: string
   revision: number; title: string; created_at: string; expires_at?: string; held: boolean; can_decide?: boolean; href: string; source: string
 }
 export interface DeskProjection {
@@ -102,12 +102,13 @@ export interface DeskProjection {
 }
 
 export function deskItemID(item: Pick<DeskProjectionItem, 'kind' | 'id'>): string {
-  const prefix = { question: 'q', approval: 'a', action_request: 'm', doctrine: 'r', tier_request: 't', key_trim: 'k', stepup: 's', account_matrix: 'u' }[item.kind]
+  const prefix = { question: 'q', approval: 'a', action_request: 'm', doctrine: 'r', tier_request: 't', key_trim: 'k', stepup: 's', account_matrix: 'u', routine_consent: 'c' }[item.kind]
   return `${prefix}:${item.id}`
 }
 // Link-out rows are decided on their own settings page, never in the memo.
 // Only a known in-app settings path is followed; anything else stays inert.
 export function deskLinkOut(item: Pick<DeskProjectionItem, 'kind' | 'href'>): string {
+  if (item.kind === 'routine_consent') return typeof item.href === 'string' && /^\/(?:p\/[A-Za-z0-9_-]{1,40}\/settings|settings\/(?:personal|routines))\?recurrence=[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}&consent=1$/.test(item.href) ? item.href : ''
   return item.kind === 'account_matrix' && typeof item.href === 'string' && /^\/settings\/[a-z0-9-]{1,40}(#[a-z0-9-]{1,40})?$/.test(item.href) ? item.href : ''
 }
 // Compatibility links are data, never a selector or a destination to execute.
