@@ -674,9 +674,10 @@ func TestEscalationRetainsOriginalModelAcrossSelections(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				// Models reports the first held step's cause; both steps were
-				// attempted (Opus by the retry, Fable as the retained original).
-				if pick.Profile != nil || pick.Trace.Blocked != "already attempted" || len(pick.Trace.Held) != 2 || pick.Trace.Held[1].Line != "anthropic:fable" || pick.Trace.Held[1].Reason != "already attempted" {
+				// The escalation block is the whole walk's (the Decision Desk
+				// stores it as the route block); each held step names its own
+				// cause: Opus attempted by the retry, Fable as the retained original.
+				if pick.Profile != nil || pick.Trace.Blocked != "no allowed stronger route" || len(pick.Trace.Held) != 2 || pick.Trace.Held[0].Line != "anthropic:opus" || pick.Trace.Held[0].Reason != "already attempted" || pick.Trace.Held[1].Line != "anthropic:fable" || pick.Trace.Held[1].Reason != "already attempted" {
 					t.Fatal("original model returned to routing", pick)
 				}
 				if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {
