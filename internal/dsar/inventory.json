@@ -720,6 +720,23 @@
       "table": "inbox_messages"
     },
     {
+      "classification": "personal",
+      "columns": {
+        "harness": "metadata",
+        "model": "metadata",
+        "reason": "review",
+        "set_at": "metadata",
+        "set_by": "personal",
+        "tenant_id": "metadata",
+        "until_at": "personal"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "set_by"
+      },
+      "table": "model_pauses"
+    },
+    {
       "classification": "review",
       "columns": {
         "audit": "review",
@@ -744,7 +761,9 @@
         "set_by": "personal",
         "situation": "metadata",
         "tenant_id": "metadata",
-        "thinking": "personal"
+        "thinking": "personal",
+        "end_mode": "metadata",
+        "efforts": "personal"
       },
       "locator": {
         "person_column": "set_by",
@@ -774,6 +793,29 @@
         "tenant_column": "tenant_id"
       },
       "table": "model_pref_profiles"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "column_key": "metadata",
+        "effort": "metadata",
+        "effort_level": "metadata",
+        "efforts": "personal",
+        "end_mode": "metadata",
+        "not_allowed": "personal",
+        "profile_id": "metadata",
+        "rank": "personal",
+        "set_at": "metadata",
+        "set_by": "personal",
+        "situation": "metadata",
+        "tenant_id": "metadata",
+        "thinking": "personal"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "set_by"
+      },
+      "table": "model_pref_situation_orders"
     },
     {
       "classification": "metadata",
@@ -824,6 +866,26 @@
       "table": "model_refresh_settings"
     },
     {
+      "classification": "personal",
+      "columns": {
+        "column_key": "metadata",
+        "kind": "metadata",
+        "line": "metadata",
+        "position": "metadata",
+        "project_id": "metadata",
+        "scope": "metadata",
+        "set_at": "metadata",
+        "set_by": "personal",
+        "tenant_id": "metadata",
+        "why": "review"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "set_by"
+      },
+      "table": "model_row_constraints"
+    },
+    {
       "classification": "metadata",
       "columns": {
         "revision": "metadata",
@@ -848,7 +910,8 @@
         "set_at": "metadata",
         "set_by": "personal",
         "tenant_id": "metadata",
-        "why": "review"
+        "why": "review",
+        "moved_to_models": "metadata"
       },
       "locator": {
         "person_column": "set_by",
@@ -871,6 +934,18 @@
         "tenant_column": "tenant_id"
       },
       "table": "model_situation_limits"
+    },
+    {
+      "classification": "review",
+      "columns": {
+        "audit": "review",
+        "migrated_at": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "model_v2_migrations"
     },
     {
       "classification": "personal",

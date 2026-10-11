@@ -67,7 +67,11 @@ func registryRevision(ctx context.Context, tx pgx.Tx) (string, error) {
  (SELECT count(*)>512 FROM (SELECT 1 FROM model_profiles LIMIT 513) p) OR
  (SELECT count(*)>512 FROM (SELECT 1 FROM model_profile_retirements LIMIT 513) r) OR
  (SELECT count(*)>4096 FROM (SELECT 1 FROM model_pref_profiles LIMIT 4097) p) OR
- (SELECT count(*)>1536 FROM (SELECT 1 FROM model_rule_revisions LIMIT 1537) r)`).Scan(&large); err != nil {
+ (SELECT count(*)>1536 FROM (SELECT 1 FROM model_rule_revisions LIMIT 1537) r) OR
+ (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_orders LIMIT 1537) o) OR
+ (SELECT count(*)>1536 FROM (SELECT 1 FROM model_pref_situation_orders LIMIT 1537) o) OR
+ (SELECT count(*)>4096 FROM (SELECT 1 FROM model_row_constraints LIMIT 4097) r) OR
+ (SELECT count(*)>512 FROM (SELECT 1 FROM model_pauses LIMIT 513) p)`).Scan(&large); err != nil {
 		return "", err
 	}
 	if large {
@@ -78,7 +82,10 @@ func registryRevision(ctx context.Context, tx pgx.Tx) (string, error) {
  coalesce((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.id) FROM model_profiles p),'[]'::jsonb),
  coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.profile_id) FROM model_profile_retirements r),'[]'::jsonb),
  coalesce((SELECT jsonb_agg(jsonb_build_array(p.id,p.revision) ORDER BY p.id) FROM model_pref_profiles p),'[]'::jsonb),
- coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.scope,r.scope_key) FROM model_rule_revisions r),'[]'::jsonb))`).Scan(&raw)
+ coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.scope,r.scope_key) FROM model_rule_revisions r),'[]'::jsonb),
+ coalesce((SELECT jsonb_agg(to_jsonb(o) ORDER BY o.profile_id,o.column_key,o.situation) FROM (`+modelprefs.OrdersSQL+`) o),'[]'::jsonb),
+ coalesce((SELECT jsonb_agg(to_jsonb(r) ORDER BY r.scope,r.project_id,r.column_key,r.line) FROM model_row_constraints r),'[]'::jsonb),
+ coalesce((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.harness,p.model) FROM model_pauses p),'[]'::jsonb))`).Scan(&raw)
 	if err != nil {
 		return "", err
 	}
@@ -247,7 +254,8 @@ func boardLineID(p Profile) string { f, l, _ := ProfileLine(p); return f + ":" +
 
 // Caller holds the tenant and registry fences. All transfers precede events.
 func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile) error {
-	oldLine, newLine := boardLineID(before[0]), boardLineID(after[0])
+	oldLine, _ := modelsLine(before[0])
+	newLine, _ := modelsLine(after[0])
 	if oldLine != newLine {
 		var collision bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_rules a JOIN model_rules b ON b.tenant_id=a.tenant_id AND b.scope=a.scope AND b.project_id IS NOT DISTINCT FROM a.project_id AND b.column_key=a.column_key WHERE a.line=$1 AND b.line=$2)`, oldLine, newLine).Scan(&collision); err != nil {
@@ -257,31 +265,43 @@ func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			return fail(409, "replacement line has a conflicting rule")
 		}
 
-		if _, err := tx.Exec(ctx, `UPDATE model_pref_orders SET rank=CASE WHEN rank IS NULL THEN NULL ELSE ARRAY(SELECT v FROM unnest(array_replace(rank,$1,$2)) WITH ORDINALITY u(v,n) WHERE NOT v=ANY(array_replace(not_allowed,$1,$2)) GROUP BY v ORDER BY min(n)) END,not_allowed=ARRAY(SELECT v FROM unnest(array_replace(not_allowed,$1,$2)) WITH ORDINALITY u(v,n) GROUP BY v ORDER BY min(n)) WHERE $1=ANY(rank) OR $1=ANY(not_allowed)`, oldLine, newLine); err != nil {
-			return err
+		for _, table := range []string{"model_pref_orders", "model_pref_situation_orders"} {
+			if _, err := tx.Exec(ctx, `UPDATE `+table+` SET rank=CASE WHEN rank IS NULL THEN NULL ELSE ARRAY(SELECT v FROM unnest(array_replace(rank,$1,$2)) WITH ORDINALITY u(v,n) WHERE NOT v=ANY(array_replace(not_allowed,$1,$2)) GROUP BY v ORDER BY min(n)) END,efforts=CASE WHEN efforts ? $1 THEN (efforts-$1)||jsonb_build_object($2,coalesce(efforts->$2,efforts->$1)) ELSE efforts END,not_allowed=ARRAY(SELECT v FROM unnest(array_replace(not_allowed,$1,$2)) WITH ORDINALITY u(v,n) GROUP BY v ORDER BY min(n)) WHERE $1=ANY(rank) OR $1=ANY(not_allowed)`, oldLine, newLine); err != nil {
+				return err
+			}
 		}
 		// Preserve the order of the remaining entries while deduplicating aliases.
 		if _, err := tx.Exec(ctx, `UPDATE model_rules SET line=$2 WHERE line=$1 AND NOT EXISTS(SELECT 1 FROM model_rules n WHERE n.tenant_id=model_rules.tenant_id AND n.scope=model_rules.scope AND n.project_id IS NOT DISTINCT FROM model_rules.project_id AND n.column_key=model_rules.column_key AND n.line=$2)`, oldLine, newLine); err != nil {
 			return err
 		}
+		var collision bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_row_constraints a JOIN model_row_constraints b ON b.tenant_id=a.tenant_id AND b.scope=a.scope AND b.project_id IS NOT DISTINCT FROM a.project_id AND b.column_key=a.column_key WHERE a.line=$1 AND b.line=$2)`, oldLine, newLine).Scan(&collision); err != nil {
+			return err
+		}
+		if collision {
+			return fail(409, "replacement line has a conflicting Models constraint")
+		}
+		if _, err := tx.Exec(ctx, `UPDATE model_row_constraints SET line=$2 WHERE line=$1`, oldLine, newLine); err != nil {
+			return err
+		}
 	}
-	if _, err := tx.Exec(ctx, `UPDATE model_pref_profiles SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_pref_orders o WHERE o.profile_id=model_pref_profiles.id AND ($1=ANY(o.rank) OR $2=ANY(o.rank) OR $1=ANY(o.not_allowed) OR $2=ANY(o.not_allowed)))`, oldLine, newLine); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE model_pref_profiles SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM (`+modelprefs.OrdersSQL+`) o WHERE o.profile_id=model_pref_profiles.id AND ($1=ANY(o.rank) OR $2=ANY(o.rank) OR $1=ANY(o.not_allowed) OR $2=ANY(o.not_allowed)))`, oldLine, newLine); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE model_rule_revisions SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_rules r WHERE r.scope=model_rule_revisions.scope AND coalesce(r.project_id::text,'')=model_rule_revisions.scope_key AND r.line IN ($1,$2))`, oldLine, newLine); err != nil {
 		return err
 	}
 	for _, old := range before {
-		replacement := nearestProfile(after, old.Effort, old.EffortLevel)
-		for _, table := range []string{"model_role_routes", "model_security_role_routes"} {
-			if _, err := tx.Exec(ctx, `UPDATE `+table+` SET profile_id=$2 WHERE profile_id=$1 AND NOT EXISTS(SELECT 1 FROM `+table+` n WHERE n.tenant_id=`+table+`.tenant_id AND n.role=`+table+`.role AND n.profile_id=$2)`, old.ID, replacement.ID); err != nil {
-				return err
-			}
+		if err := copyModelPause(ctx, tx, old, nearestProfile(after, old.Effort, old.EffortLevel)); err != nil {
+			return err
 		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE model_rule_revisions SET revision=revision+1 WHERE EXISTS(SELECT 1 FROM model_row_constraints r WHERE r.scope=model_rule_revisions.scope AND coalesce(r.project_id::text,'')=model_rule_revisions.scope_key AND r.line IN ($1,$2))`, oldLine, newLine); err != nil {
+		return err
 	}
 	// Reconcile native names for all affected rows without touching situations,
 	// not-allowed entries, templates, profile knobs or unrelated rules.
-	rows, err := tx.Query(ctx, `SELECT profile_id::text,column_key,situation,rank,not_allowed,thinking,effort,effort_level FROM model_pref_orders WHERE rank[1]=$1 AND effort IS NOT NULL LIMIT 1537`, newLine)
+	rows, err := tx.Query(ctx, `SELECT profile_id::text,column_key,situation,rank,not_allowed,thinking,effort,effort_level FROM (`+modelprefs.OrdersSQL+`) orders WHERE rank[1]=$1 AND effort IS NOT NULL LIMIT 1537`, newLine)
 	if err != nil {
 		return err
 	}
@@ -304,11 +324,56 @@ func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 	}
 	for _, o := range orders {
 		prof := nearestProfile(after, *o.Effort, o.EffortLevel)
-		if _, err := tx.Exec(ctx, `UPDATE model_pref_orders SET effort=$4,effort_level=$5 WHERE profile_id=$1 AND column_key=$2 AND situation=$3`, o.ProfileID, o.Column, o.Situation, prof.Effort, prof.EffortLevel); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE `+orderStore(o.Situation)+` SET effort=$4,effort_level=$5 WHERE profile_id=$1 AND column_key=$2 AND situation=$3`, o.ProfileID, o.Column, o.Situation, prof.Effort, prof.EffortLevel); err != nil {
 			return err
 		}
 	}
+	for _, table := range []string{"model_pref_orders", "model_pref_situation_orders"} {
+		rows, err := tx.Query(ctx, `SELECT profile_id::text,column_key,situation,efforts->>$1 FROM `+table+` WHERE efforts ? $1 LIMIT 1537`, newLine)
+		if err != nil {
+			return err
+		}
+		type entry struct{ profile, column, situation, effort string }
+		entries := []entry{}
+		for rows.Next() {
+			var e entry
+			if err := rows.Scan(&e.profile, &e.column, &e.situation, &e.effort); err != nil {
+				rows.Close()
+				return err
+			}
+			entries = append(entries, e)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if len(entries) > 1536 {
+			return modelprefs.ErrBoardBounds
+		}
+		for _, e := range entries {
+			var level *int
+			for _, old := range before {
+				if old.Effort == e.effort {
+					level = old.EffortLevel
+					break
+				}
+			}
+			next := nearestProfile(after, e.effort, level)
+			if _, err := tx.Exec(ctx, `UPDATE `+table+` SET efforts=jsonb_set(efforts,ARRAY[$4::text],to_jsonb($5::text)) WHERE profile_id=$1 AND column_key=$2 AND situation=$3`, e.profile, e.column, e.situation, newLine, next.Effort); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
+}
+
+// Closed identifiers only; the situation is never interpolated into SQL.
+func orderStore(situation string) string {
+	if situation == "small" || situation == "review" {
+		return "model_pref_situation_orders"
+	}
+	return "model_pref_orders"
 }
 
 func nearestProfile(ps []Profile, effort string, level *int) Profile {

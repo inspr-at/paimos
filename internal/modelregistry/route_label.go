@@ -4,15 +4,9 @@ package modelregistry
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"fmt"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5"
-
-	"github.com/inspr-at/paimos/internal/agentaccounts"
 )
 
 // Label is the short display name of a profile: the harness, the model
@@ -59,42 +53,18 @@ func ModelKey(model string) string {
 	return key
 }
 
-// Revision names the current registry state: a short digest over every
-// route step and its profile pin. It changes whenever PUT /api/models/routes
-// or a new profile changes what a role can resolve to. Empty when the
-// registry has no routes (not seeded).
+// Revision names registry pins, Models orders, never rules and pauses.
 func Revision(ctx context.Context, tx pgx.Tx) (string, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT r.role, r.priority, r.state, r.valid_until, p.slug, p.version, p.enabled
-		FROM (`+agentaccounts.ModelRoleRoutesSQL+`) r
-		JOIN model_profiles p ON p.tenant_id = r.tenant_id AND p.id = r.profile_id
-		ORDER BY r.role, r.priority`)
+	var setup bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles)`).Scan(&setup); err != nil {
+		return "", err
+	}
+	if !setup {
+		return "", nil
+	}
+	revision, err := registryRevision(ctx, tx)
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
-	sum := sha256.New()
-	n := 0
-	for rows.Next() {
-		var role, state, slug, version string
-		var priority int
-		var until *time.Time
-		var enabled bool
-		if err := rows.Scan(&role, &priority, &state, &until, &slug, &version, &enabled); err != nil {
-			return "", err
-		}
-		stamp := ""
-		if until != nil {
-			stamp = until.UTC().Format(time.RFC3339)
-		}
-		fmt.Fprintf(sum, "%s\x00%d\x00%s\x00%s\x00%s\x00%s\x00%t\n", role, priority, state, stamp, slug, version, enabled)
-		n++
-	}
-	if err := rows.Err(); err != nil {
-		return "", err
-	}
-	if n == 0 {
-		return "", nil
-	}
-	return hex.EncodeToString(sum.Sum(nil))[:8], nil
+	return revision[:8], nil
 }

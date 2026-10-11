@@ -115,7 +115,6 @@ type roleDef struct {
 	effort   string
 	cross    bool
 	readOnly bool
-	ladder   []string
 }
 
 func roleByName(name string) (roleDef, bool) {
@@ -130,55 +129,8 @@ func roleByName(name string) (roleDef, bool) {
 var roleLadder = []roleDef{
 	{name: "scout", tier: "fast", effort: "medium"},
 	{name: "mechanical", tier: "fast", effort: "high"},
-	{name: "build", tier: "standard", effort: "high", ladder: []string{"codex-6-1-sol-high", "claude-sonnet-high", "pi-anthropic-sonnet-high"}},
-	{name: "build-hard", tier: "strong", effort: "xhigh", ladder: []string{"codex-6-1-sol-xhigh", "codex-sol-xhigh", "claude-opus-xhigh", "pi-anthropic-opus-xhigh"}},
-	{name: "review-gate", tier: "frontier", effort: "xhigh", cross: true, readOnly: true,
-		ladder: []string{"codex-astra-xhigh", "claude-fable-xhigh", "claude-opus-xhigh", "grok-4-7-xhigh", "cursor-grok-xhigh"}},
-	{name: "review-gate-security", tier: "frontier", effort: "xhigh", cross: true, readOnly: true,
-		ladder: []string{"grok-4-7-xhigh", "cursor-grok-xhigh", "codex-6-1-sol-xhigh"}},
-}
-
-func defaultRoutes(profiles []seedProfile) []seedRoute {
-	sorted := append([]seedProfile(nil), profiles...)
-	sortProfiles(sorted)
-	var out []seedRoute
-	for _, role := range roleLadder {
-		var slugs []string
-		if len(role.ladder) > 0 {
-			slugs = append(slugs, role.ladder...)
-		} else {
-			for _, harness := range []string{"codex", "claude", "pi", "cursor"} {
-				for _, profile := range sorted {
-					if profile.Harness == harness && profile.Tier == role.tier && profile.Effort == role.effort {
-						slugs = append(slugs, profile.Slug)
-					}
-				}
-			}
-		}
-		// Keep the additional harnesses behind the role's original candidates.
-		switch role.name {
-		case "scout":
-			slugs = append(slugs, "gemini-gemini-2-5-flash-4096")
-		case "mechanical":
-			slugs = append(slugs, "gemini-gemini-2-5-flash-16384")
-		case "build":
-			slugs = append(slugs, "gemini-gemini-2-5-pro-16384", "opencode-ollama-qwen3-coder-default")
-		case "build-hard", "review-gate":
-			slugs = append(slugs, "gemini-gemini-2-5-pro-32768", "opencode-google-gemini-2-5-pro-default")
-		}
-		for i, slug := range slugs {
-			out = append(out, seedRoute{Role: role.name, Priority: i + 1, Slug: slug})
-		}
-	}
-	return out
-}
-
-func sortProfiles(profiles []seedProfile) {
-	for i := 1; i < len(profiles); i++ {
-		j := i
-		for j > 0 && profiles[j].Slug < profiles[j-1].Slug {
-			profiles[j], profiles[j-1] = profiles[j-1], profiles[j]
-			j--
-		}
-	}
+	{name: "build", tier: "standard", effort: "high"},
+	{name: "build-hard", tier: "strong", effort: "xhigh"},
+	{name: "review-gate", tier: "frontier", effort: "xhigh", cross: true, readOnly: true},
+	{name: "review-gate-security", tier: "frontier", effort: "xhigh", cross: true, readOnly: true},
 }

@@ -153,19 +153,21 @@ paths:
   /models/routes:
     get:
       operationId: readModelRoutes
-      description: Read-only ladder for one role, requiring models.read. Never seeds the catalog or appends events. CLI uses ladder priority and harness health; ordinary managed review uses legacy family/tier order until an explicit saved-order activation, then saved priorities. Qualification floors, platform capability, approved accounts and preferences still apply. order_mode and managed_fallback_order (profile IDs before qualification/preferences) share the stored-row SQL snapshot; truncated order is incomplete. At most 50 steps, with explicit truncation. Complete snapshots include routes, a quoted strong edit_token over canonical role content (including full-precision expiry and reason), and can_edit for person plus models.manage. Truncated snapshots have no edit token and cannot be edited; no cursor. Unseeded tenants return setup false. Each read applies a five-second statement timeout.
+      deprecated: true
+      description: "Deprecated compatibility read derived from Models rows, chains, situations and model pauses. Requires models.read, never seeds the catalog or appends events. Returns at most 50 steps; truncated means incomplete. can_edit is false and edit_token is null. Use model preferences for choices and settings/review-policy for review rules."
       security: *auth
       parameters:
         - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
       responses:
-        '200': {description: Bounded tenant ladder snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRoutesRead'}}}}
+        '200': {description: "Bounded Models-derived compatibility snapshot", content: {application/json: {schema: {$ref: '#/components/schemas/ModelRoutesRead'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '401': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '503': {description: Statement timeout; retry later, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retrying}}, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     put:
       operationId: replaceModelRoutes
-      description: Person with workspace models.manage replaces routes under a tenant and registry fence with final authorization. Unqualified PUT preserves whole-tenant last-writer-wins compatibility. With role, replace only that complete role and require its quoted strong If-Match token; review-gate tokens include ordering mode. Explicit order_mode is allowed only for conditional review-gate writes; omission and legacy whole-tenant writes preserve the mode. Rows and mode change atomically, including mode-only audit events with before_order_mode/after_order_mode metadata; before/after arrays retain their shape; missing 428 revision_required, malformed 400 invalid_revision, mismatched 409 stale_revision. Never initializes in role mode. At most 50 rows per role and 300 total; audit before/after must be complete within those bounds. Unchanged stored expired holds may be reordered; new or changed holds require strictly future expiry sampled after fences. Conditional expiry_policy=clear compensation converts all desired expired holds to available with empty reason/null expiry. Invalid temporal conditional changes return 422 suppression_expired; legacy keeps 400. No-op emits no replacement event. Thirty-second request deadline; five-second lock and statement timeouts.
+      deprecated: true
+      description: "Retired role ladder writer. Returns 410 Gone without decoding or changing settings. Use Models orders and model pauses."
       security: [{session: []}]
       parameters:
         - {name: role, in: query, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
@@ -174,6 +176,7 @@ paths:
         - {name: expiry_policy, in: query, description: Allowed only with role. clear is for compensation; preserves future holds without extending them., schema: {type: string, enum: [preserve, clear], default: preserve}}
       requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 300, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
       responses:
+        '410': {description: "Role ladders moved to Models orders and pauses", content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '200': {description: Actual normalized stored routes for the addressed role or whole tenant, headers: {ETag: {description: New quoted strong role content token including ordinary review mode in conditional mode, schema: {type: string}}, Model-Order-Mode: {description: Actual stored ordinary review mode for role=review-gate, schema: {type: string, enum: [legacy, saved]}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
         '400': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}

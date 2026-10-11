@@ -11,7 +11,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 	"github.com/inspr-at/paimos/internal/modelactivation"
@@ -113,8 +112,6 @@ func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) 
 		return append(changes, upgraded...), err
 	}
 	profiles := catalogProfiles()
-	ids := make(map[string]string, len(profiles))
-	disabled := make(map[string]bool, len(profiles))
 	seeded := make([]Profile, 0, len(profiles))
 	for _, profile := range profiles {
 		row, err := insertActivatedProfile(ctx, tx, p, profileWrite{
@@ -124,25 +121,9 @@ func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) 
 		if err != nil {
 			return nil, err
 		}
-		ids[profile.Slug] = row.ID
-		disabled[profile.Slug] = !row.Enabled
 		seeded = append(seeded, row)
 	}
-	routes := make([]Route, 0)
-	for _, route := range defaultRoutes(profiles) {
-		id := ids[route.Slug]
-		if id == "" {
-			return nil, fail(http.StatusInternalServerError, "catalog route is missing its profile")
-		}
-		if disabled[route.Slug] {
-			continue
-		}
-		stored := Route{Role: route.Role, Priority: route.Priority, ProfileID: id, State: "available"}
-		if err := insertRoute(ctx, tx, p.TenantID, stored); err != nil {
-			return nil, err
-		}
-		routes = append(routes, stored)
-	}
+	routes := []Route{} // New profiles wait for an explicit Models choice.
 	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2) ON CONFLICT (tenant_id) DO UPDATE SET catalog_version=EXCLUDED.catalog_version`, p.TenantID, CatalogVersion); err != nil {
 		return nil, err
 	}
@@ -209,22 +190,6 @@ func profileSource(source string) string {
 	return "auto"
 }
 
-// Only these constant identifiers enter SQL; the caller's role is never SQL.
-func roleRoutesTable(role string) string {
-	if role == "review-gate-security" {
-		return "model_security_role_routes"
-	}
-	return "model_role_routes"
-}
-
-func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) error {
-	_, err := tx.Exec(ctx, `
-		INSERT INTO `+roleRoutesTable(route.Role)+` (tenant_id, role, priority, profile_id, state, reason, valid_until)
-		VALUES ($1::uuid, $2, $3, $4::uuid, $5, $6, $7)`,
-		tenantID, route.Role, route.Priority, route.ProfileID, route.State, route.Reason, route.ValidUntil)
-	return err
-}
-
 func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 	return listProfilesLimit(ctx, tx, 0)
 }
@@ -276,23 +241,20 @@ func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]
 }
 
 func listRoutes(ctx context.Context, tx pgx.Tx) ([]Route, error) {
-	rows, err := tx.Query(ctx, `
-		SELECT role, priority, profile_id::text, state, reason, valid_until
-		FROM (`+agentaccounts.ModelRoleRoutesSQL+`) routes
-		ORDER BY role, priority, profile_id`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	out := []Route{}
-	for rows.Next() {
-		var route Route
-		if err := rows.Scan(&route.Role, &route.Priority, &route.ProfileID, &route.State, &route.Reason, &route.ValidUntil); err != nil {
+	for _, role := range roleLadder {
+		steps, _, err := derivedRoleSteps(ctx, tx, nil, role.name, routesTotalLimit+1)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, route)
+		for _, step := range steps {
+			out = append(out, step.Route)
+		}
+		if len(out) > routesTotalLimit {
+			return nil, prefFail(413, "audit_snapshot_too_large")
+		}
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func validateProfile(in profileWrite) error {
@@ -370,53 +332,6 @@ func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profil
 		return Profile{}, err
 	}
 	return out, nil
-}
-
-// replaceRoutes is the transaction-injected legacy fixture helper. Production
-// writes enter through Module.replace with final authority and shared fences.
-func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming []Route, now time.Time) ([]Route, error) {
-	if err := routeBounds(incoming); err != nil {
-		return nil, err
-	}
-	if err := requireCatalog(ctx, tx); err != nil {
-		return nil, err
-	}
-	before, err := boundedStoredRoutes(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	normalized, err := normalizeStoredRoutes(incoming, before, now, false)
-	if err != nil {
-		return nil, err
-	}
-	if err := profilesExist(ctx, tx, normalized); err != nil {
-		return nil, err
-	}
-	if routesEqual(before, normalized) {
-		return before, nil
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM model_role_routes`); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
-		return nil, err
-	}
-	if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
-		return nil, err
-	}
-	for _, route := range normalized {
-		if err := insertRoute(ctx, tx, p.TenantID, route); err != nil {
-			return nil, err
-		}
-	}
-	after, err := boundedStoredRoutes(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	if err := writeEvent(ctx, tx, p, evRoutes, before, after); err != nil {
-		return nil, err
-	}
-	return after, nil
 }
 
 func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {

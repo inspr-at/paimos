@@ -25,11 +25,8 @@ type preferenceOwner struct {
 	Source string  `json:"source"`
 }
 
-// Preserve saved ladders until S2 migrates them. Merely opening Models creates
-// a revision-zero profile and must not adopt a different routing policy.
-func boardDispatchAdopted(s modelprefs.BoardState) bool {
-	return len(s.Orders) > 0 || len(s.Rules) > 0 || s.Workspace.Revision > 0 || s.Person != nil && s.Person.Revision > 0
-}
+// Models is the dispatch authority for migrated and newly-created tenants.
+func boardDispatchAdopted(s modelprefs.BoardState) bool { return true }
 
 func boardInitialized(s modelprefs.BoardState) bool {
 	return s.Workspace.ID != "" || s.Person != nil && s.Person.ID != ""
@@ -88,12 +85,6 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	s = modelsBoardIdentities(s, c)
 	c = modelsCatalog(c)
 	s.Lines = c.lines
-	if !strings.HasPrefix(q.Role, "review-gate") && q.Role != "build-hard" && !q.Escalation {
-		s, err = modelsLegacyDefaultTail(ctx, tx, s)
-		if err != nil {
-			return nil, err
-		}
-	}
 	requirement, err := boardResidency(ctx, tx, s, q.PersonID, q.ProjectID, q.TicketResidency)
 	if err != nil {
 		return nil, err
@@ -337,41 +328,6 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 // The minimum equivalent stays xhigh even when the native catalog has no name.
 const ModelsReviewHighestNative = true
 const modelsReviewMinLevel = reviewgate.ReviewMinEffortLevel
-
-// S2 carries a saved build ladder into the workspace Default when it has no
-// chain. Read that same expansion until persistence catches up, rather than
-// silently dropping today's fallback. Explicit chains or ends stay closed.
-func modelsLegacyDefaultTail(ctx context.Context, tx pgx.Tx, s modelprefs.BoardState) (modelprefs.BoardState, error) {
-	for i, order := range s.Orders {
-		if order.ProfileID != s.Workspace.ID || order.Column != "other" || order.Situation != "first" || len(order.Rank) != 1 || order.End != "" {
-			continue
-		}
-		steps, err := loadLadderLimit(ctx, tx, "build", 257)
-		if err != nil {
-			return s, err
-		}
-		if len(steps) > 256 {
-			return s, modelprefs.ErrBoardBounds
-		}
-		order.Rank = slices.Clone(order.Rank)
-		efforts := map[string]string{}
-		for line, effort := range order.Efforts {
-			efforts[line] = effort
-		}
-		for _, step := range steps {
-			line, _ := modelsLine(step.Profile)
-			if slices.Contains(order.Rank, line) {
-				continue
-			}
-			order.Rank = append(order.Rank, line)
-			efforts[line] = step.Profile.Effort
-		}
-		order.Efforts = efforts
-		s.Orders[i] = order
-		break
-	}
-	return s, nil
-}
 
 func qualifiedReviewProfile(p Profile) bool {
 	return (p.Tier == "strong" || p.Tier == "frontier") && p.EffortLevel != nil && *p.EffortLevel >= modelsReviewMinLevel

@@ -291,6 +291,11 @@ func ResolveModelsBoard(s BoardState, q BoardQuery) BoardDecision {
 			d.Steps = append(d.Steps, BoardStep{id, e, level, stage})
 		}
 	}
+	// An explicit personal chain ending in Wait owns its tail. A migrated
+	// workspace pin-bottom must not refill the empty chain from a saved dial.
+	if found && order.End == "wait" && owner.Scope == "person" {
+		d.Rank = slices.Clone(order.Rank)
+	}
 	appendSteps(d.Rank, d.Effort, d.EffortLevel, order.Efforts, "column")
 	end := "wait"
 	if column != "other" {

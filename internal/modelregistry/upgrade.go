@@ -3,7 +3,6 @@ package modelregistry
 
 import (
 	"context"
-	"strings"
 
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/modelactivation"
@@ -74,70 +73,7 @@ func prepareCatalogUpgrade(ctx context.Context, tx pgx.Tx, p tenant.Principal) (
 		}
 		added = append(added, profile)
 	}
-	now, err := dbNow(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	changed := []string{}
-	for _, role := range roleLadder {
-		steps, mode, err := loadLadderSnapshot(ctx, tx, role.name, 0)
-		if err != nil {
-			return nil, err
-		}
-		// An explicit ordinary review save remains tenant policy even when
-		// its rows happen to match the historical default byte-for-byte.
-		if role.name == "review-gate" && mode == reviewOrderSaved {
-			continue
-		}
-		if !matchesV2(role.name, steps) {
-			continue
-		}
-		replacements := []Route{}
-		safe := true
-		for _, seed := range defaultRoutes(catalogProfiles()) {
-			if seed.Role != role.name {
-				continue
-			}
-			if ids[seed.Slug] == "" {
-				safe = false
-				break
-			}
-			route := Route{Role: seed.Role, Priority: seed.Priority, ProfileID: ids[seed.Slug], State: "available"}
-			for _, old := range steps {
-				if old.Profile.Slug == seed.Slug {
-					route.State, route.Reason, route.ValidUntil = old.State, old.Reason, old.ValidUntil
-				}
-			}
-			replacements = append(replacements, route)
-		}
-		// Never discard an active override even when its old default was retired.
-		for _, old := range steps {
-			if old.State == "available" || old.ValidUntil == nil || !now.Before(*old.ValidUntil) {
-				continue
-			}
-			retained := false
-			for _, r := range replacements {
-				if r.ProfileID == old.ProfileID {
-					retained = true
-				}
-			}
-			if !retained {
-				safe = false
-			}
-		}
-		if !safe {
-			continue
-		}
-		if _, err := tx.Exec(ctx, `DELETE FROM `+roleRoutesTable(role.name)+` WHERE role=$1`, role.name); err != nil {
-			return nil, err
-		}
-		for _, r := range replacements {
-			if err := insertRoute(ctx, tx, p.TenantID, r); err != nil {
-				return nil, err
-			}
-		}
-		changed = append(changed, role.name)
-	}
+	changed := []string{} // Catalog upgrades never add or replace Models choices.
 	if _, err := tx.Exec(ctx, `UPDATE model_refresh_settings SET catalog_version=$1`, CatalogVersion); err != nil {
 		return nil, err
 	}
@@ -146,48 +82,6 @@ func prepareCatalogUpgrade(ctx context.Context, tx pgx.Tx, p tenant.Principal) (
 
 func samePin(p Profile, s seedProfile) bool {
 	return p.Slug == s.Slug && p.Harness == s.Harness && p.Family == s.Family && p.Model == s.Model && p.Effort == s.Effort && p.Tier == s.Tier && p.Enabled
-}
-
-func matchesV2(role string, steps []ladderStep) bool {
-	expected, ok := v2Ladders[role]
-	if !ok {
-		return role == "review-gate-security" && len(steps) == 0
-	}
-	legacyCount := len(expected)
-	if len(steps) != legacyCount {
-		// Main's additive harness upgrade appends exact pins to historical
-		// defaults. Recognize that suffix while retaining custom route policy.
-		expected = append([]string(nil), expected...)
-		for _, route := range defaultRoutes(catalogProfiles()) {
-			if route.Role == role && (strings.HasPrefix(route.Slug, "gemini-") || strings.HasPrefix(route.Slug, "opencode-")) {
-				expected = append(expected, route.Slug)
-			}
-		}
-	}
-	if len(steps) != len(expected) {
-		return false
-	}
-	for i, step := range steps {
-		if step.Priority != i+1 || step.Profile.Slug != expected[i] || (step.Profile.Version != "2" && (i < legacyCount || step.Profile.Version != CatalogVersion)) || !step.Profile.Enabled {
-			return false
-		}
-		if step.Profile.Slug == "codex-terra-high" {
-			if step.Profile.Harness != "codex" || step.Profile.Family != "openai" || step.Profile.Model != "gpt-6-terra" || step.Profile.Effort != "high" || step.Profile.Tier != "standard" {
-				return false
-			}
-		} else {
-			matched := false
-			for _, seed := range catalogProfiles() {
-				if samePin(step.Profile, seed) {
-					matched = true
-				}
-			}
-			if !matched {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 // KnownInvalid is a verified retired/invalid identifier, not a vendor response.
