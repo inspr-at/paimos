@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 package cli
 
-import "strconv"
+import (
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+
+	"github.com/inspr-at/paimos/internal/ticketbenefits"
+)
 
 type benefitFlags struct{ PillEN, PillDE, BenefitEN, BenefitDE, Hide, NoReleaseNeeded string }
 
@@ -37,4 +44,50 @@ func (b benefitFlags) apply(fields map[string]any) (bool, error) {
 		fields["no_release_needed"] = value
 	}
 	return b.changed(), nil
+}
+
+// One-time, read-only audit of visible open work. hide_closed uses the server's
+// tenant-defined status categories; walkNodes enforces cursor and page bounds.
+func (rt *runtime) reportInvalidPills(project string) error {
+	proj, err := rt.projectNode(project)
+	if err != nil {
+		return err
+	}
+	kinds, err := rt.loadKinds()
+	if err != nil {
+		return err
+	}
+	nodes, err := rt.walkNodes(url.Values{"parent_id": {proj.ID}, "include_descendants": {"true"}, "hide_closed": {"true"}}, nil)
+	if err != nil {
+		return err
+	}
+	type invalidPill struct {
+		ID     string   `json:"id"`
+		Key    string   `json:"issue_key"`
+		State  string   `json:"status"`
+		PillEN string   `json:"pill_en"`
+		PillDE string   `json:"pill_de"`
+		Issues []string `json:"issues"`
+	}
+	items := []invalidPill{}
+	scanned := 0
+	for _, node := range nodes {
+		slug := kinds.slug(node.KindID)
+		if slug != "work" && slug != "ticket" {
+			continue
+		}
+		scanned++
+		if issues := ticketbenefits.PillIssues(node.Fields); len(issues) > 0 {
+			fields := fieldMap(node.Fields)
+			items = append(items, invalidPill{node.ID, node.Key, node.State, fieldString(fields, "pill_en"), fieldString(fields, "pill_de"), issues})
+		}
+	}
+	if rt.jsonOut {
+		return rt.printJSON(map[string]any{"items": items, "scanned": scanned, "total": len(items)})
+	}
+	for _, item := range items {
+		fmt.Fprintf(rt.stdout, "%s (%s): %s\n  pill_en: %q\n  pill_de: %q\n", item.Key, item.State, strings.Join(item.Issues, "; "), item.PillEN, item.PillDE)
+	}
+	fmt.Fprintf(rt.stdout, "%d open tickets scanned; %d with invalid pills.\n", scanned, len(items))
+	return nil
 }

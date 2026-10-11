@@ -132,11 +132,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
 }
 
 for (const [state, category, completed] of [['custom-complete', 'done', true], ['done', 'open', false]] as const) {
-  test(`leaf benefit guidance resolves ${state} as ${category}`, async ({ page }) => {
+  test(`leaf benefit guidance resolves ${state} as ${category}`, async ({ page }, testInfo) => {
     const data = fixtures()
     const node = data.nodes.find(n => n.key === 'PHAROS-12')!
     node.kind_slug = 'work'; node.state = state
     node.estimate = { is_parent: false, hours: null, estimated_children: 0, open_children: 0 }
+    node.fields = { ...node.fields, pill_en: '', pill_de: '', benefit_en: '', benefit_de: '' }
     const child = data.nodes.find(n => n.parent_id === node.id)!
     child.parent_id = node.parent_id
     const errors = watchErrors(page)
@@ -148,6 +149,49 @@ for (const [state, category, completed] of [['custom-complete', 'done', true], [
     await expect(region).toContainText(guidance)
     await page.getByRole('button', { name: 'Edit', exact: true }).click()
     await expect(region).toContainText(guidance)
+    await expect(region).toContainText('Each non-empty pill needs 2–4 words to save.')
+    if (completed) {
+      await expect(region).toContainText('Completing it again needs both languages and benefits.')
+      await expect(region).not.toContainText('Before Done')
+    } else await expect(region).not.toContainText('This completed ticket')
+
+    // Risk: restoring completed-ticket context must not move the fields as the
+    // draft becomes valid, or describe the next complete edit as incomplete.
+    const englishPill = region.getByLabel('Pill · English')
+    const germanPill = region.getByLabel('Pill · Deutsch')
+    const englishBenefit = region.getByLabel('Benefit · English')
+    const germanBenefit = region.getByLabel('Benefit · Deutsch')
+    const save = page.getByRole('button', { name: 'Save', exact: true })
+    const contexts = completed
+      ? [390, 1024, 1440].flatMap(width => ['light', 'dark'].map(theme => ({ width, theme })))
+      : [{ width: 1440, theme: 'light' }]
+    for (const { width, theme } of contexts) {
+      await page.setViewportSize({ width, height: 1000 })
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+      await englishPill.fill('')
+      await germanPill.fill('')
+      await englishBenefit.fill('')
+      await germanBenefit.fill('')
+      await expectStableControls({
+        controls: { englishPill, germanPill, englishBenefit, germanBenefit, save },
+        scrollAreas: { region },
+        interactions: [
+          { name: 'invalid pill', run: async () => { await englishPill.fill('Word'); await expect(englishPill).toHaveAttribute('aria-invalid', 'true') } },
+          { name: 'valid English pill', run: async () => { await englishPill.fill('Clear leaf benefits'); await expect(englishPill).not.toHaveAttribute('aria-invalid', 'true') } },
+          { name: 'valid German pill', run: async () => { await germanPill.fill('Verständlicher gemeinsamer Nutzen') } },
+          { name: 'English benefit', run: async () => { await englishBenefit.fill('Completed work explains the benefit.') } },
+          { name: 'German benefit', run: async () => { await germanBenefit.fill(longGerman); await expect(region).toContainText(guidance) } },
+        ],
+      })
+      if (completed) await region.screenshot({ path: testInfo.outputPath(`completed-edit-${width}-${theme}.png`) })
+    }
+    await save.click()
+    await expect(region).toContainText(longGerman)
+    await expect(region).not.toContainText('incomplete benefit fields')
+    await page.getByRole('button', { name: 'Edit', exact: true }).click()
+    await expect(region).toContainText('Each non-empty pill needs 2–4 words to save.')
+    await expect(region).not.toContainText('incomplete benefit fields')
+    if (completed) await expect(region).toContainText('Completing it again needs both languages and benefits.')
     expect(errors).toEqual([])
   })
 }

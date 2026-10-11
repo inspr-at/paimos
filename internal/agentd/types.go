@@ -284,9 +284,10 @@ type StartRequest struct {
 }
 
 type RunTools struct {
-	URL     string `json:"url"`
-	Token   string `json:"token"`
-	Routine bool   `json:"routine,omitempty"`
+	URL                string `json:"url"`
+	Token              string `json:"token"`
+	Routine            bool   `json:"routine,omitempty"`
+	BrowserCaptureOnly bool   `json:"browser_capture_only,omitempty"`
 }
 
 type AdapterEvent struct {

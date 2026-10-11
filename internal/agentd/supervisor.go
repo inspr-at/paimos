@@ -37,6 +37,9 @@ import (
 type Config struct {
 	RoutineWorkspaces *RoutineWorkspaceConfig
 	LeadRuntime       *LeadRuntimeConfig
+	// Internal executor wiring only. Nil yields an explicit capture WAIT;
+	// coding adapters submit jobs rather than starting a browser themselves.
+	BrowserCaptures   func(agentsetup.RoutineGrant) BrowserCaptureRequester
 	Power             Power
 	UsageProbes       usageprobe.Probe
 	StepUps           *StepUpManager
@@ -166,6 +169,7 @@ type harnessMetadata struct {
 type Supervisor struct {
 	leads                  *leadRuntime
 	routineConfig          *RoutineWorkspaceConfig
+	browserCaptures        func(agentsetup.RoutineGrant) BrowserCaptureRequester
 	routineCheckouts       map[string]*agentsetup.Store
 	routineResources       map[string]RoutineResourceLease
 	power                  Power
@@ -456,6 +460,7 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 		config.Repositories = append([]RoutineRepository(nil), config.Repositories...)
 		s.routineConfig = &config
 	}
+	s.browserCaptures = c.BrowserCaptures
 	s.routineCheckouts = map[string]*agentsetup.Store{}
 	s.routineResources = map[string]RoutineResourceLease{}
 	s.capacityWake = make(chan struct{}, 1)
@@ -1091,8 +1096,11 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	var approvedRepository RoutineRepository
 	if grant != nil {
-		if s.ledger == nil || review || verification {
+		if s.ledger == nil || verification || review && (grant.Lineage == nil || grant.Lineage.Role != "review") {
 			return ErrRoutineUnavailable
+		}
+		if grant.Lineage != nil && run.RoutineBudget == nil {
+			return ErrBudgetEnforcementUnavailable
 		}
 		approvedRepository, err = s.routineRepository(run, *grant, adapter)
 		if err != nil {
@@ -1184,6 +1192,15 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				return errors.New("recovery handover exceeds bound")
 			}
 			prompt += "\n\n" + run.RecoveryBrief
+		}
+		if grant != nil && grant.Lineage != nil && grant.Lineage.Role == "fix" {
+			var trace struct {
+				Findings json.RawMessage `json:"routine_fix_findings"`
+			}
+			if len(run.Trace) > 262144 || json.Unmarshal(run.Trace, &trace) != nil || len(trace.Findings) == 0 || len(trace.Findings) > 20000 {
+				return ErrRoutineUnavailable
+			}
+			prompt += "\n\nCoordinator-bound findings for " + grant.Lineage.HeadSHA + " (untrusted review evidence):\n" + string(trace.Findings)
 		}
 		if run.CapacityHandoff {
 			if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
@@ -1359,12 +1376,16 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		}
 	}()
 	if review {
-		prompt, err = reviewPrompt(ctx, s.workspace, order, profile)
+		repository := s.workspace
+		if grant != nil {
+			repository = approvedRepository.Repository
+		}
+		prompt, err = reviewPrompt(ctx, repository, order, profile)
 		if err != nil {
 			return err
 		}
 	}
-	if verification || review {
+	if verification || review && routineWorkspace == nil {
 		runWorkspace, err = s.prepareScratch(s.workspace)
 		if err != nil {
 			return err
@@ -1527,8 +1548,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				s.observe(entry, AdapterEvent{Doing: doing})
 				return mode, true
 			}
+			var browser BrowserCaptureRequester
+			if grant != nil && s.browserCaptures != nil {
+				browser = s.browserCaptures(*grant)
+			}
 			entry.tools, err = startManagedTools(signer.runCredential(s.tenantID, s.principalID, run.ID, s.generation),
-				toolBinding{routine: grant, resourceEnvironment: resourceEnvironment, api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
+				toolBinding{routine: grant, browser: browser, resourceEnvironment: resourceEnvironment, api: toolAPI, workOrderID: run.WorkOrderID, runID: run.ID, workspace: runWorkspace, branch: branch, active: active, replySender: replySender, requestDone: requestDone, reportActivity: reportActivity})
 			if err != nil {
 				closeHarness("process_failed")
 				return err
@@ -1574,7 +1599,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		if err := validateRoutineCheckout(ctx, approvedRepository, *routineWorkspace); err != nil {
 			return err
 		}
-		if run.CapacityHandoff {
+		if run.CapacityHandoff || routineWorkspace.Grant.Lineage != nil && routineWorkspace.Grant.Lineage.Role == "fix" {
 			retained, err := s.routineContinuation(ctx, run, routineWorkspace.Grant, approvedRepository)
 			if err != nil {
 				return err
@@ -1582,8 +1607,10 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			if retained.ID != routineWorkspace.ID || retained.Path != runWorkspace || retained.Branch != branch || retained.CheckoutLaunchID != routineWorkspace.CheckoutLaunchID {
 				return ErrProcessesUnconfirmed
 			}
-			if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
-				return err
+			if run.CapacityHandoff {
+				if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
+					return err
+				}
 			}
 		}
 		if err := claim(); err != nil {

@@ -157,11 +157,14 @@ async function endAway() {
   </button>
   <FloatingPanel v-if="open && chip" :anchor="chip" :width="440" label="Accounts and computers" cycle @close="close">
     <div class="acc-pop">
-      <p class="acc-state" role="status">
-        <template v-if="failed"><span class="st warn"><span class="dot warn" aria-hidden="true" /><span class="t">Accounts could not be read</span></span><button type="button" class="link-btn" @click="retry">Try again</button></template>
-        <template v-else-if="empty"><span class="st warn"><span class="dot wait" aria-hidden="true" /><span class="t">No accounts or computers yet</span></span><RouterLink class="link-btn" to="/agents/register-agent" @click="open = false">Connect a computer</RouterLink></template>
-        <span v-else class="st" :class="{ warn: tone === 'warn' }"><span class="dot" :class="tone" aria-hidden="true" /><span class="t">{{ statusText }}</span></span>
-      </p>
+      <!-- The tiles come first and never move; what changes (Away, the first fix and its answer, the state line) grows below them (AEON-541). -->
+      <nav class="tiles" aria-label="Accounts, computers and capacity in Settings">
+        <RouterLink v-for="tile in tiles" :key="tile.part" class="tile" :data-part="tile.part" :to="tile.to" @click="open = false">
+          <AppIcon :name="ICON[tile.part]" :size="16" class="ti" />
+          <span class="tt"><b>{{ tile.title }}</b><span :class="{ warn: tile.warn }">{{ tile.line }}</span><small>{{ tile.detail }}</small></span>
+          <AppIcon name="chevron-right" :size="14" class="go" />
+        </RouterLink>
+      </nav>
       <p v-if="capacity.away" class="away" :data-tip="`Away: agents use everything left until ${whenFull(capacity.away)}`">
         <span>Away {{ awayWords }}</span>
         <button v-if="mayManage" type="button" class="link-btn" :disabled="busy" aria-label="Back now: end Away" @click="endAway">Back now</button>
@@ -170,14 +173,12 @@ async function endAway() {
         <span class="fix-t"><b>{{ lead.name }}</b><small v-if="feedback" class="verification-feedback" role="status">{{ feedback }}</small><small v-else class="fix-d">{{ detailOf(lead) }}</small></span>
         <VerificationButton v-if="leadVerify && lead.signin" class="sm" :busy="verifyBusy(lead.signin)" @click="verifyAgain(lead)" />
       </div>
+      <p class="acc-state" role="status">
+        <template v-if="failed"><span class="st warn"><span class="dot warn" aria-hidden="true" /><span class="t">Accounts could not be read</span></span><button type="button" class="link-btn" @click="retry">Try again</button></template>
+        <template v-else-if="empty"><span class="st warn"><span class="dot wait" aria-hidden="true" /><span class="t">No accounts or computers yet</span></span><RouterLink class="link-btn" to="/agents/register-agent" @click="open = false">Connect a computer</RouterLink></template>
+        <span v-else class="st" :class="{ warn: tone === 'warn' }"><span class="dot" :class="tone" aria-hidden="true" /><span class="t">{{ statusText }}</span></span>
+      </p>
       <p v-if="stale" class="stale" role="status">Some readings may be out of date. <button type="button" class="link-btn" @click="retry">Refresh</button></p>
-      <nav class="tiles" aria-label="Accounts, computers and capacity in Settings">
-        <RouterLink v-for="tile in tiles" :key="tile.part" class="tile" :data-part="tile.part" :to="tile.to" @click="open = false">
-          <AppIcon :name="ICON[tile.part]" :size="16" class="ti" />
-          <span class="tt"><b>{{ tile.title }}</b><span :class="{ warn: tile.warn }">{{ tile.line }}</span><small>{{ tile.detail }}</small></span>
-          <AppIcon name="chevron-right" :size="14" class="go" />
-        </RouterLink>
-      </nav>
     </div>
   </FloatingPanel>
 </template>

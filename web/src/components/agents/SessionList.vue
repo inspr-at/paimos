@@ -700,7 +700,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
          at the card's width, under the app header; the pills and the column heads stick with it. -->
     <div ref="stick" class="th-stick" :class="{ stuck }" data-stick>
       <div class="tree-head">
-        <h2 class="sess-title"><span id="sessions-title">{{ showRemoved ? 'History' : 'Sessions' }}</span><span v-if="loaded && state === 'ready'" class="fs-count" aria-hidden="true">{{ shownCount }}</span></h2>
+        <h2 class="sess-title"><span class="title-room"><span id="sessions-title">{{ showRemoved ? 'History' : 'Sessions' }}</span><span class="title-ghost" aria-hidden="true">Sessions</span></span><span v-if="loaded && state === 'ready'" class="fs-count" aria-hidden="true">{{ shownCount }}</span></h2>
         <!-- Collapse all / Expand all (AEON-1210): a muted icon in a fixed slot; the icon swaps in place and writes the folded groups. -->
         <span class="fold-all-slot">
           <button
@@ -1070,6 +1070,10 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 @media (prefers-reduced-motion: reduce) { .th-stick { transition: none; } }
 .tree-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-height: 52px; padding: 4px 10px 6px; }
 .sess-title { display: inline-flex; align-items: baseline; gap: 8px; margin: 0; color: var(--ink); font: 650 15px/1.3 var(--font); letter-spacing: -.005em; white-space: nowrap; }
+/* The title keeps the room of its longer word, so History never moves the tools after it (AEON-541). */
+.title-room { display: inline-grid; }
+.title-room > * { grid-area: 1 / 1; }
+.title-ghost { visibility: hidden; }
 .fs-count { display: inline-block; min-inline-size: 3ch; font: 500 12px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .list-tools { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 8px; margin-left: 10px; min-width: 0; }
 /* Collapse all / Expand all (AEON-1210): a muted ghost icon in a fixed 28 px slot (44 px to touch). */

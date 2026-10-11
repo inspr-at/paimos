@@ -21,7 +21,138 @@ import (
 
 const benefitFields = `{"pill_en":"Clear release notes","pill_de":"Verständliche Release Notes","benefit_en":"Tickets explain the benefit.","benefit_de":"Tickets erklären den Nutzen."}`
 
+// Risk: accepting invalid pills strands delivered work at the completion gate.
+func testTicketPillsValidatedAtWriteTime(t *testing.T) {
+	p := newPrincipal(t, "pill-writes")
+	k := kindBySlug(t, p, "work")
+	n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Valid draft","fields":%s}`, k.ID, benefitFields))
+	snapshot := func() json.RawMessage {
+		t.Helper()
+		var raw json.RawMessage
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT jsonb_build_object('nodes',(SELECT jsonb_agg(to_jsonb(n) ORDER BY id) FROM nodes n),'events',(SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e))`).Scan(&raw)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	for _, key := range []string{"pill_en", "pill_de"} {
+		for _, value := range []string{"Word", "One two three four five"} {
+			for _, method := range []string{http.MethodPost, http.MethodPatch} {
+				t.Run(key+"/"+value+"/"+method, func(t *testing.T) {
+					var fields map[string]any
+					if err := json.Unmarshal([]byte(benefitFields), &fields); err != nil {
+						t.Fatal(err)
+					}
+					fields[key] = value
+					body := map[string]any{"fields": fields}
+					path := "/api/nodes/" + n.ID
+					if method == http.MethodPost {
+						path = "/api/nodes"
+						body["kind_id"] = k.ID
+						body["title"] = "Invalid draft"
+					}
+					rawBody, _ := json.Marshal(body)
+					before := snapshot()
+					code, raw := call(t, &p, method, path, string(rawBody))
+					if code != http.StatusUnprocessableEntity || !strings.Contains(string(raw), key+" must contain 2–4 words") {
+						t.Fatalf("invalid pill accepted: %d %s", code, raw)
+					}
+					if !sameJSON(before, snapshot()) {
+						t.Fatal("rejected write changed nodes or audit events")
+					}
+				})
+			}
+		}
+		for _, value := range []string{"One two", "One two three", "One two three four", "One\u00a0two"} {
+			fields, _ := json.Marshal(map[string]string{key: value})
+			created := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Optional benefits","fields":%s}`, k.ID, fields))
+			code, raw := call(t, &p, http.MethodPatch, "/api/nodes/"+created.ID, fmt.Sprintf(`{"fields":%s}`, fields))
+			decode[nodeJSON](t, code, raw, http.StatusOK)
+		}
+	}
+	// Old open data must still fail status-only writes and completion, rather
+	// than bypassing the validator because the request does not include fields.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=jsonb_set(fields,'{pill_en}','"One two three four five"') WHERE id=$1`, n.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []string{"in_progress", "done", "accepted", "delivered"} {
+		before := snapshot()
+		code, raw := call(t, &p, http.MethodPatch, "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q}`, state))
+		if code != http.StatusUnprocessableEntity || !strings.Contains(string(raw), "pill_en must contain 2–4 words") {
+			t.Fatalf("status bypass: %d %s", code, raw)
+		}
+		if !sameJSON(before, snapshot()) {
+			t.Fatal("rejected transition changed nodes or audit events")
+		}
+	}
+	before := snapshot()
+	code, raw := call(t, &p, http.MethodPost, "/api/nodes/bulk", fmt.Sprintf(`{"ids":[%q],"state":"in_progress"}`, n.ID))
+	result := decode[bulkResult](t, code, raw, http.StatusOK)
+	if len(result.Items) != 0 || len(result.Skipped) != 1 || result.Skipped[0].ID != n.ID || result.Skipped[0].Reason != "pill_en must contain 2–4 words" {
+		t.Fatalf("bulk must report invalid pills as skipped: %s", raw)
+	}
+	if !sameJSON(before, snapshot()) {
+		t.Fatal("skipped bulk transition changed nodes or audit events")
+	}
+}
+
+// Risk: legacy invalid pills block cancellation, including deferred lifecycle
+// cancellation, even though the action does not change release-note pills.
+func testTicketPillsDoNotBlockCancellationAndArchival(t *testing.T) {
+	for _, state := range []string{"cancelled", "archived", "custom-cancel", "custom-archive"} {
+		for _, method := range []string{http.MethodPatch, http.MethodPost} {
+			t.Run(state+"/"+method, func(t *testing.T) {
+				p := newPrincipal(t, "pill-cancel")
+				k := kindBySlug(t, p, "work")
+				n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Legacy pills","fields":%s}`, k.ID, benefitFields))
+				legacyFields := json.RawMessage(`{"pill_en":"One two three four five","pill_de":"Wort","benefit_en":"Tickets explain the benefit.","benefit_de":"Tickets erklären den Nutzen."}`)
+				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+					if _, err := tx.Exec(t.Context(), `UPDATE node_kinds SET field_schema=jsonb_set(field_schema,'{states}','[{"state":"custom-cancel","category":"cancelled"},{"state":"custom-archive","category":"archived"}]') WHERE id=$1`, k.ID); err != nil {
+						return err
+					}
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2::jsonb WHERE id=$1`, n.ID, string(legacyFields))
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				// A terminal state must not allow writing a new invalid pill.
+				code, raw := call(t, &p, http.MethodPatch, "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q,"fields":{"pill_en":"Changed"}}`, state))
+				if code != http.StatusUnprocessableEntity || !strings.Contains(string(raw), "pill_en must contain 2–4 words") {
+					t.Fatalf("terminal state accepted a changed invalid pill: %d %s", code, raw)
+				}
+				if unchanged := currentWorkTest(t, p, n.ID); unchanged.State != n.State || !sameJSON(unchanged.Fields, legacyFields) {
+					t.Fatal("rejected pill edit changed the legacy ticket", unchanged)
+				}
+				path := "/api/nodes/" + n.ID
+				body := fmt.Sprintf(`{"state":%q}`, state)
+				if method == http.MethodPost {
+					path = "/api/nodes/bulk"
+					body = fmt.Sprintf(`{"ids":[%q],"state":%q}`, n.ID, state)
+				}
+				code, raw = call(t, &p, method, path, body)
+				if method == http.MethodPost {
+					result := decode[bulkResult](t, code, raw, http.StatusOK)
+					if len(result.Items) != 1 || len(result.Skipped) != 0 || len(result.Unchanged) != 0 {
+						t.Fatalf("bulk terminal transition did not change the ticket: %s", raw)
+					}
+				} else {
+					decode[nodeJSON](t, code, raw, http.StatusOK)
+				}
+				if terminal := currentWorkTest(t, p, n.ID); terminal.State != state || !sameJSON(terminal.Fields, legacyFields) {
+					t.Fatal("terminal transition changed pills or did not persist its state", terminal)
+				}
+			})
+		}
+	}
+}
+
 func TestTicketBenefitsCreationCompletionAndHistory(t *testing.T) {
+	testTicketPillsValidatedAtWriteTime(t)
+	t.Run("legacy-terminal-pills", testTicketPillsDoNotBlockCancellationAndArchival)
 	for _, state := range []string{"done", "accepted", "delivered", "custom-complete", " CUSTOM--COMPLETE "} {
 		t.Run(state, func(t *testing.T) {
 			p := newPrincipal(t, "benefits")
