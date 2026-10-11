@@ -36,7 +36,28 @@ test('AEON-1212: admission uses four real gates and a timestamp; no report, unre
   assert.match(passed.caption, /^All passed at the last start · \d\d:\d\d$/)
   const held = admissionHistory([report({ reason_codes: ['dial_full'] })], read)
   assert.match(held.caption, /^1 held the last start/)
-  assert.equal(held.rows[0]?.detail, 'Dial held it: dial_full')
+  assert.equal(held.rows[0]?.detail, 'Dial held it: the dial was full')
+  assert.equal(held.rows[0]?.reason, 'dial_full')
+  for (const [code, kind, words] of [
+    ['dial_full', 'dial', 'the dial was full'],
+    ['harness_full', 'harness', 'a harness limit was reached'],
+    ['daily_limit', 'account_room', 'the daily cap was reached'],
+    ['daily_cap', 'account_room', 'the daily cap was reached'],
+    ['account_full', 'account_room', 'no account had room'],
+    ['account_room_full', 'account_room', 'no account had room'],
+    ['capacity_full', 'account_room', 'no account had room'],
+    ['host_full', 'host_load', 'the computer was too busy'],
+    ['host_load_full', 'host_load', 'the computer was too busy'],
+  ] as const) {
+    const row = admissionHistory([report({ reason_codes: [code] })], read).rows.find(row => row.kind === kind)!
+    assert.equal(row.state, 'held'); assert.equal(row.detail, `${row.label} held it: ${words}`); assert.equal(row.reason, code)
+  }
+  const unknown = report({ outcome: 'wait', reason_codes: ['future_check'], request: { stage: 'admission', outcome: 'wait', reason_codes: ['future_check'], attempt: 1, gates: [{ kind: 'dial', state: 'full' }] } })
+  assert.equal(admissionHistory([unknown], read).rows[0]?.detail, 'Dial held it: a check said no')
+  assert.equal(admissionHistory([unknown], read).rows[0]?.reason, 'future_check')
+  const unknownWithoutGate = admissionHistory([report({ outcome: 'wait', reason_codes: ['future_check'] })], read)
+  assert.equal(unknownWithoutGate.rows[0]?.detail, 'Dial: a check said no')
+  assert.doesNotMatch(unknownWithoutGate.caption, /All passed/)
   assert.equal(admissionHistory([], read).caption, 'No start yet')
   assert.equal(admissionHistory([], read).rows.length, 0)
   assert.equal(admissionHistory([report()], { ...read, error: 'history denied' }).rows.length, 0)

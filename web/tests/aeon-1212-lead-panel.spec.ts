@@ -289,6 +289,39 @@ async function checkPanel(page: Page, phone: boolean) {
   expect(failures).toEqual([])
 }
 
+// Copy/reply must remain reachable without leaving an empty action row or
+// moving the message, its neighbours, the question, or the pinned composer.
+async function checkChatSpacing(page: Page, output: string) {
+  const messages = panel(page).locator('.thread > .msg')
+  await expect(messages).toHaveCount(4)
+  const first = messages.first(), copy = first.getByRole('button', { name: 'Copy', exact: true })
+  await expectStableControls({ controls: {
+    header: panel(page).locator('.pane-bar'), tabs: panel(page).getByRole('tablist'),
+    composer: panel(page).locator('.composer'), question: question(page),
+    message: first, next: messages.nth(1), copy, reply: first.getByRole('button', { name: 'Reply', exact: true }),
+  }, scrollAreas: { thread: panel(page).locator('.thread-scroll') }, interactions: [
+    { name: 'reveal message actions', run: () => first.hover() },
+    { name: 'focus message action', run: () => copy.focus() },
+  ] })
+  const spacing = await messages.evaluateAll(rows => rows.map((row, index) => {
+    const bounds = row.getBoundingClientRect(), previous = rows[index - 1]?.getBoundingClientRect()
+    const actions = row.querySelector('.message-actions')?.getBoundingClientRect()
+    const body = row.querySelector('.markdown-body, .msg-body')!.getBoundingClientRect()
+    return { gap: previous ? bounds.top - previous.bottom : null, timeGroup: row.classList.contains('time-group'),
+      actionsInside: !actions || actions.top >= bounds.top && actions.bottom <= bounds.bottom + 0.5,
+      actionsBesideText: !actions || actions.left >= body.right }
+  }))
+  for (const item of spacing) {
+    if (item.gap !== null) expect(Math.abs(item.gap - (item.timeGroup ? 20 : 12)), 'compact message/time-group spacing').toBeLessThanOrEqual(0.5)
+    expect(item.actionsInside, '44 px message actions stay inside their row').toBe(true)
+    expect(item.actionsBesideText, 'message actions cannot cover the text').toBe(true)
+  }
+  await writeFile(output, `${JSON.stringify(spacing, null, 2)}\n`)
+  console.log(`AEON-1212 chat spacing: ${spacing.slice(1).map(item => item.gap).join(', ')} px; action hover/focus shift ≤ 0.5 px`)
+  await copy.blur()
+  await panel(page).locator('.pane-bar').hover()
+}
+
 for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','dark'] as const) {
   test(`AEON-1212 check.mjs: ${width} ${look} Lead Session Chat controls stay put and the real answer records in place`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1000 })
@@ -303,7 +336,7 @@ for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','d
     await expectStableControls({ controls: stable, scrollAreas: { panel: panel(page) }, interactions: [
       { name: 'Lead', run: async () => { await tab(page, 'Lead').click(); await expect(panel(page).locator('#lp-checks')).toHaveText('Before every start'); await expect(panel(page).locator('.admission-caption')).toContainText('All passed at the last start'); await expect(panel(page).locator('[data-check]')).toHaveCount(4); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-sheet-${width}-${look}.png`) }) } },
       { name: 'Session', run: async () => { await tab(page, 'Session').click(); await expect(panel(page).locator('#session-panel-overview')).toBeVisible(); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/session-${width}-${look}.png`) }) } },
-      { name: 'Chat', run: async () => { await tab(page, 'Chat').click(); await expect(question(page)).toBeVisible(); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-chat-${width}-${look}.png`) }) } },
+      { name: 'Chat', run: async () => { await tab(page, 'Chat').click(); await expect(question(page)).toBeVisible(); await checkPanel(page, width <= 400); await checkChatSpacing(page, info.outputPath(`AEON-1212/chat-spacing-${width}-${look}.md`)); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-chat-${width}-${look}.png`) }) } },
     ] })
     world.hold()
     await expectStableControls({ controls: { ...stable, card: question(page), answerArea: question(page).locator('.answer-slot'), composer: panel(page).locator('.composer') }, scrollAreas: { thread: panel(page).locator('.thread-scroll') }, interactions: [
@@ -539,8 +572,22 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
         await page.reload()
         await expect(caption).toContainText('1 held the last start')
         await expect(checks).toHaveCount(4)
-        await expect(checks.first()).toHaveText('Dial held it: dial_full')
+        await expect(checks.first()).toHaveText('Dial held it: the dial was full')
+        await expect(checks.first()).toHaveAttribute('data-tip', 'dial_full')
         await admissionShot('held')
+      } },
+      { name: 'held history with an unknown reason', run: async () => {
+        world.state.admission = [{ ...makeAdmission(), outcome: 'wait', reason_codes: ['future_check'], request: { ...makeAdmission().request, outcome: 'wait', reason_codes: ['future_check'], gates: [{ kind: 'dial', state: 'full' }] } }]
+        await page.reload()
+        await expect(caption).toContainText('1 held the last start')
+        await expect(checks.first()).toHaveText('Dial held it: a check said no')
+        await expect(checks.first()).toHaveAttribute('data-tip', 'future_check')
+        await expect(panel(page).locator('.lead-content')).not.toContainText('future_check')
+        await checks.first().focus()
+        await expect(page.locator('.tooltip')).toHaveText('future_check')
+        await checks.first().blur()
+        await panel(page).locator('.pane-bar').hover()
+        await admissionShot('unknown-reason')
       } },
       { name: 'no start yet', run: async () => {
         world.state.admission = []
