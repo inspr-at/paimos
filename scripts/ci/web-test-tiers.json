@@ -676,6 +676,24 @@
     ,
     "browser:tests/knowledge.spec.ts:Decision entries expose active and superseded history without generic mutation controls"
     ,
+    "browser:tests/models-outdated.spec.ts:Remove moves every use and removes the versions in one step; Undo restores the versions and every use"
+    ,
+    "browser:tests/models-outdated.spec.ts:a review that went stale is refused without removing anything, says so and shows the list read again"
+    ,
+    "browser:tests/models-outdated.spec.ts:old versions that can move reach the tray when the first page holds only versions that cannot, and Remove keeps that page's revision"
+    ,
+    "browser:tests/models-outdated.spec.ts:on a phone › the sheet fills the screen with its actions pinned at the bottom, Keep them left of Remove, and every target is at least 44 px"
+    ,
+    "browser:tests/models-outdated.spec.ts:screenshots of the tray and the sheet at 1440, 1024 and 390 px, light and dark"
+    ,
+    "browser:tests/models-outdated.spec.ts:the review sheet overlays the page: inside the viewport, nothing on the page moves, focus stays in it and Esc closes it without a write"
+    ,
+    "browser:tests/models-outdated.spec.ts:the tray names the two successors that take over most uses and the count, only for admins and only when something is outdated"
+    ,
+    "browser:tests/models-outdated.spec.ts:unticking versions changes what moves and the button label while the actions and boxes stay put (±0.5 px)"
+    ,
+    "browser:tests/models-outdated.spec.ts:with auto-update on the uses already moved, so the tray says nothing uses them and Remove only removes"
+    ,
     "browser:tests/models-registry.spec.ts:screenshots of the card at 1440 and 400 px, light and dark"
     ,
     "browser:tests/no-shift-agents.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
@@ -9400,6 +9418,24 @@
     ,
     {"kind":"browser","file":"tests/model-refresh.spec.ts","name":"the Models page carries the registry card: the old freshness links land on it and Check now shows its cooldown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"Remove moves every use and removes the versions in one step; Undo restores the versions and every use","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"a review that went stale is refused without removing anything, says so and shows the list read again","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"old versions that can move reach the tray when the first page holds only versions that cannot, and Remove keeps that page's revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"on a phone › the sheet fills the screen with its actions pinned at the bottom, Keep them left of Remove, and every target is at least 44 px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"screenshots of the tray and the sheet at 1440, 1024 and 390 px, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"the review sheet overlays the page: inside the viewport, nothing on the page moves, focus stays in it and Esc closes it without a write","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"the tray names the two successors that take over most uses and the count, only for admins and only when something is outdated","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"unticking versions changes what moves and the button label while the actions and boxes stay put (±0.5 px)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/models-outdated.spec.ts","name":"with auto-update on the uses already moved, so the tray says nothing uses them and Remove only removes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Add model with several levels registers them in order, and a failure after the first level is never reported as saved","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/models-registry.spec.ts","name":"Add model: Undo removes what was added","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -16840,11 +16876,17 @@
     ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses server review evidence, including newly qualified harnesses and per-model residency","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a refusal the server answered still says nothing was removed","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a removal whose answer is lost after it committed is not called \"nothing removed\": it says the outcome is open and shows the list read again","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"a save that waited for a read and lost its editor writes nothing and does not call it a conflict","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"an answer from a closed editor never reaches the reopened one: Undo restores the values that editor was read with","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"an earlier answer that arrives first does not stand in for the reopened editor's own read","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry-card.unit.test.ts","name":"versions that can move still reach the tray when the first page holds only versions that cannot, and Remove sends the first page's revision","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"answers that are not what the page expects > is an error, not a crash, when the list or the refresh status has the wrong shape","tier":"GATED-FULL"}
     ,
@@ -16857,6 +16899,22 @@
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > separates a partial or stale discovery from a new model and from a version taken on","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"copy > writes dates, times, intervals and waits the way the page shows them","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"old versions > names the two successors that take over most uses, counts the rest, and says nothing uses them only when nothing is hidden","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"old versions > offers only versions whose uses can move: a registered successor, and a runnable one when something uses the old version","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"old versions > reads on past pages whose versions cannot move, at the first page's revision, and stops at a full batch, a changed revision, an unreadable page or the page bound","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"old versions > reads one bounded page and rejects an answer that is not the outdated list","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"old versions > retires the versions at the revision read with them and undoes with the token alone","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"old versions > says why a version is old in words, with a badge only for a named source","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"old versions > tells a refusal from an answer that never came: only a 4xx means nothing was written","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"old versions > writes each use in words: the row, the person, and what a lock or rule does, never a server code","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-registry.unit.test.ts","name":"registry lines > describes a line as harness, route (when it adds something), id, source and what was taken on","tier":"GATED-FULL"}
     ,
