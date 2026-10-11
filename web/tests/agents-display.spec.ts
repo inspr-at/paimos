@@ -244,6 +244,13 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await row(page, 2).locator('.agent-link').click()
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('.now-eta .report-source')).toBeVisible()
+    // TEMPORARY diagnostic (AEON-1210 r4): which element sticks out of the sheet's right edge.
+    const sticking = await panel.evaluate(el => {
+      const edge = el.getBoundingClientRect().left + el.clientLeft + el.clientWidth
+      return [...el.querySelectorAll('*')].map(c => ({ c, r: c.getBoundingClientRect() })).filter(({ r }) => r.width > 0 && r.right > edge + 0.5)
+        .map(({ c, r }) => `${c.tagName.toLowerCase()}.${[...c.classList].join('.')}[${(c.textContent ?? '').trim().slice(0, 40)}] right ${r.right.toFixed(1)} > ${edge.toFixed(1)} w ${r.width.toFixed(1)}`)
+    })
+    expect(sticking, `sheet ${await panel.evaluate(el => `${el.scrollWidth}/${el.clientWidth}`)}`).toEqual([])
     // The Messages tab is Chat since AEON-977.
     await expectStableControls({
       controls: { overview: panel.getByRole('tab', { name: 'Overview' }), chat: panel.getByRole('tab', { name: 'Chat' }), tabs: panel.getByRole('tablist'), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel },
