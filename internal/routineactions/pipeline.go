@@ -85,7 +85,7 @@ func pipelineSettledTx(ctx context.Context, tx pgx.Tx, run, id string, nonCode b
 	return nil
 }
 
-func loadPRActionTx(ctx context.Context, tx pgx.Tx, run, key string) (PROpen, Receipt, error) {
+func loadPRActionTx(ctx context.Context, tx pgx.Tx, run, key, initialHead string) (PROpen, Receipt, error) {
 	var payload, result []byte
 	err := tx.QueryRow(ctx, `SELECT o.payload,a.result FROM routine_actions a JOIN routine_effect_outbox o ON o.action_id=a.id AND o.run_id=a.run_id WHERE a.run_id=$1 AND a.action_key=$2 AND a.kind='pr.open' AND a.state='succeeded'`, run, key).Scan(&payload, &result)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -96,7 +96,7 @@ func loadPRActionTx(ctx context.Context, tx pgx.Tx, run, key string) (PROpen, Re
 	}
 	var e effect
 	var r Receipt
-	if json.Unmarshal(payload, &e) != nil || json.Unmarshal(result, &r) != nil || e.Request.PROpen == nil || !e.Request.PROpen.Valid() || r.PullRequest < 1 || r.OperationRef != e.OperationRef || r.RequestDigest != routineguard.Digest(e.Request) {
+	if json.Unmarshal(payload, &e) != nil || json.Unmarshal(result, &r) != nil || e.Request.PROpen == nil || !e.Request.PROpen.Valid() || e.Request.PROpen.HeadSHA != initialHead || r.PullRequest < 1 || r.OperationRef != e.OperationRef || r.RequestDigest != routineguard.Digest(e.Request) {
 		return PROpen{}, Receipt{}, workorders.Fail(409, "pipeline_pr_binding_changed")
 	}
 	return *e.Request.PROpen, r, nil
@@ -125,7 +125,7 @@ func (b *Broker) ReconcilePipeline(ctx context.Context, tid, id string) (Receipt
 		}
 		if !e.Request.PipelineRequest.NonCode {
 			var err error
-			in, pr, err = loadPRActionTx(ctx, tx, r.RunID, e.Request.PipelineRequest.PRActionKey)
+			in, pr, err = loadPRActionTx(ctx, tx, r.RunID, e.Request.PipelineRequest.PRActionKey, e.Request.PipelineRequest.HeadSHA)
 			if err != nil {
 				return err
 			}
@@ -166,7 +166,7 @@ func (b *Broker) ReconcilePipeline(ctx context.Context, tid, id string) (Receipt
 		wait := func(reason string) error { r.WaitReason = reason; out = *r; return nil }
 		proof := map[string]any{"action": r.RequestDigest, "assignment": binding.AssignmentDigest, "result": e.Request.PipelineRequest.ResultDigest, "target": e.Request.TargetID, "revision": e.Request.ExpectedRevision}
 		if !e.Request.PipelineRequest.NonCode {
-			current, currentPR, err := loadPRActionTx(ctx, tx, r.RunID, e.Request.PipelineRequest.PRActionKey)
+			current, currentPR, err := loadPRActionTx(ctx, tx, r.RunID, e.Request.PipelineRequest.PRActionKey, e.Request.PipelineRequest.HeadSHA)
 			if err != nil {
 				return err
 			}
@@ -237,7 +237,6 @@ func (b *Broker) ReconcilePipeline(ctx context.Context, tid, id string) (Receipt
 		if err != nil {
 			return err
 		}
-		r.ApprovalID = a.ID
 		approved, err := approvals.LiveRoutineHoldTx(ctx, tx, p, a.ID, e.Request.TargetID, "work_orders.write", digest, now)
 		if err != nil {
 			return err
@@ -249,6 +248,7 @@ func (b *Broker) ReconcilePipeline(ctx context.Context, tid, id string) (Receipt
 		} else if _, err := tx.Exec(ctx, `UPDATE routine_effect_outbox SET result=jsonb_build_object('approval_digest',$2::text) WHERE action_id=$1`, r.ID, digest); err != nil {
 			return err
 		}
+		r.ApprovalID = a.ID
 		r.State = "awaiting_decision"
 		if approved {
 			if e.Request.PipelineRequest.NonCode {
@@ -424,7 +424,7 @@ func (b *Broker) completeObservedMergeTx(ctx context.Context, tx pgx.Tx, p tenan
 	if work != e.Request.TargetID {
 		return false, "", workorders.Fail(409, "external_action_target_changed")
 	}
-	in, pr, err := loadPRActionTx(ctx, tx, r.RunID, e.Request.PipelineRequest.PRActionKey)
+	in, pr, err := loadPRActionTx(ctx, tx, r.RunID, e.Request.PipelineRequest.PRActionKey, e.Request.PipelineRequest.HeadSHA)
 	if err != nil {
 		return false, "", err
 	}
