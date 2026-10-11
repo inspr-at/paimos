@@ -105,7 +105,8 @@ const lead = computed(() => s.value?.project_id ? leads.views[s.value.project_id
 const isLead = computed(() => !!s.value && lead.value?.session_id === s.value.id)
 const project = computed(() => s.value ? projects.byId(s.value.project_id) : null)
 const pinned = computed(() => leadTab(leadPreference.value.value?.pinned))
-const questions = computed(() => s.value ? projection.asksOf(s.value.id).filter(q => q.project_id === s.value!.project_id) : [])
+const questionReadable = computed(() => !!s.value && can('questions.read', s.value.project_id) && projection.questions.state !== 'forbidden')
+const questions = computed(() => s.value && questionReadable.value ? projection.asksOf(s.value.id).filter(q => q.project_id === s.value!.project_id) : [])
 const hasQuestion = computed(() => questions.value.length > 0 && auth.identity?.principal.kind === 'person' && can('questions.decide', s.value?.project_id))
 let opening = 0
 function selectTab(next: PanelTab) {
@@ -410,7 +411,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <ProvenanceDetail v-if="s" :project-id="s.project_id" :session-id="s.id" :now="now" />
     </div>
     <SessionChat v-if="view && !loading && !reported?.watch" ref="chat" v-show="tab === 'chat'" id="session-panel-messages" :view="view" :now="now" :can-write="canWrite" :active="tab === 'chat'"
-      :questions="questions" :question-focus="questionFocus" :interrupt-block="interruptReason" role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" @interrupt="interrupt" />
+      :questions="questions" :question-readable="questionReadable" :question-focus="questionFocus" :interrupt-block="interruptReason" role="tabpanel" aria-labelledby="session-tab-messages" @unread="unread = $event" @interrupt="interrupt" />
   </aside>
 </template>
 

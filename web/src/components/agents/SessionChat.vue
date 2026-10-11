@@ -21,7 +21,7 @@ import { advanceReceipt, chatCapability, isQueuedMessage, chatSendLevel, chatWor
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
-const props = defineProps<{ view: SessionView; now: number; canWrite: boolean; active: boolean; interruptBlock: string; questions?: Question[]; questionFocus?: string }>()
+const props = defineProps<{ view: SessionView; now: number; canWrite: boolean; active: boolean; interruptBlock: string; questions?: Question[]; questionReadable?: boolean; questionFocus?: string }>()
 const emit = defineEmits<{ unread: [count: number]; interrupt: [] }>()
 const agents = useAgents()
 const identity = useSession()
@@ -33,7 +33,8 @@ const s = computed(() => props.view.session)
 // open questions; a card rereads its own record when it leaves that projection.
 const seenQuestions = ref<Question[]>([])
 watch(() => [identity.identity?.tenant.id, me.value, s.value.id], () => { seenQuestions.value = [] }, { flush: 'sync' })
-watch(() => props.questions, questions => {
+watch(() => [props.questions, props.questionReadable] as const, ([questions, readable]) => {
+  if (readable === false) { seenQuestions.value = []; return }
   const known = new Map(seenQuestions.value.map(question => [question.id, question]))
   for (const question of questions ?? []) known.set(question.id, question)
   seenQuestions.value = [...known.values()].slice(-20)

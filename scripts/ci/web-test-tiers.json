@@ -5542,6 +5542,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: failed answer retries the same request, a plain message never decides, and a late result stays off another session","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: losing question-read access clears retained cards and discards the pending decision response","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: pinned and last-used tabs belong to the person; queue links force Lead at Next up and chat keys only type","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: server action omission and decision denial remain read-only, and more than four real options link to the Desk","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

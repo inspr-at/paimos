@@ -3,6 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../lib/api'
+import { can } from '../../lib/authz'
 import { leadActionAvailable, leadActionReason, decisionLine, LEAD_WORDS, unmanagedLeadCopy } from '../../lib/lead'
 import { leadOverlay, openStartLead } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
@@ -32,6 +33,7 @@ const dial = ref<{ running: number; total: number } | null>(null)
 const now = ref(Date.now())
 let clock: ReturnType<typeof setInterval> | undefined
 const mayStart = computed(() => session.identity?.principal.kind === 'person' && leadActionAvailable(lead.value, 'start'))
+const mayDecide = computed(() => session.identity?.principal.kind === 'person' && can('questions.read', props.projectId) && can('questions.decide', props.projectId))
 const poller = usePoller(() => leads.load(props.projectId), 15_000)
 async function readDial() {
   const who = `${session.identity?.tenant.id}:${session.identity?.principal.id}`, project = props.projectId
@@ -103,9 +105,10 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
   <div class="lead-content pane-body">
       <p v-if="view?.error" class="small warn" role="alert">{{ view.error }}</p>
       <div v-if="questions.length" class="needs" role="note">
-        <AppIcon name="clock" :size="16" /><strong>It asks you</strong>
+        <AppIcon name="clock" :size="16" /><strong>{{ mayDecide ? 'It asks you' : 'Waits for a project admin' }}</strong>
         <p>{{ questions[0]!.input.question }}</p>
-        <button type="button" class="btn primary sm" @click="emit('chat', questions[0]!.id)">Answer in Chat</button>
+        <button v-if="mayDecide" type="button" class="btn primary sm" @click="emit('chat', questions[0]!.id)">Answer in Chat</button>
+        <RouterLink v-else class="btn ghost sm" :to="{ path: '/decision-desk', query: { item: `q:${questions[0]!.id}` } }">Open on the Desk<AppIcon name="chevron-right" :size="13" /></RouterLink>
       </div>
       <p v-if="questionsPartial" class="small warn" data-partial><RouterLink to="/decision-desk">Not every open question could be read here; see the Decision Desk</RouterLink></p>
       <section class="p-sec" aria-labelledby="lp-now">

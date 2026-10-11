@@ -181,6 +181,27 @@ test('AEON-1212: server action omission and decision denial remain read-only, an
   await expect(question(page).getByRole('link', { name: 'All options on the Desk' })).toBeVisible()
 })
 
+test('AEON-1212: losing question-read access clears retained cards and discards the pending decision response', async ({ page }) => {
+  const world = await setup(page)
+  await page.goto(`/agents/${LEAD_SESSION}?tab=chat`)
+  await expect(question(page)).toBeVisible()
+  world.hold()
+  await question(page).getByRole('button', { name: 'Not now', exact: true }).click()
+  await world.started()
+  await page.route('**/api/me/permissions*', route => {
+    const value = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    value.workspace.permissions = value.workspace.permissions.filter(permission => !permission.startsWith('questions.'))
+    if (value.project) value.project.permissions = value.project.permissions.filter(permission => !permission.startsWith('questions.'))
+    return route.fulfill({ json: value })
+  })
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(question(page)).toHaveCount(0)
+  world.release()
+  await expect.poll(() => world.state.question.state).toBe('answered')
+  await expect(question(page)).toHaveCount(0)
+  await expect(panel(page)).not.toContainText('Answered:')
+})
+
 test('AEON-1212: pinned and last-used tabs belong to the person; queue links force Lead at Next up and chat keys only type', async ({ page }) => {
   const world = await setup(page, { question: false, pinned: 'session', last: 'chat', german: true })
   await page.goto(`/agents/${LEAD_SESSION}`)
