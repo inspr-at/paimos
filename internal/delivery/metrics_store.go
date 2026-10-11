@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"path"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
@@ -109,9 +111,10 @@ func upsertReportsTx(ctx context.Context, tx pgx.Tx, tid, repository string, rep
 	return nil
 }
 
-// metricsEvent records metric facts after the existing ingress authenticated,
+// metricWebhookFacts records metrics and returns the durable Flow input after
+// ingress authenticated,
 // bound and accepted the delivery. Only content-free timing facts are kept.
-func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) error {
+func (m *Module) metricWebhookFacts(ctx context.Context, name string, raw []byte) (webhookOutcome, []metricRun, error) {
 	var e struct {
 		Repository struct {
 			Default string `json:"default_branch"`
@@ -120,8 +123,12 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 		Suite struct {
 			ID     int64  `json:"id"`
 			Head   string `json:"head_sha"`
+			Branch string `json:"head_branch"`
 			Status string `json:"status"`
-			App    struct {
+			Pulls  []struct {
+				Number int64 `json:"number"`
+			} `json:"pull_requests"`
+			App struct {
 				Slug string `json:"slug"`
 			} `json:"app"`
 		} `json:"check_suite"`
@@ -131,7 +138,18 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 		Created time.Time `json:"created_at"`
 	}
 	if err := json.Unmarshal(raw, &e); err != nil {
-		return errRead
+		return webhookFailed, nil, errRead
+	}
+	if name != "pull_request" && name != "check_suite" && name != "status" {
+		return webhookNothingToRecord, nil, nil
+	}
+	scope, err := m.jobScope(ctx)
+	if err != nil {
+		return webhookFailed, nil, err
+	}
+	configured := len(scope.workflows) > 0
+	if !configured && name != "check_suite" {
+		return webhookNotConfigured, nil, nil
 	}
 	var runs []metricRun
 	var pulls []metricPull
@@ -140,21 +158,38 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 	case "pull_request":
 		// Only pulls into the default branch with an opened time are facts.
 		if e.Repository.Default == "" || e.Pull.Base.Ref != e.Repository.Default || e.Pull.Created.IsZero() {
-			return nil
+			return webhookNothingToRecord, nil, nil
 		}
 		pull, err := metricPullFrom(e.Pull, m.config.Repository)
 		if err != nil {
-			return err
+			return webhookFailed, nil, err
 		}
 		pulls = []metricPull{pull}
 	case "check_suite":
 		reader, ok := m.github.(metricsReader)
 		if !ok || e.Suite.App.Slug != "github-actions" || e.Suite.Status != "completed" {
-			return nil
+			return webhookNothingToRecord, nil, nil
 		}
-		scope, err := m.jobScope(ctx)
-		if err != nil {
-			return err
+		if !configured {
+			if len(e.Suite.Pulls) > 100 || len(e.Suite.Branch) > 255 {
+				return webhookFailed, nil, &webhookStepError{step: "flow", err: errRead}
+			}
+			prs := make([]int64, 0, len(e.Suite.Pulls)+1)
+			for _, p := range e.Suite.Pulls {
+				prs = append(prs, p.Number)
+			}
+			if match := queueBranch.FindStringSubmatch(strings.TrimPrefix(e.Suite.Branch, "refs/heads/")); match != nil {
+				if pr, err := strconv.ParseInt(match[1], 10, 64); err == nil {
+					prs = append(prs, pr)
+				}
+			}
+			needed, err := m.suiteNeedsFlow(ctx, e.Suite.Head, prs)
+			if err != nil {
+				return webhookFailed, nil, &webhookStepError{step: "flow", err: err}
+			}
+			if !needed {
+				return webhookNotConfigured, nil, nil
+			}
 		}
 		err = reader.MetricsRead(ctx, m.config.TenantID, func(get func(string, any) error) error {
 			var err error
@@ -168,14 +203,17 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 			return nil
 		})
 		if err != nil {
-			return err
+			if !configured {
+				return webhookFailed, nil, &webhookStepError{step: "flow", err: err}
+			}
+			return webhookFailed, nil, err
 		}
 	case "status":
 		if e.Context != "aeon/review" {
-			return nil
+			return webhookNothingToRecord, nil, nil
 		}
 		if !reviewgate.ValidSHA(e.SHA) || e.State != "pending" && e.State != "success" && e.State != "failure" && e.State != "error" {
-			return errRead
+			return webhookFailed, nil, errRead
 		}
 		at := e.Created.UTC()
 		if e.Created.IsZero() {
@@ -183,14 +221,19 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 		}
 		marks = []metricMark{{Kind: "review_status", Key: e.SHA + "/" + e.State, Head: e.SHA, At: at, Outcome: e.State}}
 	default:
-		return nil
+		return webhookNothingToRecord, nil, nil
 	}
 	if len(runs)+len(pulls)+len(marks) == 0 {
-		return nil
+		return webhookNothingToRecord, nil, nil
+	}
+	// Checks and queue facts belong to linked deliveries even when metrics are
+	// unconfigured. Keep their read and write without creating metric rows.
+	if !configured {
+		return webhookNotConfigured, runs, nil
 	}
 	at := m.now()
 	service := db.AllProjects(ctx, "delivery metric webhook facts")
-	err := db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 		if err := upsertRunsTx(ctx, tx, m.config.TenantID, m.config.Repository, "webhook", runs, at); err != nil {
 			return err
 		}
@@ -200,10 +243,43 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 		return upsertMarksTx(ctx, tx, m.config.TenantID, m.config.Repository, "webhook", marks, at)
 	})
 	if err != nil {
-		return err
+		return webhookFailed, nil, err
 	}
-	// AEON-1004: the same runs become checks and merge-queue steps in Flow.
-	return m.flowFromRuns(ctx, runs)
+	return webhookRecorded, runs, nil
+}
+
+// suiteNeedsFlow checks the bounded suite subjects before an Actions read.
+// GitHub can omit pull_requests, so also match the projected PR/queue head
+// and bounded verified observations of earlier heads against current linkage.
+// A full history page conservatively requires the Actions read only while a
+// current linked consumer exists: truncation must not revive removed links.
+// The eventual flow write still resolves the current ticket under its fence.
+func (m *Module) suiteNeedsFlow(ctx context.Context, head string, prs []int64) (bool, error) {
+	if len(prs) > 101 {
+		return false, errRead
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var needed bool
+	service := db.AllProjects(ctx, "delivery check-suite flow consumers")
+	err := db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `WITH history AS MATERIALIZED (
+			SELECT observations FROM delivery_github_events
+			WHERE repository=$1 AND jsonb_array_length(observations)>0
+			AND (head_sha=$2 OR observations @> jsonb_build_array(jsonb_build_object('head_sha',$2::text))
+				OR observations @> jsonb_build_array(jsonb_build_object('queue_head',$2::text)))
+			ORDER BY sequence DESC LIMIT 101
+		)
+		SELECT EXISTS(SELECT 1 FROM delivery_items i
+			WHERE i.repository=$1 AND i.project_id IS NOT NULL AND i.ticket_node_id IS NOT NULL
+			AND ((SELECT count(*)>100 FROM history) OR i.head_sha=$2 OR i.observation->>'queue_head'=$2 OR i.pull_request=ANY($3::bigint[])
+			OR EXISTS(SELECT 1 FROM history h CROSS JOIN LATERAL
+				(SELECT value FROM jsonb_array_elements(h.observations) LIMIT 100) o
+				WHERE (o.value->>'head_sha'=$2 OR o.value->>'queue_head'=$2)
+				AND o.value->'pull_request'=to_jsonb(i.pull_request))))`,
+			m.config.Repository, head, prs).Scan(&needed)
+	})
+	return needed, err
 }
 
 // metricSourceRow is a project's repository link and backfill position.

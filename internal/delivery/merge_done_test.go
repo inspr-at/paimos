@@ -268,17 +268,51 @@ func TestMergeDoneQueueConstituentsRequireActualMerge(t *testing.T) {
 	if mergedState(t, f, f.ticket) != "qa" || mergedState(t, f, second) != "qa" {
 		t.Fatal("queue checks or destruction proved merge")
 	}
+	_, next, finished, checkpoints, _, class := receiptState(t, f, "queue-destroy")
+	if finished != nil || checkpoints["completion"] != "" || class != nil {
+		t.Fatal("missing merge proof was checkpointed as complete")
+	}
 	g.facts[7] = mergeFactFixture(f, 7, "AEON-848", strings.Repeat("c", 40))
-	g.facts[8] = mergeFactFixture(f, 8, "AEON-849", strings.Repeat("d", 40))
 	for n, p := range f.gh.pulls {
 		p.Open = false
 		p.Merged = true
 		f.gh.pulls[n] = p
 	}
+	// A partial canonical response applies the confirmed constituent once,
+	// retaining the other subject for internal recovery without redelivery.
+	f.at = next
+	if err := f.m.retryWebhooks(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if mergedState(t, f, f.ticket) != "done" || mergedState(t, f, second) != "qa" {
+		t.Fatal("partial proof lost a confirmed or an unconfirmed constituent")
+	}
+	_, next, finished, checkpoints, _, class = receiptState(t, f, "queue-destroy")
+	if finished != nil || checkpoints["completion"] != "" || class != nil {
+		t.Fatal("partial group was checkpointed as complete")
+	}
+	g.facts[8] = mergeFactFixture(f, 8, "AEON-849", strings.Repeat("d", 40))
+	f.at = next
+	if err := f.m.retryWebhooks(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if mergedState(t, f, f.ticket) != "done" || mergedState(t, f, second) != "done" {
+		t.Fatal("internal retry did not complete every confirmed constituent")
+	}
 	recordedMergeWebhook(t, f, "merge_group.destroyed", "queue-destroy", 204, nil)
 	if mergedState(t, f, f.ticket) != "done" || mergedState(t, f, second) != "done" {
 		t.Fatal("confirmed group constituents not completed")
 	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='delivery.merge_done' AND node_id=ANY($1::uuid[])`, []string{f.ticket, second}).Scan(&count); err != nil {
+			return err
+		}
+		if count != 2 {
+			t.Fatalf("group recovery duplicated completion effects: %d", count)
+		}
+		return nil
+	})
 }
 
 func TestMergeDoneRefusalNeedsYouAndRecovery(t *testing.T) {
@@ -305,10 +339,21 @@ func TestMergeDoneRefusalNeedsYouAndRecovery(t *testing.T) {
 	if mergedState(t, f, f.ticket) != "qa" {
 		t.Fatal("completion gate bypassed")
 	}
+	_, next, finished, checkpoints, _, class := receiptState(t, f, "refused-merge")
+	if finished != nil || checkpoints["completion"] != "" || class != nil {
+		t.Fatal("refused merge was checkpointed as complete")
+	}
 	f.tx(t, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=$2,updated_at=clock_timestamp() WHERE id=$1`, f.ticket, mergeBenefits)
 		return err
 	})
+	f.at = next
+	if err := f.m.retryWebhooks(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if mergedState(t, f, f.ticket) != "done" {
+		t.Fatal("internal retry did not recover the corrected gate")
+	}
 	recordedMergeWebhook(t, f, "pull_request.closed", "refused-merge", 204, nil)
 	if mergedState(t, f, f.ticket) != "done" {
 		t.Fatal("replay did not recover fixed gate")
@@ -684,5 +729,28 @@ func TestMergeDoneReferencesAndCanonicalGroupReads(t *testing.T) {
 	}
 	if fact, err := mergedPull(get, "other/repo", 7); err != nil || fact != nil {
 		t.Fatal("foreign base proved merge")
+	}
+	for _, tc := range []struct {
+		name, state, branch string
+		merged, pending     bool
+	}{
+		{name: "closed_unmerged", state: "closed", branch: "main"},
+		{name: "other_branch_merge", state: "closed", branch: "release", merged: true},
+		{name: "open_pull", state: "open", branch: "main", pending: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			get := func(_ string, out any) error {
+				raw, err := json.Marshal(map[string]any{"number": 7, "state": tc.state, "merged": tc.merged,
+					"base": map[string]any{"ref": tc.branch, "repo": map[string]any{"full_name": "example/delivery"}}})
+				if err != nil {
+					return err
+				}
+				return json.Unmarshal(raw, out)
+			}
+			fact, pending, err := mergedPullState(get, "example/delivery", 7)
+			if err != nil || fact != nil || pending != tc.pending {
+				t.Fatalf("canonical empty state: fact=%v pending=%t err=%v", fact, pending, err)
+			}
+		})
 	}
 }
