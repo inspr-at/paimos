@@ -313,7 +313,8 @@ function modeKeys(event: KeyboardEvent, key: string) {
   .cd-live-sk .skeleton { width: 150px; }
 }
 @media (pointer: coarse) {
-  .cdf::after { content: ''; position: absolute; inset: -10px; }
+  /* 44 px, reaching left rather than over the total beside it (4 px away). */
+  .cdf::after { content: ''; position: absolute; inset: -10px -4px -10px -14px; }
   .load-state, .cd-live-sk { min-height: 36px; }
   .cd-live { height: 36px; }
   .cd-live::after { content: ''; position: absolute; inset: -4px 0; }

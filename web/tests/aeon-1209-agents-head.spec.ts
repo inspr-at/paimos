@@ -451,6 +451,23 @@ test.describe('touch targets', () => {
     await page.goto('/agents')
     const keys = seven ? UNITS : ['total', 'codex', 'claude', 'cursor']
     await expect(unit(page, keys.at(-1)!)).toBeVisible()
+    // Closed, each unit is one target (a tap opens its plate) and the fold keeps its own 44 px reach beside the total.
+    const closed = await page.evaluate(() => {
+      const misses: string[] = []
+      const sample = (b: { left: number; top: number; right: number; bottom: number }, ok: (el: Element | null) => boolean, label: string) => {
+        for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
+          const x = b.left + 1 + (b.right - b.left - 2) * i / 4, y = b.top + 1 + (b.bottom - b.top - 2) * j / 4, el = document.elementFromPoint(x, y)
+          if (!ok(el)) misses.push(`${label} at ${Math.round(x)},${Math.round(y)} reaches ${el?.closest('button')?.getAttribute('aria-label') ?? el?.getAttribute('class') ?? 'nothing'}`)
+        }
+      }
+      const fold = document.querySelector('.cdial .cdf')!, r = fold.getBoundingClientRect(), a = getComputedStyle(fold, '::after')
+      const v = (k: string) => Math.min(0, parseFloat(a.getPropertyValue(k)) || 0)
+      if (r.right - v('right') - (r.left + v('left')) < 43.5) misses.push('fold is under 44 px')
+      sample({ left: r.left + v('left'), top: r.top + v('top'), right: r.right - v('right'), bottom: r.bottom - v('bottom') }, el => el?.closest('button') === fold, 'fold')
+      for (const u of document.querySelectorAll<HTMLElement>('.cdial [data-unit]')) sample(u.getBoundingClientRect(), el => el?.closest('[data-unit]') === u && !el.closest('button'), u.dataset.unit!)
+      return misses
+    })
+    expect(closed).toEqual([])
     for (const key of keys) {
       await unit(page, key).locator('.du-mark').tap()
       await expect(unit(page, key)).toHaveClass(/\bopen\b/)
