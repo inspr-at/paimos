@@ -4,6 +4,7 @@ package agentaccounts
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func evidenceHTTP(mod httpapi.Module, ctx context.Context, p tenant.Principal, token, method, path, body string, now time.Time) *httptest.ResponseRecorder {
@@ -139,16 +141,46 @@ func evidenceBlockedOrDone(t *testing.T, ctx context.Context, blockerPID int, do
 			return w, ""
 		default:
 		}
-		var query string
-		err := adminPool.QueryRow(ctx, `SELECT query FROM pg_stat_activity
- WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)) LIMIT 1`, blockerPID).Scan(&query)
-		if err == nil {
-			return nil, query
-		}
-		if err != pgx.ErrNoRows {
+		query, err := blockedStatement(ctx, adminPool, blockerPID)
+		if err != nil {
 			t.Fatal(err)
 		}
+		if query != "" {
+			return nil, query
+		}
 	}
+}
+
+type activityReader interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+// blockedStatement names the statement a backend blocked by blockerPID waits
+// in, or "" when none is blocked. pg_stat_activity text comes from a snapshot
+// held for the observer's transaction while pg_blocking_pids is live, so one
+// read can pair a waiter's previous statement with its new lock wait. A
+// blocked waiter cannot advance, so its text is re-read from a fresh snapshot.
+func blockedStatement(ctx context.Context, q activityReader, blockerPID int) (string, error) {
+	var waiter int
+	err := q.QueryRow(ctx, `SELECT pid FROM pg_stat_activity
+ WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)) LIMIT 1`, blockerPID).Scan(&waiter)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if _, err := q.Exec(ctx, `SELECT pg_stat_clear_snapshot()`); err != nil {
+		return "", err
+	}
+	var query string
+	err = q.QueryRow(ctx, `SELECT query FROM pg_stat_activity
+ WHERE pid=$1 AND $2=ANY(pg_blocking_pids(pid))`, waiter, blockerPID).Scan(&query)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return query, err
 }
 
 func startEvidenceRequest(t *testing.T, ctx context.Context, mod httpapi.Module, p tenant.Principal, token, method, id string, e ResidencyEvidence) <-chan *httptest.ResponseRecorder {
@@ -173,6 +205,65 @@ func evidenceBlocker(t *testing.T, ctx context.Context) (pgx.Tx, int) {
 		t.Fatal(err)
 	}
 	return tx, pid
+}
+
+// Risk: a lock-order proof pairs a waiter's previous statement with its live
+// lock wait and judges the wrong statement (AEON-1148 CI: the tenant
+// visibility read before the fence). A frozen activity snapshot makes the
+// read skew deterministic, without sleeps.
+func TestResidencyEvidenceBlockedStatementReadsFreshActivity(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	const (
+		previous = `SELECT 'aeon-previous-statement'`
+		waiting  = `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`
+	)
+	key := "aeon-stale-activity:" + t.Name()
+	blocker, blockerPID := evidenceBlocker(t, ctx)
+	if _, err := blocker.Exec(ctx, waiting, key); err != nil {
+		t.Fatal(err)
+	}
+	waiter, waiterPID := evidenceBlocker(t, ctx)
+	if _, err := waiter.Exec(ctx, previous); err != nil {
+		t.Fatal(err)
+	}
+	observer, _ := evidenceBlocker(t, ctx)
+	var query string
+	if err := observer.QueryRow(ctx, `SELECT query FROM pg_stat_activity WHERE pid=$1`, waiterPID).Scan(&query); err != nil {
+		t.Fatal(err)
+	}
+	if query != previous {
+		t.Fatalf("snapshot did not capture the previous statement: %s", query)
+	}
+	waited := make(chan error, 1)
+	go func() {
+		_, err := waiter.Exec(ctx, waiting, key)
+		waited <- err
+	}()
+	if err := dbtest.WaitForBlocked(ctx, adminPool, waiterPID, blockerPID, waiting); err != nil {
+		t.Fatal(err)
+	}
+	// One read in the frozen snapshot pairs the previous text with the wait.
+	if err := observer.QueryRow(ctx, `SELECT query FROM pg_stat_activity
+ WHERE pid=$1 AND $2=ANY(pg_blocking_pids(pid))`, waiterPID, blockerPID).Scan(&query); err != nil {
+		t.Fatal(err)
+	}
+	if query != previous {
+		t.Fatalf("stale observer did not reproduce read skew: %s", query)
+	}
+	query, err := blockedStatement(ctx, observer, blockerPID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query != waiting {
+		t.Fatalf("observer named %q, want the waiting statement", query)
+	}
+	if err := blocker.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := dbtest.Await(t, ctx, waited); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestResidencyEvidenceTenantFencePrecedesPairingLock(t *testing.T) {
