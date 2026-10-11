@@ -195,6 +195,8 @@ func executionPermissions(a *Assignment) []string {
 	return slices.Compact(permissions)
 }
 
+// executionIdentityTx is the shared eligibility check for identity listing,
+// consent writes and final claims. Listing must never approximate these rules.
 func executionIdentityTx(ctx context.Context, tx pgx.Tx, tenantID string, in Input, id string) error {
 	d := in.Definition
 	if d.Scope.Kind == "personal" {
