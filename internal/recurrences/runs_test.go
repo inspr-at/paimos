@@ -58,7 +58,7 @@ func TestRoutineIntentAtomicReplayAndAuthority(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if o.Run == nil || o.Run.State != "pending" || o.Run.WorkOrderID == nil || o.Run.AgentRunID == nil {
+			if o.Run == nil || o.Run.State != RunCreated || o.Run.WorkOrderID == nil || o.Run.AgentRunID == nil {
 				t.Fatalf("missing pending lineage: %+v", o)
 			}
 			return abort
@@ -79,7 +79,7 @@ func TestRoutineIntentAtomicReplayAndAuthority(t *testing.T) {
 			return err
 		})
 		first := f.manual(r.ID, "lost")
-		if first.Run == nil || first.Run.State != "pending" {
+		if first.Run == nil || first.Run.State != RunCreated {
 			t.Fatalf("missing run: %+v", first)
 		}
 		f.install(New(f.d.App)) // A different server instance loses no receipt.
@@ -102,7 +102,7 @@ func TestRoutineIntentAtomicReplayAndAuthority(t *testing.T) {
 			var frozen bool
 			err := tx.QueryRow(t.Context(), `SELECT definition_revision=1 AND owner_principal_id=$2 AND assignment->>'goal'=$3
  AND policy_snapshot#>>'{definition,assignment,goal}'=$3 AND NOT execute_consent AND consent_revision=0 AND execution_principal_id IS NULL
- AND state='pending' AND source_receipt->>'occurrence_key'='manual:lost'
+ AND state='created' AND source_receipt->>'occurrence_key'='manual:lost'
  AND work_node_id=$4 AND work_order_id=$5 AND agent_run_id=$6
  AND (SELECT count(*) FROM routine_actions WHERE run_id=r.id AND state='succeeded' AND kind='work.create')=1
  AND (SELECT count(*) FROM routine_effect_outbox WHERE run_id=r.id AND state='pending')=1
