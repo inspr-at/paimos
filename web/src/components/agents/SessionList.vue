@@ -5,7 +5,7 @@ import type { SessionControl } from '../../lib/agents'
 import { reparentSession, undoRemoval } from '../../lib/agentRows'
 import { movableWorker, moveTarget } from './sessionMove'
 import { useAgents } from '../../stores/agents'
-import { GROUPS, controlBlocked, sessionForest, type SessionBranch, type SessionGroup } from '../../lib/agentState'
+import { GROUPS, controlBlocked, sessionForest, sessionWorking, type SessionBranch, type SessionGroup } from '../../lib/agentState'
 import { relativeTime } from '../../lib/work'
 import type { Availability, SessionView } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
@@ -43,7 +43,7 @@ import { useSession } from '../../stores/session'
 import { DEFAULT_SORT, nextSort, orderForest, readSort, writeSort, type SessionSort, type SortKey } from './sessionOrder'
 import TierCell from './TierCell.vue'
 import { LEAD_WORDS } from '../../lib/lead'
-import { below, shownBelow, treeRows, type TreeRow } from './sessionTree'
+import { below, countedLive, shownBelow, treeRows, type TreeRow } from './sessionTree'
 import { useServiceTiers } from '../../stores/serviceTiers'
 import { TIER_NAME } from '../../lib/serviceTier'
 import { FILTER_LABEL, matchesFilter, type HeadFilter } from './headCounts'
@@ -75,7 +75,6 @@ const removal = useSessionRemoval()
 const current = computed(() => GROUPS.flatMap(g => props.groups[g.id]))
 const stale = computed(() => current.value.map(v => v.session).filter(s => isStale(s, props.now) && removal.canRemove(s)))
 const lineageName = (id: string) => [...current.value, ...(props.history ?? [])].find(v => v.session.id === id)?.name || `${LEAD_WORDS.l} session`
-const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
 type Branch = SessionBranch<SessionView>
 // Families in the viewer's order (AEON-468): state, then start time, unless they chose a column.
 const sort = ref<SessionSort | null>(null)
@@ -84,7 +83,15 @@ const sort = ref<SessionSort | null>(null)
 // A state change is a state: the row stays and its badge, line 2 and time change. An ended
 // session keeps the place (the group) it had while it ran for 10 minutes, then moves to Ended.
 const lastGroup = new Map<string, SessionGroup>()
-const rememberGroups = (views: SessionView[]) => { for (const v of views) if (v.status.group !== 'stopped') lastGroup.set(v.session.id, v.status.group) }
+// Its rank among its siblings while it ran (0 working, 1 live), so an ended worker keeps that place too.
+const lastRank = new Map<string, 0 | 1>()
+const rememberGroups = (views: SessionView[]) => {
+  for (const v of views) {
+    if (v.status.group === 'stopped') continue
+    lastGroup.set(v.session.id, v.status.group)
+    if (countedLive(v)) lastRank.set(v.session.id, sessionWorking(v) ? 0 : 1)
+  }
+}
 watch(current, rememberGroups, { immediate: true })
 const lingering = (view: SessionView) => view.status.group === 'stopped' && lingers(view.session, props.now)
 function placed(view: SessionView): SessionView {
@@ -92,6 +99,29 @@ function placed(view: SessionView): SessionView {
   return { ...view, status: { ...view.status, group: lastGroup.get(view.session.id) ?? 'idle' } }
 }
 const liveViews = computed(() => current.value.map(placed))
+// Rows show the newest copy of their session; the held copy only places them.
+const liveById = computed(() => new Map(current.value.map(view => [view.session.id, view])))
+const liveOf = (view: SessionView) => showRemoved.value ? view : liveById.value.get(view.session.id) ?? view
+// A row keeps its place while the copy that places it sits outside Ended though its session ended:
+// placed() above, or a copy the hold keeps. Membership, sibling order, the stopped count and
+// line 2 read it from that copy, never from the clock, so a held list keeps the row past the
+// 10-minute mark until Show now or the release.
+const ended = (view: SessionView) => view.status.state === 'done' || view.status.state === 'stopped'
+const keepsPlace = (view: SessionView) => view.status.group !== 'stopped' && ended(liveOf(view))
+const keptRank = (view: SessionView) => keepsPlace(view) ? lastRank.get(view.session.id) ?? 1 : undefined
+// A head count's filter (AEON-780) and the card head's search (AEON-1209) keep matching
+// sessions and their ancestors, which stay as dimmed context, unfolded. The state filter
+// applies to the live list; the search to History too.
+const stateFilter = computed(() => showRemoved.value ? null : props.filter ?? null)
+const terms = computed(() => (props.query ?? '').toLowerCase().split(/\s+/).filter(Boolean))
+const searchText = (view: SessionView) => [view.name, view.harness, view.account, view.model, view.projectKey, view.projectTitle, view.ticket?.key, view.ticket?.title, view.session.host, view.session.display_label, intendedResult(view)].filter(Boolean).join(' ').toLowerCase()
+// It judges the copy on screen: whether a row matches is part of its place, so a refresh that
+// changes it waits like any other move.
+const filtering = computed<((view: SessionView) => boolean) | null>(() => {
+  const state = stateFilter.value, words = terms.value
+  if (!state && !words.length) return null
+  return view => (!state || matchesFilter(view, state)) && (!words.length || words.every(word => searchText(view).includes(word)))
+})
 // Structure waits while the person points at the list, has keyboard focus in a row or a menu
 // open; a refresh then never moves, adds or removes a row under them (sessionHold.ts).
 const pointing = ref(false)
@@ -100,25 +130,24 @@ const keyFocus = ref(false)
 const menuOpen = ref(false)
 const structure: Structure<SessionView> = {
   id: view => view.session.id,
-  key: view => `${view.status.group}|${view.session.parent_harness_session_id ?? ''}`,
-  order: views => { const ids: string[] = []; const walk = (b: Branch) => { ids.push(b.view.session.id); b.children.forEach(walk) }; orderForest(sessionForest([...views], props.now), sort.value, props.now).forEach(walk); return ids },
+  key: view => `${view.status.group}|${view.session.parent_harness_session_id ?? ''}|${filtering.value ? Number(filtering.value(view)) : ''}`,
+  order: views => { const ids: string[] = []; const walk = (b: Branch) => { ids.push(b.view.session.id); b.children.forEach(walk) }; orderForest(sessionForest([...views], props.now, keptRank), sort.value, props.now).forEach(walk); return ids },
 }
 const hold = useSessionHold(() => liveViews.value, structure, () => !showRemoved.value && (pointing.value || keyFocus.value || menuOpen.value))
+// The sessions the list lays out: a row the hold keeps keeps the table, so the live list emptying
+// under the pointer never swaps it for the connect hint.
+const total = computed(() => hold.views.value.length)
 // The card head's note says a delay like the page head does (AEON-785): no "Live" while reads lag.
 const listStale = computed(() => agents.refreshStale || (agents.sessionsUpdatedAt !== null && props.now - agents.sessionsUpdatedAt > 45_000))
-// Rows show the newest copy of their session; the held copy only places them.
-const liveById = computed(() => new Map(current.value.map(view => [view.session.id, view])))
-const liveOf = (view: SessionView) => showRemoved.value ? view : liveById.value.get(view.session.id) ?? view
 const forest = computed(() => {
   if (showRemoved.value) return orderForest(sessionForest(props.history ?? [], props.now), sort.value, props.now, true)
-  const ordered = orderForest(sessionForest(hold.views.value, props.now), sort.value, props.now)
+  const ordered = orderForest(sessionForest(hold.views.value, props.now, keptRank), sort.value, props.now)
   const rank = hold.rank.value
   return rank ? inFrameOrder(ordered, rank, branch => branch.view.session.id) : ordered
 })
-// A new order is the person's own choice: it applies at once.
-watch(sort, () => { if (hold.rank.value) hold.showNow() })
-const lingersBelow = (branch: Branch): boolean => lingering(liveOf(branch.view)) || branch.children.some(lingersBelow)
-const lingerCount = (branch: Branch): number => Number(lingering(liveOf(branch.view))) + branch.children.reduce((sum, child) => sum + lingerCount(child), 0)
+// A new order, filter or search is the person's own choice: it applies at once.
+watch([sort, stateFilter, () => terms.value.join(' ')], () => { if (hold.rank.value) hold.showNow() })
+const lingersBelow = (branch: Branch): boolean => keepsPlace(branch.view) || branch.children.some(lingersBelow)
 function onFocusIn(event: FocusEvent) {
   const target = event.target as HTMLElement
   keyFocus.value = !!target.closest('[data-row]') && target.matches(':focus-visible')
@@ -132,17 +161,6 @@ function onFocusOut(event: FocusEvent) {
 type Bucket = 'attention' | 'live' | 'pausing' | 'paused' | 'stopped'
 const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'pausing', label: 'Pausing' }, { id: 'paused', label: 'Paused' }, { id: 'stopped', label: 'Ended' }]
 const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped' : group === 'pausing' ? 'pausing' : group === 'paused' ? 'paused' : group === 'working' || group === 'idle' ? 'live' : 'attention'
-// A head count's filter (AEON-780) and the card head's search (AEON-1209) keep matching
-// sessions and their ancestors, which stay as dimmed context, unfolded. The state filter
-// applies to the live list; the search to History too.
-const stateFilter = computed(() => showRemoved.value ? null : props.filter ?? null)
-const terms = computed(() => (props.query ?? '').toLowerCase().split(/\s+/).filter(Boolean))
-const searchText = (view: SessionView) => [view.name, view.harness, view.account, view.model, view.projectKey, view.projectTitle, view.ticket?.key, view.ticket?.title, view.session.host, view.session.display_label, intendedResult(view)].filter(Boolean).join(' ').toLowerCase()
-const filtering = computed<((view: SessionView) => boolean) | null>(() => {
-  const state = stateFilter.value, words = terms.value
-  if (!state && !words.length) return null
-  return held => { const view = liveOf(held); return (!state || matchesFilter(view, state)) && (!words.length || words.every(word => searchText(view).includes(word))) }
-})
 const kept = computed(() => {
   const ids = new Set<string>()
   const active = filtering.value
@@ -160,10 +178,11 @@ const keeps = (branch: Branch) => !filtering.value || kept.value.has(branch.view
 const roots = (bucket: Bucket) => showRemoved.value
   ? (bucket === 'stopped' ? forest.value.filter(keeps) : [])
   : forest.value.filter(branch => bucketOf(branch.group) === bucket && keeps(branch))
-// Count sessions, including folded descendants, rather than family roots.
-const pausedCount = (branch: Branch): number => Number(branch.view.status.state === 'paused') + branch.children.reduce((sum, child) => sum + pausedCount(child), 0)
-const attentionCount = (branch: Branch): number => Number(bucketOf(branch.view.status.group) === 'attention') + branch.children.reduce((sum, child) => sum + attentionCount(child), 0)
-const bucketCount = (bucket: Bucket) => roots(bucket).reduce((sum, branch) => sum + (showRemoved.value || bucket === 'stopped' ? branch.count : bucket === 'paused' ? pausedCount(branch) : bucket === 'attention' ? attentionCount(branch) : branch.liveCount), 0)
+// Count sessions, including folded descendants, rather than family roots. Counts read the newest
+// copies; the copy on screen only places the family (AEON-1211).
+const tally = (branch: Branch, counts: (view: SessionView) => boolean): number => Number(counts(liveOf(branch.view))) + branch.children.reduce((sum, child) => sum + tally(child, counts), 0)
+const bucketCount = (bucket: Bucket) => roots(bucket).reduce((sum, branch) => sum + (showRemoved.value || bucket === 'stopped' ? branch.count
+  : tally(branch, bucket === 'paused' ? view => view.status.state === 'paused' : bucket === 'attention' ? view => bucketOf(view.status.group) === 'attention' : countedLive)), 0)
 const countTip = (bucket: Bucket) => bucket === 'attention' ? 'Sessions needing attention, including collapsed workers' : bucket === 'paused' ? 'Paused sessions, including collapsed workers' : 'Live sessions in these families, including collapsed workers'
 const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
@@ -184,21 +203,23 @@ function toggleStopped(branch: Branch) {
   history.value[id] = !history.value[id]
   expanded.value[id] = true
 }
-const stoppedChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.count - child.liveCount - lingerCount(child), 0)
-const descendants = (branch: Branch): SessionView[] => branch.children.flatMap(child => [child.view, ...descendants(child)])
-const activityLine = (branch: Branch) => branch.view.session.agent_activity_mode === 'off' ? '' :
-  (branch.view.session.role === 'coordinator' && !branch.view.session.stopped_at ? workerActivity(descendants(branch), props.now) : '') || currentActivity(branch.view, props.now)
-const workingChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.workingCount, 0)
+// Ended workers a parent hides until asked: neither live on screen nor keeping their place.
+const stoppedChildren = (branch: Branch): number => branch.children.reduce((sum, child) => sum + Number(!countedLive(child.view) && !keepsPlace(child.view)) + stoppedChildren(child), 0)
+// What a row says about the sessions under it reads their newest copies, wherever they are placed.
+const descendants = (branch: Branch): SessionView[] => branch.children.flatMap(child => [liveOf(child.view), ...descendants(child)])
+const activityLine = (branch: Branch, view: SessionView) => view.session.agent_activity_mode === 'off' ? '' :
+  (view.session.role === 'coordinator' && !view.session.stopped_at ? workerActivity(descendants(branch), props.now) : '') || currentActivity(view, props.now)
+const workingChildren = (branch: Branch) => descendants(branch).filter(sessionWorking).length
 // Line 2 says what the session works on, or what it asks, or how it ended; never the state word,
 // which lives in the avatar (AEON-1211). A pending control or tier ask leads; an ended row that
-// keeps its place says when it moves to Ended.
+// keeps its place says when it moves to Ended. `view` is the newest copy; the branch places it.
 function lineTwo(branch: Branch, view: SessionView) {
   const lead = view.session.archived_at ? 'Removed' : tierRequestLabel(view) || pendingLabel(view)
   const handedOver = view.session.stopped_at && view.session.handed_over_to_id ? `Handed over to ${lineageName(view.session.handed_over_to_id)}` : ''
-  const step = handedOver || activityLine(branch) || currentStep(view, branch.children.reduce((sum, child) => sum + child.liveCount, 0), props.now)
+  const step = handedOver || activityLine(branch, view) || currentStep(view, descendants(branch).filter(countedLive).length, props.now)
   // A word more precise than the badge's ("Stop requested", "Lost contact") opens the line.
   const precise = view.status.label !== STATE_LABEL[view.status.state] && view.status.label !== step ? view.status.label : ''
-  const moves = lingering(view) ? `moves to Ended at ${clockTime(movesAt(view.session))}` : ''
+  const moves = keepsPlace(branch.view) ? `moves to Ended at ${clockTime(movesAt(view.session))}` : ''
   return [lead, precise, step, moves].filter(Boolean).join(' · ')
 }
 // A filter shows every kept child; otherwise the list hides stopped ones until asked.
@@ -222,7 +243,7 @@ function visible(group: Bucket): Row[] {
       family: row.depth > 0 || row.open, familyEnd: !rows[index + 1]?.depth,
       lead: view.session.role === 'coordinator' || row.branch.children.length > 0,
       sub: row.foldable ? shownBelow(row.branch, offered) : 0,
-      under: below(row.branch, v => v.name),
+      under: below(row.branch, v => v.name, liveOf),
     }
   })
 }
@@ -291,7 +312,7 @@ watch(viewer, id => {
   sort.value = readSort(id)
   expanded.value = {}; history.value = {}; showStopped.value = false; showRemoved.value = false
   // A different person never sees the last one's held rows.
-  hold.reset(); lastGroup.clear(); rememberGroups(current.value)
+  hold.reset(); lastGroup.clear(); lastRank.clear(); rememberGroups(current.value)
 }, { immediate: true })
 const hostLabels = ref(new Map<string, string>())
 let hostRead = 0
@@ -722,7 +743,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
             </a>
             </RouterLink>
             <!-- An ended row that still keeps its place says the handover on line 2, so its height stays. -->
-            <span v-if="row.view.session.stopped_at && row.view.session.handed_over_to_id && !lingering(row.view)" class="lineage">
+            <span v-if="row.view.session.stopped_at && row.view.session.handed_over_to_id && !keepsPlace(row.branch.view)" class="lineage">
               <RouterLink :to="`/agents/${row.view.session.handed_over_to_id}`" :title="`Handed over to ${lineageName(row.view.session.handed_over_to_id)}`">Handed over to {{ lineageName(row.view.session.handed_over_to_id) }}</RouterLink>
               <button v-if="stoppedChildren(row.branch)" type="button" class="worker-toggle history-toggle" :aria-expanded="!!history[row.view.session.id]" :aria-label="`Show stopped workers of ${row.view.name}`" @click="toggleStopped(row.branch)">{{ stoppedChildren(row.branch) }} stopped</button>
             </span>

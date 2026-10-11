@@ -95,10 +95,18 @@ export interface SessionBranch<T> {
   view: T; children: SessionBranch<T>[]; group: SessionGroup; liveCount: number; workingCount: number; count: number
 }
 
+/** A live session doing work right now: it counts as working in its family and leads its siblings. */
+export function sessionWorking(view: { session: HarnessSession; status: SessionStatus }) {
+  const s = view.session
+  return !s.stopped_at && !['idle', 'throttled'].includes(s.activity) && ['working', 'starting', 'stopping'].includes(s.phase) && !['problem', 'unresponsive', 'awaiting', 'idle'].includes(view.status.state)
+}
+
 // Parent UUIDs, never shared principals or names, establish the tree. A missing
 // or invalid parent leaves a visible root; even malformed cycles lose no rows.
 // Group by the most urgent member so a stopped lead cannot hide working children.
-export function sessionForest<T extends { session: HarnessSession; status: SessionStatus }>(views: T[], _now: number): SessionBranch<T>[] {
+// An ended session that keeps its place (AEON-1211) sorts among its siblings as it did
+// while it ran: `kept` names that rank (0 working, 1 live); the list remembers it.
+export function sessionForest<T extends { session: HarnessSession; status: SessionStatus }>(views: T[], _now: number, kept?: (view: T) => 0 | 1 | undefined): SessionBranch<T>[] {
   const branches = new Map(views.map(view => [view.session.id, { view, children: [], group: view.status.group, liveCount: 0, workingCount: 0, count: 0 } as SessionBranch<T>]))
   const roots: SessionBranch<T>[] = []
   for (const branch of branches.values()) {
@@ -116,11 +124,11 @@ export function sessionForest<T extends { session: HarnessSession; status: Sessi
     else roots.push(branch)
   }
   const rank = (group: SessionGroup) => GROUPS.findIndex(g => g.id === group)
-  const activityRank = (branch: SessionBranch<T>) => branch.workingCount ? 0 : branch.liveCount ? 1 : 2
+  const activityRank = (branch: SessionBranch<T>) => Math.min(branch.workingCount ? 0 : branch.liveCount ? 1 : 2, kept?.(branch.view) ?? 2)
   const summarize = (branch: SessionBranch<T>) => {
     const s = branch.view.session
     branch.liveCount = s.phase === 'stopped' || s.stopped_at ? 0 : 1
-    branch.workingCount = branch.liveCount && !['idle', 'throttled'].includes(s.activity) && ['working', 'starting', 'stopping'].includes(s.phase) && !['problem', 'unresponsive', 'awaiting', 'idle'].includes(branch.view.status.state) ? 1 : 0
+    branch.workingCount = branch.liveCount && sessionWorking(branch.view) ? 1 : 0
     branch.count = 1
     for (const child of branch.children) {
       summarize(child)
