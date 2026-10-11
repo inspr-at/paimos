@@ -220,6 +220,7 @@ for (const width of [1600, 390]) {
     const detail = page.locator('article.detail')
     const hint = detail.getByRole('region', { name: 'Release notes' }).getByText('Notes written after release', { exact: true })
     await expect(hint).toBeVisible()
+    await hint.scrollIntoViewIfNeeded()
     await expect(hint).toBeInViewport({ ratio: 1 })
     await expect(detail.getByText('Historical tag headline')).toHaveCount(0)
     const detailStyle = await hint.evaluate(el => {

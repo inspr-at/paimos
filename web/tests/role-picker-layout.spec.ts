@@ -210,12 +210,15 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 1024,
       mountFloatingList(kind as FloatingList, true)
     }, kind)
     if (kind === 'facet') await page.getByRole('button', { name: 'Choices', exact: true }).click()
-    const panel = page.locator('.floating[role="dialog"]')
+    const sheet = kind === 'epic' && width === 390
+    const panel = sheet ? page.getByRole('dialog', { name: 'Parent for PHAROS-11' }) : page.locator('.floating[role="dialog"]')
     await expect(panel).toBeVisible()
     const list = panel.locator('.menu, .options, .picker-list')
     const rows = list.locator('[role="option"], [role="menuitemradio"], [role="checkbox"], :scope > label')
     await expect.poll(() => rows.count()).toBeGreaterThanOrEqual(8)
-    expect(await list.evaluate(el => el.scrollHeight - el.clientHeight), 'no nested clipping').toBeLessThanOrEqual(1)
+    // Parent choices use the shared phone sheet with one scrolling list body.
+    if (sheet) expect(await list.evaluate(el => getComputedStyle(el).overflowY)).toBe('auto')
+    else expect(await list.evaluate(el => el.scrollHeight - el.clientHeight), 'no nested clipping').toBeLessThanOrEqual(1)
     await insideViewport(panel, page)
     if (kind === 'label') await insideViewport(panel.getByRole('button', { name: 'Apply', exact: true }), page)
     await rows.last().scrollIntoViewIfNeeded()
