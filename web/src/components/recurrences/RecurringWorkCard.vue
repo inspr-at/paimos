@@ -45,7 +45,6 @@ const cardId = computed(() => kind.value === 'personal' ? 'routines' : kind.valu
 const readOnlyReason = computed(() => kind.value === 'workspace' && can('recurrences.manage') ? 'Changing workspace routines needs a workspace admin' : 'Needs the Manage recurring work permission')
 const readOnlyNote = computed(() => kind.value === 'workspace' ? 'You can read workspace routines. Changing them needs an admin.' : `You can read routines. ${readOnlyReason.value}.`)
 const projectKeyOf = (item: Recurrence) => props.project && item.project_id === props.project.id ? props.project.routeKey : projects.byId(item.project_id)?.routeKey ?? ''
-const outputOf = (item: Recurrence) => props.project && item.project_id === props.project.id ? props.project : projects.byId(item.project_id) ?? null
 // ---------- The project switch: "Agents may run routines in WEB" ----------
 const settings = ref<RoutineExecutionSettings | null>(null), switchBusy = ref(false)
 const showSwitch = computed(() => kind.value === 'project' && !!projectId.value && can('harness.read', projectId.value))
@@ -203,7 +202,7 @@ function turnOff() {
     </section>
     <RecurrenceHistory v-if="chosen && projectKeyOf(chosen)" :key="chosen.id" :item="chosen" :project-key="projectKeyOf(chosen)" :may-manage="mayManageItem(chosen)" :busy="busy.includes(chosen.id)" @toggle="toggle(chosen!)" @run="run(chosen!)" @edit="editor = { item: chosen }" />
     <FloatingPanel v-if="menu" :anchor="menu.anchor" :width="236" align="end" :label="`More for ${recurrenceName(menu.item)}`" @close="closeMenu"><div class="row-menu" role="menu" @keydown="menuKeys"><button type="button" role="menuitem" :disabled="!mayManageItem(menu.item) || busy.includes(menu.item.id)" :data-tip="!mayManageItem(menu.item) ? readOnlyReason : undefined" @click="editor = { item: menu.item }; closeMenu(false)"><AppIcon name="edit" :size="14" />Edit…</button><button type="button" role="menuitem" @click="selected = menu.item.id; closeMenu()"><AppIcon name="history" :size="14" />History</button><button type="button" role="menuitem" @click="copyCLI(menu.item)"><AppIcon name="terminal" :size="14" />Copy CLI command</button><div class="separator" /><button type="button" role="menuitem" class="danger" :disabled="!mayManageItem(menu.item) || busy.includes(menu.item.id)" @click="remove(menu.item)"><AppIcon name="trash" :size="14" />Delete…</button></div></FloatingPanel>
-    <RecurrenceEditor v-if="editor" :project="editor.item ? outputOf(editor.item) : project" :scope="kind" :recurrence="editor.item" :consent="editor.consent" @close="editor = null" @saved="saved" @changed="changed" @revoked="state => { revoked = state ? 'saved' : 'draft' }" />
+    <RecurrenceEditor v-if="editor" :project="kind === 'project' ? project : null" :scope="kind" :recurrence="editor.item" :consent="editor.consent" @close="editor = null" @saved="saved" @changed="changed" @revoked="state => { revoked = state ? 'saved' : 'draft' }" />
     <RecurrenceRun v-if="runPrompt" :key="runPrompt.id" :item="runPrompt" @close="runPrompt = null" @ran="ran" />
   </div>
 </template>

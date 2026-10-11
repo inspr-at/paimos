@@ -145,7 +145,9 @@ const dirty = computed(() => JSON.stringify(input.value) !== savedSnapshot)
 const wait = computed(() => base.value?.execution_policy?.wait_reason ?? '')
 const personal = computed(() => base.value?.definition?.scope.kind === 'personal')
 const consentReady = computed(() => mine.value && wait.value === 'execution_consent_required' && (settings.value ? settings.value.automatic_launch_enabled : true) && (personal.value || (runsAs.value === 'ready' && !!principal.value)))
-const primary = computed<'create' | 'save' | 'consent' | null>(() => step.value === 'consent' ? dirty.value ? 'save' : mine.value ? 'consent' : null : base.value ? 'save' : 'create')
+// No primary when consent can't succeed (someone else decides, a blocker, the switch is off, no agent to run as).
+const consentPossible = computed(() => mine.value && wait.value === 'execution_consent_required' && (settings.value ? settings.value.automatic_launch_enabled : true) && (personal.value || runsAs.value === 'loading' || runsAs.value === 'ready'))
+const primary = computed<'create' | 'save' | 'consent' | null>(() => step.value === 'consent' ? dirty.value ? 'save' : consentPossible.value ? 'consent' : null : base.value ? 'save' : 'create')
 const primaryLabel = computed(() => busy.value ? primary.value === 'consent' ? 'Letting agents run it…' : 'Saving…' : primary.value === 'consent' ? 'Let agents run it' : primary.value === 'save' ? 'Save' : 'Create')
 const primaryDisabled = computed(() => primary.value === 'consent' ? !consentReady.value || busy.value : !scopeAllowed.value || busy.value || !!problems.value.length || previewBusy.value || !!previewError.value)
 const heading = computed(() => step.value === 'consent' ? 'Let agents run it' : base.value ? 'Edit routine' : source ? 'Repeat' : 'New routine')
@@ -255,7 +257,8 @@ function keys(event: KeyboardEvent) {
 }
 function chooseParent(value: { id: string; key: string; title: string } | null) { parent.value = value?.id || outputProject.value; parentLabel.value = value ? `${value.key} · ${value.title}` : topLabel; const anchor = picker.value; picker.value = null; anchor?.focus() }
 function chooseProject(id: string) { outputProject.value = id; parent.value = id; parentLabel.value = id ? topLabel : 'Pick the project first' }
-const projectChoices = computed(() => projects.projects.filter(project => !project.archived && (project.id === outputProject.value || can('recurrences.manage', project.id))))
+// Every live project is offered; the chosen one is checked (one permission read, not one per project).
+const projectChoices = computed(() => projects.projects.filter(project => !project.archived || project.id === outputProject.value))
 // The sentence: a read-only summary in a fixed slot, each part a jump to its field.
 function jump(target: string) { const el = document.getElementById(`${uid}-${target}`); el?.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); (el?.matches('button') ? el : el?.closest('section')?.querySelector<HTMLElement>('input, button, select, textarea'))?.focus({ preventScroll: true }) }
 const sentenceTitle = computed(() => {

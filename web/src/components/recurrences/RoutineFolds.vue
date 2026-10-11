@@ -26,7 +26,7 @@ const id = (name: string) => `${props.idPrefix}-${name}`
 <template>
   <div class="folds">
     <button :id="id('f-rules')" type="button" class="fold-row" :aria-expanded="open.rules" :aria-controls="id('fb-rules')" @click="open.rules = !open.rules">
-      <AppIcon name="chevron-right" :size="13" /><span class="fr-ic"><AppIcon name="shield" :size="15" /></span><span class="fr-t">What it may do</span><span class="fr-s">{{ mayWords(draft.actions) }}</span>
+      <AppIcon name="chevron-right" :size="13" /><span class="fr-ic"><AppIcon name="shield" :size="15" /></span><span class="fr-t">What it may do</span><span class="fr-s" :title="mayWords(draft.actions)">{{ mayWords(draft.actions) }}</span>
     </button>
     <div :id="id('fb-rules')" class="fold" :class="{ open: open.rules }" :inert="!open.rules"><div class="fold-in"><div class="fb">
       <p class="fb-lead">In its own copy of the code it may read, change and run tests freely. Everything that leaves that copy is one of these actions, and each is checked first.</p>
@@ -53,7 +53,7 @@ const id = (name: string) => `${props.idPrefix}-${name}`
     </div></div></div>
 
     <button :id="id('f-budget')" type="button" class="fold-row" :class="{ warn: budgetUnqualified }" :aria-expanded="open.budget" :aria-controls="id('fb-budget')" @click="open.budget = !open.budget">
-      <AppIcon name="chevron-right" :size="13" /><span class="fr-ic"><AppIcon name="gauge" :size="15" /></span><span class="fr-t">Budget</span><span class="fr-s"><AppIcon v-if="budgetUnqualified" name="alert" :size="12" />{{ budgetSummary }}</span>
+      <AppIcon name="chevron-right" :size="13" /><span class="fr-ic"><AppIcon name="gauge" :size="15" /></span><span class="fr-t">Budget</span><span class="fr-s" :title="budgetSummary"><AppIcon v-if="budgetUnqualified" name="alert" :size="12" />{{ budgetSummary }}</span>
     </button>
     <div :id="id('fb-budget')" class="fold" :class="{ open: open.budget }" :inert="!open.budget"><div class="fold-in"><div class="fb">
       <div class="fr"><span class="fl">Per run</span><div class="seg bud" role="radiogroup" aria-label="Limit per run"><button v-for="[mode, label] in ([['off', 'No limit'], ['tokens', 'Tokens'], ['money', 'Money'], ['both', 'Both']] as const)" :key="mode" type="button" role="radio" :data-bud="mode" :aria-checked="draft.mode === mode" @click="draft.mode = mode">{{ label }}</button></div></div>
