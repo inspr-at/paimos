@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { controlStability } from './control-stability'
+import { deliveryMetrics } from './delivery-numbers-fixtures'
 import { checkProjectSettings, approvedCheckSHA } from './project-settings-acceptance.mjs'
 import type { MetricSource } from '../src/lib/deliveryNumbers'
 import type { DeliverySettings } from '../src/lib/projectDeliverySettings'
@@ -22,7 +23,7 @@ function source(state: State): MetricSource | null {
 async function setup(page: Page) {
   const data = fixtures(), errors = watchErrors(page)
   await mockWork(page, data)
-  const world = { state: 'none' as State, readOnly: false, fail: false, source: null as MetricSource | null, overrides: { deadlines: { ci_green: 30 } } as DeliverySettings, revision: 1, writes: [] as { id: string; body: DeliverySettings; revision: string }[], links: [] as Record<string, unknown>[], history: [] as Record<string, unknown>[], held: null as null | { entered: () => void; until: Promise<void> }, pendingLoad: null as null | { entered: () => void; until: Promise<void> } }
+  const world = { state: 'none' as State, readOnly: false, fail: false, leadReason: false, metrics: [] as unknown[], source: null as MetricSource | null, overrides: { deadlines: { ci_green: 30 } } as DeliverySettings, revision: 1, writes: [] as { id: string; body: DeliverySettings; revision: string }[], links: [] as Record<string, unknown>[], history: [] as Record<string, unknown>[], held: null as null | { entered: () => void; until: Promise<void> }, pendingLoad: null as null | { entered: () => void; until: Promise<void> } }
   const otherSettings = new Map<string, { overrides: DeliverySettings; revision: number }>()
   await page.route('**/api/me/permissions**', route => {
     const id = new URL(route.request().url()).searchParams.get('project_id') ?? undefined
@@ -35,7 +36,7 @@ async function setup(page: Page) {
     const selected = world.state, shown = structuredClone(world.source)
     if (world.pendingLoad) { const hold = world.pendingLoad; hold.entered(); await hold.until }
     if (selected === 'error') return route.fulfill({ status: 503, json: { error: 'read unavailable' } })
-    return route.fulfill({ json: { project_id: new URL(route.request().url()).pathname.split('/')[3], generated_at: NOW, source: shown, metrics: [] } })
+    return route.fulfill({ json: { project_id: new URL(route.request().url()).pathname.split('/')[3], generated_at: NOW, source: shown, metrics: world.metrics } })
   })
   await page.route('**/api/projects/*/delivery/metrics/source', route => {
     const body = route.request().postDataJSON(); world.links.push(body)
@@ -64,6 +65,9 @@ async function setup(page: Page) {
     const effective = { ...defaults, ...target.overrides, deadlines: { ...defaults.deadlines, ...target.overrides.deadlines } }
     return route.fulfill({ json: url.searchParams.get('view') === 'overrides' ? target.overrides : effective, headers: { ETag: `"${target.revision}"` } })
   })
+  await page.route('**/api/nodes/*/delivery**', route => route.fulfill({ json: { items: [], next_cursor: null, available: true } }))
+  await page.route('**/api/projects/p-aeon/lead', route => world.leadReason ? route.fulfill({ json: { project_id: 'p-aeon', revision: 0, generation: 0, session_id: null, state: 'none', reason: '', process_active: false, automatic_launch_enabled: false } }) : route.fallback())
+  await page.route('**/api/projects/p-aeon/lead-settings', route => world.leadReason ? route.fulfill({ json: { revision: 1, details_redacted: false, automatic_launch_enabled: false, owner_person_id: null, overrides: {}, effective: {}, wait_reason: 'acceptance_pending' } }) : route.fallback())
   return { world, errors }
 }
 async function navigate(page: Page, path: string) {
@@ -165,6 +169,27 @@ test('AEON-1226: approved repository reference states and check.mjs audit agains
     await page.screenshot({ path: testInfo.outputPath(`how-actions-${width}-${theme}.png`), fullPage: true })
     results.push(...await checkProjectSettings(page, `how-actions-${width}-${theme}`, width < 600))
     await page.keyboard.press('Escape'); await expect(how).toBeFocused(); stable.done()
+
+    world.state = 'none'; world.source = null
+    await page.goto('/p/AEON/delivery'); await expect(page.getByRole('link', { name: 'Link repository', exact: true })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`delivery-banner-none-${width}-${theme}.png`), fullPage: true })
+    await page.getByRole('link', { name: 'Link repository', exact: true }).click(); await expect(page.locator('#link-form')).toBeVisible()
+    world.state = 'appoff'; world.source = source('appoff'); world.metrics = deliveryMetrics().metrics
+    await page.goto('/p/AEON/delivery'); await expect(page.locator('.go-src').first()).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`delivery-problem-chips-${width}-${theme}.png`), fullPage: true })
+    await page.locator('.go-src').first().click(); await expect(page).toHaveURL('/p/AEON/settings/delivery#repository')
+    world.state = 'none'; world.source = null; world.metrics = []
+    await page.goto('/p/AEON/AEON-1'); await expect(page.locator('.delivery .settings-link')).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`ticket-delivery-none-${width}-${theme}.png`), fullPage: true })
+    await page.locator('.delivery .settings-link').click(); await expect(page).toHaveURL('/p/AEON/settings/delivery#repository')
+    await page.goto('/'); await page.getByRole('button', { name: /^Actions for AEON / }).click()
+    await expect(page.getByRole('menuitem', { name: 'Project settings', exact: true })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`projects-row-menu-${width}-${theme}.png`), fullPage: true })
+    await page.getByRole('menuitem', { name: 'Project settings', exact: true }).click(); await expect(page).toHaveURL('/p/AEON/settings')
+    world.leadReason = true
+    await page.goto('/p/AEON/tickets'); await expect(page.locator('[data-launch-reason] .settings-link')).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`lead-launch-reason-${width}-${theme}.png`), fullPage: true })
+    await page.locator('[data-launch-reason] .settings-link').click(); await expect(page).toHaveURL('/p/AEON/settings/agents#lead')
     failures.push(...errors); await context.close()
   }
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
