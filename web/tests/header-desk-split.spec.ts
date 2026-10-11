@@ -259,7 +259,14 @@ for (const width of [601, 640, 721, 768, 1024]) test(`on a project's tickets at 
 // header's padding; a name that ends in an ellipsis keeps three characters' room;
 // no separator stands alone.
 const trailFit = (page: Page) => page.locator('.app-header').evaluate(header => {
-  const shown = (el: Element) => { const box = el.getBoundingClientRect(), style = getComputedStyle(el); return box.width > 1 && box.height > 1 && style.display !== 'none' && style.visibility !== 'hidden' }
+  // In sight: the element and every box up to the header has room; a visually hidden (1 px) box hides all inside it.
+  const shown = (el: Element) => {
+    for (let at: Element | null = el; at && at !== header; at = at.parentElement) {
+      const box = at.getBoundingClientRect(), style = getComputedStyle(at)
+      if (box.width <= 1 || box.height <= 1 || style.display === 'none' || style.visibility === 'hidden') return false
+    }
+    return true
+  }
   const trail = header.querySelector<HTMLElement>('.crumbs')
   if (!trail || !shown(trail)) return { parts: [] as string[], cut: [] as string[] }
   const own = header.getBoundingClientRect(), pad = getComputedStyle(header)
