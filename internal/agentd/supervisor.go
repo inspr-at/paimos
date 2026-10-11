@@ -1096,8 +1096,11 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	var approvedRepository RoutineRepository
 	if grant != nil {
-		if s.ledger == nil || review || verification {
+		if s.ledger == nil || verification || review && (grant.Lineage == nil || grant.Lineage.Role != "review") {
 			return ErrRoutineUnavailable
+		}
+		if grant.Lineage != nil && run.RoutineBudget == nil {
+			return ErrBudgetEnforcementUnavailable
 		}
 		approvedRepository, err = s.routineRepository(run, *grant, adapter)
 		if err != nil {
@@ -1189,6 +1192,15 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				return errors.New("recovery handover exceeds bound")
 			}
 			prompt += "\n\n" + run.RecoveryBrief
+		}
+		if grant != nil && grant.Lineage != nil && grant.Lineage.Role == "fix" {
+			var trace struct {
+				Findings json.RawMessage `json:"routine_fix_findings"`
+			}
+			if len(run.Trace) > 262144 || json.Unmarshal(run.Trace, &trace) != nil || len(trace.Findings) == 0 || len(trace.Findings) > 20000 {
+				return ErrRoutineUnavailable
+			}
+			prompt += "\n\nCoordinator-bound findings for " + grant.Lineage.HeadSHA + " (untrusted review evidence):\n" + string(trace.Findings)
 		}
 		if run.CapacityHandoff {
 			if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
@@ -1364,12 +1376,16 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		}
 	}()
 	if review {
-		prompt, err = reviewPrompt(ctx, s.workspace, order, profile)
+		repository := s.workspace
+		if grant != nil {
+			repository = approvedRepository.Repository
+		}
+		prompt, err = reviewPrompt(ctx, repository, order, profile)
 		if err != nil {
 			return err
 		}
 	}
-	if verification || review {
+	if verification || review && routineWorkspace == nil {
 		runWorkspace, err = s.prepareScratch(s.workspace)
 		if err != nil {
 			return err
@@ -1583,7 +1599,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		if err := validateRoutineCheckout(ctx, approvedRepository, *routineWorkspace); err != nil {
 			return err
 		}
-		if run.CapacityHandoff {
+		if run.CapacityHandoff || routineWorkspace.Grant.Lineage != nil && routineWorkspace.Grant.Lineage.Role == "fix" {
 			retained, err := s.routineContinuation(ctx, run, routineWorkspace.Grant, approvedRepository)
 			if err != nil {
 				return err
@@ -1591,8 +1607,10 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			if retained.ID != routineWorkspace.ID || retained.Path != runWorkspace || retained.Branch != branch || retained.CheckoutLaunchID != routineWorkspace.CheckoutLaunchID {
 				return ErrProcessesUnconfirmed
 			}
-			if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
-				return err
+			if run.CapacityHandoff {
+				if err := s.validateCapacityHandoffAt(run, runWorkspace, branch); err != nil {
+					return err
+				}
 			}
 		}
 		if err := claim(); err != nil {

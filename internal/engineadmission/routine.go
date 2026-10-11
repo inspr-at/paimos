@@ -32,7 +32,7 @@ type RoutineFactsReader func(context.Context, pgx.Tx, string, string) (RoutineFa
 func RequireRoutineTx(ctx context.Context, tx pgx.Tx, owner tenant.Principal, routine, run, harness string, estimate float64, reader RoutineFactsReader) error {
 	var project string
 	var bound bool
-	if err := tx.QueryRow(ctx, `SELECT output_project_id::text,agent_run_id=$2::uuid AND owner_principal_id=$3::uuid AND execute_consent AND consent_revision=definition_revision FROM routine_runs WHERE id=$1`, routine, run, owner.ID).Scan(&project, &bound); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT output_project_id::text,(agent_run_id=$2::uuid OR EXISTS(SELECT 1 FROM routine_attempts a JOIN agent_runs ar ON ar.id=a.agent_run_id JOIN routine_budget_orders b ON b.run_id=a.run_id AND b.work_order_id=ar.work_order_id WHERE a.run_id=r.id AND a.agent_run_id=$2 AND a.assignment_digest=r.assignment_digest AND a.role IN ('review','fix'))) AND owner_principal_id=$3::uuid AND execute_consent AND consent_revision=definition_revision FROM routine_runs r WHERE id=$1`, routine, run, owner.ID).Scan(&project, &bound); err != nil {
 		return err
 	}
 	if !bound {

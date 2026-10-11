@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -58,6 +59,8 @@ type LeadLaunch struct {
 // independently checks current consent, qualification, admission and budget.
 // Paths and account credentials must never be added to this projection.
 type RoutineGrant struct {
+	Lineage *RoutineLineage `json:"lineage,omitempty"`
+
 	LedgerGeneration     string    `json:"ledger_generation"`
 	LaunchID             string    `json:"launch_id"`
 	TenantID             string    `json:"tenant_id"`
@@ -88,9 +91,23 @@ type RoutineGrant struct {
 	ExpiresAt            time.Time `json:"expires_at"`
 }
 
+// RoutineLineage pins a coordinator-owned continuation to the original budget
+// and artifact. It is content-free and cannot grant review or merge approval.
+type RoutineLineage struct {
+	Role          string `json:"role"`
+	PreviousRunID string `json:"previous_run_id"`
+	ReviewOrderID string `json:"review_order_id,omitempty"`
+	Repository    string `json:"repository"`
+	BaseSHA       string `json:"base_sha"`
+	HeadSHA       string `json:"head_sha"`
+	PolicyDigest  string `json:"policy_digest"`
+}
+
 var routineIdentifier = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`)
 
 var routineUUID = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
+var routineSHA = regexp.MustCompile(`^(?:[a-f0-9]{40}|[a-f0-9]{64})$`)
+var routineRepository = regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`)
 
 func RoutineDigest(value string) bool {
 	if len(value) != 64 {
@@ -106,6 +123,16 @@ func RoutineDigest(value string) bool {
 }
 
 func (g RoutineGrant) Validate() error {
+	if l := g.Lineage; l != nil {
+		if (l.Role != "review" && l.Role != "fix") || !routineUUID.MatchString(l.PreviousRunID) || l.PreviousRunID == g.AgentRunID || !RoutineDigest(l.PolicyDigest) || !routineRepository.MatchString(l.Repository) || len(l.Repository) > 200 || !routineSHA.MatchString(l.BaseSHA) || !routineSHA.MatchString(l.HeadSHA) || l.BaseSHA == l.HeadSHA || !routineUUID.MatchString(l.ReviewOrderID) {
+			return errors.New("routine continuation binding unavailable")
+		}
+		for _, part := range strings.Split(l.Repository, "/") {
+			if part == "." || part == ".." {
+				return errors.New("routine continuation repository unavailable")
+			}
+		}
+	}
 	for _, id := range []string{g.LedgerGeneration, g.LaunchID, g.TenantID, g.OwnerID, g.ProjectID, g.RoutineRunID, g.AgentRunID, g.PrincipalID, g.ExecutionPrincipalID, g.AccountID, g.ComputerID, g.QualificationID, g.BudgetGrantID} {
 		if !routineUUID.MatchString(id) {
 			return errors.New("routine binding identity unavailable")
