@@ -327,8 +327,10 @@ func (p *qualifiedPipeline) RoutineReadyTx(context.Context, pgx.Tx, string, stri
 func (p *qualifiedPipeline) RoutineReviewTx(context.Context, pgx.Tx, string, string) (evidence.Review, error) {
 	return p.review, nil
 }
-func (p *qualifiedPipeline) RoutineMergeResultTx(context.Context, pgx.Tx, string, string, string, string, int64) (bool, string, error) {
-	return false, "merge_done_receipt_pending_or_refused", nil
+func (p *qualifiedPipeline) RoutineMergeResultTx(ctx context.Context, tx pgx.Tx, target, repo, head, merge string, pr int64) (bool, string, error) {
+	var done bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events WHERE node_id=$1 AND type='delivery.merge_done' AND metadata->>'repository'=$2 AND metadata->>'head_sha'=$3 AND metadata->>'merge_sha'=$4 AND (metadata->>'pull_request')::bigint=$5)`, target, repo, head, merge, pr).Scan(&done)
+	return done, "merge_done_receipt_pending_or_refused", err
 }
 
 // Risk R15/R17: AEON-1008 necessarily changes updated_at when it marks Done.
@@ -449,18 +451,26 @@ func TestRoutineMergeObservationKeepsDoneRevisionAndApproval(t *testing.T) {
 func codeLandingFixture(t *testing.T) (*externalFixture, *qualifiedPipeline, Receipt) {
 	t.Helper()
 	f := externalSetup(t)
-	f.b.WithObservation(func(_ context.Context, _ pgx.Tx, _ tenant.Principal, _ Binding) (tenant.Principal, error) { return f.agent, nil })
+	f.b.WithObservation(func(_ context.Context, _ pgx.Tx, _ tenant.Principal, _ Binding) (tenant.Principal, error) {
+		return f.agent, nil
+	})
 	in := f.request("pr", "pr.open")
 	in.PROpen = &PROpen{Repository: "example/routine", Branch: "work/change", BaseBranch: "main", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40), Title: "EXT-2: change"}
 	f.b.WithPullRequests(&lostPull{})
 	pr, err := f.b.Execute(t.Context(), f.agent, f.run, in)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	pr, err = f.b.ReconcilePR(t.Context(), f.agent.TenantID, pr.ID)
-	if err != nil || pr.State != "succeeded" { t.Fatalf("PR fixture: %+v %v", pr, err) }
+	if err != nil || pr.State != "succeeded" {
+		t.Fatalf("PR fixture: %+v %v", pr, err)
+	}
 	in = f.request("pipeline", "pipeline.request")
 	in.PipelineRequest = &PipelineRequest{PRActionKey: "pr", HeadSHA: strings.Repeat("b", 40)}
 	out, err := f.b.Execute(t.Context(), f.agent, f.run, in)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.exec(`UPDATE routine_attempts SET state='completed',process_receipt='{"process_state":"exited"}' WHERE run_id=$1`, f.run)
 	f.exec(`UPDATE routine_runs SET state='awaiting_pipeline' WHERE id=$1`, f.run)
 	number := int64(7)
@@ -477,7 +487,9 @@ func (f *externalFixture) approve(id string) {
 	req := httptest.NewRequest("POST", "/api/approvals/"+id+"/decision", strings.NewReader(`{"decision":"approved"}`)).WithContext(tenant.WithPrincipal(f.t.Context(), f.person))
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
-	if w.Code != 200 { f.t.Fatalf("person approval: %d %s", w.Code, w.Body.String()) }
+	if w.Code != 200 {
+		f.t.Fatalf("person approval: %d %s", w.Code, w.Body.String())
+	}
 }
 
 func (f *externalFixture) mergedReceipt(head, merge string) {
@@ -491,49 +503,75 @@ func (f *externalFixture) mergedReceipt(head, merge string) {
 func TestRoutinePipelineRecoversMergeFixAndTargetEdits(t *testing.T) {
 	for _, queued := range []bool{false, true} {
 		name := "direct_merge_before_receipt"
-		if queued { name = "queue_merge_before_receipt" }
+		if queued {
+			name = "queue_merge_before_receipt"
+		}
 		t.Run(name, func(t *testing.T) {
 			f, p, out := codeLandingFixture(t)
-			if queued { p.facts.Facts.Queued = true; p.facts.Facts.QueueHead = strings.Repeat("c", 40); p.facts.ArtifactSHA = p.facts.Facts.QueueHead }
+			if queued {
+				p.facts.Facts.Queued = true
+				p.facts.Facts.QueueHead = strings.Repeat("c", 40)
+				p.facts.ArtifactSHA = p.facts.Facts.QueueHead
+			}
 			out, err := f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-			if err != nil || out.State != "awaiting_decision" { t.Fatalf("handoff: %+v %v", out, err) }
+			if err != nil || out.State != "awaiting_decision" {
+				t.Fatalf("handoff: %+v %v", out, err)
+			}
 			f.approve(out.ApprovalID)
 			out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-			if err != nil || out.State != "awaiting_merge" { t.Fatalf("approval: %+v %v", out, err) }
+			if err != nil || out.State != "awaiting_merge" {
+				t.Fatalf("approval: %+v %v", out, err)
+			}
 			p.facts.Facts.Merged = true
 			p.facts.MergeSHA = strings.Repeat("c", 40)
 			// GitHub removes the live queue entry after merge.
 			p.facts.Facts.Queued, p.facts.Facts.QueueHead = false, ""
 			out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-			if err != nil || out.State == "succeeded" || out.WaitReason != "merge_done_receipt_pending_or_refused" { t.Fatalf("missing receipt: %+v %v", out, err) }
+			if err != nil || out.State == "succeeded" || out.WaitReason != "merge_done_receipt_pending_or_refused" {
+				t.Fatalf("missing receipt: %+v %v", out, err)
+			}
 			if queued {
 				f.mergedReceipt(p.review.HeadSHA, strings.Repeat("d", 40))
 				out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-				if err != nil || out.State == "succeeded" { t.Fatalf("wrong queue receipt: %+v %v", out, err) }
+				if err != nil || out.State == "succeeded" {
+					t.Fatalf("wrong queue receipt: %+v %v", out, err)
+				}
 			}
 			f.mergedReceipt(p.review.HeadSHA, p.facts.MergeSHA)
 			out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-			if err != nil || out.State != "succeeded" { t.Fatalf("delayed exact receipt: %+v %v", out, err) }
+			if err != nil || out.State != "succeeded" {
+				t.Fatalf("delayed exact receipt: %+v %v", out, err)
+			}
 		})
 	}
 	t.Run("queue_merges_before_second_decision", func(t *testing.T) {
 		f, p, out := codeLandingFixture(t)
 		out, err := f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-		if err != nil || out.State != "awaiting_decision" { t.Fatalf("handoff: %+v %v", out, err) }
+		if err != nil || out.State != "awaiting_decision" {
+			t.Fatalf("handoff: %+v %v", out, err)
+		}
 		f.approve(out.ApprovalID)
 		out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-		if err != nil || out.State != "awaiting_merge" { t.Fatalf("approval: %+v %v", out, err) }
+		if err != nil || out.State != "awaiting_merge" {
+			t.Fatalf("approval: %+v %v", out, err)
+		}
 		p.facts.Facts.Queued, p.facts.Facts.QueueHead = true, strings.Repeat("c", 40)
 		p.ready = false
 		out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-		if err != nil || out.State != "pending" || out.WaitReason != "pipeline_ci_or_artifact_pending" { t.Fatalf("queue checks: %+v %v", out, err) }
+		if err != nil || out.State != "pending" || out.WaitReason != "pipeline_ci_or_artifact_pending" {
+			t.Fatalf("queue checks: %+v %v", out, err)
+		}
 		p.ready, p.facts.ArtifactSHA = true, p.facts.Facts.QueueHead
 		out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-		if err != nil || out.State != "awaiting_decision" { t.Fatalf("queue refresh: %+v %v", out, err) }
+		if err != nil || out.State != "awaiting_decision" {
+			t.Fatalf("queue refresh: %+v %v", out, err)
+		}
 		p.facts.Facts.Merged, p.facts.MergeSHA = true, p.facts.Facts.QueueHead
 		f.mergedReceipt(p.review.HeadSHA, p.facts.MergeSHA)
 		out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-		if err != nil || out.State != "succeeded" { t.Fatalf("pre-queue decision lost: %+v %v", out, err) }
+		if err != nil || out.State != "succeeded" {
+			t.Fatalf("pre-queue decision lost: %+v %v", out, err)
+		}
 	})
 	t.Run("fix_head_uses_same_pr", func(t *testing.T) {
 		f, p, out := codeLandingFixture(t)
@@ -543,15 +581,47 @@ func TestRoutinePipelineRecoversMergeFixAndTargetEdits(t *testing.T) {
 		p.review.HeadSHA = strings.Repeat("f", 40)
 		p.facts.Facts.PullHead, p.facts.ArtifactSHA = p.review.HeadSHA, p.review.HeadSHA
 		out, err := f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-		if err != nil || out.State != "awaiting_decision" || out.PullRequest != 7 { t.Fatalf("reviewed fix handoff: %+v %v", out, err) }
+		if err != nil || out.State != "awaiting_decision" || out.PullRequest != 7 {
+			t.Fatalf("reviewed fix handoff: %+v %v", out, err)
+		}
 		f.approve(out.ApprovalID)
 		p.facts.Facts.Merged, p.facts.MergeSHA = true, strings.Repeat("c", 40)
 		f.mergedReceipt(strings.Repeat("b", 40), p.facts.MergeSHA)
 		out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-		if err != nil || out.State == "succeeded" { t.Fatalf("old-head receipt: %+v %v", out, err) }
+		if err != nil || out.State == "succeeded" {
+			t.Fatalf("old-head receipt: %+v %v", out, err)
+		}
 		f.mergedReceipt(p.review.HeadSHA, p.facts.MergeSHA)
 		out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-		if err != nil || out.State != "succeeded" { t.Fatalf("fixed-head landing: %+v %v", out, err) }
+		if err != nil || out.State != "succeeded" {
+			t.Fatalf("fixed-head landing: %+v %v", out, err)
+		}
+	})
+	t.Run("expired_merge_hold_is_renewed_visibly", func(t *testing.T) {
+		f, p, out := codeLandingFixture(t)
+		out, err := f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
+		if err != nil || out.State != "awaiting_decision" {
+			t.Fatalf("handoff: %+v %v", out, err)
+		}
+		f.approve(out.ApprovalID)
+		out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
+		if err != nil || out.State != "awaiting_merge" {
+			t.Fatalf("approval: %+v %v", out, err)
+		}
+		oldID := out.ApprovalID
+		f.exec(`UPDATE approval_requests SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, oldID)
+		f.exec(`UPDATE agent_permission_grants SET valid_until=clock_timestamp()-interval '1 second' WHERE approval_request_id=$1`, oldID)
+		p.facts.Facts.Merged, p.facts.MergeSHA = true, strings.Repeat("c", 40)
+		f.mergedReceipt(p.review.HeadSHA, p.facts.MergeSHA)
+		out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
+		if err != nil || out.State != "awaiting_decision" || out.ApprovalID == oldID || out.WaitReason != "pipeline_person_approval_or_observation_pending" {
+			t.Fatalf("expired consent must request a new person decision: %+v %v", out, err)
+		}
+		f.approve(out.ApprovalID)
+		out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
+		if err != nil || out.State != "succeeded" {
+			t.Fatalf("renewed exact receipt: %+v %v", out, err)
+		}
 	})
 	t.Run("target_edits_keep_identity_and_scope", func(t *testing.T) {
 		f := externalSetup(t)
@@ -559,23 +629,31 @@ func TestRoutinePipelineRecoversMergeFixAndTargetEdits(t *testing.T) {
 		in.PROpen = &PROpen{Repository: "example/routine", Branch: "work/change", BaseBranch: "main", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40), Title: "EXT-2: change"}
 		f.b.WithPullRequests(&lostPull{})
 		out, err := f.b.Execute(t.Context(), f.agent, f.run, in)
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		f.exec(`UPDATE nodes SET title='Person edit',updated_at=updated_at+interval '1 second' WHERE id=$1`, f.target)
 		out, err = f.b.ReconcilePR(t.Context(), f.agent.TenantID, out.ID)
-		if err != nil || out.State != "succeeded" { t.Fatalf("edited PR target: %+v %v", out, err) }
+		if err != nil || out.State != "succeeded" {
+			t.Fatalf("edited PR target: %+v %v", out, err)
+		}
 		in = f.request("pipeline", "pipeline.request")
-		in.PipelineRequest = &PipelineRequest{NonCode: true, ResultDigest: strings.Repeat("e", 64)}
+		in.PipelineRequest = &PipelineRequest{PRActionKey: "pr", HeadSHA: strings.Repeat("b", 40)}
 		out, err = f.b.Execute(t.Context(), f.agent, f.run, in)
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		f.exec(`UPDATE routine_attempts SET state='completed',process_receipt='{"process_state":"exited"}' WHERE run_id=$1`, f.run)
 		f.exec(`UPDATE routine_runs SET state='awaiting_pipeline' WHERE id=$1`, f.run)
 		f.exec(`UPDATE nodes SET body='Person release copy',updated_at=updated_at+interval '1 second' WHERE id=$1`, f.target)
-		// The retained PR still forbids claiming this is a non-code result:
-		// target edits pass the identity fence and reach that specific guard.
-		_, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
-		assertFailure(t, err, 409, "code_result_requires_pr_pipeline")
+		number := int64(7)
+		f.b.WithPipeline(&qualifiedPipeline{facts: evidence.PipelineFacts{Facts: evidence.Facts{PR: &number, Base: strings.Repeat("a", 40), PullHead: strings.Repeat("b", 40)}, ArtifactSHA: strings.Repeat("b", 40)}, ready: true, review: evidence.Review{OrderID: f.run, Repository: "example/routine", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40), GateOpen: true, Verdict: "ok", PolicyDigest: strings.Repeat("e", 64)}})
+		out, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
+		if err != nil || out.State != "awaiting_decision" {
+			t.Fatalf("edited pipeline target: %+v %v", out, err)
+		}
 		f.exec(`UPDATE routine_runs SET work_node_id=output_project_id WHERE id=$1`, f.run)
-		_, err = f.b.ReconcilePR(t.Context(), f.agent.TenantID, out.ID)
+		_, err = f.b.ReconcilePipeline(t.Context(), f.agent.TenantID, out.ID)
 		assertFailure(t, err, 409, "external_action_target_changed")
 	})
 }
