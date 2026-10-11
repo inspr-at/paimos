@@ -442,25 +442,29 @@ test('the search finds a row by the model name it shows, and still by its raw id
   await page.emulateMedia({ reducedMotion: 'reduce' })
   const data = await setup(page)
   await page.goto('/agents')
-  const lead = row(page, data.sessions[0]!.id), worker = row(page, data.sessions[1]!.id), cursor = row(page, data.sessions[3]!.id)
-  await expect(cursor.locator('.exec-model')).toHaveText('Composer fast 2.5')
-  const search = page.getByRole('searchbox', { name: 'Search sessions in this list' })
-  // The rows a search matches; ancestors it keeps as dimmed context do not count.
+  const lead = String(data.sessions[0]!.id), worker = String(data.sessions[1]!.id), cursor = String(data.sessions[3]!.id)
+  await expect(row(page, cursor).locator('.exec-model')).toHaveText('Composer fast 2.5')
+  const box = page.getByRole('searchbox', { name: 'Search sessions in this list' })
+  // The rows a search matches; ancestors it keeps as dimmed context do not count. Each query follows
+  // one that matches nothing, so the rows it finds can only come from that query.
   const matched = page.locator('.sessions .row[data-row]:not(.context-only)')
-  for (const [query, found, shows] of [
-    ['Opus 5.5', [lead, row(page, DONE)], 'Opus 5.5 · xhigh'],
+  const matchedIds = () => matched.evaluateAll(els => els.map(el => el.getAttribute('data-row')!.slice(2)).sort())
+  async function search(query: string, ids: string[]) {
+    await box.fill('no session matches this')
+    await expect(matched).toHaveCount(0)
+    await box.fill(query)
+    await expect.poll(matchedIds, { message: `${query} finds exactly these rows` }).toEqual([...ids].sort())
+  }
+  for (const [query, ids, shows] of [
+    ['Opus 5.5', [lead, DONE], 'Opus 5.5 · xhigh'],
     ['gpt-6.1 sol', [worker], 'GPT-6.1 Sol · xhigh'],
     ['Composer fast 2.5', [cursor], 'Composer fast 2.5'],
   ] as const) {
-    await search.fill(query)
-    for (const one of found) await expect(one, `${query} finds it`).toBeVisible()
-    await expect(matched).toHaveCount(found.length)
-    expect(await matched.locator('.exec-model').allInnerTexts(), `${query} matches only rows that show it`).toEqual(found.map(() => shows))
+    await search(query, [...ids])
+    await expect(matched.locator('.exec-model'), `${query} matches rows that show it`).toHaveText(ids.map(() => shows))
   }
   // Raw ids keep matching: the model the session reports and the run's launch profile.
-  for (const [query, found] of [['claude-opus-5-5', lead], ['gpt-6.1-sol', worker], ['codex-astra-xhigh', worker]] as const) {
-    await search.fill(query)
-    await expect(found, `${query} finds it`).toBeVisible()
-    await expect(found).not.toHaveClass(/context-only/)
-  }
+  await search('claude-opus-5-5', [lead, DONE])
+  await search('gpt-6.1-sol', [worker])
+  await search('codex-astra-xhigh', [worker])
 })
