@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { APIError, assignProjectGroup, getNode, getProjectGroups, undoGroupEvent, updateNode, type NodePatch, type SharedProjectGroup, type WorkNode } from '../../lib/api'
+import { APIError, assignProjectGroup, getNode, getProjectGroups, listNodes, undoGroupEvent, updateNode, type NodePatch, type SharedProjectGroup, type WorkNode } from '../../lib/api'
 import { can, myProjectRole, myWorkspaceRole } from '../../lib/authz'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { toast } from '../../lib/toast'
@@ -19,8 +19,9 @@ import ProjectSettingsExplainer from './ProjectSettingsExplainer.vue'
 
 const props = defineProps<{ project: Project }>()
 const route = useRoute(), projects = useProjects(), projectGroups = useProjectGroups()
-const scope = useIdentityScope(() => can('nodes.read', props.project.id)), reads = scope.lane(), groupReads = scope.lane()
+const scope = useIdentityScope(() => can('nodes.read', props.project.id)), reads = scope.lane(), groupReads = scope.lane(), ticketReads = scope.lane()
 const node = ref<WorkNode | null>(null), name = ref(props.project.title), description = ref('')
+const ticketKey = ref(''), ticketError = ref('')
 const groups = ref<SharedProjectGroup[]>([]), groupId = ref(''), groupsReady = ref(false), groupError = ref('')
 const loading = ref(true), busy = ref(false), loadError = ref('')
 const nameInput = ref<HTMLInputElement>()
@@ -70,9 +71,13 @@ function load(preserveDraft = false) {
     if (readTarget !== props.project.id) return
     groups.value = result.items; groupId.value = result.items.find(group => group.project_ids.includes(readTarget))?.id ?? ''; groupsReady.value = true; groupError.value = ''
   }), { failed: () => { groupError.value = 'Shared groups could not be read. Nothing changed.'; groupsReady.value = false } })
+  void ticketReads.run(({ after, signal }) => after(listNodes({ within: target, kind: ['work', 'ticket', 'task', 'epic'], sort: '-created_at,-key', limit: 1 }, { signal }), result => {
+    if (target !== props.project.id) return
+    ticketKey.value = result.items[0]?.key ?? `${props.project.routeKey}-1`; ticketError.value = ''
+  }), { failed: () => { ticketKey.value = ''; ticketError.value = 'The ticket example could not be read.' } })
 }
 watch(() => scope.owner.value, () => {
-  node.value = null; name.value = props.project.title; description.value = ''; groups.value = []; groupId.value = ''; groupsReady.value = false; busy.value = false; close(false); load()
+  node.value = null; name.value = props.project.title; description.value = ''; ticketKey.value = ''; ticketError.value = ''; groups.value = []; groupId.value = ''; groupsReady.value = false; busy.value = false; close(false); load()
 }, { immediate: true, flush: 'sync' })
 watch(admin, allowed => { if (!allowed) close(false) })
 // A disabled field cannot take focus. Wait for the read and write permission
@@ -183,8 +188,8 @@ onBeforeUnmount(() => close(false))
       <div class="frow"><label class="fl" for="f-name"><b id="name-label">Name</b><small id="name-help">Shown in the header, the Projects page and search.</small></label>
         <form v-if="writable" data-project-field tabindex="-1" @submit.prevent="saveField('name')"><input id="f-name" aria-labelledby="name-label" aria-describedby="name-help" ref="nameInput" v-model="name" class="field" maxlength="120" autocomplete="off" :disabled="loading || !node" :readonly="busy" :aria-busy="busy" @blur="saveField('name')"></form><p v-else class="fv">{{ project.title }}</p>
       </div>
-      <div class="frow"><span class="fl"><b>Key</b><small>Set when the project was created. <ProjectSettingsExplainer id="key" :project-key="project.routeKey" /></small></span><div class="key-show"><span class="key-badge big">{{ project.routeKey }}</span><span class="key-say">Starts every ticket number: <b class="mono">{{ project.routeKey }}-&lt;number&gt;</b>.</span></div></div>
-      <div class="frow top"><label class="fl" for="f-desc"><b id="description-label">Description</b><small id="description-help">Plain text, under the name in the header.</small></label><form v-if="writable" data-project-field tabindex="-1" @submit.prevent="saveField('description')"><textarea id="f-desc" aria-labelledby="description-label" aria-describedby="description-help" v-model="description" class="field ta" rows="3" maxlength="2000" placeholder="What this project is for, in a sentence or two" :disabled="loading || !node" :readonly="busy" :aria-busy="busy" @blur="saveField('description')" /></form><p v-else class="fv">{{ node ? fullDescription(node) || 'No description' : project.description || 'No description' }}</p></div>
+      <div class="frow"><span class="fl"><b>Key</b><small>Set when the project was created. <ProjectSettingsExplainer id="key" :project-key="project.routeKey" /></small></span><div class="key-show"><span class="key-badge big">{{ project.routeKey }}</span><span class="key-say"><template v-if="ticketKey">Starts every ticket number: <b class="mono">{{ ticketKey }}</b>.</template><template v-else>{{ ticketError || 'Reading ticket example…' }}</template></span></div></div>
+      <div class="frow top"><label class="fl" for="f-desc"><b id="description-label">Description</b><small id="description-help">Shown under the name in the header; Markdown works.</small></label><form v-if="writable" data-project-field tabindex="-1" @submit.prevent="saveField('description')"><textarea id="f-desc" aria-labelledby="description-label" aria-describedby="description-help" v-model="description" class="field ta" rows="3" maxlength="2000" placeholder="What this project is for, in a sentence or two" :disabled="loading || !node" :readonly="busy" :aria-busy="busy" @blur="saveField('description')" /></form><p v-else class="fv">{{ node ? fullDescription(node) || 'No description' : project.description || 'No description' }}</p></div>
       <div class="frow"><label class="fl" for="f-group"><b id="group-label">Group</b><small id="group-help">Shared groups arrange the Projects page for everyone.</small></label><select v-if="can('project_groups.write')" id="f-group" aria-labelledby="group-label" aria-describedby="group-help" class="field" :value="groupId" :disabled="!groupsReady || busy" @change="chooseGroup"><option value="">{{ !groupsReady ? 'Reading shared groups…' : 'No group' }}</option><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.name }}</option></select><p v-else class="fv">{{ groupsReady ? groups.find(group => group.id === groupId)?.name ?? 'No group' : groupError || 'Reading shared groups…' }}</p></div>
     </div>
     <div class="foot-lines">

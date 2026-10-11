@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Risk: settings, Undo and destructive confirmations must stay on the project
 // and revision acted on; failed writes cannot claim success or move controls.
+// Key examples must use current-project work, and description help must allow Markdown.
 import { test, expect, type Page } from '@playwright/test'
 import { execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
@@ -11,6 +12,10 @@ import { checkProjectSettings, approvedCheckSHA } from './project-settings-accep
 
 async function setup(page: Page, readOnly = false) {
   const data = fixtures(), errors = watchErrors(page)
+  // Newest is creation order, not the largest key or the most recent edit.
+  Object.assign(data.nodes.find(node => node.id === 'n-5')!, { kind_slug: 'work', created_at: '2026-09-23T11:00:00Z' })
+  data.nodes.find(node => node.id === 'n-6')!.updated_at = '2026-09-23T11:30:00Z'
+  data.nodes.find(node => node.id === 'n-a1')!.created_at = '2026-09-23T11:45:00Z'
   await mockWork(page, data, { admin: !readOnly, readOnly })
   const writes: { id: string; body: Record<string, unknown>; expected: string }[] = [], assignments: unknown[] = []
   const nodes = new Map(data.projects.map(p => [p.id, { id: p.id, key: p.key, title: p.title, body: p.description, state: p.state, fields: { classic: { key: p.classic, description: p.description }, preserved: 'keep me' }, updated_at: p.last, created_at: p.last, parent_id: null, kind_id: 'k-project', position: '0', deleted_at: null }]))
@@ -160,6 +165,8 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
   await expect(page).toHaveURL('/p/PHAROS/settings#f-name')
   const name = page.getByLabel('Name', { exact: true }), description = page.getByLabel('Description', { exact: true })
   await expect(name).toBeEnabled(); await expect(name).toBeFocused()
+  await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: PHAROS-15.')
+  await expect(page.locator('#description-help')).toHaveText('Shown under the name in the header; Markdown works.')
   const initialRevision = world.nodes.get('p-pharos')!.updated_at
   // A list response snapshots the old revision before the edit, then returns
   // only after the confirmed write. It must not put the old header back.
@@ -248,6 +255,7 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
   await name.blur(); expect(world.writes.length).toBe(count)
   await navigate(page, '/p/AEON/settings')
   await expect(page.locator('#project-title')).toHaveText('Aeon')
+  await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: AEON-1.')
   const replied = page.waitForResponse(response => response.url().endsWith('/api/nodes/p-pharos') && response.request().method() === 'PATCH')
   release(); await replied
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Aeon')
@@ -262,6 +270,8 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
   await navigate(page, '/p/AEON/settings?recurrence=r-1&consent=1'); await expect(page).toHaveURL('/p/AEON/settings/routines?recurrence=r-1&consent=1')
   await navigate(page, '/p/AEON/settings/access')
   await expect(page.getByRole('link', { name: 'Settings › Access › Projects' })).toHaveAttribute('href', '/settings/access/projects/p-aeon')
+  await navigate(page, '/p/PRJ-26/settings')
+  await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: PRJ-26-1.')
   await navigate(page, '/p/AEON/settings')
   await expect(page.getByLabel('Name', { exact: true })).toBeEnabled()
   const deleteRevision = world.nodes.get('p-aeon')!.updated_at
@@ -280,7 +290,7 @@ test('AEON-1233: General edits, lifecycle and legacy links stay on the acted-on 
 
 test('AEON-1233: approved P1 reference states and check.mjs audit against the build', async ({ browser }, testInfo) => {
   test.setTimeout(240_000)
-  const lines = [`AEON-1233 P1 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit runs on the built P1 surface. Full mock flows for P2–P6 are outside this package.', 'The public-source guard requires the approved Lead example’s operator host to become {C}, filled from the selected computer; other approved explainer text is retained.', 'Freeze dates/actors are absent from the project API: show the confirmed Frozen state without inventing a date or person. The key uses a ticket-number pattern when no actual ticket number is supplied.', 'FIX2: the approved Delete sheet is retained with an unavailable message and disabled final action until authorized, revision-checked project-and-ticket deletion exists.']
+  const lines = [`AEON-1233 P1 evidence · HEAD ${execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()}`, `Approved check.mjs SHA-256 ${approvedCheckSHA}`, 'The approved audit runs on the built P1 surface. Full mock flows for P2–P6 are outside this package.', 'The public-source guard requires the approved Lead example’s operator host to become {C}, filled from the selected computer; other approved explainer text is retained.', 'Freeze dates/actors are absent from the project API: show the confirmed Frozen state without inventing a date or person. FIX3: the key example uses the project’s newest ticket key, or KEY-1 when there is none; the description hint explicitly supports Markdown.', 'FIX2: the approved Delete sheet is retained with an unavailable message and disabled final action until authorized, revision-checked project-and-ticket deletion exists.']
   for (const width of [1440, 1024, 400, 390]) for (const theme of ['light', 'dark'] as const) {
     const context = await browser.newContext({ viewport: { width, height: width < 600 ? 860 : 1000 }, hasTouch: width < 600, colorScheme: theme, reducedMotion: 'reduce' })
     try {
@@ -291,6 +301,8 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       await page.goto('/p/PHAROS/settings')
       await expect(page.getByLabel('Name', { exact: true })).toBeEnabled()
       await expect(page.getByLabel('Group', { exact: true })).toBeEnabled()
+      await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: PHAROS-15.')
+      await expect(page.locator('#description-help')).toHaveText('Shown under the name in the header; Markdown works.')
       async function capture(state: string) {
         const checks = await checkProjectSettings(page, `${state}/${width}/${theme}`, width < 600)
         for (const check of checks) expect(check.passed, check.message).toBe(true)
@@ -337,8 +349,8 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       await page.locator('.toast-close').evaluateAll(buttons => { for (const button of buttons) (button as HTMLButtonElement).click() })
       await expect(page.locator('.toast')).toHaveCount(0)
       if (width <= 1000) { await nav.click(); await capture('nav-open'); await page.keyboard.press('Escape') }
-      await navigate(page, '/p/AEON/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await capture('general-aeon')
-      await navigate(page, '/p/PRJ-26/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await capture('general-prj26')
+      await navigate(page, '/p/AEON/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: AEON-1.'); await capture('general-aeon')
+      await navigate(page, '/p/PRJ-26/settings'); await expect(page.getByLabel('Name', { exact: true })).toBeEnabled(); await expect(page.getByLabel('Group', { exact: true })).toBeEnabled(); await expect(page.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: PRJ-26-1.'); await capture('general-prj26')
       await navigate(page, '/p/PHAROS/settings/agents'); await expect(page.getByText('This project has no context yet, so no account may work on it. Choose one.', { exact: true })).toBeVisible(); await capture('agents-pharos')
       world.control.contextFail = true
       await navigate(page, '/p/PHAROS/settings/access'); await navigate(page, '/p/PHAROS/settings/agents')
@@ -355,6 +367,7 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       await expect(viewer.locator('[data-life]')).toHaveCount(0); await expect(viewer.locator('#f-name, #f-desc')).toHaveCount(0)
       await expect(viewer.getByRole('link', { name: 'Edit name and description in Settings' })).toHaveCount(0)
       await expect(viewer.getByText('Reading shared groups…', { exact: true })).toHaveCount(0)
+      await expect(viewer.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: PHAROS-15.')
       for (const check of await checkProjectSettings(viewer, `readonly/${width}/${theme}`, width < 600)) expect(check.passed, check.message).toBe(true)
       await viewer.screenshot({ path: testInfo.outputPath(`general-readonly-${width}-${theme}.png`), fullPage: true })
       const longPage = await context.newPage(), longWorld = await setup(longPage)
@@ -365,6 +378,7 @@ test('AEON-1233: approved P1 reference states and check.mjs audit against the bu
       await expect(longPage.getByLabel('Name', { exact: true })).toBeEnabled()
       await expect(longPage.getByLabel('Name', { exact: true })).toHaveValue(longName)
       await expect(longPage.getByLabel('Group', { exact: true })).toBeEnabled()
+      await expect(longPage.locator('.project-settings .key-say')).toHaveText('Starts every ticket number: PHAROS-15.')
       for (const check of await checkProjectSettings(longPage, `long-text/${width}/${theme}`, width < 600)) expect(check.passed, check.message).toBe(true)
       await longPage.screenshot({ path: testInfo.outputPath(`general-long-text-${width}-${theme}.png`), fullPage: true })
     } finally { await context.close() }
