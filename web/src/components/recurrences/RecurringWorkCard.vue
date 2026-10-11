@@ -27,7 +27,10 @@ const editor = ref<{ item?: Recurrence; consent?: boolean } | null>(null), runPr
 const person = computed(() => !!session.identity && session.identity.principal.kind !== 'agent')
 const workspaceAdmin = computed(() => ['owner', 'admin'].includes(myWorkspaceRole()?.key ?? ''))
 const projectId = computed(() => props.project?.id ?? '')
-const mayManage = computed(() => kind.value === 'project' ? can('recurrences.manage', projectId.value) : kind.value === 'personal' ? person.value && can('recurrences.manage') : can('recurrences.manage') && workspaceAdmin.value)
+// Personal routines need the right only in their output project, as the server checks it:
+// New routine… is open to every person (the editor checks the project picked), and each
+// row is checked against its own project.
+const mayManage = computed(() => kind.value === 'project' ? can('recurrences.manage', projectId.value) : kind.value === 'personal' ? person.value : can('recurrences.manage') && workspaceAdmin.value)
 const mayRead = () => kind.value === 'project' ? can('nodes.read', projectId.value) : kind.value === 'personal' ? person.value : can('nodes.read')
 const identity = useIdentityScope(mayRead), reads = identity.lane(), links = identity.lane(), switchReads = identity.lane()
 const mayManageItem = (item: Recurrence) => mayManage.value && (kind.value === 'project' || can('recurrences.manage', item.project_id))
@@ -85,7 +88,9 @@ function selectSource() {
 }
 watch([projectId, () => kind.value, () => identity.owner.value], () => { clear(); selectSource(); load(); readSwitch() }, { immediate: true, flush: 'sync' })
 watch(() => props.selectedId, () => { menu.value = null; editor.value = null; runPrompt.value = null; selectSource() }, { flush: 'sync' })
-watch(mayManage, value => { if (!value) { if (editor.value) revoked.value = 'draft'; editor.value = null; runPrompt.value = null; menu.value = null } })
+// An open editor or Run now prompt is bound to its own row's right as well.
+const lostRight = computed(() => !mayManage.value || !!editor.value?.item && !mayManageItem(editor.value.item) || !!runPrompt.value && !mayManageItem(runPrompt.value))
+watch(lostRight, lost => { if (lost) { if (editor.value) revoked.value = 'draft'; editor.value = null; runPrompt.value = null; menu.value = null } })
 const poller = usePoller(() => { if (!cursor.value) load() }, 20_000)
 onMounted(() => { poller.start(); if (kind.value !== 'project') void projects.load() })
 onBeforeUnmount(() => { alive = false; epoch++; stopAccess(); poller.stop() })
@@ -94,10 +99,11 @@ function replace(item: Recurrence) { if (linked.value?.id === item.id && item.re
 function closeMenu(restore = true) { const anchor = menu.value?.anchor; menu.value = null; if (restore) anchor?.focus() }
 // Each write the editor makes lands here; saved also closes it.
 function changed(item: Recurrence) { if (!inScope(item)) return; if (items.value.some(row => row.id === item.id) || linked.value?.id === item.id) replace(item); else items.value.push(item); selected.value = item.id; revoked.value = '' }
-function saved(item: Recurrence, outcome: 'saved' | 'consented' | 'kept' = 'saved') {
+function saved(item: Recurrence, outcome: 'saved' | 'consented' | 'kept' | 'waiting' = 'saved') {
   editor.value = null; changed(item)
   if (outcome === 'consented') toast(`Agents may run “${recurrenceName(item)}”${item.next_at ? ` · next run ${when(item.next_at, recurrenceZone(item.trigger))}` : ''}.`, { timeout: 8000 })
   else if (outcome === 'kept') toast(`Kept paused. ${recurrenceName(item)} waits until you let agents run it.`)
+  else if (outcome === 'waiting') toast(`Not paused. ${recurrenceName(item)} creates its tickets when due; they wait until you let agents run it.`, { timeout: 8000 })
   else toast(`Saved ${recurrenceName(item)}`)
 }
 function refreshItem(id: string) { void identity.run(({ after, signal }) => after(getRecurrence(id, signal), item => { replace(item) }), { failed: error => { toast(error instanceof Error ? error.message : 'The routine could not be refreshed.', { tone: 'error' }) } }) }
@@ -180,7 +186,7 @@ function turnOff() {
   <div class="recurring-layout">
     <section :id="cardId" class="settings-card glass-card" :aria-labelledby="`${cardId}-title`">
       <header class="card-head"><span class="card-icon"><AppIcon name="repeat" :size="16" /></span><div class="card-titles"><h2 :id="`${cardId}-title`">{{ heading }}</h2><p>{{ lead }}</p></div><div class="card-aside"><button type="button" class="btn sm" :disabled="!mayManage" :data-tip="mayManage ? 'New routine' : readOnlyReason" @click="revoked = ''; editor = {}"><AppIcon name="plus" :size="13" />New routine…</button></div></header>
-      <p v-if="revoked" class="ro-note" role="status"><AppIcon name="eye" :size="13" /><span><b>The routine editor closed:</b> {{ revoked === 'saved' ? 'your rights here changed. The routine stays saved; agents don’t run it until its owner lets them.' : 'your rights here changed, so you can no longer change routines here. Nothing was saved; your draft was discarded.' }} You can still read them.</span></p>
+      <p v-if="revoked" class="ro-note" role="status"><AppIcon name="eye" :size="13" /><span><b>The routine editor closed:</b> {{ revoked === 'saved' ? `your rights ${kind === 'personal' ? 'in its project' : 'here'} changed. The routine stays saved; agents don’t run it until its owner lets them.` : kind === 'personal' ? 'your rights in its project changed. Nothing was saved; your draft was discarded.' : 'your rights here changed, so you can no longer change routines here. Nothing was saved; your draft was discarded.' }} You can still read them.</span></p>
       <p v-else-if="!mayManage" class="permission-note" role="note">{{ readOnlyNote }}</p>
       <div v-if="showSwitch && settings" class="enable"><span class="en-ic"><AppIcon name="agent" :size="15" /></span><div class="en-t"><b>Agents may run routines in {{ project?.routeKey }}</b><small>{{ settings.automatic_launch_enabled ? 'On. Each routine still needs its owner to let agents run it.' : settings.wait_reason === 'automatic_launch_disabled' && !settings.consent_enabled ? `Off, as for every project. Ask OPS to qualify ${project?.routeKey}; then an owner turns it on. Ticket-only routines work either way.` : `Off: ${waitReasonWords(settings.wait_reason, { project: project?.routeKey })} Ticket-only routines work either way.` }}</small></div><span class="stc calm"><AppIcon :name="settings.automatic_launch_enabled ? 'check' : 'stop'" :size="12" /><span>{{ settings.automatic_launch_enabled ? 'On' : 'Off' }}</span></span><button v-if="settings.automatic_launch_enabled" type="button" class="btn sm" :disabled="!mayTurn || switchBusy" :data-tip="mayTurn ? undefined : `Only a ${project?.routeKey} owner or admin can change this`" @click="turnOff">Turn off…</button></div>
       <div class="card-body"><p v-if="failure" class="error" role="alert">{{ failure }} <button type="button" class="btn sm" @click="load()">Retry</button></p><p v-if="loading && !items.length" class="empty" role="status">Loading routines…</p><p v-else-if="!items.length && !failure && !linkFailure" class="empty">No routines yet. Use New routine…, or Repeat… on a ticket.</p>

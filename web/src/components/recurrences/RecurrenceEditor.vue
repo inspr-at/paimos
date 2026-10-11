@@ -28,7 +28,7 @@ import type { RunsAsState } from './RunsAsPicker.vue'
 // routine saves paused and unconsented; the same sheet then asks "Let agents run it".
 // saved: the sheet is done (parents close it); changed: a write landed and it stays open.
 const props = defineProps<{ project?: { id: string; routeKey: string; title?: string } | null; source?: ListItem | null; recurrence?: Recurrence; scope?: RoutineScopeKind; consent?: boolean }>()
-const emit = defineEmits<{ close: []; saved: [item: Recurrence, outcome: 'saved' | 'consented' | 'kept']; changed: [item: Recurrence]; revoked: [saved: boolean] }>()
+const emit = defineEmits<{ close: []; saved: [item: Recurrence, outcome: 'saved' | 'consented' | 'kept' | 'waiting']; changed: [item: Recurrence]; revoked: [saved: boolean] }>()
 const vocabulary = useWorkVocabulary(), session = useSession(), projects = useProjects()
 const uid = useId(), dialog = ref<HTMLDialogElement>(), body = ref<HTMLElement>(), nameField = ref<HTMLInputElement>()
 const initial = props.recurrence, source = props.source
@@ -62,9 +62,14 @@ const owner = computed(() => base.value?.definition?.owner_principal_id ?? me.va
 const mine = computed(() => person.value && owner.value === me.value)
 const adminRole = (role: { key: string } | null) => role?.key === 'owner' || role?.key === 'admin'
 const scopeAdmin = computed(() => adminRole(myWorkspaceRole()) || (scopeKind === 'project' && !!outputProject.value && adminRole(myProjectRole(outputProject.value))))
-// Who may keep this sheet open at all; losing it closes the sheet (revocation).
-const scopeAllowed = computed(() => scopeKind === 'project' ? can('recurrences.manage', outputProject.value) : scopeKind === 'personal' ? person.value : can('recurrences.manage') && (!!initial || scopeAdmin.value))
 const outputAllowed = computed(() => !outputProject.value || can('recurrences.manage', outputProject.value))
+// A personal routine needs the right only in its output project (the server checks it
+// there). Once seen granted for the project shown, losing it revokes; picking a project
+// without it only says so below.
+const heldOutput = ref('')
+watch([outputProject, outputAllowed], ([id, allowed]) => { if (id && allowed) heldOutput.value = id }, { immediate: true, flush: 'sync' })
+// Who may keep this sheet open at all; losing it closes the sheet (revocation).
+const scopeAllowed = computed(() => scopeKind === 'project' ? can('recurrences.manage', outputProject.value) : scopeKind === 'personal' ? person.value && (heldOutput.value !== outputProject.value || outputAllowed.value) : can('recurrences.manage') && (!!initial || scopeAdmin.value))
 const scope = useIdentityScope(() => scopeAllowed.value), previews = scope.lane(), kindsLane = scope.lane(), routeLane = scope.lane(), rulesLane = scope.lane(), settingsLane = scope.lane()
 const openedAs = { id: me.value, name: session.identity?.principal.name ?? '' }
 const localZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
@@ -161,9 +166,10 @@ const cancelLabel = computed(() => step.value === 'consent' ? mine.value && base
 function resetBaseline(saved: Recurrence) {
   base.value = saved; initialSchedule = JSON.stringify(schedule); savedSnapshot = JSON.stringify(input.value); policy.value = saved.execution_policy ?? policy.value
 }
+// Closing the consent step says what is true: kept paused, or (resumed, consent failed) not paused.
 function close() {
   if (busy.value) return
-  if (step.value === 'consent' && base.value && mine.value) emit('saved', base.value, 'kept')
+  if (step.value === 'consent' && base.value && mine.value) emit('saved', base.value, base.value.paused ? 'kept' : 'waiting')
   else emit('close')
 }
 function enterConsent() {

@@ -42,7 +42,10 @@ retried; a resumed routine offers Pause again. Until
 and workspace routines show "Runs as: unavailable" and cannot be let run. A
 stale write reloads the record: fields the server changed take its value with
 a tint, other unsaved fields stay. Losing the right to manage closes the sheet,
-and the box says nothing was saved. Project boxes also show whether agents may
+and the box says nothing was saved. Your routines need **Manage recurring work**
+only in the project their tickets go to, as the server checks it: each row and
+the open sheet follow that project's right. Closing the consent step says
+"Kept paused" only for a paused routine; a resumed one says it is not paused. Project boxes also show whether agents may
 run routines there; an owner or admin can turn it off, and turning it on waits
 for OPS qualification. Rows show the derived state (Scheduled, Waiting for a
 person, Held, Stopped; Running and Failed once runs are reported).

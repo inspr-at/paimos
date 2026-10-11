@@ -2,12 +2,14 @@
 import { test, expect, type Page, type TestInfo } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { mockSettings, settingsData } from './settings-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { Recurrence, RecurrenceInput } from '../src/lib/recurrences'
 
 // Risk (AEON-1182): creating an agent routine starts work without consent, consents to a
 // revision that is no longer shown, lets someone other than the owner decide, keeps a
-// stale or revoked draft, or moves controls while options change.
+// stale or revoked draft, says "kept paused" for a resumed routine, checks personal
+// routines against the wrong scope, or moves controls while options change.
 const OTHER = '22222222-2222-4222-8222-222222222222', AGENT = '58000000-0000-4000-8000-000000000001', CREATED = '58000000-0000-4000-8000-000000000002'
 const dates = ['2026-10-12T06:00:00Z', '2026-10-19T06:00:00Z', '2026-10-26T07:00:00Z', '2026-11-02T07:00:00Z']
 const waiting = { eligible: false, consent_required: true, wait_reason: 'execution_consent_required', project_revision: 2, consent_revision: 0 }
@@ -15,13 +17,16 @@ const assignment = { goal: 'Update npm and Go dependencies; open one pull reques
 const owned = (owner: string): Recurrence => ({ id: AGENT, project_id: 'p-pharos', parent_id: 'p-pharos', template: { name: 'Weekly dependency update', title: 'Update dependencies {{date}}', description: assignment.goal, acceptance_criteria: ['All tests pass'], estimate_hours: 1, priority: 'medium', tags: [], type: 'work' }, trigger: { kind: 'time', rrule: 'FREQ=WEEKLY;BYDAY=MO', time_of_day: '08:00', timezone: 'Europe/Vienna' }, queue_each: true, overlap_policy: 'skip', catch_up_policy: 'one', paused: true, revision: 3, occurrence_count: 0, next_at: dates[0], created_at: dates[0], updated_at: dates[0], definition: { scope: { kind: 'project', project_id: 'p-pharos' }, owner_principal_id: owner, assignment: structuredClone(assignment) as NonNullable<Recurrence['definition']>['assignment'] }, execution_policy: { ...waiting } })
 interface Call { method: string; path: string; query: URLSearchParams; body: Record<string, unknown> }
 
-async function setup(page: Page, role: 'admin' | 'member', options: { items?: Recurrence[]; staleOnce?: boolean } = {}) {
+// manageIn grants Manage recurring work in that one project only, never in the workspace.
+async function setup(page: Page, role: 'admin' | 'member', options: { items?: Recurrence[]; staleOnce?: boolean; manageIn?: string; consentFails?: string } = {}) {
   const errors = watchErrors(page), calls: Call[] = [], items = options.items ?? []
   const grants = { manage: true }
   await mockWork(page, fixtures(), { admin: role === 'admin' })
   await page.route('**/api/me/permissions**', route => {
-    const effective = mockEffectivePermissions(role, new URL(route.request().url()).searchParams.get('project_id') || undefined)
-    if (grants.manage) (effective.workspace.permissions as string[]).push('recurrences.manage', 'run.create')
+    const projectId = new URL(route.request().url()).searchParams.get('project_id') || undefined
+    const effective = mockEffectivePermissions(role, projectId)
+    if (grants.manage && !options.manageIn) (effective.workspace.permissions as string[]).push('recurrences.manage', 'run.create')
+    else if (grants.manage && effective.project && projectId === options.manageIn) effective.project = { ...effective.project, permissions: [...effective.project.permissions, 'recurrences.manage', 'run.create'] }
     return route.fulfill({ json: effective })
   })
   await page.route('**/api/work-kinds**', route => route.fulfill({ json: { items: [{ id: 'k-maint', slug: 'maintenance', label: 'Maintenance', hint: '', position: 1, examples: [], labels: [], ticket_count: 0 }, { id: 'k-docs', slug: 'docs', label: 'Docs', hint: '', position: 2, examples: [], labels: [], ticket_count: 0 }], next_cursor: null } }))
@@ -38,7 +43,10 @@ async function setup(page: Page, role: 'admin' | 'member', options: { items?: Re
       const wait = !a ? '' : a.runtime_requirements.needs_browser ? 'capability_unqualified' : ['money', 'both'].includes(a.budget?.mode ?? '') ? 'budget_mode_unqualified' : 'execution_consent_required'
       return route.fulfill({ json: { times: dates, trigger_kind: 'time', ...(a ? { execution_policy: { ...waiting, wait_reason: wait } } : {}) } })
     }
-    if (path === '/api/recurrences' && method === 'GET') return route.fulfill({ json: { items: url.searchParams.get('project_id') === 'p-pharos' ? items : [], next_cursor: null } })
+    if (path === '/api/recurrences' && method === 'GET') {
+      const project = url.searchParams.get('project_id'), scope = url.searchParams.get('scope') ?? 'project'
+      return route.fulfill({ json: { items: items.filter(row => (!project || row.project_id === project) && (row.definition?.scope.kind ?? 'project') === scope), next_cursor: null } })
+    }
     if (path === '/api/recurrences' && method === 'POST') {
       const created = { ...owned(me.id), ...(body as unknown as RecurrenceInput), id: CREATED, revision: 1, paused: true, execution_policy: { ...waiting } } as Recurrence
       items.push(created); return route.fulfill({ status: 201, json: created })
@@ -52,6 +60,7 @@ async function setup(page: Page, role: 'admin' | 'member', options: { items?: Re
     if (path.endsWith('/history')) return route.fulfill({ json: { items: [{ id: 9, type: 'recurrence.updated', at: dates[0], actor_name: 'Markus Barta', before: null, after: null, node: null }], next_cursor: null } })
     if (path.endsWith('/preview')) return route.fulfill({ json: { times: dates, trigger_kind: 'time' } })
     if (path.endsWith('/resume') || path.endsWith('/pause')) { Object.assign(record, { paused: path.endsWith('/pause'), revision: record.revision + 1 }); return route.fulfill({ json: record }) }
+    if (path.endsWith('/execution-consent') && options.consentFails) return route.fulfill({ status: 422, json: { error: options.consentFails } })
     if (path.endsWith('/execution-consent')) { Object.assign(record, { revision: record.revision + 1, execution_policy: { ...waiting, eligible: true, wait_reason: '', consent_revision: record.revision + 1 } }); return route.fulfill({ json: record }) }
     if (method === 'PUT') {
       if (staleOnce) { staleOnce = false; Object.assign(record, { revision: record.revision + 1, trigger: { ...record.trigger, time_of_day: '09:00' } }); return route.fulfill({ status: 409, json: { error: 'recurrence revision changed' } }) }
@@ -213,6 +222,56 @@ test('someone else’s routine says who decides, a stale save keeps unsaved text
   await expect(editor(page)).toHaveCount(0)
   await expect(page.getByRole('status').filter({ hasText: 'The routine editor closed:' })).toContainText('Nothing was saved')
   expect(calls.filter(call => call.method === 'PUT')).toHaveLength(1)
+  expect(errors).toEqual([])
+})
+
+test('closing after a failed consent says the routine is not paused, never “Kept paused”', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  const { errors, calls } = await setup(page, 'admin', { items: [owned(me.id)], consentFails: 'execution_identity_unavailable' })
+  await page.goto(`/p/PHAROS/settings?recurrence=${AGENT}&consent=1`)
+  await expect(editor(page)).toHaveAccessibleName('Let agents run it')
+  await editor(page).getByRole('button', { name: /^Runs as:/ }).click()
+  await page.getByRole('option', { name: /PHAROS routines/ }).click()
+  await editor(page).getByRole('button', { name: /^Let agents run it/ }).click()
+  // The resume landed, then the consent failed: said in words, with Pause again.
+  await expect(editor(page).getByRole('alert').filter({ hasText: 'Agents may not run it:' })).toContainText('It is resumed')
+  expect(calls.filter(call => /\/(resume|execution-consent)$/.test(call.path)).map(call => call.path.split('/').at(-1))).toEqual(['resume', 'execution-consent'])
+  await editor(page).getByRole('button', { name: /^Close/ }).click()
+  await expect(editor(page)).toHaveCount(0)
+  await expect(page.getByText(/^Not paused\. Weekly dependency update creates its tickets when due; they wait until you let agents run it\.$/)).toBeVisible()
+  await expect(page.getByText(/Kept paused/)).toHaveCount(0)
+  // The row agrees: not paused, so it offers Pause.
+  await expect(page.getByRole('row', { name: 'Weekly dependency update', exact: true }).getByRole('button', { name: 'Pause', exact: true })).toBeEnabled()
+  expect(errors).toEqual([])
+})
+
+test('your routines need the right only in their own project, and losing it there closes the sheet', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1100 })
+  await mockSettings(page, settingsData())
+  const mine = owned(me.id)
+  mine.definition!.scope = { kind: 'personal' }
+  const { errors, calls, revoke } = await setup(page, 'member', { items: [mine], manageIn: 'p-pharos' })
+  await page.goto('/settings/personal')
+  // No workspace grant: each row is checked against its own output project, as the server does.
+  const row = page.getByRole('row', { name: 'Weekly dependency update', exact: true })
+  await expect(row.getByRole('button', { name: 'Resume', exact: true })).toBeEnabled()
+  await expect(row.getByRole('button', { name: 'Run now', exact: true })).toBeEnabled()
+  await page.getByRole('button', { name: 'New routine…', exact: true }).click()
+  await expect(editor(page)).toHaveAccessibleName('New routine')
+  const project = editor(page).getByRole('combobox', { name: 'Project', exact: true })
+  // Picking a project without the right only says so; the sheet stays open.
+  await project.selectOption('p-aeon')
+  await expect(editor(page).getByText(/^You can’t add routines to /)).toBeVisible()
+  await project.selectOption('p-pharos')
+  await expect(editor(page).getByText(/^You can’t add routines to /)).toHaveCount(0)
+  await editor(page).getByRole('textbox', { name: 'Name', exact: true }).fill('My weekly sweep')
+  // Losing it in the chosen project closes the sheet and discards the draft.
+  revoke()
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(editor(page)).toHaveCount(0)
+  await expect(page.getByRole('status').filter({ hasText: 'The routine editor closed:' })).toContainText('your rights in its project changed. Nothing was saved; your draft was discarded.')
+  await expect(row.getByRole('button', { name: 'Resume', exact: true })).toBeDisabled()
+  expect(calls.filter(call => call.method !== 'GET' && call.path !== '/api/recurrences/preview')).toEqual([])
   expect(errors).toEqual([])
 })
 

@@ -900,6 +900,8 @@
     ,
     "browser:tests/routines-editor.spec.ts:an agent routine is created paused, then let run as the picked agent, with every control anchored"
     ,
+    "browser:tests/routines-editor.spec.ts:closing after a failed consent says the routine is not paused, never “Kept paused”"
+    ,
     "browser:tests/routines-editor.spec.ts:someone else’s routine says who decides, a stale save keeps unsaved text, and revocation closes the sheet"
     ,
     "browser:tests/routines-editor.spec.ts:the Routines box and editor render in dark at 1440px"
@@ -907,6 +909,8 @@
     "browser:tests/routines-editor.spec.ts:the Routines box and editor render in light at 390px"
     ,
     "browser:tests/routines-editor.spec.ts:the phone sheet scrolls under a pinned footer, and switching who moves nothing"
+    ,
+    "browser:tests/routines-editor.spec.ts:your routines need the right only in their own project, and losing it there closes the sheet"
     ,
     "browser:tests/service-tier.spec.ts:1440: compact Default tier control keeps its box through confirmation and Undo"
     ,
@@ -11280,6 +11284,8 @@
     ,
     {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"an agent routine is created paused, then let run as the picked agent, with every control anchored","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"closing after a failed consent says the routine is not paused, never “Kept paused”","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"someone else’s routine says who decides, a stale save keeps unsaved text, and revocation closes the sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the Routines box and editor render in dark at 1440px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11287,6 +11293,8 @@
     {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the Routines box and editor render in light at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"the phone sheet scrolls under a pinned footer, and switching who moves nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/routines-editor.spec.ts","name":"your routines need the right only in their own project, and losing it there closes the sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/row-actions.spec.ts","name":"PDF from the list opens the quote on its page and prints it once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
