@@ -21,6 +21,7 @@ func TestResolveTicketRoute(t *testing.T) {
 	}
 	profiles := decode[[]Profile](t, &p, http.MethodGet, "/api/models", "", http.StatusOK)
 	minimalAccount(t, p, profileBySlug(profiles, "codex-6-1-sol-high"))
+	minimalAccount(t, p, profileBySlug(profiles, "codex-luna-medium"))
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		if err := modelprefs.SeedKinds(t.Context(), tx, p.TenantID); err != nil {
 			return err
@@ -63,7 +64,8 @@ func TestResolveTicketRoute(t *testing.T) {
 		if routesAfter != routes || eventsAfter != events {
 			t.Fatalf("resolve wrote state: routes %d→%d events %d→%d", routes, routesAfter, events, eventsAfter)
 		}
-		if _, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes WHERE role='build'`); err != nil {
+		// Pausing the only runnable build model leaves build without a route.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by) SELECT tenant_id,harness,model,'Build fixture paused',$2 FROM model_profiles WHERE id=$1`, backend.Profile.ID, p.ID); err != nil {
 			return err
 		}
 		missing, err := ResolveTicketRoute(t.Context(), tx, "build", "infra", now)

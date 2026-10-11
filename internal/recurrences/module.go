@@ -50,6 +50,8 @@ func (m *Module) WithHistory(publications []Publication) *Module {
 	return m
 }
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/runs", m.listRuns)
+	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/runs/{runId}", m.getRun)
 	mux.HandleFunc("GET /api/recurrences/{recurrenceId}/guardrails", m.getGuardrails)
 	mux.HandleFunc("PUT /api/recurrences/{recurrenceId}/guardrails", m.putGuardrails)
 	mux.HandleFunc("GET /api/recurrences", m.list)

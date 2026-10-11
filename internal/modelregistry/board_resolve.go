@@ -78,7 +78,12 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if !boardDispatchAdopted(s) && !(q.ExplicitBoard && boardInitialized(s)) {
 		return nil, nil
 	}
-	c, err := loadBoardCatalog(ctx, tx, true)
+	var c boardCatalog
+	if preview, ok := ctx.Value(previewBoardKey{}).(*preferencePreviewCatalog); ok && preview != nil {
+		c, err = preview.routingBoard(ctx, tx)
+	} else {
+		c, err = loadBoardCatalog(ctx, tx, true)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -329,6 +334,14 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			out.Trace.Blocked = "no model in the ranked order can run now"
 			if len(d.Held) > 0 {
 				out.Trace.Blocked = d.Held[0].Reason
+			}
+			if q.Escalation && waitCode == "" {
+				// Escalation keeps its route-level reason for the Decision Desk;
+				// each line's own cause stays in Held.
+				out.Trace.Blocked = "no allowed stronger route"
+				if lockedEscalation {
+					out.Trace.Blocked = "locked model preference"
+				}
 			}
 		}
 		if roleName == "review-gate-security" {

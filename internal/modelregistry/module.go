@@ -88,6 +88,17 @@ func (m *Module) mount(mux *http.ServeMux, legacy http.HandlerFunc) {
 	mux.HandleFunc("PUT /api/models/refresh/settings", m.putSettings)
 	mux.HandleFunc("PUT /api/models/refresh/credentials/{accountId}", m.putCredential)
 	mux.HandleFunc("GET /api/models/catalog", m.catalog)
+	mux.HandleFunc("POST /api/models/harness-probes/claim", m.claimHarnessProbes)
+	// A literal harness-probes segment plus an account wildcard conflicts with
+	// {id}/retire. This fallback keeps the public probe path and lets the more
+	// specific retirement, proposal and claim routes retain precedence.
+	mux.HandleFunc("POST /api/models/{collection}/{accountId}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("collection") != "harness-probes" {
+			http.NotFound(w, r)
+			return
+		}
+		m.reportHarnessProbe(w, r)
+	})
 	mux.HandleFunc("GET /api/models/outdated", boundedPreferenceHandler(m.outdatedModels))
 	mux.HandleFunc("POST /api/models/outdated/retire", boundedPreferenceHandler(m.retireOutdated))
 	mux.HandleFunc("POST /api/models/outdated/undo", boundedPreferenceHandler(m.undoOutdated))
@@ -328,6 +339,17 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 		}
 
 		query := WorkQuery{Role: q.Role, AuthorFamily: q.AuthorFamily, Harness: q.Harness, ProjectID: project, PersonID: modelprefs.PrefsPerson(r.Context(), tx, current)}
+		if query.Harness != "" {
+			// A harness filter must name one of the role's Models routes,
+			// as it named a ladder route before the retirement.
+			steps, _, err := derivedRoleSteps(r.Context(), tx, query.PersonID, query.Role, 0)
+			if err != nil {
+				return err
+			}
+			if !ladderHasHarness(steps, query.Harness) {
+				return fail(http.StatusBadRequest, "role and harness combination is unsupported")
+			}
+		}
 		resolved, err := resolveDailyWith(r.Context(), tx, current, query, now, func(query WorkQuery) (WorkResolution, error) {
 			boardQuery := query
 			boardQuery.Area, boardQuery.Situation = "other", "first"

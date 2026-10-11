@@ -72,6 +72,11 @@ func validExecutionMode(r Run, adapter Adapter) error {
 // approved account. Check immutable policy/capability before routing;
 // adapters still require the strict, routed binding in validExecutionMode.
 func validQueuedExecutionMode(r Run, adapter Adapter) error {
+	if r.RoutineBudget != nil {
+		if _, ok := adapter.(RoutineBudgetAdapter); !ok {
+			return ErrBudgetEnforcementUnavailable
+		}
+	}
 	if r.ReadOnlyReview {
 		a, ok := adapter.(VerificationAdapter)
 		if !ok || !a.VerificationSupported() {

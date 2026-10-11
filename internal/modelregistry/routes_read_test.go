@@ -19,11 +19,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// displayModel names one Models line per fixture pin. Letter suffixes keep
+// the lines distinct (a numeric suffix is a version of one line) and sort
+// in fixture order.
+func displayModel(i int) string {
+	return fmt.Sprintf("fixture-model-%c%c", 'a'+(i-1)/26, 'a'+(i-1)%26)
+}
+
+// displayRoutesFixture registers qualified review pins, one line each, which
+// the compatibility read derives from Models' automatic review order. Their
+// historical ladder rows remain fixture history only.
 func displayRoutesFixture(t *testing.T, p tenant.Principal, count int) {
 	t.Helper()
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		for i := 1; i <= count; i++ {
-			profile, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: fmt.Sprintf("display-%d", i), Version: "1", Harness: "claude", Family: "anthropic", Model: fmt.Sprintf("fixture-model-%d", i), Effort: "xhigh", Tier: "frontier"})
+			profile, err := insertProfile(t.Context(), tx, p.TenantID, profileWrite{Slug: fmt.Sprintf("display-%d", i), Version: "1", Harness: "claude", Family: "anthropic", Model: displayModel(i), Effort: "xhigh", Tier: "frontier"})
 			if err != nil {
 				return err
 			}
@@ -62,7 +72,7 @@ func TestPoliciesLadderBoundsSetupPermissionsAndTenantIsolation(t *testing.T) {
 		t.Fatalf("setup %v truncated %v steps %d", got.Setup, got.Truncated, len(got.Steps))
 	}
 	for i, step := range got.Steps {
-		if step.Priority != i+1 || step.Profile.Model != fmt.Sprintf("fixture-model-%d", i+1) || step.Profile.ID != step.ProfileID {
+		if step.Priority != i+1 || step.Profile.Model != displayModel(i+1) || step.Profile.ID != step.ProfileID {
 			t.Fatalf("wrong order/profile at %d", i)
 		}
 	}
@@ -70,13 +80,9 @@ func TestPoliciesLadderBoundsSetupPermissionsAndTenantIsolation(t *testing.T) {
 	if foreign.Setup || len(foreign.Steps) != 0 {
 		t.Fatal("ladder crossed tenants")
 	}
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes WHERE priority=51`)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	fifty := decode[routesRead](t, &p, "GET", "/api/models/routes?role=review-gate", "", 200)
+	exact := makePrincipal(t, "policies-fifty", "person", "Fifty owner", []string{"admin"})
+	displayRoutesFixture(t, exact, 50)
+	fifty := decode[routesRead](t, &exact, "GET", "/api/models/routes?role=review-gate", "", 200)
 	if fifty.Truncated || len(fifty.Steps) != 50 {
 		t.Fatal("exactly 50 must be complete")
 	}
@@ -196,7 +202,8 @@ func lockDisplayTable(t *testing.T) (pgx.Tx, int) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = tx.Rollback(context.Background()) })
-	if _, err := tx.Exec(t.Context(), `LOCK TABLE model_role_routes IN ACCESS EXCLUSIVE MODE`); err != nil {
+	// Models orders are the compatibility read's routing input.
+	if _, err := tx.Exec(t.Context(), `LOCK TABLE model_pref_orders IN ACCESS EXCLUSIVE MODE`); err != nil {
 		t.Fatal(err)
 	}
 	var pid int
@@ -220,7 +227,7 @@ func TestPoliciesLadderStatementTimeout503NoPartialAnswer(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
-	if w.Code != 503 || w.Header().Get("Retry-After") != "1" || body["error"] != "Review ladder read timed out; retry shortly." || body["steps"] != nil {
+	if w.Code != 503 || w.Header().Get("Retry-After") != "1" || body["error"] != "Models compatibility read timed out; retry shortly." || body["steps"] != nil {
 		t.Fatalf("wrong timeout response %d %s", w.Code, w.Body.String())
 	}
 }
@@ -228,29 +235,22 @@ func TestPoliciesLadderStatementTimeout503NoPartialAnswer(t *testing.T) {
 func TestPoliciesLadderReplaceReadConsistentSnapshotBarrier(t *testing.T) {
 	reset(t)
 	p := makePrincipal(t, "snapshot", "person", "Owner", []string{"admin"})
-	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-		if err := ensureCatalog(t.Context(), tx, p); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `DELETE FROM model_role_routes`)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
+	// Only the two display lines feed the derived review read.
 	displayRoutesFixture(t, p, 2)
 	old := decode[routesRead](t, &p, "GET", "/api/models/routes?role=review-gate", "", 200)
-	now := time.Date(2026, 10, 2, 18, 0, 0, 0, time.UTC)
-	expires := now.Add(time.Hour)
-	replacement := []Route{}
-	for _, step := range old.Steps {
-		replacement = append(replacement, Route{Role: "review-gate", Priority: step.Priority, ProfileID: step.ProfileID, State: "unavailable", Reason: "replacement", ValidUntil: &expires})
+	if len(old.Steps) != 2 {
+		t.Fatalf("fixture lines missing: %+v", old.Steps)
 	}
+	expires := time.Now().UTC().Add(time.Hour)
 	writer, pid := lockDisplayTable(t)
 	if _, err := writer.Exec(t.Context(), `SELECT set_config('aeon.tenant_id',$1,true)`, p.TenantID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := replaceRoutes(t.Context(), writer, p, replacement, now); err != nil {
-		t.Fatal(err)
+	// The replacement is a pause on each fixture model, under the held lock.
+	for _, step := range old.Steps {
+		if _, err := writer.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by) SELECT tenant_id,harness,model,$2,'replacement',$3 FROM model_profiles WHERE id=$1`, step.ProfileID, expires, p.ID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()

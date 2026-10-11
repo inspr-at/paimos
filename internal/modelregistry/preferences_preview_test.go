@@ -59,8 +59,9 @@ func TestPreferenceGETBoundedLargeCatalog(t *testing.T) {
 			p, h := editorFixture(t)
 			project := editorProject(t, p, "PREVIEW-1")
 			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
-				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled)
- SELECT $1,'preview-'||n,'1','claude','anthropic',CASE WHEN n%2=0 THEN 'claude-opus-5' ELSE 'claude-sonnet-5' END,'xhigh','strong',true FROM generate_series(1,1024) n`, p.TenantID); err != nil {
+				// Activated pins register their native level; review membership reads it.
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier,enabled,registered_effort_level)
+ SELECT $1,'preview-'||n,'1','claude','anthropic',CASE WHEN n%2=0 THEN 'claude-opus-5' ELSE 'claude-sonnet-5' END,'xhigh','strong',true,4 FROM generate_series(1,1024) n`, p.TenantID); err != nil {
 					return err
 				}
 				if scenario == "retired-catalog" {
