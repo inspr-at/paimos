@@ -26,6 +26,14 @@ type metricsFake struct {
 	calls   []string
 }
 
+// A green queue suite has no failed checks to quarantine. Keep that ingress
+// reader available while independently injecting the Actions runs for Flow.
+type metricsQueueFake struct{ *metricsFake }
+
+func (g *metricsQueueFake) QueueChecks(context.Context, queueSuite, *queueRun) (string, []queueRun, error) {
+	return "CI", nil, nil
+}
+
 func (g *metricsFake) MetricsRead(_ context.Context, tenantID string, read func(func(string, any) error) error) error {
 	if tenantID == "" {
 		return errRead
@@ -107,6 +115,9 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 			f := newFixture(t)
 			g := &metricsFake{auditFake: &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}}
 			f.m.github = g
+			if tc.queue {
+				f.m.github = &metricsQueueFake{metricsFake: g}
+			}
 			p := f.pull()
 			if tc.linked {
 				f.gh.pulls[7] = p
@@ -120,7 +131,7 @@ func TestDeliveryWebhookUnlinkedMetricSource(t *testing.T) {
 				head, branch = p.Head, p.Branch
 			}
 			if tc.queue {
-				head, branch, event, stepKey = strings.Repeat("c", 40), "gh-readonly-queue/main/pr-7-group", "merge_group", "queue"
+				head, branch, event, stepKey = strings.Repeat("c", 40), "gh-readonly-queue/main/pr-7-"+p.Head, "merge_group", "queue"
 			}
 			if tc.projectedQueue {
 				auditSend(t, f, "merge_group", "unconfigured-queue", map[string]any{"action": "checks_requested", "merge_group": map[string]any{"head_sha": head, "base_sha": p.Base, "head_ref": "refs/heads/" + branch}}, 204)
