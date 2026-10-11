@@ -93,7 +93,7 @@ watch(() => JSON.stringify(input.value), () => {
   clearTimeout(timer); previews.cancel(); times.value = []; previewError.value = ''; previewBusy.value = !problems.value.length
   if (problems.value.length) return
   const snapshot = copyRecurrenceInput(input.value)
-  timer = setTimeout(() => void previews.run(({ after, signal }) => after(previewRecurrenceDraft(snapshot, signal), result => { times.value = result.times; policy.value = result.execution_policy ?? null }), { failed: error => { previewError.value = error instanceof Error ? error.message : 'Preview could not be loaded.' }, settled: () => { previewBusy.value = false } }), 160)
+  timer = setTimeout(() => void previews.run(({ after, signal }) => after(previewRecurrenceDraft(snapshot, signal), result => { times.value = Array.isArray(result.times) ? result.times : []; policy.value = result.execution_policy ?? null }), { failed: error => { previewError.value = error instanceof Error ? error.message : 'Preview could not be loaded.' }, settled: () => { previewBusy.value = false } }), 160)
 }, { immediate: true })
 // Revocation closes the sheet and the box says why; another person signing in clears the draft.
 watch(() => scope.owner.value, (now, previous) => {
