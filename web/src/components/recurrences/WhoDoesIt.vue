@@ -64,7 +64,8 @@ const efforts = computed(() => ROUTINE_EFFORTS.some(([role]) => role === draft.v
           <button type="button" class="btn sm ghost" :disabled="draft.sources.length >= 32" aria-haspopup="dialog" :aria-expanded="!!picker" @click="openPicker"><AppIcon name="plus" :size="12" />Add a ticket or knowledge…</button>
           <span class="hint">Up to 32. Read before each run; nothing is fetched from outside.</span>
         </div></div>
-        <p class="route"><AppIcon name="agent" :size="14" /><span class="rt-txt"><template v-if="routeState === 'ready' && route">Today <b>{{ route.model }} via {{ HARNESS_LABEL[route.harness] ?? route.harness }}</b> {{ effortVerb(draft.role) }}; a model of another family checks each action.</template><template v-else-if="routeState === 'loading'">Finding the model for {{ effortWord(draft.role) }}…</template><template v-else>No model is set for {{ effortWord(draft.role) }} yet{{ routeState === 'failed' ? ' (the route couldn’t be read)' : '' }}; Settings › Models decides.</template> It follows the ticket’s description and criteria as its instructions.</span><a href="/settings/models" target="_blank" rel="noopener" class="go">Settings › Models<AppIcon name="chevron-right" :size="12" /></a></p>
+        <p class="route"><AppIcon name="agent" :size="14" /><span class="rt-txt"><template v-if="routeState === 'ready' && route">Today <b>{{ route.model }} via {{ HARNESS_LABEL[route.harness] ?? route.harness }}</b> {{ effortVerb(draft.role) }}; a model of another family checks each action.</template><template v-else-if="routeState === 'loading'">Finding the model for {{ effortWord(draft.role) }}…</template><template v-else>No model is set for {{ effortWord(draft.role) }} yet{{ routeState === 'failed' ? ' (the route couldn’t be read)' : '' }}; Settings › Models decides.</template></span><a href="/settings/models" target="_blank" rel="noopener" class="go">Settings › Models<AppIcon name="chevron-right" :size="12" /></a></p>
+        <p class="hint pad">It follows the ticket’s description and criteria as its instructions.</p>
       </template>
     </div>
     <RoutineFolds v-if="agent" v-model="draft" :policy="policy" :rules="rules" :rules-state="rulesState" :owner="owner" :mine="mine" :project="project" :fresh="fresh" :id-prefix="idPrefix" />
@@ -101,7 +102,7 @@ const efforts = computed(() => ROUTINE_EFFORTS.some(([role]) => role === draft.v
 .chip-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chip-x { display: grid; place-items: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-3); }
 .chip-x:hover { background: var(--row-hover); color: var(--ink); }
-.route { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; min-height: 58px; margin-left: 96px; padding: 8px 12px; border-radius: 10px; background: var(--surface-sunken); font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.route { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; min-height: 58px; align-content: flex-start; margin-left: 96px; padding: 8px 12px; border-radius: 10px; background: var(--surface-sunken); font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
 .route > svg { flex: none; margin-top: 2px; color: var(--ink-3); }
 .route b { color: var(--ink); font-weight: 600; }
 .route > .rt-txt { flex: 1 1 260px; min-width: 0; }
@@ -118,7 +119,7 @@ const efforts = computed(() => ROUTINE_EFFORTS.some(([role]) => role === draft.v
   .top > .field-label { padding: 0; }
   .hint.pad, .route { padding-left: 12px; margin-left: 0; }
   .hint.pad { padding-left: 0; }
-  .route { min-height: 92px; }
+  .route { min-height: 116px; }
   .seg.who { display: grid; grid-template-columns: minmax(0, 1fr); border-radius: 14px; justify-self: stretch; }
   .seg.who button { justify-content: flex-start; }
   .seg.eff { flex-wrap: wrap; border-radius: 14px; }

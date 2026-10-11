@@ -111,7 +111,7 @@ const id = (name: string) => `${props.idPrefix}-${name}`
 .eh { margin-top: 4px; font: 500 10.5px/1.5 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
 .eh .count { margin-left: 6px; font: 500 11.5px/1 var(--font); letter-spacing: 0; text-transform: none; }
 .acts { display: grid; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); }
-.act { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-height: 52px; padding: 2px 12px 2px 6px; cursor: pointer; }
+.act { display: grid; grid-template-columns: 44px minmax(0, 1fr) 15em; align-items: center; gap: 8px; min-height: 52px; padding: 2px 12px 2px 6px; cursor: pointer; }
 .acts .act + .act { border-top: 1px solid var(--line); }
 .act.single { border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); }
 .act .switch { justify-content: center; min-width: 44px; min-height: 44px; }
