@@ -15,4 +15,3 @@ The reversible design decisions are `modelprefs.ModelsSmallSituation` (currently
 Stored exception rows continue through Default when their end is unset; Default ends in Wait. S1 retains saved role ladders and matrix preferences until Models is adopted or migrated. Before S2 persists the migration, a workspace Default with a pick but no chain reads its saved build-ladder tail into the order; an explicit chain or end remains authoritative. Saved per-harness Wait settings allow sibling routes of the current model, then wait before another registered model; S2 carries these settings into order ends.
 
 S1 provides the resolver and in-memory end/per-step effort controls. S2/S3 own persistence migration, new situation/order writes, cause-code fields and the public v2 contract. The existing resolution description and trace situation enum receive minimal contract updates. No migration or endpoint is added here.
-
