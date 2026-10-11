@@ -958,8 +958,6 @@
         ,
         {"file":"tests/project-sections.spec.ts","listedTests":24,"weightSeconds":53.268293,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/project-settings.spec.ts","listedTests":2,"weightSeconds":120,"weightSource":"unmeasured-estimate"}
-        ,
         {"file":"tests/project-sort.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/project-status-counts.spec.ts","weightSeconds":60,"weightSource":"unmeasured-estimate"}
@@ -1321,6 +1319,8 @@
       ]
       ,
       "specs": [
+        {"file":"tests/project-settings.spec.ts","listedTests":2,"weightSeconds":120,"weightSource":"unmeasured-estimate"}
+        ,
         {"file":"tests/settings-host-capacity.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":5.532,"median":4.6885,"min":2.007},"seconds":49.642,"selectedTests":12},"weightSeconds":24,"weightSource":"unmeasured-test-count-estimate"}
         ,
         {"file":"tests/settings-shared.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":6.609,"median":0.685,"min":0.399},"seconds":32.482,"selectedTests":23},"weightSeconds":20,"weightSource":"unmeasured-test-count-estimate"}
