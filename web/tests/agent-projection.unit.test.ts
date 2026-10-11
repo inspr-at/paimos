@@ -179,6 +179,25 @@ describe('the store', () => {
       await opening
       expect(projection.asksOf(S1).map(item => item.id)).toEqual(['urgent'])
       expect(reads).toBe(1)
+      // A named event during the shared read needs a fresh answer. All
+      // opening waiters remain attached through that catch-up, too.
+      vi.useFakeTimers()
+      const beforeWake = deferred<unknown>(), afterWake = deferred<unknown>(), catchUpStarted = deferred<void>()
+      let wakeReads = 0, settled = false
+      mocks.questions = () => {
+        if (++wakeReads === 1) return beforeWake.promise
+        catchUpStarted.resolve(); return afterWake.promise
+      }
+      const catchingUp = projection.refresh().then(() => { settled = true })
+      mocks.wake!('question.asked', 'new-question')
+      await vi.advanceTimersByTimeAsync(WAKE_BATCH_MS)
+      beforeWake.resolve({ items: [], has_more: false })
+      await catchUpStarted.promise
+      expect(settled).toBe(false)
+      afterWake.resolve({ items: [q('new-urgent', { session: S1 })], has_more: false })
+      await catchingUp
+      expect(projection.asksOf(S1).map(item => item.id)).toEqual(['new-urgent'])
+      expect(wakeReads).toBe(2)
     } finally {
       laterAnswer.resolve({ items: [q('urgent', { session: S1 })], has_more: false })
       await overlapping

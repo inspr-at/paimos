@@ -111,6 +111,7 @@ const questions = computed(() => s.value && questionReadable.value ? projection.
 const hasQuestion = computed(() => questions.value.length > 0 && auth.identity?.principal.kind === 'person' && can('questions.decide', s.value?.project_id))
 let opening = 0
 function selectTab(next: PanelTab) {
+  opening++ // A person's choice cancels any automatic selection still awaiting reads.
   tab.value = next
   if (isLead.value) leadPreference.save({ ...leadPreference.value.value, last: next }, 0)
   else workerPreference.save({ last: next }, 0)

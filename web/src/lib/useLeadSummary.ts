@@ -30,10 +30,12 @@ export function useLeadSummary(projectId: Ref<string>, projectKey: Ref<string>) 
   const leadSession = computed(() => lead.value?.session_id ? sessions.value.find(agent => agent.session_id === lead.value!.session_id) ?? null : null)
   // The lead's workers by their real parent session, never every worker in the project; null while that tree is unknown.
   const workerIds = computed(() => projection.workersOf(projectId.value, lead.value?.session_id))
-  const workers = computed(() => { const ids = workerIds.value; return ids ? sessions.value.filter(agent => !!agent.session_id && ids.has(agent.session_id)) : [] })
-  const workersKnown = computed(() => workerIds.value !== null)
-  // Only part of the project's sessions could be read: the lead has at least these workers.
-  const workersPartial = computed(() => workersKnown.value && projection.treeSource(projectId.value).partial)
+  // Both the parent tree and the live inventory must be readable and current.
+  // A failed live read with no items cannot establish that zero workers run.
+  const workersKnown = computed(() => workerIds.value !== null && live.state === 'ready' && !live.dataStale)
+  const workers = computed(() => { const ids = workerIds.value; return workersKnown.value && ids ? sessions.value.filter(agent => !!agent.session_id && ids.has(agent.session_id)) : [] })
+  // Either read may omit sessions: the workers shown are then only a lower bound.
+  const workersPartial = computed(() => workersKnown.value && (projection.treeSource(projectId.value).partial || live.truncated))
   const decisions = computed(() => view.value?.decisions ?? [])
   // Gate and merges come from the project's lead reports across generations;
   // until that history is read in full they are unknown.

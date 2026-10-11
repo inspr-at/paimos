@@ -5610,6 +5610,8 @@
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: an overlapping refresh cannot finish the opening on discarded question evidence","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212 fix2: unreadable and truncated live worker reads never render a complete empty inventory","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 1024 dark long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: 1024 light long German question options stay readable and do not move the header or answer controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

@@ -150,6 +150,39 @@ test('AEON-1212 fix2: a manual tab choice cancels automatic opening while questi
   } finally { answer.resolve() }
 })
 
+test('AEON-1212 fix2: unreadable and truncated live worker reads never render a complete empty inventory', async ({ page }) => {
+  const world = await setup(page)
+  let status = 503
+  await page.route('**/api/harness-sessions/live*', route => route.fulfill({ status, json: status === 200
+    ? { items: world.data.live.filter(agent => agent.session_id === LEAD_SESSION), at: NOW, fresh_seconds: 120, truncated: true }
+    : { error: 'Worker inventory unavailable' } }))
+  await page.goto(`/agents/${LEAD_SESSION}?tab=lead`)
+  const count = panel(page).locator('.facts div').filter({ has: page.getByText('Workers', { exact: true }) }).locator('dd')
+  const unreadable = panel(page).getByText('Its workers can’t be read right now.', { exact: true })
+  await expect(unreadable).toBeVisible()
+  await expect(count).toHaveText('—')
+  const refresh = () => page.evaluate(async () => { await (await import('/src/stores/liveAgents.ts' /* @vite-ignore */)).useLiveAgents().refresh() })
+  await expectStableControls({ controls: { header: panel(page).locator('.pane-bar'), tabs: panel(page).getByRole('tablist') }, interactions: [
+    { name: 'truncated live read with no worker in its window', run: async () => {
+      status = 200; await refresh()
+      await expect(count).toHaveText('0+')
+      await expect(panel(page)).toContainText('Not every session of this project could be read; more workers may run.')
+      await expect(panel(page).getByText('No workers yet.', { exact: true })).toHaveCount(0)
+    } },
+    { name: 'failed refresh of the retained live window', run: async () => {
+      status = 503; await refresh()
+      await expect(unreadable).toBeVisible()
+      await expect(count).toHaveText('—')
+      await expect(panel(page).getByText('No workers yet.', { exact: true })).toHaveCount(0)
+    } },
+    { name: 'live inventory forbidden', run: async () => {
+      status = 403; await refresh()
+      await expect(unreadable).toBeVisible()
+      await expect(count).toHaveText('—')
+    } },
+  ] })
+})
+
 // Same observable probes as check.mjs, scoped to this package's changed panel.
 async function checkPanel(page: Page, phone: boolean) {
   const failures = await panel(page).evaluate((root, touch) => {
