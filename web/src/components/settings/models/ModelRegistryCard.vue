@@ -443,7 +443,8 @@ h2 { font: 600 18px/1.3 var(--font); letter-spacing: -.01em; color: var(--ink); 
 .reg-check[aria-disabled="true"] { cursor: default; color: var(--ink-3); }
 .reg-check[aria-disabled="true"]:hover { background: transparent; }
 
-.reg-check-label { justify-items: end; }
+/* Tabular figures: "again in 1 min" and "again in 5 min" take one width, so the shared box never changes size. */
+.reg-check-label { justify-items: end; font-variant-numeric: tabular-nums; }
 .reg-check-label > span { display: inline-flex; align-items: center; gap: 6px; }
 .reg-check .spin { animation: reg-spin 1s linear infinite; }
 @keyframes reg-spin { to { transform: rotate(360deg); } }
