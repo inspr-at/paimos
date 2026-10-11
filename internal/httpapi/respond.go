@@ -3,9 +3,14 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -38,4 +43,25 @@ func RetiredFlow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	WriteError(w, http.StatusGone, "The INSPR Flow is retired.")
+}
+
+// ErrorClass names a failure without its text, so 5xx answers can be logged
+// next to their request id without leaking SQL, identifiers or payload
+// content. An already cancelled request context is the AEON-1228 signature.
+func ErrorClass(err error) string {
+	var pgErr *pgconn.PgError
+	switch {
+	case err == nil:
+		return "none"
+	case errors.Is(err, context.Canceled):
+		return "context_canceled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "context_deadline"
+	case errors.As(err, &pgErr):
+		return "postgres_" + pgErr.Code
+	case errors.Is(err, pgx.ErrNoRows):
+		return "no_rows"
+	default:
+		return "internal"
+	}
 }

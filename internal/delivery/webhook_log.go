@@ -130,3 +130,11 @@ func (m *Module) rejectWebhook(w http.ResponseWriter, r *http.Request, action, s
 	}
 	w.WriteHeader(status)
 }
+
+// closeAfterFailedRead ends the keep-alive connection after a body read that
+// failed or overran its deadline. net/http has already cancelled the
+// connection's context in that read; if it drained the late body and reused
+// the connection, every later request on it would start cancelled (AEON-1228).
+func closeAfterFailedRead(w http.ResponseWriter) {
+	w.Header().Set("Connection", "close")
+}

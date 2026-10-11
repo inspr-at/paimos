@@ -154,21 +154,44 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 		// Caller-supplied IDs can contain tokens. Generate our own trace value
 		// before it enters response headers, context or structured logs.
 		id := newRequestID()
-		ctx := context.WithValue(r.Context(), requestIDKey{}, id)
-		r = r.WithContext(ctx)
+		// net/http cancels a keep-alive connection's context on any failed read,
+		// including a handler's own read deadline, but can keep the connection
+		// open after draining the body. Every later request on it would start
+		// cancelled and fail its first database call in 0 ms (AEON-1228). Any
+		// response written after that cancellation closes the connection; a
+		// request that still arrives cancelled is logged and closes it too.
+		conn := r.Context()
+		deadOnArrival := conn.Err() != nil
+		if deadOnArrival {
+			w.Header().Set("Connection", "close")
+		}
+		r = r.WithContext(context.WithValue(conn, requestIDKey{}, id))
 		w.Header().Set(requestIDHeader, id)
-		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK}
+		sw := &statusWriter{ResponseWriter: w, status: http.StatusOK, conn: conn}
 		start := time.Now()
 		defer func() {
-			slog.Info("request",
+			attrs := []any{
 				"method", r.Method,
 				"path", requestLogRoute(r),
 				"status", sw.status,
 				"request_id", id,
 				"duration_ms", time.Since(start).Milliseconds(),
-			)
+			}
+			if deadOnArrival {
+				attrs = append(attrs, "connection_context", "cancelled_on_arrival")
+				slog.Warn("request arrived on a cancelled connection; connection closed", "path", requestLogRoute(r), "request_id", id)
+			} else if sw.closed {
+				attrs = append(attrs, "connection_context", "cancelled")
+			}
+			slog.Info("request", attrs...)
 		}()
 		next.ServeHTTP(sw, r)
+		// A handler that wrote nothing gets its status line from net/http after
+		// this returns; the connection header must be set before that.
+		if !sw.wrote && conn.Err() != nil {
+			sw.closed = true
+			w.Header().Set("Connection", "close")
+		}
 	})
 }
 
@@ -246,6 +269,10 @@ type statusWriter struct {
 	http.ResponseWriter
 	status int
 	wrote  bool
+	// conn is the request context net/http derived from the connection. Once
+	// it is cancelled the connection must not carry another request.
+	conn   context.Context
+	closed bool
 }
 
 func (w *statusWriter) WriteHeader(status int) {
@@ -254,6 +281,10 @@ func (w *statusWriter) WriteHeader(status int) {
 	}
 	w.status = status
 	w.wrote = true
+	if w.conn != nil && w.conn.Err() != nil {
+		w.closed = true
+		w.ResponseWriter.Header().Set("Connection", "close")
+	}
 	w.ResponseWriter.WriteHeader(status)
 }
 
