@@ -9,7 +9,7 @@ import {
   type RegistryProfile, type SimpleDocument, type SimpleUnavailable, type TailBoard,
 } from '../src/lib/modelsSimple'
 import { getMembers } from '../src/lib/access'
-import { dismissLine, getRegistry, getSimple, getTail, getTicketResolution, getWorkspaceRules, putDismissed, putEffort, putOrder, putWorkspaceRules, resetOrder } from '../src/lib/modelsSimpleApi'
+import { dismissLine, getRegistry, getSimple, getTail, getTicketResolution, getWorkspaceRules, putDismissed, putEffort, putOrder, putSituationOrder, putWorkspaceRules, resetOrder, resetSituationOrder } from '../src/lib/modelsSimpleApi'
 import { useModelsSimple } from '../src/lib/useModelsSimple'
 import { resetToasts, toasts } from '../src/lib/toast'
 import { KINDS, MANY, NEW_LINE, OPUS_CURSOR, registry, simplePerson } from './models-simple-fixtures'
@@ -30,7 +30,7 @@ vi.mock('../src/lib/authz', () => ({ can: (permission: string) => permission ===
 vi.mock('vue', async original => ({ ...await original<typeof import('vue')>(), onBeforeUnmount: (cleanup: () => void) => state.cleanups.push(cleanup) }))
 vi.mock('../src/lib/api', async original => ({ ...await original<typeof import('../src/lib/api')>(), api: vi.fn() }))
 vi.mock('../src/lib/access', async original => ({ ...await original<typeof import('../src/lib/access')>(), getMembers: vi.fn() }))
-vi.mock('../src/lib/modelsSimpleApi', async original => ({ ...await original<typeof import('../src/lib/modelsSimpleApi')>(), getSimple: vi.fn(), getTail: vi.fn(), getRegistry: vi.fn(), getTicketResolution: vi.fn(), getWorkspaceRules: vi.fn(), putOrder: vi.fn(), resetOrder: vi.fn(), putEffort: vi.fn(), putWorkspaceRules: vi.fn(), dismissLine: vi.fn(), putDismissed: vi.fn() }))
+vi.mock('../src/lib/modelsSimpleApi', async original => ({ ...await original<typeof import('../src/lib/modelsSimpleApi')>(), getSimple: vi.fn(), getTail: vi.fn(), getRegistry: vi.fn(), getTicketResolution: vi.fn(), getWorkspaceRules: vi.fn(), putOrder: vi.fn(), resetOrder: vi.fn(), putEffort: vi.fn(), putWorkspaceRules: vi.fn(), putSituationOrder: vi.fn(), resetSituationOrder: vi.fn(), dismissLine: vi.fn(), putDismissed: vi.fn() }))
 
 const settle = async () => { for (let index = 0; index < 20; index++) await Promise.resolve() }
 const deferred = <T>() => { let resolve!: (value: T) => void, reject!: (error: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
@@ -513,6 +513,24 @@ describe('the card’s writes', () => {
     toasts.at(-1)!.actions[0]!.run(); await settle()
     expect(putDismissed).toHaveBeenCalledWith('me', ['xai:old'], 4, simplePerson)
     expect(NEW_LINE.id).toBe('xai:grok-preview')
+  })
+  it('Undo of “Same as the row” writes the whole situation order back, its saved exclusions included', async () => {
+    // A workspace server: DELETE removes the stored order, exclusions and all; only the Undo body can bring them back.
+    const fix = { line: 'anthropic:sonnet', effort: 'xhigh', chain: [{ line: 'openai:sol', effort: 'high' }], end: 'wait' as const, not: ['xai:grok'] }
+    const server = { revision: 5, situations: { design: { fix } } as NonNullable<SimpleDocument['situations']> }
+    vi.mocked(getSimple).mockImplementation(async scope => scope === 'me' ? simpleDoc() : simpleDoc({ revision: server.revision, situations: server.situations }))
+    vi.mocked(getTail).mockImplementation(async scope => tailBoard({ revision: scope === 'me' ? 3 : server.revision }))
+    vi.mocked(resetSituationOrder).mockImplementation(async (column, key, revision) => { delete server.situations[column]![key]; server.revision = revision + 1; return { revision: server.revision } })
+    vi.mocked(putSituationOrder).mockImplementation(async (column, key, body, revision) => {
+      server.situations[column] = { ...server.situations[column], [key]: { line: body.rank[0]!, effort: body.efforts[body.rank[0]!] ?? null, chain: body.rank.slice(1).map(line => ({ line, effort: body.efforts[line] ?? null })), end: body.end ?? 'row', not: body.not ?? [] } }
+      server.revision = revision + 1; return { revision: server.revision }
+    })
+    const model = await page(); model.setScope('default'); await settle()
+    expect(await model.situation('design', 'fix', null, 5)).toBe(true)
+    expect(resetSituationOrder).toHaveBeenCalledWith('design', 'fix', 5); expect(server.situations.design!.fix).toBeUndefined()
+    toasts.at(-1)!.actions[0]!.run(); await settle()
+    expect(putSituationOrder).toHaveBeenCalledWith('design', 'fix', { rank: ['anthropic:sonnet', 'openai:sol'], efforts: { 'anthropic:sonnet': 'xhigh', 'openai:sol': 'high' }, end: 'wait', not: ['xai:grok'] }, 6)
+    expect(server.situations.design!.fix).toEqual(fix); expect(model.doc.value?.situations?.design?.fix).toEqual(fix)
   })
 })
 

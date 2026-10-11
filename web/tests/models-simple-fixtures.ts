@@ -3,7 +3,7 @@
 // It follows the server's rules that matter to the page (revision checks, the person header, native efforts that
 // carry to the nearest level) and records every write.
 import type { Page } from '@playwright/test'
-import type { ModelRule, RegistryProfile, SimpleDocument, SimpleRow, SimpleTrace, SimpleUnavailable, TailBoard, TailColumn } from '../src/lib/modelsSimple'
+import type { ModelRule, RegistryProfile, SimpleDocument, SimpleQuick, SimpleRow, SimpleSituations, SimpleTrace, SimpleUnavailable, SituationKey, TailBoard, TailColumn } from '../src/lib/modelsSimple'
 
 export const simplePerson = '11111111-1111-4111-8111-111111111111'
 export const otherPerson = '22222222-2222-4222-8222-222222222222'
@@ -84,6 +84,10 @@ export interface MockOptions {
   fail?: number
   german?: boolean
   fallback?: boolean
+  /** Workspace situation orders (AEON-1162): Default fix and stuck, UI design stuck. */
+  situations?: boolean
+  /** Settings › Kinds of work limits cannot be read. */
+  noLimits?: boolean
   /** Models v2 orders (AEON-1161): short fallbacks with their own levels and endings, and a Never rule on UI design. */
   v2?: boolean
   /** A pin to the bottom migrated from the old board: Fable stays the last step of the Default for everyone. */
@@ -113,6 +117,28 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     layers.default.set('concept', options.down ? { rank: ['anthropic:fable'], not: [], effort: 'max' } : { rank: ['anthropic:opus', 'openai:sol'], not: [], effort: 'high' })
     rules = [{ scope: 'workspace', project_id: null, column: 'design', line: 'anthropic:opus', lock: 'top', position: 0, why: 'Design mocks stay on Opus while the design gate is tuned (AEON-912).', set_by: options.lockedByOther ? otherPerson : simplePerson, set_at: '2026-10-02T09:00:00Z' }]
   } else layers.default.set('other', { rank: TEMPLATE, not: [], effort: 'xhigh' })
+  // Situation orders live on the workspace only: `${column}:${situation}`, as the order endpoint stores them.
+  const situations = new Map<string, { rank: string[]; efforts: Record<string, string>; end: 'wait' | 'row' | 'auto'; not: string[] }>()
+  if (options.situations) {
+    situations.set('other:fix', { rank: ['xai:grok'], efforts: { 'xai:grok': 'high' }, end: 'row', not: ['anthropic:sonnet'] })
+    situations.set('other:stuck', { rank: ['openai:astra', 'anthropic:opus'], efforts: { 'openai:astra': 'xhigh', 'anthropic:opus': 'max' }, end: 'wait', not: [] })
+    situations.set('design:stuck', { rank: ['anthropic:fable'], efforts: { 'anthropic:fable': 'max' }, end: 'row', not: [] })
+  }
+  // Reviews run at a model's highest native level: the server reads a review step back at it and refuses any other.
+  const highest = (id: string) => line(id)?.efforts.at(-1) ?? null
+  const situationCells = (): SimpleSituations => {
+    const cells: SimpleSituations = {}
+    for (const [key, order] of situations) {
+      const [column, situation] = key.split(':') as [string, SituationKey], first = line(order.rank[0])
+      const effort = (id: string) => order.efforts[id] ?? (situation === 'review' ? highest(id) : null)
+      cells[column] = { ...cells[column], [situation]: { line: order.rank[0]!, effort: effort(order.rank[0]!), harness: first?.harness, model: first?.model, chain: order.rank.slice(1).map(id => ({ line: id, effort: effort(id) })), end: order.end, not: [...order.not] } }
+    }
+    return cells
+  }
+  // Quick jobs: the cheapest fast model with room. When the Claude account is down, a cheaper route was skipped first.
+  const quick = (): SimpleQuick => ({ line: 'openai:luna', effort: 'low', harness: 'codex', model: 'gpt-6-luna', trace: [
+    ...(options.down ? [{ role: 'scout', line: 'anthropic:sonnet', stage: 'column' as const, reason: REASON_DOWN, selected: false }, { role: 'scout', line: 'cursor:composer', stage: 'column' as const, reason: 'Quick jobs requires fast tier', selected: false }] : []),
+    { role: 'scout', line: 'openai:luna', stage: 'column', reason: '', selected: true }] })
   if (options.member) {
     layers.mine.set('other', { rank: ['openai:sol', ...TEMPLATE.slice(1)], not: [], effort: 'high' })
     layers.mine.set('concept', { rank: ['anthropic:fable', 'anthropic:opus'], not: [], effort: 'high' })
@@ -199,6 +225,7 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
       // A line is new until someone places it in an order or says "not now".
       new_lines: options.fresh && !dis.includes(NEW_LINE.id) && ![...layers.mine.values(), ...layers.default.values()].some(order => order.rank?.includes(NEW_LINE.id)) ? [{ line: NEW_LINE.id, can_do: ['concept'] }] : [],
       revision: revision[layer], rules_revision: rulesRevision, person_id: simplePerson,
+      quick: quick(), ...(layer === 'default' ? { situations: situationCells() } : {}),
     }
   }
   function tail(layer: 'mine' | 'default'): TailBoard {
@@ -234,6 +261,7 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     const layer = url.searchParams.get('for') === 'default' || url.searchParams.get('layer') === 'default' ? 'default' as const : 'mine' as const
     if (method === 'GET' && path === '/model-preferences/simple') return route.fulfill({ json: simple(url.searchParams.get('for') === 'default' ? 'default' : 'mine') })
     if (method === 'GET' && path === '/model-preferences/board') return route.fulfill({ json: tail(layer) })
+    if (method === 'GET' && path === '/model-preferences/situations') return options.noLimits ? route.fulfill({ status: 503, json: { error: 'unavailable' } }) : route.fulfill({ json: { small_hours: 2, fix_rounds: 3, revision: 1, set_by: null, set_at: null, words: [] } })
     if (method === 'GET') return route.fulfill({ json: { items: [] } })
     const body = (request.postDataJSON() ?? null) as Record<string, unknown> | null, person = request.headers()['if-prefs-person']
     writes.push({ method, path, search: url.search, body, person })
@@ -261,6 +289,22 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     }
     if (layer === 'mine' && !person && path.startsWith('/model-preferences/')) return route.fulfill({ status: 428, json: { error: 'person_precondition_required' } })
     const target = layer, orders = layers[target]
+    const situation = path.startsWith('/model-preferences/orders/') ? path.split('/')[4] : undefined
+    if (situation && situation !== 'first') {
+      // A situation order: workspace only, rank = [pick, …chain]; an omitted end or not keeps the stored one.
+      const column = decodeURIComponent(path.split('/')[3]!), key = `${column}:${situation}`, submitted = method === 'DELETE' ? Number(url.searchParams.get('revision')) : (body as { revision: number }).revision
+      if (target !== 'default') return route.fulfill({ status: 403, json: { error: 'forbidden' } })
+      if (submitted !== revision.default) return route.fulfill({ status: 409, json: { error: 'stale_revision' } })
+      if (method === 'DELETE') situations.delete(key)
+      else {
+        const input = body as { rank: string[]; efforts?: Record<string, string>; end?: 'wait' | 'row' | 'auto'; not?: string[] }, before = situations.get(key)
+        if (new Set(input.rank).size !== input.rank.length) return route.fulfill({ status: 400, json: { error: 'invalid_board_order' } })
+        if (situation === 'review' && Object.entries(input.efforts ?? {}).some(([id, effort]) => effort !== highest(id))) return route.fulfill({ status: 422, json: { error: 'review_floor', code: 'review_floor' } })
+        situations.set(key, { rank: input.rank, efforts: input.efforts ?? before?.efforts ?? {}, end: input.end ?? before?.end ?? (situation === 'review' ? 'auto' : 'row'), not: input.not ?? before?.not ?? [] })
+      }
+      revision.default++
+      return route.fulfill({ json: { person_id: simplePerson, revision: revision.default, profile: tail('default').profile, dry_run: false, moved: [] } })
+    }
     if (path.startsWith('/model-preferences/orders/')) {
       const column = decodeURIComponent(path.split('/')[3]!), submitted = method === 'DELETE' ? Number(url.searchParams.get('revision')) : (body as { revision: number }).revision
       // A workspace lock freezes the pick and its order for everyone's own writes.
@@ -301,7 +345,7 @@ export async function mockModels(page: Page, options: MockOptions = {}) {
     return route.fulfill({ json: {} })
   })
   return {
-    writes, calls: state.calls, orders: layers, get rules() { return rules }, revision, setFail: (status?: number) => { fail = status }, setQueued: (value: boolean) => { queued = value },
+    writes, calls: state.calls, orders: layers, situations, get rules() { return rules }, revision, setFail: (status?: number) => { fail = status }, setQueued: (value: boolean) => { queued = value },
     holdNext: () => { let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve }); hold = () => barrier; return () => { hold = undefined; release() } },
     /** Holds the next ticket resolution read until the returned release runs. */
     holdResolve: () => { let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve }); holdRead = () => barrier; return release },

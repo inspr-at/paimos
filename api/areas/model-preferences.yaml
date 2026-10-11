@@ -504,10 +504,11 @@ components:
       allOf:
         - {$ref: '#/components/schemas/ModelSimplePick'}
         - type: object
-          required: [chain, end]
+          required: [chain, end, not]
           properties:
             chain: {type: array, maxItems: 512, items: {$ref: '#/components/schemas/ModelSimpleStep'}}
             end: {type: string, enum: [wait, row, auto]}
+            not: {type: array, maxItems: 512, items: {type: string, maxLength: 128}, description: 'The order''s saved exclusions, so a client can write the whole stored order back.'}
     ModelSimplePreferences:
       type: object
       required: [all, exceptions, reviews, next, unavailable, new_lines, quick, outdated, revision, rules_revision, person_id]

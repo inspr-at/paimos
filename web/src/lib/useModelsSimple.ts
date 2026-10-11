@@ -8,11 +8,12 @@ import { toast } from './toast'
 import { getMembers } from './access'
 import { preferenceFailure } from './modelsSettings'
 import { useSession } from '../stores/session'
-import { deleteNever, dismissLine, getRegistry, getSimple, getTail, getTicketResolution, getWorkspaceRules, putChain, putDismissed, putEffort, putNever, putOrder, putWorkspaceRules, resetOrder, type ChainBody } from './modelsSimpleApi'
+import { deleteNever, dismissLine, getRegistry, getSimple, getTail, getTicketResolution, getWorkspaceRules, putChain, putDismissed, putEffort, putNever, putOrder, putSituationOrder, putWorkspaceRules, resetOrder, resetSituationOrder, type ChainBody } from './modelsSimpleApi'
 import {
   ALL_COLUMN, buildEntries, buildRows, chainEfforts, effortLevel, entryFor, lineName, lineRoutes, lockReason, moveItem, movePin, nearestEffort, nextView, orderBody, orderLines, orderWithFirst, pinFirst, pinnedLast, pinnedSteps, rulesBody, sameOrder, ticketWhy, unpin,
   type ChainEnd, type ModelEntry, type RegistryProfile, type RowView, type RulesBody, type Scope, type SimpleDocument, type SimpleNever, type SimpleStep, type TailBoard, type TailColumn, type WhyView,
 } from './modelsSimple'
+import { situationFailure, situationOrder, situationSteps, type SituationKey, type SituationOrder } from './modelsSimple'
 
 interface Revs { prefs: number; rules: number }
 type Step = (revs: Revs) => Promise<Revs>
@@ -382,6 +383,25 @@ export function useModelsSimple() {
     if (draft.value === column) draft.value = null
     return done
   }
+  /**
+   * A workspace situation order (Expert, For everyone): the new order, or null for "Same as the row" (review: automatic).
+   * `seen` is the revision on screen when the person opened the cell. Undo writes back the whole order the page showed,
+   * its exclusions included, or removes it again.
+   */
+  async function situation(column: string, key: SituationKey, next: SituationOrder | null, seen: number): Promise<boolean> {
+    const state = doc.value
+    if (!state || scope.value !== 'default' || !admin.value || !columnOf(column)) return false
+    // The order was read from the page at this revision; a refresh in between means it may no longer be what was changed.
+    if (state.revision !== seen) { error.value = conflict; return false }
+    const shown = state.situations?.[column]?.[key] ?? null
+    if (!next && !shown) return false
+    const before = situationOrder(situationSteps(shown), shown?.end, shown?.not)
+    const write = (body: SituationOrder | null): Step => async revs => ({ ...revs, prefs: advanced(await (body ? putSituationOrder(column, key, body, revs.prefs) : resetSituationOrder(column, key, revs.prefs)), revs.prefs) })
+    const current = capture(), done = await commit({ forward: [write(next)], backward: [write(before)] })
+    // The server answers with codes; say what they mean.
+    if (!done && current()) { const plain = situationFailure(error.value); if (plain) error.value = plain }
+    return done
+  }
   /** Why the ticket a person clicked runs where it does: its own resolution, read for the identity on screen. A caller
    *  whose link can change passes `still`, so an answer or a failure for a ticket that is no longer asked about is dropped. */
   async function explain(ticket: string, still: () => boolean = () => true): Promise<WhyView | null> {
@@ -413,5 +433,5 @@ export function useModelsSimple() {
   watch(() => can('models.read'), allowed => { if (allowed && !doc.value && !loading.value && owner.value) void load() })
   onBeforeUnmount(() => { alive = false; generation++; epoch.value++; abort?.abort(); unsubscribe() })
 
-  return { scope, doc, rows, names, entries, routes, labels, kinds, freeKinds, next, news, tail, loading, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey, cantReason, load, pick, use, clear, lock, dismiss, editChain, fixedSteps, canAllow, allowAgain, explain, startException, discardException, setScope, dropError }
+  return { scope, doc, workspace, rows, names, entries, routes, labels, kinds, freeKinds, next, news, tail, loading, busy, error, failed, announcement, draft, admin, editable, readable, owner, actionKey, cantReason, load, pick, use, clear, lock, dismiss, editChain, fixedSteps, canAllow, allowAgain, explain, situation, startException, discardException, setScope, dropError }
 }

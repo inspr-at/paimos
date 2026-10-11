@@ -89,6 +89,37 @@ func TestModelsV2InheritedDefaultExclusionsAreNotExceptions(t *testing.T) {
 	}
 }
 
+// Risk: the matrix shows a situation order without its saved exclusions, so
+// writing the shown order back (Undo of "Same as the row") silently drops them.
+func TestModelsV2SituationCellsCarryTheirExclusions(t *testing.T) {
+	admin, member := boardFixture(t)
+	revision := int64(0)
+	for _, situation := range []string{"small", "fix", "stuck", "review"} {
+		end, not := "row", []string{"anthropic:sonnet"}
+		if situation == "review" {
+			end = "auto"
+		}
+		if situation == "fix" {
+			not = []string{}
+		}
+		revision = boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/"+situation+"?for=default", map[string]any{"rank": []string{"openai:sol"}, "not": not, "end": end, "revision": revision}, ""), 200).Revision
+	}
+	cells := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple?for=default", nil, ""), 200).Situations
+	if cells == nil {
+		t.Fatal("workspace read lost the situation matrix")
+	}
+	for _, situation := range []string{"small", "fix", "stuck", "review"} {
+		cell, want := (*cells)["backend"][situation], []string{"anthropic:sonnet"}
+		if situation == "fix" {
+			want = []string{}
+		}
+		// An order without exclusions still says so: [] rather than a missing list.
+		if cell.Line == nil || *cell.Line != "openai:sol" || cell.Not == nil || !slices.Equal(cell.Not, want) {
+			t.Fatalf("situation %s lost its exclusions: %+v", situation, cell)
+		}
+	}
+}
+
 // Risk: the page saves a chain or native level that dispatch does not read,
 // personal writes alter workspace policy, or failed writes emit success/audit.
 func TestModelsV2PageContractWritesAndReads(t *testing.T) {
