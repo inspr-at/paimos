@@ -48,6 +48,51 @@ async function positions(locator: Locator) {
 }
 const maxShift = (a: number[][], b: number[][]) => a.length !== b.length ? Infinity : Math.max(0, ...a.flatMap((r, i) => r.map((v, j) => Math.abs(v - b[i]![j]!))))
 const opacity = (locator: Locator) => locator.evaluate(el => Number(getComputedStyle(el).opacity))
+// Every supported harness, with a limit each: the most the capacity row has to hold.
+const SEVEN = { codex: 4, claude: 2, cursor: 'no_limit', grok: 2, pi: 'off', gemini: 'no_limit', opencode: 3 }
+const UNITS = ['total', ...Object.keys(SEVEN)]
+type Box = { x0: number; y0: number; x1: number; y1: number }
+type Reach = { clip: Box; plate: Box | null; targets: (Box & { name: string; misses: string[] })[] }
+/** A unit's −, number and + as a finger or pointer can reach them: each box grown by its touch ::after,
+ *  and the control that sampled points inside it actually hit (a 5 × 5 grid on touch, five inner points
+ *  for round mouse targets). Also the row's clip box and, while open, the plate. */
+async function reach(page: Page, key: string, touch: boolean): Promise<Reach> {
+  return unit(page, key).evaluate((el, grid) => {
+    const grow = (b: Element, pseudo: string) => {
+      const r = b.getBoundingClientRect(), a = getComputedStyle(b, pseudo), on = a.content !== 'none' && a.position === 'absolute'
+      const v = (k: string) => { const x = parseFloat(a.getPropertyValue(k)); return on && Number.isFinite(x) ? Math.min(0, x) : 0 }
+      return { on, opacity: Number(a.opacity), box: { x0: r.left + v('left'), y0: r.top + v('top'), x1: r.right - v('right'), y1: r.bottom - v('bottom') } }
+    }
+    const misses = (b: Element, t: Box) => {
+      const w = t.x1 - t.x0, h = t.y1 - t.y0
+      const points = grid ? [0, 1, 2, 3, 4].flatMap(i => [0, 1, 2, 3, 4].map(j => [t.x0 + 1 + (w - 2) * i / 4, t.y0 + 1 + (h - 2) * j / 4]))
+        : [[.5, .5], [.3, .5], [.7, .5], [.5, .3], [.5, .7]].map(([u, v]) => [t.x0 + w * u!, t.y0 + h * v!])
+      return points.flatMap(([x, y]) => {
+        const found = document.elementFromPoint(x!, y!), hit = found?.closest('button')
+        return hit === b ? [] : [`${Math.round(x!)},${Math.round(y!)} reaches ${hit?.getAttribute('aria-label') ?? found?.getAttribute('class') ?? 'nothing'}`]
+      })
+    }
+    const row = el.closest('.cap-row')!.getBoundingClientRect(), plate = grow(el, '::before')
+    const targets = ([['−', '.pm.dec'], ['number', '.value'], ['+', '.pm.inc']] as const).map(([name, selector]) => {
+      const b = el.querySelector(selector)!, box = grow(b, '::after').box
+      return { name, ...box, misses: misses(b, box) }
+    })
+    return { clip: { x0: Math.max(0, row.left), y0: 0, x1: Math.min(innerWidth, row.right), y1: innerHeight }, plate: plate.on && plate.opacity === 1 ? plate.box : null, targets }
+  }, touch)
+}
+function expectReach(r: Reach, label: string, touch: boolean) {
+  for (const t of r.targets) {
+    expect(t.misses, `${label} ${t.name}: every sampled point reaches it`).toEqual([])
+    if (touch) expect([t.x1 - t.x0 >= 43.5, t.y1 - t.y0 >= 43.5], `${label} ${t.name}: a 44 px target`).toEqual([true, true])
+    expect(t.x0 >= r.clip.x0 - .5 && t.x1 <= r.clip.x1 + .5, `${label} ${t.name}: inside the row and the screen`).toBe(true)
+    if (r.plate) expect(t.x0 >= r.plate.x0 - .5 && t.x1 <= r.plate.x1 + .5 && t.y0 >= r.plate.y0 - .5 && t.y1 <= r.plate.y1 + .5, `${label} ${t.name}: on its plate`).toBe(true)
+  }
+  const [dec, value, inc] = r.targets as [Reach['targets'][number], Reach['targets'][number], Reach['targets'][number]]
+  for (const [a, b] of [[dec, value], [value, inc], [dec, inc]] as const) {
+    const ox = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), oy = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0)
+    expect(ox > .5 && oy > .5, `${label}: ${a.name} and ${b.name} must not overlap`).toBe(false)
+  }
+}
 
 for (const theme of ['light', 'dark'] as const) {
   test(`${theme} 1440: head order, the capacity row and no Desk panel`, async ({ page }, info) => {
@@ -117,6 +162,35 @@ for (const theme of ['light', 'dark'] as const) {
     }
   })
 }
+
+// Risk: with every supported harness, a tablet-wide row clips the dial's last units, their − and +, or the live state.
+for (const width of [1024, 768, 390]) test(`${width}: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable`, async ({ page }, info) => {
+  await page.setViewportSize({ width, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await setup(page, { limits: SEVEN })
+  await page.goto('/agents')
+  await expect(page.locator('.cdial .f-chip')).toHaveCount(7)
+  const fit = await page.evaluate(() => {
+    const row = document.querySelector('.cap-row')!, r = row.getBoundingClientRect(), d = document.querySelector('.cdial')!.getBoundingClientRect(), cs = getComputedStyle(row)
+    return { dial: d.right, row: r.right - parseFloat(cs.paddingRight), main: document.querySelector('main')!.scrollWidth - document.querySelector('main')!.clientWidth }
+  })
+  expect(fit.dial, 'the dial ends inside the row').toBeLessThanOrEqual(fit.row + .5)
+  expect(fit.main, 'no sideways scroll').toBeLessThanOrEqual(.5)
+  for (const key of UNITS) {
+    await page.mouse.move(2, 990)
+    await unit(page, key).locator('.du-mark').hover()
+    expectReach(await reach(page, key, false), `${width} ${key}`, false)
+    if (key === 'opencode') await page.screenshot({ path: info.outputPath(`${width}-seven-${key}.png`) })
+  }
+  await page.mouse.move(2, 990)
+  for (const selector of ['.cdial .cdf', '.cdial .cd-live']) {
+    const hit = await page.locator(selector).evaluate(el => {
+      const r = el.getBoundingClientRect(), row = el.closest('.cap-row')!.getBoundingClientRect()
+      return { inside: r.left >= row.left - .5 && r.right <= Math.min(row.right, innerWidth) + .5, reached: document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('button') === el }
+    })
+    expect(hit, `${width} ${selector}`).toEqual({ inside: true, reached: true })
+  }
+})
 
 test('the accounts chip opens three tiles that lead into Settings; its tooltip stays away while open', async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
@@ -197,6 +271,49 @@ test('F and / search this list; typing in the search only types; Esc clears, the
   await expect(page.locator('.page-head .count[data-filter="working"]')).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('.sessions .pills-row .chip-main')).toHaveAccessibleName('State: Working. Change the filter')
   await expect(page.locator('.sessions .pills-row .chip-value')).toHaveText('Working')
+})
+
+// Risk: a search hides the session under the cursor, and Enter, p or r still act on it unseen.
+test('a search that hides the session under the cursor moves the cursor to a match; Enter and p never act on a hidden session', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const { data } = await setup(page)
+  // The long list's workers can all be paused, so p would open a sheet for any session it reached.
+  for (const s of data.sessions.slice(9)) Object.assign(s, { role: 'worker', owner_principal_id: me.id, advertised_capabilities: ['pause', 'inbox'], supported_pause_levels: ['stop_now', 'pause_quickly', 'pause', 'wrap_up'] })
+  const id = (n: number) => `5e100000-0000-4000-8000-${String(n - 1).padStart(12, '0')}`
+  const row = (n: number) => page.locator(`.sessions [data-row="s:${id(n)}"]`)
+  const search = page.getByRole('searchbox', { name: 'Search sessions in this list' })
+  const pauseSheet = page.getByRole('dialog', { name: /^Pause / })
+  await page.goto('/agents')
+  await row(3).focus()
+  await expect(row(3)).toHaveClass(/\bactive\b/)
+  await page.keyboard.press('f')
+  await search.fill('worker w12x')
+  await expect(row(3)).toHaveCount(0)
+  await page.locator('h1').click()
+  // The cursor left the hidden row for the one match.
+  await expect(page.locator('.sessions .row.active')).toHaveAttribute('data-row', `s:${id(12)}`)
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(new RegExp(`/agents/${id(12)}\\?`))
+  await page.keyboard.press('Escape')
+  await expect(page).toHaveURL(/\/agents\?q=/)
+  // Nothing matches: no row is a target, so Enter and p do nothing.
+  await page.keyboard.press('f')
+  await search.fill('nothing matches zzz')
+  await expect(page.locator('.sessions .row[data-row]')).toHaveCount(0)
+  await page.locator('h1').click()
+  await page.keyboard.press('Enter')
+  await page.keyboard.press('p')
+  await expect(page).toHaveURL(/\/agents\?q=nothing/)
+  await expect(pauseSheet).toHaveCount(0)
+  // The same p on a shown row does open its sheet, so the silence above is the guard, not a dead key.
+  await search.fill('worker w12x')
+  await expect(row(12)).toHaveCount(1)
+  await page.locator('h1').click()
+  await page.keyboard.press('j')
+  await expect(page.locator('.sessions .row.active')).toHaveAttribute('data-row', `s:${id(12)}`)
+  await page.keyboard.press('p')
+  await expect(page.getByRole('dialog', { name: 'Pause Long list worker w12x' })).toBeVisible()
 })
 
 for (const width of [1440, 1024, 390]) test(`${width}: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover`, async ({ page }) => {
@@ -321,5 +438,65 @@ test.describe('phone', () => {
     await expect(unit(page, 'codex')).toHaveClass(/open/)
     await expect.poll(() => opacity(unit(page, 'codex').locator('.pm.inc'))).toBe(1)
     await page.screenshot({ path: info.outputPath(`390-${theme}-head.png`), fullPage: false })
+  })
+})
+
+// Risk: on touch, the targets of a unit's −, number and + overlap, so a tap on the number steps the
+// limit instead of opening the editor, or a target hangs outside the plate or the row, out of reach.
+test.describe('touch targets', () => {
+  test.use({ hasTouch: true, isMobile: true })
+  for (const [width, seven] of [[390, false], [390, true], [768, true]] as const) test(`${width}${seven ? ' with seven harnesses' : ''}: an open plate holds −, the number and + as three distinct 44 px targets`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await setup(page, seven ? { limits: SEVEN } : {})
+    await page.goto('/agents')
+    const keys = seven ? UNITS : ['total', 'codex', 'claude', 'cursor']
+    await expect(unit(page, keys.at(-1)!)).toBeVisible()
+    // Closed, each unit is one target (a tap opens its plate) and the fold keeps its own 44 px reach beside the total.
+    const closed = await page.evaluate(() => {
+      const misses: string[] = []
+      const sample = (b: { left: number; top: number; right: number; bottom: number }, ok: (el: Element | null) => boolean, label: string) => {
+        for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
+          const x = b.left + 1 + (b.right - b.left - 2) * i / 4, y = b.top + 1 + (b.bottom - b.top - 2) * j / 4, el = document.elementFromPoint(x, y)
+          if (!ok(el)) misses.push(`${label} at ${Math.round(x)},${Math.round(y)} reaches ${el?.closest('button')?.getAttribute('aria-label') ?? el?.getAttribute('class') ?? 'nothing'}`)
+        }
+      }
+      const fold = document.querySelector('.cdial .cdf')!, r = fold.getBoundingClientRect(), a = getComputedStyle(fold, '::after')
+      const v = (k: string) => Math.min(0, parseFloat(a.getPropertyValue(k)) || 0)
+      if (r.right - v('right') - (r.left + v('left')) < 43.5) misses.push('fold is under 44 px')
+      sample({ left: r.left + v('left'), top: r.top + v('top'), right: r.right - v('right'), bottom: r.bottom - v('bottom') }, el => el?.closest('button') === fold, 'fold')
+      for (const u of document.querySelectorAll<HTMLElement>('.cdial [data-unit]')) sample(u.getBoundingClientRect(), el => el?.closest('[data-unit]') === u && !el.closest('button'), u.dataset.unit!)
+      return misses
+    })
+    expect(closed).toEqual([])
+    for (const key of keys) {
+      await unit(page, key).locator('.du-mark').tap()
+      await expect(unit(page, key)).toHaveClass(/\bopen\b/)
+      expectReach(await reach(page, key, true), `${width} ${key}`, true)
+      if (key === 'total' || key === 'grok') await page.screenshot({ path: info.outputPath(`${width}-${seven ? 'seven' : 'three'}-${key}-plate.png`) })
+      await page.locator('h1').tap()
+      await expect(unit(page, key)).not.toHaveClass(/\bopen\b/)
+    }
+    // A tap on the open plate's number types; a tap on its + steps once.
+    const total = unit(page, 'total')
+    await total.locator('.du-mark').tap()
+    const number = await total.locator('.value').boundingBox()
+    await page.touchscreen.tap(number!.x + number!.width / 2, number!.y + number!.height / 2)
+    await expect(total.locator('input')).toBeFocused()
+    await total.locator('input').press('Escape')
+    await expect(total.locator('.f-num')).toHaveText('12')
+    await total.locator('.pm.inc').tap()
+    await expect(total.locator('.f-num')).toHaveText('13')
+  })
+
+  test('1280 with seven harnesses: the wide row shows −, the number and + as three distinct 44 px targets in every unit', async ({ page }, info) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await setup(page, { limits: SEVEN })
+    await page.goto('/agents')
+    await expect(page.locator('.cdial .f-chip')).toHaveCount(7)
+    for (const key of UNITS) expectReach(await reach(page, key, true), `1280 ${key}`, true)
+    expect(await page.locator('main').evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(.5)
+    await page.screenshot({ path: info.outputPath('1280-touch-seven.png') })
   })
 })

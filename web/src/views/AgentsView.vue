@@ -16,6 +16,7 @@ import { usePoller } from '../lib/usePolledData'
 import { useAgents, type SessionView } from '../stores/agents'
 import { useProjects } from '../stores/projects'
 import { useDecisionDesk } from '../stores/decisionDesk'
+import RoutinesLine from '../components/routines/RoutinesLine.vue'
 import { useCapacity } from '../stores/capacity'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
@@ -278,6 +279,13 @@ async function closePanel() {
 // ---------- Keyboard: j/k move, Enter opens, Esc closes ----------
 // A folded section's rows stay in the page but inert; the cursor skips them.
 function rows() { return [...document.querySelectorAll<HTMLElement>('.agents-page [data-row]')].filter(el => !el.closest('[inert]')) }
+// A key acts only on a row the list shows, or on the session open in the panel (AEON-1209).
+const onScreen = (id: string) => (!!sessionId.value && id === `s:${sessionId.value}`) || rows().some(el => el.dataset.row === id)
+// Search and filters take rows away; a cursor left on a hidden row moves to the first match, or to none.
+watch([query, filter], () => {
+  if (!cursor.value || onScreen(cursor.value)) return
+  cursor.value = document.querySelector<HTMLElement>('.agents-page .sessions .row[data-row]:not(.filter-context)')?.dataset.row ?? ''
+}, { flush: 'post' })
 function focusRow(id: string) {
   const el = document.querySelector<HTMLElement>(`.agents-page [data-row="${CSS.escape(id)}"]`)
   el?.focus({ preventScroll: true })
@@ -310,11 +318,11 @@ function keydown(event: KeyboardEvent) {
     case 'k': case 'ArrowUp': event.preventDefault(); move(-1); break
     case 'Enter': case 'o':
       if ((event.target as HTMLElement).closest('a, button, summary')) return
-      if (kind === 's') { event.preventDefault(); openSession(id) }
+      if (kind === 's' && onScreen(cursor.value)) { event.preventDefault(); openSession(id) }
       break
     case 'p': case 'r': {
       const view = agents.views.find(v => v.session.id === id)
-      if (kind === 's' && view && pause.eligible(view.session, event.key === 'p' ? 'pause' : 'resume')) { event.preventDefault(); pause.open(event.key === 'p' ? 'pause' : 'resume', [view.session]) }
+      if (kind === 's' && view && onScreen(cursor.value) && pause.eligible(view.session, event.key === 'p' ? 'pause' : 'resume')) { event.preventDefault(); pause.open(event.key === 'p' ? 'pause' : 'resume', [view.session]) }
       break
     }
     case 'Escape':
@@ -399,6 +407,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           <template v-else>
             <button role="menuitem" type="button" class="menu-item" aria-label="Model preferences" @click="menuAction(() => openModelPrefs())"><AppIcon name="gear" /><span>Model preferences<small>Which models do which work.</small></span></button>
             <RouterLink role="menuitem" class="menu-item" to="/agents/usage" @click="headerMenu = null"><AppIcon name="pulse" /><span>Usage<small>Tokens and cost per agent, account and day.</small></span></RouterLink>
+            <RouterLink role="menuitem" class="menu-item" to="/agents/routines" @click="headerMenu = null"><AppIcon name="repeat" /><span>Routines<small>Recurring work agents do by themselves.</small></span></RouterLink>
             <RouterLink v-if="can('keys.manage')" role="menuitem" class="menu-item" to="/settings/access/agents" @click="headerMenu = null"><AppIcon name="key" /><span>Agent keys<small>Scoped API keys for agents.</small></span></RouterLink>
             <div class="menu-sep" role="separator" />
             <RouterLink role="menuitem" class="menu-item" to="/settings/personal#agents" @click="headerMenu = null"><AppIcon name="gear" /><span>Agent settings<small>Default pause level and indicators.</small></span></RouterLink>
@@ -417,6 +426,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           <AccountsComputers :permissions="pairingAccess" :show-accounts="showCapacity" />
         </div>
         <div id="dial-body-host" class="dial-host" />
+        <!-- AEON-1192: one Routines line while a routine waits for a person or failed. -->
+        <RoutinesLine v-if="agents.loaded && session.identity?.principal.kind === 'person'" />
         <AttachPending ref="attachPending" :now="agents.now" @rows="rows => attachRows = rows" @history="rows => attachHistory = rows" @updated="requests => attachDialog?.sync(requests)" v-slot="{ rows }">
           <AgentChores v-if="capacity.signins.length || rows.length || attachHistory.length" :signins="capacity.signins" :attaches="rows" :history="attachHistory" @review="request => { attachRows = rows; reviewAttach(request) }" @dismiss="id => attachPending?.dismiss(id)" />
         </AttachPending>
@@ -449,7 +460,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 </template>
 
 <style scoped>
-.agents-page { width: 100%; margin: 0; padding: 22px var(--gutter) 24px; }
+.agents-page { --page-x: var(--gutter); width: 100%; margin: 0; padding: 22px var(--page-x) 24px; }
 /* One control height for the head, the capacity row and the Sessions card head (AEON-1209): 36 px, 44 on touch. */
 .agents-page { --ctl-h: 36px; }
 @media (pointer: coarse), (max-width: 720px) { .agents-page { --ctl-h: 44px; } }
@@ -480,10 +491,10 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 /* A column, not a grid: a folding card's negative margin can take the gap with it (AEON-505). */
 .main-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
 /* The capacity row (AEON-1209): what may run, left-aligned, scrolling with the page. Its width decides
-   how the dial's units open (a container query in the dial). A tight row's − and + float over the
-   neighbours; at the row's right edge they never widen the page (clipped 4 px out, where focus rings
-   still fit; the padding and margin cancel out in layout). */
-.cap-row { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-start; gap: 8px; min-height: var(--ctl-h); margin-inline: -4px; padding-inline: 4px; container: cap / inline-size; overflow-x: clip; }
+   how the dial's units open (a container query in the dial). A tight row's plates float over the
+   neighbours and may reach into the page's side padding, but never widen the page: the row clips at
+   the page's edge (its padding and negative margin cancel out in layout). */
+.cap-row { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-start; gap: 8px; min-height: var(--ctl-h); margin-inline: calc(-1 * var(--page-x)); padding-inline: var(--page-x); container: cap / inline-size; overflow-x: clip; }
 /* The unfolded dial's body lands here, under the capacity row; empty, it takes no room. */
 .dial-host:empty { display: none; }
 .inline-error { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-radius: 12px; background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); font-size: 13px; color: var(--danger); }
@@ -494,7 +505,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
   .agents-page.panel-open { margin: 0; padding-right: calc(var(--panel-w) + 22px); }
 }
 @media (max-width: 720px) {
-  .agents-page { padding: 16px 12px 20px; }
+  .agents-page { --page-x: 12px; padding: 16px var(--page-x) 20px; }
   .hint { display: none; }
   /* Phones: title and controls on line 1 (44 px), the counts on line 2. */
   .page-head { gap: 2px 8px; }

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 
 	"github.com/inspr-at/paimos/internal/accountuse"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/events"
@@ -16,6 +18,44 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
+
+// BindRoutineCompletion records durable continuation demand from accepted
+// telemetry. It grants the reporting worker no review or retry authority.
+func BindRoutineCompletion(boundary httpapi.Module, completion UsageRecorder) error {
+	m, ok := boundary.(*module)
+	if !ok || completion == nil {
+		return workorders.Fail(409, "routine_completion_unavailable")
+	}
+	m.routineCompletion = completion
+	return nil
+}
+
+// QueueRoutineFixTx retains the previous writer's order and checkout identity.
+// Its caller resolves the current registry route and persists the shared budget
+// hold and launch before committing. Ordinary HTTP clients cannot use it.
+func QueueRoutineFixTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, routine, previous, profile, account string, trace json.RawMessage) (Run, error) {
+	var order, agent, project, owner string
+	err := tx.QueryRow(ctx, `SELECT ar.work_order_id::text,ar.agent_principal_id::text,r.output_project_id::text,r.owner_principal_id::text FROM agent_runs ar JOIN routine_attempts a ON a.agent_run_id=ar.id JOIN routine_runs r ON r.id=a.run_id WHERE ar.id=$1 AND r.id=$2 AND a.role IN ('build','fix') AND ar.status IN ('completed','failed') AND ar.account_id=$3`, previous, routine, account).Scan(&order, &agent, &project, &owner)
+	if err != nil {
+		return Run{}, err
+	}
+	if p.Kind != tenant.Person || p.ID != owner {
+		return Run{}, authz.ErrForbidden
+	}
+	for _, perm := range []string{"run.create", "work_orders.write"} {
+		if err := authz.RequireTx(ctx, tx, p, perm, authz.Scope{ProjectID: project}); err != nil {
+			return Run{}, err
+		}
+	}
+	if err := accountuse.RequireProject(ctx, tx, account, project); err != nil {
+		return Run{}, err
+	}
+	var model string
+	if err := tx.QueryRow(ctx, `SELECT m.model FROM model_profiles m JOIN agent_accounts a ON a.harness=m.harness WHERE m.id=$1 AND m.enabled AND a.id=$2 AND a.registered_by_principal_id=$3 AND aeon_account_allows_profile(a.harness,a.allowed_model_profile_ids,m.id)`, profile, account, agent).Scan(&model); err != nil {
+		return Run{}, err
+	}
+	return scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,prefs_person_id,retry_of_run_id,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING `+columns, p.TenantID, order, agent, profile, model, account, p.ID, previous, trace))
+}
 
 // QueueReview is the narrow cross-principal dispatch path. It requires an
 // immutable review binding and an already selected, approved account. Public

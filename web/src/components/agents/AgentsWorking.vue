@@ -156,8 +156,8 @@ function modeKeys(event: KeyboardEvent, key: string) {
   <div class="working dial cdial" :class="{ open: !folded, loading: !(plan && snapshot) }" role="group" aria-label="Agents at once" @pointerdown="armUnitClose">
     <button type="button" class="fs-tog cdf" :aria-expanded="!folded" :aria-controls="bodyId" :aria-label="folded ? 'Unfold the dial: each harness, its daily limit and usage' : 'Fold the dial'" :data-tip="folded ? 'Unfold: each harness, its daily limit and usage' : 'Fold the dial'" @click="sections.toggle('dial')"><AppIcon name="chevron-right" :size="13" /></button>
     <template v-if="plan && snapshot">
-      <WorkingStepper unit total class="f-total" :class="{ open: openUnit === 'total' }" data-unit="total" role="group" :aria-label="`Agents at once: ${total}`" :value="total" :effective="total" :viewer="viewer()" :revision="snapshot.updated_at" :interrupt="interrupts" label="Agents at once" @step="changeTotal" @edit="editTotal" @hold="held">
-        <template #mark><span class="du-face" :data-tip="`Run up to ${total} ${total === 1 ? 'agent' : 'agents'} at once`" @click="tapUnit('total')">
+      <WorkingStepper unit total class="f-total" :class="{ open: openUnit === 'total' }" data-unit="total" role="group" :aria-label="`Agents at once: ${total}`" :value="total" :effective="total" :viewer="viewer()" :revision="snapshot.updated_at" :interrupt="interrupts" label="Agents at once" @step="changeTotal" @edit="editTotal" @hold="held" @face="tapUnit('total')">
+        <template #mark><span class="du-face" :data-tip="`Run up to ${total} ${total === 1 ? 'agent' : 'agents'} at once`">
           <svg class="f-bot" :class="{ busy: run > 0 }" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g class="bob">
             <path class="stalk" d="M12 7.6V3.9" /><circle class="tip" cx="12" cy="2.5" r="1.65" />
             <rect class="ear" x="2.3" y="11.7" width="2.3" height="4.8" rx="1.15" /><rect class="ear" x="19.4" y="11.7" width="2.3" height="4.8" rx="1.15" />
@@ -168,18 +168,19 @@ function modeKeys(event: KeyboardEvent, key: string) {
         </span></template>
       </WorkingStepper>
       <span class="f-chips" role="group" aria-label="Each harness">
-        <template v-for="row in rows" :key="row.key">
+        <!-- Each harness keeps its hairline before it, so a wrap never parts the two. -->
+        <span v-for="row in rows" :key="row.key" class="du-cell">
           <span class="du-sep" aria-hidden="true" />
           <WorkingStepper
             unit class="f-chip" :class="[`is-${row.mode}`, { att: attention(row.key), open: openUnit === row.key }]" :data-harness="row.key" :data-unit="row.key" role="group" :aria-label="`${row.label}: ${row.summary}${attention(row.key) ? `, ${rowWords(row.key).replace(/^./, c => c.toLowerCase())}` : ''}`" :aria-describedby="`${infoId}-tip-${row.key}`"
-            :value="row.limit" :effective="row.effective" :label="row.label" :viewer="viewer()" :revision="snapshot.updated_at" :interrupt="interrupts" @step="changeLimit(row.key, $event)" @edit="editLimit(row.key, $event)" @boundary="changeMode(row.key, $event)" @hold="held"
+            :value="row.limit" :effective="row.effective" :label="row.label" :viewer="viewer()" :revision="snapshot.updated_at" :interrupt="interrupts" @step="changeLimit(row.key, $event)" @edit="editLimit(row.key, $event)" @boundary="changeMode(row.key, $event)" @hold="held" @face="tapUnit(row.key)"
           >
-            <template #mark><span class="du-face" :data-tip="tipOf(row)" @click="tapUnit(row.key)"><HarnessMark :harness="row.key" :size="16" /></span></template>
+            <template #mark><span class="du-face" :data-tip="tipOf(row)"><HarnessMark :harness="row.key" :size="16" /></span></template>
             <!-- The flag's room is always kept, so a state that comes or goes never moves a neighbour. -->
             <template #flag><span class="cd-flag" :class="attention(row.key) ? `st-${views[row.key]!.kind}` : ''"><AppIcon v-if="attention(row.key)" :name="flagIcon(row.key)" :size="12" /></span></template>
           </WorkingStepper>
           <span :id="`${infoId}-tip-${row.key}`" class="sr-only">{{ tipOf(row) }}</span>
-        </template>
+        </span>
       </span>
       <span class="cd-break" aria-hidden="true" />
       <button type="button" class="f-live cd-live wh-tog" :class="{ idle: run === 0 && !waitingN, full: !!waitingN, failed: error }" :aria-expanded="infoOpen" :aria-controls="infoId" :data-tip="error || `${status} Your sessions across projects, including sessions started outside PAIMOS. Other people's sessions appear in the live count above.`" @click="toggleInfo">
@@ -245,8 +246,12 @@ function modeKeys(event: KeyboardEvent, key: string) {
 <style scoped>
 /* ---------- Folded: one light control in the capacity row (AEON-1209, design AEON-1196 r7) ---------- */
 /* The control is one pill at the shared control height; inside it the units have no outline and no
-   fill: the total, then each harness, 16 px apart with a faint hairline between them. */
-.cdial { position: relative; display: inline-flex; align-items: center; flex: none; gap: 0; min-width: 0; height: var(--ctl-h, 36px); padding: 0 6px 0 4px; border: 1px solid var(--glass-edge); border-radius: 999px; background: var(--btn-bg); box-shadow: var(--shadow-btn); color: var(--ink); }
+   fill: the total, then each harness, 16 px apart with a faint hairline between them. When the row
+   cannot hold them all (many harnesses, a tablet), the units wrap onto further lines inside the
+   control, which then takes the row's width; nothing is clipped. */
+.cdial { position: relative; display: inline-flex; align-items: center; flex: 0 1 auto; flex-wrap: wrap; gap: 0; row-gap: 4px; min-width: 0; max-width: 100%; min-height: var(--ctl-h, 36px); padding: 3px 6px 3px 4px; border: 1px solid var(--glass-edge); border-radius: calc(var(--ctl-h, 36px) / 2); background: var(--btn-bg); box-shadow: var(--shadow-btn); color: var(--ink); }
+/* Touch targets reach 4 px above and below a unit; wrapped lines keep them apart. */
+@media (pointer: coarse) { .cdial { row-gap: 8px; } }
 .cdial.open { background: var(--row-selected); }
 .cdf { position: relative; display: grid; place-items: center; flex: none; width: 26px; height: 26px; margin-right: 4px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--ink-3); cursor: pointer; }
 .cdf svg { transition: transform .2s ease; }
@@ -254,6 +259,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
 @media (hover: hover) { .cdf:hover { background: var(--row-hover); color: var(--ink); } }
 .cdf:focus-visible, .cd-live:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .f-chips { display: contents; }
+.du-cell { display: inline-flex; align-items: center; flex: none; }
 .du-sep { flex: none; width: 1px; height: 16px; margin: 0 8px; background: var(--line); }
 .du-face { display: inline-grid; place-items: center; color: var(--ink); }
 .f-chip.is-off .du-face { opacity: .6; }
@@ -299,7 +305,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
 .cd-break, .cd-live-sk { display: none; }
 /* A narrow row (phones): the control takes the full width and its units wrap; the live state ends the last line. */
 @container cap (max-width: 640px) {
-  .cdial { flex: 1 1 100%; flex-wrap: wrap; justify-content: flex-start; row-gap: 4px; height: auto; min-height: var(--ctl-h, 36px); padding: 4px 6px; border-radius: 22px; }
+  .cdial { flex: 1 1 100%; row-gap: 4px; padding: 4px 6px; border-radius: 22px; }
   /* The live state always ends a second line on the right, loading or loaded. */
   .cd-break { display: block; flex: 0 0 100%; height: 0; }
   .cd-live { margin-left: auto; }
@@ -307,7 +313,8 @@ function modeKeys(event: KeyboardEvent, key: string) {
   .cd-live-sk .skeleton { width: 150px; }
 }
 @media (pointer: coarse) {
-  .cdf::after { content: ''; position: absolute; inset: -10px; }
+  /* Exactly 44 px, reaching left rather than over the total beside it (4 px away) or a wrapped line below. */
+  .cdf::after { content: ''; position: absolute; inset: -9px -4px -9px -14px; }
   .load-state, .cd-live-sk { min-height: 36px; }
   .cd-live { height: 36px; }
   .cd-live::after { content: ''; position: absolute; inset: -4px 0; }

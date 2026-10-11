@@ -85,6 +85,8 @@ export const router = createRouter({
     { path: '/crm', redirect: '/business/customers' },
     { path: '/decision-desk', component: () => import('./views/DecisionDeskView.vue'), meta: { title: 'Decision Desk', fill: false } },
     { path: '/agents/usage', component: () => import('./views/UsageDashboardView.vue'), meta: { title: 'Usage' } },
+    // AEON-1192: every routine you can see, with its logbook (?scope=&project=&state=&routine=&run=).
+    { path: '/agents/routines', component: () => import('./views/RoutinesView.vue'), meta: { title: 'Routines', fill: false } },
     // Before :sessionId, or that param captures the public guide. Anonymous readers stay on this route.
     { path: '/agents/register-agent', component: () => import('./views/RegisterAgentView.vue'), meta: { title: 'Connect your machine', public: true } },
     // One record for the overview and its open session, so opening the panel never remounts the page.
@@ -103,7 +105,7 @@ export const router = createRouter({
     // The full-screen board is gone with the minimal Models page (AEON-1011); old links land on the page.
     { path: '/settings/models/board', redirect: '/settings/models' },
     { path: '/settings/business/profiles/:profileId?', component: () => import('./views/settings/DocumentProfilesView.vue'), props: true, meta: { title: 'Document profiles', fill: true } },
-    { path: '/settings/:section(personal|theme|developer|policies|models|agent-rules|accounts|computers|capacity|workspace|vocabulary|kinds|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
+    { path: '/settings/:section(personal|theme|developer|policies|models|routines|agent-rules|accounts|computers|capacity|workspace|vocabulary|kinds|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
     { path: '/settings/:section(access)/:tab(people|invites|roles|projects|agents|audit)?/:id?', component: () => import('./views/SettingsView.vue'), meta: { title: 'Access', keepsFocus: true } },
     { path: '/link', component: () => import('./views/LinkAccountView.vue'), meta: { title: 'Link an account' } },

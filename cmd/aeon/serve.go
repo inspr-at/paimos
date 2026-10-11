@@ -399,7 +399,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	deliveryMod := delivery.New(pool, reviewApp.Config, cfg.ReviewWebhookSecret, delivery.AppReader{App: reviewApp}, reviewMod.HandlePullChange)
 	// Exact runtime/gate/CI readers remain unavailable until OPS qualification.
 	// The executor is inert on default-off projects and never enables a setting.
-	routineExecutor := routineexec.New(pool, routineexec.Options{})
+	routineExecutor := routineexec.New(pool, routineexec.Options{Reviews: reviewMod})
 	runMod := agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun, reviewMod.PrepareForRun)
 	if err := routineExecutor.Bind(runMod); err != nil {
 		return err

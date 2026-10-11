@@ -311,6 +311,8 @@
     "scripts/releaseworkflow:TestRehearsedBuilderPins"
     ,
     "scripts/releaseworkflow:TestRootAptTimeoutReapsBeforeRetry"
+    ,
+    "scripts/test-tiers/go-package:TestPackageInventoryMatchesUncachedCollector"
   ]
   ,
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)"
@@ -1695,6 +1697,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestMutationReplaceRefHidesSealedTree","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestMutationSubmoduleDiffCannotExposeSensitiveContent","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestNativeBrowserCaptureBrokerBoundsAndReceipts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestNewAgentdAgainstServerWithoutRelayKeepsRunsAndLogsOnce","tier":"ESSENTIAL"}
     ,
@@ -4887,6 +4891,8 @@
     {"kind":"go","package":"internal/cli","name":"TestPauseLevelsAndLeavingCLI","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestPersonAPIErrorPreservesStatusAndRedactsSession","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPillWritesSurface422AndReportOpenInvalidPills","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestPrintHeartbeatPauseAndBoundedHandover","tier":"GATED-FULL"}
     ,
@@ -8852,6 +8858,8 @@
     ,
     {"kind":"go","package":"internal/routineexec","name":"TestRoutineQueueWaitsDoNotBlockLaterWork","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/routineexec","name":"TestRoutineReviewFixLineageAndFiniteEscalation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/routineguard","name":"TestEvaluationAuthorMatchesPersistedActionAttempt","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineguard","name":"TestEvaluationPersonHoldSurvivesEvaluatorDeadline","tier":"ESSENTIAL"}
@@ -10167,6 +10175,8 @@
     {"kind":"go","package":"scripts/rules-bootstrap","name":"TestUnsafeFiles","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/test-tier-go","name":"TestSourceInventoryUsesTestingSignatureAndBuildActivity","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/test-tiers/go-package","name":"TestPackageInventoryMatchesUncachedCollector","tier":"NIGHTLY"}
   ]
   ,
   "ticket": "AEON-681"

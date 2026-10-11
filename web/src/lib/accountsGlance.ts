@@ -6,7 +6,8 @@
 import { agentUpdateAdvice, describeComputerStatus, describeEnrollmentStatus, type PairingView } from './agentPairing.ts'
 import type { OverviewAccount, SignInReference } from './accountsOverview.ts'
 import { readiness } from './computerAccounts.ts'
-import { when, type AccountRow, type CapacityWindow } from './capacity.ts'
+import { ago, when, type AccountRow, type CapacityWindow } from './capacity.ts'
+import { hostCapacityReason } from './hostCapacity.ts'
 import type { QuotaWarningSettings } from './quotaWarnings.ts'
 
 export const DEFAULT_QUOTA_THRESHOLDS: Readonly<QuotaWarningSettings> = Object.freeze({ early_percent: 10, urgent_percent: 3 })
@@ -241,4 +242,49 @@ export function glanceTiles(input: GlanceTilesInput): GlanceTile[] {
     detail: 'Work days, nights, pace and what is kept for you', warn: false, to: '/settings/capacity',
   })
   return tiles
+}
+
+// ---------- Settings › Computers: one table, a row per computer, a column per account (AEON-1174, design AEON-1149) ----------
+/** A column's short label: an address up to its @; a name stays whole. The full address goes in the tooltip. */
+export function shortIdentity(identity: string): string {
+  const at = identity.indexOf('@')
+  return at > 0 ? identity.slice(0, at) : identity
+}
+
+export type SigninWord = 'Ready' | 'Expired' | 'Offline' | 'Draining' | 'Blocked' | 'Checking' | 'Not reported'
+export interface SigninCell { word: SigninWord; tone: 'ok' | 'warn' | 'off' | 'wait' | 'blocked'; tip: string }
+/**
+ * One cell: the sign-in in one word, and in its tip the words the panel shows when they
+ * say more. A removed computer or a signed-out sign-in is Blocked, as is a sign-in that
+ * cannot start agents until someone acts; an expired verification says Expired, even while
+ * its computer is offline (it still needs verifying). A check under way or a sign-in with no
+ * report yet is never called Ready.
+ */
+export function signinCell(s: SignInReference, row?: AccountRow, now = Date.now()): SigninCell {
+  const { computer: c, enrollment: e } = s
+  if (c.computer_state === 'revoked') return { word: 'Blocked', tone: 'blocked', tip: `${c.computer_name} was removed. Its sign-ins are blocked.` }
+  if (e.state === 'revoked') return { word: 'Blocked', tone: 'blocked', tip: `Signed out on ${c.computer_name}. New agents do not start with it.` }
+  if (c.computer_state === 'draining' || e.state === 'draining') return { word: 'Draining', tone: 'wait', tip: 'New starts are blocked; running agents finish.' }
+  if (verificationExpired(s)) return { word: 'Expired', tone: 'warn', tip: 'Verification expired. New agents wait until it passes again.' }
+  if (c.computer_state !== 'connected' || c.connectivity !== 'online') return { word: 'Offline', tone: 'off', tip: c.last_seen_at ? `${c.computer_name} last reported ${ago(c.last_seen_at, now)}. New agents wait until it reports again.` : `${c.computer_name} has not reported yet.` }
+  const full = signinStatus(c, e.account_id, row, now)
+  if (isProblemSignin(s)) return { word: 'Blocked', tone: 'warn', tip: `${full.replace(/\.$/, '')}. New agents wait until someone acts.` }
+  const label = describeEnrollmentStatus(c, e)
+  if (!label) return { word: 'Not reported', tone: 'off', tip: `${c.computer_name} has not reported this sign-in yet.` }
+  if (label !== 'Ready') return { word: 'Checking', tone: 'wait', tip: `${label.replace(/\.$/, '')}. This settles on its own.` }
+  return { word: 'Ready', tone: 'ok', tip: full && full !== 'Ready' ? full : '' }
+}
+
+export interface ComputerLine { text: string; tone: 'ok' | 'wait' | 'off' | 'blocked' }
+/** The computer cell's second line: agents running and why new starts wait, or why nothing starts there. */
+export function computerLine(c: PairingView, now = Date.now()): ComputerLine {
+  if (c.computer_state === 'revoked') return { text: c.local_cleanup === 'pending' ? 'Removed · cleanup pending' : 'Removed', tone: 'blocked' }
+  if (c.computer_state === 'draining') return { text: 'Draining · running agents finish', tone: 'wait' }
+  if (c.computer_state !== 'connected') return { text: describeComputerStatus(c).stateLabel, tone: 'wait' }
+  if (c.connectivity !== 'online') return { text: c.last_seen_at ? `Offline · seen ${ago(c.last_seen_at, now)}` : 'Offline · not seen yet', tone: 'off' }
+  const host = c.host_capacity
+  if (!host) return { text: 'Online · no load report yet', tone: 'ok' }
+  const max = host.policy.maximum_agents
+  const count = max ? `${host.running} of ${max} agents running` : host.running ? `${host.running} ${host.running === 1 ? 'agent' : 'agents'} running` : 'No agents running'
+  return host.reason ? { text: `${count} · waiting: ${hostCapacityReason(host.reason)}`, tone: 'wait' } : { text: count, tone: 'ok' }
 }
