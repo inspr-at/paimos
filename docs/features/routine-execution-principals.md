@@ -26,3 +26,15 @@ consent PUT still checks the displayed recurrence revision, current owner and
 permissions, live qualification, and the chosen identity under the access
 fence. An identity revoked after listing cannot be consented using the old
 list. Consent and final admission remain separate requirements.
+
+The ESSENTIAL regression `TestRoutineExecutionPrincipalEligibilityParityAndPagination`
+covers GET/PUT identity parity, personal/project/workspace scope, role and source
+restrictions, live and revoked keys, retained pairing, canonical aliases, tenant
+isolation, empty continuation pages, picker revocation and person-only access.
+At handoff, OpenAPI bundle generation/check and the migration guard passed.
+Three approved remote Go attempts returned exit 3 because the single night slot
+was occupied; two remote static attempts returned exit 3 under the night
+protocol. No heavy local fallback ran. The affected Go packages (`recurrences`,
+`authz`, `reportercontract`) and the complete static gate remain required in
+coordinator CI; prepare the generated contract before running Go checks with
+`node api/generate.mjs --write`. No pinned response schema changed.
