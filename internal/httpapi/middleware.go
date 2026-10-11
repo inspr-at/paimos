@@ -190,6 +190,7 @@ func requestIDMiddleware(next http.Handler) http.Handler {
 			slog.Info("request", attrs...)
 		}()
 		if deadOnArrival {
+			w.Header().Set("Cache-Control", "no-store")
 			w.Header().Set("Retry-After", "1")
 			LogFailure(r, "connection_context", conn.Err())
 			sw.failureLogged = true

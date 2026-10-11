@@ -61,8 +61,8 @@ func TestCancelledInTenantDoesNotPoisonTheOnlyConnection(t *testing.T) {
 		case <-time.After(15 * time.Second):
 			t.Fatal("cancelled InTenant did not return")
 		}
-		if cancelled == nil {
-			t.Fatal("cancelled statement returned success")
+		if !errors.Is(cancelled, context.Canceled) {
+			t.Fatalf("statement did not fail for caller cancellation: %v", cancelled)
 		}
 		followPID, followErr, elapsed := followUp(t, pool, tid)
 		after := pool.Stat().NewConnsCount()
@@ -112,6 +112,7 @@ func TestCancelledInTenantDoesNotPoisonTheOnlyConnection(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := pool.Stat().NewConnsCount()
+		canceledAcquires := pool.Stat().CanceledAcquireCount()
 		dead, cancel := context.WithCancel(context.Background())
 		cancel()
 		start := time.Now()
@@ -123,8 +124,8 @@ func TestCancelledInTenantDoesNotPoisonTheOnlyConnection(t *testing.T) {
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("already-cancelled InTenant error = %v", err)
 		}
-		if elapsed > time.Second {
-			t.Fatalf("already-cancelled InTenant took %s; begin must return on the cancelled context", elapsed)
+		if pool.Stat().CanceledAcquireCount() != canceledAcquires+1 {
+			t.Fatal("already-cancelled InTenant did not fail at pool acquisition")
 		}
 		followPID, followErr, followElapsed := followUp(t, pool, tid)
 		t.Logf("pre_cancel_err=%v pre_cancel=%s follow_err=%v warm_pid=%d follow_pid=%d new_conns=%d->%d follow=%s", err, elapsed, followErr, warm, followPID, before, pool.Stat().NewConnsCount(), followElapsed)
@@ -162,6 +163,8 @@ func singleConnectionPool(t *testing.T, appURL string) *pgxpool.Pool {
 func waitForQuery(t *testing.T, d *dbtest.DB, pid int32, fragment string) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
+	poll := time.NewTicker(20 * time.Millisecond)
+	defer poll.Stop()
 	for {
 		var query string
 		err := d.Admin.QueryRow(context.Background(), `SELECT query FROM pg_stat_activity WHERE pid=$1 AND state='active'`, pid).Scan(&query)
@@ -171,7 +174,7 @@ func waitForQuery(t *testing.T, d *dbtest.DB, pid int32, fragment string) {
 		if time.Now().After(deadline) {
 			t.Fatalf("backend %d did not show %q as active (last err %v)", pid, fragment, err)
 		}
-		time.Sleep(20 * time.Millisecond)
+		<-poll.C // pacing only; pg_stat_activity establishes statement execution
 	}
 }
 

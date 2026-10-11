@@ -154,6 +154,37 @@ func TestRequestOnCancelledConnectionClosesIt(t *testing.T) {
 	if !strings.Contains(logs.String(), "cancelled_on_arrival") || !strings.Contains(logs.String(), rec.Header().Get(requestIDHeader)) {
 		t.Fatalf("missing dead-on-arrival log with request id: %s", logs.String())
 	}
+	// A real net/http connection with a cancelled base context must emit the
+	// retry response and close, rather than only mutating a recorder's headers.
+	server := httptest.NewUnstartedServer(handler)
+	server.Config.ConnContext = func(context.Context, net.Conn) context.Context { return ctx }
+	server.Start()
+	defer server.Close()
+	conn, err := net.Dial("tcp", server.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(10 * time.Second)) // hang guard only
+	if _, err := io.WriteString(conn, "GET /api/me HTTP/1.1\r\nHost: aeon.test\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	responses := bufio.NewReader(conn)
+	response, err := http.ReadResponse(responses, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusServiceUnavailable || response.Header.Get("Retry-After") != "1" || !response.Close {
+		t.Fatalf("cancelled arrival: status %d headers %v", response.StatusCode, response.Header)
+	}
+	if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	_, err = responses.ReadByte()
+	if !errors.Is(err, io.EOF) {
+		t.Fatalf("cancelled arrival connection remained open: %v", err)
+	}
 }
 
 // AEON-1228: failures outside auth must remain diagnosable without logging
