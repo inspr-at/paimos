@@ -175,7 +175,11 @@
         "internal/harness/lead_runtime_test.go",
         "internal/agentd/lead_runtime.go",
         "internal/agentd/lead_runtime_test.go",
-        "internal/modelregistry/routine_reads.go"
+        "internal/modelregistry/routine_reads.go",
+        "internal/routineexec/landing.go",
+        "internal/delivery/routine.go",
+        "internal/delivery/routine_test.go",
+        "internal/crossreview/routine_pr.go"
       ]
     },
     {
@@ -290,7 +294,11 @@
         "internal/recurrences/reads_test.go",
         "internal/decisiondesk/routine_consent_test.go",
         "internal/recurrences/run_history.go",
-        "internal/recurrences/run_history_test.go"
+        "internal/recurrences/run_history_test.go",
+        "internal/routineactions/pr.go",
+        "internal/routineactions/pr_app.go",
+        "internal/routineactions/pipeline.go",
+        "internal/routineactions/pr_test.go"
       ]
     },
     {

@@ -5872,6 +5872,8 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestReconcileContinuesAfterConfirmedMissingPull","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestRoutinePipelineRefreshesQueueProofAndObservesDone","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestShadowRoutingEventReplayAndTenantBoundary","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestShadowRoutingKeepsCallerBoardWhenAssigneeDiffers","tier":"ESSENTIAL"}
@@ -8829,6 +8831,12 @@
     {"kind":"go","package":"internal/routineactions","name":"TestRoutineActionCatalogueClosedAndBounded","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/routineactions","name":"TestRoutineActionsAtomicReplayAndTargets","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/routineactions","name":"TestRoutineMergeObservationKeepsDoneRevisionAndApproval","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/routineactions","name":"TestRoutineNonCodeCompletionNeedsSettledActionsAndPerson","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/routineactions","name":"TestRoutinePRResponseLossAndFinalAuthority","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/routinebudget","name":"TestRoutineBudgetAdmissionAndOwnership","tier":"ESSENTIAL"}
     ,
