@@ -35,13 +35,11 @@ func (d Display) FullName() string { return strings.TrimSpace(d.DisplayName + " 
 
 // Profile is one immutable model pin.
 type Profile struct {
-	Identity  string           `json:"identity"`
-	Lifecycle CatalogLifecycle `json:"lifecycle"`
-	Source    string           `json:"source"`
-	Origin    string           `json:"origin"`
-	Note      string           `json:"note"`
-	RetireAt  *time.Time       `json:"retire_at"`
-	Retired   bool             `json:"retired"`
+	Source   string     `json:"source"`
+	Origin   string     `json:"origin"`
+	Note     string     `json:"note"`
+	RetireAt *time.Time `json:"retire_at"`
+	Retired  bool       `json:"retired"`
 	Display
 	EffortLevel *int      `json:"effort_level"`
 	Provider    string    `json:"provider"`
