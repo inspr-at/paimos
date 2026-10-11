@@ -42,7 +42,19 @@ async function readDial() {
     dial.value = { running: plan.running_total, total: plan.total }
   } catch { dial.value = null }
 }
-watch(() => [props.projectId, session.identity?.principal.id], () => { dial.value = null; void leads.load(props.projectId); void queue.load(props.projectId); void readDial() }, { immediate: true })
+// A read that failed says what is missing and offers Try again, never the raw error. The button keeps
+// its place and its name while the read runs; a project or person change drops the answer.
+const queueFailed = computed(() => !!queue.errors[props.projectId])
+const retrying = ref<'queue' | 'history' | null>(null)
+let retryTurn = 0
+async function retry(what: 'queue' | 'history') {
+  if (retrying.value) return
+  const turn = ++retryTurn
+  retrying.value = what
+  try { await (what === 'queue' ? queue.load(props.projectId, true) : leads.load(props.projectId)) }
+  finally { if (turn === retryTurn) retrying.value = null }
+}
+watch(() => [props.projectId, session.identity?.principal.id], () => { dial.value = null; retryTurn++; retrying.value = null; void leads.load(props.projectId); void queue.load(props.projectId); void readDial() }, { immediate: true })
 onMounted(async () => { poller.start(); clock = setInterval(() => { now.value = Date.now() }, 10_000); await nextTick(); if (!showSection()) closeButton.value?.focus() })
 // The queue chip on an Agents lead row opens the panel at Next up (AEON-1210), also when it is open already.
 const nextUp = ref<HTMLElement>()
@@ -139,8 +151,8 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
         <p v-if="unmanaged" class="small" data-unmanaged>{{ unmanagedLeadCopy }}</p>
         <dl class="facts">
           <div><dt>Workers</dt><dd>{{ workerCount }}</dd><dd class="sub">{{ !workersKnown ? 'can’t be read' : workersPartial ? 'not all sessions read' : `of this ${w.l}` }}</dd></div>
-          <div><dt>Queued</dt><dd>{{ queued ? queued.length : '—' }}</dd><dd class="sub">{{ next[0] ? `next ${next[0].key}` : queued ? 'nothing waits' : 'can’t be read' }}</dd></div>
-          <div><dt>Gate</dt><dd>{{ gateIds ? gateIds.length : '—' }}</dd><dd class="sub">{{ gateIds?.[0] ? keyOf(gateIds[0]) ?? '…' : gateIds ? 'none' : 'not read yet' }}</dd></div>
+          <div><dt>Queued</dt><dd>{{ queued ? queued.length : '—' }}</dd><dd class="sub">{{ next[0] ? `next ${next[0].key}` : queued ? 'nothing waits' : queueFailed ? 'can’t be read' : 'reading…' }}</dd></div>
+          <div><dt>Gate</dt><dd>{{ gateIds ? gateIds.length : '—' }}</dd><dd class="sub">{{ gateIds?.[0] ? keyOf(gateIds[0]) ?? '…' : gateIds ? 'none' : view?.decisionsError ? 'can’t be read' : 'not read yet' }}</dd></div>
           <div><dt>Merged</dt><dd>{{ mergedIds ? mergedIds.length : '—' }}</dd><dd class="sub">today</dd></div>
         </dl>
       </section>
@@ -158,8 +170,12 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
       </section>
       <section id="next-up" ref="nextUp" class="p-sec" tabindex="-1" aria-labelledby="lp-next">
         <div class="p-head"><h3 id="lp-next">Next up</h3><span class="small">Queue order · Move to top on the ticket</span></div>
-        <p v-if="!queued" class="small warn">The queue can’t be read right now.</p>
-        <p v-else-if="!next.length" class="small faint">Nothing is queued. Queue work on a ticket with <kbd class="keycap">Q</kbd>.</p>
+        <div v-if="queueFailed" class="read-fail" data-read-fail="queue">
+          <p class="small warn">{{ queued ? 'The queue couldn’t be read again, so Next up may be out of date.' : 'The queue can’t be read right now, so Next up is unknown.' }}</p>
+          <button type="button" class="btn sm" :aria-disabled="!!retrying" :aria-busy="retrying === 'queue'" @click="retry('queue')"><AppIcon name="refresh" :size="12" />Try again</button>
+        </div>
+        <p v-if="!queued && !queueFailed" class="small faint">Reading the queue…</p>
+        <p v-else-if="queued && !next.length" class="small faint">Nothing is queued. Queue work on a ticket with <kbd class="keycap">Q</kbd>.</p>
         <div v-for="item in next" :key="item.ticket_id" class="wk">
           <span class="vendor"><AppIcon name="queue" :size="14" /></span>
           <span class="wk-t"><TicketPeekLink class="key" :ticket-key="item.key" :href="href(item.key)" />{{ item.title }}</span>
@@ -179,7 +195,10 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
       </section>
       <section class="p-sec" aria-labelledby="lp-recent">
         <div class="p-head"><h3 id="lp-recent">Recent</h3><span class="small">From the project’s event log</span></div>
-        <p v-if="view?.decisionsError" class="small warn">{{ view.decisionsError }}</p>
+        <div v-if="view?.decisionsError" class="read-fail" data-read-fail="history">
+          <p class="small warn">The {{ w.l }}’s history can’t be read right now, so Recent, Gate and Merged are unknown.</p>
+          <button type="button" class="btn sm" :aria-disabled="!!retrying" :aria-busy="retrying === 'history'" @click="retry('history')"><AppIcon name="refresh" :size="12" />Try again</button>
+        </div>
         <p v-else-if="!complete && lead?.session_id" class="small faint">Reading the {{ w.l }}’s history…</p>
         <p v-else-if="!recent.length" class="small faint">Nothing reported yet.</p>
         <ul v-else class="log"><li v-for="r in recent" :key="r.id"><time>{{ r.at }}</time><span>{{ r.text }}</span></li></ul>
@@ -233,6 +252,10 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
 .small { margin: 0; font-size: 12.5px; color: var(--ink-3); }
 .small.warn { color: var(--warn-ink); }
 .faint { color: var(--ink-3); }
+.read-fail { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; }
+.read-fail p { flex: 1 1 16em; }
+.read-fail .btn { gap: 6px; }
+.read-fail .btn[aria-disabled="true"] { opacity: .55; cursor: default; }
 .now-line { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--ink); font-weight: 600; }
 .now-copy { margin: 4px 0 0; font-size: 13px; color: var(--ink-2); }
 .facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 12px; margin: 16px 0 0; }

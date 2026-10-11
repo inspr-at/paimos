@@ -244,6 +244,8 @@
     ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:390: long German names stay readable and never widen the page"
     ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:Next up and Recent that can’t be read say what is missing and offer Try again"
+    ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:a queue or questions that can’t be read say so below the list instead of dropping chips and lines in silence"
     ,
     "browser:tests/aeon-1210-agents-tree.spec.ts:dark 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip"
@@ -5455,6 +5457,8 @@
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Display groups by harness, state or none; the address keeps it and Project is back with one click","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Filter by project, harness and computer: pills under the head, the address keeps them, Clear all ends them","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Next up and Recent that can’t be read say what is missing and offer Try again","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"a fold is the person’s, survives a reload, sums up the workers and moves none of the row’s controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -18043,6 +18047,8 @@
     {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > an ended lead generation never hides what the current lead does: starting, removed, paused or running anew","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > group by a value in a given order, unknown keys after by label","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > head a project’s sessions without a lead with the same no-lead line, queued work or not, read or not","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > head each group with its lead, whatever order the sessions come in","tier":"ESSENTIAL"}
     ,

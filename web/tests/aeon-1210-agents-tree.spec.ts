@@ -5,13 +5,13 @@
 // changes the head, a filter or grouping is lost on reload, a phone scrolls sideways or gets a
 // row target under 44 px.
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, liveAgent, me, mockWork, watchErrors, type LiveAgentMock } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { capacityWorld, NOW } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { mockDailyPlan } from './agents-daily-fixtures'
 import { expectStableControls } from './helpers/stable'
-import type { ProjectLead } from '../src/lib/lead'
+import type { LeadDecision, ProjectLead } from '../src/lib/lead'
 
 const sid = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
 const LEAD = sid(1)
@@ -49,8 +49,31 @@ async function setup(page: Page, options: { folded?: string[]; workers?: number;
     const id = decodeURIComponent(new URL(route.request().url()).pathname.split('/')[3]!)
     return leads[id] ? route.fulfill({ json: leads[id] }) : route.fulfill({ status: 404, json: { error: 'not found' } })
   })
-  const queued = [...Array(4).fill('p-pharos'), ...Array(2).fill('p-aeon'), ...Array(3).fill('p-web')]
-  await page.route('**/api/queue', route => route.fulfill({ json: { items: queued.map((project, i) => ({ node_id: `q-${i}`, project_id: project, key: `Q-${i}`, title: 'Queued work', state: 'open', priority: 'normal', estimate_hours: 1, queued: { run_id: `r-${i}`, position: i + 1, by: { ...me, kind: 'person' }, at: new Date(NOW).toISOString(), target_agent_id: null, expected_agent_id: null, model_profile_id: null, expected_start_at: null, waiting: false, wait_reason: '' } })), manual_order: false, capacity: { queued_hours: 9, parallel_runs: 4, work_hours: null, warning: false } } }))
+  const queued: [project: string, key: string, title: string][] = [
+    ['p-pharos', 'PHAROS-21', 'Disk graph for every host'], ['p-pharos', 'PHAROS-22', 'Swap alert for the build hosts'], ['p-pharos', 'PHAROS-23', 'Restore drill report'], ['p-pharos', 'PHAROS-24', 'Fleet list export'],
+    ['p-aeon', 'AEON-31', 'Queue chip on lead lines'], ['p-aeon', 'AEON-32', 'Held changes note'], ['p-web', 'WEB-7', 'Pricing page copy'], ['p-web', 'WEB-8', 'Legal footer'], ['p-web', 'WEB-9', 'Status page link'],
+  ]
+  // The whole queue (the list's counts) and one project's (the lead panel's Next up) answer from the same items.
+  await page.route(url => url.pathname === '/api/queue', route => {
+    const project = new URL(route.request().url()).searchParams.get('project_id')
+    const items = queued.map(([project_id, key, title], i) => ({ node_id: `q-${i}`, project_id, key, title, state: 'open', priority: 'normal', estimate_hours: 1, queued: { run_id: `r-${i}`, position: i + 1, by: { ...me, kind: 'person' }, at: new Date(NOW).toISOString(), target_agent_id: null, expected_agent_id: null, model_profile_id: null, expected_start_at: null, waiting: false, wait_reason: '' } }))
+      .filter(item => !project || item.project_id === project)
+    return route.fulfill({ json: { items, count: items.length, manual_order: false, capacity: { queued_hours: items.length, parallel_runs: 4, work_hours: null, warning: false } } })
+  })
+  // The lead panel also reads the live sessions (its workers) and the lead's history (Recent, Gate, Merged).
+  const node = (id: string) => { const n = work.nodes.find(x => x.id === id)!; return { id: n.id, key: n.key, title: n.title, project_id: n.project } }
+  const live = (n: number, ticket: ReturnType<typeof node> | null, model: string) => {
+    const s = data.sessions.find(x => x.id === sid(n))!
+    return { ...liveAgent({ project_id: 'p-pharos', session_id: s.id, principal_id: String(s.agent_principal_id), harness: s.harness as LiveAgentMock['harness'], management_mode: s.management_mode as LiveAgentMock['management_mode'], role: s.role as LiveAgentMock['role'], ticket, since: String(s.created_at), heartbeat_at: String(s.heartbeat_at) }), model, reasoning_effort: 'high' } as LiveAgentMock
+  }
+  work.live.push(live(1, null, 'Claude Fable'), live(2, node('n-2'), 'Codex Astra'), live(5, null, 'Grok 4.7'))
+  const at = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString()
+  const decisions: LeadDecision[] = [
+    { event_id: 11, project_id: 'p-pharos', session_id: LEAD, recorded_at: at(70), outcome: 'selected', reason_codes: ['oldest_eligible'], gate_freshness: [], results: [], request: { ticket_node_id: 'n-1', stage: 'queue', outcome: 'selected', reason_codes: ['oldest_eligible'], attempt: 1 } },
+    { event_id: 12, project_id: 'p-pharos', session_id: LEAD, recorded_at: at(68), outcome: 'selected', reason_codes: ['gates_ready'], gate_freshness: [], results: [], request: { ticket_node_id: 'n-1', stage: 'admission', outcome: 'selected', reason_codes: ['gates_ready'], attempt: 1 } },
+    { event_id: 13, project_id: 'p-pharos', session_id: LEAD, recorded_at: at(30), outcome: 'requested', reason_codes: ['review_requested'], gate_freshness: [], results: [], request: { ticket_node_id: 'n-2', stage: 'review', outcome: 'requested', reason_codes: ['review_requested'], attempt: 1 } },
+  ]
+  await page.route(/\/api\/projects\/p-pharos\/lead-decisions\?/, route => route.fulfill({ json: { items: decisions.filter(d => d.event_id > Number(new URL(route.request().url()).searchParams.get('after') ?? 0)), next_after: null } }))
   return { data, work, calls }
 }
 
@@ -87,11 +110,18 @@ for (const theme of ['light', 'dark'] as const) test(`${theme} 1440: projects in
   await expect(groups(page).nth(0).locator('[role="row"]').first()).toHaveAttribute('data-row', 'l:p-aeon')
   await expect(pending.locator('.c-state')).toContainText('Waiting')
   await expect(pending.locator('.result')).toHaveText('AEON lead')
-  // PRJ-26 has sessions and no lead: a plain header names it. WEB: queued work and no lead, one slim line.
-  await expect(groups(page).nth(2).locator('.group-row')).toContainText('PRJ-26')
+  // WEB: queued work and no lead, one slim line. PRJ-26 has sessions and no lead: the same line heads them (Tick, 2026-10-11).
   const nolead = page.locator('.sessions .row.nolead[data-project="WEB"]')
   await expect(nolead).toContainText('3 queued · no lead')
   await expect(nolead.getByRole('button', { name: 'Start a lead for WEB' })).toBeVisible()
+  const prj = page.locator('.sessions .row.nolead[data-project="PRJ-26"]')
+  await expect(groups(page).nth(2).locator('[role="row"]').first()).toHaveAttribute('data-project', 'PRJ-26')
+  await expect(groups(page).nth(2).locator('.group-row')).toHaveCount(0)
+  await expect(prj.locator('.nl-t')).toHaveText('no lead')
+  await expect(prj.getByRole('button', { name: 'Start a lead for PRJ-26' })).toBeVisible()
+  const look = (line: typeof prj) => line.evaluate(el => { const cs = getComputedStyle(el); return [cs.backgroundImage, cs.boxShadow, cs.minHeight, cs.borderRadius, cs.marginLeft, cs.paddingLeft] })
+  expect(await look(prj)).toEqual(await look(nolead))
+  await expect(groups(page).nth(2).locator(`[data-row="s:${sid(4)}"]`)).toBeVisible()
   // The queue chip on the lead's title line opens the lead panel at Next up.
   const chip = leadRow(page).locator('.qchip.q-l1')
   await expect(chip).toBeVisible()
@@ -102,6 +132,13 @@ for (const theme of ['light', 'dark'] as const) test(`${theme} 1440: projects in
   const panel = page.getByRole('complementary', { name: 'PHAROS lead' })
   await expect(panel).toBeVisible()
   await expect(panel.locator('#next-up')).toBeFocused()
+  // Every read the panel makes is answered: its workers, Next up in queue order and the lead's history.
+  await expect(panel.locator('#next-up .wk')).toHaveCount(3)
+  await expect(panel.locator('#next-up .wk-t').first()).toContainText('PHAROS-21')
+  await expect(panel.locator('.facts dd').first()).toHaveText('2')
+  await expect(panel.locator('.log li')).toHaveCount(3)
+  await expect(panel.locator('[data-read-fail]')).toHaveCount(0)
+  await expect(panel).not.toContainText('Unmocked route')
   await page.screenshot({ path: info.outputPath(`1440-${theme}-next-up.png`) })
   expect(errors).toEqual([])
 })
@@ -248,13 +285,59 @@ test('a queue or questions that can’t be read say so below the list instead of
   await page.route(/\/api\/decision-desk\?state=open/, route => route.fulfill({ status: 500, json: { error: 'desk down' } }))
   await page.goto('/agents')
   await expect(leadRow(page)).toBeVisible()
-  await expect(page.locator('.sessions [data-source-note="queue"]')).toHaveText('Queued work can’t be read right now, so queue counts and no-lead lines are missing here.')
+  await expect(page.locator('.sessions [data-source-note="queue"]')).toHaveText('Queued work can’t be read right now, so queue counts are missing here, and so is the no-lead line of a project without sessions.')
   await expect(page.locator('.sessions [data-source-note="questions"]').getByRole('link')).toHaveAttribute('href', '/decision-desk')
-  // The counts are unknown: no chip and no no-lead line claims a number.
+  // The counts are unknown: no chip and no no-lead line claims a number. WEB's line needs its queue;
+  // PRJ-26's sessions still run without a lead, and its line says only that.
   await expect(page.locator('.sessions .qchip')).toHaveCount(0)
-  await expect(page.locator('.sessions .row.nolead')).toHaveCount(0)
+  await expect(page.locator('.sessions .row.nolead')).toHaveCount(1)
+  await expect(page.locator('.sessions .row.nolead[data-project="PRJ-26"] .nl-t')).toHaveText('no lead')
   // The lead that waits still heads its group: its state never needed the queue.
   await expect(page.locator('.sessions [data-row="l:p-aeon"] .c-state')).toContainText('Waiting')
+})
+
+// Tick, 2026-10-11: a read the lead panel could not make says what is missing and offers Try again,
+// never a raw error string; Try again keeps its place and name while it runs, then the section fills in.
+test('Next up and Recent that can’t be read say what is missing and offer Try again', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await setup(page)
+  let queueDown = true, historyDown = true, release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route(url => url.pathname === '/api/queue' && url.searchParams.has('project_id'), async route => {
+    if (queueDown) return route.fulfill({ status: 500, json: { error: 'queue store unavailable' } })
+    await held
+    return route.fallback()
+  })
+  await page.route(/\/api\/projects\/p-pharos\/lead-decisions\?/, route => historyDown ? route.fulfill({ status: 500, json: { error: 'event log unavailable' } }) : route.fallback())
+  await page.goto('/agents')
+  await leadRow(page).locator('.qchip.q-l1').click()
+  const panel = page.getByRole('complementary', { name: 'PHAROS lead' })
+  const queueFail = panel.locator('[data-read-fail="queue"]'), historyFail = panel.locator('[data-read-fail="history"]')
+  await expect(queueFail.locator('p')).toHaveText('The queue can’t be read right now, so Next up is unknown.')
+  await expect(historyFail.locator('p')).toHaveText('The lead’s history can’t be read right now, so Recent, Gate and Merged are unknown.')
+  await expect(panel.locator('.facts dd.sub').nth(1)).toHaveText('can’t be read')
+  await expect(panel.locator('.facts dd.sub').nth(2)).toHaveText('can’t be read')
+  for (const raw of ['queue store unavailable', 'event log unavailable', 'Unmocked route']) await expect(panel).not.toContainText(raw)
+  // Try again on Next up: while the read is held, the button stays where it is, says the same and refuses a second press.
+  queueDown = false
+  const again = queueFail.getByRole('button', { name: 'Try again' })
+  const before = await again.boundingBox()
+  await again.click()
+  await expect(again).toHaveAttribute('aria-busy', 'true')
+  await expect(again).toHaveText('Try again')
+  expect(await again.boundingBox()).toEqual(before)
+  await expect(historyFail.getByRole('button', { name: 'Try again' })).toHaveAttribute('aria-disabled', 'true')
+  release()
+  await expect(queueFail).toHaveCount(0)
+  await expect(panel.locator('#next-up .wk')).toHaveCount(3)
+  await expect(panel.locator('#next-up .wk-t').first()).toContainText('PHAROS-21')
+  // Try again on Recent reads the lead's history once more: the log, Gate and Merged fill in.
+  historyDown = false
+  await historyFail.getByRole('button', { name: 'Try again' }).click()
+  await expect(historyFail).toHaveCount(0)
+  await expect(panel.locator('.log li')).toHaveCount(3)
+  await expect(panel.locator('.facts dd.sub').nth(2)).not.toHaveText('can’t be read')
 })
 
 // The design's gate (AEON-1196 check.mjs) on the grouped list: no coloured edge accents, SVG icons
@@ -331,7 +414,10 @@ for (const width of [390, 1024, 1440]) test(`${width}: long German names stay re
   await expect(leadRow(page)).toBeVisible()
   const title = leadRow(page).locator('.result')
   await expect(title).toHaveAttribute('title', /Wiederherstellungsprüfung für alle Kundenportale abschließen/)
-  await expect(page.locator('.sessions .grp[aria-label^="PRJ-26 · Studio-Infrastruktur"] .group-row')).toContainText('Kundenportale')
+  // PRJ-26 runs without a lead: its group keeps the full name, the no-lead line heads it and holds its button.
+  const prj = page.locator('.sessions .grp[aria-label$="der Kundenportale"]')
+  await expect(prj.locator('.row.nolead')).toBeVisible()
+  expect(await prj.locator('.row.nolead').evaluate(row => { const r = row.getBoundingClientRect(); return [...row.querySelectorAll<HTMLElement>('.nl-btn, .nl-note')].every(el => { const b = el.getBoundingClientRect(); return b.left >= r.left - 0.5 && b.right <= r.right + 0.5 }) })).toBe(true)
   const wide = await page.evaluate(() => { const m = document.querySelector('main')!; return Math.max(document.documentElement.scrollWidth - innerWidth, m.scrollWidth - m.clientWidth) })
   expect(wide).toBeLessThanOrEqual(0.5)
   // The queue chip and the row's actions stay inside the row.

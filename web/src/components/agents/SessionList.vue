@@ -142,7 +142,7 @@ const candidates = (branch: Branch) => branch.children.filter(child => showRemov
 
 // ---------- Groups (AEON-1210, design AEON-1196 §3.3) ----------
 // By project (the default): projects in their fixed order, the lead row heading each group and
-// its workers nested below; a project with queued work and no lead is one slim line. "No project"
+// its workers nested below; a project without a lead, with queued work or sessions, is headed by one slim line. "No project"
 // and "Ended" come at the end. Display may group by lead, harness, state or computer, or not at all.
 const projectStore = useProjects()
 const customOrder = usePreference<{ ids?: string[] }>('projects:order')
@@ -159,11 +159,12 @@ type Header = 'none' | 'static' | 'toggle' | 'fold'
 interface Section { id: string; header: Header; label: string; note?: string; count: number; roots: Branch[]; project?: ProjectRef; line?: LeadLine | null }
 const liveCount = (roots: Branch[]) => roots.reduce((sum, branch) => sum + branch.liveCount, 0)
 const flatten = (roots: Branch[]): Branch[] => roots.flatMap(branch => [branch, ...flatten(branch.children)])
-// Grouped by lead or not at all, a project's lead line shows where its current lead has no running session here.
+// Grouped by lead or not at all, a project's lead line shows where its current lead has no running session here;
+// a no-lead line only for queued work, since the project's sessions are listed elsewhere.
 function lineSections(live: Branch[]): Section[] {
   if (!lines.value) return []
   return projectGroups({ roots: live, projects: orderedProjects.value, lead: leadOf, queued: queuedOf, lines: true, onlyProjects: facets.value.project }).groups
-    .flatMap(g => g.line ? [{ id: `p:${g.project.id}`, header: 'none' as const, label: g.project.key, count: 0, roots: [], project: g.project, line: g.line }] : [])
+    .flatMap(g => g.line && (g.line.kind === 'pending' || g.line.queued) ? [{ id: `p:${g.project.id}`, header: 'none' as const, label: g.project.key, count: 0, roots: [], project: g.project, line: g.line }] : [])
 }
 const HOSTLESS = 'No computer'
 const groupLabel = (key: string) => GROUPS.find(g => g.id === key)?.label ?? key
@@ -818,10 +819,10 @@ function sessionLinkClick(event: MouseEvent, id: string) {
         <div v-else-if="section.header === 'static'" class="group-row" role="row">
           <span role="rowheader" class="group-label"><span class="group-name">{{ section.label }}</span><span class="mono">{{ section.count }}</span><span v-if="section.note" class="eh-note">{{ section.note }}</span></span>
         </div>
-        <!-- A project with queued work and no lead: one slim line (AEON-1196 §3.3). -->
+        <!-- A project without a lead: one slim line (AEON-1196 §3.3), for its queued work and heading its sessions alike. -->
         <div v-if="section.line?.kind === 'none' && section.project" class="row nolead" role="row" :data-project="section.project.key">
           <span role="gridcell" class="nl-in">
-            <span class="nl-ic" aria-hidden="true"><AppIcon name="folder" :size="15" /></span><b class="mono nl-key">{{ section.project.key }}</b><span class="nl-t">{{ qWord(section.line.queued) }} queued · no {{ LEAD_WORDS.l }}</span>
+            <span class="nl-ic" aria-hidden="true"><AppIcon name="folder" :size="15" /></span><b class="mono nl-key">{{ section.project.key }}</b><span class="nl-t">{{ section.line.queued ? `${qWord(section.line.queued)} queued · ` : '' }}no {{ LEAD_WORDS.l }}</span>
             <button v-if="projects?.mayStart && canLaunchLead(section.line.lead)" type="button" class="btn sm nl-btn" :aria-label="`Start a ${LEAD_WORDS.l} for ${section.project.key}`" @click="openStartLead([section.project.id], $event.currentTarget as HTMLElement, true)"><AppIcon name="play" :size="13" />Start a {{ LEAD_WORDS.l }}</button>
             <span v-else class="nl-note">{{ !canLaunchLead(section.line.lead) ? leadLaunchReason(section.line.lead) : `A project admin starts its ${LEAD_WORDS.l}` }}</span>
           </span>
@@ -1269,7 +1270,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .lead-open { padding: 0; border: 0; background: transparent; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .pending-bot { display: grid; place-items: center; border-radius: 9px; background: var(--surface-sunken); }
 .row.pending .current-activity { color: var(--ink-2); }
-/* A project with queued work and no lead: one slim line. */
+/* A project without a lead: one slim line. */
 .row.nolead { display: flex; grid-column: 1 / -1; align-items: center; min-height: 44px; margin: 4px 6px; padding: 4px 12px; cursor: default; background: repeating-linear-gradient(135deg, transparent 0 8px, color-mix(in srgb, var(--line) 40%, transparent) 8px 9px); box-shadow: inset 0 0 0 1px var(--line); }
 @media (hover: hover) { .row.nolead:hover { background: repeating-linear-gradient(135deg, transparent 0 8px, color-mix(in srgb, var(--line) 40%, transparent) 8px 9px); } }
 .nl-in { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; width: 100%; min-width: 0; padding: 0; font-size: 13px; color: var(--ink-2); }
