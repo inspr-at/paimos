@@ -3,13 +3,15 @@ package modelregistry
 
 import (
 	"encoding/json"
+	"slices"
+	"testing"
+	"time"
+
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"slices"
-	"testing"
-	"time"
+	"github.com/jackc/pgx/v5"
 )
 
 // Risk: daily fallback invents a provider order, ignores wait or unknown

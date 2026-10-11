@@ -7,17 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/inspr-at/paimos/internal/activity"
-	"github.com/inspr-at/paimos/internal/auth"
-	"github.com/inspr-at/paimos/internal/capacity"
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/harness"
-	"github.com/inspr-at/paimos/internal/httpapi"
-	"github.com/inspr-at/paimos/internal/inbox"
-	"github.com/inspr-at/paimos/internal/modelregistry"
-	"github.com/inspr-at/paimos/internal/nodes"
-	"github.com/inspr-at/paimos/internal/search"
 	"io"
 	"net"
 	"net/http"
@@ -30,6 +19,20 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/activity"
+	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/harness"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/nodes"
+	"github.com/inspr-at/paimos/internal/search"
 )
 
 func TestUnsupportedCompatCommands(t *testing.T) {

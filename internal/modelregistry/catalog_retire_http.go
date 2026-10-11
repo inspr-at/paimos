@@ -351,7 +351,7 @@ func sameRouteProfiles(profiles []Profile, old Profile) []Profile {
 	return out
 }
 func profileReferenced(s retireSnapshot, id string) bool {
-	for _, table := range []string{"model_pref_cells"} {
+	for _, table := range []string{"model_role_routes", "model_security_role_routes", "model_pref_cells"} {
 		for _, raw := range s[table] {
 			if rowString(rowFields(raw), "profile_id") == id {
 				return true

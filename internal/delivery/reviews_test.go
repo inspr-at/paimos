@@ -5,17 +5,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"net/http/httptest"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
+	"github.com/jackc/pgx/v5"
 )
 
 func reviewsPath(f *fixture) string { return "/api/projects/" + f.project + "/delivery-reviews" }

@@ -4,10 +4,6 @@ package modelregistry
 import (
 	"context"
 	"encoding/json"
-	"github.com/inspr-at/paimos/internal/capacity"
-	"github.com/inspr-at/paimos/internal/linkvault"
-	"github.com/inspr-at/paimos/internal/modelprefs"
-	"github.com/inspr-at/paimos/internal/tenant"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +12,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/linkvault"
+	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 // Risk: editing level 2 fails after inserting level 1, leaving a partial

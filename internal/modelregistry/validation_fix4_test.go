@@ -4,13 +4,15 @@ package modelregistry
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
 	"math"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/jackc/pgx/v5"
 )
 
 // Risk: the retired ladder writer still decodes an out-of-range priority and

@@ -5,14 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/inspr-at/paimos/internal/capacity"
-	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/modelprefs"
-	"github.com/inspr-at/paimos/internal/tenant"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 // reviewLookupFailure fails the nth query matching match (n=0 only counts).

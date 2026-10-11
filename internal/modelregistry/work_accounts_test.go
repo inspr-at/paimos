@@ -4,14 +4,16 @@ package modelregistry
 import (
 	"context"
 	"encoding/json"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"strings"
-	"testing"
-	"time"
+	"github.com/jackc/pgx/v5"
 )
 
 type euClaudeEvidence struct{ expires time.Time }

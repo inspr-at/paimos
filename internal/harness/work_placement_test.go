@@ -3,13 +3,15 @@ package harness_test
 
 import (
 	"encoding/json"
+	"testing"
+
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/workorders"
-	"testing"
+	"github.com/jackc/pgx/v5"
 )
 
 func placementAccount(t *testing.T, f *harnessFixture, tx pgx.Tx, h string) error {

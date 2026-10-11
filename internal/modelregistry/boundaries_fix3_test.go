@@ -5,11 +5,6 @@ import (
 	"bufio"
 	"context"
 	"errors"
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/modelprefs"
-	"github.com/inspr-at/paimos/internal/tenant"
-	"github.com/inspr-at/paimos/internal/workorders"
 	"io"
 	"net"
 	"net/http"
@@ -18,6 +13,13 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/jackc/pgx/v5"
 )
 
 // Read signals the exact stalled-input boundary; Close releases it, including

@@ -4,10 +4,12 @@ package crossreview
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/inspr-at/paimos/internal/modelregistry"
 	"net/http/httptest"
 	"reflect"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestManagedOrderActivationOnlyChangesFutureReviewBindings(t *testing.T) {

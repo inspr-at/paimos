@@ -2,12 +2,14 @@
 package modelregistry
 
 import (
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/tenant"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 func incompleteCatalogFixture(t *testing.T, p tenant.Principal) {

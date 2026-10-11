@@ -8,6 +8,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -16,12 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/principallink"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"net/http"
-	"net/http/httptest"
-	"reflect"
-	"strings"
-	"testing"
-	"time"
+	"github.com/jackc/pgx/v5"
 )
 
 func editorProject(t *testing.T, p tenant.Principal, key string) string {
@@ -244,7 +246,7 @@ func TestEditorExpiryTokensAndCompensation(t *testing.T) {
 	sampled := false
 	h := newEditorHTTP(t, &Module{pool: appPool, validationClock: func(context.Context, pgx.Tx) (time.Time, error) { sampled = true; return clock, nil }})
 	initial := h.ladder(t, p, "build")
-	if initial.EditToken != nil || initial.CanEdit {
+	if initial.EditToken != nil || initial.CanEdit || len(initial.Routes) == 0 {
 		t.Fatal("compatibility read still grants editing")
 	}
 	expiry := clock.Add(time.Second)
@@ -256,6 +258,22 @@ func TestEditorExpiryTokensAndCompensation(t *testing.T) {
 	}
 	if sampled || catalogSetupState(t, p) != before || eventCount(t, p, evRoutes) != events {
 		t.Fatal("retired writer sampled its clock or changed stored holds")
+	}
+	// The Models successor preserves the exact reason and native expiry.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,until_at,reason,set_by) SELECT tenant_id,harness,model,$2,'quota',$3 FROM model_profiles WHERE id=$1`, initial.Routes[0].ProfileID, expiry, p.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range h.ladder(t, p, "build").Routes {
+		if row.ProfileID == initial.Routes[0].ProfileID {
+			found = row.State == "unavailable" && row.Reason == "quota" && row.ValidUntil != nil && row.ValidUntil.Equal(expiry)
+		}
+	}
+	if !found {
+		t.Fatal("deprecated read lost the Models pause")
 	}
 	// Full-precision and reason-only changes must bind different content.
 	a := held

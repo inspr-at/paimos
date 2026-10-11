@@ -3,12 +3,14 @@
 package modelregistry
 
 import (
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/modelprefs"
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestResolveTicketRoute(t *testing.T) {

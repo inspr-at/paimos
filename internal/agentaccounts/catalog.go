@@ -260,9 +260,9 @@ func catalogProfiles(ctx context.Context, tx pgx.Tx, role, authorFamily string, 
 // or the nearest level, ties up; reviews take the highest. A candidate the
 // catalog does not offer (paused, suppressed or unqualified) preselects
 // nothing on that step, since dispatch skips it rather than run an older
-// version. Quick jobs and an Automatic review keep no saved order, so nothing
-// is preselected for Quick jobs. Automatic reviews retain their family-order
-// hint at each route's highest native effort. A board or registry beyond its bounds preselects nothing
+// version. Quick jobs have no preselection; Automatic reviews retain their
+// family-order hint at each route's highest native effort. A board or registry
+// beyond its bounds preselects nothing
 // rather than failing the catalog.
 func catalogPriorities(ctx context.Context, tx pgx.Tx, role, authorFamily, project string, now time.Time, profiles []catalogProfile) error {
 	q := modelprefs.BoardQuery{Column: "other", Situation: "first"}

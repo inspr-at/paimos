@@ -4,8 +4,6 @@ package nodes
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +13,11 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 )
 
 func TestPlanningSourceProjectCosts(t *testing.T) {

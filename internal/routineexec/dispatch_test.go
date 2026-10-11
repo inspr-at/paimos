@@ -226,10 +226,6 @@ func setupDispatchOn(t *testing.T, f *fixture) *dispatchFixture {
 		if err := dbtest.ModelsOrder(t.Context(), tx, f.owner.TenantID, "other", "first", "wait", f.profile); err != nil {
 			return err
 		}
-		// Keep the legacy route as history and seed the live Models choice.
-		if err := dbtest.SetModelOrder(t.Context(), tx, f.owner.TenantID, "", "other", "first", f.profile); err != nil {
-			return err
-		}
 		return tx.QueryRow(t.Context(), `SELECT agent_run_id::text FROM routine_runs WHERE id=$1`, f.run).Scan(&agentRun)
 	}))
 	var mode atomic.Int32

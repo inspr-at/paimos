@@ -3,14 +3,16 @@ package modelregistry
 
 import (
 	"encoding/json"
+	"slices"
+	"testing"
+	"time"
+
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
-	"slices"
-	"testing"
-	"time"
+	"github.com/jackc/pgx/v5"
 )
 
 // Risk C1: the first DailyStart counts denied headroom or unknown readings;

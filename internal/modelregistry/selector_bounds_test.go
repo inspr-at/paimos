@@ -4,10 +4,12 @@ package modelregistry
 import (
 	"context"
 	"fmt"
-	"github.com/inspr-at/paimos/internal/modelprefs"
-	"github.com/inspr-at/paimos/internal/tenant"
 	"strings"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
 )
 
 type selectorObservedTx struct {

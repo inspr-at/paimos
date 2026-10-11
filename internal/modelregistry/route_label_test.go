@@ -3,12 +3,15 @@
 package modelregistry
 
 import (
-	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/dbtest"
-	"github.com/inspr-at/paimos/internal/tenant"
 	"net/http"
 	"regexp"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 )
 
 func TestModelKeyMatchesAliasesAndAPIIDs(t *testing.T) {

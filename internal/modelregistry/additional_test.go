@@ -2,11 +2,13 @@
 package modelregistry
 
 import (
+	"net/http"
+	"testing"
+
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
-	"net/http"
-	"testing"
+	"github.com/jackc/pgx/v5"
 )
 
 // Risk: reading catalog facts appends guessed harness pins or replaces a saved Models choice.
