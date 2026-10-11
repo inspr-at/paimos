@@ -380,6 +380,7 @@
         "web/src/components/agents/SessionsHeld.vue",
         "web/src/components/agents/sessionHold.ts",
         "web/src/components/agents/sessionTime.ts",
+        "web/src/components/header/DeskPreview.vue",
         "web/src/components/settings/models/ModelOutdatedSheet.vue"
       ]
     },
