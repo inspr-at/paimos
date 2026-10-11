@@ -255,39 +255,39 @@ func TestRemovePreviewCoversTheWholeVersionAndEverySituation(t *testing.T) {
 		}
 	}
 	ids.Add("profile", sibling.ID)
-	bySituation := func(doc lineUsageDocument) map[string]lineUse {
-		out := map[string]lineUse{}
+	backend := func(doc lineUsageDocument) simplePick {
 		for _, use := range doc.UsedBy {
-			out[use.Column+"/"+use.Situation] = use
+			if use.Column == "backend" {
+				return use.Replacement
+			}
 		}
-		return out
+		t.Fatalf("backend use missing: %+v", doc.UsedBy)
+		return simplePick{}
 	}
-	// The sibling route can run: asked about one route only, it is what takes over.
-	one := bySituation(boardDecode[lineUsageDocument](t, boardCall(t, admin, "GET", base, nil, ""), 200))
-	if one["backend/first"].Replacement.Harness != "pi" || one["backend/first"].Replacement.Model != sibling.Model {
-		t.Fatalf("fixture lacks a usable sibling route: %+v", one["backend/first"])
+	// The sibling route can run: asked about the Claude route alone, it is what takes over.
+	if pick := backend(boardDecode[lineUsageDocument](t, boardCall(t, admin, "GET", base, nil, ""), 200)); pick.Harness != "pi" || pick.Model != sibling.Model {
+		t.Fatalf("fixture lacks a usable sibling route: %+v", pick)
 	}
+	// Asked about the whole version, neither of its routes takes over.
 	whole := boardDecode[lineUsageDocument](t, boardCall(t, admin, "GET", base+"?"+ids.Encode(), nil, ""), 200)
-	uses := bySituation(whole)
-	if len(whole.UsedBy) != 3 || whole.Incomplete {
-		t.Fatalf("want backend first, other small and other review: %+v", whole.UsedBy)
+	if pick := backend(whole); pick.Harness != "codex" || pick.Model != sol.Model {
+		t.Fatalf("backend falls back to %+v, want %s", pick, sol.Model)
 	}
-	for _, key := range []string{"backend/first", "other/small"} {
-		if pick := uses[key].Replacement; pick.Harness != "codex" || pick.Model != sol.Model {
-			t.Fatalf("%s falls back to %+v, want %s", key, pick, sol.Model)
-		}
-	}
-	review, ok := uses["other/review"]
-	if !ok {
-		t.Fatalf("review situation use missing: %+v", whole.UsedBy)
-	}
+	uses := map[string]lineUse{}
 	for _, use := range whole.UsedBy {
+		uses[use.Column+"/"+use.Situation] = use
 		if use.Replacement.Model == opus.Model || use.Replacement.Model == sibling.Model {
 			t.Fatalf("%s/%s falls back to a route removed in the same step: %+v", use.Column, use.Situation, use.Replacement)
 		}
 	}
-	if review.Layer != "default" {
-		t.Fatalf("review use lost its layer: %+v", review)
+	if len(whole.UsedBy) != 3 || whole.Incomplete {
+		t.Fatalf("want backend first, other small and other review: %+v", whole.UsedBy)
+	}
+	if pick := uses["other/small"].Replacement; pick.Harness != "codex" || pick.Model != sol.Model {
+		t.Fatalf("the small situation falls back to %+v, want %s", pick, sol.Model)
+	}
+	if review, ok := uses["other/review"]; !ok || review.Layer != "default" {
+		t.Fatalf("review situation use missing or lost its layer: %+v", whole.UsedBy)
 	}
 	// A route that is gone means the page asks about a version that changed.
 	boardError(t, boardCall(t, admin, "GET", base+"?profile=00000000-0000-4000-8000-000000000000", nil, ""), 409, "stale_removal_set")
