@@ -173,6 +173,11 @@ func (m *Module) runtimeFence(ctx context.Context, tx pgx.Tx, p tenant.Principal
 }
 
 func (m *Module) validateLeadLaunch(ctx context.Context, tx pgx.Tx, p tenant.Principal, in agentsetup.LeadPickup, launch agentsetup.LeadLaunch) error {
+	if reason, err := authz.ProjectStartReasonTx(ctx, tx, in.Demand.ProjectID); err != nil {
+		return err
+	} else if reason != "" {
+		return workorders.Fail(409, reason)
+	}
 	g := launch.Grant
 	if g.Validate() != nil || launch.Demand != in.Demand || g.LaunchID != in.Demand.ID || g.ProjectID != in.Demand.ProjectID || g.RoutineRunID != in.Demand.RoutineRunID || g.OwnerID != in.Demand.OwnerID || g.TenantID != p.TenantID || g.PrincipalID != p.ID || g.DaemonID != in.DaemonID || g.DaemonGeneration != in.DaemonGeneration || g.LedgerGeneration != in.LedgerGeneration || g.AccountID != in.AccountID || g.ComputerID != in.ComputerID || g.DaemonDigest != in.DaemonDigest || g.CapabilityDigest != in.CapabilityDigest || launch.Generation != in.Demand.Generation+1 || !workorders.UUID(launch.ProfileID) || launch.Model == "" || len(launch.Model) > 256 || len(launch.Effort) > 32 || !validHarness(launch.Harness) || len(launch.Host) < 1 || len(launch.Host) > 128 || launch.MaxDurationSeconds < 1 || launch.MaxDurationSeconds > 86400 {
 		return workorders.Fail(409, "lead_runtime_binding_changed")

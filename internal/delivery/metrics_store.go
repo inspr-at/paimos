@@ -212,17 +212,21 @@ type metricSourceRow struct {
 	Repository, CIWorkflow, NightlyWorkflow string
 	Cursor                                  *backfillCursor
 	Revision                                int64
+	BackfillDays                            int
 	Since, DoneAt                           *time.Time
+	LastReadError                           *MetricReadError
+	Pending                                 bool
+	LastEventAt, RetryAt                    *time.Time
 }
 
 func loadMetricSourceTx(ctx context.Context, tx pgx.Tx, project string, lock bool) (*metricSourceRow, error) {
 	var s metricSourceRow
-	var raw []byte
-	query := `SELECT project_id::text,repository,ci_workflow,nightly_workflow,backfill_cursor,backfill_revision,backfill_since,backfill_done_at FROM delivery_metric_sources WHERE project_id=$1`
+	var raw, readError []byte
+	query := `SELECT project_id::text,repository,ci_workflow,nightly_workflow,backfill_cursor,backfill_revision,backfill_since,backfill_done_at,last_read_error,last_event_at,backfill_retry_at,coalesce(backfill_pending,false),coalesce(backfill_days,30) FROM delivery_metric_sources WHERE project_id=$1`
 	if lock {
 		query += ` FOR NO KEY UPDATE`
 	}
-	err := tx.QueryRow(ctx, query, project).Scan(&s.Project, &s.Repository, &s.CIWorkflow, &s.NightlyWorkflow, &raw, &s.Revision, &s.Since, &s.DoneAt)
+	err := tx.QueryRow(ctx, query, project).Scan(&s.Project, &s.Repository, &s.CIWorkflow, &s.NightlyWorkflow, &raw, &s.Revision, &s.Since, &s.DoneAt, &readError, &s.LastEventAt, &s.RetryAt, &s.Pending, &s.BackfillDays)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -235,6 +239,11 @@ func loadMetricSourceTx(ctx context.Context, tx pgx.Tx, project string, lock boo
 			return nil, err
 		}
 		s.Cursor = &c
+	}
+	if readError != nil {
+		if err = json.Unmarshal(readError, &s.LastReadError); err != nil {
+			return nil, err
+		}
 	}
 	return &s, nil
 }

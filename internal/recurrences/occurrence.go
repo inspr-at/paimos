@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -239,6 +240,12 @@ func occurSource(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recur
 	}
 	if err = authorizeRunOwner(ctx, tx, actor, r); err != nil {
 		return Occurrence{}, err
+	}
+	if reason == "" {
+		reason, err = authz.ProjectStartReasonTx(ctx, tx, r.ProjectID)
+		if err != nil {
+			return Occurrence{}, err
+		}
 	}
 	// The locked reload replaces the earlier normalized copy.
 	switch r.Template.Type {

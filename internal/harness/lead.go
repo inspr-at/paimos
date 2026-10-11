@@ -124,14 +124,14 @@ func projectLeadActions(ctx context.Context, tx pgx.Tx, p tenant.Principal, stor
 	if stored.Reason == adoptionPending && stored.Generation == 0 && stored.SessionID != nil {
 		actions.CancelAdoption = leadAction("")
 	}
-	active, err := leadProject(ctx, tx, stored.ProjectID)
+	lifecycle, err := leadProject(ctx, tx, stored.ProjectID)
 	if err != nil {
 		return actions, err
 	}
 	startReason := ""
 	switch {
-	case !active:
-		startReason = "project_archived"
+	case lifecycle != "":
+		startReason = lifecycle
 	case view.ProcessActive:
 		startReason = "process_exit_unconfirmed"
 	case !view.AutomaticLaunchEnabled:
@@ -143,8 +143,8 @@ func projectLeadActions(ctx context.Context, tx pgx.Tx, p tenant.Principal, stor
 		actions.Resume = leadAction("lead_not_paused")
 	}
 	switch {
-	case !active:
-		actions.Adopt = leadAction("project_archived")
+	case lifecycle != "":
+		actions.Adopt = leadAction(lifecycle)
 	case stored.SessionID != nil:
 		actions.Adopt = leadAction("ordinary_succession_required")
 	case stored.State == "paused":
@@ -266,12 +266,10 @@ func leadFence(ctx context.Context, tx pgx.Tx, projectID string) error {
 	}
 	return lockHierarchy(ctx, tx, projectID)
 }
-func leadProject(ctx context.Context, tx pgx.Tx, projectID string) (bool, error) {
-	var state string
-	var deleted *time.Time
-	err := tx.QueryRow(ctx, `SELECT n.state,n.deleted_at FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1 AND k.slug='project'`, projectID).Scan(&state, &deleted)
-	return state != "archived" && deleted == nil, err
+func leadProject(ctx context.Context, tx pgx.Tx, projectID string) (string, error) {
+	return authz.ProjectStartReasonTx(ctx, tx, projectID)
 }
+
 func leadOwner(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID, owner string) error {
 	var canonical string
 	err := tx.QueryRow(ctx, `SELECT c.id::text FROM principals p JOIN principals c ON c.tenant_id=p.tenant_id AND c.id=coalesce(p.linked_to,p.id) WHERE p.id=$1 AND p.kind='person' AND p.status='active' AND c.kind='person' AND c.status='active'`, owner).Scan(&canonical)
@@ -323,7 +321,7 @@ func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead, rea
 		return l, err
 	}
 	l.AutomaticLaunchEnabled = policy.AutomaticLaunchEnabled
-	active, err := leadProject(ctx, tx, l.ProjectID)
+	lifecycle, err := leadProject(ctx, tx, l.ProjectID)
 	if err != nil {
 		return l, err
 	}
@@ -335,8 +333,8 @@ func projectLead(ctx context.Context, tx pgx.Tx, p tenant.Principal, l Lead, rea
 	if l.State == "none" {
 		return l, nil
 	}
-	if !active {
-		l.State, l.Reason = "cannot_start", "project_archived"
+	if lifecycle != "" {
+		l.State, l.Reason = "cannot_start", lifecycle
 		return l, nil
 	}
 	if err = leadOwner(ctx, tx, p, l.ProjectID, l.owner); errors.Is(err, authz.ErrForbidden) {
@@ -414,12 +412,12 @@ func (m *Module) startLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err := leadOwner(ctx, tx, p, id, p.ID); err != nil {
 		return nil, err
 	}
-	active, err := leadProject(ctx, tx, id)
+	lifecycle, err := leadProject(ctx, tx, id)
 	if err != nil {
 		return nil, err
 	}
-	if !active {
-		return nil, workorders.Fail(409, "project archived")
+	if lifecycle != "" {
+		return nil, workorders.Fail(409, lifecycle)
 	}
 	l, err := loadLead(ctx, tx, id, true)
 	if err != nil {
@@ -506,6 +504,9 @@ func (m *Module) removeLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 }
 
 func (m *Module) checkLeadAdmission(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner string, s Session) (string, error) {
+	if reason, err := authz.ProjectStartReasonTx(ctx, tx, s.ProjectID); err != nil || reason != "" {
+		return reason, err
+	}
 	if m.leadAdmission == nil {
 		return "admission_unavailable", nil
 	}
@@ -555,12 +556,12 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if l.Revision != in.Revision {
 		return nil, workorders.Fail(409, "lead revision conflict")
 	}
-	active, err := leadProject(ctx, tx, id)
+	lifecycle, err := leadProject(ctx, tx, id)
 	if err != nil {
 		return nil, err
 	}
-	if !active {
-		return nil, workorders.Fail(409, "project archived")
+	if lifecycle != "" {
+		return nil, workorders.Fail(409, lifecycle)
 	}
 	if err = leadOwner(ctx, tx, p, id, l.owner); err != nil {
 		return nil, err
@@ -784,6 +785,9 @@ func RequireCurrentLeadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, pr
 		return err
 	}
 	if l.State != "working" {
+		if l.Reason == "project_frozen" || l.Reason == "project_archived" {
+			return workorders.Fail(409, l.Reason)
+		}
 		return workorders.Fail(409, "lead generation unavailable")
 	}
 	var agent string

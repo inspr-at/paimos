@@ -143,6 +143,8 @@
         "internal/agents/**",
         "internal/hooknote/**",
         "internal/delivery/**",
+        "internal/delivery/metrics_worker.go",
+        "internal/delivery/metrics_worker_test.go",
         "internal/delivery/keepalive_poison_test.go",
         "internal/delivery/webhook_log.go",
         "internal/delivery/webhook_log_test.go",

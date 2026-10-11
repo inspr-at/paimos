@@ -248,7 +248,11 @@ func (m *Module) claimQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	}
 	out := QueueClaim{Request: in.Request, Project: project, Mode: s.Mode, Reason: "queue_empty", Decisions: []QueueDecision{}, ScriptRound: in.ScriptRound}
 	changes := []events.Change{}
-	if s.Mode == "off" {
+	if lifecycle, err := authz.ProjectStartReasonTx(ctx, tx, project); err != nil {
+		return out, err
+	} else if lifecycle != "" {
+		out.Reason = lifecycle
+	} else if s.Mode == "off" {
 		out.Reason = "queue_off"
 	} else {
 		rows, err := tx.Query(ctx, `SELECT snapshot FROM delivery_work_rounds WHERE project_id=$1 AND state='queued' ORDER BY position LIMIT 101 FOR NO KEY UPDATE`, project)

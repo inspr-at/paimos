@@ -263,6 +263,13 @@ func (m *Module) changeRound(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return nil, 200, err
 			}
+			if in.State == "running" {
+				if reason, err := authz.ProjectStartReasonTx(r.Context(), tx, project); err != nil {
+					return nil, 200, err
+				} else if reason != "" {
+					return nil, 200, fail(409, reason)
+				}
+			}
 			if in.State == "running" && (s.Mode != "shadow" || before.Hold != nil || slicesHeld(s, before)) {
 				return nil, 200, fail(409, "round is held or shadow queue is off")
 			}

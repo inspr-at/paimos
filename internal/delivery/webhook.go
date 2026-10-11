@@ -178,6 +178,10 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 		m.rejectWebhook(w, r, e.Action, "audit", 404, webhookClass("repository_mismatch"))
 		return
 	}
+	if err := m.recordMetricEvent(r.Context()); err != nil {
+		m.rejectWebhook(w, r, e.Action, "audit", 502, err)
+		return
+	}
 	// A workflow run is a flow fact, not a delivery observation. The audit
 	// handler records the live checks after this acceptance.
 	if name == "workflow_run" {
@@ -389,4 +393,15 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(204)
+}
+
+func (m *Module) recordMetricEvent(ctx context.Context) error {
+	service := db.AllProjects(ctx, "authenticated repository webhook receipt")
+	return db.InTenant(service, m.pool, m.config.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockTenant(ctx, tx, m.config.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE delivery_metric_sources SET last_event_at=greatest(last_event_at,$2) WHERE repository=$1`, m.config.Repository, m.now())
+		return err
+	})
 }
