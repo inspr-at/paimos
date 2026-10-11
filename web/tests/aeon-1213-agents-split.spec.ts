@@ -66,7 +66,13 @@ async function designProbe(page: Page) {
     // check.mjs's row contract also applies to the real table and compact
     // forms. Measure rendered text, including each parent's summary, clipping
     // ranges to overflow bounds so hidden ellipsis text is never counted.
-    const texts = [...work.querySelectorAll('.sessions .row[data-row]')].filter(visible).map(row => {
+    const rows = [...work.querySelectorAll('.sessions .row[data-row]')].filter(visible)
+    const contentOverflow: string[] = [], rowOverlap: string[] = []
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i - 1]!.getBoundingClientRect().bottom > rows[i]!.getBoundingClientRect().top + .5) rowOverlap.push(`${rows[i - 1]!.getAttribute('data-row')} / ${rows[i]!.getAttribute('data-row')}`)
+    }
+    const texts = rows.map(row => {
+      const frame = row.getBoundingClientRect()
       const samples: { text: string; left: number; right: number; top: number; bottom: number }[] = []
       const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT)
       while (walker.nextNode()) {
@@ -80,7 +86,11 @@ async function designProbe(page: Page) {
             if (css.overflowX !== 'visible') { left = Math.max(left, box.left); right = Math.min(right, box.right) }
             if (css.overflowY !== 'visible') { top = Math.max(top, box.top); bottom = Math.min(bottom, box.bottom) }
           }
-          if (right - left > .5 && bottom - top > .5) samples.push({ text: node.textContent.trim().slice(0, 40), left, right, top, bottom })
+          if (right - left > .5 && bottom - top > .5) {
+            const text = node.textContent.trim().slice(0, 40)
+            samples.push({ text, left, right, top, bottom })
+            if (top < frame.top - .5 || bottom > frame.bottom + .5) contentOverflow.push(text)
+          }
         }
       }
       return samples
@@ -89,12 +99,14 @@ async function designProbe(page: Page) {
     for (let i = 0; i < texts.length; i++) for (let j = i + 1; j < texts.length; j++) for (const a of texts[i]!) for (const b of texts[j]!) {
       if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > .5 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > .5) overlaps.push(`${a.text} / ${b.text}`)
     }
-    return { edges, glyphs, avatars, english, overlaps, overflow: document.documentElement.scrollWidth - innerWidth }
+    return { edges, glyphs, avatars, english, overlaps, contentOverflow, rowOverlap, overflow: document.documentElement.scrollWidth - innerWidth }
   })
 }
 async function checkRows(page: Page, label: string) {
   const probe = await designProbe(page)
   expect(probe.overlaps, `${label}: no two row texts overlap`).toEqual([])
+  expect(probe.contentOverflow, `${label}: row text stays within its own frame`).toEqual([])
+  expect(probe.rowOverlap, `${label}: row frames do not overlap`).toEqual([])
   expect(probe.edges).toEqual([]); expect(probe.glyphs).toEqual([]); expect(probe.english).toEqual([]); expect(probe.overflow).toBeLessThanOrEqual(1)
   console.log(`check.mjs (P5 routed adapter): PASS ${label} · row texts do not overlap · no edge accents · SVG icons · English controls · no sideways scroll`)
 }
