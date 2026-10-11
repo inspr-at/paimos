@@ -147,6 +147,8 @@ function planningDescribedBy(row: ListItem): string {
 const width = ref(1200)
 const phoneQuery = window.matchMedia('(max-width: 720px)')
 const phone = ref(phoneQuery.matches)
+const coarseQuery = window.matchMedia('(pointer: coarse)')
+const coarse = ref(coarseQuery.matches)
 // One live feed for the whole list (AEON-233). Workers are matched to loaded rows;
 // a ticket with a worker earns Assignee even when nobody is the stored owner.
 const live = useLiveAgents()
@@ -189,7 +191,13 @@ function progressOf(row: ListItem): { pct: number; stale: boolean; label: string
   return { pct, stale, label: props.liveStale ? `${label}. Showing the last successful update.` : label }
 }
 const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false }))
-const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({ ...def, field: def.sort, cls: CLS[def.id as ColumnId] ?? 'c-host' })))
+const columns = computed(() => withHostColumns(layout.value.columns, props.extraColumns).map(def => ({
+  ...def,
+  // Keep the designed text room after reserving the extra arrow reach (26px)
+  // and action reach (40px). Saved tablet layouts can scroll inside the card.
+  min: def.min + (def.id === 'title' && coarse.value && !phone.value ? 66 : 0),
+  field: def.sort, cls: CLS[def.id as ColumnId] ?? 'c-host',
+})))
 const definitions = computed<ReadonlyMap<string, ColumnDef>>(() => new Map<string, ColumnDef>([...COLUMN_BY_ID, ...columns.value.map(def => [def.id, def] as const)]))
 const hostIds = computed(() => new Set(columns.value.filter(column => !COLUMN_BY_ID.has(column.id as ColumnId)).map(column => column.id)))
 const customised = computed(() => layout.value.customised || !!hostIds.value.size)
@@ -259,8 +267,10 @@ const quickAligned = computed(() => ids.value[2] === 'status' && ids.value[3] ==
 const card = ref<HTMLElement>()
 let sizer: ResizeObserver | undefined
 const phoneChange = () => { phone.value = phoneQuery.matches }
+const coarseChange = () => { coarse.value = coarseQuery.matches }
 onMounted(() => {
   phoneChange(); void fitLoaded(); phoneQuery.addEventListener('change', phoneChange)
+  coarseQuery.addEventListener('change', coarseChange)
   if (card.value) {
     // The first fit happens before paint, so the columns never jump into place.
     const box = getComputedStyle(card.value)
@@ -268,7 +278,7 @@ onMounted(() => {
     sizer = new ResizeObserver(([entry]) => { width.value = entry.contentRect.width }); sizer.observe(card.value)
   }
 })
-onBeforeUnmount(() => { fitGeneration++; phoneQuery.removeEventListener('change', phoneChange); sizer?.disconnect() })
+onBeforeUnmount(() => { fitGeneration++; phoneQuery.removeEventListener('change', phoneChange); coarseQuery.removeEventListener('change', coarseChange); sizer?.disconnect() })
 // ---------- Column widths: drag a header edge; double-click fits, or resets Title ----------
 let resizing: { id: string; startX: number; startWidth: number } | null = null
 // Two presses within 350ms on the same edge fit the column (pointerdown's
@@ -1196,6 +1206,8 @@ td.c-title { position: relative; overflow: hidden; }
   /* Parents have only Open. Reserving an absent Queue target would consume
      their title after the full arrow reach and subtree progress are drawn. */
   td.c-title:has(.row-actions > :only-child) .title-cell { padding-right: 52px; }
+  /* The count carries the same progress when the touch controls need room. */
+  .epic-progress .bar { display: none; }
 }
 
 .status-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; margin-left: -8px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink); font-size: 13px; line-height: 18px; white-space: nowrap; }
