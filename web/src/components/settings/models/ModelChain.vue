@@ -2,6 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '../../AppIcon.vue'
+import KeyCap from '../../KeyCap.vue'
 import HarnessMark from '../../agents/HarnessMark.vue'
 import {
   defaultTail, endText, entryFor, fallbackSentence, lineFallback, lineFamily, routeNote, showsEffort, stepText,
@@ -23,7 +24,8 @@ const editable = computed(() => props.row.editable && !props.row.draft)
 const name = computed(() => props.row.isDefault ? 'the default' : props.row.label)
 const kind = computed(() => props.row.isDefault ? 'all work' : props.row.label)
 const sentence = computed(() => fallbackSentence(props.row, props.entries))
-const sentenceText = computed(() => `If ${sentence.value.pick} can’t run → ${sentence.value.steps.join(' → ')}`)
+// The tip is text, so the arrows the sentence draws read as words there.
+const sentenceText = computed(() => `If ${sentence.value.pick} can’t run, then ${sentence.value.steps.join(', then ')}`)
 const sentenceLabel = computed(() => `Fallback for ${name.value}: if ${sentence.value.pick} can’t run, then ${sentence.value.steps.join(', then ')}`)
 const tail = computed(() => defaultTail(props.base, props.entries))
 const first = computed<SimpleStep>(() => ({ line: props.row.line ?? '', effort: props.row.effort }))
@@ -138,7 +140,7 @@ function endKeys(event: KeyboardEvent) {
             >
               <button
                 v-if="moves(index)" type="button" class="grip" :data-move="`${row.key}:${index}`"
-                :aria-label="`Move ${nameOf(step)}, step ${index + 2} of ${count}. Use the arrow keys`" data-tip="Drag, or press ↑ ↓"
+                :aria-label="`Move ${nameOf(step)}, step ${index + 2} of ${count}. Use the arrow keys`" data-tip="Drag, or press the Up or Down arrow"
                 @pointerdown="grab($event, index)" @keydown.stop="stepKeys($event, index, true)"
               ><AppIcon name="grip" :size="14" /></button>
               <span v-else class="grip-sp" aria-hidden="true" />
@@ -174,7 +176,7 @@ function endKeys(event: KeyboardEvent) {
             <button v-if="allow(never)" type="button" class="link-btn quiet" :data-unnever="`${row.key}:${never.line}`" @click="emit('allow', never)">Allow again</button>
           </p>
           <p v-if="row.lock && !everyone" class="ch-hint"><AppIcon name="lock" :size="12" />Locked for everyone, with its order.</p>
-          <p v-else-if="editable && movable > 1" class="ch-hint">Drag to reorder, or focus a handle and use ↑ ↓.</p>
+          <p v-else-if="editable && movable > 1" class="ch-hint" :data-reorder="row.key"><span>Drag to reorder, or focus a handle and use <KeyCap k="up" /> <KeyCap k="down" />.</span></p>
           <p v-if="editable && fixed" class="ch-hint" :data-fixed="row.key"><AppIcon name="lock" :size="12" />{{ fixedText }}</p>
           <p v-if="several" class="ch-hint"><AppIcon name="route" :size="12" />A model with several routes tries each one before the next step.</p>
           <p v-if="row.isDefault" class="ch-hint"><AppIcon name="gauge" :size="12" />At a daily cap, the Agents dial follows this order too.</p>

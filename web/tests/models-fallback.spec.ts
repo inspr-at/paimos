@@ -102,6 +102,10 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark']) test.des
     if (!phone) await shot(page, testInfo, `fallback-${width}-${theme}-add`, false)
     await page.keyboard.type('Sonnet'); await page.keyboard.press('Enter')
     await expect(steps(page, 'all')).toHaveText(['GPT-6.1 Sol · xhigh', 'Opus 5.5 · max', 'Sonnet 5.5 · xhigh']); await expect(page.locator('#chadd-all')).toBeFocused()
+    // The keys are drawn as keycaps in the hint and named as words in the handle's tip, never typed as arrows.
+    await expect(page.locator('[data-reorder="all"]')).toHaveText('Drag to reorder, or focus a handle and use Up arrow Down arrow.')
+    await expect(page.locator('[data-reorder="all"] .keycap svg')).toHaveCount(2)
+    await expect(page.locator('[data-move="all:1"]')).toHaveAttribute('data-tip', 'Drag, or press the Up or Down arrow')
     // ↑ on a focused handle reorders, says so, and keeps focus on the step it moved.
     await page.locator('[data-move="all:1"]').focus(); await page.keyboard.press('ArrowUp')
     await expect(steps(page, 'all')).toHaveText(['GPT-6.1 Sol · xhigh', 'Sonnet 5.5 · xhigh', 'Opus 5.5 · max'])
