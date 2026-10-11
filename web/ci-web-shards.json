@@ -1038,6 +1038,8 @@
         ,
         {"file":"tests/settings-account-pacing.spec.ts","listedTests":10,"weightSeconds":22.19512,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/settings-account-parts.spec.ts","listedTests":12,"weightSeconds":30,"weightSource":"AEON-1171 estimate: eleven mocked flows, one skipped evidence run"}
+        ,
         {"file":"tests/settings-accounts.spec.ts","listedTests":24,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/settings-agents.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
