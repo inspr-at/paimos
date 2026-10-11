@@ -317,8 +317,12 @@ func TestRoutineExecutionPrincipalEligibilityParityAndPagination(t *testing.T) {
 	admin := projectPrincipal(f, "admin")
 	admin.BrowserSession = true
 	f.call(admin, "GET", path(project), nil, 403)
-	f.call(admin, "GET", path(workspace), nil, 403)
 	f.call(admin, "GET", path(personal), nil, 404)
+	// A project grant cannot see workspace definitions. Give the administrator
+	// workspace authority before asserting that the owner-only picker refuses it.
+	f.call(admin, "GET", path(workspace), nil, 404)
+	dbtest.BindRole(t, f.d, admin.TenantID, admin.ID, "admin")
+	f.call(admin, "GET", path(workspace), nil, 403)
 	agent := tenant.Principal{ID: secondAgent, TenantID: f.p.TenantID, Kind: tenant.Agent, Scopes: permissions}
 	f.call(agent, "GET", path(project), nil, 403)
 	f.call(f.p, "GET", path(project)+"?after=broken", nil, 400)
