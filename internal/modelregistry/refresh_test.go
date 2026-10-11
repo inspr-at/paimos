@@ -639,7 +639,7 @@ func TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy(t *testing.T) {
 	})
 	foundProvider := false
 	for _, profile := range current {
-		if profile.Model != "claude-opus-5" {
+		if profile.Harness != "pi" || profile.Model != "anthropic/claude-opus-5" || profile.Version != "observed-2" {
 			continue
 		}
 		foundProvider = true
