@@ -7284,6 +7284,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigrationGolden","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2MigrationWaitPreservesInheritedRows","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NativeLevelsPerRoute","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelsV2NoRuntimeLadderReaders","tier":"ESSENTIAL"}

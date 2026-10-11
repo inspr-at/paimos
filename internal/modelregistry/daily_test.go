@@ -115,6 +115,14 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 			if err := save(); err != nil {
 				return err
 			}
+			if board {
+				// Risk: the live dial's Wait switch stops working after cutover.
+				// Migrate while following the ladder, then save Wait below so
+				// no migrated Wait-ending row can mask a missing dial bridge.
+				if _, err := tx.Exec(ctx, `SELECT aeon_migrate_models_v2($1)`, p.TenantID); err != nil {
+					return err
+				}
+			}
 			got, err := ResolveWork(ctx, tx, p, WorkQuery{Role: "build", Area: "other", Situation: "first"}, now)
 			if err != nil {
 				return err
@@ -152,6 +160,17 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 				}
 				if private.Profile != nil || private.Trace.Blocked != "Codex account cannot take new work right now" || len(private.Ladder) == 0 || !slices.Equal(private.Ladder[0].SkipReasons, []string{"Codex account cannot take new work right now"}) {
 					t.Fatalf("private Wait leaked metrics or selected a successor: %+v", private)
+				}
+				settings.AtLimit = "ladder"
+				if err := save(); err != nil {
+					return err
+				}
+				resumed, err := ResolveWork(ctx, tx, p, WorkQuery{Role: "build", Area: "other", Situation: "first"}, now)
+				if err != nil {
+					return err
+				}
+				if resumed.Profile == nil || resumed.Profile.ID != claude.ID || !slices.Equal(resumed.Trace.QualifyingAccountIDs, []string{accounts["claude"]}) {
+					t.Fatalf("saving Follow the model ladder did not restore fallback: %+v", resumed)
 				}
 			}
 		}
