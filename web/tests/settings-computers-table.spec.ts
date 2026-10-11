@@ -6,7 +6,7 @@
 // a chip save moves the chip, the row or its neighbours; Undo overwrites a newer
 // change; the phone layout scrolls sideways or has targets under 44 px; past six
 // accounts the computer names scroll out of view. AEON1174_SHOTS=1 also writes
-// the part at 1440 and 390, light and dark, into the test's output folder.
+// the part at 1440, 1024 and 390, light and dark, into the test's output folder.
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
@@ -218,10 +218,10 @@ test('past six accounts the computer column stays in view while the table scroll
   await expect(name).toBeInViewport()
 })
 
-test('evidence: the Computers part at 1440 and 390, light and dark', async ({ page }, info) => {
+test('evidence: the Computers part at 1440, 1024 and 390, light and dark', async ({ page }, info) => {
   test.skip(!process.env.AEON1174_SHOTS, 'evidence run only')
   const { build7 } = await setup(page, { expired: true })
-  for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) {
+  for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as const) {
     await page.setViewportSize({ width, height: width > 600 ? 1000 : 860 })
     await page.emulateMedia({ colorScheme: theme })
     await page.goto('/settings/computers')

@@ -1062,7 +1062,7 @@
     ,
     "browser:tests/settings-accounts.spec.ts:old windows set by hand show as Set by you with Remove, and never repeat"
     ,
-    "browser:tests/settings-computers-table.spec.ts:evidence: the Computers part at 1440 and 390, light and dark"
+    "browser:tests/settings-computers-table.spec.ts:evidence: the Computers part at 1440, 1024 and 390, light and dark"
     ,
     "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
     ,
@@ -12050,7 +12050,7 @@
     ,
     {"kind":"browser","file":"tests/settings-computers-table.spec.ts","name":"an expired sign-in says Expired in its cell and Needs you verifies it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/settings-computers-table.spec.ts","name":"evidence: the Computers part at 1440 and 390, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings-computers-table.spec.ts","name":"evidence: the Computers part at 1440, 1024 and 390, light and dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-computers-table.spec.ts","name":"on a phone › each computer is a stack of rows, nothing scrolls sideways, targets are 44 px and the chip moves nothing","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
