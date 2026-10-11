@@ -18000,6 +18000,8 @@
     ,
     {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"rejects shared keys in overlapping scopes and permits disjoint row/divider bindings","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/shortcuts.unit.test.ts","name":"shortcut help preserves approved transition labels with SVG arrows and accessible words","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > queries canonical leaves on every page and excludes parents and unknown shapes from mixed results","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > rechecks leaf eligibility at submission before remembering an account or launching","tier":"ESSENTIAL"}

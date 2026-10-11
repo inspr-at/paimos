@@ -160,7 +160,7 @@ defineExpose({ open, close })
                 </template>
               </template>
             </dt>
-            <dd>{{ row.label }}</dd>
+            <dd><template v-for="(part, p) in row.labelParts ?? [row.label]" :key="p"><template v-if="p"><AppIcon name="arrow" :size="12" class="label-arrow" /><span class="sr-only"> to </span></template>{{ part }}</template></dd>
           </div>
           <div v-for="row in section.rows" :key="row.label" class="row">
             <dt>
@@ -195,6 +195,7 @@ dl { margin: 0; }
 .row:last-child { border-bottom: 0; }
 dt { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 dd { margin: 0; font-size: 13.5px; color: var(--ink); }
+.label-arrow { margin-inline: .25em; vertical-align: -.1em; }
 .combo { display: inline-flex; gap: 3px; }
 .or { font-size: 11px; color: var(--ink-3); }
 @media (max-width: 600px) { .sheet-card { padding: 18px; } .row { grid-template-columns: 116px 1fr; } }

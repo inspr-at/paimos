@@ -15,7 +15,10 @@ import { shallowRef } from 'vue'
 import { releaseChordOpen, SEQUENCE_MS } from './places'
 
 export type ShortcutScope = 'app' | 'app without list search' | 'agents page' | 'agents page, when a split fits' | 'session list' | 'a lead row' | 'a session row' | 'the divider, when focused'
-export interface ShortcutEntry { id: string; keys: readonly string[]; scope: ShortcutScope; label: string; when?: string }
+export interface ShortcutEntry { id: string; keys: readonly string[]; scope: ShortcutScope; label: string; labelParts?: readonly string[]; when?: string }
+// Approved transition labels draw an SVG arrow between parts. Plain-text
+// consumers retain the same named states, with the direction spoken as "to".
+function transitionLabel(...labelParts: string[]) { return { label: labelParts.join(' to '), labelParts } }
 export const SHORTCUT_ENTRIES = [
   { id: 'app.palette', keys: ['Mod+K'], scope: 'app', label: 'Search tickets, projects and actions' },
   { id: 'app.search', keys: ['/'], scope: 'app without list search', label: 'Search, on pages without a list' },
@@ -25,13 +28,13 @@ export const SHORTCUT_ENTRIES = [
   { id: 'places.business', keys: ['g then b'], scope: 'app', label: 'Go to Business' },
   { id: 'places.desk', keys: ['g then d'], scope: 'app', label: 'Decision Desk' },
   { id: 'agents.search.focus', keys: ['f', '/'], scope: 'agents page', label: 'Search sessions (this list)' },
-  { id: 'agents.layout.preset', keys: ['s'], scope: 'agents page, when a split fits', label: 'Jump the divider: Focus → Overview → List only' },
+  { id: 'agents.layout.preset', keys: ['s'], scope: 'agents page, when a split fits', ...transitionLabel('Jump the divider: Focus', 'Overview', 'List only') },
   { id: 'agents.row.next', keys: ['j', 'ArrowDown'], scope: 'session list', label: 'Next / previous session' },
   { id: 'agents.row.prev', keys: ['k', 'ArrowUp'], scope: 'session list', label: 'Next / previous session' },
   { id: 'agents.group.fold', keys: ['ArrowLeft'], scope: 'a lead row', label: 'Fold / unfold its workers' },
   { id: 'agents.group.unfold', keys: ['ArrowRight'], scope: 'a lead row', label: 'Fold / unfold its workers' },
   { id: 'agents.row.open', keys: ['Enter', 'o'], scope: 'a session row', label: 'Open (in the last split)' },
-  { id: 'agents.details.close', keys: ['Escape'], scope: 'agents page', label: 'Close the details → List only' },
+  { id: 'agents.details.close', keys: ['Escape'], scope: 'agents page', ...transitionLabel('Close the details', 'List only') },
   { id: 'agents.session.pause', keys: ['p'], scope: 'a session row', label: 'Pause / resume' },
   { id: 'agents.session.resume', keys: ['r'], scope: 'a session row', label: 'Pause / resume' },
   { id: 'agents.filter.add', keys: ['Shift+F'], scope: 'agents page', label: 'Add a filter' },
@@ -148,7 +151,7 @@ export function createShortcutRegistry(context = browserContext, now = () => Dat
   const hint = (id: ShortcutAction) => keys(id).map(shortcutBindingHint).join(' / ')
   function help() {
     void revision.value
-    return SHORTCUT_ENTRIES.filter(entry => keys(entry.id).length > 0).map(entry => ({ ...entry, keys: keys(entry.id) }))
+    return SHORTCUT_ENTRIES.filter(entry => keys(entry.id).length > 0).map((entry): ShortcutEntry & { id: ShortcutAction } => ({ ...entry, keys: keys(entry.id) }))
   }
   function pointer(event: PointerEvent) {
     if (!pending) return

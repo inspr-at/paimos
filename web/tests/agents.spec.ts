@@ -435,7 +435,11 @@ test('AEON-1219: registry navigation and hints respect menus, fields, IME and na
   await expect(next).toContainText('Down arrow')
   await expect(sheet.locator('dd', { hasText: /^Decision Desk$/ })).toBeVisible()
   await expect(sheet.getByText('Search sessions (this list)', { exact: true })).toHaveCount(0)
-  await expect(sheet.getByText('Jump the divider: Focus → Overview → List only', { exact: true })).toHaveCount(0)
+  await expect(sheet.locator('dd', { hasText: /^Jump the divider:/ })).toHaveCount(0)
+  const closeLabel = sheet.getByText('Close the details to List only', { exact: true })
+  await expect(closeLabel).toBeVisible()
+  await expect(closeLabel.locator('svg')).toHaveCount(1)
+  await expect(closeLabel).not.toContainText('→')
   const close = sheet.getByRole('button', { name: 'Close shortcuts' })
   const sheetGuard = await controlStability(page, { close })
   await sheetGuard.check(async () => {

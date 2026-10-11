@@ -17,6 +17,10 @@ existing KeyCap component with chords and sequence steps. Defaults remain the
 resolved bindings in release 130. Person overrides and their editor belong to
 AEON-1202.
 
+Transition labels carry `labelParts` for the shortcut sheet to separate with
+AppIcon arrows. The plain `label` joins the same parts with "to", so text-only
+consumers and screen readers keep the transition's meaning.
+
 Search (`f`, `/`), layout (`s`), filter, grouping and divider entries are ready
 for their owning Agents packages to attach. This package migrates the existing
 Agents navigation, open, pause, resume and close handlers, plus the header's

@@ -2,7 +2,38 @@
 // Risk: overlapping bindings can fire the wrong session action; global keys
 // must never take input, IME or native shortcuts away from their current owner.
 import { expect, it, vi } from 'vitest'
-import { createShortcutRegistry, SHORTCUT_ENTRIES, shortcutConflicts, type ShortcutEntry } from '../src/lib/shortcuts'
+import { createSSRApp } from 'vue'
+import { renderToString } from '@vue/server-renderer'
+import ShortcutSheet from '../src/components/work/ShortcutSheet.vue'
+import { createShortcutRegistry, onAction, SHORTCUT_ENTRIES, shortcutConflicts, type ShortcutEntry } from '../src/lib/shortcuts'
+
+it('shortcut help preserves approved transition labels with SVG arrows and accessible words', async () => {
+  // Risk: approved transition copy must keep its arrows without text glyphs,
+  // and screen readers must still hear the direction between the named states.
+  const disposers = [
+    onAction('agents.layout.preset', () => {}),
+    onAction('agents.details.close', () => {}),
+    onAction('agents.row.next', () => {}),
+    onAction('agents.row.prev', () => {}),
+  ]
+  try {
+    const html = await renderToString(createSSRApp(ShortcutSheet))
+    const labels = [...html.matchAll(/<dd\b[^>]*>([\s\S]*?)<\/dd>/g)].map(match => match[1]!.replace(/<!--[\s\S]*?-->/g, ''))
+    for (const [start, words, arrows] of [
+      ['Jump the divider:', 'Jump the divider: Focus to Overview to List only', 2],
+      ['Close the details', 'Close the details to List only', 1],
+    ] as const) {
+      const label = labels.find(text => text.startsWith(start))!
+      expect(label).toBeDefined()
+      expect(label.match(/<svg\b/g) ?? []).toHaveLength(arrows)
+      expect(label).not.toContain('→')
+      expect(label.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim()).toBe(words)
+    }
+    expect(labels.filter(label => label === 'Next / previous session')).toHaveLength(1)
+  } finally {
+    for (const dispose of disposers) dispose()
+  }
+})
 
 it('rejects shared keys in overlapping scopes and permits disjoint row/divider bindings', () => {
   expect(shortcutConflicts()).toEqual([])
