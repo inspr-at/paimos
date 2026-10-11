@@ -33,9 +33,16 @@ async function noSideways(controls: Record<string, Locator>, before: Awaited<Ret
   }
 }
 async function capture(page: Page, name: string) { await settled(page); await page.screenshot({ path: test.info().outputPath(`${name}.png`) }) }
-async function phoneRoomy(page: Page, name: string) {
+// AEON-1188: phones reach the one Display menu through the Filters sheet's link.
+async function phoneDisplay(page: Page) {
   await page.getByRole('button', { name: 'Filters', exact: true }).click()
-  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+  await page.getByRole('dialog', { name: 'Filters', exact: true }).getByRole('button', { name: 'Display settings…', exact: true }).click()
+  const sheet = page.getByRole('dialog', { name: 'Display options', exact: true })
+  await expect(sheet.locator('.display-menu.as-sheet')).toBeVisible()
+  return sheet
+}
+async function phoneRoomy(page: Page, name: string) {
+  const sheet = await phoneDisplay(page)
   const group = sheet.getByRole('radiogroup', { name: 'Project header density' })
   await group.getByRole('radio', { name, exact: true }).click()
   await expect(group.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true')
@@ -246,10 +253,9 @@ test('device preference persists across projects and reloads, but separates peop
 test('phone Display choices and pinned actions stay still through density changes', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await mockWork(page, fixtures()); await page.goto('/p/PHAROS')
-  await page.getByRole('button', { name: 'Filters', exact: true }).click()
-  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+  const sheet = await phoneDisplay(page)
   const group = sheet.getByRole('radiogroup', { name: 'Project header density' })
-  await expectStableControls({ controls: { frame: sheet, header: sheet.locator('header'), action: sheet.locator('footer button'), group, comfortable: group.getByRole('radio', { name: 'Comfortable' }), compact: group.getByRole('radio', { name: 'Compact' }) }, scrollAreas: { body: sheet.locator('.sheet-scroll') },
+  await expectStableControls({ controls: { frame: sheet, header: sheet.locator('header'), action: sheet.locator('footer button'), group, comfortable: group.getByRole('radio', { name: 'Comfortable' }), compact: group.getByRole('radio', { name: 'Compact' }) }, scrollAreas: { body: sheet.locator('.menu-body') },
     interactions: ['Comfortable', 'Compact', 'Comfortable'].map(name => ({ name, run: async () => { await group.getByRole('radio', { name }).click(); await expect(group.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true') } })) })
 })
 
@@ -279,8 +285,7 @@ test('scrolling leaves density alone and section changes keep the view settings 
 test('phone Graph retains header density in the Display sheet', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await mockWork(page, fixtures()); await page.goto('/p/PHAROS?view=graph')
-  await page.getByRole('button', { name: 'Filters', exact: true }).click()
-  const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
+  const sheet = await phoneDisplay(page)
   const group = sheet.getByRole('radiogroup', { name: 'Project header density' })
-  await expectStableControls({ controls: { group, compact: group.getByRole('radio', { name: 'Compact' }), comfortable: group.getByRole('radio', { name: 'Comfortable' }), action: sheet.locator('footer button') }, scrollAreas: { body: sheet.locator('.sheet-scroll') }, interactions: ['Comfortable', 'Compact'].map(name => ({ name, run: async () => { await group.getByRole('radio', { name }).click(); await expect(group.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true') } })) })
+  await expectStableControls({ controls: { group, compact: group.getByRole('radio', { name: 'Compact' }), comfortable: group.getByRole('radio', { name: 'Comfortable' }), action: sheet.locator('footer button') }, scrollAreas: { body: sheet.locator('.menu-body') }, interactions: ['Comfortable', 'Compact'].map(name => ({ name, run: async () => { await group.getByRole('radio', { name }).click(); await expect(group.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true') } })) })
 })

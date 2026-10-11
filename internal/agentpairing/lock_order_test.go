@@ -55,6 +55,7 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 		"recurrences/module.go:create":                      "recurrence.lock",
 		"recurrences/module.go:update":                      "recurrence.lock",
 		"recurrences/module.go:setPaused":                   "recurrence.lock",
+		"recurrences/templates.go:applyTemplate":            "recurrence.lock",
 		"recurrences/consent.go:RequireExecutionConsentTx":  "recurrence.lock",
 		"recurrences/consent.go:writeExecutionConsent":      "recurrence.lock",
 		"recurrences/guardrails.go:putGuardrails":           "recurrence.lock",

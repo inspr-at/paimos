@@ -435,7 +435,8 @@ test('Settings lists limits set by hand as Set by you, never as a vendor percent
   const panel = page.locator('section.pane')
   await accounts.locator('.list-row').filter({ hasText: 'Claude Max' }).click()
   const claude = panel.locator('.account').filter({ hasText: 'Claude Max' })
-  await expect(claude.locator('.chip.mine')).toHaveText('Set by you')
+  // AEON-1172: no limit chip; a window set by hand shows as Set by you inside the details.
+  await expect(claude.locator('.chip.mine')).toHaveCount(0)
   await expect(claude).toContainText('Team')
   await claude.getByRole('button', { name: 'Details for Claude Max' }).click()
   await expect(claude.locator('ul.mine .what')).toContainText('5,000,000 tokens')
@@ -444,7 +445,7 @@ test('Settings lists limits set by hand as Set by you, never as a vendor percent
   await panel.getByRole('button', { name: 'Close details' }).click()
   await accounts.locator('.list-row').filter({ hasText: 'Codex Pro' }).click()
   const codex = panel.locator('.account').filter({ hasText: 'Codex Pro' })
-  await codex.getByRole('switch', { name: /Agents may use it/ }).click()
+  await panel.locator('[data-limits]').getByRole('switch', { name: 'Agents may use it · Codex Pro' }).click()
   await page.getByRole('dialog', { name: 'Drain Codex Pro?' }).getByRole('button', { name: 'Drain account' }).click()
   await expect(codex.locator('.state')).toHaveText('Paused in Settings')
   expect(calls.find(c => c.method === 'PATCH')?.body).toEqual({ state: 'draining' })

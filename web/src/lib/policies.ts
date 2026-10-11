@@ -39,6 +39,7 @@ export const ELSEWHERE_RULES: readonly ElsewhereRule[] = [
   { title: 'Approvals in force', text: 'An agent proposes an exception; a person decides. Grants are scoped, expire and can be revoked.', owner: 'Agents', status: 'Enforced', to: '/agents', permissions: ['approvals.read'] },
   { title: 'Working dial', text: 'The working dial is managed on the Agents screen.', owner: 'Agents', status: 'Advisory', to: '/agents', permissions: ['harness.read'] },
   { title: 'Agent rules', text: 'Prose guides agents. It does not authorize a write. Doctrine stays in git.', owner: 'Agent rules', status: 'Advisory', to: '/settings/agent-rules', permissions: ['rules.read'] },
+  { title: 'Routine guardrails', text: 'Every action a routine takes is checked first against the hard floor, the recommended rules and the workspace, project and personal rules; the strictest wins.', owner: 'Routines', status: 'Enforced', to: '/settings/routines', permissions: ['nodes.read'] },
   { title: 'Parallel limit and accounts', text: 'Account admission checks the account’s parallel limit.', owner: 'Accounts', status: 'Enforced', to: '/settings/accounts', permissions: ['account.read'] },
   { title: 'Model preferences', text: 'Models are chosen on the Models page: one default, overrides, and a lock that members cannot change. Pins and exclusions stored from the earlier board stay enforced; projects may tighten workspace rules.', owner: 'Model preferences', status: 'Enforced' },
   { title: 'Review ladder editing', text: 'Model registry owns the configured steps. Change one complete role order on the first tab.', owner: 'Model registry', status: 'Enforced' },
@@ -76,11 +77,12 @@ export function createPoliciesReader(owner: () => string, read: PolicyRead = rea
   const state = ref<'loading' | 'loaded' | 'denied' | 'failed'>('loading')
   const ladder = ref<PolicyLadder | null>(null), registry = ref<Permission[]>([])
   function reset() { scope.reset(); ladder.value = null; registry.value = []; state.value = 'loading' }
-  async function load(tab: PolicyTab, role: PolicyRole, allowed: boolean) {
-    lane.cancel(); ladder.value = null; registry.value = []
+  async function load(tab: PolicyTab, role: PolicyRole, allowed: boolean, retain = false) {
+    lane.cancel()
+    if (!retain || !owner() || !allowed) { ladder.value = null; registry.value = [] }
     if (!owner() || !allowed) { state.value = 'denied'; return }
     if (tab === 'elsewhere') { state.value = 'loaded'; return }
-    state.value = 'loading'
+    if (!retain) state.value = 'loading'
     await lane.run(async ({ after, signal }) => {
       const path = tab === 'ladders' ? `/models/routes?role=${encodeURIComponent(role)}` : '/authz/permissions'
       await after(read(path, signal), answer => {

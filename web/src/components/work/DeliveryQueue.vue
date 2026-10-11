@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { APIError, api } from '../../lib/api'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { createScope, scopeOwner } from '../../lib/identityScope'
 import { useSession } from '../../stores/session'
 
@@ -22,7 +22,7 @@ async function load() {
   }), value => { result.value = value; error.value = '' }), { failed: () => { error.value = props.de ? 'Die Arbeitswarteschlange konnte nicht geladen werden.' : 'Delivery queue could not be loaded.' } })
 }
 watch([() => props.projectId, () => props.nodeId, () => scopeOwner(session.identity), read], () => { scope.reset(); result.value = null; error.value = ''; void load() }, { immediate: true, flush: 'sync' })
-const stopAccess = onAccessChange(change => { if (change === 'reset') { scope.reset(); result.value = null; error.value = '' } else void load() })
+const stopAccess = onAccessRevalidate({ reset: () => { scope.reset(); result.value = null; error.value = '' }, refresh: () => { void load() } })
 const poll = setInterval(() => { void load() }, 30_000)
 onBeforeUnmount(() => { clearInterval(poll); stopAccess(); scope.dispose() })
 function kind(value: string) { return (props.de ? { first_build: 'Erstbau', fix: 'Korrektur', merge: 'Merge', land: 'Abschluss' } : { first_build: 'First build', fix: 'Fix', merge: 'Merge', land: 'Land' })[value as 'first_build'] ?? value }

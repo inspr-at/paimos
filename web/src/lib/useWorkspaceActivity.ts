@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { onScopeDispose, ref, watch, type Ref } from 'vue'
-import { onAccessChange } from './authz'
+import { onAccessRevalidate } from './authz'
 import { useIdentityScope } from './useIdentityScope'
 import { toast } from './toast'
 import { ActivityRequestError, getWorkspaceActivity, undoActivity, type WorkspaceActivityFilters, type WorkspaceActivityItem } from './workspaceActivity'
@@ -23,10 +23,10 @@ export function useWorkspaceActivity(filters: Ref<WorkspaceActivityFilters>) {
     items.value = []; cursor.value = null; error.value = ''; rowErrors.value = {}; pending.value = new Set()
     loading.value = false; loadingOlder.value = false
   }
-  function load() {
-    reset()
+  function load(retain = false) {
+    if (!retain) reset()
     if (!scope.owner.value) return Promise.resolve()
-    loading.value = true
+    loading.value = !retain || !items.value.length
     const captured = { ...filters.value }
     return lane.run(({ after, signal }) => after(getWorkspaceActivity(captured, null, signal), page => {
       items.value = page.items; cursor.value = page.next_cursor
@@ -67,7 +67,7 @@ export function useWorkspaceActivity(filters: Ref<WorkspaceActivityFilters>) {
     })
   }
   watch([filters, scope.owner], () => { void load() }, { immediate: true, deep: true, flush: 'sync' })
-  const stopAccess = onAccessChange(() => { void load() })
+  const stopAccess = onAccessRevalidate({ reset, refresh: () => { if (!pending.value.size && !loadingOlder.value) void load(true) } })
   onScopeDispose(stopAccess)
   return { items, cursor, loading, loadingOlder, error, pending, rowErrors, load, loadOlder, undo }
 }

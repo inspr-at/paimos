@@ -152,7 +152,9 @@ test('mobile filters contain only supported dimensions and Hide closed', async (
   await page.goto('/p/PHAROS/tickets?view=graph'); await ready(page)
   await page.getByRole('button', { name: 'Filters', exact: true }).click()
   const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
-  await expect(sheet.locator('.sheet-section > .eyebrow')).toHaveText(['Display', 'Status', 'Priority', 'Type'])
+  // AEON-1188: no Display section of its own, only the link to the Display menu.
+  await expect(sheet.locator('.sheet-section > .eyebrow')).toHaveText(['Status', 'Priority', 'Type'])
+  await expect(sheet.getByRole('button', { name: 'Display settings…', exact: true })).toBeVisible()
   await sheet.getByRole('checkbox', { name: 'Hide closed tickets' }).uncheck()
   await expect(sheet.getByRole('button', { name: 'Show 60 tickets' })).toBeVisible()
   await sheet.getByRole('button', { name: 'Show 60 tickets' }).click()

@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+
+	"github.com/inspr-at/paimos/internal/routineguard/pathpolicy"
 )
 
 const (
@@ -19,7 +21,7 @@ const (
 	MaxRules       = 64
 	MaxSources     = 3
 	MaxPaths       = 256
-	MaxPathBytes   = 1024
+	MaxPathBytes   = pathpolicy.MaxPathBytes
 	MaxTextBytes   = 131072
 	MaxPolicyBytes = 131072
 )
@@ -133,7 +135,7 @@ func hardRules() []Rule {
 	return out
 }
 func recommendedRules() []Rule {
-	return []Rule{{ID: "recommended.sensitive", Checkpoint: "both", Method: "words", Values: []string{"password", "credential", "secret", "passwort", "zugangsdaten"}, Result: NeedsPerson},
+	return []Rule{{ID: "recommended.sensitive", Checkpoint: "both", Method: "words", Values: pathpolicy.SensitiveWords(), Result: NeedsPerson},
 		{ID: "recommended.security_paths", Checkpoint: "action", Method: "paths", Values: []string{"internal/auth", "internal/authz", "internal/db/migrations"}, Result: NeedsPerson}}
 }
 func scopeRank(kind string) int {

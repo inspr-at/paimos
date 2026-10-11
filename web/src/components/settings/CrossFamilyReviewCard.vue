@@ -5,7 +5,7 @@ import SettingsCard from './SettingsCard.vue'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import { getProjects, type ProjectSummary } from '../../lib/api'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { createScope, scopeOwner } from '../../lib/identityScope'
 import { deliveryLanguage } from '../../lib/delivery'
 import { familyName, type ReviewFamily } from '../../lib/reviews'
@@ -78,7 +78,7 @@ watch(() => scopeOwner(session.identity), () => {
   projectScope.reset(); projects.value = []; projectsError.value = false
   void projectScope.run(({ after }) => after(getProjects(), page => { projects.value = page.items }), { failed:() => { projectsError.value = true } })
 }, { immediate:true, flush:'sync' })
-const stopAccess = onAccessChange(change => { if (change === 'reset') { clear(); projectScope.reset(); projects.value = [] } else if (!dirty.value && !busy.value) void load() })
+const stopAccess = onAccessRevalidate({ reset: () => { clear(); projectScope.reset(); projects.value = [] }, refresh: () => { if (!dirty.value && !busy.value) void load() } })
 onBeforeUnmount(() => { scope.dispose(); projectScope.dispose(); stopAccess() })
 </script>
 <template>

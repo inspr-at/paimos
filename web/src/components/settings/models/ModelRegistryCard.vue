@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '../../AppIcon.vue'
 import HarnessMark from '../../agents/HarnessMark.vue'
 import ModelRegistryEditor, { type RemoveQuestion } from './ModelRegistryEditor.vue'
-import { can, onAccessChange } from '../../../lib/authz'
+import { can, onAccessRevalidate } from '../../../lib/authz'
 import { createScope, scopeOwner } from '../../../lib/identityScope'
 import { toast } from '../../../lib/toast'
 import { listWorkKinds } from '../../../lib/workKinds'
@@ -293,7 +293,7 @@ function reset() {
 }
 // Everything above is declared before the first run: a change of person or access starts over.
 watch(scopeKey, reset, { immediate: true, flush: 'sync' })
-const stopAccess = onAccessChange(reset)
+const stopAccess = onAccessRevalidate({ reset, refresh: () => { if (scopeKey.value && !saving.value && !autoBusy.value && !checking.value && !question.value?.removing) void reload() } })
 onBeforeUnmount(() => { stopAccess(); scope.dispose(); stopTicker() })
 </script>
 

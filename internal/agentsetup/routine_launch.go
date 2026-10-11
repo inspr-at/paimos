@@ -10,6 +10,49 @@ import (
 
 const RoutineExecutionCapability = "routine_execution_v1"
 const RoutinePickupHeader = "X-Aeon-Routine-Pickup"
+const LeadExecutionCapability = "routine_lead_v1"
+
+// LeadDemand is durable scheduler demand, never permission to start a model.
+type LeadDemand struct {
+	ID           string `json:"id"`
+	ProjectID    string `json:"project_id"`
+	RoutineRunID string `json:"routine_run_id"`
+	OwnerID      string `json:"owner_id"`
+	Generation   int64  `json:"generation"`
+	Revision     int64  `json:"revision"`
+}
+
+// LeadPickup constrains server-owned routing to this exact local enrollment.
+// Ref and Lease are private random proofs; callers persist them before claim.
+type LeadPickup struct {
+	Demand           LeadDemand `json:"demand"`
+	DaemonID         string     `json:"daemon_id"`
+	DaemonGeneration string     `json:"daemon_generation"`
+	LedgerGeneration string     `json:"ledger_generation"`
+	AccountID        string     `json:"account_id"`
+	ComputerID       string     `json:"computer_id"`
+	DaemonDigest     string     `json:"daemon_digest"`
+	CapabilityDigest string     `json:"capability_digest"`
+	Capability       string     `json:"capability"`
+	WorktreeID       string     `json:"worktree_id"`
+	Ref              string     `json:"harness_session_ref"`
+	Lease            string     `json:"worker_lease"`
+}
+
+// LeadLaunch carries immutable role-resolved pins and the reserved actor grant.
+// Lease and local paths are deliberately absent from the server projection.
+type LeadLaunch struct {
+	Demand             LeadDemand   `json:"demand"`
+	Grant              RoutineGrant `json:"grant"`
+	SessionID          string       `json:"session_id"`
+	Generation         int64        `json:"generation"`
+	ProfileID          string       `json:"profile_id"`
+	Harness            string       `json:"harness"`
+	Model              string       `json:"model"`
+	Effort             string       `json:"effort"`
+	Host               string       `json:"host"`
+	MaxDurationSeconds int64        `json:"max_duration_seconds"`
+}
 
 // RoutineGrant is immutable server intent, not a credential. The final claim
 // independently checks current consent, qualification, admission and budget.

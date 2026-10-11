@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import { useIdentityScope } from '../../lib/useIdentityScope'
 import { addPhonePasskey, decodeBytes, deviceSubscriptionHash, minuteTime, phoneError, phoneRequest, phoneSettings, timeMinute, type PhoneSettings } from '../../lib/phoneApprovals'
 
@@ -14,17 +14,19 @@ const start = ref('22:00'), end = ref('07:00'), quiet = ref(false), zone = ref('
 const scope = useIdentityScope(() => can('profile.read')), reads = scope.lane()
 const pushSupported = typeof window !== 'undefined' && 'Notification' in window && 'PushManager' in window && 'serviceWorker' in navigator
 const enableReady = computed(() => pushSupported && !!settings.value?.push_available && !!settings.value.passkeys.length)
-function applySettings(value: PhoneSettings) {
+function applySettings(value: PhoneSettings, keepDraft = false) {
     settings.value = value
+    if (keepDraft) return
     const prefs = value.preferences
     quiet.value = prefs.quiet_start !== prefs.quiet_end
     start.value = minuteTime(prefs.quiet_start); end.value = minuteTime(prefs.quiet_end)
     zone.value = prefs.time_zone; escalation.value = prefs.escalation_minutes
 }
 function load() {
+  const draft = JSON.stringify(preferences()), keepDraft = dirty.value
   error.value = ''
   return reads.run(({ after, signal }) => after(Promise.all([phoneSettings(signal), deviceSubscriptionHash().catch(() => '')]), ([value, hash]) => {
-    applySettings(value); deviceHash.value = hash
+    applySettings(value, keepDraft || JSON.stringify(preferences()) !== draft); deviceHash.value = hash
   }), { failed: e => { error.value = phoneError(e) } })
 }
 function act(work: (signal: AbortSignal) => Promise<unknown>, result: string, pending = '') {
@@ -39,6 +41,7 @@ function preferences(enabled = settings.value?.preferences.enabled ?? false) {
   return { enabled, time_zone: zone.value, quiet_start: quiet.value ? timeMinute(start.value) : 0,
     quiet_end: quiet.value ? timeMinute(end.value) : 0, escalation_minutes: Number(escalation.value) }
 }
+const dirty = computed(() => !!settings.value && Object.entries(preferences()).some(([key, value]) => settings.value!.preferences[key as keyof PhoneSettings['preferences']] !== value))
 function save() { return act(signal => phoneRequest('/me/phone-approvals/settings', 'PUT', preferences(), signal), 'Notification settings saved.') }
 function enable() {
   if (busy.value || !settings.value?.push_available || !settings.value.passkeys.length || !can('profile.write') || !pushSupported) return
@@ -67,11 +70,12 @@ function addPasskey() {
 function pause() {
   return act(signal => phoneRequest('/me/phone-approvals/settings', 'PUT', preferences(false), signal), 'Phone notifications paused.')
 }
-const stopAccess = onAccessChange(() => {
-  scope.reset(); settings.value = null; deviceHash.value = ''; message.value = ''; busy.value = false
-  if (can('profile.read')) void load()
-})
-watch(scope.owner, () => { settings.value = null; deviceHash.value = ''; message.value = ''; error.value = ''; scope.reset(); busy.value = false; void load() }, { flush: 'sync' })
+function reset() {
+  scope.reset(); settings.value = null; deviceHash.value = ''; message.value = ''; error.value = ''; busy.value = false
+  start.value = '22:00'; end.value = '07:00'; quiet.value = false; zone.value = 'UTC'; escalation.value = 15
+}
+const stopAccess = onAccessRevalidate({ reset, refresh: () => { if (can('profile.read') && !busy.value) void load() } })
+watch(scope.owner, () => { reset(); void load() }, { flush: 'sync' })
 onMounted(() => {
   void load()
   if (!('PublicKeyCredential' in window)) platform.value = false

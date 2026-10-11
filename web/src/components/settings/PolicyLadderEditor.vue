@@ -5,7 +5,7 @@ import { createPolicyEditor, policyJSON, policyRequest } from '../../lib/policyE
 import { readLadder, writeLadder, ladderDraft, compensateLadder, type LadderMutation, type ModelRoute, type EditableLadder } from '../../lib/policyModels'
 import { stepName, stepState, truncatedLadder, type PolicyRole, type PolicyStep } from '../../lib/policies'
 import { createScope } from '../../lib/identityScope'
-import { can, onAccessChange } from '../../lib/authz'
+import { can, onAccessRevalidate } from '../../lib/authz'
 import PolicyEditorFrame from './PolicyEditorFrame.vue'
 import PolicyEditorActions from './PolicyEditorActions.vue'
 const props = defineProps<{ owner: string; role: PolicyRole; person: boolean }>()
@@ -33,11 +33,10 @@ async function load() {
   await editor.load()
 }
 watch(() => [props.owner, props.role, authority.value], load, { immediate: true, flush: 'sync' })
-const stopAccess = onAccessChange(change => {
-  if (change === 'reset') { void load(); return }
+const stopAccess = onAccessRevalidate({ reset: () => { void load() }, refresh: () => {
   // Preserve captured revisions and Undo; a pending write owns reconciliation.
   void editor.load()
-})
+} })
 onBeforeUnmount(() => { stopAccess(); editor.dispose(); scope.dispose() })
 function edit() {
   if (!editable.value || !snapshot.value || busy.value) return

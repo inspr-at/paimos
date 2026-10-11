@@ -72,7 +72,7 @@ func (b Broker) authorize(ctx context.Context, tx pgx.Tx, p tenant.Principal, r 
 		}
 	}
 	var valid bool
-	if err := tx.QueryRow(ctx, `SELECT execute_consent AND consent_revision=definition_revision AND state NOT IN ('completed','cancelled','failed') FROM routine_runs WHERE id=$1`, r.id).Scan(&valid); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT execute_consent AND consent_revision=definition_revision AND state IN ('created','pending','queued','dispatched','starting','running') FROM routine_runs WHERE id=$1`, r.id).Scan(&valid); err != nil {
 		return policy, gate, err
 	}
 	if !valid {

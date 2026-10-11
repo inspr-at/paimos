@@ -8,7 +8,6 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
-	"github.com/inspr-at/paimos/internal/events"
 	"net/http"
 	"regexp"
 	"strings"
@@ -19,6 +18,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/modelreport"
 	"github.com/inspr-at/paimos/internal/servicetier"
@@ -27,6 +28,84 @@ import (
 )
 
 const maxUsageCount int64 = 1_000_000_000_000
+
+// RunUsage is a redacted measurement of one immutable managed run. Receipt
+// replay and successive cumulative snapshots never contribute extra rows.
+// Overlapping sessions cannot establish additive counters, so remain unknown.
+type RunUsage struct {
+	RunID                      string
+	Tokens, EstimatedAPIUSD    *string
+	KnownModels, UnknownModels int
+	Partial, Truncated         bool
+}
+
+// ReadRunUsageTx reads at most 200 runs and 200 current models per run. It
+// shares the caller's transaction/RLS snapshot and never exposes account data.
+// Estimated API list prices are not paid charges or subscription costs.
+func ReadRunUsageTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []string) ([]RunUsage, error) {
+	if len(ids) > 200 {
+		return nil, workorders.Fail(400, "run usage limit exceeded")
+	}
+	for _, id := range ids {
+		if !workorders.UUID(id) {
+			return nil, workorders.Fail(400, "invalid usage run")
+		}
+	}
+	allowed, err := authz.ProjectsTx(ctx, tx, p)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(ctx, `SELECT r.id::text,n.project_id::text,s.projects,s.sessions,
+ CASE WHEN s.sessions=1 THEN u.tokens::text END,
+ CASE WHEN s.sessions=1 THEN u.estimate::text END,
+ coalesce(u.known,0),coalesce(u.unknown,0),coalesce(u.partial,true),coalesce(u.models>200,false)
+ FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.work_order_id
+ LEFT JOIN LATERAL (SELECT count(*) AS sessions,min(id::text)::uuid AS id,array_agg(project_id::text) AS projects FROM
+  (SELECT id,project_id FROM harness_sessions WHERE tenant_id=r.tenant_id AND run_id=r.id ORDER BY created_at,id LIMIT 2) bounded) s ON true
+ LEFT JOIN LATERAL (SELECT count(*) AS models,
+  sum(input_tokens::numeric+output_tokens) FILTER(WHERE input_tokens IS NOT NULL AND output_tokens IS NOT NULL) AS tokens,
+  sum(estimated_cost_usd) FILTER(WHERE billing_mode='api') AS estimate,
+  count(*) FILTER(WHERE input_tokens IS NOT NULL AND output_tokens IS NOT NULL)::int AS known,
+  count(*) FILTER(WHERE input_tokens IS NULL OR output_tokens IS NULL)::int AS unknown,
+  bool_or(provisional OR input_tokens IS NULL OR output_tokens IS NULL OR billing_mode='unknown' OR (billing_mode='api' AND estimated_cost_usd IS NULL)) AS partial
+ FROM (SELECT input_tokens,output_tokens,provisional,billing_mode,estimated_cost_usd
+  FROM harness_session_usage WHERE tenant_id=r.tenant_id AND session_id=s.id ORDER BY model LIMIT 201) bounded) u ON s.sessions=1
+ WHERE r.id=ANY($1::uuid[]) ORDER BY r.id`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RunUsage{}
+	for rows.Next() {
+		var v RunUsage
+		var project string
+		var sourceProjects []string
+		var sessions int
+		if err := rows.Scan(&v.RunID, &project, &sourceProjects, &sessions, &v.Tokens, &v.EstimatedAPIUSD, &v.KnownModels, &v.UnknownModels, &v.Partial, &v.Truncated); err != nil {
+			return nil, err
+		}
+		if !allowed("harness.read", project) || !allowed("outcome.read", project) {
+			continue
+		}
+		visible := true
+		for _, source := range sourceProjects {
+			visible = visible && allowed("harness.read", source) && allowed("outcome.read", source)
+		}
+		if !visible {
+			continue
+		}
+		// Project-only readers cannot prove there is no hidden overlapping
+		// session. Retain their visible measurement with explicit coverage.
+		v.Partial = v.Partial || !allowed("harness.read", "") || !allowed("outcome.read", "")
+		if sessions != 1 || v.KnownModels+v.UnknownModels == 0 || v.Truncated {
+			v.Tokens, v.EstimatedAPIUSD = nil, nil
+			v.KnownModels, v.UnknownModels = 0, 1
+			v.Partial = true
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
 
 var usageModelRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/-]*$`)
 

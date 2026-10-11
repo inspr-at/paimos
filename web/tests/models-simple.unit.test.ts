@@ -19,7 +19,14 @@ const state = vi.hoisted(() => ({
   cleanups: [] as (() => void)[], access: undefined as (() => void) | undefined, manage: true, members: true,
 }))
 vi.mock('../src/stores/session', () => ({ useSession: () => state.session }))
-vi.mock('../src/lib/authz', () => ({ can: (permission: string) => permission === 'model_prefs.manage' ? state.manage : permission === 'members.read' ? state.members : true, onAccessChange: (listener: () => void) => { state.access = listener; return () => {} } }))
+vi.mock('../src/lib/authz', () => ({ can: (permission: string) => permission === 'model_prefs.manage' ? state.manage : permission === 'members.read' ? state.members : true, onAccessRevalidate: (actions: { reset: () => void; refresh: () => void }) => {
+  const owner = state.session.identity && `${state.session.identity.tenant.id}/${state.session.identity.principal.id}`
+  state.access = () => {
+    const current = state.session.identity && `${state.session.identity.tenant.id}/${state.session.identity.principal.id}`
+    if (current !== owner) actions.reset(); else actions.refresh()
+  }
+  return () => {}
+} }))
 vi.mock('vue', async original => ({ ...await original<typeof import('vue')>(), onBeforeUnmount: (cleanup: () => void) => state.cleanups.push(cleanup) }))
 vi.mock('../src/lib/api', async original => ({ ...await original<typeof import('../src/lib/api')>(), api: vi.fn() }))
 vi.mock('../src/lib/access', async original => ({ ...await original<typeof import('../src/lib/access')>(), getMembers: vi.fn() }))

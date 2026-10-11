@@ -365,6 +365,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "recurrences":
 		// This is an explicit agent allowlist. Every recurrence handler also
 		// checks the custom role and recurrences.manage key scope in its tenant.
+		if len(parts) >= 2 && parts[1] == "templates" {
+			if len(parts) == 2 && read || len(parts) == 5 && parts[2] != "" && parts[3] != "" && r.Method == http.MethodPost && (parts[4] == "preview" || parts[4] == "apply") {
+				return "recurrences.manage", true
+			}
+			return "", false
+		}
 		if len(parts) == 1 && (read || r.Method == http.MethodPost) {
 			return "recurrences.manage", true
 		}
@@ -446,6 +452,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		case "lead-settings":
 			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
 				return "nodes.read", true
+			}
+		case "lead-runtime":
+			if validRouteUUID(parts[1]) && (len(parts) == 3 && read || len(parts) == 4 && r.Method == http.MethodPost && (parts[3] == "claim" || parts[3] == "report")) {
+				return "harness.worker", true
 			}
 		case "lead":
 			if len(parts) == 4 && parts[3] == "usage" && read {
@@ -620,6 +630,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		return "inbox.send", true
 	case "models":
+		if r.Method == http.MethodPost && len(parts) == 3 && parts[1] == "harness-probes" && (parts[2] == "claim" || validRouteUUID(parts[2])) {
+			return "models.report", true
+		}
 		if r.Method == http.MethodPost && len(parts) == 2 {
 			if parts[1] == "refresh" {
 				return "models.refresh", true
