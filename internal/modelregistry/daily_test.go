@@ -103,6 +103,13 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 			return err
 		}
 		capped := "Codex account is at its daily cap until " + end.UTC().Format(time.RFC3339)
+		// The row's level picks Opus's native route: standard thinking without a
+		// saved board runs it at high, the saved deep workspace at xhigh.
+		var opusHigh string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-high' AND version=$1`, CatalogVersion).Scan(&opusHigh); err != nil {
+			return err
+		}
+		opus := map[bool]string{false: opusHigh, true: claude.ID}
 		for _, board := range []bool{false, true} {
 			var workspace string
 			if board {
@@ -132,7 +139,7 @@ func TestDailyModelsUseRankedQualifiedSuccessorsAndRespectWait(t *testing.T) {
 				if err != nil {
 					return err
 				}
-				if got.Profile == nil || got.Profile.ID != claude.ID || !slices.Equal(got.Trace.QualifyingAccountIDs, []string{accounts["claude"]}) {
+				if got.Profile == nil || got.Profile.ID != opus[board] || !slices.Equal(got.Trace.QualifyingAccountIDs, []string{accounts["claude"]}) {
 					t.Fatalf("board=%v at_limit=%s: the capped route did not continue the order: %+v", board, atLimit, got)
 				}
 				found := false
@@ -308,12 +315,20 @@ func TestDailyReviewKeepsReviewQualifiedAccounts(t *testing.T) {
 			return ResolveWork(ctx, tx, p, WorkQuery{Role: "review-gate", AuthorFamily: "openai"}, now)
 		}
 		// The only review-qualified account is exhausted; room on the unapproved sibling must not count.
+		// The Models walk names the reviewer's cap on its own step; an old saved Wait changes nothing.
+		capped := "Claude account is at its daily cap until " + end.UTC().Format(time.RFC3339)
 		for _, atLimit := range []string{"ladder", "wait"} {
 			got, err := resolve(atLimit)
 			if err != nil {
 				return err
 			}
-			if got.Profile != nil || got.Trace.Blocked != "daily_limit" || len(got.Trace.QualifyingAccountIDs) != 0 {
+			skipped := false
+			for _, step := range got.Ladder {
+				if step.ProfileID == reviewer.ID {
+					skipped = !step.Selected && slices.Equal(step.SkipReasons, []string{capped})
+				}
+			}
+			if got.Profile != nil || !got.OwnerRequired || len(got.Trace.QualifyingAccountIDs) != 0 || !skipped {
 				t.Fatalf("%s: headroom on an account review does not qualify kept the route: %+v", atLimit, got)
 			}
 		}
