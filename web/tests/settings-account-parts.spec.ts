@@ -156,17 +156,17 @@ test('every old link lands in the right part with the same panel open', async ({
   // ?account opens the account's panel in Accounts.
   await page.goto(`/settings/accounts?account=${ACCOUNTS.main}`)
   await expect(page).toHaveURL('/settings/accounts')
-  await expect(pane.getByRole('heading', { name: 'Codex' })).toBeVisible()
+  await expect(pane.getByRole('heading', { name: 'Codex', exact: true })).toBeVisible()
   await expect(pane.locator(`.use-sec [data-account="${ACCOUNTS.main}"]`)).toBeVisible()
   // ?computer&signin opens the computer's panel in Computers at that sign-in.
   await page.goto(`/settings/accounts?computer=${build7}&signin=${ACCOUNTS.claude}`)
   await expect(page).toHaveURL('/settings/computers')
-  await expect(pane.getByRole('heading', { name: 'build-7' })).toBeVisible()
+  await expect(pane.getByRole('heading', { name: 'build-7', exact: true })).toBeVisible()
   await expect(pane.locator(`.si-row.is-target[data-signin="${ACCOUNTS.claude}"]`)).toBeFocused()
   // An approval link opens the computer that holds the sign-in.
   await page.goto(`/settings/accounts?verify_account=${ACCOUNTS.claude}`)
   await expect(page).toHaveURL(`/settings/computers?verify_account=${ACCOUNTS.claude}`)
-  await expect(pane.getByRole('heading', { name: 'build-7' })).toBeVisible()
+  await expect(pane.getByRole('heading', { name: 'build-7', exact: true })).toBeVisible()
   await expect(pane.locator(`.si-row.is-target[data-signin="${ACCOUNTS.claude}"]`)).toBeVisible()
   // #add-account opens Add an account in Accounts.
   await page.goto('/settings/accounts#add-account')
@@ -191,7 +191,7 @@ test('every old link lands in the right part with the same panel open', async ({
   // In-app links take the same way.
   await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/settings/accounts?computer=d0000000-0000-4000-8000-000000000001')))
   await expect(page).toHaveURL('/settings/computers')
-  await expect(pane.getByRole('heading', { name: 'build-7' })).toBeVisible()
+  await expect(pane.getByRole('heading', { name: 'build-7', exact: true })).toBeVisible()
   expect(errors).toEqual([])
 })
 
