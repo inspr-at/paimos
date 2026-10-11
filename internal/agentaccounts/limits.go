@@ -348,7 +348,7 @@ func limitUsed(ctx context.Context, tx pgx.Tx, accountID string, rule LimitRule,
 // limitWait runs under the account FOR UPDATE lock during reserve/claim, in
 // the same transaction that stores the account and per-run estimates. Advisory
 // projections use the same arithmetic without reserving anything.
-func limitWait(ctx context.Context, tx pgx.Tx, a Account, active []Window, now time.Time, run runRow, claiming bool, s capacity.Schedule) (*CapacityWait, error) {
+func limitWait(ctx context.Context, tx pgx.Tx, a Account, active []Window, now time.Time, run runRow, claiming bool, s capacity.Schedule, exceptReservations ...string) (*CapacityWait, error) {
 	rule, err := currentLimit(ctx, tx, a.ID)
 	if err != nil || rule == nil {
 		return nil, err
@@ -373,6 +373,14 @@ func limitWait(ctx context.Context, tx pgx.Tx, a Account, active []Window, now t
 			return nil, err
 		}
 		if !now.Before(w.StartsAt) && now.Before(w.EndsAt) {
+			if len(exceptReservations) > 0 && exceptReservations[0] != "" {
+				w.ID = *rule.FromWindowID
+				projection := []Window{w}
+				if err := excludeWindowReservations(ctx, tx, projection, exceptReservations[0], false); err != nil {
+					return nil, err
+				}
+				w = projection[0]
+			}
 			estimate := int64(0)
 			if !claiming {
 				estimates, err := learnedLimitEstimates(ctx, tx, a.ID, run.LimitEstimates)
