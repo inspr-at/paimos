@@ -38,41 +38,66 @@ func prefsFixture(t *testing.T, fn func(pgx.Tx, tenant.Principal) error) {
 	}
 }
 
-// Risk: opening an unadopted Models board silently discards a saved ladder
-// before S2 has migrated it into an order.
+// Risk: migration discards a saved ladder when merely opening Models had
+// created a revision-zero workspace profile. Both pre-cutover states must
+// retain their first choice through the durable Models migration.
 func TestModelsV2UnadoptedSavedLadder(t *testing.T) {
-	prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
-		ctx := t.Context()
-		var opus string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&opus); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE model_role_routes SET priority=priority+100 WHERE role='build'`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2) ON CONFLICT(tenant_id,role,profile_id) DO UPDATE SET priority=EXCLUDED.priority`, p.TenantID, opus); err != nil {
-			return err
-		}
-		now, err := dbNow(ctx, tx)
-		if err != nil {
-			return err
-		}
-		for _, initialized := range []bool{false, true} {
-			if initialized {
-				if _, err := tx.Exec(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,revision) VALUES($1,'workspace',0)`, p.TenantID); err != nil {
+	for _, initialized := range []bool{false, true} {
+		t.Run(fmt.Sprint(initialized), func(t *testing.T) {
+			prefsFixture(t, func(tx pgx.Tx, p tenant.Principal) error {
+				ctx := t.Context()
+				var opus string
+				if err := tx.QueryRow(ctx, `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&opus); err != nil {
 					return err
 				}
-			}
-			got, err := ResolveWork(ctx, tx, p, WorkQuery{Role: "build"}, now)
-			if err != nil {
-				return err
-			}
-			if got.Profile == nil || got.Profile.ID != opus || got.OwnerRequired {
-				t.Fatalf("initialized=%v discarded saved build ladder: %+v", initialized, got)
-			}
-		}
-		return nil
-	})
+				if _, err := tx.Exec(ctx, `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, p.TenantID, opus); err != nil {
+					return err
+				}
+				if initialized {
+					if _, err := tx.Exec(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,revision) VALUES($1,'workspace',0)`, p.TenantID); err != nil {
+						return err
+					}
+				}
+				var runner, account string
+				if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Saved ladder runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
+					return err
+				}
+				if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,allowed_model_profile_ids)
+     VALUES($1,'saved-ladder','claude','saved-ladder-host',$2,'Saved ladder',now(),true,'generation',$3,ARRAY[$4::uuid]) RETURNING id::text`, p.TenantID, runner, p.ID, opus).Scan(&account); err != nil {
+					return err
+				}
+				schedule := capacity.DefaultSchedule("UTC")
+				schedule.Override = "sprint"
+				schedule.Reserve = capacity.ReserveOff
+				raw, _ := json.Marshal(schedule)
+				if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, account, raw); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(ctx, `SELECT aeon_migrate_models_v2($1)`, p.TenantID); err != nil {
+					return err
+				}
+				now, err := dbNow(ctx, tx)
+				if err != nil {
+					return err
+				}
+				got, err := ResolveWork(ctx, tx, p, WorkQuery{Role: "build"}, now)
+				if err != nil {
+					return err
+				}
+				if got.Profile == nil || got.Profile.ID != opus || got.OwnerRequired || got.Trace.PreferenceOf == nil {
+					t.Fatalf("initialized=%v discarded migrated build choice: %+v", initialized, got)
+				}
+				var rank []string
+				if err := tx.QueryRow(ctx, `SELECT o.rank FROM model_pref_orders o JOIN model_pref_profiles profile ON profile.id=o.profile_id WHERE profile.scope='workspace' AND o.column_key='other' AND o.situation='first'`).Scan(&rank); err != nil {
+					return err
+				}
+				if !reflect.DeepEqual(rank, []string{"anthropic:opus"}) {
+					t.Fatalf("saved choice was not persisted: %v", rank)
+				}
+				return nil
+			})
+		})
+	}
 }
 
 func TestResolveWorkEmptyMatrixEquivalence(t *testing.T) {

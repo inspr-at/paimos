@@ -29,8 +29,8 @@ func TestCatalogSecurityRoutesHonorOverridesAndAuthorFamily(t *testing.T) {
 		}
 	}
 	seed(admin.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO model_security_role_routes(tenant_id,role,priority,profile_id,state,reason,valid_until)
-			VALUES($1,'review-gate-security',1,$2,'conserved','Owner override',$3)`, admin.TenantID, profile, until)
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,until_at,set_by)
+		 SELECT tenant_id,harness,model,'Owner override',$2,$3 FROM model_profiles WHERE id=$1`, profile, until, admin.ID)
 		return err
 	})
 	check := func(tenantID, author string, at time.Time, want int) {
@@ -242,19 +242,19 @@ func TestCatalogCascadeMetadataAndRouting(t *testing.T) {
 	if catalog.Hosts[1].Harnesses[0].DefaultAccountID != nil || catalog.Hosts[1].Harnesses[0].Accounts[0].Available {
 		t.Fatal("empty grants permit dispatch")
 	}
-	// Active role suppression disappears at expiry, without changing a profile.
+	// A pause applies across roles and disappears at expiry without changing a profile.
 	seed(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET state='conserved',reason='test',valid_until=now()+interval '1 hour' WHERE role='build' AND profile_id=$1`, profile)
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,until_at,set_by) SELECT tenant_id,harness,model,'test',now()+interval '1 hour',$2 FROM model_profiles WHERE id=$1`, profile, admin.ID)
 		return err
 	})
 	callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/catalog", "", 200, &catalog)
 	for _, item := range catalog.Hosts[0].Harnesses[0].Accounts {
 		if item.ID == a.ID && len(item.Models) != 0 {
-			t.Fatal("suppressed role profile offered")
+			t.Fatal("paused model offered")
 		}
 	}
 	seed(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE model_role_routes SET valid_until=now()-interval '1 second' WHERE role='build' AND profile_id=$1`, profile)
+		_, err := tx.Exec(t.Context(), `UPDATE model_pauses SET until_at=now()-interval '1 second' WHERE (harness,model)=(SELECT harness,model FROM model_profiles WHERE id=$1)`, profile)
 		return err
 	})
 	callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/catalog", "", 200, &catalog)

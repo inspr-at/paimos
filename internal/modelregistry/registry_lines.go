@@ -254,8 +254,21 @@ func boardLineID(p Profile) string { f, l, _ := ProfileLine(p); return f + ":" +
 
 // Caller holds the tenant and registry fences. All transfers precede events.
 func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile) error {
-	oldLine, _ := modelsLine(before[0])
 	newLine, _ := modelsLine(after[0])
+	oldLine, _ := modelsLine(before[0])
+	aliases := []string{oldLine}
+	if legacy := boardLineID(before[0]); legacy != oldLine {
+		aliases = append(aliases, legacy)
+	}
+	for _, line := range aliases {
+		if err := transferModelLineReferences(ctx, tx, p, before, after, line, newLine); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func transferModelLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, before, after []Profile, oldLine, newLine string) error {
 	if oldLine != newLine {
 		var collision bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_rules a JOIN model_rules b ON b.tenant_id=a.tenant_id AND b.scope=a.scope AND b.project_id IS NOT DISTINCT FROM a.project_id AND b.column_key=a.column_key WHERE a.line=$1 AND b.line=$2)`, oldLine, newLine).Scan(&collision); err != nil {
@@ -266,7 +279,7 @@ func transferLineReferences(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		}
 
 		for _, table := range []string{"model_pref_orders", "model_pref_situation_orders"} {
-			if _, err := tx.Exec(ctx, `UPDATE `+table+` SET rank=CASE WHEN rank IS NULL THEN NULL ELSE ARRAY(SELECT v FROM unnest(array_replace(rank,$1,$2)) WITH ORDINALITY u(v,n) WHERE NOT v=ANY(array_replace(not_allowed,$1,$2)) GROUP BY v ORDER BY min(n)) END,efforts=CASE WHEN efforts ? $1 THEN (efforts-$1)||jsonb_build_object($2,coalesce(efforts->$2,efforts->$1)) ELSE efforts END,not_allowed=ARRAY(SELECT v FROM unnest(array_replace(not_allowed,$1,$2)) WITH ORDINALITY u(v,n) GROUP BY v ORDER BY min(n)) WHERE $1=ANY(rank) OR $1=ANY(not_allowed)`, oldLine, newLine); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE `+table+` SET rank=CASE WHEN rank IS NULL THEN NULL ELSE ARRAY(SELECT v FROM unnest(array_replace(rank,$1,$2)) WITH ORDINALITY u(v,n) GROUP BY v ORDER BY min(n)) END,efforts=CASE WHEN efforts ? $1 THEN (efforts-$1)||jsonb_build_object($2,coalesce(efforts->$2,efforts->$1)) ELSE efforts END,not_allowed=ARRAY(SELECT v FROM unnest(array_replace(not_allowed,$1,$2)) WITH ORDINALITY u(v,n) GROUP BY v ORDER BY min(n)) WHERE $1=ANY(rank) OR $1=ANY(not_allowed)`, oldLine, newLine); err != nil {
 				return err
 			}
 		}
