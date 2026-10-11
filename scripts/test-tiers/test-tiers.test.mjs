@@ -1788,10 +1788,16 @@ test('strict classification is required before tests in CI and nightly; the inde
   assert.match(job,/Report web cases needing classification\n\s+if: always\(\)/)
   for (const [source, prefix] of [[ci, ''], [nightly, 'nightly-']]) {
     const job = name => source.match(new RegExp(`\\n  ${prefix}${name}:[\\s\\S]*?(?=\\n  [a-z][a-z0-9-]*:|$)`))?.[0] ?? ''
-    const go = job('go-static'), web = job('web-setup')
+    const go = job('go-static'), web = job(prefix ? 'web-setup' : 'web-catalogue')
     assert.match(go,/cli\.mjs check go --strict/)
     assert.match(web,/Require every web case to be classified\n\s+run: node scripts\/test-tiers\/cli\.mjs check web --strict/)
-    assert.ok(web.indexOf('check web --strict') < web.indexOf('Build web'))
+    if (prefix) assert.ok(web.indexOf('check web --strict') < web.indexOf('Build web'))
+    else {
+      assert.doesNotMatch(job('web-setup'), /check web --strict/)
+      assert.equal(/^    needs: (.+)$/m.exec(web)?.[1], /^    needs: (.+)$/m.exec(job('web-setup'))?.[1], 'catalogue and runtime start from the same planning dependencies')
+      assert.match(job('web'), /needs: \[[^\n]*web-catalogue/)
+      assert.match(job('web'), /test "\$WEB_CATALOGUE" = success/)
+    }
   }
   assert.doesNotMatch(nightly,/needs:.*nightly-tier-classification/)
 })
