@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
-import type { SessionView } from '../src/stores/agents.ts'
-import { explicitOutcome, intendedResult, modelProvider, sessionContext, sessionExecution, sessionEtaEligible } from '../src/components/agents/sessionRow.ts'
+import { test } from 'vitest'
+import type { ModelProfile } from '../src/lib/agents'
+import type { SessionView } from '../src/stores/agents'
+import { explicitOutcome, intendedResult, modelNames, modelProvider, sessionExecution, sessionEtaEligible } from '../src/components/agents/sessionRow'
 
 function view(partial: Partial<SessionView> & { session?: Partial<SessionView['session']> } = {}): SessionView {
   const session = {
@@ -33,24 +34,23 @@ test('ETA guidance is limited to running sessions with a bound ticket in rows an
 test('intended result prefers an explicit phrase, then the bound ticket title, then the existing label', () => {
   const titled = view({ ticket: { id: 'n', key: 'AEON-211', title: 'Deploy approvals show the target server', href: '/p/AEON/AEON-211' }, session: { brief: 'AEON-211' } })
   assert.equal(intendedResult(titled), 'Deploy approvals show the target server')
-  assert.equal(sessionContext(titled, intendedResult(titled)), 'hausv')
   const phrase = view({ session: { brief: 'Release membership stays consistent' }, ticket: titled.ticket })
   assert.equal(explicitOutcome(phrase.session.brief), 'Release membership stays consistent')
   assert.equal(intendedResult(phrase), 'Release membership stays consistent')
   const keyOnly = view({ session: { brief: 'AEON-221' }, name: 'SC1 working' })
   assert.equal(intendedResult(keyOnly), 'AEON-221')
-  assert.equal(sessionContext(keyOnly, 'AEON-221'), 'SC1 working')
+  // The name is the session's own label, never its host (AEON-1211: the host has its own column).
   const plain = view({ name: 'amy', session: { host: 'prod-1', activity_note: 'Quiet · heartbeat only' } as SessionView['session'] })
   assert.equal(intendedResult(plain), 'amy')
-  assert.equal(sessionContext(plain, 'amy'), 'prod-1')
   assert.equal(intendedResult(plain).includes('heartbeat'), false)
 })
 
 test('execution names the reported model and effort, and omits what is not reported', () => {
   const known = view({ harness: 'Codex', session: { harness: 'codex', model: 'gpt-6-sol', reasoning_effort: 'xhigh', account_label: 'Codex Pro' } })
   const exec = sessionExecution(known)
-  assert.equal(exec.modelLine, 'gpt-6-sol · xhigh')
-  assert.equal(exec.accountLine, 'Codex · Codex Pro')
+  assert.equal(exec.modelLine, 'GPT-6 Sol · xhigh')
+  assert.equal(exec.model, 'gpt-6-sol')
+  assert.equal(exec.accountLine, 'Codex Pro')
   assert.equal(exec.provider, 'openai')
   const cursorGrok = view({ harness: 'Cursor', model: 'grok-4.7', session: { harness: 'cursor', model: 'grok-4.7', reasoning_effort: 'high' } })
   assert.equal(sessionExecution(cursorGrok).provider, 'xai')
@@ -60,8 +60,8 @@ test('execution names the reported model and effort, and omits what is not repor
   assert.equal(modelProvider('codex-astra-xhigh'), 'unknown')
   const missing = view({ harness: 'Grok', model: 'claude-fable-high', account: 'Claude Max', session: { harness: 'grok' } })
   const fallback = sessionExecution(missing)
-  assert.equal(fallback.modelLine, 'claude-fable-high')
-  assert.equal(fallback.accountLine, 'Grok · Claude Max')
+  assert.equal(fallback.modelLine, 'Claude Fable · high')
+  assert.equal(fallback.accountLine, 'Claude Max')
   assert.equal(fallback.provider, 'anthropic')
   const none = view({ harness: 'Grok', session: { harness: 'grok', heartbeat_at: new Date().toISOString() } })
   const empty = sessionExecution(none)
@@ -84,10 +84,31 @@ test('media and terminal use their execution label and never infer an AI vendor'
 
 test('heartbeat model changes refresh the same session row over a stale launch model', () => {
   const row = view({ harness: 'Claude', model: 'claude-sonnet', session: { harness: 'claude', model: 'claude-sonnet', reasoning_effort: 'low' } })
-  assert.equal(sessionExecution(row).modelLine, 'claude-sonnet · low')
+  assert.equal(sessionExecution(row).modelLine, 'Claude Sonnet · low')
   const sessionID = row.session.id
   row.session = { ...row.session, model: 'claude-opus', reasoning_effort: 'high' }
   assert.equal(row.session.id, sessionID)
-  assert.equal(sessionExecution(row).modelLine, 'claude-opus · high')
+  assert.equal(sessionExecution(row).modelLine, 'Claude Opus · high')
   assert.equal(sessionExecution(row).provider, 'anthropic')
+})
+
+// Risk (AEON-1211): the row shows a raw model id ("claude-opus-high", "gpt-6.1-sol") instead of the
+// name Settings › Models gives it. Registry fixtures here are synthetic, never a production catalog.
+test('execution uses the registry display name and level, and never a raw id', () => {
+  const profile = (fields: Partial<ModelProfile>): ModelProfile => ({ id: 'p', slug: '', harness: 'claude', family: 'anthropic', model: '', effort: 'high', tier: 'standard', enabled: true, ...fields })
+  const names = modelNames([
+    profile({ id: 'p1', slug: 'claude-opus-high', model: 'claude-opus-5-5', effort: 'high', display_name: 'Claude Opus', short_name: 'Opus', model_version: '5.5' }),
+    profile({ id: 'p2', slug: 'codex-sol-xhigh', harness: 'codex', family: 'openai', model: 'gpt-6.1-sol', effort: 'xhigh', display_name: 'Codex Sol', short_name: 'Sol', model_version: '6.1' }),
+  ])
+  // The run's pinned profile (its slug) names the model and its level.
+  const pinned = sessionExecution(view({ harness: 'Claude', model: 'claude-opus-high', account: 'Claude Max · markus', session: { harness: 'claude' } }), names)
+  assert.equal(pinned.modelLine, 'Opus 5.5 · high')
+  assert.equal(pinned.accountLine, 'Claude Max · markus')
+  // A reported model id is named by the registry; the reported level wins over the launch profile's.
+  const reported = sessionExecution(view({ harness: 'Codex', model: 'claude-opus-high', session: { harness: 'codex', model: 'gpt-6.1-sol', reasoning_effort: 'xhigh' } }), names)
+  assert.equal(reported.modelLine, 'GPT-6.1 Sol · xhigh')
+  // A model the registry does not list still reads as a name.
+  const unlisted = sessionExecution(view({ harness: 'Cursor', model: 'cursor-composer-2-5-fast', session: { harness: 'cursor' } }), names)
+  assert.equal(unlisted.modelLine, 'Cursor Composer 2.5 Fast')
+  for (const exec of [pinned, reported, unlisted]) assert.doesNotMatch(exec.modelLine, /[a-z]+-[a-z0-9]+-/)
 })

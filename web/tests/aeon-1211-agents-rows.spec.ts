@@ -4,6 +4,9 @@
 // harness again; a refresh adds, moves or removes a row under the pointer; held changes never
 // apply; an ended session vanishes at once instead of keeping its place for 10 minutes; a phone
 // scrolls sideways or gets a target under 44 px. Time is the page clock, never a sleep.
+// Fix round 3 (Tick, 2026-10-11): the columns are exactly Session · Time · Execution · Computer · Beat;
+// Execution names models as the registry does, never by raw id; line 1 is the name only (no host);
+// rows carry no listening cue, which the details say in words, with the tier.
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
@@ -12,6 +15,19 @@ const NOW = Date.parse('2026-10-11T10:00:00Z')
 const ago = (minutes: number) => new Date(NOW - minutes * 60_000).toISOString()
 const STATE_WORDS = ['Working', 'Needs something', 'Throttled', 'Problem', 'No heartbeat', 'Idle', 'Done', 'Ended', 'Paused', 'Pausing', 'Awaiting heartbeat', 'Idle · no heartbeat']
 const DONE = '5e000000-0000-4000-8000-000000000031'
+// Synthetic registry lines (never a production catalog) for the fixture's models and run slugs.
+const line = (id: string, slug: string, harness: string, family: string, model: string, effort: string, short: string, version: string) =>
+  ({ id, slug, harness, family, model, effort, tier: 'standard', enabled: true, display_name: short, short_name: short, model_version: version })
+const REGISTRY = [
+  line('m-opus', 'claude-opus-xhigh', 'claude', 'anthropic', 'claude-opus-5-5', 'xhigh', 'Opus', '5.5'),
+  line('m-fable', 'claude-fable-high', 'claude', 'anthropic', 'claude-fable', 'high', 'Fable', ''),
+  line('m-fable-x', 'claude-fable-xhigh', 'claude', 'anthropic', 'claude-fable', 'xhigh', 'Fable', ''),
+  line('m-sol', 'codex-sol-xhigh', 'codex', 'openai', 'gpt-6.1-sol', 'xhigh', 'Sol', '6.1'),
+  line('m-astra', 'codex-astra-xhigh', 'codex', 'openai', 'gpt-6.1-astra', 'xhigh', 'Astra', '6.1'),
+  line('m-luna', 'codex-luna-high', 'codex', 'openai', 'gpt-6.1-luna', 'high', 'Luna', '6.1'),
+  line('m-sonnet', 'pi-anthropic-sonnet-high', 'pi', 'anthropic', 'anthropic/claude-sonnet-4-6', 'high', 'Sonnet', '4.6'),
+  line('m-composer', 'cursor-composer-2-5-fast', 'cursor', 'cursor', 'composer-2.5-fast', 'default', 'Composer fast', '2.5'),
+]
 
 async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
   await page.clock.install({ time: NOW })
@@ -28,6 +44,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
   // Done three minutes ago: it keeps its place until 10:07.
   data.sessions.push({ ...data.sessions[0]!, id: DONE, role: 'worker', display_label: 'Release notes worker', ticket_node_id: null, ticket: null, run_id: null, phase: 'stopped', activity: 'idle', heartbeat_at: ago(3.2), stopped_at: ago(3), stop_reason: 'completed', finished: true, created_at: ago(40) })
   await mockAgents(page, data)
+  await page.route('**/api/models', route => route.request().method() === 'GET' ? route.fulfill({ json: REGISTRY }) : route.fallback())
   return data
 }
 
@@ -97,7 +114,7 @@ for (const theme of ['light', 'dark'] as const) {
       const data = await setup(page, theme)
       await page.goto('/agents')
       await expect(row(page, data.sessions[0]!.id)).toBeVisible()
-      await expect(page.locator('.sessions .thead [role="columnheader"]')).toHaveText(['Name', 'Time', 'Ticket', 'Execution', 'Tier', 'Host', 'Heartbeat', 'Actions'])
+      await expect(page.locator('.sessions .thead [role="columnheader"]')).toHaveText(['Session', 'Time', 'Execution', 'Computer', 'Beat', 'Actions'])
       const lead = row(page, data.sessions[0]!.id)
       await expect(lead.locator('.ava')).toHaveAttribute('aria-label', /^Lead .+: Working$/)
       await expect(lead.locator('.c-time')).toHaveText('1 h 12 min')
@@ -112,7 +129,7 @@ for (const theme of ['light', 'dark'] as const) {
       expect(p.english).toEqual([])
       expect(p.hscroll).toBe(false)
       await showList(page)
-      await page.screenshot({ path: info.outputPath(`${width}-${theme}-rows.png`) })
+      await page.screenshot({ path: info.outputPath(`avatars-${width}-${theme}.png`) })
       // Two lines whatever the state: every row with no tools line has one height.
       const heights = await page.locator('.sessions .row[data-row]:not(:has(.worker-tools, .lineage))').evaluateAll(els => els.map(el => `${el.getAttribute('data-row')} ${Math.round(el.getBoundingClientRect().height)}`))
       expect(new Set(heights.map(h => h.split(' ')[1])).size, heights.join(', ')).toBe(1)
@@ -129,7 +146,7 @@ for (const theme of ['light', 'dark'] as const) {
     await expect(worker).toBeVisible()
     await expect(page.locator('.sessions .thead')).toBeHidden()
     await expect(worker.locator('.op-mark')).toBeVisible()
-    await expect(worker.locator('.op-mark')).toHaveAttribute('aria-label', 'gpt-6.1-sol · xhigh · Codex · ChatGPT Pro')
+    await expect(worker.locator('.op-mark')).toHaveAttribute('aria-label', 'GPT-6.1 Sol · xhigh · Codex · ChatGPT Pro')
     await expect(worker.locator('.t-inline')).toHaveText('26m')
     await expect(worker.locator('.key-inline')).toHaveText('PHAROS-12 ·')
     // The long German line 2 ends in an ellipsis inside the row; the row stays two lines.
@@ -142,7 +159,51 @@ for (const theme of ['light', 'dark'] as const) {
     expect(p.glyphs).toEqual([])
     expect(p.hscroll, 'no sideways scroll at 390').toBe(false)
     await showList(page)
-    await page.screenshot({ path: info.outputPath(`390-${theme}-rows.png`) })
+    await page.screenshot({ path: info.outputPath(`compact-390-${theme}.png`) })
+  })
+}
+
+for (const theme of ['light', 'dark'] as const) for (const width of [1440, 400]) {
+  test(`${theme} ${width}: the approved columns, registry model names, a name-only line 1; listening and tier in the details`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    const errors = watchErrors(page)
+    const data = await setup(page, theme)
+    await page.goto('/agents')
+    const lead = row(page, data.sessions[0]!.id), worker = row(page, data.sessions[1]!.id)
+    await expect(worker).toBeVisible()
+    // Line 1 is the name only: the worker's ticket key opens it, and no row repeats its computer there.
+    await expect(worker.locator('.l1 .key-inline')).toHaveText('PHAROS-12 ·')
+    for (const session of data.sessions) {
+      const one = row(page, String(session.id)).locator('.l1')
+      if (await one.count()) expect(await one.innerText(), `line 1 of ${session.id}`).not.toContain(String(session.host))
+    }
+    // No listening or inbox cue, Tier, ticket chip or estimate on any row.
+    await expect(page.locator('.sessions .row :is([data-listening], .no-inbox, [data-tier], .ticket-chip, .session-estimate)')).toHaveCount(0)
+    if (width > 600) {
+      await expect(page.locator('.sessions .thead [role="columnheader"]')).toHaveText(['Session', 'Time', 'Execution', 'Computer', 'Beat', 'Actions'])
+      await expect(lead.locator('.exec-model')).toHaveText('Opus 5.5 · xhigh')
+      await expect(lead.locator('.exec-account')).toHaveText('Claude Max')
+      await expect(worker.locator('.exec-model')).toHaveText('GPT-6.1 Sol · xhigh')
+      await expect(worker.locator('.exec-account')).toHaveText('ChatGPT Pro')
+      await expect(lead.locator('.c-host')).toContainText('imac0')
+      const models = await page.locator('.sessions .row .exec-model:visible').allInnerTexts()
+      expect(models.length).toBeGreaterThan(3)
+      for (const text of models) expect(text, 'a registry name, never a raw model id').not.toMatch(/[a-z0-9]-[a-z0-9]/)
+    } else {
+      await expect(page.locator('.sessions .thead')).toBeHidden()
+      await expect(worker.locator('.op-mark')).toHaveAttribute('aria-label', 'GPT-6.1 Sol · xhigh · Codex · ChatGPT Pro')
+    }
+    expect((await probe(page)).hscroll).toBe(false)
+    await showList(page)
+    await page.screenshot({ path: info.outputPath(`rows-${width}-${theme}.png`) })
+    // The details say in words whether the session listens, and hold its tier.
+    await lead.locator('.agent-link').click()
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    await expect(panel.locator('.now-listen')).toContainText(/listening/i)
+    await expect(panel.locator('.service-tier [data-tier]')).toHaveCount(1)
+    await page.screenshot({ path: info.outputPath(`details-${width}-${theme}.png`) })
+    expect(errors).toEqual([])
   })
 }
 
@@ -153,7 +214,7 @@ test.describe('touch', () => {
     await page.goto('/agents')
     await expect(rows(page).first()).toBeVisible()
     await showList(page)
-    await page.screenshot({ path: info.outputPath('390-touch.png') })
+    await page.screenshot({ path: info.outputPath('touch-390-light.png') })
     const small = await page.locator('.sessions').evaluate(card => {
       const out: string[] = []
       for (const el of card.querySelectorAll<HTMLElement>('button, a[href], input:not([type="checkbox"]), select')) {
@@ -195,7 +256,7 @@ test('a refresh never adds, moves or removes a row under the pointer; the change
   await expect(row(page, gone.id)).toBeVisible()
   // The note keeps its box whichever text it shows (AEON-541).
   expect(await docBox(note(page))).toEqual(noteBox)
-  await page.screenshot({ path: info.outputPath('1440-light-held.png') })
+  await page.screenshot({ path: info.outputPath('held-1440-light.png') })
   // The pointer leaves: still held for 1.5 s, then the list follows.
   await page.mouse.move(700, 8)
   await page.clock.runFor(1400)

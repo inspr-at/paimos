@@ -65,7 +65,8 @@ export interface Approval {
   target?: DeployTarget | null
   target_digest_sha256?: string
 }
-export interface ModelProfile { id: string; slug: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean }
+// The registry also sends its display fields; the session list names models by them (AEON-1211).
+export interface ModelProfile { id: string; slug: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean; display_name?: string; short_name?: string; model_version?: string }
 export interface ModelResolution { role: string; profile: ModelProfile | null; owner_required: boolean; source: string }
 export interface MessageTarget { id: string; principal_id: string; address: string; adapter: string; target_kind: string; maximum_level: string; role: string; enabled: boolean }
 export interface ProjectMessage {

@@ -56,7 +56,9 @@ test('pi sessions retain their SVG harness icon and provider account label', asy
   await openAgents(page)
   const item = row(page, pi.id)
   await expect(item).toBeVisible()
-  await expect(item.locator('.exec-account')).toContainText('Pi · pi / anthropic (local profile)')
+  // Execution's second line is the account (AEON-1211); the harness is named with it in the cell's name.
+  await expect(item.locator('.exec-account')).toHaveText('pi / anthropic (local profile)')
+  await expect(item.locator('.c-exec')).toHaveAttribute('aria-label', /pi \/ anthropic \(local profile\)\. Pi$/)
   // AEON-1211: the avatar carries the state badge only; a compact row opens with the harness's own mark.
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(item.locator('.op-mark svg[viewBox="165.29 165.29 469.43 469.43"] path').first()).toBeVisible()
@@ -124,8 +126,8 @@ test('session setup and work context appear from the mocked harness API', async 
     commits: [{ sha: 'abc1234', subject: 'Store session setup' }, { sha: 'def5678', subject: 'Show work context' }],
   })
   await openAgents(page)
-  await expect(row(page, nova).locator('.exec-model')).toHaveText('gpt-6-sol · xhigh')
-  await expect(row(page, nova).locator('.exec-account')).toHaveText('Codex · Codex Pro')
+  await expect(row(page, nova).locator('.exec-model')).toHaveText('GPT-6 Sol · xhigh')
+  await expect(row(page, nova).locator('.exec-account')).toHaveText('Codex Pro')
   await expect(row(page, nova).locator('.result')).toHaveText('Add an Oracle Cloud connector')
   await row(page, nova).locator('.agent-link').click()
   const setupBlock = panel(page).locator('section[aria-labelledby="setup-title"]')

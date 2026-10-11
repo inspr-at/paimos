@@ -9,14 +9,12 @@ import { GROUPS, controlBlocked, sessionForest, sessionWorking, type SessionBran
 import { relativeTime } from '../../lib/work'
 import type { Availability, SessionView } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
-import TicketPeekLink from '../TicketPeekLink.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import ConnectHint from './ConnectHint.vue'
 import SessionPauseActions from './SessionPauseActions.vue'
 import { useAgentPause } from '../../stores/agentPause'
 import { pausingSession } from '../../lib/agentPause'
 import { isStale, useSessionRemoval } from './sessionRemoval'
-import ListeningLabel from './ListeningLabel.vue'
 import { useAgentAppearance } from '../../lib/agentAppearance'
 const { appearance } = useAgentAppearance()
 import SessionAvatar from './SessionAvatar.vue'
@@ -30,9 +28,7 @@ import { STATE_LABEL } from '../../lib/agentSignals'
 import ExecutionMark from './ExecutionMark.vue'
 import SessionHost from './SessionHost.vue'
 import { listHostLabels } from '../../lib/agents'
-import { intendedResult, sessionContext, sessionExecution, sessionEtaEligible } from './sessionRow'
-import SessionEstimate from './SessionEstimate.vue'
-import { etaFromSession } from '../../lib/eta'
+import { intendedResult, modelNames, sessionExecution } from './sessionRow'
 import { brand } from '../../lib/brand'
 import { toast } from '../../lib/toast'
 import { useAgentRecovery } from '../../lib/agentRecovery'
@@ -41,7 +37,6 @@ import { controlPermitted, type ControlGrant } from '../../lib/managedControl'
 import { can } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import { DEFAULT_SORT, nextSort, orderForest, readSort, writeSort, type SessionSort, type SortKey } from './sessionOrder'
-import TierCell from './TierCell.vue'
 import { LEAD_WORDS } from '../../lib/lead'
 import { below, countedLive, shownBelow, treeRows, type TreeRow } from './sessionTree'
 import { useServiceTiers } from '../../stores/serviceTiers'
@@ -131,7 +126,7 @@ const menuOpen = ref(false)
 const structure: Structure<SessionView> = {
   id: view => view.session.id,
   key: view => `${view.status.group}|${view.session.parent_harness_session_id ?? ''}|${filtering.value ? Number(filtering.value(view)) : ''}`,
-  order: views => { const ids: string[] = []; const walk = (b: Branch) => { ids.push(b.view.session.id); b.children.forEach(walk) }; orderForest(sessionForest([...views], props.now, keptRank), sort.value, props.now).forEach(walk); return ids },
+  order: views => { const ids: string[] = []; const walk = (b: Branch) => { ids.push(b.view.session.id); b.children.forEach(walk) }; orderForest(sessionForest([...views], props.now, keptRank), sort.value, props.now, false, names.value).forEach(walk); return ids },
 }
 const hold = useSessionHold(() => liveViews.value, structure, () => !showRemoved.value && (pointing.value || keyFocus.value || menuOpen.value))
 // The sessions the list lays out: a row the hold keeps keeps the table, so the live list emptying
@@ -140,8 +135,8 @@ const total = computed(() => hold.views.value.length)
 // The card head's note says a delay like the page head does (AEON-785): no "Live" while reads lag.
 const listStale = computed(() => agents.refreshStale || (agents.sessionsUpdatedAt !== null && props.now - agents.sessionsUpdatedAt > 45_000))
 const forest = computed(() => {
-  if (showRemoved.value) return orderForest(sessionForest(props.history ?? [], props.now), sort.value, props.now, true)
-  const ordered = orderForest(sessionForest(hold.views.value, props.now, keptRank), sort.value, props.now)
+  if (showRemoved.value) return orderForest(sessionForest(props.history ?? [], props.now), sort.value, props.now, true, names.value)
+  const ordered = orderForest(sessionForest(hold.views.value, props.now, keptRank), sort.value, props.now, false, names.value)
   const rank = hold.rank.value
   return rank ? inFrameOrder(ordered, rank, branch => branch.view.session.id) : ordered
 })
@@ -225,7 +220,7 @@ function lineTwo(branch: Branch, view: SessionView) {
 // A filter shows every kept child; otherwise the list hides stopped ones until asked.
 const offered = (branch: Branch) => filtering.value ? branch.children.filter(keeps) : candidates(branch)
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
-type Row = TreeRow<SessionView> & { view: SessionView; primary: string; context: string; line: string; exec: ReturnType<typeof sessionExecution>; family: boolean; familyEnd: boolean; lead: boolean; sub: number; under: ReturnType<typeof below> }
+type Row = TreeRow<SessionView> & { view: SessionView; primary: string; line: string; exec: ReturnType<typeof sessionExecution>; family: boolean; familyEnd: boolean; lead: boolean; sub: number; under: ReturnType<typeof below> }
 // Sessions as a tree of any depth (AEON-784): the list decides which children a
 // parent offers and whether it is open; sessionTree lays out the rows.
 function visible(group: Bucket): Row[] {
@@ -239,7 +234,7 @@ function visible(group: Bucket): Row[] {
     const view = liveOf(row.branch.view)
     const primary = intendedResult(view)
     return {
-      ...row, view, primary, context: sessionContext(view, primary), line: lineTwo(row.branch, view), exec: sessionExecution(view),
+      ...row, view, primary, line: lineTwo(row.branch, view), exec: sessionExecution(view, names.value),
       family: row.depth > 0 || row.open, familyEnd: !rows[index + 1]?.depth,
       lead: view.session.role === 'coordinator' || row.branch.children.length > 0,
       sub: row.foldable ? shownBelow(row.branch, offered) : 0,
@@ -328,13 +323,14 @@ watch(viewer, async () => {
 function renamedHost(host: string, label: string) {
   hostLabels.value = new Map([...hostLabels.value, [host, label]])
 }
-// The state lives in each row's avatar, so it has no column; Display › Sort still orders by it
-// (AEON-1211). Time sits beside the name: running time, or how long ago a session ended.
+// The columns are the approved ones (AEON-1211, design AEON-1196): Session · Time · Execution ·
+// Computer · Beat. The state lives in each row's avatar and the ticket key opens the name, so
+// neither has a column; Display › Sort still orders by both. The tier is in the details.
 const SORTS: { key: SortKey; label: string; cls?: string }[] = [
-  { key: 'state', label: 'State' }, { key: 'result', label: 'Name' }, { key: 'running', label: 'Time', cls: 'right c-time' }, { key: 'ticket', label: 'Ticket', cls: 'c-ticket' },
-  { key: 'execution', label: 'Execution', cls: 'c-exec' }, { key: 'host', label: 'Host', cls: 'c-host' }, { key: 'heartbeat', label: 'Heartbeat', cls: 'right c-beat' },
+  { key: 'state', label: 'State' }, { key: 'result', label: 'Session' }, { key: 'running', label: 'Time', cls: 'right c-time' }, { key: 'ticket', label: 'Ticket' },
+  { key: 'execution', label: 'Execution', cls: 'c-exec' }, { key: 'host', label: 'Computer', cls: 'c-host' }, { key: 'heartbeat', label: 'Beat', cls: 'right c-beat' },
 ]
-const COLUMNS = SORTS.filter(column => column.key !== 'state')
+const COLUMNS = SORTS.filter(column => column.key !== 'state' && column.key !== 'ticket')
 const effectiveSort = computed(() => sort.value ?? DEFAULT_SORT)
 const ariaSort = (key: SortKey) => effectiveSort.value.key === key ? (effectiveSort.value.dir === 'asc' ? 'ascending' : 'descending') : undefined
 const HEARTBEAT_HELP = 'Beats under 3 minutes old count as equal; start time and id then decide their order.'
@@ -367,16 +363,10 @@ watch([() => props.selected, () => props.history?.length, () => current.value.le
 // A row offers only what works for its session (AEON-291). Ended and silent
 // sessions get a bin right in the row: one click, then an undo toast. The
 // overflow holds the rest; it is hidden when the bin already says it all.
-const live = (view: SessionView) => view.session.phase !== 'stopped' && !view.session.archived_at
 const menuOf = (view: SessionView): SessionMenu => sessionMenu(view, { grant: grant.value, canRemove: removal.canRemove(view.session), pending: props.controls[view.session.id], product: brand.value.short_name, now: props.now })
 const bin = (view: SessionView) => removal.canRemove(view.session) && quickRemoval(view)
 // Compact rows have no Tier cell: the menu's Change tier… is its way in there (AEON-1211).
 const hasMenu = (view: SessionView) => { const m = menuOf(view); return m.control.length > 0 || m.other.length > 0 || !!m.note || (m.remove && !bin(view)) || !serviceTiers.unavailable(view.session) || serviceTiers.canAsk(view.session) }
-// The bound ticket's estimate sits under its key while the session runs; an ended
-// session no longer speaks for the ticket.
-const etaOf = (view: SessionView) => sessionEtaEligible(view) ? etaFromSession(view.session) : null
-const working = (view: SessionView) => sessionEtaEligible(view) && view.session.phase === 'working'
-const hasEta = computed(() => current.value.some(view => !!etaOf(view) || working(view)))
 const menu = ref<{ view: SessionView; anchor: HTMLElement } | null>(null)
 const menuItems = computed(() => menu.value ? menuOf(menu.value.view) : null)
 function openMenu(view: SessionView, event: MouseEvent) { menu.value = menu.value?.view.session.id === view.session.id ? null : { view, anchor: event.currentTarget as HTMLElement } }
@@ -388,6 +378,8 @@ function pickTier() {
 }
 const tierRequestLabel = (view: SessionView) => view.session.service_tier_request ? `asks for ${TIER_NAME[view.session.service_tier_request]}` : ''
 const agents = useAgents()
+// Models are named as Settings › Models names them, never by their raw ids (AEON-1211).
+const names = computed(() => modelNames(agents.models))
 const pause = useAgentPause()
 const moving = ref(false)
 const dragged = ref<SessionView | null>(null)
@@ -674,7 +666,7 @@ function sessionLinkClick(event: MouseEvent, id: string) {
     <p v-else-if="showRemoved && !removedCount" class="state" :role="historyState === 'error' ? 'alert' : undefined">{{ historyState === 'loading' ? 'Loading history…' : historyState === 'error' ? 'History could not be loaded.' : 'No ended sessions yet.' }}</p>
     <ConnectHint v-else-if="!total && !showRemoved" :can-start="canStart" :can-lead="canLead" @start="emit('start')" />
 
-    <div v-else ref="table" class="table" :class="{ 'has-eta': hasEta }" role="treegrid" :aria-label="showRemoved ? 'Ended sessions' : 'Agent sessions'" @keydown="treeKey" @focusin="onFocusIn" @focusout="onFocusOut">
+    <div v-else ref="table" class="table" role="treegrid" :aria-label="showRemoved ? 'Ended sessions' : 'Agent sessions'" @keydown="treeKey" @focusin="onFocusIn" @focusout="onFocusOut">
       <div class="thead" role="row">
         <template v-for="column in COLUMNS" :key="column.key">
         <span role="columnheader" :class="column.cls" :aria-sort="ariaSort(column.key)">
@@ -683,7 +675,6 @@ function sessionLinkClick(event: MouseEvent, id: string) {
             <span v-if="ariaSort(column.key)" class="sort-mark" aria-hidden="true"><AppIcon :name="effectiveSort.dir === 'asc' ? 'arrow-up' : 'arrow-down'" :size="11" :class="{ 'default-sort': !sort }" /></span>
           </button>
         </span>
-        <span v-if="column.key === 'execution'" role="columnheader" class="c-tier"><span tabindex="0" data-tip="Service tier: vendor serving speed and price. One chevron per offered tier. Click to change; Left/Right arrow: one step.">Tier</span></span>
         </template>
         <span role="columnheader"><span class="sr-only">Actions</span></span>
       </div>
@@ -719,25 +710,23 @@ function sessionLinkClick(event: MouseEvent, id: string) {
             ><AppIcon name="chevron-right" :size="14" class="chev" :class="{ turned: row.open }" /></button>
             <span v-else class="tree-fold-space" aria-hidden="true" />
             <RouterLink v-slot="{ href }" :to="`/agents/${row.view.session.id}`" custom>
-            <a class="agent-link" :href="href" @click="sessionLinkClick($event, row.view.session.id)" :aria-label="`${row.view.harness} ${row.view.name}, ${row.view.status.label}${row.lead ? ', lead' : ''}${row.under.problem ? `, ${rollLabel(row)}` : ''}. ${row.primary}. ${row.context}`">
+            <a class="agent-link" :href="href" @click="sessionLinkClick($event, row.view.session.id)" :aria-label="`${row.view.harness} ${row.view.name}, ${row.view.status.label}${row.lead ? ', lead' : ''}${row.under.problem ? `, ${rollLabel(row)}` : ''}${row.primary !== row.view.name ? `. ${row.primary}` : ''}`">
               <!-- The avatar carries the state badge only (AEON-1211); its word is the tooltip and part of the name. -->
               <SessionAvatar :view="row.view" :size="30" :lead="row.lead" :tip="timeTip(row.view, now)" />
-              <!-- Two lines whatever the state, so a state change never changes the row's height. Compact rows open
-                   line 1 with the harness mark and end it with the time. -->
+              <!-- Two lines whatever the state, so a state change never changes the row's height. Line 1 is the
+                   name only: the ticket key opens it ("PHAROS-12 · …"), a lead adds Lead (AEON-1211). Compact
+                   rows open it with the harness mark and end it with the time. -->
               <span class="who">
                 <span class="l1">
                   <HarnessOpener class="opener" :harness="row.view.session.harness" :harness-label="row.view.harness" :exec="row.exec" />
                   <span v-if="row.view.ticket" class="key-inline">{{ row.view.ticket.key }} ·</span>
-                  <span class="result" :title="row.primary">{{ row.primary }}</span>
-                  <span v-if="row.context !== row.primary" class="session-name" :title="row.context">{{ row.context }}</span>
+                  <span class="result" :title="row.primary !== row.view.name ? `${row.primary} · ${row.view.name}` : row.primary">{{ row.primary }}</span>
                   <span v-if="row.lead" class="role" data-tip="Coordinates other sessions">Lead</span>
                   <time class="t-inline" :datetime="row.view.session.stopped_at ?? row.view.session.created_at">{{ timeShort(row.view, now) }}</time>
                 </span>
+                <!-- Whether it listens (AEON-280) or has an inbox (AEON-282) is said in words in the details. -->
                 <span class="l2" :class="{ asks: row.view.status.group === 'needs' }">
                   <span class="l2t" :title="row.line">{{ row.line }}</span>
-                  <!-- No inbox (AEON-282) is the more specific cue; otherwise the listening cue (AEON-280). -->
-                  <span v-if="live(row.view) && row.view.session.management_mode === 'managed' && row.view.session.run_id && !row.view.session.advertised_capabilities.includes('inbox')" class="no-inbox" title="This session has no inbox delivery path. Launch a managed worker to receive follow-up messages.">No inbox</span>
-                  <ListeningLabel v-else class="l2-listen" :session="row.view.session" :now="now" compact />
                 </span>
               </span>
             </a>
@@ -760,20 +749,15 @@ function sessionLinkClick(event: MouseEvent, id: string) {
             <RouterLink v-if="row.view.session.adopted_from_id" class="lineage adopted" :to="`/agents/${row.view.session.adopted_from_id}`" :title="`Adopted from ${lineageName(row.view.session.adopted_from_id)}`">Adopted from {{ lineageName(row.view.session.adopted_from_id) }}</RouterLink>
           </span>
           <span role="gridcell" class="right c-time mono-cell" :data-tip="timeTip(row.view, now)"><time :datetime="row.view.session.stopped_at ?? row.view.session.created_at">{{ timeText(row.view, now) }}</time></span>
-          <span role="gridcell" class="c-ticket">
-            <TicketPeekLink v-if="row.view.ticket" class="ticket-chip" :ticket-key="row.view.ticket.key" :href="row.view.ticket.href" :tip="row.view.ticket.title">{{ row.view.ticket.key }}</TicketPeekLink>
-            <span v-else class="faint">{{ row.view.projectKey || '—' }}</span>
-            <SessionEstimate v-if="etaOf(row.view) || working(row.view)" class="row-eta" :eta="etaOf(row.view)" :now="now" :missing="working(row.view)" />
-          </span>
           <span class="execution-host" role="presentation">
-            <span role="gridcell" class="c-exec" :aria-label="[row.exec.model ? row.exec.providerLabel : '', row.exec.modelLine, row.exec.accountLine].filter(Boolean).join('. ')">
+            <!-- The registry's name and the level, the account under it: "Opus 5.5 · xhigh" over "Claude Max · markus" (AEON-1211). -->
+            <span role="gridcell" class="c-exec" :aria-label="[row.exec.model ? row.exec.providerLabel : '', row.exec.modelLine, row.exec.accountLine, row.exec.kind === 'ai' && row.exec.account ? row.view.harness : ''].filter(Boolean).join('. ')">
               <span class="exec-icon"><ExecutionMark :kind="row.exec.kind" :provider="row.exec.provider" /></span>
               <span class="exec-copy">
-                <span v-if="row.exec.model" class="exec-model" :title="row.exec.modelLine">{{ row.exec.modelLine }}</span>
-                <span class="exec-account" :title="row.exec.accountLine"><span v-if="row.view.harness" class="exec-harness">{{ row.exec.kind === 'ai' ? row.view.harness : row.exec.accountLine }}</span><span v-if="row.exec.account" class="exec-acct"><template v-if="row.view.harness"> · </template>{{ row.exec.account }}</span></span>
+                <span v-if="row.exec.modelLine" class="exec-model" :title="row.exec.modelLine">{{ row.exec.modelLine }}</span>
+                <span class="exec-account" :title="row.exec.accountLine">{{ row.exec.accountLine }}</span>
               </span>
             </span>
-            <span role="gridcell" class="c-tier"><TierCell :session="row.view.session" :name="row.view.name" /></span>
             <span role="gridcell" class="c-host">
               <SessionHost :key="`${viewer}:${row.view.session.host}`" :host="row.view.session.host" :label="hostLabels.get(row.view.session.host)" :editable="grant.person" @renamed="renamedHost(row.view.session.host, $event)" />
             </span>
@@ -873,7 +857,6 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 </template>
 
 <style scoped>
-.c-tier { display: flex; align-items: center; justify-content: center; align-self: stretch; }
 .row.drop-over { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--ink-2); }
 .move-lead .mi-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lineage { flex-basis: 100%; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 3px 70px; font-size: 11px; color: var(--ink-2); }
@@ -932,7 +915,8 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .quiet-btn[aria-pressed="true"] { background: transparent; box-shadow: none; color: var(--ink-2); }
 .quiet-btn[aria-pressed="true"]:hover { background: var(--row-selected); color: var(--ink); }
 .quiet-btn .count { margin-left: 2px; font: 500 11.5px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
-.table { --tree-step: 28px; display: grid; grid-template-columns: minmax(180px, 1.45fr) 92px minmax(72px, .48fr) minmax(128px, .82fr) 80px 132px 80px 108px; padding: 0 0 8px; }
+/* Session · Time · Execution · Computer · Beat · actions (AEON-1211, design AEON-1196): the name takes the room. */
+.table { --tree-step: 28px; display: grid; grid-template-columns: minmax(200px, 1fr) 92px minmax(150px, 220px) 132px 80px 108px; padding: 0 0 8px; }
 .thead, .row, .group-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; column-gap: 0; }
 .thead { position: sticky; top: var(--stick-h, 0px); z-index: 19; height: 32px; padding: 0 12px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface-raised) 94%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; white-space: nowrap; }
 .thead > span, .row > span, .execution-host > span { padding: 0 8px; min-width: 0; }
@@ -1029,12 +1013,10 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .l2.asks { color: var(--ink-2); font-weight: 550; }
 .l2t { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .result { flex: 0 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-name { flex: 0 100 auto; min-width: 2ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; font-weight: 450; }
-.no-inbox { flex: none; color: var(--ink-3); font-size: 11px; white-space: nowrap; }
-.l2-listen { flex: none; }
-.l2-listen :deep(.listening-text) { display: none; }
-/* Compact rows only: the opener mark, the ticket key and the time at the end of line 1. */
-.opener, .key-inline, .t-inline { display: none; }
+/* The ticket key opens the name on every form ("PHAROS-12 · …"). */
+.key-inline { flex: none; margin-right: -2px; font-weight: 600; white-space: nowrap; }
+/* Compact rows only: the opener mark and the time at the end of line 1. */
+.opener, .t-inline { display: none; }
 .t-inline { flex: none; margin-left: auto; padding-left: 6px; font: 500 11.5px/1 var(--mono); color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
 .row:hover .result { color: var(--teal-ink); }
 .role { flex: none; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--secondary-tint-3); color: var(--secondary-ink); font: 600 9px/16px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
@@ -1046,13 +1028,6 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .exec-model, .exec-account { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .exec-model { font-size: 12.5px; color: var(--ink); }
 .exec-account { font-size: 11.5px; color: var(--ink-3); }
-/* The estimate follows the key on its line and wraps below it only when the column is narrow. */
-/* Stacked under a narrow key, the chip and the estimate still fit the row's two lines: its height never depends on an estimate. */
-.row > .c-ticket { display: flex; flex-wrap: wrap; align-items: center; align-content: center; gap: 3px 8px; padding-block: 0; }
-.row-eta { font-size: 12px; }
-.ticket-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); text-decoration: none; font-variant-ligatures: none; white-space: nowrap; }
-.ticket-chip:hover { filter: brightness(1.04); text-decoration: underline; }
-.ticket-chip:focus-visible { box-shadow: var(--focus-ring); }
 .row .c-beat { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; }
 /* Time: running time while live, how long ago once ended, since when while paused (AEON-1211). */
 .row .c-time { font-size: 12px; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -1090,32 +1065,26 @@ function sessionLinkClick(event: MouseEvent, id: string) {
 .sk-row { display: flex; align-items: center; gap: 18px; height: 40px; }
 .sk-row .dot { width: 10px; height: 10px; border-radius: 50%; }
 .sk-row .key { width: 70px; height: 20px; border-radius: 6px; }
-/* Estimates need a ticket track wide enough for "overdue 5 min". */
-/* Retain the pre-Host ticket allocation: the new column must not wrap ETA/%
-   or increase existing row heights. The other flexible tracks absorb Host. */
-.table.has-eta { grid-template-columns: minmax(180px, 1.45fr) 92px minmax(max(112px, calc((100% - 92px - 236px) * .48 / 2.75)), .48fr) minmax(128px, .82fr) 80px 132px 80px 108px; }
 @container sessions (max-width: 1000px) {
-  .table { grid-template-columns: minmax(140px, 1.35fr) 84px minmax(68px, .42fr) minmax(108px, .75fr) 80px 132px 64px 108px; }
-  .table.has-eta { grid-template-columns: minmax(140px, 1.35fr) 84px minmax(104px, .42fr) minmax(108px, .75fr) 80px 132px 64px 108px; }
+  .table { grid-template-columns: minmax(160px, 1fr) 84px minmax(128px, 180px) 132px 64px 108px; }
 }
 /* The menu floats outside the list container: size its targets by viewport. */
 @media (max-width: 720px) { .menu-item { min-height: 44px; align-items: center; } .menu-item > svg { margin-top: 0; } }
 /* The list's own width decides its form (design AEON-1196): the table down to 560 px, compact
-   rows below. A table under 880 px (beside the docked panel) keeps Time, the model, Tier and the
-   beat; the ticket key joins the name and Host moves to the details. */
+   rows below. A table under 880 px (beside the docked panel) keeps Time, the model and the beat;
+   the computer and the account line move to the details. */
 @container sessions (max-width: 880px) {
-  .table, .table.has-eta { grid-template-columns: minmax(108px, 1fr) 84px minmax(96px, .7fr) 80px 64px 108px; }
-  .thead > .c-ticket, .thead > .c-host, .row > .c-ticket, .execution-host > .c-host, .exec-account { display: none; }
-  .key-inline { display: inline; flex: none; margin-right: -2px; font-weight: 600; }
+  .table { grid-template-columns: minmax(108px, 1fr) 84px minmax(96px, 150px) 64px 108px; }
+  .thead > .c-host, .execution-host > .c-host, .exec-account { display: none; }
 }
 /* Compact rows (AEON-1211): a list under 560 px (the phone, and later the side list) shows each
    session in two lines. Line 1 opens with the 12 px harness mark, names the session and ends with
-   its time; line 2 says what it works on. Execution, Tier, Host, Heartbeat and the ticket move to
-   the details and the row menu. 16 px per tree level (AEON-784). */
+   its time; line 2 says what it works on. Execution, Computer and Beat move to the details and the
+   row menu. 16 px per tree level (AEON-784). */
 @container sessions (max-width: 559px) {
   /* A 44 px fold column on touch and phones; 28 px beside a fine pointer. */
   .table { --tree-step: 16px; --fold: 28px; display: block; }
-  .thead, .row > :is(.c-time, .c-ticket, .execution-host, .c-beat) { display: none; }
+  .thead, .row > :is(.c-time, .execution-host, .c-beat) { display: none; }
   /* Flex, not an inline line box: the Ended toggle is a button and its baseline
      made that header ~20px taller than the text headers, so the row jumped
      when a phone session moved from Pausing to Ended (AEON-790). */
@@ -1134,9 +1103,8 @@ function sessionLinkClick(event: MouseEvent, id: string) {
   .opener { display: inline-grid; }
   .t-inline { display: inline; }
   /* One name per compact row; the avatar says Lead (design AEON-1196). A list without parents needs no fold column. */
-  .session-name, .role { display: none; }
+  .role { display: none; }
   .table:not(:has(.tree-fold)) { --fold: 0px; }
-  .l2-listen, .no-inbox { margin-left: auto; }
   /* Lines run beside the fold buttons: 16 px per level. The content inset (10px)
      and half the fold put its centre on the stem. The elbow is one step long,
      so it ends on the child fold's centre. */

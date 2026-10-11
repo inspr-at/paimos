@@ -17,7 +17,7 @@ for (const theme of ['light', 'dark'] as const) {
       // AEON-1211: the row's avatar carries the state: its badge, and the word in its name.
       await expect(row.locator('.ava')).toHaveAttribute('aria-label', new RegExp(`: ${STATE_LABEL[state].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`))
       await expect(row.locator('.ava .agent-state-mark')).toHaveAttribute('data-mark', state)
-      await expect(row.locator('.exec-model')).toContainText('integration-model · xhigh')
+      await expect(row.locator('.exec-model')).toContainText('Integration Model · xhigh')
       await expect(row.locator('.exec-account')).toContainText('Test account')
       await expect(row.locator('.provider-mark')).toHaveAttribute('data-provider', 'unknown')
       await row.locator('.agent-link').click()

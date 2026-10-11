@@ -54,7 +54,9 @@ test('live tiles show current steps and rows nest workers with stopped history c
   await expect(page.getByRole('group', { name: 'Show sessions by state' }).locator('[data-filter="working"]')).toContainText('2working')
   await expect(page.locator(`[data-row="s:${worker.id}"]`)).toHaveAttribute('data-parent', lead.id)
   await expect(page.locator(`[data-row="s:${worker.id}"] .result`)).toHaveText('PDF worker image')
-  await expect(page.locator(`[data-row="s:${worker.id}"] .session-name`)).toHaveText('hausv')
+  // Line 1 is the name only (AEON-1211); the session's own label stays in the name's tooltip.
+  await expect(page.locator(`[data-row="s:${worker.id}"] .session-name`)).toHaveCount(0)
+  await expect(page.locator(`[data-row="s:${worker.id}"] .result`)).toHaveAttribute('title', 'PDF worker image · hausv')
   await expect(page.locator(`[data-row="s:${worker.id}"] .result`)).not.toContainText('Running PDF tests')
   await expect(page.locator(`[data-row="s:${stopped.id}"]`)).toHaveCount(0)
   await expect(page.locator('.sessions .thead')).not.toContainText(/Account|Model/)
@@ -138,10 +140,10 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.goto('/agents')
     await expect(page.getByRole('group', { name: 'Show sessions by state' }).locator('[data-filter="working"]')).toContainText('2working')
     // Compact rows (AEON-1211) name the model in the opener mark; the table in Execution.
-    if (width === 390) await expect(page.locator(`[data-row="s:${worker.id}"] .op-mark`)).toHaveAttribute('aria-label', 'gpt-6-sol · xhigh · Codex · Codex Pro')
+    if (width === 390) await expect(page.locator(`[data-row="s:${worker.id}"] .op-mark`)).toHaveAttribute('aria-label', 'GPT-6 Sol · xhigh · Codex · Codex Pro')
     else {
-      await expect(page.locator(`[data-row="s:${worker.id}"] .exec-model`)).toHaveText('gpt-6-sol · xhigh')
-      await expect(page.locator(`[data-row="s:${worker.id}"] .exec-account`)).toHaveText('Codex · Codex Pro')
+      await expect(page.locator(`[data-row="s:${worker.id}"] .exec-model`)).toHaveText('GPT-6 Sol · xhigh')
+      await expect(page.locator(`[data-row="s:${worker.id}"] .exec-account`)).toHaveText('Codex Pro')
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     const pass = process.env.AM1_CAPTURE_PASS

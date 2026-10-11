@@ -154,6 +154,9 @@ const setupLine = computed(() => {
   return [props.view.harness, r?.harness_version].filter(Boolean).join(' ')
 })
 const modelLine = computed(() => [reported.value?.model || props.view?.model, reported.value?.reasoning_effort].filter(Boolean).join(' · '))
+// A managed run without an inbox cannot receive follow-up messages (AEON-282). The rows no longer
+// say it; this tab does, in words, where it says whether the session listens (AEON-1211).
+const noInbox = computed(() => !!props.view && props.view.session.management_mode === 'managed' && !!props.view.session.run_id && !props.view.session.advertised_capabilities.includes('inbox'))
 // Fetch only the selected session, and refresh when a heartbeat changes metadata
 // even if the activity note stays the same. The list does not carry history.
 watch([
@@ -284,7 +287,10 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <template v-else-if="view.session.heartbeat_at"> · heartbeat <time :datetime="view.session.heartbeat_at" :data-tip="absoluteTime(view.session.heartbeat_at)">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time></template>
           <template v-else> · no heartbeat yet</template>
         </p>
-        <p v-if="view.session.phase !== 'stopped' && !view.session.stopped_at && !view.session.archived_at" class="now-meta now-listen"><ListeningLabel :session="view.session" :now="now" /></p>
+        <p v-if="view.session.phase !== 'stopped' && !view.session.stopped_at && !view.session.archived_at" class="now-meta now-listen">
+          <span v-if="noInbox" class="no-inbox" data-tip="Launch a managed worker to receive follow-up messages.">No inbox · this run cannot receive follow-up messages</span>
+          <ListeningLabel v-else :session="view.session" :now="now" />
+        </p>
         <p v-if="sessionEtaEligible(view) && (etaFromSession(view.session) || view.session.phase === 'working')" class="now-meta now-eta"><SessionEstimate labelled :eta="etaFromSession(view.session)" :now="now" :missing="view.session.phase === 'working'" /></p>
         <SessionStateEvidence :view="view" :now="now" />
         <ol v-if="currentTimeline.length" class="activity-timeline" aria-label="Current activity history">
@@ -405,6 +411,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .now-step { font-size: 19px; line-height: 1.3; color: var(--ink); overflow-wrap: anywhere; }
 .now-meta { font-size: 12px; color: var(--ink-2); }
 .now-listen { display: flex; min-width: 0; }
+.no-inbox { min-width: 0; color: var(--ink-2); }
 .activity-timeline { display: grid; gap: 0; margin: 10px 0 0; padding: 0; list-style: none; }
 .activity-timeline li { display: grid; grid-template-columns: 65px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink); }
 .activity-timeline time { color: var(--ink-3); font-size: 11px; white-space: nowrap; }

@@ -86,19 +86,25 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
 
 for (const theme of ['light', 'dark'] as const) {
   for (const width of [1600, 390]) {
-    test(`${theme} ${width}: listening status in the list and the panel`, async ({ page }) => {
+    test(`${theme} ${width}: listening status in words in the panel, never as a row icon`, async ({ page }) => {
       const { worker, quiet, never } = await setup(page, theme)
       await page.setViewportSize({ width, height: width > 600 ? 1000 : 844 })
       await page.goto('/agents')
-      await expect(row(page, worker.id).locator('[data-listening="yes"]:visible')).toContainText('Listening')
-      await expect(row(page, quiet.id).locator('[data-listening="no"]:visible')).toContainText('Not listening')
-      await expect(row(page, quiet.id).locator('[data-listening="no"]:visible')).toHaveAttribute('data-tip', /^Last pulled its inbox 12m ago through a turn hook\./)
-      await expect(row(page, never.id).locator('[data-listening="no"]:visible')).toHaveAttribute('data-tip', /Has not pulled its inbox yet/)
+      // AEON-1211 (design AEON-1196): rows carry no listening cue; the details say it in words.
+      await expect(row(page, worker.id)).toBeVisible()
+      await expect(page.locator('.sessions .row [data-listening]')).toHaveCount(0)
       expect(await page.evaluate(() => document.scrollingElement!.scrollWidth <= document.scrollingElement!.clientWidth)).toBe(true)
       await shot(page, `list-${width}-${theme}`)
+      for (const [session, words, tip] of [[worker, 'Listening', /^Pulled its inbox/], [never, 'Not listening · never pulled', /Has not pulled its inbox yet/]] as const) {
+        await page.goto(`/agents/${session.id}`)
+        await panelOf(page).getByRole('tab', { name: 'Overview' }).click()
+        await expect(panelOf(page).locator('.now-listen')).toContainText(words)
+        await expect(panelOf(page).locator('.now-listen .listening')).toHaveAttribute('data-tip', tip)
+      }
       await page.goto(`/agents/${quiet.id}`)
       await panelOf(page).getByRole('tab', { name: 'Overview' }).click()
       await expect(panelOf(page).locator('.now-listen')).toContainText('Not listening · last pulled 12m ago')
+      await expect(panelOf(page).locator('.now-listen .listening')).toHaveAttribute('data-tip', /^Last pulled its inbox 12m ago through a turn hook\./)
       // No coloured edge accent marks the state (AGENTS.md rule 11).
       const edges = await panelOf(page).locator('.now-listen .listening').evaluate(el => { const s = getComputedStyle(el); return [s.borderLeftWidth, s.borderTopWidth] })
       expect(edges).toEqual(['0px', '0px'])
