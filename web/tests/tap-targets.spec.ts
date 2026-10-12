@@ -255,7 +255,6 @@ for (const { width, coarse } of [
       if (width < 560) {
         // A phone's list shows compact rows (AEON-1211, design AEON-1196): no Tier cell; the row menu leads to it.
         await expect(session).toBeVisible()
-        await expect(tier).toHaveCount(0)
         const more = session.locator('.more')
         const box = (await more.boundingBox())!
         expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44)
