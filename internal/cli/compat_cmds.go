@@ -131,8 +131,10 @@ func (rt *runtime) resolveModelForTicket(role, author, harness, ticket string) e
 		if err := rt.printJSON(out); err != nil {
 			return err
 		}
-	} else if result.Profile != nil {
-		fmt.Fprintf(rt.stdout, "%s@%s — %s\n%s\n", result.Profile.Slug, result.Profile.Version, result.Profile.Family, result.CommandTemplate)
+	} else if result.Profile != nil || result.OwnerRequired {
+		if result.Profile != nil {
+			fmt.Fprintf(rt.stdout, "%s@%s — %s\n%s\n", result.Profile.Slug, result.Profile.Version, result.Profile.Family, result.CommandTemplate)
+		}
 		for _, step := range result.Ladder {
 			label := slugByID[step.ProfileID]
 			if label == "" {
@@ -166,6 +168,9 @@ func (rt *runtime) resolveModelForTicket(role, author, harness, ticket string) e
 		fmt.Fprintln(rt.stdout)
 	}
 	if result.OwnerRequired {
+		if !strings.HasPrefix(result.Role, "review-gate") {
+			return rt.fail(fmt.Errorf("no allowed model route can run right now"), "")
+		}
 		return rt.fail(fmt.Errorf("owner approval required; review gate remains closed"), "")
 	}
 	return nil
