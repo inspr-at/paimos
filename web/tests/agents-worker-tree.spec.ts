@@ -180,7 +180,7 @@ test('a deep problem marks every ancestor, folded parents name it, and arrow key
   // The family sits with its most urgent member; only ancestors say a problem is below. The avatar carries
   // its own state badge only (AEON-1211), so the ancestors say it in their name and, folded, on their line.
   await expect(page.locator('.sessions .grp', { has: row(page, lead) }).locator('[role="row"]').first()).toHaveAttribute('data-row', `s:${lead}`)
-  for (const key of [lead, id(2), id(100)]) await expect(row(page, key).locator('.agent-link')).toHaveAccessibleName(/, \d+ problems? below\./)
+  for (const key of [lead, id(2), id(100)]) await expect(row(page, key).locator('.agent-link')).toHaveAccessibleName(/, 1 problem below(?:\.|$)/)
   for (const key of [id(200), id(3)]) await expect(row(page, key).locator('.agent-link')).not.toHaveAccessibleName(/problem below/)
   for (const key of [lead, id(2), id(100), id(200), id(3)]) await expect(row(page, key).locator('.ava .agent-state-mark')).toHaveCount(1)
 
@@ -269,7 +269,8 @@ test('a stopped lead links its successor instead of claiming live workers', asyn
     Object.assign(worker, { parent_harness_session_id: id(90), adopted_from_id: lead })
   }
   await page.goto('/agents')
-  // It stopped just now, so it keeps its place and end state for 10 minutes (AEON-1210, design §3.2).
+  // Past ten minutes it is in Ended; opening that group exposes its successor and stopped history.
+  await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(row(page, lead).getByRole('link', { name: 'Handed over to Resumed lead' })).toBeVisible()
   await expect(row(page, lead).locator('.worker-tools')).toHaveCount(0)
   await expect(row(page, id(2)).getByRole('link', { name: 'Adopted from Release lead' })).toBeVisible()
