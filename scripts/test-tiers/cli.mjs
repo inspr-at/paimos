@@ -52,6 +52,7 @@ export function runnerSelection(tests,options,candidate,planner) {
   const decision=runnerDecision(candidate,planner)
   const selection=select(tests,{...options,forceFull:options.forceFull||decision.mode==='full'})
   selection.layout=selection.full?'full':decision.layout
+  selection.decision=decision
   return selection
 }
 
@@ -59,7 +60,7 @@ export function runnerSelection(tests,options,candidate,planner) {
 // Programmatic comparisons can share one native snapshot of an unchanged
 // checkout through `collect`. Otherwise content-keyed discovery reuses the
 // catalogue across processes and invalidates it when registration inputs change.
-export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false,cache,inventory:supplied}={}, { collect=target }={}) {
+export function plan(kind,{env=process.env,event=env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=env.CI_AFFECTED_LANE,plannerMode=env.AEON_TEST_TIER_MODE,plannerLayout=env.AEON_TEST_TIER_LAYOUT,base=eventBase(env),index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false,cache,inventory:supplied}={}, { collect=target, browserCoverage=nightlyBrowserMap, exec=command }={}) {
   if(supplied!==undefined&&!Array.isArray(supplied?.tests)) throw new Error('Supplied inventory needs a tests array')
   const begin=performance.now()
   const inventory=supplied??collect(kind,{browserOnly:kind==='web'&&!unit,...(cache===undefined?{}:{cache})})
@@ -77,9 +78,9 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
   // fetched event base with the checkout. Both are unused unless the switch is on.
   const on=affectedLane==='on'&&event==='pull_request'&&Array.isArray(paths)
   const tree=on?sourceTree(root):undefined
-  const promotions=on&&paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(eventBase(),{cwd:root}):undefined
+  const promotions=on&&paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(base,{cwd:root,exec}):undefined
   const readFile=path=>boundedText(root,path)
-  const coverage=paths?.some(path=>path.startsWith('web/src/'))?nightlyBrowserMap(root,eventBase(),load('web').tests):{}
+  const coverage=paths?.some(path=>path.startsWith('web/src/'))?browserCoverage(root,base,load('web').tests):{}
   const candidate=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,promotions,imports:inventory.imports,...coverage})
   const selection=runnerSelection(all,{event,paths,imports:inventory.imports,affectedLane,
     forceFull:full,forceAll:catalogue,webImports:graph,tree,promotions,readFile,...coverage},candidate,
