@@ -46,6 +46,7 @@ test('nightly failure artifacts bind failed cases and incomplete runners to the 
 })
 import './slow-owners.test.mjs'
 import './web-batches.test.mjs'
+import './affected.test.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
 const w=(file,name,tier='NIGHTLY')=>({kind:'node',file,name,tier})

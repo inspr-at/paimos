@@ -326,6 +326,15 @@ layout regardless of the switch. Main push, manual and nightly selection keep
 their established behavior. Required check names, skipped-job accounting, tier
 evidence, tree reuse and unconditional `migration-compat` stay unchanged.
 
+For worker pre-push checks and LEAD's `remote-affected.sh`, run
+`node scripts/test-tiers/affected.mjs [--base origin/main] [--kind web|go|all] [--json]`
+to list unique browser specs and unit files relative to `web/`, and Go packages
+for HEAD's merge-base diff through the same PR planner with the affected lane
+on. This offline, read-only view uses the checked-in tier manifests; unavailable
+browser-impact evidence or other uncertainty prints `FULL: <reason>` without
+test lists. Run the full shards in that case or rely on PR CI. CI's trusted
+planner and native inventory remain authoritative.
+
 **The bar (OPS decision, phase 2):** the PR lane is feedback only. The merge
 queue is the authoritative full gate, main push stays full or exact-tree reuse,
 nightly stays full, and any change to CI machinery stays full in the PR lane

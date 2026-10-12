@@ -247,7 +247,7 @@ func TestDeliveryWebhookRetryBudget(t *testing.T) {
 				t.Fatalf("first attempt status %d, want %d", w.Code, wantStatus)
 			}
 			attempts, next, finished, checkpoints, step, class := receiptState(t, f, "retry-delivery")
-			if attempts != 1 || finished != nil || checkpoints["completion"] != "" || step == nil || !next.Equal(f.at.Add(5*time.Second)) {
+			if attempts != 1 || finished != nil || checkpoints["completion"] != "" || step == nil || !next.Equal(f.at.Add(time.Minute)) {
 				t.Fatal("first unresolved attempt was not retained with backoff")
 			}
 			if scenario == "github_failure" {
@@ -451,7 +451,7 @@ func TestDeliveryWebhookInternalRetry(t *testing.T) {
 				if *failedStep != step && !(step == "completion" && *failedStep == "reader-MergedPull") {
 					t.Fatalf("failed at %s instead of %s", *failedStep, step)
 				}
-				if !next.Equal(f.at.Add(5 * time.Second)) {
+				if !next.Equal(f.at.Add(time.Minute)) {
 					t.Fatalf("first retry schedule %s", next)
 				}
 				before := receiptEffects(t, f)
@@ -508,7 +508,7 @@ func TestDeliveryWebhookInternalRetry(t *testing.T) {
 			})
 		}
 	}
-	if webhookBackoff(2) != 10*time.Second || webhookBackoff(1000000) != 5*time.Minute {
+	if webhookBackoff(2) != 2*time.Minute || webhookBackoff(1000000) != time.Hour {
 		t.Fatal("backoff did not grow to its bound")
 	}
 }
