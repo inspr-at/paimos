@@ -55,6 +55,17 @@ func safeCodexIdentityError(err error) error {
 	return identityFailure("identity_probe_failed", err)
 }
 
+// Let app-server consume EOF and exit normally within its existing deadline.
+// Cancelling first forces group teardown even after a complete account/read,
+// and an unconfirmed teardown must discard that otherwise valid identity.
+func finishCodexIdentity(ctx context.Context, cancel context.CancelFunc, closeInput func() error, wait func() error) error {
+	_ = closeInput()
+	err := wait() // The owned process still observes ctx and enforces its bound.
+	err = errors.Join(err, ctx.Err())
+	cancel()
+	return err
+}
+
 func CodexAccountMatches(expected, email string) bool {
 	if expected == CodexChatGPTLogin {
 		return email == ""
@@ -104,14 +115,14 @@ func codexIdentity(ctx context.Context, path, home, nodePath, dir string) (email
 		close(closed)
 	})
 	defer func() {
-		cancel()
+		cleanupErr := finishCodexIdentity(ctx, cancel, input.Close, proc.Wait)
 		if !stopClose() {
 			<-closed
 		}
 		_ = input.Close()
 		_ = output.Close()
-		if err := proc.Wait(); errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) {
-			email, resultErr = "", safeCodexIdentityError(errors.Join(resultErr, err))
+		if errors.Is(cleanupErr, ownedprocess.ErrCleanupUnconfirmed) || errors.Is(cleanupErr, context.DeadlineExceeded) || errors.Is(cleanupErr, context.Canceled) {
+			email, resultErr = "", safeCodexIdentityError(errors.Join(resultErr, cleanupErr))
 		}
 	}()
 	encoder := json.NewEncoder(input)

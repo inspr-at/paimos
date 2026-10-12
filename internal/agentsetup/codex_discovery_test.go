@@ -76,6 +76,33 @@ func TestCodexIdentityFailuresExposeOnlyAllowlistedCauses(t *testing.T) {
 	}
 }
 
+func TestCodexIdentityClosesInputBeforeOwnedCleanup(t *testing.T) {
+	// A fake ownership waiter makes forced-cleanup failure deterministic.
+	// The legacy cancel-first sequence is the negative control; no sleeps,
+	// process signals, vendor executable or real account are involved.
+	ctx, cancel := context.WithCancel(t.Context())
+	closed := false
+	wait := func() error {
+		if ctx.Err() != nil || !closed {
+			return ownedprocess.ErrCleanupUnconfirmed
+		}
+		return nil
+	}
+	cancel()
+	if !errors.Is(wait(), ownedprocess.ErrCleanupUnconfirmed) {
+		t.Fatal("negative control did not reproduce the discarded identity")
+	}
+	ctx, cancel = context.WithCancel(t.Context())
+	if err := finishCodexIdentity(ctx, cancel, func() error { closed = true; return nil }, wait); err != nil || ctx.Err() != context.Canceled {
+		t.Fatal("complete identity was forced into teardown before stdin EOF", err)
+	}
+	// Confirmed output never overrides an unconfirmed group cleanup.
+	ctx, cancel = context.WithCancel(t.Context())
+	if err := finishCodexIdentity(ctx, cancel, func() error { return nil }, func() error { return ownedprocess.ErrCleanupUnconfirmed }); !errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) {
+		t.Fatal("cleanup ownership fence was weakened")
+	}
+}
+
 func TestCodexDiscoveryStderrAndOptionalEmail(t *testing.T) {
 	for _, tc := range []struct {
 		name, response, context, label string
