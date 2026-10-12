@@ -1043,5 +1043,79 @@
     "other_model_clis_called": false,
     "ticket_status_changed": false,
     "credentials_displayed_or_copied": false
+  },
+  "fix7": {
+    "recorded_at": "2026-10-12T04:58:12.503859+00:00",
+    "baseline": "6f9702cabc2fc0a69299ef2a271b191e5af9125d",
+    "source_fix_commit": "0920d7824",
+    "inventory_fix_commit": "4ab1ea881",
+    "review_report": "review-ci590-0632.out (the dispatch filename has a duplicated prefix/suffix)",
+    "changes": [
+      "Retain the inaccessible Clear stale slot in History so flex wrapping cannot move History, Search, Filter or Display.",
+      "Publish a record/viewer-bound successful lead removal after its revision watcher closes the menu; rebase only that project heading and keep unrelated updates held.",
+      "Retain sessionContext for the historical execution-column capture; approved rows still use their activity line.",
+      "Register ten GATED-FULL cases and six additional strict split-inventory cases; preserve existing cases, tiers, launch policies and assertions. New timing entries are estimates, not measurements."
+    ],
+    "negative_controls": {
+      "test_only_scratch_commit": "799ed89e0",
+      "production_basis": "6f9702ca",
+      "toolbar": "Four desktop/theme cases fail with History moving between flex lines; at 1024 light the x coordinate changes from 161.734375 to 811.109375.",
+      "units": "The successful-removal notification is absent and sessionContext is undefined; both fail their named assertions, ten other cases pass.",
+      "existing_lead_remove": "Baseline affected browser run reproduced failures on phone and wide layouts.",
+      "delivery_branch_contains_no_negative_control_commits": true
+    },
+    "validation": {
+      "affected_browsers": {
+        "commit": "0920d7824",
+        "passed": 110,
+        "files": [
+          "tests/no-shift-agents.spec.ts",
+          "tests/lead-remove.spec.ts",
+          "tests/run-kinds.spec.ts",
+          "tests/aeon-1211-agents-rows.spec.ts",
+          "tests/aeon-1210-agents-tree.spec.ts",
+          "tests/session-removal.spec.ts"
+        ],
+        "runner": "Guarded validation lane; one headless Chromium worker."
+      },
+      "focused_units": {
+        "passed": 36,
+        "files": [
+          "tests/lead-remove.unit.test.ts",
+          "tests/sessionRow.unit.test.ts",
+          "tests/session-hold.unit.test.ts",
+          "tests/project-leads-store.unit.test.ts"
+        ],
+        "runner": "Guarded local runner; one worker. The supplied remote shell runners do not expose a targeted Vitest lane."
+      },
+      "strict_split_inventory": {
+        "passed": 3,
+        "command": "node --test scripts/test-tiers/slow-owners.test.mjs"
+      },
+      "static_initial": {
+        "exit_code": 1,
+        "passed": 41,
+        "optional_skipped": 0,
+        "cause": "Expanded no-shift-agents native inventory did not match the pinned slow-owner baseline; corrected without changing assertions."
+      },
+      "final_validation": "Recorded after this documentation commit in web/test-results/AEON-1211/fix7/<final-head>/evidence.json and .agent-result.txt."
+    },
+    "design_exception": {
+      "workflow": ".github/workflows/agents-run-kinds.yml",
+      "status": "Coordinator decision required; no assertion weakened or skipped.",
+      "reason": "The before stage swaps only SessionList from the historical base, while executing current P3 phone assertions and the new .ava geometry selector. The restored helper removes its page-render failure; the old Computer-in-row layout still fails the current phone assertion and lacks .ava. Its historical rows measure 79 and 54 px, while the approved P3 row frame is at least 60 px, so the unchanged cross-snapshot equality requirement also conflicts with the approved redesign.",
+      "approved_decision": "AEON-1196 round 7: the state belongs in the avatar, Computer is in details on compact rows, and P3 owns compact rows/Time. Keep the approved design.",
+      "reproduction": "Scratch historical capture cad3a282d: two phone failures at the existing Host-hidden assertion; diagnostic geometry capture 15448b72d: historical table renders and its baseline capture passes.",
+      "gate_policy_preview": "The changed head has no trusted gate/verdict until the coordinator performs its cross-family review."
+    },
+    "constraints": {
+      "origin_push": false,
+      "deployment": false,
+      "review_gate_run": false,
+      "other_model_cli": false,
+      "ticket_status_change": false,
+      "new_permissions_routes_migrations": false
+    },
+    "shared_files": "Minimal additive web tier/shard and split-baseline registrations. No new source files."
   }
 }
