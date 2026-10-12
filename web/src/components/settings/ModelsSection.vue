@@ -1,5 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+// Shared unscoped CSS uses a regular import: Vue's style-src descriptor cache
+// can otherwise race with ModelRegistryCard and incorrectly scope this sheet.
+import '../../styles/models.css'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
@@ -264,4 +267,3 @@ watch(() => [route.hash, shown.value], async () => {
     </ModelsPopover>
   </div>
 </template>
-<style src="../../styles/models.css"></style>
