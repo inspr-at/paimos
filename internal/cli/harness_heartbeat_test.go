@@ -409,8 +409,23 @@ func testCoordinatorHeartbeatRetriesActiveGeneration(t *testing.T, message strin
 	if regs[0].body["harness_session_ref"] != "claude:"+transcriptSessionID {
 		t.Fatal("retry lost the native coordinator reference")
 	}
-	if len(hbWhere(calls, http.MethodPost, "/heartbeat")) != 1 || len(hbWhere(calls, http.MethodPost, "/stop")) != 1 {
+	beats := hbWhere(calls, http.MethodPost, "/heartbeat")
+	var liveness, diagnostics []hbCall
+	for _, beat := range beats {
+		if beat.body["inbox_binding_report"] == true {
+			diagnostics = append(diagnostics, beat)
+		} else {
+			liveness = append(liveness, beat)
+		}
+	}
+	if len(liveness) != 1 || len(diagnostics) != 1 || len(beats) != 2 || len(hbWhere(calls, http.MethodPost, "/stop")) != 1 {
 		t.Fatal("successful retry did not enter the normal heartbeat/stop lifecycle")
+	}
+	if beats[0].body["inbox_binding_report"] == true || diagnostics[0].path != liveness[0].path || diagnostics[0].lease != liveness[0].lease || diagnostics[0].body["activity_sequence"] != liveness[0].body["activity_sequence"] || diagnostics[0].body["phase"] != liveness[0].body["phase"] || diagnostics[0].body["activity"] != liveness[0].body["activity"] {
+		t.Fatal("binding report did not follow the accepted heartbeat's exact worker identity")
+	}
+	if code, exists := diagnostics[0].body["inbox_binding_error"]; !exists || code != nil {
+		t.Fatal("successful source registration did not report a clear binding diagnostic")
 	}
 	wantLog := strings.Repeat("heartbeat: predecessor generation is still active; retrying registration in 50s\n", 3)
 	if stderr.String() != wantLog || stdout.Len() != 0 {

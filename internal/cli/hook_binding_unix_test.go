@@ -18,7 +18,10 @@ import (
 )
 
 func TestAEON1254HookDoctorClassifiesCLIAndInstance(t *testing.T) {
+	isolate(t)
 	work, home := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	t.Chdir(work)
 	executable, _ := os.Executable()
 	settings := filepath.Join(work, ".claude", "settings.local.json")
 	if err := os.MkdirAll(filepath.Dir(settings), 0700); err != nil {
@@ -35,6 +38,27 @@ func TestAEON1254HookDoctorClassifiesCLIAndInstance(t *testing.T) {
 		if got := inboxHookCheck(work, home, executable, "ppm"); got != tc.want {
 			t.Fatalf("got %q, want %q", got, tc.want)
 		}
+	}
+	for _, tc := range []struct{ name, settings, code, status string }{
+		{"rules_only", `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"aeon session start --rules-out rules.txt"}]}]}}`, "hook_unavailable", "ok"},
+		{"malformed_settings", `{"hooks":`, "hook_unavailable", "warn"},
+		{"relative_cli", `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"aeon hook claude Stop"}]}]}}`, "hook_unavailable", "warn"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := os.WriteFile(settings, []byte(tc.settings), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if got := inboxHookCheck(work, home, executable, "ppm"); got != tc.code {
+				t.Fatalf("heartbeat refusal = %q, want %q", got, tc.code)
+			}
+			check := new(runtime).inboxDoctorCheck("ppm", "https://fixture.invalid", indexAeonID)
+			if check.Status != tc.status {
+				t.Fatalf("doctor status = %q, want %q: %s", check.Status, tc.status, check.Detail)
+			}
+			if tc.status == "ok" && check.Detail != "generic Claude inbox hook not installed" {
+				t.Fatalf("doctor claimed a rules-only setup was bound: %s", check.Detail)
+			}
+		})
 	}
 }
 

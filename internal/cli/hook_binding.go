@@ -19,16 +19,24 @@ import (
 // Requiring the heartbeat's CLI avoids old readers silently rejecting the
 // private source index. A current generic hook inherits its indexed instance.
 func inboxHookCheck(worktree, home, executable, instance string) string {
+	code, _ := inspectInboxHook(worktree, home, executable, instance)
+	return code
+}
+
+// absent is true only after both settings files were checked successfully and
+// no inbox hook was found. Heartbeats require a hook; doctor also serves users
+// whose Claude settings configure only the independent rules hook.
+func inspectInboxHook(worktree, home, executable, instance string) (code string, absent bool) {
 	paths := []string{filepath.Join(worktree, ".claude", "settings.local.json"), hookSettingsPath(home, "claude")}
 	current, err := os.Stat(executable)
 	if err != nil {
-		return "hook_cli_mismatch"
+		return "hook_cli_mismatch", false
 	}
 	found := false
 	for _, path := range paths {
 		raw, missing, err := readHarnessFile(path)
 		if err != nil {
-			return "hook_unavailable"
+			return "hook_unavailable", false
 		}
 		if missing {
 			continue
@@ -39,7 +47,7 @@ func inboxHookCheck(worktree, home, executable, instance string) string {
 			}
 		}
 		if json.Unmarshal([]byte(raw), &settings) != nil {
-			return "hook_unavailable"
+			return "hook_unavailable", false
 		}
 		for event, groups := range settings.Hooks {
 			if event != "Stop" && event != "PostToolUse" && event != "UserPromptSubmit" {
@@ -56,21 +64,21 @@ func inboxHookCheck(worktree, home, executable, instance string) string {
 					}
 					args, err := staticHookArgs(command)
 					if err != nil || len(args) < 4 || !filepath.IsAbs(args[0]) {
-						return "hook_unavailable"
+						return "hook_unavailable", false
 					}
 					info, err := os.Stat(args[0])
 					if err != nil || !os.SameFile(current, info) {
-						return "hook_cli_mismatch"
+						return "hook_cli_mismatch", false
 					}
 					for i, arg := range args {
 						if arg == "--paired" {
-							return "hook_unavailable"
+							return "hook_unavailable", false
 						}
 						if arg == "--instance" && (i+1 == len(args) || args[i+1] != instance) {
-							return "hook_instance_mismatch"
+							return "hook_instance_mismatch", false
 						}
 						if strings.HasPrefix(arg, "--instance=") && strings.TrimPrefix(arg, "--instance=") != instance {
-							return "hook_instance_mismatch"
+							return "hook_instance_mismatch", false
 						}
 					}
 					found = true
@@ -79,9 +87,9 @@ func inboxHookCheck(worktree, home, executable, instance string) string {
 		}
 	}
 	if !found {
-		return "hook_unavailable"
+		return "hook_unavailable", true
 	}
-	return ""
+	return "", false
 }
 
 func pairedBindingCheck(origin, principal string) string {
@@ -122,12 +130,10 @@ func (rt *runtime) inboxDoctorCheck(instance, origin, principal string) doctorCh
 	worktree, _ := os.Getwd()
 	home, _ := os.UserHomeDir()
 	executable, _ := os.Executable()
-	_, projectMissing, _ := readHarnessFile(filepath.Join(worktree, ".claude", "settings.local.json"))
-	_, userMissing, _ := readHarnessFile(hookSettingsPath(home, "claude"))
-	if projectMissing && userMissing {
+	code, absent := inspectInboxHook(worktree, home, executable, instance)
+	if absent {
 		return doctorCheck{Name: "inbox-hook", Status: "ok", Detail: "generic Claude inbox hook not installed"}
 	}
-	code := inboxHookCheck(worktree, home, executable, instance)
 	if code == "" {
 		paired := pairedBindingCheck(origin, principal)
 		if paired == "instance_mismatch" || paired == "principal_mismatch" {
