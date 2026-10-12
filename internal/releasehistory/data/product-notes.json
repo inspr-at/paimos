@@ -6076,8 +6076,8 @@
     "261012145858.0.0": {
       "release_channel": "stable",
       "release_sequence": 130,
-      "snapshot_sha256": "24d3afae108f8a8b61e70e2f2dfa6e66ad4ccba7dd9c9cfabe969b19f1590d95",
-      "captured_at": "2026-10-12T15:28:18Z",
+      "snapshot_sha256": "735833c20545db3700cea847e0ca0683cfb35f2e6e33c70225a93e14924c092a",
+      "captured_at": "2026-10-12T15:38:55Z",
       "release_revision": 1,
       "items": [
         {
@@ -6117,7 +6117,7 @@
           "pill_en": "Simpler lead adoption",
           "pill_de": "Einfachere Lead-Übernahme",
           "benefit_en": "After you confirm the adoption, the running session proves its lead claim with a separate command that uses its existing state directory; an empty candidate list explains what is missing.",
-          "benefit_de": "Nach deiner Bestätigung weist die laufende Sitzung ihren Lead-Anspruch mit einem eigenen Befehl nach, der ihr vorhandenes Zustandsverzeichnis nutzt; eine leere Kandidatenliste erklärt, was fehlt.",
+          "benefit_de": "Nach Bestätigung der Übernahme weist die laufende Sitzung ihren Lead-Anspruch mit einem eigenen Befehl nach, der ihr vorhandenes Zustandsverzeichnis nutzt; eine leere Kandidatenliste erklärt, was fehlt.",
           "group": "fixes"
         },
         {
