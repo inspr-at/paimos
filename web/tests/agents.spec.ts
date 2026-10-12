@@ -100,7 +100,7 @@ test('sessions are grouped by project, the lead heading its group, with ticket a
   await expect(lead.getByRole('link', { name: /Claude Code camy, Working/ })).toBeVisible()
   await expect(lead).toContainText('camy')
   await expect(lead).toContainText('Lead')
-  await expect(lead.getByRole('link', { name: 'PHAROS-11' })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
+  await expect(lead.locator('.key-inline')).toHaveText('PHAROS-11 ·')
   // AEON-1211: the state lives in the avatar (its badge, name and tooltip); a precise word opens line 2.
   await expect(lead.locator('.ava')).toHaveAttribute('aria-label', /: Working$/)
   await expect(row(page, session(5)).locator('.ava')).toHaveAttribute('data-tip', /^Awaiting heartbeat · Heartbeat overdue · /)
@@ -676,11 +676,9 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [1600,
     await page.emulateMedia({ colorScheme })
     await setup(page)
     await openAgents(page)
-    // Compact rows (AEON-1211) carry the key in the name; the ticket opens from the session's details.
-    if (width === 390) {
-      await row(page, camy).locator('.l2').click()
-      await panel(page).getByRole('link', { name: /^PHAROS-11/ }).first().click()
-    } else await row(page, camy).getByRole('link', { name: 'PHAROS-11', exact: true }).click()
+    // Every form carries the ticket key in the name; its link lives in the session's details.
+    await row(page, camy).locator('.l2').click()
+    await panel(page).getByRole('link', { name: /^PHAROS-11/ }).first().click()
     const ticket = page.getByRole('complementary', { name: 'Ticket details' })
     await expect(ticket).toBeVisible()
     const box = (await ticket.boundingBox())!

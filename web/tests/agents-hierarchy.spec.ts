@@ -54,7 +54,7 @@ test('workers nest by session ID, display their label, harness and ticket, and e
   await expect(row(page, child)).toHaveAttribute('data-parent', lead)
   await expect(row(page, child)).toContainText('AC4 hierarchy')
   await expect(row(page, child).locator('.live-bot')).toHaveAttribute('data-harness', 'codex')
-  await expect(row(page, child).getByRole('link', { name: 'PHAROS-12' })).toBeVisible()
+  await expect(row(page, child).locator('.key-inline')).toHaveText('PHAROS-12 ·')
   // The fold button is reached from its row: ← and → fold and unfold; Enter and Space work on the button.
   const toggle = row(page, lead).getByRole('button', { name: 'Fold Release lead’s workers: 1 worker, 1 working' })
   await toggle.focus()
