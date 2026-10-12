@@ -127,6 +127,11 @@ func Current(openAPI []byte) (map[string]Pin, error) {
 		sort.Strings(pin.RequestPaths)
 		out[name] = pin
 	}
+	native, err := NativeSessionPin(openAPI)
+	if err != nil {
+		return nil, fmt.Errorf("native-session: %w", err)
+	}
+	out["native-session"] = native
 	return out, nil
 }
 

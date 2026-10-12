@@ -456,6 +456,8 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 			inbox.New(pool, attachedMessages),
 			chat.New(pool, chat.Options{Enabled: cfg.ChatEnabled}),
 			harnessMod,
+			// Native route declarations reuse the authz native-sessions table;
+			// authMod.Middleware applies their envelope before authentication.
 			nativesessions.NewDisabled(),
 			rules.New(pool),
 			doctrineMod,

@@ -31,6 +31,75 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	}
 }
 
+// AuthenticationMiddleware keeps the native envelope around authentication,
+// after Server has resolved the exact route pattern. It changes only rejected
+// response bodies; authentication, pairing and permission checks stay intact.
+func AuthenticationMiddleware(authenticate func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		ordinary := authenticate(next)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			native := false
+			for _, route := range nativecontract.PublicRoutes() {
+				if r.Pattern == route.Method+" "+route.Path {
+					native = true
+					break
+				}
+			}
+			if !native {
+				ordinary.ServeHTTP(w, r)
+				return
+			}
+			w.Header().Set(reportercontract.Header, reportercontract.NativeSession)
+			w.Header().Set("Cache-Control", "no-store")
+			response := &authenticationResponse{ResponseWriter: w}
+			authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				response.authorized = true
+				next.ServeHTTP(w, r)
+			})).ServeHTTP(response, r)
+		})
+	}
+}
+
+type authenticationResponse struct {
+	http.ResponseWriter
+	authorized, written, denied bool
+}
+
+func (w *authenticationResponse) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *authenticationResponse) WriteHeader(status int) {
+	if w.written {
+		return
+	}
+	w.written = true
+	if !w.authorized && (status == http.StatusUnauthorized || status == http.StatusForbidden) {
+		w.denied = true
+		w.Header().Del("Content-Length")
+		writeReason(w.ResponseWriter, status, nativecontract.ReasonGrantMissing)
+		return
+	}
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *authenticationResponse) Write(body []byte) (int, error) {
+	if !w.written {
+		w.WriteHeader(http.StatusOK)
+	}
+	if w.denied {
+		return len(body), nil
+	}
+	return w.ResponseWriter.Write(body)
+}
+
+func (w *authenticationResponse) Flush() {
+	if !w.written {
+		w.WriteHeader(http.StatusOK)
+	}
+	if !w.denied {
+		_ = http.NewResponseController(w.ResponseWriter).Flush()
+	}
+}
+
 func (*Module) disabled(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	p, ok := tenant.PrincipalFrom(r.Context())
@@ -44,9 +113,19 @@ func (*Module) disabled(w http.ResponseWriter, r *http.Request) {
 		writeReason(w, http.StatusRequestEntityTooLarge, nativecontract.ReasonBufferFull)
 		return
 	}
-	terminal := r.URL.Query().Get("view") == "terminal"
-	personControl := r.Pattern == "POST /api/sessions/{id}/control/end"
-	if p.Kind == tenant.Agent && (terminal || personControl) {
+	view := r.URL.Query().Get("view")
+	personOnly := false
+	switch r.Pattern {
+	case "POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/attach",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/attach/renew",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/detach",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/take",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/return",
+		"POST /api/projects/{projectId}/native-sessions/{ownedSessionId}/approvals/{approvalId}/decision",
+		"POST /api/sessions/{id}/control/end":
+		personOnly = true
+	}
+	if p.Kind == tenant.Agent && (view == "terminal" || view == "expert" || personOnly) {
 		writeReason(w, http.StatusForbidden, nativecontract.ReasonWrongPrincipal)
 		return
 	}

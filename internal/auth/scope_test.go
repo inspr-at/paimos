@@ -4,6 +4,7 @@ package auth
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -20,9 +21,191 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/nativecontract"
+	"github.com/inspr-at/paimos/internal/nativesessions"
+	"github.com/inspr-at/paimos/internal/reportercontract"
+	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
+
+type nativeUnreadBody struct{ reads int }
+
+func (b *nativeUnreadBody) Read([]byte) (int, error) {
+	b.reads++
+	return 0, errors.New("disabled native route read its body")
+}
+func (*nativeUnreadBody) Close() error { return nil }
+
+// Risk: middleware rejects declared disabled routes before their handlers, or
+// native authentication errors drift from the published contract. Exercise real
+// cookie/key lookup, live roles, pairing and the complete production HTTP chain.
+func TestNativeRoutesThroughProductionAuthentication(t *testing.T) {
+	reset(t)
+	tid := insertTenant(t, "native-auth", "Native authentication")
+	m := newMod(t, Config{Env: envDev})
+	ownerID, ownerIdentity := signinPerson(t, tid, "native-owner", "Native owner", "owner@example.test", "owner@example.test", "super_admin")
+	ownerCookie, err := m.startSession(t.Context(), ownerIdentity, tid, ownerID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deniedID, deniedIdentity := signinPerson(t, tid, "native-customer", "Native customer", "customer@example.test", "customer@example.test", "customer")
+	deniedCookie, err := m.startSession(t.Context(), deniedIdentity, tid, deniedID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyOwner := tenant.Principal{TenantID: tid, KeyCreatorID: ownerID}
+	create := func(name string, scopes []string) keyRecord {
+		t.Helper()
+		key, err := m.createAgentKey(t.Context(), keyOwner, name, "", scopes, nil)
+		if err != nil {
+			t.Fatal("create synthetic native key:", err)
+		}
+		return key
+	}
+	agent := create("native-delegated", []string{"harness.read", "harness.control", "harness.worker", "chat.send"})
+	empty := create("native-empty", []string{})
+	inbox := create("native-inbox", []string{"inbox.send"})
+	paired := create("native-daemon", agentpairing.RuntimePermissions)
+	var computer string
+	if err := db.InTenant(t.Context(), appPool, tid, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state)
+			VALUES($1,gen_random_uuid(),'126612661',$2,$2,$2,'{}','synthetic','redeemed') RETURNING id::text`, tid, strings.Repeat("a", 64)).Scan(&computer); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,setup_state)
+			VALUES($1,$2,$2,$3,$4,'native-test-daemon',$5,'connected')`, tid, computer, paired.PrincipalID, paired.ID, strings.Repeat("b", 64))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Seeding is complete. Requests use the production tenant boundary too.
+	m.inTenant = db.InTenant
+	catalog := doctrine.New(appPool, doctrine.Options{})
+	server := &httpapi.Server{
+		Pool:       appPool,
+		Modules:    []httpapi.Module{m, nativesessions.NewDisabled()},
+		Middleware: []func(http.Handler) http.Handler{m.Middleware, catalog.CatalogMiddleware, events.PositionMiddleware(appPool)},
+	}
+	handler := server.Handler()
+	validator, err := nativecontract.NewValidator()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	check := func(t *testing.T, method, path, cookie, bearer string, status int, reason nativecontract.Reason) {
+		t.Helper()
+		body := &nativeUnreadBody{}
+		r := httptest.NewRequest(method, path, nil)
+		r.Body = body
+		if cookie != "" {
+			r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: cookie})
+		}
+		if bearer != "" {
+			r.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, r)
+		if w.Code != status {
+			t.Fatalf("%s %s: status %d, want %d; %s", method, path, w.Code, status, w.Body.String())
+		}
+		if w.Header().Get(reportercontract.Header) != reportercontract.NativeSession || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Content-Type") != "application/json" {
+			t.Fatal("native contract/cache/content header missing at production boundary")
+		}
+		if err := validator.ValidateJSON("NativeError", w.Body.Bytes()); err != nil {
+			t.Fatal("invalid native authentication envelope:", err)
+		}
+		var got nativecontract.Error
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || got.Reason != reason || got.RequestID != nil || got.Retryable {
+			t.Fatalf("wrong native failure: %s", w.Body.String())
+		}
+		if body.reads != 0 {
+			t.Fatal("production disabled route consumed its body")
+		}
+	}
+	var before int
+	if err := adminPool.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE tenant_id=$1`, tid).Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	routes := nativecontract.PublicRoutes()
+	if len(routes) != 22 {
+		t.Fatalf("native auth regression covers %d routes, want 22", len(routes))
+	}
+	personOnly := map[string]bool{
+		"nativeAttach": true, "nativeAttachRenew": true, "nativeDetach": true,
+		"nativeTake": true, "nativeReturn": true, "nativeApprovalsApprovalDecision": true, "endNativeSessionControl": true,
+	}
+	for _, route := range routes {
+		t.Run(route.OperationID, func(t *testing.T) {
+			path := routeValue.ReplaceAllString(route.Path, id)
+			check(t, route.Method, path, "", "", http.StatusUnauthorized, nativecontract.ReasonGrantMissing)
+			check(t, route.Method, path, "invalid-session", "", http.StatusUnauthorized, nativecontract.ReasonGrantMissing)
+			check(t, route.Method, path, ownerCookie, "", http.StatusServiceUnavailable, nativecontract.ReasonFeatureDisabled)
+			check(t, route.Method, path, deniedCookie, "", http.StatusForbidden, nativecontract.ReasonGrantMissing)
+			check(t, route.Method, path, "", empty.Token, http.StatusForbidden, nativecontract.ReasonGrantMissing)
+			status, reason := http.StatusServiceUnavailable, nativecontract.ReasonFeatureDisabled
+			if personOnly[route.OperationID] {
+				status, reason = http.StatusForbidden, nativecontract.ReasonGrantMissing
+			}
+			check(t, route.Method, path, "", agent.Token, status, reason)
+			status, reason = http.StatusForbidden, nativecontract.ReasonGrantMissing
+			if strings.HasPrefix(route.Path, "/api/agentd/native-sessions/") {
+				status, reason = http.StatusServiceUnavailable, nativecontract.ReasonFeatureDisabled
+			}
+			check(t, route.Method, path, "", paired.Token, status, reason)
+		})
+	}
+	check(t, http.MethodPost, "/api/projects/"+id+"/native-sessions/"+id+"/input", "", inbox.Token, http.StatusServiceUnavailable, nativecontract.ReasonFeatureDisabled)
+	for _, view := range []string{"expert", "terminal"} {
+		check(t, http.MethodGet, "/api/projects/"+id+"/native-sessions/"+id+"/stream?view="+view, "", agent.Token, http.StatusForbidden, nativecontract.ReasonWrongPrincipal)
+	}
+	// Exact patterns only: unknown descendants/methods and existing routes keep
+	// the established authorization status and ordinary error body/header.
+	for _, route := range []string{
+		"POST /api/projects/" + id + "/native-sessions/" + id + "/input/extra",
+		"POST /api/agentd/native-sessions/commands", "GET /api/agentd/native-sessions/claim",
+		"GET /api/agentd/native-sessions/commands/extra", "GET /api/agent-keys",
+	} {
+		method, path, _ := strings.Cut(route, " ")
+		for _, authenticated := range []bool{false, true} {
+			r := httptest.NewRequest(method, path, nil)
+			if authenticated {
+				r.Header.Set("Authorization", "Bearer "+paired.Token)
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			want := http.StatusUnauthorized
+			if authenticated {
+				want = http.StatusForbidden
+			}
+			if w.Code != want || w.Header().Get(reportercontract.Header) != "" || strings.Contains(w.Body.String(), `"reason"`) {
+				t.Fatalf("non-native route changed: %s HTTP %d %s", route, w.Code, w.Body.String())
+			}
+		}
+	}
+	var after, sessions, runs int
+	if err := adminPool.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM events WHERE tenant_id=$1),
+		(SELECT count(*) FROM harness_sessions WHERE tenant_id=$1),(SELECT count(*) FROM agent_runs WHERE tenant_id=$1)`, tid).Scan(&after, &sessions, &runs); err != nil {
+		t.Fatal(err)
+	}
+	if before != after || sessions != 0 || runs != 0 {
+		t.Fatalf("disabled native effects: events %d -> %d, sessions %d, runs %d", before, after, sessions, runs)
+	}
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_pairing_computers SET state='revoked' WHERE id=$1`, computer); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPost, "/api/agentd/native-sessions/claim", nil)
+	r.Header.Set("Authorization", "Bearer "+paired.Token)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusGone || !strings.Contains(w.Body.String(), `"pairing_revoked"`) {
+		t.Fatalf("native allowance bypassed pairing revocation: HTTP %d %s", w.Code, w.Body.String())
+	}
+}
 
 // Agent keys reach shared project groups (AEON-136) through the views scope,
 // like saved views and preferences.

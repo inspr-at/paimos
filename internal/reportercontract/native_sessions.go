@@ -17,8 +17,8 @@ import (
 const NativeSession = nativecontract.ContractVersion
 
 // NativeSessionPin includes the stream variants as well as JSON and disabled
-// responses. R0 adds this pin to Current and pins.json in the same PR; C0 owns
-// this derivation but cannot edit the shared surface registry or pin inventory.
+// responses, including denials before the handler. Current includes this pin
+// alongside the legacy surfaces without changing their versions or shapes.
 func NativeSessionPin(openAPI []byte) (Pin, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(openAPI, &doc); err != nil {
@@ -47,7 +47,7 @@ func NativeSessionPin(openAPI []byte) (Pin, error) {
 		if err != nil {
 			return Pin{}, err
 		}
-		for _, status := range []string{"200", "202", "503"} {
+		for _, status := range []string{"200", "202", "401", "403", "503"} {
 			if _, ok := responses[status]; !ok {
 				continue
 			}

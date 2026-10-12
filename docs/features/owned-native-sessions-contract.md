@@ -124,48 +124,51 @@ binary modification are prohibited. Hosted tenant enablement requires BYO API
 keys or vendor-approved flows and its separate terms/OS/grant qualification.
 No new secrets, permissions, tables or migrations are part of C0.
 
-R0 owns these same-PR metadata changes before merge:
+Fix round 4 includes the coordinator's explicit R0 ownership grant for the
+22 native routes. Their outer declarations reuse `harness.read`,
+`harness.control`, `harness.worker`, `chat.send` / `inbox.send`, and
+`questions.decide`. Enabled handlers still owe current target visibility,
+mode-specific permissions, controller/owner proofs, bounded actor grants and
+transaction-fenced checks. No role or key ceiling is widened.
 
-- Add `internal/nativecontract/**` and `internal/nativesessions/**` to S2
-  (`agent-runtime`). The TypeScript declaration is already covered by S9
-  (`web-core-tests`); existing reporter/API/cmd ownership remains applicable.
-- Register `internal/nativecontract:TestNativeContractRejectsUnsafeWire`,
-  `internal/nativecontract:TestNativeContractAreaParity`, and
-  `internal/nativesessions:TestDisabledNativeRoutesAuthenticateWithoutStarting`
-  as ESSENTIAL Go tests; refresh the serialized Go tier inventory.
-- In `reportercontract.Current`, add the pin returned by `NativeSessionPin` under
-  `native-session`, then regenerate `pins.json` through the established pin tool.
-  This new derivation includes JSON, SSE and disabled 503 schemas without changing
-  any legacy version or pin.
-- Extend the reporter route-header inventory with all `PublicRoutes()`. The C0
-  disabled-module fixture already exercises every route with and without auth.
-- No web spec/shard, DSAR, permission, key ceiling or shared-fence entries change:
-  there is no UI behavior, migration, new permission or DB lock caller.
+Authentication applies the native header, no-store policy and `NativeError`
+envelope to 401/403 responses for exact native patterns. Existing authentication,
+authorization and pairing decisions are preserved. Person-only attach, takeover,
+approval and end-control routes reject agent keys; Expert/terminal viewer access
+also remains person-only. The five daemon claim, receipt, event, final and command
+routes cross only the existing live pairing boundary; unrelated routes and
+revoked pairing retain their denials.
 
-R0 is coordinator-owned and deliberately excluded from the builder write set.
-It must complete in this PR, before authoritative CI/merge. C0's browser check
-is not applicable. Guarded Go/static results and affected selection are reported
-in the worker handoff; an incomplete/refused check is never reported green.
+The granted R0 rows are applied in this branch:
 
-Worker validation handoff (2026-10-13): declaration generation/check, OpenAPI
-generation/check, schema reference/required-field validation, additive retention
-of all original 45 schemas / 20 routes, TypeScript syntax and exclusive-write-set
-checks pass. The affected planner reports `FULL: R2 full: OpenAPI lint package
-changed with the contract`; full CI belongs to the coordinator/PR lane.
+- `internal/authz/routes_native_sessions.go` and its `testdata/domains` fixture
+  declare all 22 patterns using existing permissions. The real-mux inventory
+  mounts the disabled module alongside the existing production modules.
+- S2 (`agent-runtime`) owns `internal/nativecontract/**` and
+  `internal/nativesessions/**` in `scripts/audit/slices.json`. Existing S1
+  auth/cmd, reporter/API ownership and S9 TypeScript ownership cover the rest.
+- The Go tier manifest registers the two native contract tests, the disabled
+  route test and `internal/auth:TestNativeRoutesThroughProductionAuthentication`
+  as ESSENTIAL. Both Go shard tables add unmeasured whole-package entries for
+  `nativecontract` and `nativesessions` to shard 2. Auth's existing whole-package
+  entries automatically include its new test.
+- `reportercontract.Current` includes the `native-session` pin derived by
+  `NativeSessionPin`; the established pin tool regenerates `pins.json`.
+  JSON, SSE, 401, 403 and disabled 503 shapes are pinned at `native-session/1.0`;
+  legacy versions and pins retain their previous values. The version and route
+  header inventories include the new surface and all 22 routes.
+- No web test/shard, DSAR, permission registry/label, built-in exclusion,
+  key-ceiling fixture or shared-fence row changes: this round adds no UI,
+  migration, permission, role grant or DB lock caller.
 
-The guarded remote Go run at `b78b77c54` passed `internal/nativesessions` and
-`internal/reportercontract`, including the disabled-route zero-start fixture.
-The native unsafe-wire behavior fixture passed; area parity failed because the
-fresh checkout lacked ignored `api/openapi.yaml`. Package setup now generates
-that bundle before native tests. This fix and the private-producer/viewer fixture
-were committed, but repeated final-HEAD remote retries returned exit 3 at the
-global 2/2 capacity limit. Final-HEAD Go validation remains incomplete.
-Guarded static attempts also returned exit 3 (capacity, then the held/non-GREEN
-host guard); no static pass is claimed. There was no local Go/browser/static
-fallback, origin push, deployment, review gate or model CLI invocation.
+The production-chain regression uses real session cookies and agent keys with
+live roles, the real tenant boundary and the server's route, authentication,
+doctrine, event-position and transport middleware. All routes cover anonymous,
+stale-cookie, authorized-person, forbidden-person, empty-key, delegated-agent
+and paired-daemon requests; it also checks alternate input scopes, person-only
+view denials, unchanged unrelated routes, zero body reads, zero session/run/event
+side effects and pairing revocation. Browser validation is not applicable.
 
-After applying the R0 rows above, the coordinator must run
-`remote-test.sh <worktree> ./internal/nativecontract/... ./internal/nativesessions/... ./internal/reportercontract/`
-and guarded `ci-static-locked.sh` / authoritative PR CI before merge. Browser
-validation is not applicable to C0. The worker exits with these checks explicit,
-without changing any coordinator-owned metadata or ticket state.
+Validation results are recorded after the guarded remote checks. The affected
+planner selects the full CI lane because C0 changes the OpenAPI contract; final
+PR CI and the cross-family review remain coordinator-owned.

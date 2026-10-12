@@ -129,6 +129,8 @@
 2 2659 github.com/inspr-at/paimos/internal/inbox TestUnpulledMessageFailsNoListenerAndPeopleHaveNoDeadline
 2 0 github.com/inspr-at/paimos/internal/inbox TestWebhookPolicy
 2 16 github.com/inspr-at/paimos/internal/localjournal
+2 0 github.com/inspr-at/paimos/internal/nativecontract
+2 0 github.com/inspr-at/paimos/internal/nativesessions
 2 0 github.com/inspr-at/paimos/internal/nodes TestCanonicalRouteFields
 2 230 github.com/inspr-at/paimos/internal/nodes TestConvertWritesOneEventAndUndo
 2 0 github.com/inspr-at/paimos/internal/nodes TestLeadMinutesFollowTheWebRules
