@@ -993,7 +993,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
       </ul>
       <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
       <form v-else class="compose" @submit.prevent="send()">
-        <p v-if="showHookNotice" class="compose-block" role="status">{{ view.name }} {{ words.unmanagedNote }}</p>
+        <p v-if="showHookNotice" class="compose-block hook-notice" role="status">{{ bindingReason ? words.unmanagedBlocked : `${view.name} ${words.unmanagedNote}` }}</p>
 
         <label class="sr-only" :for="`compose-${s.id}`">{{ words.message }} {{ view.name }}</label>
         <textarea :id="`compose-${s.id}`" ref="textarea" v-model="draft" class="field" rows="2" :placeholder="`${words.placeholder} ${view.name}`" :disabled="!canWrite" @keydown="composerKeys" @focus="toBottom(true)" />
@@ -1023,6 +1023,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 .queue-item { display: flex; align-items: center; gap: 6px; min-height: 44px; min-width: 0; padding: 2px 3px 2px 10px; border-radius: 12px; background: var(--code-bg); box-shadow: inset 0 0 0 1px var(--line); }
 .queue-item > svg { flex: none; color: var(--ink-3); }
 .queue-item.editing { background: var(--chip-teal-bg); }
+.hook-notice { height: 4.2em; overflow-y: auto; line-height: 1.4; }
 .queue-copy { flex: 1; min-width: 0; }
 .queue-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .queue-when { display: block; height: 2.8em; overflow-y: auto; overflow-wrap: anywhere; font-size: 11.5px; line-height: 1.4; color: var(--ink-3); }
