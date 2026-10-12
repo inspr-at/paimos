@@ -68,3 +68,10 @@ parallel cloning tested separately at its original eight-way concurrency.
 The remaining planning performance guard also failed on unchanged base
 `f95e4d39e`: 206.845 ms against 200 ms, versus 204.071 ms with this change.
 Its assertions and budget remain unchanged.
+
+The concurrent-start regression uses an uncommitted catalogue write and
+PostgreSQL's blocking graph to establish two overlapping installers, covering
+both an absent settings row and an existing tuning row. Against the unchanged
+`ca9694ae` installer, it reproduces duplicate catalogue insertion (`23505`) and
+concurrent tuple update (`XX000`). Both cases pass with the installation fence
+on the approved remote PostgreSQL runner.
