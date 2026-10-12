@@ -90,39 +90,107 @@ const buildTicketJoinsSQL = ` LEFT JOIN nodes n ON n.id=b.node_id
  LEFT JOIN nodes direct_parent ON direct_parent.tenant_id=direct.tenant_id AND direct_parent.id=direct.parent_id
  LEFT JOIN node_kinds dpk ON dpk.tenant_id=direct_parent.tenant_id AND dpk.id=direct_parent.kind_id `
 
+type buildNodeTarget struct {
+	ID     string
+	Origin bool
+}
+
+// Resolve only the named node and, for an order, its immediate parent. Keeping
+// these indexed point reads separate avoids multiplying the nodes' RLS policy
+// in a large join when a tenant has hundreds of branches.
+func buildNodeTargetTx(ctx context.Context, tx pgx.Tx, id string) (buildNodeTarget, error) {
+	var target buildNodeTarget
+	var order bool
+	var parent *string
+	if err := tx.QueryRow(ctx, `SELECT n.id::text,k.slug='work_order',n.parent_id::text
+      FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+      WHERE n.id=$1 AND n.deleted_at IS NULL`, id).Scan(&target.ID, &order, &parent); err != nil {
+		return target, err
+	}
+	if !order || parent == nil {
+		return target, nil
+	}
+	if err := tx.QueryRow(ctx, `SELECT k.slug IN ('work','ticket','task') FROM nodes n
+      JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1`, *parent).Scan(&target.Origin); err != nil {
+		return target, err
+	}
+	if target.Origin {
+		target.ID = *parent
+	}
+	return target, nil
+}
+
 // BuildTicketTx resolves the at-most-three public bindings under caller RLS.
 // Work-order children and their runs occupy the originating ticket's slot;
 // standalone orders use an explicit ticket if supplied, otherwise their own
 // slot. Conflicting originating ticket bindings fail closed.
-// Callers hold the tenant/tree fences, so bindings cannot change before write.
+// Callers hold tenant/tree fences, so the bounded point reads share one binding.
 func BuildTicketTx(ctx context.Context, tx pgx.Tx, ticket, order, run *string) (*string, error) {
-	expected := 0
-	for _, id := range []*string{ticket, order, run} {
-		if id != nil {
-			expected++
+	cache := make(map[string]buildNodeTarget, 4)
+	resolve := func(id string) (buildNodeTarget, error) {
+		if target, ok := cache[id]; ok {
+			return target, nil
+		}
+		target, err := buildNodeTargetTx(ctx, tx, id)
+		if err == nil {
+			cache[id] = target
+		}
+		return target, err
+	}
+	var explicit, result *string
+	add := func(target buildNodeTarget, fallback bool) error {
+		if fallback && !target.Origin && explicit != nil {
+			target.ID = *explicit
+		}
+		if result != nil && *result != target.ID {
+			return Fail(409, "ticket, work order and run binding conflict")
+		}
+		id := target.ID
+		result = &id
+		return nil
+	}
+	if ticket != nil {
+		target, err := resolve(*ticket)
+		if err != nil {
+			return nil, err
+		}
+		id := target.ID
+		explicit = &id
+		if err = add(target, false); err != nil {
+			return nil, err
 		}
 	}
-	if expected == 0 {
-		return nil, nil
+	if order != nil {
+		var node string
+		if err := tx.QueryRow(ctx, `SELECT node_id::text FROM work_orders WHERE node_id=$1`, *order).Scan(&node); err != nil {
+			return nil, err
+		}
+		target, err := resolve(node)
+		if err != nil {
+			return nil, err
+		}
+		if err = add(target, true); err != nil {
+			return nil, err
+		}
 	}
-	var target *string
-	var found, distinct int
-	err := tx.QueryRow(ctx, `WITH bindings AS (
-	 SELECT $1::uuid AS node_id,NULL::uuid AS queue_ticket,$1::uuid AS direct_ticket WHERE $1::uuid IS NOT NULL
-	 UNION ALL SELECT node_id,NULL::uuid,$1::uuid FROM work_orders WHERE node_id=$2
-	 UNION ALL SELECT work_order_id,queue_node_id,$1::uuid FROM agent_runs WHERE id=$3
-	) SELECT min(`+buildTicketIDSQL+`::text),count(*),count(DISTINCT `+buildTicketIDSQL+`)
-	 FROM bindings b `+buildTicketJoinsSQL+` WHERE n.id IS NOT NULL AND n.deleted_at IS NULL`, ticket, order, run).Scan(&target, &found, &distinct)
-	if err != nil {
-		return nil, err
+	if run != nil {
+		var node string
+		var queueTicket *string
+		if err := tx.QueryRow(ctx, `SELECT work_order_id::text,queue_node_id::text FROM agent_runs WHERE id=$1`, *run).Scan(&node, &queueTicket); err != nil {
+			return nil, err
+		}
+		if queueTicket != nil {
+			node = *queueTicket
+		}
+		target, err := resolve(node)
+		if err != nil {
+			return nil, err
+		}
+		if err = add(target, queueTicket == nil); err != nil {
+			return nil, err
+		}
 	}
-	if found != expected {
-		return nil, pgx.ErrNoRows
-	}
-	if distinct != 1 {
-		return nil, Fail(409, "ticket, work order and run binding conflict")
-	}
-	return target, nil
+	return result, nil
 }
 
 // The same resolution serves the existence probe and public metadata query.
