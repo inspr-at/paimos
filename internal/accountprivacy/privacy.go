@@ -70,6 +70,38 @@ func LoadControls(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []stri
 	return out, rows.Err()
 }
 
+// LoadHostDiagnostics is independent of usage sharing and check controls.
+// Only the person who approved the connected computer may see its diagnostics;
+// unpaired accounts fall back to their person owner, as routing advice does.
+func LoadHostDiagnostics(ctx context.Context, tx pgx.Tx, p tenant.Principal, ids []string) (Policy, error) {
+	if len(ids) > 1024 {
+		return nil, errors.New("too many host diagnostic targets")
+	}
+	if p.Kind != tenant.Person || p.ID == "" {
+		return Policy{}, nil
+	}
+	rows, err := tx.Query(ctx, `SELECT a.id::text,COALESCE(COALESCE(q.approved_by,a.owner_person_id)=$2::uuid,false)
+ FROM agent_accounts a
+ LEFT JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id
+ LEFT JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id AND c.state='connected'
+ LEFT JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+ WHERE a.id=ANY($1::uuid[])`, ids, p.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := Policy{}
+	for rows.Next() {
+		var id string
+		var allowed bool
+		if err := rows.Scan(&id, &allowed); err != nil {
+			return nil, err
+		}
+		out[id] = allowed
+	}
+	return out, rows.Err()
+}
+
 func IDs(raw json.RawMessage, fallback string) ([]string, error) {
 	var v any
 	if err := json.Unmarshal(raw, &v); err != nil {
@@ -154,10 +186,10 @@ func uuid(s string) bool {
 // availability projections carry details_redacted. History becomes an empty
 // array. The registering daemon's own scoped reports remain unaffected.
 func Redact(raw json.RawMessage, policy Policy, fallback string, history bool) (json.RawMessage, error) {
-	return RedactWithControls(raw, policy, nil, fallback, history)
+	return RedactWithControls(raw, policy, nil, nil, fallback, history)
 }
 
-func RedactWithControls(raw json.RawMessage, policy, controls Policy, fallback string, history bool) (json.RawMessage, error) {
+func RedactWithControls(raw json.RawMessage, policy, controls, hostDiagnostics Policy, fallback string, history bool) (json.RawMessage, error) {
 	if history && !policy[fallback] {
 		return json.RawMessage(`[]`), nil
 	}
@@ -190,6 +222,12 @@ func RedactWithControls(raw json.RawMessage, policy, controls Policy, fallback s
 		case map[string]any:
 			if own := accountID(obj); own != "" {
 				id = own
+			}
+			// Sharing usage and registering an account never grant host details.
+			// Aggregate waits have no account ID; their handlers authorize host
+			// diagnostics before folding away the account (capacity/next).
+			if id != "" && !hostDiagnostics[id] {
+				delete(obj, "host_reason")
 			}
 			saved := map[string]any{}
 			if id != "" && !policy[id] {

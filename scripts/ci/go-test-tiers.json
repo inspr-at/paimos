@@ -690,6 +690,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityEnforcesSchedulesSnapshotsAndResourceStops","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityHostDiagnosticsRequireComputerPersonOwner","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityIngestRouteResetAndRLS","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityLimitingResetPreservesExistingSprintEnd","tier":"GATED-FULL"}

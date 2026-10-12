@@ -118,6 +118,14 @@ func TestFix2MixedShapesAndLegacyEnums(t *testing.T) {
 		t.Fatalf("private host cause escaped account redaction: %s", body)
 	}
 	visible, err := Redact(raw, Policy{id: true}, "", false)
+	if err != nil || strings.Contains(string(visible), `"host_reason"`) || !strings.Contains(string(visible), `"used":42`) {
+		t.Fatalf("usage sharing released host diagnostics or lost quota: %s %v", visible, err)
+	}
+	visible, err = RedactWithControls(raw, Policy{id: true}, Policy{id: true}, nil, "", false)
+	if err != nil || strings.Contains(string(visible), `"host_reason"`) {
+		t.Fatalf("registering account controls released host diagnostics: %s %v", visible, err)
+	}
+	visible, err = RedactWithControls(raw, Policy{id: true}, nil, Policy{id: true}, "", false)
 	if err != nil || !strings.Contains(string(visible), `"host_reason":"managed_exit_unconfirmed"`) {
 		t.Fatalf("owner lost host cause: %s %v", visible, err)
 	}
