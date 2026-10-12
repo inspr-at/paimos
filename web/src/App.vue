@@ -15,7 +15,6 @@ import StatusPage from './components/StatusPage.vue'
 import ShortcutSheet from './components/work/ShortcutSheet.vue'
 import StatusHelpSheet from './components/work/StatusHelpSheet.vue'
 import AppIcon from './components/AppIcon.vue'
-import TicketPeekHost from './components/TicketPeekHost.vue'
 import LeadOverlays from './components/lead/LeadOverlays.vue'
 import { command, consume } from './lib/commands'
 import { clearFatal, fatal } from './lib/fatal'
@@ -31,6 +30,8 @@ import { usePoller } from './lib/usePolledData'
 import { sessionFreezeApplies } from './lib/agentPairing'
 
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
+// A closed preview must not load the ticket workspace or its lead state.
+const TicketPeekHost = defineAsyncComponent(() => import('./components/TicketPeekHost.vue'))
 const session = useSession()
 const route = useRoute()
 const router = useRouter()
