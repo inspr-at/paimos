@@ -6072,6 +6072,511 @@
           "group": "features"
         }
       ]
+    },
+    "261012145858.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 130,
+      "snapshot_sha256": "8046f0375bdd280f91d4dda69e78c1d0e01eb29f5a23a9778a083f24b84ba196",
+      "captured_at": "2026-10-12T15:40:57Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-1091",
+          "pill_en": "Content needs no release",
+          "pill_de": "Inhalte ohne Release",
+          "benefit_en": "Tickets marked “No release needed” can be accepted without a software release after the configured waiting time (30 days by default), unless an objection or a human check stops it.",
+          "benefit_de": "Als „Kein Release nötig“ markierte Tickets können nach der eingestellten Wartezeit (standardmäßig 30 Tage) ohne Software-Release abgenommen werden, sofern kein Einwand und keine menschliche Prüfung entgegensteht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1129",
+          "pill_en": "No more lock stalls",
+          "pill_de": "Keine Sperr-Staus mehr",
+          "benefit_en": "PAIMOS stays responsive because a background job no longer blocks everyone while it searches.",
+          "benefit_de": "PAIMOS bleibt flüssig, weil ein Hintergrundjob beim Suchen nicht mehr alle anderen blockiert.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1135",
+          "pill_en": "No sample data",
+          "pill_de": "Keine Beispieldaten",
+          "benefit_en": "The Flow view only ever shows real runs; without one it says so plainly.",
+          "benefit_de": "Die Flow-Ansicht zeigt nur echte Läufe; ohne einen sagt sie das klar.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1139",
+          "pill_en": "Leaner Agents page",
+          "pill_de": "Schlankere Agents-Seite",
+          "benefit_en": "The Agents page no longer repeats the Decision Desk. The Desk sits after Business in the header, with its count.",
+          "benefit_de": "Die Agents-Seite wiederholt den Decision Desk nicht mehr. Der Desk steht in der Kopfzeile nach Business, mit seiner Anzahl.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1140",
+          "pill_en": "Simpler lead adoption",
+          "pill_de": "Einfachere Lead-Übernahme",
+          "benefit_en": "After you confirm the adoption, the running session proves its lead claim with a separate command that uses its existing state directory; an empty candidate list explains what is missing.",
+          "benefit_de": "Nach Bestätigung der Übernahme weist die laufende Sitzung ihren Lead-Anspruch mit einem eigenen Befehl nach, der ihr vorhandenes Zustandsverzeichnis nutzt; eine leere Kandidatenliste erklärt, was fehlt.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1141",
+          "pill_en": "Claude subagents visible",
+          "pill_de": "Claude-Subagenten sichtbar",
+          "benefit_en": "With the PAIMOS lifecycle hooks installed and the parent's heartbeat helper running, registered Claude Code sessions report their subagents automatically under their parent on Agents.",
+          "benefit_de": "Mit installierten PAIMOS-Lifecycle-Hooks und laufendem Heartbeat-Helfer der Elternsitzung melden registrierte Claude-Code-Sitzungen ihre Subagenten automatisch unter ihrer Elternsitzung in Agents.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1142",
+          "pill_en": "Better defaults, 100 icons",
+          "pill_de": "Bessere Vorgaben, 100 Icons",
+          "benefit_en": "New workspaces start with Epic, Ticket and Task, and you can pick from about 100 icons that match PAIMOS.",
+          "benefit_de": "Neue Workspaces starten mit Epic, Ticket und Task, und es gibt rund 100 passende Icons zur Auswahl.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1143",
+          "pill_en": "Clear, finished policies",
+          "pill_de": "Klare, fertige Richtlinien",
+          "benefit_en": "Policies shows only who may or must do what, in plain words; which model runs is decided in one place.",
+          "benefit_de": "Richtlinien zeigen nur noch, wer was darf oder muss, in klaren Worten; welches Modell läuft, wird an einer Stelle entschieden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1144",
+          "pill_en": "Models that scale",
+          "pill_de": "Modelle mit Überblick",
+          "benefit_en": "Models stays calm with dozens of models: grouped by provider, with visible fallbacks and a reviewed cleanup of outdated versions.",
+          "benefit_de": "Die Modellseite bleibt auch mit vielen Modellen übersichtlich: nach Anbieter gruppiert, mit sichtbaren Ausweichmodellen und einem geprüften Aufräumen veralteter Versionen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1146",
+          "pill_en": "Clearer model waits",
+          "pill_de": "Klarere Modell-Wartegründe",
+          "benefit_en": "Missing quota readings no longer count as proof that an account is used up, and PAIMOS explains the other reasons a model has to wait.",
+          "benefit_de": "Fehlende Kontingentdaten gelten nicht mehr als Nachweis, dass ein Konto erschöpft ist, und PAIMOS erklärt die anderen Gründe, warum ein Modell warten muss.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1147",
+          "pill_en": "Honest release reminders",
+          "pill_de": "Ehrliche Release-Hinweise",
+          "benefit_en": "New release reminders in Needs attention appear only with recorded merge evidence and in projects that use releases.",
+          "benefit_de": "Neue Release-Hinweise in „Braucht Aufmerksamkeit“ erscheinen nur mit nachgewiesenem Merge und in Projekten, die Releases verwenden.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1148",
+          "pill_en": "Links that open",
+          "pill_de": "Links, die öffnen",
+          "benefit_en": "Clicking a ticket in Needs attention opens it, and the model auto-update setting reads the same on both pages.",
+          "benefit_de": "Ein Klick auf ein Ticket in „Braucht Aufmerksamkeit“ öffnet es, und die Modell-Aktualisierung zeigt auf beiden Seiten dasselbe.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1149",
+          "pill_en": "Clear accounts and capacity",
+          "pill_de": "Klare Konten und Kapazität",
+          "benefit_en": "Accounts, computers and capacity each get one clear place, so you know what to set to get what you want.",
+          "benefit_de": "Konten, Computer und Kapazität haben je einen klaren Ort, damit klar ist, was man einstellt, um das Gewünschte zu bekommen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1151",
+          "pill_en": "Models from the source",
+          "pill_de": "Modelle aus der Quelle",
+          "benefit_en": "Provider and harness catalogs supply model facts together with their source; values nobody reports stay marked unknown, and you can still add entries by hand.",
+          "benefit_de": "Anbieter- und Harness-Kataloge liefern Modelldaten samt Quelle; Werte, die niemand meldet, bleiben als unbekannt markiert, und Einträge von Hand bleiben möglich.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1152",
+          "pill_en": "Harnesses report models",
+          "pill_de": "Harnesse melden Modelle",
+          "benefit_en": "Codex, Claude Code, Cursor, OpenCode and pi can report their model catalogs, including native thinking levels where the tool exposes them.",
+          "benefit_de": "Codex, Claude Code, Cursor, OpenCode und pi können ihre Modellkataloge melden, samt nativer Denkstufen, wo das Werkzeug sie bereitstellt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1153",
+          "pill_en": "Retire old models",
+          "pill_de": "Alte Modelle ablösen",
+          "benefit_en": "Outdated models are flagged with their successor and can be retired in one step, with undo.",
+          "benefit_de": "Veraltete Modelle werden mit Nachfolger markiert und lassen sich in einem Schritt ablösen, mit Rückgängig.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1157",
+          "pill_en": "One model choice everywhere",
+          "pill_de": "Eine Modellwahl überall",
+          "benefit_en": "Automatic model choices for starts, reviews and CLI roles follow the orders on Models; accounts with a saved quota floor can still wait for a reading.",
+          "benefit_de": "Automatische Modellentscheidungen für Starts, Reviews und CLI-Rollen folgen den Reihenfolgen der Modellseite; Konten mit gespeicherter Kontingent-Untergrenze können weiterhin auf einen Messwert warten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1158",
+          "pill_en": "Old model rules migrated",
+          "pill_de": "Alte Modellregeln übernommen",
+          "benefit_en": "Saved model orders, holds and rules move into the new Models settings, with an audit record of the conversion; role-specific holds become pauses.",
+          "benefit_de": "Gespeicherte Modell-Reihenfolgen, Sperren und Regeln wandern in die neuen Einstellungen der Modellseite, mit einem Nachweis der Umwandlung; rollenbezogene Sperren werden zu Pausen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1159",
+          "pill_en": "Models page data ready",
+          "pill_de": "Daten der Modellseite bereit",
+          "benefit_en": "The Models page gets every field it needs, including pause, locks and one reason per model that can't run.",
+          "benefit_de": "Die Modellseite bekommt alle nötigen Felder, inklusive Pause, Sperren und einem Grund pro Modell, das nicht laufen kann.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1160",
+          "pill_en": "Clear model picker",
+          "pill_de": "Klare Modellauswahl",
+          "benefit_en": "Picking a model is quick: grouped by provider, newest first, with one plain sentence when a choice can't run.",
+          "benefit_de": "Ein Modell zu wählen geht schnell: nach Anbieter gruppiert, neueste zuerst, mit einem klaren Satz, wenn eine Wahl nicht laufen kann.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1161",
+          "pill_en": "Simple fallback order",
+          "pill_de": "Einfache Ausweich-Reihenfolge",
+          "benefit_en": "You see and change what happens when a model can't run, right under each row, with undo.",
+          "benefit_de": "Direkt unter jeder Zeile ist sichtbar und änderbar, was passiert, wenn ein Modell nicht laufen kann, mit Rückgängig.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1162",
+          "pill_en": "Models per situation",
+          "pill_de": "Modelle je Situation",
+          "benefit_en": "Admins can set a different model order for first builds, fix rounds, stuck work and reviews, without clutter for everyone else.",
+          "benefit_de": "Admins können für Erstbauten, Fix-Runden, festgefahrene Arbeit und Reviews eine eigene Reihenfolge setzen, ohne Ballast für alle anderen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1163",
+          "pill_en": "Model facts with sources",
+          "pill_de": "Modelldaten mit Quellen",
+          "benefit_en": "The model registry shows each model once with its routes, native levels and where every fact came from.",
+          "benefit_de": "Das Modellregister zeigt jedes Modell einmal, mit seinen Wegen, nativen Stufen und der Quelle jeder Angabe.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1164",
+          "pill_en": "Retire old models",
+          "pill_de": "Alte Modelle ablösen",
+          "benefit_en": "Outdated models are announced with their successors and can be retired in one reviewed step, with undo.",
+          "benefit_de": "Veraltete Modelle werden mit Nachfolgern angezeigt und lassen sich in einem geprüften Schritt ablösen, mit Rückgängig.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1165",
+          "pill_en": "Policies as plain rules",
+          "pill_de": "Regeln ohne Ballast",
+          "benefit_en": "Policies shows only the rules: cross-family review, what agents must ask you for, and where other rules live.",
+          "benefit_de": "Die Regelseite zeigt nur Regeln: Review durch eine andere Modellfamilie, wofür Agenten nachfragen müssen, und wo andere Regeln liegen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1166",
+          "pill_en": "Dial follows Models",
+          "pill_de": "Regler folgt Modellen",
+          "benefit_en": "When a harness hits its limit, work simply continues with the next model in your order instead of a separate switch.",
+          "benefit_de": "Erreicht ein Harness sein Limit, geht die Arbeit einfach mit dem nächsten Modell der Reihenfolge weiter statt über einen eigenen Schalter.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1171",
+          "pill_en": "Accounts in three parts",
+          "pill_de": "Konten in drei Teilen",
+          "benefit_en": "Accounts, Computers and Capacity each have their own place in Settings, and old links still open the right panel.",
+          "benefit_de": "Konten, Computer und Kapazität haben je einen eigenen Platz in den Einstellungen, und alte Links öffnen weiter das richtige Panel.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1172",
+          "pill_en": "Quota at a glance",
+          "pill_de": "Kontingent auf einen Blick",
+          "benefit_en": "Each account shows one clear bar for its quota and limits, and the old sprint and hold menus are gone.",
+          "benefit_de": "Jedes Konto zeigt einen klaren Balken für Kontingent und Grenzen, und die alten Sprint- und Halte-Menüs sind weg.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1173",
+          "pill_en": "Calmer account rules",
+          "pill_de": "Ruhigere Kontoregeln",
+          "benefit_en": "Deciding which account may work where gets simpler: clear rules for new things, one corner control, and undo.",
+          "benefit_de": "Festzulegen, welches Konto wo arbeiten darf, wird einfacher: klare Regeln für Neues, ein Eck-Schalter und Rückgängig.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1174",
+          "pill_en": "Computers in one table",
+          "pill_de": "Computer in einer Tabelle",
+          "benefit_en": "One table shows every computer against every account, with a plain state per cell and one switch for new starts.",
+          "benefit_de": "Eine Tabelle zeigt jeden Computer gegen jedes Konto, mit klarem Zustand pro Zelle und einem Schalter für neue Starts.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1175",
+          "pill_en": "Pace in one place",
+          "pill_de": "Tempo an einem Ort",
+          "benefit_en": "Capacity is the home for how fast agents may spend; the dial and Capacity edit the same single value.",
+          "benefit_de": "Kapazität ist der Ort dafür, wie schnell Agenten verbrauchen dürfen; Regler und Kapazität ändern denselben einen Wert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1176",
+          "pill_en": "Tidier Agents card",
+          "pill_de": "Aufgeräumte Agenten-Karte",
+          "benefit_en": "The Agents page shows three simple tiles that open the right part of Settings, and the dial links to Capacity.",
+          "benefit_de": "Die Agentenseite zeigt drei einfache Kacheln, die den richtigen Teil der Einstellungen öffnen, und der Regler verlinkt zu Kapazität.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1177",
+          "pill_en": "Old limit writes retired",
+          "pill_de": "Alte Grenzwerte abgelöst",
+          "benefit_en": "Retired limit, repeat, sprint and hold actions can no longer be written, so nothing old sneaks back in.",
+          "benefit_de": "Abgelöste Grenz-, Wiederholungs-, Sprint- und Halte-Aktionen lassen sich nicht mehr schreiben, damit nichts Altes zurückkommt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1184",
+          "pill_en": "Who runs a routine",
+          "pill_de": "Wer eine Routine ausführt",
+          "benefit_en": "When you set up a routine, you can only pick people or agents that are really allowed to run it.",
+          "benefit_de": "Beim Einrichten einer Routine stehen nur Personen oder Agenten zur Wahl, die sie wirklich ausführen dürfen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1187",
+          "pill_en": "Less dead code",
+          "pill_de": "Weniger toter Code",
+          "benefit_en": "Leftover screens from replaced flows are gone, and links that pointed nowhere now open the right place.",
+          "benefit_de": "Überreste ersetzter Abläufe sind entfernt, und Links ins Leere öffnen jetzt die richtige Stelle.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1188",
+          "pill_en": "Display in one place",
+          "pill_de": "Anzeige an einem Ort",
+          "benefit_en": "List display settings live in one place, wherever you open them from.",
+          "benefit_de": "Die Anzeigeeinstellungen einer Liste liegen an einem Ort, egal von wo man sie öffnet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1189",
+          "pill_en": "Business setup unified",
+          "pill_de": "Business-Einrichtung an einem Ort",
+          "benefit_en": "You set up Business in Settings; the overview just shows what is on and what is missing.",
+          "benefit_de": "Business wird in den Einstellungen eingerichtet; die Übersicht zeigt nur, was aktiv ist und was fehlt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1191",
+          "pill_en": "Routine status shown",
+          "pill_de": "Routinestatus auf einen Blick",
+          "benefit_en": "Routines show their last run and, once saved, the rules that apply to them; consent requests appear on the Decision Desk.",
+          "benefit_de": "Routinen zeigen ihren letzten Lauf und nach dem Speichern die für sie geltenden Regeln; Zustimmungsanfragen erscheinen auf dem Entscheidungs-Desk.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1192",
+          "pill_en": "All routines together",
+          "pill_de": "Alle Routinen gemeinsam",
+          "benefit_en": "One page lists every routine you can see, with an honest run logbook: a failed run is never shown as green.",
+          "benefit_de": "Eine Seite listet jede sichtbare Routine mit ehrlichem Laufbuch: Ein fehlgeschlagener Lauf wird nie grün angezeigt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1195",
+          "pill_en": "No flicker on focus",
+          "pill_de": "Kein Flackern beim Fokus",
+          "benefit_en": "Switching back to PAIMOS no longer makes lists blink or reorder; what you see stays put while it refreshes.",
+          "benefit_de": "Beim Zurückwechseln zu PAIMOS blinken oder springen Listen nicht mehr; der sichtbare Inhalt bleibt stehen, während er aktualisiert wird.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1196",
+          "pill_en": "A calmer Agents page",
+          "pill_de": "Ruhigere Agents-Seite",
+          "benefit_en": "The Agents page groups sessions by project, shows each agent's state in its avatar, and one divider sizes the list and the details.",
+          "benefit_de": "Die Agents-Seite gruppiert Sessions nach Projekt, zeigt den Zustand jedes Agents im Avatar, und ein Teiler bestimmt die Breite von Liste und Details.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1198",
+          "pill_en": "Pills checked early",
+          "pill_de": "Pills früh geprüft",
+          "benefit_en": "A ticket can't be saved with a benefit pill that would later block it from being closed.",
+          "benefit_de": "Ein Ticket lässt sich nicht mit einer Pill speichern, die später das Abschließen blockieren würde.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1200",
+          "pill_en": "Faster test classification",
+          "pill_de": "Schnellere Testeinordnung",
+          "benefit_en": "Checking which tests a change needs takes seconds instead of compiling the whole repository every time.",
+          "benefit_de": "Die Prüfung, welche Tests eine Änderung braucht, dauert Sekunden statt jedes Mal das ganze Repository zu kompilieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1204",
+          "pill_en": "Policies ready for Models",
+          "pill_de": "Regeln bereit für Modelle",
+          "benefit_en": "Policies points you to the new Models page for role order instead of offering a save that no longer works.",
+          "benefit_de": "Die Regelseite verweist für die Rollen-Reihenfolge auf die neue Modellseite, statt ein Speichern anzubieten, das nicht mehr funktioniert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1209",
+          "pill_en": "Calm Agents header",
+          "pill_de": "Ruhiger Agenten-Kopf",
+          "benefit_en": "The Agents page starts with a tidy action header and its own capacity row, while session search and filters stay in view.",
+          "benefit_de": "Die Agentenseite beginnt mit einer aufgeräumten Kopfzeile für Aktionen und einer eigenen Kapazitätszeile; Suche und Filter der Sitzungsliste bleiben im Blick.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1210",
+          "pill_en": "Sessions by project",
+          "pill_de": "Sitzungen nach Projekt",
+          "benefit_en": "Sessions are grouped by project with the lead on top and its workers below, so you see who works on what at a glance.",
+          "benefit_de": "Sitzungen sind nach Projekt gruppiert, mit dem Lead oben und seinen Workern darunter, sodass auf einen Blick erkennbar ist, wer woran arbeitet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1211",
+          "pill_en": "Calm session rows",
+          "pill_de": "Ruhige Sitzungszeilen",
+          "benefit_en": "Each row shows its state in the avatar, compact rows stay readable, and finished sessions stay put for a few minutes instead of vanishing.",
+          "benefit_de": "Jede Zeile zeigt ihren Zustand im Avatar, kompakte Zeilen bleiben lesbar, und beendete Sitzungen bleiben kurz stehen, statt zu verschwinden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1212",
+          "pill_en": "One panel per lead",
+          "pill_de": "Ein Panel pro Lead",
+          "benefit_en": "One panel per lead with Lead, Session and Chat, opening on whatever needs you first.",
+          "benefit_de": "Ein Panel pro Lead mit Lead, Sitzung und Chat, das dort öffnet, wo zuerst Handlungsbedarf besteht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1213",
+          "pill_en": "Smooth split view",
+          "pill_de": "Flüssige Teilansicht",
+          "benefit_en": "List and details share the screen smoothly at any width, with simple keys that work on German and English keyboards.",
+          "benefit_de": "Liste und Details teilen sich den Bildschirm flüssig bei jeder Breite, mit einfachen Tasten für deutsche und englische Tastaturen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1214",
+          "pill_en": "Desk in the header",
+          "pill_de": "Desk im Kopf",
+          "benefit_en": "The Decision Desk sits last in the header with a quick preview on every page.",
+          "benefit_de": "Der Entscheidungs-Desk steht zuletzt im Kopf, mit einer schnellen Vorschau auf jeder Seite.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1216",
+          "pill_en": "Healthy harnesses keep running",
+          "pill_de": "Gesunde Harnesses laufen weiter",
+          "benefit_en": "A sign-in problem with one tool no longer stops queued agents that use a different, working tool.",
+          "benefit_de": "Ein Anmeldeproblem bei einem Werkzeug hält wartende Agenten mit einem anderen, funktionierenden Werkzeug nicht mehr auf.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1217",
+          "pill_en": "Add accounts without stopping",
+          "pill_de": "Konten ohne Stopp hinzufügen",
+          "benefit_en": "People can add or re-link an agent account on a computer from the Agents page without stopping the computer's agent service.",
+          "benefit_de": "Man kann auf der Agents-Seite Agent-Konten auf einem Rechner hinzufügen oder neu verknüpfen, ohne den Agent-Dienst des Rechners anzuhalten.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1219",
+          "pill_en": "Shared navigation keys",
+          "pill_de": "Gemeinsame Navigationstasten",
+          "benefit_en": "Global navigation and Agents shortcuts come from one shared list and work on German and English keyboards; page-specific keys keep their own actions.",
+          "benefit_de": "Globale Navigation und Agents-Tastenkürzel stammen aus einer gemeinsamen Liste und funktionieren mit deutscher und englischer Tastatur; seitenspezifische Tasten behalten ihre eigenen Aktionen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1220",
+          "pill_en": "Honest lead buttons",
+          "pill_de": "Ehrliche Lead-Knöpfe",
+          "benefit_en": "The lead panel only offers start, pause and hand-over when you can really do them, and otherwise says why.",
+          "benefit_de": "Das Lead-Panel bietet Start, Pause und Übergabe nur an, wenn sie wirklich ausführbar sind, und nennt sonst den Grund.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1226",
+          "pill_en": "Delivery numbers switch on",
+          "pill_de": "Lieferzahlen einschalten",
+          "benefit_en": "A project's delivery numbers can be switched on from its Settings: link the GitHub repository once and the history fills in by itself.",
+          "benefit_de": "Die Lieferzahlen eines Projekts lassen sich in seinen Einstellungen einschalten: einmal das GitHub-Repository verknüpfen, die Historie füllt sich von selbst.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1233",
+          "pill_en": "All project settings",
+          "pill_de": "Alle Projekteinstellungen",
+          "benefit_en": "Everything about a project lives in one place: rename it, describe it, group it, freeze or archive it, each with a short explanation.",
+          "benefit_de": "Alles zu einem Projekt an einem Ort: umbenennen, beschreiben, gruppieren, einfrieren oder archivieren, jeweils mit kurzer Erklärung.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1234",
+          "pill_en": "History fills itself",
+          "pill_de": "Historie füllt sich selbst",
+          "benefit_en": "After you link a repository, its delivery history fills automatically, and missing GitHub Actions read access is named explicitly.",
+          "benefit_de": "Nach dem Verknüpfen eines Repositorys füllt sich die Lieferhistorie automatisch; fehlender Lesezugriff auf GitHub Actions wird ausdrücklich benannt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1235",
+          "pill_en": "New projects, guided",
+          "pill_de": "Neue Projekte, geführt",
+          "benefit_en": "Creating a project suggests a key from its name, checks its format right away and then opens Settings with linking a repository as the next step.",
+          "benefit_de": "Beim Anlegen eines Projekts wird aus dem Namen ein Schlüssel vorgeschlagen und sofort auf das Format geprüft; danach öffnen sich die Einstellungen mit dem Verknüpfen eines Repositorys als nächstem Schritt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-1236",
+          "pill_en": "Reliable routine runs",
+          "pill_de": "Zuverlässige Routine-Läufe",
+          "benefit_en": "Routine runs survive retries and restarts: a repeated start is recognised instead of refused, and reviews pick up the run correctly.",
+          "benefit_de": "Routine-Läufe überstehen Wiederholungen und Neustarts: ein wiederholter Start wird erkannt statt abgelehnt, und Reviews übernehmen den Lauf korrekt.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1241",
+          "pill_en": "No lost GitHub events",
+          "pill_de": "Keine verlorenen GitHub-Events",
+          "benefit_en": "Merges, checks and delivery timings from GitHub are never silently lost, even when one processing step fails.",
+          "benefit_de": "Merges, Prüfungen und Lieferzeiten von GitHub gehen nie mehr still verloren, auch wenn ein Verarbeitungsschritt scheitert.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1246",
+          "pill_en": "Outline and hours fixed",
+          "pill_de": "Gliederung und Stunden repariert",
+          "benefit_en": "The ticket outline and the hours week strip work again as before, and the accounts limits no longer jump after ending a session.",
+          "benefit_de": "Die Ticket-Gliederung und der Stunden-Wochenstreifen funktionieren wieder wie zuvor, und die Kontolimits springen nach dem Beenden einer Sitzung nicht mehr.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1249",
+          "pill_en": "Session ticket link back",
+          "pill_de": "Sitzungs-Ticketlink zurück",
+          "benefit_en": "The Agents panel names and links the ticket a session works on again, and shows the same model name as the list.",
+          "benefit_de": "Das Agenten-Panel nennt und verlinkt wieder das Ticket, an dem eine Sitzung arbeitet, und zeigt denselben Modellnamen wie die Liste.",
+          "group": "fixes"
+        }
+      ]
     }
   }
 }
