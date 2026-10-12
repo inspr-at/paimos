@@ -131,12 +131,18 @@ func TestRoutineClaimReplayRetainsBindingAndLiveGuards(t *testing.T) {
 	var sibling string
 	must(t, d.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status) SELECT tenant_id,work_order_id,agent_principal_id,model_profile_id,'running' FROM agent_runs WHERE id=$1 RETURNING id::text`, d.agentRun).Scan(&sibling))
 	// An external assignment has no managed account binding and consumes no
-	// host slot. Binding it to the account must restore the live host refusal.
+	// host slot. Binding it to a second account must restore the host refusal.
 	s25Request(t, d, d.agentRun, "claim", body, g, g.DaemonGeneration, 200, "")
-	// Keep the account ceiling open so only the one-agent host ceiling can
-	// produce the expected refusal, rather than account-level parallelism.
-	d.exec(`UPDATE agent_accounts SET max_parallel_runs=2 WHERE id=$1`, g.AccountID)
-	d.exec(`UPDATE agent_runs SET account_id=$2 WHERE id=$1`, sibling, g.AccountID)
+	// A separate paired account keeps each account's immutable one-run cap
+	// intact, so the expected refusal proves the computer-wide ceiling.
+	var siblingAccount string
+	must(t, d.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,label,registered_by_principal_id,owner_person_id)
+ SELECT tenant_id,account_key||'-sibling',harness,daemon_id,'Host guard sibling',registered_by_principal_id,owner_person_id
+ FROM agent_accounts WHERE id=$1 RETURNING id::text`, g.AccountID).Scan(&siblingAccount))
+	d.exec(`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at)
+ SELECT tenant_id,$2,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at
+ FROM agent_pairing_enrollments WHERE account_id=$1`, g.AccountID, siblingAccount)
+	d.exec(`UPDATE agent_runs SET account_id=$2 WHERE id=$1`, sibling, siblingAccount)
 	s25Request(t, d, d.agentRun, "claim", body, g, g.DaemonGeneration, 409, "host_maximum_agents")
 	d.exec(`UPDATE agent_runs SET status='cancelled' WHERE id=$1`, sibling)
 	d.exec(`UPDATE routine_launch_intents SET binding=jsonb_set(binding,'{account_id}',to_jsonb($2::text)) WHERE id=$1`, g.LaunchID, d.project)
