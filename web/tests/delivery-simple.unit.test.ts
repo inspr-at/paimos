@@ -12,6 +12,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 vi.mock('../src/lib/api.ts', () => ({ api: async () => new Response('{}'), APIError: class extends Error {} }))
 import * as delivery from '../src/lib/delivery'
 import * as numbers from '../src/lib/deliveryNumbers'
+import * as projectSettings from '../src/lib/projectSettings'
+import * as projectDeliverySettings from '../src/lib/projectDeliverySettings'
 import * as simple from '../src/lib/deliverySimple'
 import { simpleNumbersOf, sparkGeometry, verdictOf, type SparkModel } from '../src/lib/deliverySimple'
 import { TILES } from '../src/lib/deliveryNumbers'
@@ -227,6 +229,7 @@ for (const lang of ['en', 'de'] as const) {
       '../work/ProjectTabs.vue': stub, './ExpertTile.vue': stub, './LevelSwitch.vue': stub,
       './SimpleNumbers.vue': stub, './TrendChart.vue': stub, './WindowSwitch.vue': stub, './FlowView.vue': stub,
       '../../lib/delivery': delivery, '../../lib/deliveryNumbersText': numbersText,
+      '../../lib/authz': { can: () => true }, '../../lib/projectSettings': projectSettings, '../../lib/projectDeliverySettings': projectDeliverySettings,
       '../../lib/deliveryFlow': flowLib, '../../lib/deliveryFlowModes': flowModes, '../../lib/deliveryFlowText': flowTextLib, '../../lib/useDeliveryFlow': useFlow,
       '../../lib/deliveryNumbers': { ...numbers, readDeliveryMetrics: () => read() },
       '../../lib/preferences': { onPreferenceFailure: (listener: (key: string) => void) => { failures.add(listener); return () => { failures.delete(listener) } }, preferenceSaves, usePreference: () => pref },

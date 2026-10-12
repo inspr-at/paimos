@@ -3,12 +3,13 @@
 // One inline SVG set: 16×16 grid, stroke 1.8, round caps and joins, currentColor.
 export type IconName =
   | 'flag' | 'square'
+  | 'repo' | 'circle' | 'signal-off'
   | 'queue' | 'queue-add' | 'queue-on' | 'queue-off' | 'to-top' | 'repeat'
   | 'sun' | 'moon' | 'user' | 'chevron' | 'chevron-right' | 'chevron-left' | 'chevron-up' | 'arrow' | 'arrow-up' | 'arrow-down'
   | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'external' | 'filter' | 'check'
   | 'rows-comfortable' | 'rows-compact' | 'keyboard' | 'epic' | 'ticket' | 'task' | 'alert' | 'refresh' | 'sliders' | 'enter'
   | 'inbox' | 'folder' | 'layers' | 'archive' | 'clock' | 'expand' | 'collapse' | 'more' | 'link' | 'trash' | 'agent' | 'outline' | 'expand-all' | 'collapse-all' | 'arrow-left' | 'eye' | 'eye-off' | 'monitor' | 'key'
-  | 'pause' | 'hold' | 'play' | 'winddown' | 'stop' | 'shield' | 'send' | 'bolt' | 'gauge' | 'interrupt' | 'halt'
+  | 'snowflake' | 'pause' | 'hold' | 'play' | 'winddown' | 'stop' | 'shield' | 'send' | 'bolt' | 'gauge' | 'interrupt' | 'halt'
   | 'minus' | 'compare' | 'download' | 'paperclip' | 'image' | 'upload' | 'info' | 'journey'
   | 'users' | 'history' | 'sparkle' | 'wrench' | 'bug' | 'gear' | 'commit' | 'tag' | 'box' | 'rollback'
   | 'command' | 'option' | 'backspace'
@@ -23,7 +24,7 @@ export type IconName =
   | 'sticky-note' | 'scroll-text' | 'presentation' | 'palette' | 'pen-tool' | 'brush' | 'shapes' | 'puzzle' | 'beaker' | 'flask-conical'
   | 'telescope' | 'lightbulb' | 'triangle-alert' | 'siren' | 'flame' | 'shield-alert' | 'messages-square' | 'handshake' | 'megaphone'
   | 'gavel' | 'scale' | 'vote' | 'calendar-check' | 'timer' | 'hourglass' | 'trending-up' | 'sprout'
-  | 'hand' | 'route'
+  | 'wait' | 'hand' | 'route'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -31,6 +32,9 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
 
 <template>
   <svg :width="size" :height="size" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+    <template v-if="name === 'repo'"><path d="M2.8 12.3V3.7c0-.7.6-1.3 1.3-1.3h9.1v9.6H4.1c-.7 0-1.3.6-1.3 1.3s.6 1.3 1.3 1.3h1.5" /><path d="M5.6 2.4V12M7.6 12.7v2.1l1.2-.8 1.2.8v-2.1" /></template>
+    <circle v-else-if="name === 'circle'" cx="8" cy="8" r="6" />
+    <path v-else-if="name === 'signal-off'" d="M8 12.6h.01M5.6 10.2a3.4 3.4 0 0 1 4.8 0M3.2 7.8a6.8 6.8 0 0 1 5.6-2.1M12.8 7.8a6.8 6.8 0 0 0-1.4-1.1M2 2l12 12" />
     <path v-if="name === 'flag'" d="M3.5 14V2.6M3.5 3h8.2l-1.8 3 1.8 3H3.5" />
     <rect v-else-if="name === 'square'" x="2.2" y="2.2" width="11.6" height="11.6" rx="2" />
     <path v-else-if="name === 'queue'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h7.8M2.4 12h7.8" />
@@ -99,6 +103,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'collapse-all'" d="m4.4 6.8 3.6-3.2 3.6 3.2M4.4 12.4 8 9.2l3.6 3.2" />
     <template v-else-if="name === 'agent'"><rect x="2.6" y="5" width="10.8" height="8.2" rx="2.4" /><path d="M8 5V2.6M6 9h.01M10 9h.01M1 8.4v2M15 8.4v2" /><circle cx="8" cy="2.2" r=".6" fill="currentColor" stroke="none" /></template>
     <path v-else-if="name === 'trash'" d="M2.8 4.2h10.4M6.2 4.2V2.8h3.6v1.4M4.2 4.2l.7 8.6c.1.7.6 1.2 1.3 1.2h3.6c.7 0 1.2-.5 1.3-1.2l.7-8.6M6.8 7v4.2M9.2 7v4.2" />
+    <template v-else-if="name === 'snowflake'"><path d="M8 1.8v12.4M2.6 4.9l10.8 6.2M2.6 11.1l10.8-6.2" /><path d="m6.5 2.9 1.5 1.3 1.5-1.3M6.5 13.1 8 11.8l1.5 1.3" /></template>
     <path v-else-if="name === 'pause'" d="M6 3.8v8.4M10 3.8v8.4" />
     <template v-else-if="name === 'hold'"><circle cx="8" cy="8" r="6" /><path d="M6.4 5.6v4.8M9.6 5.6v4.8" /></template>
     <path v-else-if="name === 'winddown'" d="M1.6 13.6h12.8M4.8 13.6a3.2 3.2 0 0 1 6.4 0M8 1.8v5.2M5.8 4.9 8 7.1l2.2-2.2" />
@@ -109,6 +114,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'halt'"><path d="M5.5 1.9h5l3.6 3.6v5l-3.6 3.6h-5l-3.6-3.6v-5Z" /><rect x="6" y="6" width="4" height="4" rx=".6" fill="currentColor" stroke="none" /></template>
     <path v-else-if="name === 'send'" d="M14 2 7.2 8.8M14 2 9.6 14 7.2 8.8 2 6.4Z" />
     <path v-else-if="name === 'bolt'" d="M9 1.8 3.6 9h4l-.8 5.2L12.4 7h-4Z" />
+    <template v-else-if="name === 'wait'"><circle cx="8" cy="8" r="5.7" /><path d="M6.7 6v4M9.3 6v4" /></template>
     <template v-else-if="name === 'gauge'"><path d="M2.4 11.6a5.6 5.6 0 1 1 11.2 0" /><path d="m8 11.6 2.6-3.4" /></template>
     <path v-else-if="name === 'minus'" d="M3.6 8h8.8" />
     <template v-else-if="name === 'compare'"><rect x="1.9" y="2.8" width="12.2" height="10.4" rx="1.8" /><path d="M8 1.6v12.8" /><path d="m5 6.4-1.4 1.6L5 9.6M11 6.4l1.4 1.6L11 9.6" /></template>

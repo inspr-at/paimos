@@ -89,8 +89,9 @@ test('offline and revoked computers do not present prior harness reports as live
   const report: Report = { ...computerReport(), connectivity: 'offline' }
   await setup(page, report)
   await open(page)
-  // Never a problem from an old report, and never ready on an offline computer.
+  // Never a problem row from an old report, and never Ready on an offline computer.
   await expect(section(page).locator('.acc-fix')).toHaveCount(0)
+  await expect(section(page).getByText('Ready', { exact: true })).toHaveCount(0)
   await expect(line(page)).toContainText('0 of 2 ready')
   await expect(section(page).locator('.tile[data-part="computers"]')).toContainText('0 of 1 online')
   report.computer_state = 'revoked'

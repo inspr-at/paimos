@@ -11,6 +11,7 @@ import { ref, type App } from 'vue'
 import { createMemoryHistory, createRouter, type Router, type RouteRecordRaw } from 'vue-router'
 import { sourceModule } from './record-source'
 import { mountView, textOf } from './webcore-view-harness'
+import * as projectSettings from '../src/lib/projectSettings'
 
 const root = fileURLToPath(new URL('../src/', import.meta.url))
 const removed = [
@@ -98,6 +99,7 @@ it('approval evidence opens the canonical Decision Desk route', () => {
 it('Check computers opens the real Computers settings section without the retired anchor', async () => {
   const router = routeRecords(), push = vi.fn((path: string) => router.push(path))
   const view = mountView('../src/components/lead/LeadBand.vue', {
+    '../../lib/projectSettings': projectSettings,
     'vue-router': { useRouter: () => ({ push }) },
     '../../lib/authz': { can: () => true },
     '../../lib/lead': { LEAD_WORDS: { l: 'lead' }, canLaunchLead: () => true },
@@ -129,6 +131,7 @@ function routeRecords(): Router {
   const empty = { render: () => null }
   const views = (routes: RouteRecordRaw[]): RouteRecordRaw[] => routes.map(route => ({ ...route, ...(route.component ? { component: empty } : {}), ...(route.children ? { children: views(route.children) } : {}) })) as RouteRecordRaw[]
   return sourceModule<{ router: Router }>('router.ts', {
+    './lib/projectSettings': sourceModule('lib/projectSettings.ts', {}),
     'vue-router': { createWebHistory: createMemoryHistory, createRouter: (options: Parameters<typeof createRouter>[0]) => createRouter({ ...options, routes: views(options.routes) }) },
     './lib/brand': { setPageTitle() {} }, './stores/projects': {},
     './stores/session': { useSession: () => ({ identity: { principal: { kind: 'person' } }, refresh: async () => {} }) },

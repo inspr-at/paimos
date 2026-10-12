@@ -142,8 +142,10 @@ for (const role of ['worker', 'coordinator'] as const) {
   })
 }
 
+// The approved rows (AEON-1211, design AEON-1196) carry no estimate: the details show it, and the
+// columns still fit at every width.
 for (const width of [1600, 1100, 390]) {
-  test(`the sessions table carries the bound ticket's estimate without overflowing its columns at ${width}px`, async ({ page }) => {
+  test(`the sessions table leaves the bound ticket's estimate to the details and fits its columns at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     await mockWork(page, fixtures(), { admin: true })
     const data = agentData({ ...agentsWorld })
@@ -154,20 +156,28 @@ for (const width of [1600, 1100, 390]) {
     await mockAgents(page, data)
     await page.goto('/agents')
     await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-    await expect(sessionRow(page, 2).locator('.eta-cell .when')).toHaveText(/^~2\d min$/)
-    await expect(sessionRow(page, 3).locator('.eta-cell')).toHaveClass(/stale/)
-    await expect(sessionRow(page, 4).locator('.eta-cell')).toHaveClass(/overdue/)
-    await expect(sessionRow(page, 4).locator('.eta-cell .when')).toHaveText(/^overdue [45] min$/)
-    // Stopped sessions stay empty; working sessions without a time show a quiet hint.
-    await expect(page.locator('.row .eta-cell .when')).toHaveCount(3)
-    await expect(sessionRow(page, 1).locator('.eta-cell')).toHaveText('no ETA')
-    await expect(sessionRow(page, 7).locator('.eta-cell')).toHaveCount(0)
-    for (const n of [2, 3, 4]) {
-      const fits = await sessionRow(page, n).evaluate(row => [...row.querySelectorAll<HTMLElement>(':scope > [role="gridcell"]')].every(cell => cell.scrollWidth <= cell.clientWidth + 1)
-        && [...row.querySelectorAll<HTMLElement>('.when > .shown')].every(el => el.scrollWidth <= el.clientWidth))
+    await expect(sessionRow(page, 2)).toBeVisible()
+    await expect(page.locator('.sessions .row .eta-cell')).toHaveCount(0)
+    for (const n of [1, 2, 3, 4]) {
+      const fits = await sessionRow(page, n).evaluate(row => [...row.querySelectorAll<HTMLElement>(':scope > [role="gridcell"], :scope > .execution-host > [role="gridcell"]')].every(cell => cell.scrollWidth <= cell.clientWidth + 1))
       expect(fits).toBe(true)
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+    // The details carry the estimate: fresh, stale and overdue reports, a quiet hint, nothing once stopped.
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    const eta = panel.locator('.now-eta .eta-cell')
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000002')
+    await expect(eta.locator('.when')).toHaveText(/^~2\d min$/)
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000003')
+    await expect(eta).toHaveClass(/stale/)
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000004')
+    await expect(eta).toHaveClass(/overdue/)
+    await expect(eta.locator('.when')).toHaveText(/^overdue [45] min$/)
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
+    await expect(eta).toHaveText('no ETA')
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000007')
+    await expect(panel.locator('.now-block')).toBeVisible()
+    await expect(panel.locator('.now-eta')).toHaveCount(0)
   })
 }
 
@@ -203,10 +213,17 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const shots = process.env.AEON_443_SHOTS
     if (shots) { mkdirSync(shots, { recursive: true }); await page.screenshot({ path: join(shots, `tickets-${width}-${theme}.png`), fullPage: true }) }
     await mockAgents(page, agentData({ ...agentsWorld }))
+    // The agents rows carry no estimate (AEON-1211); the details give the quiet hint, and nothing once stopped.
     await page.goto('/agents')
-    await expect(sessionRow(page, 1).locator('.eta-cell')).toHaveText('no ETA')
-    await expect(sessionRow(page, 7).locator('.eta-cell')).toHaveCount(0)
+    await expect(sessionRow(page, 1)).toBeVisible()
+    await expect(page.locator('.sessions .row .eta-cell')).toHaveCount(0)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
     if (shots) { await sessionRow(page, 1).scrollIntoViewIfNeeded(); await page.screenshot({ path: join(shots, `agents-${width}-${theme}.png`) }) }
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000001')
+    await expect(panel.locator('.now-eta .eta-cell')).toHaveText('no ETA')
+    await page.goto('/agents/5e000000-0000-4000-8000-000000000007')
+    await expect(panel.locator('.now-block')).toBeVisible()
+    await expect(panel.locator('.now-eta')).toHaveCount(0)
   })
 }

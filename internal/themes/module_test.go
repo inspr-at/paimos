@@ -61,8 +61,15 @@ func TestInputBoundsReadTime(t *testing.T) {
 			if valid := input(w, r, &out, "name", "scope"); valid != tc.valid || w.Code != tc.status {
 				t.Fatalf("valid=%t HTTP %d; want %t HTTP %d: %s", valid, w.Code, tc.valid, tc.status, w.Body.String())
 			}
-			if !read || len(w.deadlines) != 2 || !w.deadlines[1].IsZero() {
-				t.Fatalf("body read=%t; deadline was not cleared: %v", read, w.deadlines)
+			want := 2
+			if tc.name == "oversized" || tc.readErr != nil {
+				want = 1
+			}
+			if !read || len(w.deadlines) != want || want == 2 && !w.deadlines[1].IsZero() {
+				t.Fatalf("body read=%t; wrong success/failure deadline cleanup: %v", read, w.deadlines)
+			}
+			if want == 1 && w.Header().Get("Connection") != "close" {
+				t.Fatal("failed read left connection reusable")
 			}
 		})
 	}

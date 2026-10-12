@@ -595,7 +595,19 @@ test('stale progress queued through readiness fixes also offers Undo', async ({ 
 })
 
 test('successful Undo refreshes membership and reports a failed ticket read honestly', async ({ page }) => {
+  // The fixture stream's initial open schedules a 400 ms workspace + project
+  // queue refresh. Drain it under an injected clock before counting Undo reads;
+  // otherwise its two reads can race the stability guard on Linux Chromium.
+  await page.clock.install({ time: new Date(now) })
+  await page.clock.pauseAt(new Date(Date.parse(now) + 1000))
   const { state, data } = await world(page, { stale: true })
+  const initialQueueReads = ['', 'p-pharos'].map(project => page.waitForResponse(response => {
+    const url = new URL(response.url())
+    return response.request().method() === 'GET' && url.pathname === '/api/queue' && (url.searchParams.get('project_id') ?? '') === project
+  }))
+  await page.clock.fastForward(1000)
+  await Promise.all(initialQueueReads)
+  await page.clock.resume()
   const ticket = row(page, 'PHAROS-12'), queue = ticket.locator('.q-btn')
   await ticket.hover(); await queue.click()
   await expect(queue).toHaveAttribute('aria-pressed', 'true')

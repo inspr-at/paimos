@@ -389,6 +389,8 @@ test('a tap at the bottom keeps following new posts', async ({ page }) => {
 
 test('an upward gesture on a thread that fits still follows the next post', async ({ page }) => {
   const { worker, data, messages } = await setup(page, { count: 2, storage: { 'aeon.session-tab': 'messages' } })
+  // This case needs a fitting thread; long-token wrapping is covered separately.
+  messages.forEach((message, index) => { message.body = `Short post ${index + 1}.` })
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(`/agents/${worker.id}`)
   const panel = panelOf(page)

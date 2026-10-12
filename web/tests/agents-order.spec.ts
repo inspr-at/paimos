@@ -77,26 +77,33 @@ test('default order is start time and survives live refreshes with shuffled hear
   }
 })
 
-test('clicking Ticket orders rows by ticket, stays put on refresh, is remembered, and resets', async ({ page }) => {
+test('choosing Ticket in Display orders rows by ticket, stays put on refresh, is remembered, and resets', async ({ page }) => {
   const { liveRefresh } = await setup(page)
   await page.goto('/agents')
   await expect.poll(() => rowOrder(page)).toEqual([sid(3), sid(1), sid(2), sid(4)])
-  await page.locator('.sessions .sort-tool').click()
-  const ticket = page.getByRole('group', { name: 'Sort sessions' })
-  await ticket.getByRole('combobox', { name: 'Sort' }).selectOption('ticket')
+  // The ticket key opens each name, so Ticket has no column (AEON-1211, design AEON-1196); Display orders by it.
+  await expect(page.getByRole('columnheader', { name: 'Ticket' })).toHaveCount(0)
+  const tool = page.locator('.sessions .sort-tool')
+  const bar = page.getByRole('group', { name: 'Sort sessions' })
+  await tool.click()
+  await bar.getByRole('combobox', { name: 'Sort' }).selectOption('ticket')
   const byTicket = [sid(2), sid(3), sid(1), sid(4)] // PHAROS-4, -12, -30, -100
   await expect.poll(() => rowOrder(page)).toEqual(byTicket)
-  await expect(ticket.getByRole('button', { name: /Order ascending/ })).toBeVisible()
-  await expect(page.locator('.sessions .sort-tool')).toHaveAccessibleName('Display: sort sessions by Ticket, ascending')
+  await page.keyboard.press('Escape')
+  await expect(bar).toHaveCount(0)
+  await expect(tool).toHaveAccessibleName('Display: sort sessions by Ticket, ascending')
   await liveRefresh()
   await liveRefresh()
   expect(await rowOrder(page)).toEqual(byTicket)
 
-  // Keyboard: the direction is a button; Enter reverses the order.
-  await ticket.getByRole('button', { name: /Order ascending/ }).focus()
+  // Keyboard: Display's direction button reverses the order with Enter.
+  await tool.click()
+  await bar.getByRole('button', { name: /Order ascending/ }).focus()
   await page.keyboard.press('Enter')
   await expect.poll(() => rowOrder(page)).toEqual([...byTicket].reverse())
-  await expect(ticket.getByRole('button', { name: /Order descending/ })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(bar).toHaveCount(0)
+  await expect(tool).toHaveAccessibleName('Display: sort sessions by Ticket, descending')
 
   // Remembered for this viewer across a reload.
   expect(await page.evaluate(key => localStorage.getItem(key), storageKey)).toBe(JSON.stringify({ key: 'ticket', dir: 'desc' }))
@@ -135,6 +142,7 @@ test('the Heartbeat sort explains that fresh beats tie, for screen readers too',
   await page.goto('/agents')
   await expect.poll(() => rowOrder(page)).toHaveLength(4)
   const help = 'Beats under 3 minutes old count as equal; start time and id then decide their order.'
+  // The column is named Beat (AEON-1211, design AEON-1196); it orders by the heartbeat.
   const beat = page.getByRole('columnheader', { name: 'Beat' }).getByRole('button')
   await expect(beat).toHaveAccessibleDescription(help)
   await expect(beat).toHaveAttribute('data-tip', new RegExp(help.slice(0, 30)))

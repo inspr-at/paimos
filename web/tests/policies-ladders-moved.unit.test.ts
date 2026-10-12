@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-1204: role ladders moved to Settings › Models and PUT /models/routes now
-// answers 410 Gone. The Policies Ladders tab shows one line with a link there and
+// answers 410 Gone. Policies, rules only since AEON-1165, links to Models and
 // never reads or writes the retired ladder endpoints.
 import { readFileSync } from 'node:fs'
 import { afterEach, beforeEach, expect, test, vi } from 'vitest'
@@ -41,30 +41,32 @@ afterEach(() => { vi.unstubAllGlobals() })
 async function renderPolicies() {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:path(.*)*', component: defineComponent({ render: () => null }) }] })
   await router.push('/settings/policies'); await router.isReady()
-  const app = createSSRApp(PoliciesSection); app.use(router)
+  // main.ts registers v-clip-tip for the whole app; it adds nothing to server HTML.
+  const app = createSSRApp(PoliciesSection); app.use(router); app.directive('clip-tip', {})
   const html = await renderToString(app)
   // Let any request the setup started reach the transport (no timing sleep).
   for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve))
   return html
 }
 const ladderEndpoint = (request: { path: string }) => /\/models\/routes(\?|$)/.test(request.path)
+// The "Which model runs" row's link to Models, whatever the attribute order.
+const modelsRuleLinks = (html: string) => (html.match(/<a\b[^>]*>/g) ?? []).filter(tag => tag.includes('rule-go') && tag.includes('href="/settings/models"'))
 
-test('the Ladders tab shows the moved line with its Settings › Models link and requests no ladder endpoint', async () => {
+test('Policies links to Settings › Models and requests no ladder endpoint', async () => {
   const html = await renderPolicies()
   expect(mocks.requests.filter(ladderEndpoint)).toEqual([])
   expect(mocks.requests.some(request => request.method === 'PUT')).toBe(false)
-  expect(html).toContain('data-testid="policies-ladders-moved"')
-  expect(html).toMatch(/Role ladders moved to <a[^>]*href="\/settings\/models"[^>]*>/)
-  expect(html).toMatch(/<span class="sr-only"[^>]*>Settings, Models<\/span><\/span><\/a>\.<\/span><\/p>/)
-  // No ladder editor, role selector, ladder list or Save action is mounted.
-  for (const gone of ['policy-edit', 'policy-save', 'policies-role', 'ladder-slot', 'Configured ladder', 'policies-row-link']) expect(html).not.toContain(gone)
+  expect(html).toMatch(/Which model runs is decided on <a[^>]*href="\/settings\/models"[^>]*>Models<\/a>\./)
+  expect(modelsRuleLinks(html)).toHaveLength(1)
+  // No ladder tab, editor, role selector, ladder list or Save action is mounted.
+  for (const gone of ['role="tab"', 'policy-edit', 'policy-save', 'policies-role', 'ladder-slot', 'Configured ladder', 'policies-row-link']) expect(html).not.toContain(gone)
 })
 
-test('without See models the tab says so and still requests no ladder endpoint', async () => {
+test('without See models the Models rule names its owner without a link and requests no ladder endpoint', async () => {
   mocks.grants = new Set(['roles.read'])
   const html = await renderPolicies()
-  expect(html).toMatch(/<p class="state-line"[^>]*>You can&#39;t see this: it needs See models\.<\/p>/)
-  expect(html).not.toContain('data-testid="policies-ladders-moved"')
+  expect(html).toMatch(/<span class="rule-go none"[^>]*>Models<\/span>/)
+  expect(modelsRuleLinks(html)).toEqual([])
   expect(mocks.requests.filter(ladderEndpoint)).toEqual([])
 })
 

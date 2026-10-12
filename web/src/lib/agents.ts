@@ -2,6 +2,7 @@
 import type { DeployTarget } from './deployTarget'
 import { agentEventIdentity, type AgentEventIdentity } from './tierEvidenceLive.ts'
 import { watchStreamHealth } from './streamHealth.ts'
+import { eventNode, PROJECTION_EVENTS } from './agentProjection.ts'
 // The agents workspace HTTP surface for a person's session: harness sessions and
 // their typed controls, runs, approvals, accounts with allowance windows, models
 // and project messages. Worker-only endpoints (heartbeat, drain, claim) are absent.
@@ -65,7 +66,8 @@ export interface Approval {
   target?: DeployTarget | null
   target_digest_sha256?: string
 }
-export interface ModelProfile { id: string; slug: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean }
+// The registry also sends its display fields; the session list names models by them (AEON-1211).
+export interface ModelProfile { id: string; slug: string; harness: string; family: string; model: string; effort: string; tier: string; enabled: boolean; display_name?: string; short_name?: string; model_version?: string }
 export interface ModelResolution { role: string; profile: ModelProfile | null; owner_required: boolean; source: string }
 export interface MessageTarget { id: string; principal_id: string; address: string; adapter: string; target_kind: string; maximum_level: string; role: string; enabled: boolean }
 export interface ProjectMessage {
@@ -181,6 +183,12 @@ const OTHER_EVENTS = ['inbox.sent', 'harness.leaving_requested', 'harness.leavin
 // Delivery progress of sent messages (AEON-280). These only refresh message
 // status, never the whole workspace.
 export const DELIVERY_EVENTS = ['inbox.message_fetched', 'inbox.receipt_handed_off', 'inbox.receipt_failed', 'inbox.delivery_failed', 'inbox.message_cancelled']
+// Lead, decision, queue, question and reparent events wake the shared Agents projection
+// (AEON-1210 G4; stores/agentProjection.ts), which batches them and rereads what changed.
+// Every agents subscription carries them; a reconnect wakes a full reread.
+const projectionWakes = new Set<(event?: string, node?: string | null) => void>()
+export function onProjectionWake(listener: (event?: string, node?: string | null) => void) { projectionWakes.add(listener); return () => { projectionWakes.delete(listener) } }
+const wakeProjection = (event?: string, node?: string | null) => projectionWakes.forEach(listener => listener(event, node))
 export function subscribeAgents(changed: (event?: string, identity?: AgentEventIdentity) => void, connection: (live: boolean) => void = () => {}, delivery: () => void = () => {}, telemetry = false, recover: () => void = changed): () => void {
   if (typeof EventSource === 'undefined') return () => {}
   let stream: EventSource
@@ -188,13 +196,13 @@ export function subscribeAgents(changed: (event?: string, identity?: AgentEventI
   const health = watchStreamHealth(() => {
     stream.close()
     connection(false)
-    recover(); delivery()
+    recover(); delivery(); wakeProjection()
     connect()
   })
   function connect() {
     const source = stream = new EventSource('/api/events/stream?after=latest')
     const current = (run: (event: Event) => void) => (event: Event) => { if (!stopped && stream === source) { health.heard(); run(event) } }
-    source.onopen = current(() => { connection(true); changed(); delivery() })
+    source.onopen = current(() => { connection(true); changed(); delivery(); wakeProjection() })
     source.onerror = () => { if (!stopped && stream === source) connection(false) }
     source.addEventListener('stream.ping', current(() => {}))
     source.addEventListener('stream.ready', current(() => {}))
@@ -202,6 +210,7 @@ export function subscribeAgents(changed: (event?: string, identity?: AgentEventI
     // Heartbeats prove liveness without invalidating the 20-second live feed poll.
     source.addEventListener('harness.heartbeat', current(() => { if (telemetry) changed() }))
     for (const name of DELIVERY_EVENTS) source.addEventListener(name, current(delivery))
+    for (const name of PROJECTION_EVENTS) source.addEventListener(name, current(event => wakeProjection(name, eventNode((event as MessageEvent).data))))
   }
   connect()
   return () => { stopped = true; health.stop(); stream.close() }

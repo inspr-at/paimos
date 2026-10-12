@@ -797,3 +797,116 @@ func TestCatalogOutdatedRetireRevocationFence(t *testing.T) {
 		t.Fatal("revocation permitted retirement")
 	}
 }
+
+// Risk: the review sheet says "Opus 5 · xhigh → Sonnet 5 · max" while the
+// retirement stores another level, or invents a level for a rule, lock or pause.
+// Each use's from_effort is the level it runs the old version at; to_effort is
+// the level the retirement then writes (nearest, ties going up).
+func TestCatalogOutdatedUseLevels(t *testing.T) {
+	admin, old, next := retireFixture(t)
+	var pinned Profile
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		// Opus 5.5 is gone, so Opus 5 heads its line; its source names Sonnet 5 as the successor.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($1,$2,'Fixture inactive version',$3)`, admin.TenantID, next.ID, admin.ID); err != nil {
+			return err
+		}
+		raw, _ := json.Marshal("claude-sonnet-5")
+		if err := RecordCatalogFacts(t.Context(), tx, admin.TenantID, []CatalogFact{{Provider: "anthropic", ModelID: old.Model, Fact: "successor", Value: raw, Source: "harness:recorded-lifecycle-vector", SourceKind: "harness", FieldPath: "upgrade", FetchedAt: time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)}}); err != nil {
+			return err
+		}
+		// The fixture seeds a build role route; a pause is another use without a level.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pauses(tenant_id,harness,model,reason,set_by,set_at) VALUES($1,'claude',$2,'Fixture pause',$3,'2026-10-11T00:00:00Z')`, admin.TenantID, old.Model, admin.ID); err != nil {
+			return err
+		}
+		var err error
+		if pinned, err = insertActivatedProfile(t.Context(), tx, admin, profileWrite{Slug: "old-opus-xhigh", Version: "1", Harness: "claude", Family: "anthropic", Model: old.Model, Effort: "xhigh", Tier: "strong", RegisteredEffortLevel: ptrInt(4)}, true, modelactivation.Person); err != nil {
+			return err
+		}
+		// Native scales are explicit fixture inputs; the successor offers high (3)
+		// and max (5) only, so xhigh (4) lies between them and goes up.
+		for _, native := range []struct {
+			effort string
+			level  int
+		}{{"high", 3}, {"max", 5}} {
+			if _, err := insertActivatedProfile(t.Context(), tx, admin, profileWrite{Slug: "native-next-" + native.effort, Version: "1", Harness: "claude", Family: "anthropic", Model: "claude-sonnet-5", Effort: native.effort, Tier: "strong", RegisteredEffortLevel: ptrInt(native.level)}, true, modelactivation.Person); err != nil {
+				return err
+			}
+		}
+		var workspace, scope, kind string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_pref_profiles(tenant_id,scope) VALUES($1,'workspace') RETURNING id::text`, admin.TenantID).Scan(&workspace); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,not_allowed,effort,effort_level,efforts) VALUES
+			($1,$2,'other','first',ARRAY['anthropic:opus'],'{}','xhigh',4,NULL),
+			($1,$2,'docs','fix',ARRAY['anthropic:haiku','anthropic:opus'],'{}',NULL,NULL,'{"anthropic:opus":"high"}'),
+			($1,$2,'backend','stuck',ARRAY['anthropic:haiku'],ARRAY['anthropic:opus'],NULL,NULL,NULL)`, admin.TenantID, workspace); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO work_kinds(tenant_id,slug,label) VALUES($1,'levels-kind','Levels kind') RETURNING id::text`, admin.TenantID).Scan(&kind); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_pref_scopes(tenant_id,level) VALUES($1,'default') RETURNING id::text`, admin.TenantID).Scan(&scope); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pref_rows(tenant_id,scope_id,kind_id,level,locked) VALUES($1,$2,$3,'default',false)`, admin.TenantID, scope, kind); err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO model_pref_cells(tenant_id,scope_id,kind_id,bucket,mode,profile_id) VALUES($1,$2,$3,'normal','pinned',$4)`, admin.TenantID, scope, kind, pinned.ID)
+		return err
+	})
+	level := func(v *string) string {
+		if v == nil {
+			return "none"
+		}
+		return *v
+	}
+	levels := func(uses []retireUse) map[string]string {
+		out := map[string]string{}
+		for _, use := range uses {
+			out[use.Label] = level(use.FromEffort) + " > " + level(use.ToEffort)
+		}
+		return out
+	}
+	want := map[string]string{
+		"Default · other · first": "xhigh > max",
+		"fallback · docs · fix":   "high > high",
+		"fallback · build":        "none > none",
+		"never · backend":         "none > none",
+		"pause · claude":          "none > none",
+		"pinned · normal":         "xhigh > max",
+	}
+	preview := outdatedPreview(t, admin)
+	version := requireOutdated(t, preview, "anthropic:claude-opus-5")
+	if version.Successor == nil || *version.Successor != "anthropic:claude-sonnet-5" {
+		t.Fatalf("fixture successor: %+v", version)
+	}
+	if got := levels(version.Uses); !reflect.DeepEqual(got, want) {
+		t.Fatalf("preview levels\n got %v\nwant %v", got, want)
+	}
+	// The JSON names the fields, with null for a use without a level.
+	body := boardCall(t, admin, "GET", "/api/models/outdated", nil, "").Body.String()
+	if !strings.Contains(body, `"from_effort":"xhigh","to_effort":"max"`) || !strings.Contains(body, `"from_effort":null,"to_effort":null`) {
+		t.Fatal("levels missing from the outdated JSON", body)
+	}
+	result := boardDecode[retireResult](t, boardCall(t, admin, "POST", "/api/models/outdated/retire", retireWrite{Versions: []string{version.Version}, Revision: preview.Revision}, ""), 200)
+	if got := levels(result.Moved); !reflect.DeepEqual(got, want) {
+		t.Fatalf("moved levels\n got %v\nwant %v", got, want)
+	}
+	// What the sheet said is what was written.
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		var pick, step, cell string
+		if err := tx.QueryRow(t.Context(), `SELECT effort FROM model_pref_orders WHERE column_key='other' AND situation='first'`).Scan(&pick); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT efforts->>'anthropic:sonnet' FROM model_pref_orders WHERE column_key='docs' AND situation='fix'`).Scan(&step); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT p.effort FROM model_pref_cells c JOIN model_profiles p ON p.id=c.profile_id WHERE c.mode='pinned'`).Scan(&cell); err != nil {
+			return err
+		}
+		if pick != "max" || step != "high" || cell != "max" {
+			t.Fatalf("stored levels differ from the preview: pick %s, step %s, pinned %s", pick, step, cell)
+		}
+		return nil
+	})
+}

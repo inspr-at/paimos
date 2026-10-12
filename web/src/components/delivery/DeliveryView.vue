@@ -28,6 +28,9 @@ import { onPreferenceFailure, preferenceSaves, usePreference } from '../../lib/p
 import { usePoller } from '../../lib/usePolledData'
 import { vClipTip } from '../../directives/clipTip'
 import { useProfile } from '../../stores/profile'
+import { can } from '../../lib/authz'
+import { projectSettingsPath } from '../../lib/projectSettings'
+import { repositoryState } from '../../lib/projectDeliverySettings'
 
 const props = defineProps<{ project: { id: string; routeKey: string; title: string } }>()
 const route = useRoute()
@@ -124,6 +127,9 @@ const tiles = computed(() => state.value === 'ready' && numbers.value ? numbers.
 const charts = computed(() => state.value === 'ready' && numbers.value ? numbers.value.charts : empty.value.charts)
 const source = computed(() => data.value?.source ?? null)
 const noData = computed(() => state.value === 'ready' && !!data.value && !hasAnyData(data.value))
+const canManage = computed(() => can('delivery.manage', props.project.id))
+const repositoryLink = computed(() => ({ path: projectSettingsPath(props.project.routeKey, 'delivery'), hash: '#repository', ...(!source.value && canManage.value ? { query: { link: '1' } } : {}) }))
+const settingsLabel = computed(() => !source.value ? canManage.value ? lang.value === 'de' ? 'Repository verknüpfen' : 'Link repository' : lang.value === 'de' ? 'Zuständigkeit anzeigen' : 'See who' : lang.value === 'de' ? 'Repository & Lieferung' : 'Repository & delivery')
 const updated = computed(() => {
   if (view.value === 'flow') {
     // Flow names its own moment: Live says what "now" is; Replay and Compare show recorded runs.
@@ -138,13 +144,17 @@ const chips = computed(() => {
   const t = text.value, s = source.value
   if (!s) return []
   const day = (iso: string | null) => iso ? shortDate(iso.slice(0, 10), lang.value) : ''
-  const back = s.backfill === 'done' ? { icon: 'history' as const, b: t.srcBack[0], rest: fill(t.srcBack[1], { d: day(s.backfill_since) }) }
+  const stale = repositoryState(s, Date.parse(data.value?.generated_at ?? '')) === 'stale'
+  const readError = s.last_read_error?.reason
+  const historyProblem = lang.value === 'de' ? { actions_read_missing: 'Actions-Lesezugriff fehlt', not_installed: 'App nicht installiert', github_unavailable: 'GitHub nicht erreichbar' } : { actions_read_missing: 'Actions read access missing', not_installed: 'App not installed', github_unavailable: 'GitHub unavailable' }
+  const back = readError ? { icon: 'history' as const, b: lang.value === 'de' ? 'Historie' : 'History', rest: ` · ${historyProblem[readError]}` }
+    : s.backfill === 'done' ? { icon: 'history' as const, b: t.srcBack[0], rest: fill(t.srcBack[1], { d: day(s.backfill_since) }) }
     : s.backfill === 'running' ? { icon: 'history' as const, b: t.srcRun[0], rest: s.covered_since ? fill(t.srcRun[1], { d: day(s.covered_since) }) : t.srcRunNone[1] }
       : { icon: 'history' as const, b: t.srcNone[0], rest: t.srcNone[1] }
   return [
-    { icon: 'pulse' as const, b: s.app_connected ? t.srcApp[0] : t.srcAppOff[0], rest: s.app_connected ? t.srcApp[1] : t.srcAppOff[1] },
-    back,
-    { icon: 'merge' as const, b: t.srcTool[0], rest: t.srcTool[1] },
+    { icon: s.app_connected ? 'pulse' as const : 'signal-off' as const, b: s.app_connected ? t.srcApp[0] : t.srcAppOff[0], rest: stale ? lang.value === 'de' ? ` · letztes Ereignis ${day(s.last_event_at ?? null)}` : ` · last event ${day(s.last_event_at ?? null)}` : s.app_connected ? t.srcApp[1] : t.srcAppOff[1], problem: !s.app_connected || stale },
+    { ...back, problem: s.backfill !== 'done' || !!s.last_read_error },
+    { icon: 'merge' as const, b: t.srcTool[0], rest: t.srcTool[1], problem: false },
   ]
 })
 const unit = computed(() => bucketOf(prefs.value.window))
@@ -246,13 +256,15 @@ watch(state, (next, prev) => {
         <div v-else-if="!source" class="banner" role="status">
           <AppIcon name="info" :size="16" />
           <span v-clip-tip class="grow"><b>{{ text.norepoT }}</b> {{ text.norepoB }}</span>
+          <RouterLink class="btn sm" :class="{ primary: canManage }" :to="repositoryLink"><AppIcon name="link" :size="13" />{{ settingsLabel }}</RouterLink>
         </div>
         <div v-else-if="noData" class="banner" role="status">
           <AppIcon name="info" :size="16" />
           <span v-clip-tip class="grow"><b>{{ text.nodataT }}</b> {{ fill(text.nodataB, { repo: source.repository }) }}</span>
+          <RouterLink class="btn sm" :to="repositoryLink">{{ settingsLabel }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
         </div>
         <div v-else class="sources">
-          <span v-for="chip in chips" :key="chip.b" class="src"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span></span>
+          <template v-for="chip in chips" :key="chip.b"><RouterLink v-if="chip.problem" class="src go-src" :to="repositoryLink"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span><AppIcon name="chevron-right" :size="12" /></RouterLink><span v-else class="src"><AppIcon :name="chip.icon" :size="14" /><span><b>{{ chip.b }}</b>{{ chip.rest }}</span></span></template>
         </div>
       </div>
 
@@ -325,14 +337,14 @@ watch(state, (next, prev) => {
 .dl-ctrls { display: flex; align-items: center; gap: 10px; }
 .slot-hidden { visibility: hidden; }
 .dl-updated { font: 500 11.5px/1.4 var(--mono); color: var(--ink-3); white-space: nowrap; }
-.dl-status { min-height: 40px; }
+.dl-status { min-height: 56px; }
 .dl-status.veiled { visibility: hidden; }
 /* The warning replaces the status row in place: same anchor, no extra flow, so tiles stay put. */
-.banner.pref-warn { position: absolute; z-index: 2; top: calc(100% + 12px); right: calc(50% + 6px); left: 0; margin: 0; min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
+.banner.pref-warn { position: absolute; z-index: 2; top: calc(100% + 12px); right: calc(50% + 6px); left: 0; margin: 0; min-height: 44px; padding-block: 0; flex-wrap: nowrap; }
 .banner.pref-warn .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The read alert owns the right half, the save alert the left half: always, so a retry never moves or resizes (AEON-541). */
 .dl-status .banner.half { margin-left: calc(50% + 6px); }
-.sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 28px; margin-top: 12px; }
+.sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 44px; margin-top: 12px; }
 .src { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 0 10px; border-radius: 999px; background: var(--surface-sunken); color: var(--ink-2); font-size: 12px; }
 .src svg { flex: none; color: var(--teal-ink); }
 .src b { font-weight: 600; color: var(--ink); }
@@ -344,8 +356,8 @@ watch(state, (next, prev) => {
 .banner.err { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .banner.err svg { color: var(--danger); }
 .banner .btn { flex: none; gap: 6px; }
-/* While a read is in flight or has failed, the row keeps the height measured from the chips (AEON-541). */
-.dl-status .banner { min-height: 28px; padding-block: 0; flex-wrap: nowrap; }
+/* The status row fits its actions in every state; a failed read keeps the measured chip height (AEON-541). */
+.dl-status .banner { min-height: 44px; padding-block: 0; flex-wrap: nowrap; }
 .dl-status .banner .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banner.flow-pref-warn { margin: 0; min-height: 40px; padding-block: 0; flex-wrap: nowrap; }
 .banner.flow-pref-warn .grow { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
@@ -405,6 +417,7 @@ watch(state, (next, prev) => {
   .half .btn { width: 44px; }
 }
 @container delivery (max-width: 460px) { .tiles { grid-template-columns: minmax(0, 1fr); } }
+.go-src { text-decoration:none; color:inherit; } .go-src:hover { box-shadow:inset 0 0 0 1px var(--teal); }
 </style>
 
 <style>

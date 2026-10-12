@@ -7,6 +7,8 @@ import { describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, ref } from 'vue'
 import { LINGER_MS, RELEASE_MS, frameOf, heldChanges, lingers, movesAt, reordered, settle, useSessionHold, type Structure } from '../src/components/agents/sessionHold'
 import { timeShort, timeText, timeTip, timeValue } from '../src/components/agents/sessionTime'
+import { projectGroups } from '../src/components/agents/sessionGroups'
+import type { ProjectLead } from '../src/lib/lead'
 
 type Row = { id: string; group: string; parent?: string; label?: string }
 const structure: Structure<Row> = {
@@ -144,6 +146,146 @@ describe('holding while the person points', () => {
     scope.stop()
     timers.advance(RELEASE_MS)
     expect(hold.rank.value, 'no release ran after the list unmounted').not.toBeNull()
+  })
+})
+
+describe('a filter match is part of a row\'s place', () => {
+  // Risk (gate on 49f7335a): the hold keeps a row's group and parent but the list judges its filter
+  // match on the newest model names, so a rename in the registry adds or removes a row under the pointer.
+  function setup() {
+    const names = ref<Record<string, string>>({ a: 'Opus', b: 'Sol', c: 'Fable' })
+    const query = ref('opus')
+    const filtered: Structure<Row> = { ...structure, match: row => names.value[row.id]!.toLowerCase().includes(query.value) }
+    const live = ref<Row[]>([{ id: 'a', group: 'working' }, { id: 'b', group: 'working' }, { id: 'c', group: 'idle' }])
+    const pointing = ref(false), timers = manualTimers()
+    const hold = effectScope().run(() => useSessionHold(() => live.value, filtered, () => pointing.value, timers))!
+    const matched = () => ['a', 'b', 'c'].map(id => hold.matched(id))
+    return { names, query, pointing, timers, hold, matched }
+  }
+
+  it('keeps the match each row froze with through a rename, until the release', async () => {
+    const { names, pointing, timers, hold, matched } = setup()
+    expect(matched(), 'nothing holds: the list judges the newest names').toEqual([undefined, undefined, undefined])
+    pointing.value = true; await nextTick()
+    // The registry renames two models while the person points: a stops matching, c starts.
+    names.value = { a: 'Lyra', b: 'Sol', c: 'Opus' }
+    expect(matched()).toEqual([true, false, false])
+    expect(ids(hold.views.value)).toEqual(['a', 'b', 'c'])
+    expect(hold.pending.value, 'both new matches wait').toBe(2)
+    pointing.value = false; await nextTick()
+    timers.advance(RELEASE_MS)
+    expect(matched()).toEqual([undefined, undefined, undefined])
+    expect(hold.pending.value).toBe(0)
+  })
+
+  it('freezes the newest matches on Show now, the person\'s own search, and lets a followed row through', async () => {
+    const { names, query, pointing, hold, matched } = setup()
+    pointing.value = true; await nextTick()
+    names.value = { a: 'Lyra', b: 'Sol', c: 'Opus' }
+    hold.showNow()
+    expect(matched()).toEqual([false, false, true])
+    expect(hold.pending.value).toBe(0)
+    // The list calls Show now when the person changes the search (SessionList.vue).
+    query.value = 'sol'
+    expect(matched(), 'the frame keeps what it froze until Show now').toEqual([false, false, true])
+    expect(hold.pending.value).toBe(2)
+    hold.showNow()
+    expect(matched()).toEqual([false, true, false])
+    hold.follow(['b'])
+    expect(hold.matched('b'), 'the person\'s own change follows the newest copy').toBeUndefined()
+  })
+})
+
+describe('project headings share the held session structure', () => {
+  // Risk (fix6): independent lead/queue reads insert a heading above a held session,
+  // although no session id changed and the old pending count stayed zero.
+  function setup() {
+    const live = ref<Row[]>([{ id: 'a', group: 'working', label: 'old activity' }])
+    const pointing = ref(false), timers = manualTimers(), scope = effectScope()
+    const lead = ref<ProjectLead>({ project_id: 'p-pharos', state: 'working', reason: '', revision: 1, generation: 1, session_id: 'a', process_active: true })
+    const queued = ref(0)
+    const layout = {
+      read: (views: readonly Row[]) => projectGroups({
+        roots: views.map(row => ({ view: { session: { id: row.id, project_id: 'p-pharos', role: 'coordinator' }, projectKey: 'PHAROS', projectTitle: 'Pharos' } })),
+        projects: [{ id: 'p-aeon', key: 'AEON', title: 'Aeon' }, { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' }],
+        lead: id => id === 'p-pharos' ? { ...lead.value } : { ...lead.value, project_id: id, state: 'none', session_id: null, process_active: false },
+        queued: id => id === 'p-aeon' ? queued.value : 0,
+        lines: true,
+      }).groups,
+      headings: (groups: ReturnType<typeof projectGroups>['groups']) => groups.map(g => ({ id: g.project.id, key: g.line?.kind ?? 'session' })),
+      follow: (held: ReturnType<typeof projectGroups>['groups'], current: ReturnType<typeof projectGroups>['groups'], ids: ReadonlySet<string>) => held.flatMap(group => ids.has(group.project.id) ? current.filter(next => next.project.id === group.project.id) : [group]),
+    }
+    const hold = scope.run(() => useSessionHold(() => live.value, structure, () => pointing.value, timers, layout))!
+    return { live, pointing, timers, scope, lead, queued, hold }
+  }
+
+  it('keeps a queued-work heading out until Show now, then holds its departure until release', async () => {
+    const { live, pointing, timers, scope, queued, hold } = setup()
+    try {
+      pointing.value = true; await nextTick()
+      queued.value = 1
+      live.value = [{ ...live.value[0]!, label: 'new activity' }]
+      expect(hold.pending.value, 'the new no-lead heading is a waiting change').toBe(1)
+      expect(hold.layout.value!.map(g => g.project.id)).toEqual(['p-pharos'])
+      expect(ids(hold.views.value)).toEqual(['a'])
+      expect(hold.views.value[0]!.label, 'row evidence stays live').toBe('new activity')
+      hold.showNow()
+      expect(hold.layout.value!.map(g => g.project.id)).toEqual(['p-aeon', 'p-pharos'])
+      expect(hold.pending.value).toBe(0)
+      queued.value = 0
+      expect(hold.pending.value).toBe(1)
+      pointing.value = false; await nextTick()
+      timers.advance(RELEASE_MS - 1)
+      expect(hold.layout.value!.map(g => g.project.id)).toEqual(['p-aeon', 'p-pharos'])
+      timers.advance(1)
+      expect(hold.layout.value!.map(g => g.project.id)).toEqual(['p-pharos'])
+      expect(hold.pending.value).toBe(0)
+    } finally { scope.stop() }
+  })
+
+  it('keeps a handover heading out through a cancelled release, then applies it on release', async () => {
+    const { pointing, timers, scope, lead, hold } = setup()
+    try {
+      pointing.value = true; await nextTick()
+      lead.value = { ...lead.value, session_id: 'next-generation', state: 'starting', revision: 2, generation: 2 }
+      expect(hold.pending.value, 'the pending lead heading is a waiting change').toBe(1)
+      expect(hold.layout.value![0]!.line).toBeNull()
+      expect(ids(hold.views.value)).toEqual(['a'])
+      pointing.value = false; await nextTick()
+      timers.advance(RELEASE_MS - 1)
+      pointing.value = true; await nextTick()
+      timers.advance(RELEASE_MS)
+      expect(hold.layout.value![0]!.line).toBeNull()
+      expect(hold.pending.value).toBe(1)
+      pointing.value = false; await nextTick()
+      timers.advance(RELEASE_MS)
+      expect(hold.layout.value![0]!.line?.kind).toBe('pending')
+      expect(hold.pending.value).toBe(0)
+    } finally { scope.stop() }
+  })
+
+  it('applies an own lead removal while unrelated headings wait, and holds later changes to that lead', async () => {
+    const { pointing, scope, lead, queued, hold } = setup()
+    try {
+      lead.value = { ...lead.value, state: 'paused', session_id: null, generation: 0, process_active: false }
+      pointing.value = true; await nextTick()
+      expect(hold.layout.value![0]!.line?.kind).toBe('pending')
+      queued.value = 1
+      lead.value = { ...lead.value, state: 'none', revision: 0 }
+      expect(hold.pending.value).toBe(2)
+      hold.followHeadings(['p-pharos'])
+      expect(hold.layout.value!.map(group => group.project.id)).toEqual(['p-pharos'])
+      expect(hold.layout.value![0]!.line?.kind).toBe('none')
+      expect(hold.pending.value, 'the unrelated queued heading still waits').toBe(1)
+      expect(ids(hold.views.value)).toEqual(['a'])
+      lead.value = { ...lead.value, state: 'starting', revision: 1 }
+      expect(hold.layout.value![0]!.line?.kind, 'rebasing an own deletion does not follow later refreshes').toBe('none')
+      expect(hold.pending.value).toBe(2)
+      hold.showNow()
+      expect(hold.layout.value!.map(group => group.project.id)).toEqual(['p-aeon', 'p-pharos'])
+      expect(hold.layout.value![1]!.line?.kind).toBe('pending')
+      expect(hold.pending.value).toBe(0)
+    } finally { scope.stop() }
   })
 })
 

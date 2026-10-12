@@ -147,7 +147,7 @@ test('1440: compact Default tier control keeps its box through confirmation and 
   expect(writes[1]).toMatchObject({ tier: 'default', expected_revision: 3, expected_ownership: ownership })
 })
 
-for (const width of [1280, 1366, 1440]) test(`${width}: panel-open session table fits and keeps Tier and overflow controls`, async ({ page }) => {
+for (const width of [1280, 1366, 1440]) test(`${width}: panel-open session table fits; Tier sits in the details and the overflow in the row`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 })
   const { data } = await setup(page)
   Object.assign(data.sessions[0]!, { eta_ready_at: new Date(Date.now() + 600_000).toISOString(), progress_pct: 50 })
@@ -155,26 +155,25 @@ for (const width of [1280, 1366, 1440]) test(`${width}: panel-open session table
   await expect(page.locator('.session-panel')).toHaveClass(/docked/)
   await page.getByRole('separator', { name: 'Resize the session list' }).press('ArrowLeft')
   await expect(row(page)).toBeVisible()
-  const list = page.locator('.sessions'), actions = row(page).locator('.more'), tier = glyph(page)
-  const details = page.locator('.session-panel')
+  const list = page.locator('.sessions'), actions = row(page).locator('.more'), tier = glyph(page), panel = page.getByRole('complementary', { name: 'Session details' })
   await tier.scrollIntoViewIfNeeded()
   await row(page).hover()
   await expect(actions).toBeVisible(); await expect(tier).toBeVisible()
   await expect(row(page).locator('.host-badge')).toBeHidden()
+  await expect(row(page).locator('[data-tier]')).toHaveCount(0)
   const measure = async () => {
     const dimensions = await list.evaluate(el => ({ scroll: el.scrollWidth, client: el.clientWidth }))
     expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client)
-    const listBox = (await list.boundingBox())!, actionBox = (await actions.boundingBox())!, tierBox = (await tier.boundingBox())!
+    const listBox = (await list.boundingBox())!, panelBox = (await panel.boundingBox())!, actionBox = (await actions.boundingBox())!, tierBox = (await tier.boundingBox())!
     expect(actionBox.width).toBeGreaterThan(0); expect(tierBox.width).toBeGreaterThan(0)
-    const detailBox = (await details.boundingBox())!
-    for (const [box, frame] of [[actionBox, listBox], [tierBox, detailBox]]) {
-      expect(box!.x).toBeGreaterThanOrEqual(frame!.x)
-      expect(box!.x + box!.width).toBeLessThanOrEqual(frame!.x + frame!.width)
+    for (const [box, frame] of [[actionBox, listBox], [tierBox, panelBox]] as const) {
+      expect(box.x).toBeGreaterThanOrEqual(frame.x)
+      expect(box.x + box.width).toBeLessThanOrEqual(frame.x + frame.width)
     }
     expect(await actions.evaluate(el => { const r = el.getBoundingClientRect(); return !!document.elementFromPoint(r.right - 1, r.y + r.height / 2)?.closest('.more') })).toBe(true)
   }
   await measure()
-  await expectStableControls({ controls: { actions, tier, row: row(page) }, scrollAreas: { details: details.locator('.scroll:visible') }, interactions: [{ name: 'open overflow', run: async () => { await actions.click(); await expect(page.getByRole('menuitem', { name: 'Change tier…' })).toBeVisible() } }] })
+  await expectStableControls({ controls: { actions, tier, row: row(page) }, scrollAreas: { details: panel.locator('.scroll:visible') }, interactions: [{ name: 'open overflow', run: async () => { await actions.click(); await expect(page.getByRole('menuitem', { name: 'Change tier…' })).toBeVisible() } }] })
   await measure()
 })
 test('an unopened row shows its pending agent tier request', async ({ page }) => {
@@ -276,13 +275,15 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme: theme })
     const errors: string[] = []; page.on('pageerror', e => errors.push(e.message))
     await setup(page, { active: width === 390 ? 'fast' : 'default' })
-    await page.goto('/agents')
     if (width === 390) {
-      // Compact rows have no Tier cell (AEON-1211): the row menu's Change tier… opens the same picker.
+      // Rows have no Tier cell (AEON-1211): the row menu's Change tier… opens the same picker.
+      await page.goto('/agents')
       await row(page).locator('.more').click()
       await page.getByRole('menuitem', { name: 'Change tier…' }).click()
+    } else {
+      await page.goto(`/agents/${id}`)
+      await glyph(page).click()
     }
-    else { await page.goto(`/agents/${id}`); await glyph(page).click() }
     await expect(picker(page).getByRole('radio', { name: /Fastest:/ })).toHaveAttribute('aria-disabled', 'false')
     const controls = { choices: picker(page).getByRole('radiogroup'), fast: picker(page).locator('[data-option=fast]'), default: picker(page).locator('[data-option=default]'), fastest: picker(page).locator('[data-option=fastest]'), cancel: picker(page).getByRole('button', { name: /Cancel/ }), confirm: picker(page).locator('.tp-go'), ...(width === 390 ? { frame: picker(page) } : {}) }
     await expectStableControls({ controls, scrollAreas: { body: picker(page), notes: picker(page).locator('.tp-notes') }, interactions: ['fastest', 'default', 'fast'].map(t => ({ name: `choose ${t}`, run: async () => { await picker(page).locator(`[data-option=${t}]`).click(); await expect(picker(page).locator(`[data-option=${t}]`)).toHaveAttribute('aria-checked', 'true') } })) })
@@ -294,7 +295,8 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
   })
 }
 
-test('offered-only chevrons share one centre; hover, step and pending Undo hold boxes', async ({ page }) => {
+// The tier lives in the details; every offered-tier count keeps the same control centre.
+test('the tier control in the details holds its box through hover, step and pending Undo', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   const { writes, data } = await setup(page)
   const centres: number[] = []

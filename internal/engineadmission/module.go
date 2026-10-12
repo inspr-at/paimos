@@ -230,7 +230,11 @@ func (m *Module) admit(w http.ResponseWriter, r *http.Request) {
 		}
 		at := m.now()
 		out = Decision{RequestID: in.RequestID, ProjectID: project, Reason: "shadow_disabled", Mode: "off", EvaluatedAt: at}
-		if settings.ShadowEnabled {
+		if lifecycle, err := authz.ProjectStartReasonTx(ctx, tx, project); err != nil {
+			return err
+		} else if lifecycle != "" {
+			out.Reason = lifecycle
+		} else if settings.ShadowEnabled {
 			out.Mode = "shadow"
 			// Savepoint: unreadable/malformed inputs can still produce an audited deny.
 			inputTx, err := tx.Begin(ctx)
@@ -279,6 +283,9 @@ func (m *Module) admit(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *Module) evaluate(ctx context.Context, tx pgx.Tx, p tenant.Principal, in Request, project string, wip int, wipErr error, wipAt, now time.Time, routineRun ...string) (string, *time.Time, error) {
+	if reason, err := authz.ProjectStartReasonTx(ctx, tx, project); err != nil || reason != "" {
+		return reason, nil, err
+	}
 	if in.Harness == "" {
 		return "harness_required", nil, nil
 	}

@@ -32,6 +32,8 @@ test('priorities, initials and descriptions', () => {
   assert.equal(descriptionLine('# GLINT\n\nGlanceable, **truthful** [ticket](https://x) context.\n\nMore.'), 'Glanceable, truthful ticket context.')
   assert.equal(projectRouteKey('PRJ-17', { classic: { key: 'PHAROS' } }), 'PHAROS')
   assert.equal(projectRouteKey('PRJ-26', { classic: {} }), 'PRJ-26')
+  assert.equal(projectRouteKey('WEB-1', { project_key: 'WEB' }), 'WEB')
+  assert.equal(projectRouteKey('PRJ-17', { project_key: 'FLEET', classic: { key: 'PHAROS' } }), 'FLEET')
 })
 
 test('relative time is compact in tables and prose elsewhere', () => {

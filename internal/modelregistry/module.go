@@ -341,8 +341,9 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 		query := WorkQuery{Role: q.Role, AuthorFamily: q.AuthorFamily, Harness: q.Harness, ProjectID: project, PersonID: modelprefs.PrefsPerson(r.Context(), tx, current)}
 		if query.Harness != "" {
 			// A harness filter must name one of the role's Models routes,
-			// as it named a ladder route before the retirement.
-			steps, err := routingRoleSteps(r.Context(), tx, query.PersonID, query.Role)
+			// as it named a ladder route before the retirement. The routes
+			// include the project's rules, as resolution below does.
+			steps, err := routingRoleSteps(r.Context(), tx, query.PersonID, query.ProjectID, query.Role)
 			if err != nil {
 				return err
 			}

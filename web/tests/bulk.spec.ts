@@ -24,7 +24,7 @@ test('checkbox and Shift-click select a range; one status change for all of them
   await expect(rows(page)).toHaveCount(5)
   await row(page, 'PHAROS-11').hover()
   await row(page, 'PHAROS-11').getByRole('checkbox', { name: 'Select PHAROS-11' }).check()
-  await row(page, 'PHAROS-13').click({ modifiers: ['Shift'] })
+  await row(page, 'PHAROS-13').locator('.title-link').click({ modifiers: ['Shift'] })
   await expect(bulkBar(page)).toHaveAccessibleName('3 selected tickets')
   await expect(grid(page).locator('tr.ticket-row.selected .key')).toHaveText(['PHAROS-11', 'PHAROS-12', 'PHAROS-13'])
   // Shift-click selects; it never opens the ticket.
@@ -176,7 +176,7 @@ test('the bulk bar and its menus have no axe violations in light and dark', asyn
     await expect(rows(page)).toHaveCount(5)
     await row(page, 'PHAROS-11').hover()
     await row(page, 'PHAROS-11').getByRole('checkbox').check()
-    await row(page, 'PHAROS-13').click({ modifiers: ['Shift'] })
+    await row(page, 'PHAROS-13').locator('.title-link').click({ modifiers: ['Shift'] })
     for (const open of [null, 'Labels', 'Assignee'] as const) {
       if (open) await bulkBar(page).getByRole('button', { name: open }).click()
       await page.waitForTimeout(150)

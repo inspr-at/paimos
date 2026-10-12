@@ -57,7 +57,9 @@ test('pi sessions retain their SVG harness icon and provider account label', asy
   await openAgents(page)
   const item = row(page, pi.id)
   await expect(item).toBeVisible()
-  await expect(item.locator('.exec-account')).toContainText('Pi · pi / anthropic (local profile)')
+  // Execution's second line is the account (AEON-1211); the harness is named with it in the cell's name.
+  await expect(item.locator('.exec-account')).toHaveText('pi / anthropic (local profile)')
+  await expect(item.locator('.c-exec')).toHaveAttribute('aria-label', /pi \/ anthropic \(local profile\)\. Pi$/)
   // AEON-1211: the avatar carries the state badge only; a compact row opens with the harness's own mark.
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(item.locator('.op-mark svg[viewBox="165.29 165.29 469.43 469.43"] path').first()).toBeVisible()
@@ -84,17 +86,21 @@ test('the header routes the canonical count to Decision Desk and keeps Agents se
   await expect(places.getByRole('link', { name: 'Decision Desk, 4 open', exact: true })).toHaveAttribute('aria-current', 'page')
 })
 
-test('sessions are grouped by what they need, with ticket and heartbeat; details show account and model', async ({ page }) => {
+test('sessions are grouped by project, the lead heading its group, with ticket and heartbeat; details show account and model', async ({ page }) => {
   const errors = watchErrors(page)
   await setup(page)
   await openAgents(page)
-  // Three buckets in urgency order; each row still names its exact state.
-  await expect(page.locator('.group-row')).toHaveText([/Needs attention\s*\d+/, /Live\s*\d+/, /Ended\s*1/])
+  // AEON-1210: each project is one group in a fixed order, the lead row heading it; Ended folds away at the end.
+  // Each row still names its exact state.
+  await expect(page.locator('.sessions .grp')).toHaveCount(4)
+  expect(await page.locator('.sessions .grp').evaluateAll(list => list.map(el => el.getAttribute('aria-label')))).toEqual(['AEON · Aeon', 'PHAROS · Pharos', 'PRJ-26 · Studio infrastructure', 'Ended'])
+  await expect(page.locator('.sessions .grp').nth(1).locator('[role="row"]').first()).toHaveAttribute('data-row', `s:${camy}`)
+  await expect(page.getByRole('button', { name: /^Ended\s*1/ })).toBeVisible()
   const lead = row(page, camy)
   await expect(lead.getByRole('link', { name: /Claude Code camy, Working/ })).toBeVisible()
-  await expect(lead).toContainText('camy')
+  await expect(lead.locator('.result')).toHaveAttribute('title', /camy$/)
   await expect(lead).toContainText('Lead')
-  await expect(lead.getByRole('link', { name: 'PHAROS-11' })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
+  await expect(lead.locator('.key-inline')).toHaveText('PHAROS-11 ·')
   // AEON-1211: the state lives in the avatar (its badge, name and tooltip); a precise word opens line 2.
   await expect(lead.locator('.ava')).toHaveAttribute('aria-label', /: Working$/)
   await expect(row(page, session(5)).locator('.ava')).toHaveAttribute('data-tip', /^Awaiting heartbeat · Heartbeat overdue · /)
@@ -125,8 +131,8 @@ test('session setup and work context appear from the mocked harness API', async 
     commits: [{ sha: 'abc1234', subject: 'Store session setup' }, { sha: 'def5678', subject: 'Show work context' }],
   })
   await openAgents(page)
-  await expect(row(page, nova).locator('.exec-model')).toHaveText('gpt-6-sol · xhigh')
-  await expect(row(page, nova).locator('.exec-account')).toHaveText('Codex · Codex Pro')
+  await expect(row(page, nova).locator('.exec-model')).toHaveText('GPT-6 Sol · xhigh')
+  await expect(row(page, nova).locator('.exec-account')).toHaveText('Codex Pro')
   await expect(row(page, nova).locator('.result')).toHaveText('Add an Oracle Cloud connector')
   await row(page, nova).locator('.agent-link').click()
   const setupBlock = panel(page).locator('section[aria-labelledby="setup-title"]')
@@ -373,20 +379,25 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   await setup(page)
   await openAgents(page)
   // A click anywhere on the row that is not a link or button opens the session.
-  // Rows follow urgency, then start time: kite, which needs you and started first, sits right above nova.
-  await row(page, kite).locator('.c-time').click()
-  await expect(page).toHaveURL(`/agents/${kite}`)
-  await expect(panel(page).getByRole('heading', { name: /kite/ })).toBeVisible()
+  // AEON-1210: the PHAROS lead heads its group; j walks its project's other sessions in list order.
+  await expect(row(page, camy)).toBeVisible()
+  const order = await page.locator('.sessions .grp', { has: row(page, camy) }).locator('[data-row^="s:"]').evaluateAll(rows => rows.map(r => r.getAttribute('data-row')!.slice(2)))
+  expect(order[0]).toBe(camy)
+  expect(order).toContain(nova)
+  await row(page, camy).locator('.c-time').click()
+  await expect(page).toHaveURL(`/agents/${camy}`)
+  await expect(panel(page).getByRole('heading', { name: /camy/ })).toBeVisible()
   await panel(page).focus()
   await page.keyboard.press('j')
-  await expect(page).toHaveURL(`/agents/${nova}`)
-  await expect(panel(page).getByRole('heading', { name: /nova/ })).toBeVisible()
+  await expect(page).toHaveURL(`/agents/${order[1]}`)
+  await page.keyboard.press('j')
+  await expect(page).toHaveURL(`/agents/${order[2]}`)
   await page.keyboard.press('Escape')
   await expect(page).toHaveURL('/agents')
   await expect(panel(page)).toHaveCount(0)
-  await expect(row(page, nova)).toBeFocused()
+  await expect(row(page, order[2]!)).toBeFocused()
   await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(`/agents/${nova}`)
+  await expect(page).toHaveURL(`/agents/${order[2]}`)
 })
 
 test('AEON-1219: registry navigation and hints respect menus, fields, IME and native keys', async ({ page }, testInfo) => {
@@ -405,21 +416,27 @@ test('AEON-1219: registry navigation and hints respect menus, fields, IME and na
     await page.keyboard.press('Escape')
   })
   guard.done()
-  await row(page, kite).focus()
+  // AEON-1210 groups the list by project; navigation follows the displayed lead and its workers.
+  await expect(row(page, camy)).toBeVisible()
+  const order = await page.locator('.sessions .grp', { has: row(page, camy) }).locator('[data-row^="s:"]').evaluateAll(rows => rows.map(r => r.getAttribute('data-row')!.slice(2)))
+  expect(order[0]).toBe(camy)
+  expect(order.length).toBeGreaterThan(1)
+  const nextSession = order[1]!
+  await row(page, camy).focus()
   for (const modifiers of ['Control', 'Meta']) for (const key of ['s', 'r', 'd', 'p', 'a']) {
     await page.keyboard.press(`${modifiers}+${key}`)
   }
-  await row(page, kite).dispatchEvent('keydown', { key: 'j', code: 'KeyJ', isComposing: true })
-  await expect(row(page, kite)).toBeFocused()
+  await row(page, camy).dispatchEvent('keydown', { key: 'j', code: 'KeyJ', isComposing: true })
+  await expect(row(page, camy)).toBeFocused()
   await page.keyboard.press('j')
-  await expect(row(page, nova)).toBeFocused()
+  await expect(row(page, nextSession)).toBeFocused()
   await page.keyboard.press('Enter')
-  await expect(page).toHaveURL(`/agents/${nova}`)
+  await expect(page).toHaveURL(`/agents/${nextSession}`)
   await panel(page).focus()
   await page.keyboard.press('Escape')
   await expect(page).toHaveURL('/agents')
-  await expect(row(page, nova)).toBeFocused()
-  // P5 attaches the page search: bare / stays with the list, never the palette.
+  await expect(row(page, nextSession)).toBeFocused()
+  // P1 owns this list's search: / focuses it while the global palette keeps Ctrl K.
   await page.keyboard.press('/')
   await expect(page.getByRole('dialog', { name: 'Search and commands' })).toHaveCount(0)
   await expect(page.getByRole('searchbox', { name: 'Search sessions in this list' })).toBeFocused()
@@ -431,7 +448,7 @@ test('AEON-1219: registry navigation and hints respect menus, fields, IME and na
   await input.press('j')
   await expect(input).toHaveValue('jprj')
   await page.keyboard.press('Escape')
-  await row(page, nova).focus()
+  await row(page, nextSession).focus()
   await page.keyboard.press('?')
   const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
   await expect(sheet).toBeVisible()
@@ -439,7 +456,11 @@ test('AEON-1219: registry navigation and hints respect menus, fields, IME and na
   await expect(next).toContainText('J')
   await expect(next).toContainText('Down arrow')
   await expect(sheet.locator('dd', { hasText: /^Decision Desk$/ })).toBeVisible()
-  await expect(sheet.getByText('Search sessions (this list)', { exact: true })).toBeVisible()
+  // AEON-1196 P1 now registers this handler; AEON-1219's pre-P1 absence is stale.
+  const listSearch = sheet.locator('.row').filter({ has: page.locator('dd', { hasText: /^Search sessions \(this list\)$/ }) })
+  await expect(listSearch).toBeVisible()
+  await expect(listSearch).toContainText('F')
+  await expect(listSearch).toContainText('/')
   await expect(sheet.locator('dd', { hasText: /^Jump the divider:/ })).toBeVisible()
   const closeLabel = sheet.getByText('Close the details to List only', { exact: true })
   await expect(closeLabel).toBeVisible()
@@ -618,13 +639,19 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await expect(page.getByRole('menuitem', { name: /^Agent keys/ })).toBeVisible()
     await page.keyboard.press('Escape')
     await expectStableControls({ controls: {
-      desk: page.getByRole('link', { name: 'Decision Desk, 4 open', exact: true }),
+      desk: page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Decision Desk, 4 open', exact: true }),
       more,
       new: page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }),
     }, interactions: [
       { name: 'open a full-height session', run: async () => { await row(page, camy).locator('.c-agent a').click(); await expect(panel(page)).toBeVisible(); expect(await panel(page).boundingBox()).toEqual({ x: 0, y: 0, width: 390, height: 844 }) } },
       { name: 'return to the phone overview', run: async () => { await page.keyboard.press('Escape'); await expect(panel(page)).toHaveCount(0) } },
     ] })
+    // Nothing is lost on a phone: Usage and Agent keys sit in More.
+    await page.locator('.page-head').getByRole('button', { name: 'More agent actions' }).click()
+    await expect(page.getByRole('menuitem', { name: /^Usage/ })).toBeVisible()
+    await expect(page.getByRole('menuitem', { name: /^Agent keys/ })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('menuitem', { name: /^Usage/ })).toHaveCount(0)
     expect(errors).toEqual([])
   })
 }
@@ -655,11 +682,9 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [1600,
     await page.emulateMedia({ colorScheme })
     await setup(page)
     await openAgents(page)
-    // Compact rows (AEON-1211) carry the key in the name; the ticket opens from the session's details.
-    if (width === 390) {
-      await row(page, camy).locator('.l2').click()
-      await panel(page).getByRole('link', { name: /^PHAROS-11/ }).first().click()
-    } else await row(page, camy).getByRole('link', { name: 'PHAROS-11', exact: true }).click()
+    // Every form carries the ticket key in the name; its link lives in the session's details.
+    await row(page, camy).locator('.l2').click()
+    await panel(page).getByRole('link', { name: /^PHAROS-11/ }).first().click()
     const ticket = page.getByRole('complementary', { name: 'Ticket details' })
     await expect(ticket).toBeVisible()
     const box = (await ticket.boundingBox())!

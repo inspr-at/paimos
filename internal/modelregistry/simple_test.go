@@ -230,6 +230,111 @@ func TestMinimalRemovePreviewQualificationAndPrivacy(t *testing.T) {
 	})
 }
 
+// Risk (AEON-1163): the remove question of a version with two usable routes
+// offers the sibling route that is removed in the same step as the fallback,
+// and a version used only in the small or review situation reads as unused.
+func TestRemovePreviewCoversTheWholeVersionAndEverySituation(t *testing.T) {
+	admin, _ := boardFixture(t)
+	ps := decode[[]Profile](t, &admin, "GET", "/api/models", "", 200)
+	sol, opus := profileBySlug(ps, "codex-6-1-sol-high"), profileBySlug(ps, "claude-opus-high")
+	sibling := decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"pi-opus-sibling","version":"1","harness":"pi","family":"anthropic","model":"anthropic/`+opus.Model+`","effort":"high","tier":"`+opus.Tier+`"}`, 201)
+	minimalAccount(t, admin, sol)
+	minimalAccount(t, admin, sibling)
+	order := map[string]any{"rank": []string{"anthropic:opus", "openai:sol"}, "not": []string{}, "revision": 0}
+	boardDecode[boardWriteResult](t, boardCall(t, admin, "PUT", "/api/model-preferences/orders/backend/first?for=default", order, ""), 200)
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_pref_situation_orders(tenant_id,profile_id,column_key,situation,rank,end_mode)
+ SELECT tenant_id,id,'other',situation,ARRAY['anthropic:opus','openai:sol'],'wait' FROM model_pref_profiles,unnest(ARRAY['small','review']) situation WHERE scope='workspace'`)
+		return err
+	})
+	base := "/api/models/lines/claude/" + opus.Model + "/usage"
+	ids := url.Values{}
+	for _, p := range ps {
+		if p.Harness == "claude" && p.Model == opus.Model && !p.Retired {
+			ids.Add("profile", p.ID)
+		}
+	}
+	ids.Add("profile", sibling.ID)
+	backend := func(doc lineUsageDocument) simplePick {
+		for _, use := range doc.UsedBy {
+			if use.Column == "backend" {
+				return use.Replacement
+			}
+		}
+		t.Fatalf("backend use missing: %+v", doc.UsedBy)
+		return simplePick{}
+	}
+	// The sibling route can run: asked about the Claude route alone, it is what takes over.
+	if pick := backend(boardDecode[lineUsageDocument](t, boardCall(t, admin, "GET", base, nil, ""), 200)); pick.Harness != "pi" || pick.Model != sibling.Model {
+		t.Fatalf("fixture lacks a usable sibling route: %+v", pick)
+	}
+	// Asked about the whole version, neither of its routes takes over.
+	whole := boardDecode[lineUsageDocument](t, boardCall(t, admin, "GET", base+"?"+ids.Encode(), nil, ""), 200)
+	if pick := backend(whole); pick.Harness != "codex" || pick.Model != sol.Model {
+		t.Fatalf("backend falls back to %+v, want %s", pick, sol.Model)
+	}
+	uses := map[string]lineUse{}
+	for _, use := range whole.UsedBy {
+		uses[use.Column+"/"+use.Situation] = use
+		if use.Replacement.Model == opus.Model || use.Replacement.Model == sibling.Model {
+			t.Fatalf("%s/%s falls back to a route removed in the same step: %+v", use.Column, use.Situation, use.Replacement)
+		}
+	}
+	if len(whole.UsedBy) != 3 || whole.Incomplete {
+		t.Fatalf("want backend first, other small and other review: %+v", whole.UsedBy)
+	}
+	if pick := uses["other/small"].Replacement; pick.Harness != "codex" || pick.Model != sol.Model {
+		t.Fatalf("the small situation falls back to %+v, want %s", pick, sol.Model)
+	}
+	if review, ok := uses["other/review"]; !ok || review.Layer != "default" {
+		t.Fatalf("review situation use missing or lost its layer: %+v", whole.UsedBy)
+	}
+	// A route that is gone means the page asks about a version that changed.
+	boardError(t, boardCall(t, admin, "GET", base+"?profile=00000000-0000-4000-8000-000000000000", nil, ""), 409, "stale_removal_set")
+}
+
+// Risk (AEON-1163): the remove question reads once, through the version's
+// first route. A use stored under an id only a later route has, such as the
+// Cursor route's board id from before Models, goes unnamed, and Remove takes a
+// route that is still in use without saying so.
+func TestRemovePreviewNamesUsesOfEveryRoute(t *testing.T) {
+	admin, _ := boardFixture(t)
+	tier := profileBySlug(decode[[]Profile](t, &admin, "GET", "/api/models", "", 200), "claude-opus-high").Tier
+	route := func(slug, harness string) Profile {
+		return decode[Profile](t, &admin, "POST", "/api/models", `{"slug":"`+slug+`","version":"1","harness":"`+harness+`","family":"anthropic","model":"claude-opus-5-5","effort":"high","tier":"`+tier+`"}`, 201)
+	}
+	opus, cursor := route("claude-opus-5-5-route", "claude"), route("cursor-opus-5-5-route", "cursor")
+	line, version := modelsLine(opus)
+	if l, v := modelsLine(cursor); l != line || v != version || boardLineID(cursor) == line || boardLineID(cursor) == boardLineID(opus) {
+		t.Fatalf("fixture: Cursor must be a later route of %s %s with an id of its own, got %s %s %s", line, version, l, v, boardLineID(cursor))
+	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_rules(tenant_id,scope,column_key,line,lock,why) VALUES ($1,'workspace','docs',$2,'top','pinned before Models')`, admin.TenantID, boardLineID(cursor))
+		return err
+	})
+	named := func(doc lineUsageDocument) bool {
+		return slices.ContainsFunc(doc.UsedBy, func(use lineUse) bool { return use.Column == "docs" && use.Layer == "workspace" && use.Situation == "" })
+	}
+	base := "/api/models/lines/claude/" + opus.Model + "/usage"
+	if alone := boardDecode[lineUsageDocument](t, boardCall(t, admin, "GET", base, nil, ""), 200); named(alone) {
+		t.Fatalf("fixture: the rule must name the Cursor route only, yet the Claude Code route alone names it: %+v", alone.UsedBy)
+	}
+	// The page asks once, with every level of every route of the version.
+	ids := url.Values{}
+	for _, p := range decode[[]Profile](t, &admin, "GET", "/api/models", "", 200) {
+		if l, v := modelsLine(p); l == line && v == version && !p.Retired {
+			ids.Add("profile", p.ID)
+		}
+	}
+	if !slices.Contains(ids["profile"], cursor.ID) || !slices.Contains(ids["profile"], opus.ID) {
+		t.Fatalf("the version's profiles miss a route: %v", ids["profile"])
+	}
+	whole := boardDecode[lineUsageDocument](t, boardCall(t, admin, "GET", base+"?"+ids.Encode(), nil, ""), 200)
+	if !named(whole) || whole.Incomplete {
+		t.Fatalf("the Cursor route's use is not named: %+v", whole.UsedBy)
+	}
+}
+
 // Risk: the simple view disagrees with rank[0], canonical person/revision,
 // native effort, locks or its visible inability to run the selected model.
 func TestMinimalSimpleReadPreservesFirstAndFallback(t *testing.T) {

@@ -134,7 +134,8 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 		}
 		p, kind, err := m.authenticate(r)
 		if err != nil && !publicRequest(r) {
-			writeInternal(w)
+			httpapi.MarkAuthentication(r)
+			internalFailure(w, r, "authenticate", err)
 			return
 		}
 		if err != nil {
@@ -148,6 +149,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
+			httpapi.MarkAuthentication(r)
 			p.BrowserSession = true
 			if !publicRequest(r) {
 				if c, cErr := r.Cookie(sessionCookieName); cErr == nil {
@@ -156,6 +158,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			}
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		case credAgent:
+			httpapi.MarkAuthentication(r)
 			r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 		}
 		if kind != credSession && kind != credAgent && protectedRequest(r) {
@@ -170,7 +173,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			if err := m.pairingBoundary(r, p); err != nil {
 				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
 					if err := m.auditWorkstation(r, p, false, "pairing_denied"); err != nil {
-						writeInternal(w)
+						internalFailure(w, r, "audit_pairing_denied", err)
 						return
 					}
 				}
@@ -208,7 +211,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			if !controlled || scope == "" {
 				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
 					if err := m.auditWorkstation(r, p, false, "route_denied"); err != nil {
-						writeInternal(w)
+						internalFailure(w, r, "audit_route_denied", err)
 						return
 					}
 				}
@@ -252,7 +255,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 			if err := permissionErr; err != nil {
 				if authz.OwnerWorkstation(p) && workstationGovernance(r) {
 					if err := m.auditWorkstation(r, p, false, "permission_denied"); err != nil {
-						writeInternal(w)
+						internalFailure(w, r, "audit_permission_denied", err)
 						return
 					}
 				}
@@ -263,7 +266,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 						authz.WriteForbidden(w, err)
 					}
 				} else {
-					writeInternal(w)
+					internalFailure(w, r, "permission", err)
 				}
 				return
 			}

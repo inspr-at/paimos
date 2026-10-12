@@ -109,15 +109,16 @@ test.describe('agents', () => {
     const capacity = capacityWorld({})
     const data = agentData(world)
     data.accounts = capacity.accounts as unknown as typeof data.accounts
-    await mockAgents(page, data, { capacity })
+    await mockAgents(page, data, { capacity, now: () => NOW })
     await page.route('**/api/me/permissions*', route => route.fulfill({ json: mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined) }))
     await page.goto('/agents')
     await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
-    // Six sessions are listed and four requests wait on this person: the exception is theirs, and the click lands on the first.
+    // Six sessions are listed and four canonical requests wait on this person.
     await expect(sum(page)).toHaveAccessibleName('6 agents, 4 ask you. Go to the requests.')
     await expect(sum(page)).toHaveAttribute('data-tone', 'attention')
     await sum(page).click()
-    await expect(page.locator('.agents-page [data-row^="a:"], .agents-page [data-row^="m:"]').first()).toBeFocused()
+    await expect(page).toHaveURL('/decision-desk')
+    await expect(page.getByRole('heading', { name: 'Decision Desk', exact: true })).toBeVisible()
   })
 })
 

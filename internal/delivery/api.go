@@ -240,6 +240,11 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 	}
 	input := Settings{}
 	write := r.Method == http.MethodPut
+	overrides := r.URL.Query().Get("view") == "overrides" && !write
+	if len(r.Header.Get("If-Match")) > 128 {
+		respondError(w, fail(400, "invalid delivery settings revision"))
+		return
+	}
 	if write {
 		if err := decode(w, r, &input); err != nil {
 			respondError(w, err)
@@ -251,6 +256,7 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out Settings
+	var etag string
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
 		if write {
@@ -269,6 +275,13 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 		if err = authz.RequireTx(ctx, tx, p, permission, scope(project)); err != nil {
 			return err
 		}
+		stored, revision, err := storedSettingsTx(ctx, tx, project)
+		if err != nil {
+			return err
+		}
+		if write && r.Header.Get("If-Match") != "" && r.Header.Get("If-Match") != revision {
+			return fail(412, "delivery settings changed; reload before saving")
+		}
 		if write {
 			var checks any
 			if input.RequiredChecks != nil {
@@ -282,6 +295,15 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				return err
 			}
+			stored, revision, err = storedSettingsTx(ctx, tx, project)
+			if err != nil {
+				return err
+			}
+		}
+		etag = revision
+		if overrides {
+			out = stored
+			return nil
 		}
 		out, err = settingsTx(ctx, tx, project)
 		return err
@@ -290,6 +312,7 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	w.Header().Set("ETag", etag)
 	httpapi.WriteJSON(w, 200, out)
 }
 func (m *Module) hold(w http.ResponseWriter, r *http.Request) {

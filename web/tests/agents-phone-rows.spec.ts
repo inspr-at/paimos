@@ -98,7 +98,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [375, 390, 4
       expect(line2.y + line2.height).toBeLessThanOrEqual(who.y + who.height + 1)
       // Execution and tier live in details; the ticket key stays in the name.
       await expect(r.locator('.c-exec')).toBeHidden()
-      await expect(r.locator('.c-ticket')).toHaveCount(0)
+      await expect(r.locator(':is(.c-ticket, [data-tier], .session-estimate)')).toHaveCount(0)
     }
     // Long titles use the full width up to the time, which sits right before the actions.
     const leadTime = await box(row(page, 1).locator('.t-inline'))

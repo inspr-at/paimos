@@ -12,6 +12,8 @@ interface Preference {
   timer?: ReturnType<typeof setTimeout>; channel?: MessageChannel; tail?: Promise<void>
 }
 const owner = shallowRef('')
+// Read-only ownership fence for caches that follow the same authentication epoch.
+export const preferenceOwner = computed(() => owner.value)
 let epoch = 0
 let authenticationCurrent = () => true
 const cache = new Map<string, Preference>()

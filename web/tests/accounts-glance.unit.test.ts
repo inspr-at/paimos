@@ -8,8 +8,9 @@
 import { describe, expect, it } from 'vitest'
 import type { PairingView } from '../src/lib/agentPairing'
 import type { OverviewAccount } from '../src/lib/accountsOverview'
+import { initialRefreshStatus, refreshStatus } from '../src/lib/usePolledData'
 import { readiness } from '../src/lib/computerAccounts'
-import { glanceChipText, glanceFlag, glanceItems, glanceSummary, glanceTiles, onlineComputers, signinStatus } from '../src/lib/accountsGlance'
+import { glanceAvailability, glanceChipText, glanceFlag, glanceItems, glanceSummary, glanceTiles, onlineComputers, signinStatus } from '../src/lib/accountsGlance'
 
 function door(id: string, over: Record<string, unknown> = {}) {
   return {
@@ -218,4 +219,22 @@ describe('the accounts chip and its tiles', () => {
     expect(tiles([], [studio], 0, { showAccounts: false }).map(t => t.part)).toEqual(['computers'])
     expect(tiles([account('claude', [studio])], [studio], 0, { away: 'until 18:00' })[2]!.line).toBe('Away until 18:00')
   })
+})
+
+// AEON-1209 G7 · risk: missing or forbidden evidence is presented as zero/ready.
+it('AEON-1209: a multi-source claim requires every read, preserves stale timestamps and hides forbidden values', () => {
+  const ready = refreshStatus(initialRefreshStatus(), { ok: true, at: NOW })
+  const failure = refreshStatus(initialRefreshStatus(), { ok: false, error: 'accounts unavailable' })
+  expect(glanceAvailability([ready, initialRefreshStatus()], true, NOW).state).toBe('loading')
+  expect(glanceAvailability([ready, failure], true, NOW)).toEqual({ state: 'error', updatedAt: null, reason: 'accounts unavailable' })
+  expect(glanceAvailability([ready], true, NOW).state).toBe('empty')
+  const lastGood = refreshStatus(initialRefreshStatus(), { ok: true, at: NOW - 10_000 })
+  const stale = refreshStatus(lastGood, { ok: false, error: 'computers unavailable' })
+  expect(glanceAvailability([ready, stale], false, NOW)).toEqual({ state: 'stale', updatedAt: NOW - 10_000, reason: 'computers unavailable' })
+  expect(glanceAvailability([ready], false, NOW + 45_001).state).toBe('stale')
+  const denied = refreshStatus(lastGood, { ok: false, error: 'access denied', forbidden: true })
+  expect(glanceAvailability([ready, denied], false, NOW)).toEqual({ state: 'forbidden', updatedAt: null, reason: 'access denied' })
+  const stillDenied = refreshStatus(denied, { ok: false, error: 'offline' })
+  expect(glanceAvailability([stillDenied], false, NOW).state).toBe('forbidden')
+  expect(glanceAvailability([refreshStatus(stillDenied, { ok: true, at: NOW })], false, NOW).state).toBe('ready')
 })

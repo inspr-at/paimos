@@ -30,19 +30,20 @@ API-billed doors have no percentage-based daily ceiling. Daily waits use the
 canonical person's next local midnight, with calendar/DST arithmetic.
 
 `GET /api/models/resolve` retains Settings → Models order and shared successor
-qualification. With `at_limit: ladder`, an exhausted selected harness is
-excluded and the same work-specific resolver is rerun. The successor still
+qualification. At a daily cap the walk skips the exhausted route and continues
+the order, other routes of the same model first (AEON-1166); the saved
+`at_limit` is ignored. The successor still
 needs an allowed profile, available account, project fence, residency and
 existing review qualifications. Only owned doors with daily room appear in
-the selected qualifying account IDs. `wait` and unknown daily evidence return
-no selected profile; `trace.blocked` is `daily_limit` or
-`daily_limit_unknown`. An explicit harness filter remains binding. Catalog
+the selected qualifying account IDs. An order that ends in Wait returns no
+selected profile, with the first cause and its reset in `trace.blocked`;
+unknown daily evidence returns `daily_limit_unknown`. An explicit harness filter remains binding. Catalog
 previews before any accounts are enrolled remain advisory; they grant no start
 authority. No model or key scopes are changed.
 
 `POST /api/engine/admission` remains shadow-only and returns `enforced: false`.
 It reads the same daily state in the final audited decision transaction.
-Both ladder and wait refuse the exhausted requested harness. The caller
+It refuses the exhausted requested harness whatever the old `at_limit` says. The caller
 resolves the successor separately, then evaluates that harness with a new
 request ID. Replay returns the original decision; it is not fresh authority.
 
@@ -69,14 +70,14 @@ denotes visible API-billed doors. This discriminant remains explicit when
 subscription and API doors share a harness. Once the day ends, fetch a
 new plan. Used and left are display pairs, not two independent limits.
 
-When all eligible doors are measured exhausted, `daily[harness].at_limit`
-selects `ladder` or `wait`. Ladder calls
+When all eligible doors are measured exhausted, the plan's `daily_at_limit`
+is `follows_models` (the per-harness `at_limit` is ignored since AEON-1166), so the guard calls
 `GET /api/models/resolve?ticket=<work-key>&role=<work-role>&situation=<round>`
 with the existing Models read authority and the work's author family for
 review. No caller-selected provider order or unqualified successor is allowed.
 A null profile refuses; a selected profile still passes the existing count,
-account and host gates and the server's final reservation/claim check. Wait
-refuses until `daily_until`; an unknown plan retries a fresh read and never
+account and host gates and the server's final reservation/claim check. An
+order that ends in Wait refuses until `daily_until`; an unknown plan retries a fresh read and never
 switches models based on stale usage. First-build finishing reserve and PR WIP
 remain separate existing gates.
 

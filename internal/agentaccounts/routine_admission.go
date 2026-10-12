@@ -87,8 +87,11 @@ func requireRoutineCapacityInputs(ctx context.Context, tx pgx.Tx, owner, runID, 
 	if err != nil {
 		return "", "", "", err
 	}
-	if run.AccountID == nil || *run.AccountID != accountID || run.Purpose != "managed" || run.Status != "queued" {
+	if run.AccountID == nil || *run.AccountID != accountID || run.ProfileID == nil || run.Purpose != "managed" {
 		return "", "", "", workorders.Fail(409, "routine_account_unbound")
+	}
+	if err := requireRoutineAccountPhase(ctx, tx, run, false); err != nil {
+		return "", "", "", err
 	}
 	a, err := getAccount(ctx, tx, accountID)
 	if err != nil {
@@ -138,11 +141,11 @@ func requireRoutineCapacityInputs(ctx context.Context, tx pgx.Tx, owner, runID, 
 	var host string
 	var running int
 	err = tx.QueryRow(ctx, `SELECT c.id::text,c.capacity_signals,c.capacity_policy,c.capacity_reported_at,
- (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.status IN ('starting','running','waiting'))
+ (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.id<>$4::uuid AND (r.status IN ('starting','running','waiting') OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))
  FROM agent_pairing_enrollments e JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
  JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
  WHERE e.account_id=$1 AND c.principal_id=$3 AND e.state='connected' AND e.ongoing_approved_at IS NOT NULL
- AND c.state='connected' AND q.state='redeemed' AND `+modelprefs.CanonicalPersonSQL("q.approved_by")+`=$2::uuid`, accountID, owner, run.AgentID).Scan(&host, &raw, &policyRaw, &at, &running)
+ AND c.state='connected' AND q.state='redeemed' AND `+modelprefs.CanonicalPersonSQL("q.approved_by")+`=$2::uuid`, accountID, owner, run.AgentID, run.ID).Scan(&host, &raw, &policyRaw, &at, &running)
 	if isNoRows(err) {
 		return "", "", "", workorders.Fail(409, "host_inputs_unreadable")
 	}
@@ -161,4 +164,56 @@ func requireRoutineCapacityInputs(ctx context.Context, tx pgx.Tx, owner, runID, 
 		return "", "", "", workorders.Fail(409, "host_"+reason)
 	}
 	return a.Harness, a.BillingMode, host, nil
+}
+
+// A retry reconciles its existing actor, never a prospective queued start.
+// Keep ordinary runs out of this exception and require the exact committed
+// launch/account/daemon and claim receipt. Only continuation may admit an
+// exited actor, with independently settled usage and no surviving session.
+// Callers retain tenant/tree/pairing fences and recheck all live admission
+// inputs after this identity check; this function grants no execution itself.
+func requireRoutineAccountPhase(ctx context.Context, tx pgx.Tx, run runRow, continuation bool) error {
+	if run.Status == "queued" {
+		return nil
+	}
+	if run.Status != "starting" && run.Status != "running" && run.Status != "waiting" && !(continuation && run.Status == "completed") {
+		return workorders.Fail(409, "routine_account_unbound")
+	}
+	var exact bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(
+ SELECT 1 FROM agent_runs ar
+ JOIN routine_launch_intents l ON l.tenant_id=ar.tenant_id AND l.id=ar.routine_launch_id AND l.agent_run_id=ar.id
+ JOIN routine_runs r ON r.tenant_id=l.tenant_id AND r.id=l.routine_run_id
+ JOIN routine_attempts a ON a.tenant_id=r.tenant_id AND a.run_id=r.id AND a.agent_run_id=ar.id
+ JOIN routine_budget_grants g ON g.tenant_id=a.tenant_id AND g.attempt_id=a.id AND g.agent_run_id=ar.id AND g.run_id=r.id AND g.parent_id IS NULL
+ WHERE ar.id=$1 AND ar.account_id=$2 AND ar.agent_principal_id=$3
+ AND l.binding=ar.trace->'routine_launch' AND l.binding->>'launch_id'=l.id::text
+ AND l.binding->>'tenant_id'=ar.tenant_id::text AND l.binding->>'routine_run_id'=r.id::text
+ AND l.binding->>'agent_run_id'=ar.id::text AND l.binding->>'account_id'=ar.account_id::text
+ AND l.binding->>'principal_id'=ar.agent_principal_id::text AND l.worker_principal_id=ar.agent_principal_id
+ AND l.binding->>'owner_id'=r.owner_principal_id::text AND l.owner_principal_id=r.owner_principal_id
+ AND l.binding->>'project_id'=r.output_project_id::text AND l.project_id=r.output_project_id
+ AND l.binding->>'daemon_id'=ar.daemon_id AND l.binding->>'daemon_generation'=ar.daemon_generation
+ AND a.principal_id=ar.agent_principal_id AND a.assignment_digest=r.assignment_digest
+ AND l.binding->>'assignment_digest'=r.assignment_digest AND l.binding->>'budget_grant_id'=g.id::text
+ AND g.account_id=ar.account_id AND l.claimed_at IS NOT NULL AND l.worktree_id IS NOT NULL
+ AND EXISTS(SELECT 1 FROM routine_launch_evidence e WHERE e.tenant_id=l.tenant_id AND e.launch_id=l.id AND e.kind='claimed'
+  AND e.receipt->>'launch_id'=l.id::text AND e.receipt->>'worktree_id'=l.worktree_id
+  AND e.receipt->>'computer_id'=l.binding->>'computer_id'
+  AND e.receipt->>'daemon_digest'=l.binding->>'daemon_digest'
+  AND e.receipt->>'capability_digest'=l.binding->>'capability_digest'
+  AND e.receipt->>'capability'=l.binding->>'capability')
+ AND ((ar.status IN ('starting','running','waiting') AND l.state='claimed' AND l.exit_observed_at IS NULL AND g.state='held')
+  OR ($4 AND ar.status='completed' AND ar.ended_at IS NOT NULL AND l.state='exit_observed' AND l.exit_observed_at IS NOT NULL
+   AND g.state='settled' AND EXISTS(SELECT 1 FROM routine_budget_settlements s WHERE s.tenant_id=g.tenant_id AND s.grant_id=g.id)
+   AND EXISTS(SELECT 1 FROM routine_launch_evidence e WHERE e.tenant_id=l.tenant_id AND e.launch_id=l.id AND e.kind='exit_observed')
+   AND NOT EXISTS(SELECT 1 FROM harness_sessions h WHERE h.run_id=ar.id AND NOT aeon_work_session_stopped(h.stopped_at,h.stop_reason))))
+ )`, run.ID, run.AccountID, run.AgentID, continuation).Scan(&exact)
+	if err != nil {
+		return err
+	}
+	if !exact {
+		return workorders.Fail(409, "routine_account_unbound")
+	}
+	return nil
 }

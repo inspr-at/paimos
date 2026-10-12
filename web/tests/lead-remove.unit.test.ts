@@ -66,3 +66,31 @@ it('AEON-1040: project, revision, viewer and authority changes invalidate remova
   c.props.lead.generation = 0; c.props.lead.session_id = 's1'
   expect(c.state.removable.value).toBe(false)
 })
+
+it('AEON-1211: successful removal notifies the held list after its revision watcher closes the menu', async () => {
+  const c = menu(), writing = deferred<leadAPI.ProjectLead>()
+  await c.state.remove()
+  c.remove.mockReturnValueOnce(writing.promise)
+  const pending = c.state.remove()
+  const removed = { ...c.props.lead, revision: 0, state: 'none' as const }
+  c.props.lead = removed; await flush()
+  expect(c.state.confirmation.value).toBeNull()
+  writing.resolve(removed); await pending
+  expect(c.emitted).toEqual([['removed', 'p1']])
+})
+
+it('AEON-1211: a stale removal success never rebases another record or viewer', async () => {
+  for (const change of [
+    (c: ReturnType<typeof menu>) => { c.props.projectId = 'p2' },
+    (c: ReturnType<typeof menu>) => { c.session.identity.principal.id = 'person2' },
+    (c: ReturnType<typeof menu>) => { c.props.lead = { ...c.props.lead, revision: 3, state: 'starting' } },
+  ]) {
+    const c = menu(), writing = deferred<leadAPI.ProjectLead>()
+    await c.state.remove()
+    c.remove.mockReturnValueOnce(writing.promise)
+    const pending = c.state.remove(), removed = { ...c.props.lead, revision: 0, state: 'none' as const }
+    change(c); await flush()
+    writing.resolve(removed); await pending
+    expect(c.emitted).toEqual([])
+  }
+})

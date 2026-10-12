@@ -114,7 +114,10 @@ test('a problem: the chip flags it, the line names it, and Verify again fixes it
   await unfold(page)
   await expect(status(page)).toHaveText('5 of 6 ready · Claude needs verifying on build-7 · +1')
   await expect(tile(page, 'accounts')).toContainText('Codex is low: 9% left this week')
-  await expect(tile(page, 'computers')).toContainText('Claude needs verifying on build-7')
+  // Approved AEON-1196 r7: Computers owns connectivity; G7 keeps it readable
+  // without the accounts join. Verification remains in the shared line and fix.
+  await expect(tile(page, 'computers')).toContainText('2 of 2 online')
+  await expect(pop(page).locator('.acc-fix')).toContainText('Claude needs verifying on build-7')
   const verify = pop(page).locator('.verify-button')
   const guard = await controlStability(page, { verify, chip: chip(page), accounts: tile(page, 'accounts'), capacity: tile(page, 'capacity') })
   await guard.check(async () => { await verify.click(); await expect(verify).toHaveAttribute('aria-busy', 'true') })
@@ -134,7 +137,8 @@ test('people without account management see the problem, not Verify again', asyn
   await unfold(page)
   await expect(status(page)).toContainText('Claude needs verifying on build-7')
   await expect(pop(page).getByRole('button', { name: 'Verify again' })).toHaveCount(0)
-  await expect(tile(page, 'computers')).toContainText('Claude needs verifying on build-7')
+  await expect(tile(page, 'computers')).toContainText('2 of 2 online')
+  await expect(pop(page).locator('.acc-fix')).toContainText('Claude needs verifying on build-7')
 })
 
 test('each tile opens its part of Settings', async ({ page }) => {
@@ -181,7 +185,7 @@ test('an approval link opens the popover once and offers that account\'s check',
   await expect(pop(page)).toBeVisible()
   await expect(pop(page).locator('.acc-fix')).toContainText('Verify Claude on build-7')
   await expect(pop(page).locator('.acc-fix')).toContainText('An approval link asked for a fresh check.')
-  await expect(tile(page, 'computers')).toContainText('Verify Claude on build-7')
+  await expect(tile(page, 'computers')).toContainText('2 of 2 online')
   expect(work.preferences['ui.agents.sections']).toBeUndefined()
   // Closing it is the person's choice while the link is still in the address.
   await page.keyboard.press('Escape')
@@ -196,7 +200,8 @@ test('loading, a failed read with Try again, and an empty workspace each say so'
   let fail = true
   await page.route('**/api/agent-accounts/capacity', route => route.request().method() === 'GET' && fail ? route.fulfill({ status: 500, json: { error: 'down' } }) : route.fallback())
   await open(page)
-  await expect(chip(page)).toContainText('Accounts could not be read')
+  // G7's binding unreadable and authorized-empty words replace AEON-782's copy.
+  await expect(chip(page)).toContainText('Accounts unreadable')
   await unfold(page)
   fail = false
   await status(page).getByRole('button', { name: 'Try again' }).click()
@@ -208,8 +213,8 @@ test('loading, a failed read with Try again, and an empty workspace each say so'
   await page.reload()
   await expect(chip(page)).toContainText('No accounts yet')
   await unfold(page)
-  await expect(status(page)).toContainText('No accounts or computers yet')
-  await expect(status(page).getByRole('link', { name: 'Connect a computer' })).toHaveAttribute('href', '/agents/register-agent')
+  await expect(status(page)).toContainText('No accounts yet')
+  await expect(status(page).getByRole('link', { name: 'Connect', exact: true })).toHaveAttribute('href', '/agents/register-agent')
 })
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {

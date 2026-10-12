@@ -9,6 +9,8 @@ import { expectStableControls } from './helpers/stable'
 
 const now = Date.parse('2026-10-01T14:00:00Z')
 const before = process.env.AEON_501_CAPTURE === 'before'
+// The rows name a model the registry does not list by its words, never its raw id (AEON-1211).
+const SHOWN: Record<string, string> = { 'gpt-fixture': 'Gpt Fixture', 'grok-fixture': 'Grok Fixture' }
 
 async function availableHostBadgeWidth(hostCell: Locator) {
   return hostCell.evaluate(el => {
@@ -214,8 +216,9 @@ test('execution kinds and person-specific host names on the real agents table', 
   await expect(page.locator(`[data-row="s:${ai.id}"]`)).toBeVisible()
   const table = page.getByRole('treegrid', { name: 'Agent sessions' })
   if (!before) {
-    await expect(table.getByRole('columnheader').filter({ hasText: /^Name/ })).toBeVisible()
-    await expect(table.getByRole('columnheader').filter({ hasText: /^Host/ })).toBeVisible()
+    // The approved column names (AEON-1211, design AEON-1196): Session · Time · Execution · Computer · Beat.
+    await expect(table.getByRole('columnheader').filter({ hasText: /^Session/ })).toBeVisible()
+    await expect(table.getByRole('columnheader').filter({ hasText: /^Computer/ })).toBeVisible()
     await expect(page.locator(`[data-row="s:${media.id}"] .c-exec`)).toContainText('higgsfield/kling3_0')
     await expect(page.locator(`[data-row="s:${terminal.id}"] .c-exec`)).toContainText('ffmpeg')
     await expect(page.locator('[data-run-kind="media"]')).toHaveCount(1)
@@ -304,7 +307,7 @@ test('execution kinds and person-specific host names on the real agents table', 
           await expect(workerHost).toBeHidden()
           for (const child of [ai, xai, media, terminal]) {
             const row = page.locator(`[data-row="s:${child.id}"]`)
-            const what = child.model || ('generator' in child ? child.generator : 'command' in child ? child.command : '')
+            const what = child.model ? SHOWN[child.model]! : ('generator' in child ? child.generator : 'command' in child ? child.command : '')
             if (width === 390) await expect(row.locator('.op-mark')).toHaveAttribute('aria-label', new RegExp(what.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')))
             else expectModelGlyphFits(await modelGlyphSize(row.locator('.exec-model'), child === terminal ? terminal.command.length : 1), `${width}px ${child.display_label}: execution text fits`, true)
           }
@@ -327,7 +330,7 @@ test('execution kinds and person-specific host names on the real agents table', 
         // generated separator alone must never satisfy this guard.
         for (const child of [ai, xai, media, terminal]) {
           const model = page.locator(`[data-row="s:${child.id}"] .exec-model`)
-          await expect(model).toContainText(child.model || ('generator' in child ? child.generator : 'command' in child ? child.command : ''))
+          await expect(model).toContainText(child.model ? SHOWN[child.model]! : ('generator' in child ? child.generator : 'command' in child ? child.command : ''))
           const characters = child === terminal ? terminal.command.length : 1
           const glyph = await modelGlyphSize(model, characters)
           expectModelGlyphFits(glyph, `${width}px ${child.display_label}: ${characters} execution characters fit after the separator and before any ellipsis`, true)

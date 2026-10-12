@@ -7,6 +7,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -37,6 +38,11 @@ func RequireRoutineTx(ctx context.Context, tx pgx.Tx, owner tenant.Principal, ro
 	}
 	if !bound {
 		return workorders.Fail(409, "routine_intent_required")
+	}
+	if reason, err := authz.ProjectStartReasonTx(ctx, tx, project); err != nil {
+		return err
+	} else if reason != "" {
+		return workorders.Fail(409, reason)
 	}
 	var raw []byte
 	err := tx.QueryRow(ctx, `SELECT CASE WHEN octet_length(snapshot::text)<=65536 THEN snapshot END FROM delivery_work_settings WHERE project_id=$1`, project).Scan(&raw)
