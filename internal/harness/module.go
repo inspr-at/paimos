@@ -244,13 +244,14 @@ type Session struct {
 	CurrentActivityHistory  []agentactivity.Activity `json:"current_activity_history,omitempty"`
 	doing, toolActivity     *string
 	doingAt, toolActivityAt *time.Time
-	CanReparent             *bool                  `json:"can_reparent,omitempty"`
-	OwnerPrincipalID        *string                `json:"owner_principal_id,omitempty"`
-	HandedOverToID          *string                `json:"handed_over_to_id,omitempty"`
-	AdoptedFromID           *string                `json:"adopted_from_id,omitempty"`
-	Controls                []Control              `json:"controls,omitempty"`
-	Watch                   *AttachStatus          `json:"watch,omitempty"`
-	InboxBindingError       *string                `json:"inbox_binding_error"`
+	CanReparent             *bool           `json:"can_reparent,omitempty"`
+	OwnerPrincipalID        *string         `json:"owner_principal_id,omitempty"`
+	HandedOverToID          *string         `json:"handed_over_to_id,omitempty"`
+	AdoptedFromID           *string         `json:"adopted_from_id,omitempty"`
+	Controls                []Control       `json:"controls,omitempty"`
+	Watch                   *AttachStatus   `json:"watch,omitempty"`
+	InboxBindingError       json.RawMessage `json:"inbox_binding_error,omitempty"`
+	inboxBindingCode        *string
 	ProcessOwnership        *ownedprocess.Identity `json:"process_ownership,omitempty"`
 	ProcessObservedAt       *time.Time             `json:"process_observed_at,omitempty"`
 	ArchivedAt              *time.Time             `json:"archived_at"`
@@ -451,7 +452,7 @@ func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
 	var activityNow time.Time
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.OwnerPrincipalID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.PauseProgress, &s.DeskAnswers, &s.ServiceTier, &s.ServiceTierRevision, &s.ServiceTierReports, &s.ServiceTierRequest, &s.InboxBindingError)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.OwnerPrincipalID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.PauseProgress, &s.DeskAnswers, &s.ServiceTier, &s.ServiceTierRevision, &s.ServiceTierReports, &s.ServiceTierRequest, &s.inboxBindingCode)
 	if err != nil {
 		return s, err
 	}
@@ -462,6 +463,16 @@ func scanSession(row pgx.Row) (Session, error) {
 	if progress != nil {
 		value := int(*progress)
 		s.ProgressPct = &value
+	}
+	// NULL is a legacy/unreported value, so its wire bytes stay unchanged.
+	// A reported clear is stored as the empty sentinel and emitted as JSON null
+	// so row merges discard the previous refusal instead of keeping it forever.
+	if s.inboxBindingCode != nil {
+		if *s.inboxBindingCode == "" {
+			s.InboxBindingError = json.RawMessage("null")
+		} else {
+			s.InboxBindingError, _ = json.Marshal(*s.inboxBindingCode)
+		}
 	}
 	projectActivity(&s, activityNow)
 	s.HasVendorSessionRef = len(s.vendorRefDigest) > 0
@@ -1372,10 +1383,14 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if err != nil {
 		return nil, err
 	}
-	bindingError := s.InboxBindingError
+	bindingError := s.inboxBindingCode
 	if in.InboxBindingError != nil {
 		if err := json.Unmarshal(in.InboxBindingError, &bindingError); err != nil || bindingError != nil && !hookbinding.Valid(*bindingError) {
 			return nil, workorders.Fail(400, "invalid inbox binding refusal code")
+		}
+		if bindingError == nil {
+			cleared := ""
+			bindingError = &cleared
 		}
 		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: s.ProjectID}); err != nil {
 			return nil, err
