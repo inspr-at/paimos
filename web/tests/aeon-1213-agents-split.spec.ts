@@ -353,7 +353,7 @@ test('AEON-1213: the work-area threshold and 240 ms presets honor reduced motion
       return { gap: frame.bottom - footer.bottom, inset: parseFloat(getComputedStyle(el).borderBottomWidth) + parseFloat(getComputedStyle(el).paddingBottom) }
     })
     expect(Math.abs(geometry.gap - geometry.inset), `${width}: composer pinned to pane bottom`).toBeLessThanOrEqual(.5)
-    const guard = await controlStability(page, { composer, send: pane(page).locator('.compose .send'), stop: pane(page).locator('.chat-stop') })
+    const guard = await controlStability(page, { composer, send: pane(page).locator('.compose .send'), stop: pane(page).getByRole('button', { name: 'Interrupt', exact: true }) })
     for (const draft of ['Die vollständigen Berechtigungseinstellungen für sämtliche angeschlossenen Arbeitsbereiche zuverlässig prüfen.', '']) {
       await guard.check(async () => {
         await composer.fill(draft); await composer.blur()

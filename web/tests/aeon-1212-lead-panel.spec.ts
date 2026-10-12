@@ -121,6 +121,9 @@ for (const look of ['light', 'dark'] as const) {
       computer: 'ArbeitsrechnerMitEinerBesondersAusführlichenBezeichnungFürGemeinsameImplementierungsaufgaben',
     }
     const errors = watchErrors(page), world = await setup(page, { question: false, workerMetadata: metadata })
+    // P5's default reserves a 480 px details pane. This risk needs the wide
+    // row, so open the remembered Focus split rather than a compact pane.
+    world.data.preferences['agents:layout'] = { handle: 320 }
     const worker = world.data.live.find(row => row.role === 'worker')!
     worker.heartbeat_at = null
     world.data.live.push({ ...worker, session_id: 'aaaaaaaa-0000-4000-8000-000000000003', principal_id: 'aaaaaaaa-0000-4000-8000-0000000000a3', name: 'Second worker', heartbeat_at: '2025-12-31T09:59:40Z' })
