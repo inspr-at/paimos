@@ -668,21 +668,21 @@ test.describe('phone screenshots', () => {
   // A touch phone: no hover, so Reply stays visible as on an iPhone.
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
   for (const theme of ['light', 'dark'] as const) {
-    test(`${theme} 390: screenshots of both tabs`, async ({ page }) => {
-      test.skip(!process.env.SESSION_CHAT_SHOTS, 'screenshots only')
+    test(`${theme} 390: screenshots of both tabs`, async ({ page }, info) => {
+      const capture = (name: string) => page.screenshot({ path: info.outputPath(`session-chat/${name}.png`) })
       const { worker } = await setup(page, { theme, count: 7, storage: readUpTo(worker0, 203) })
       await page.goto(`/agents/${worker.id}`)
       await expect(messagesTab(page)).toBeVisible()
-      await shot(page, `overview-${theme}-390`)
+      await capture(`overview-${theme}-390`)
       await messagesTab(page).click()
       await expect(panelOf(page).getByRole('separator', { name: /new/ })).toBeVisible()
-      await shot(page, `messages-unread-${theme}-390`)
+      await capture(`messages-unread-${theme}-390`)
       await scroller(page).evaluate(el => el.scrollTo({ top: 0 }))
       await expect(panelOf(page).getByRole('button', { name: /latest message/ })).toBeVisible()
-      await shot(page, `scrolled-up-${theme}-390`)
+      await capture(`scrolled-up-${theme}-390`)
       await panelOf(page).getByRole('textbox').focus()
       await expect(panelOf(page).getByRole('button', { name: /latest message/ })).toHaveCount(0)
-      await shot(page, `focused-${theme}-390`)
+      await capture(`focused-${theme}-390`)
     })
   }
 })
