@@ -6076,8 +6076,8 @@
     "261012145858.0.0": {
       "release_channel": "stable",
       "release_sequence": 130,
-      "snapshot_sha256": "37811b62bbd6477933585e81f78275e7a2d31714f0a284bda57f3d8dee9bff10",
-      "captured_at": "2026-10-12T15:21:46Z",
+      "snapshot_sha256": "24d3afae108f8a8b61e70e2f2dfa6e66ad4ccba7dd9c9cfabe969b19f1590d95",
+      "captured_at": "2026-10-12T15:28:18Z",
       "release_revision": 1,
       "items": [
         {
@@ -6116,16 +6116,16 @@
           "key": "AEON-1140",
           "pill_en": "Simpler lead adoption",
           "pill_de": "Einfachere Lead-Übernahme",
-          "benefit_en": "After you confirm the adoption, the running session completes its lead claim on its own; an empty candidate list explains what is missing.",
-          "benefit_de": "Nach deiner Bestätigung schließt die laufende Sitzung ihren Lead-Anspruch selbst ab; eine leere Kandidatenliste erklärt, was fehlt.",
+          "benefit_en": "After you confirm the adoption, the running session proves its lead claim with a separate command that uses its existing state directory; an empty candidate list explains what is missing.",
+          "benefit_de": "Nach deiner Bestätigung weist die laufende Sitzung ihren Lead-Anspruch mit einem eigenen Befehl nach, der ihr vorhandenes Zustandsverzeichnis nutzt; eine leere Kandidatenliste erklärt, was fehlt.",
           "group": "fixes"
         },
         {
           "key": "AEON-1141",
           "pill_en": "Claude subagents visible",
           "pill_de": "Claude-Subagenten sichtbar",
-          "benefit_en": "With the PAIMOS hooks installed, registered Claude Code sessions report their subagents automatically under their parent on Agents.",
-          "benefit_de": "Mit den PAIMOS-Hooks melden registrierte Claude-Code-Sitzungen ihre Subagenten automatisch unter ihrer Elternsitzung in Agents.",
+          "benefit_en": "With the PAIMOS lifecycle hooks installed and the parent's heartbeat helper running, registered Claude Code sessions report their subagents automatically under their parent on Agents.",
+          "benefit_de": "Mit installierten PAIMOS-Lifecycle-Hooks und laufendem Heartbeat-Helfer der Elternsitzung melden registrierte Claude-Code-Sitzungen ihre Subagenten automatisch unter ihrer Elternsitzung in Agents.",
           "group": "features"
         },
         {
