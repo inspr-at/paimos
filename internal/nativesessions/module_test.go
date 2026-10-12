@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/nativecontract"
 	"github.com/inspr-at/paimos/internal/nativesessions"
 	"github.com/inspr-at/paimos/internal/reportercontract"
@@ -103,6 +105,46 @@ func TestDisabledNativeRoutesAuthenticateWithoutStarting(t *testing.T) {
 	}
 	if store.starts != 0 {
 		t.Fatalf("native starts = %d; want zero", store.starts)
+	}
+	// Credentials are absent or malformed, so this exercises the complete
+	// server/auth boundary with no database and no injected principal.
+	authMod, err := auth.New(auth.Config{SessionKey: []byte(strings.Repeat("x", 32))}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	production := (&httpapi.Server{
+		Modules:    []httpapi.Module{authMod, nativesessions.NewDisabled()},
+		Middleware: []func(http.Handler) http.Handler{authMod.Middleware},
+	}).Handler()
+	for _, route := range nativecontract.PublicRoutes() {
+		t.Run("production authentication/"+route.OperationID, func(t *testing.T) {
+			path := route.Path
+			for _, name := range []string{"projectId", "ownedSessionId", "sessionId", "approvalId", "id"} {
+				path = strings.ReplaceAll(path, "{"+name+"}", person.ID)
+			}
+			for _, credential := range []string{"none", "stale cookie", "malformed bearer"} {
+				request := httptest.NewRequest(route.Method, path, nil)
+				body := &unreadBody{}
+				request.Body = body
+				switch credential {
+				case "stale cookie":
+					request.AddCookie(&http.Cookie{Name: "aeon_session", Value: "not-a-session"})
+				case "malformed bearer":
+					request.Header.Set("Authorization", "Bearer not-a-key")
+				}
+				response := httptest.NewRecorder()
+				production.ServeHTTP(response, request)
+				if response.Code != http.StatusUnauthorized || response.Header().Get(reportercontract.Header) != reportercontract.NativeSession || response.Header().Get("Cache-Control") != "no-store" {
+					t.Fatalf("%s: production authentication lost native status/headers: HTTP %d %s", credential, response.Code, response.Body.String())
+				}
+				if err := v.ValidateJSON("NativeError", response.Body.Bytes()); err != nil {
+					t.Fatal("production authentication lost native error shape:", err)
+				}
+				if response.Body.String() != `{"reason":"grant_missing","request_id":null,"retryable":false}`+"\n" || body.reads != 0 || store.starts != 0 {
+					t.Fatal("production authentication changed failure reason or caused native/input effects")
+				}
+			}
+		})
 	}
 	var _ io.ReadCloser = (*unreadBody)(nil)
 }

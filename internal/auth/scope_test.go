@@ -142,9 +142,9 @@ func TestNativeRoutesThroughProductionAuthentication(t *testing.T) {
 	for _, route := range routes {
 		t.Run(route.OperationID, func(t *testing.T) {
 			path := routeValue.ReplaceAllString(route.Path, id)
+			check(t, route.Method, path, ownerCookie, "", http.StatusServiceUnavailable, nativecontract.ReasonFeatureDisabled)
 			check(t, route.Method, path, "", "", http.StatusUnauthorized, nativecontract.ReasonGrantMissing)
 			check(t, route.Method, path, "invalid-session", "", http.StatusUnauthorized, nativecontract.ReasonGrantMissing)
-			check(t, route.Method, path, ownerCookie, "", http.StatusServiceUnavailable, nativecontract.ReasonFeatureDisabled)
 			check(t, route.Method, path, deniedCookie, "", http.StatusForbidden, nativecontract.ReasonGrantMissing)
 			check(t, route.Method, path, "", empty.Token, http.StatusForbidden, nativecontract.ReasonGrantMissing)
 			status, reason := http.StatusServiceUnavailable, nativecontract.ReasonFeatureDisabled
