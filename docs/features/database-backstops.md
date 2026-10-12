@@ -8,6 +8,9 @@ new login defaults apply. Explicit server, database, role and connection tuning
 is preserved, including an explicitly disabled timeout. The application role
 changes only its own database-specific defaults; it needs no additional role or
 RLS privileges. These defaults also apply to dedicated listener connections.
+Installation takes a transaction-scoped advisory lock per role and database,
+within its ten-second deadline, so concurrent starts serialize catalogue writes
+before either startup reaches the migration lock.
 
 SSE listeners wait outside transactions; the idle transaction timeout does not
 close them. Chat and delivery history commit authentication/read transactions

@@ -38,6 +38,13 @@ func installBackstops(ctx context.Context, pool *pgxpool.Pool) error {
 			return err
 		}
 		defer func() { _ = tx.Rollback(ctx) }()
+		// Startup precedes the migration lock. Serialize catalogue writes for
+		// this role; PostgreSQL advisory locks are already database-scoped.
+		// Transaction scope releases the fence on commit, rollback or disconnect,
+		// and the installation deadline also bounds waiting for another start.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-db-backstops:'||current_user,0))`); err != nil {
+			return fmt.Errorf("installation lock: %w", err)
+		}
 		var database string
 		if err := tx.QueryRow(ctx, `SELECT current_database()`).Scan(&database); err != nil {
 			return err
