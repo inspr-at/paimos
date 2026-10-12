@@ -11,7 +11,7 @@ import { useProjectLeads } from '../src/stores/projectLeads'
 import { useWorkQueue } from '../src/stores/workQueue'
 import { useDecisionDesk } from '../src/stores/decisionDesk'
 import { useCapacity } from '../src/stores/capacity'
-import { readLead, readLeadDecisions, readOpenQuestions } from '../src/lib/lead'
+import { readLead, readLeadDecisions } from '../src/lib/lead'
 import { readQueue } from '../src/lib/workQueue'
 import { loadDeskProjection } from '../src/lib/decisionDesk'
 import { defaultSchedule, listCapacity, listSchedules } from '../src/lib/capacity'
@@ -21,7 +21,7 @@ const state = vi.hoisted(() => ({ session: { identity: { tenant: { id: 't' }, pr
 vi.mock('../src/stores/session', () => ({ useSession: () => state.session }))
 vi.mock('../src/stores/agents', () => ({ useAgents: () => ({ accounts: [], now: 0, onWrite: () => () => {} }) }))
 vi.mock('../src/lib/preferences', () => ({ usePreference: () => ({ value: { value: null }, save: vi.fn() }) }))
-vi.mock('../src/lib/lead', async original => ({ ...await original<typeof import('../src/lib/lead')>(), readLead: vi.fn(), readLeadDecisions: vi.fn(), readOpenQuestions: vi.fn() }))
+vi.mock('../src/lib/lead', async original => ({ ...await original<typeof import('../src/lib/lead')>(), readLead: vi.fn(), readLeadDecisions: vi.fn() }))
 vi.mock('../src/lib/workQueue', async original => ({ ...await original<typeof import('../src/lib/workQueue')>(), readQueue: vi.fn() }))
 vi.mock('../src/lib/decisionDesk', async original => ({ ...await original<typeof import('../src/lib/decisionDesk')>(), loadDeskProjection: vi.fn() }))
 vi.mock('../src/lib/capacity', async original => ({ ...await original<typeof import('../src/lib/capacity')>(), listCapacity: vi.fn(), listSchedules: vi.fn() }))
@@ -47,7 +47,6 @@ it('AEON-1195: every audited store retains rows through refresh and fences delay
     vi.mocked(listSchedules).mockResolvedValue(schedules)
     vi.mocked(listPairingComputers).mockResolvedValue(computers)
     vi.mocked(readLeadDecisions).mockResolvedValue({ items: [], after: 0, caughtUp: true })
-    vi.mocked(readOpenQuestions).mockResolvedValue({ items: [], more: false })
     const pinia = createPinia(); setActivePinia(pinia)
     const leads = useProjectLeads(), work = useWorkQueue(), desk = useDecisionDesk(), capacity = useCapacity()
     try {

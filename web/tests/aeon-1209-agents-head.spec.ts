@@ -262,9 +262,10 @@ test('F and / search this list; typing in the search only types; Esc clears, the
   await page.keyboard.press('/')
   await expect(search).toBeFocused()
   await expect(page.locator('dialog.palette[open]')).toHaveCount(0)
-  // Shift F opens the filter; picking a state filters like the head count does.
+  // Shift F opens the filter (AEON-1210: Filter by State, Project, Harness, Computer); picking a state filters like the head count does.
   await page.locator('h1').click()
   await page.keyboard.press('Shift+F')
+  await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'State' }).click()
   const menu = page.getByRole('menu', { name: 'Filter sessions by state' })
   await expect(menu).toBeVisible()
   await menu.getByRole('menuitemradio', { name: /Working/ }).click()
@@ -335,7 +336,7 @@ for (const width of [1440, 1024, 390]) test(`${width}: the head, the capacity ro
     interactions: [
       { name: 'type a search', run: async () => { await search.fill('worker w1x'); await expect(page.locator('.sessions .fs-count')).toHaveText('1') } },
       { name: 'clear it', run: async () => { await search.fill(''); await expect(page.locator('.sessions .pills-row')).toHaveCount(0) } },
-      { name: 'pick a state', run: async () => { await filter.click(); await page.getByRole('menuitemradio', { name: /Working/ }).click(); await expect(page.locator('.sessions .pills-row')).toBeVisible() } },
+      { name: 'pick a state', run: async () => { await filter.click(); await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'State' }).click(); await page.getByRole('menuitemradio', { name: /Working/ }).click(); await expect(page.locator('.sessions .pills-row')).toBeVisible() } },
       { name: 'clear all', run: async () => { await page.locator('.sessions .pills-row').getByRole('button', { name: 'Clear all' }).click(); await expect(page.locator('.sessions .pills-row')).toHaveCount(0) } },
       { name: 'open Display', run: async () => { await display.click(); await expect(page.getByRole('dialog', { name: 'Display' })).toBeVisible() } },
       { name: 'close Display', run: async () => { await page.keyboard.press('Escape'); await expect(page.getByRole('dialog', { name: 'Display' })).toHaveCount(0) } },
@@ -399,7 +400,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await unit(page, 'claude').locator('.du-mark').hover(); await gate('unit-hover'); await page.mouse.move(2, 990)
     await capRow(page).locator('.acc-chip').click(); await expect(page.getByRole('dialog', { name: 'Accounts and computers' })).toBeVisible()
     await gate('accounts'); await page.keyboard.press('Escape')
-    await stick(page).getByRole('button', { name: 'Filter', exact: true }).click(); await expect(page.getByRole('menu', { name: 'Filter sessions by state' })).toBeVisible()
+    await stick(page).getByRole('button', { name: 'Filter', exact: true }).click(); await page.getByRole('menu', { name: 'Filter by' }).getByRole('menuitem', { name: 'State' }).click(); await expect(page.getByRole('menu', { name: 'Filter sessions by state' })).toBeVisible()
     await gate('filter'); await page.getByRole('menuitemradio', { name: /Working/ }).click()
     await expect(page.locator('.sessions .pills-row')).toBeVisible(); await gate('pill')
     await stick(page).getByRole('button', { name: /^Display: / }).click(); await expect(page.getByRole('dialog', { name: 'Display' })).toBeVisible()

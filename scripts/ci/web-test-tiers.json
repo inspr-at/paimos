@@ -238,6 +238,30 @@
     ,
     "browser:tests/aeon-1209-agents-head.spec.ts:touch targets › 768 with seven harnesses: an open plate holds −, the number and + as three distinct 44 px targets"
     ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:1024: long German names stay readable and never widen the page"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:1440: long German names stay readable and never widen the page"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:390: long German names stay readable and never widen the page"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:Next up and Recent that can’t be read say what is missing and offer Try again"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:a queue or questions that can’t be read say so below the list instead of dropping chips and lines in silence"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:dark 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1024 dark: the grouped list, its menus and its folds"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1024 light: the grouped list, its menus and its folds"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 1440 dark: the grouped list, its menus and its folds"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 390 dark: the grouped list, its menus and its folds"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:design gate at 390 light: the grouped list, its menus and its folds"
+    ,
+    "browser:tests/aeon-1210-agents-tree.spec.ts:phone › dark 390: the lead line, the queue chip and every row target reach 44 px"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -463,6 +487,8 @@
     "browser:tests/agents-worker-tree.spec.ts:a Sessions fold stored before shows the list; a count and History lead straight into it without a preference write"
     ,
     "browser:tests/agents-worker-tree.spec.ts:the footer problem jump switches a Working filter to Problem and focuses the folded row"
+    ,
+    "browser:tests/agents.spec.ts:sessions are grouped by project, the lead heading its group, with ticket and heartbeat; details show account and model"
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1024"
     ,
@@ -1597,6 +1623,8 @@
     "vitest:tests/agent-pause-store.unit.test.ts:stop-only agents keep running unless Stop now is explicitly chosen"
     ,
     "vitest:tests/agent-pause-store.unit.test.ts:wind-down eligibility matches ownership while bulk permissions stay available"
+    ,
+    "vitest:tests/agent-projection.unit.test.ts:the store > reads every lead again once the projects list arrives after the page"
     ,
     "vitest:tests/agent-theme.unit.test.ts:a failed load after an identity reset uses defaults, never the legacy appearance cache"
     ,
@@ -5566,6 +5594,44 @@
     ,
     {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"touch targets › 768 with seven harnesses: an open plate holds −, the number and + as three distinct 44 px targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"1024: long German names stay readable and never widen the page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"1440: long German names stay readable and never widen the page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"390: long German names stay readable and never widen the page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Collapse all folds every lead, Expand all opens them; the icon swaps in its fixed slot","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Display groups by harness, state or none; the address keeps it and Project is back with one click","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Filter by project, harness and computer: pills under the head, the address keeps them, Clear all ends them","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"Next up and Recent that can’t be read say what is missing and offer Try again","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"a fold is the person’s, survives a reload, sums up the workers and moves none of the row’s controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"a queue or questions that can’t be read say so below the list instead of dropping chips and lines in silence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"dark 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"design gate at 1024 dark: the grouped list, its menus and its folds","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"design gate at 1024 light: the grouped list, its menus and its folds","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"design gate at 1440 dark: the grouped list, its menus and its folds","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"design gate at 1440 light: the grouped list, its menus and its folds","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"design gate at 390 dark: the grouped list, its menus and its folds","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"design gate at 390 light: the grouped list, its menus and its folds","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"light 1440: projects in their fixed order, the lead heads its group, the no-lead line and the queue chip","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"phone › dark 390: the lead line, the queue chip and every row target reach 44 px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1210-agents-tree.spec.ts","name":"phone › light 390: the lead line, the queue chip and every row target reach 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -6524,7 +6590,7 @@
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"session setup and work context appear from the mocked harness API","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents.spec.ts","name":"sessions are grouped by what they need, with ticket and heartbeat; details show account and model","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents.spec.ts","name":"sessions are grouped by project, the lead heading its group, with ticket and heartbeat; details show account and model","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents.spec.ts","name":"the header routes the canonical count to Decision Desk and keeps Agents separate","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -15888,6 +15954,32 @@
     ,
     {"kind":"vitest","file":"tests/agent-pause-store.unit.test.ts","name":"wind-down eligibility matches ownership while bulk permissions stay available","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"bindings > bind a question to the exact session that asked, never by principal; one without a session binds to nobody","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"bindings > bind workers by their real parent, at any depth, and survive a cycle","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"bindings > map each named event to what it wakes; no event rereads everything","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > a failed read is said: queue counts become unknown, questions keep what was shown as incomplete","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > a lead’s workers from a session read cut short are a lower bound; a cut-short queue count never stands in for the project’s own","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > a read answered after a sign-in change is never shown to the next person","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > a reconnect or a poll rereads Next up with the counts: a missed queue event leaves neither behind","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > batches named events into one reread of what they changed; a reconnect rereads everything","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > binds a lead band’s workers by parent from the project’s own session read when the Agents list is not loaded","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > reads every lead again once the projects list arrives after the page","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > reads open questions within five pages and says when more exist; a failed later page keeps the rest","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > reads the queue, the open questions and every active project’s lead while the page shows them","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-projection.unit.test.ts","name":"the store > the Agents list hears when the queue failed or was read in part, and when not every question was read","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"accepted recovery stays pending until verified result and never calls queued work restarted","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"changing diagnosis remains below every session control and tab","tier":"ESSENTIAL"}
@@ -17858,21 +17950,15 @@
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1040: removal sends the confirmed revision and older reads cannot resurrect the lead","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a failed later question page keeps the questions read and says the rest are unread","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a failed question read keeps the last questions shown and reports them incomplete","tier":"GATED-FULL"}
-    ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a newer read never yields to an older revision answered later","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a read that began before Pause cannot put the older lead back, and a fresh read follows","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a session read answered after a reset is not admitted for the next person","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"an unanswered question stays with the lead after its session stopped","tier":"ESSENTIAL"}
-    ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"gate and merged totals cover every generation and survive trimming the retained history","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"open questions are paged within a bound and a remainder is reported, never hidden","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"questions bind to the lead’s exact session, also after it stopped; another generation’s stay on the Desk","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a deferred bulk assignee opening cannot replace a later close action","tier":"GATED-FULL"}
     ,
@@ -18387,6 +18473,32 @@
     {"kind":"vitest","file":"tests/session-confirm.unit.test.ts","name":"AEON-584: refreshing the same identity keeps confirmation of the captured delete","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-confirm.unit.test.ts","name":"AEON-584: sign-out cancels an open confirm before the logout response","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"folded groups preference > keeps well-formed ids once, bounded, and drops projects that are gone","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"list tools in the address > match by project, harness and computer, and count each value","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"list tools in the address > read bounded values: each once, short, at most twenty","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > a count from a queue read in part says it is a lower bound; a queue that can’t be read says so","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > a folded lead sums up what it holds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > an ended lead generation never hides what the current lead does: starting, removed, paused or running anew","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > group by a value in a given order, unknown keys after by label","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > head a project’s sessions without a lead with the same no-lead line, queued work or not, read or not","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > head each group with its lead, whatever order the sessions come in","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > keep the person’s own project order, then the rest by key","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > one queue chip per project: on the current lead, never on an ended generation; the first coordinator while the lead is unknown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > show a pending lead or the no-lead line only where no lead row heads the group","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-groups.unit.test.ts","name":"project groups > still group sessions of a project the person no longer lists, after the listed ones","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-order.unit.test.ts","name":"choosing, remembering and resetting the order > round-trips per viewer, resets, and ignores unusable storage","tier":"GATED-FULL"}
     ,

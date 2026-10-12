@@ -4,7 +4,6 @@
 // Inside PAIMOS it is always "lead"; people read the workspace word (LeadWords).
 import { reactive } from 'vue'
 import { api, APIError } from './api.ts'
-import type { Question, QuestionPage } from './decisionDeskApi.ts'
 
 export type LeadState = 'none' | 'starting' | 'working' | 'waiting_for_room' | 'paused' | 'cannot_start'
 export interface ProjectLead {
@@ -75,24 +74,6 @@ export async function readLeadDecisions(id: string, after = 0, pages = 5): Promi
   return { items, after: cursor, caughtUp: false }
 }
 /** Open questions in one project, at most `pages` × 100; `more` says some were not read. */
-export async function readOpenQuestions(id: string, pages = 5): Promise<{ items: Question[]; more: boolean }> {
-  const items = new Map<string, Question>()
-  for (let page = 0; page < pages; page++) {
-    let result: QuestionPage
-    try {
-      result = await leadRequest<QuestionPage>(`${project(id)}/questions?state=open&limit=100&offset=${page * 100}`)
-      if (result.items.length > 100) throw new Error('The question page exceeded its limit.')
-    } catch (e) {
-      // A later page failed: keep what was read and report the rest as unread.
-      if (page === 0) throw e
-      return { items: [...items.values()], more: true }
-    }
-    for (const question of result.items) items.set(question.id, question)
-    if (!result.has_more) return { items: [...items.values()], more: false }
-  }
-  return { items: [...items.values()], more: true }
-}
-
 // ---------- Words ----------
 export interface LeadWords { S: string; l: string; P: string; pl: string }
 // Acronyms stay as typed ("AI"), ordinary words read lower case mid-sentence.

@@ -64,9 +64,10 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
 test('four live workers lead eight collapsed stopped workers, and labels distinguish their shared principal', async ({ page }) => {
   const { data } = await setup(page)
   await page.goto('/agents')
-  await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead: 4 sub-agents, 4 working')
+  await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead’s workers: 4 workers, 4 working')
   await expect(history(page)).toHaveText('8 stopped')
-  await expect(row(page, lead).locator('.worker-tools')).toHaveText(/^4 sub-agents\s*8 stopped$/)
+  // AEON-1210: the stopped count keeps its own line; the lead's line 2 says what it holds.
+  await expect(row(page, lead).locator('.worker-tools')).toHaveText('8 stopped')
   await expect(history(page)).toHaveAttribute('aria-expanded', 'false')
   // Equal start times: session ID decides, never the latest heartbeat (AEON-468).
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(4), id(5)])
@@ -79,7 +80,7 @@ test('four live workers lead eight collapsed stopped workers, and labels disting
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(4), id(5), ...Array.from({ length: 8 }, (_, n) => id(10 + n))])
   await expand(page).click()
   await expect(children(page)).toHaveCount(0)
-  await expect(row(page, lead).locator('.kid-count')).toHaveText('12 sub-agents')
+  await expect(row(page, lead).locator('.current-activity')).toContainText('12 workers')
   await expand(page).click()
   await expect(children(page)).toHaveCount(12)
   // A fresh heartbeat on the last worker leaves every row where it is.
@@ -103,7 +104,7 @@ test('idle follows working; newly stopped workers hide immediately and histories
   Object.assign(data.sessions.find(s => s.id === id(4))!, { activity: 'idle', heartbeat_at: ago(0) })
   await page.goto('/agents')
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(5), id(4)])
-  await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead: 4 sub-agents, 3 working')
+  await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead’s workers: 4 workers, 3 working')
   await history(page).click()
   await expect(children(page, id(90))).toHaveCount(0)
   await history(page, id(90)).click()
@@ -112,7 +113,7 @@ test('idle follows working; newly stopped workers hide immediately and histories
   await refresh(page)
   await expect(row(page, id(5))).toHaveCount(0)
   await expect(history(page)).toHaveText('9 stopped')
-  await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead: 3 sub-agents, 2 working')
+  await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead’s workers: 3 workers, 2 working')
   await expect(children(page, id(90))).toHaveCount(1)
 })
 
@@ -165,8 +166,8 @@ test('a deep problem marks every ancestor, folded parents name it, and arrow key
   await expect(row(page, id(4))).toHaveAttribute('aria-posinset', '3')
   await expect(row(page, id(4))).toHaveAttribute('aria-setsize', '4')
   await expect(row(page, id(4))).not.toHaveAttribute('aria-expanded', /.*/)
-  // The family sits with its most urgent member; only ancestors carry the dot.
-  await expect(page.locator('.group-row.attention + .row')).toHaveAttribute('data-row', `s:${lead}`)
+  // The lead heads its project's group (AEON-1210); only ancestors carry the dot.
+  await expect(page.locator('.sessions .grp', { has: row(page, lead) }).locator('[role="row"]').first()).toHaveAttribute('data-row', `s:${lead}`)
   for (const key of [lead, id(2), id(100)]) await expect(row(page, key).locator('.roll-dot')).toHaveCount(1)
   for (const key of [id(200), id(3)]) await expect(row(page, key).locator('.roll-dot')).toHaveCount(0)
 
@@ -174,15 +175,14 @@ test('a deep problem marks every ancestor, folded parents name it, and arrow key
   await page.keyboard.press('ArrowLeft')
   await expect(row(page, id(200))).toHaveCount(0)
   await expect(row(page, id(100))).toHaveAttribute('aria-expanded', 'false')
-  await expect(row(page, id(100)).locator('.kid-count')).toHaveText('1 sub-agent')
-  await expect(row(page, id(100)).locator('.roll.problem')).toHaveText('1 problem below')
+  // Folded, a parent sums up what it holds on its line 2 (AEON-1210).
+  await expect(row(page, id(100)).locator('.current-activity')).toContainText('1 worker · 1 problem')
   await expect(row(page, id(100))).toBeFocused()
   await page.keyboard.press('ArrowLeft')
   await expect(row(page, id(2))).toBeFocused()
   await page.keyboard.press('ArrowLeft')
   await expect(row(page, id(100))).toHaveCount(0)
-  await expect(row(page, id(2)).locator('.kid-count')).toHaveText('2 sub-agents')
-  await expect(row(page, id(2)).locator('.roll.problem')).toHaveText('1 problem below')
+  await expect(row(page, id(2)).locator('.current-activity')).toContainText('2 workers · 1 problem')
   await page.keyboard.press('ArrowRight')
   await expect(row(page, id(100))).toBeVisible()
   await expect(row(page, id(2))).toBeFocused()
@@ -256,7 +256,7 @@ test('a stopped lead links its successor instead of claiming live workers', asyn
     Object.assign(worker, { parent_harness_session_id: id(90), adopted_from_id: lead })
   }
   await page.goto('/agents')
-  await page.locator('.group-toggle').filter({ hasText: 'Ended' }).click()
+  // It stopped just now, so it keeps its place and end state for 10 minutes (AEON-1210, design §3.2).
   await expect(row(page, lead).getByRole('link', { name: 'Handed over to Resumed lead' })).toBeVisible()
   await expect(row(page, lead).locator('.worker-tools')).toHaveCount(0)
   await expect(row(page, id(2)).getByRole('link', { name: 'Adopted from Release lead' })).toBeVisible()

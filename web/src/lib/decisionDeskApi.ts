@@ -17,6 +17,8 @@ export interface QuestionInput {
   recommend?: string; why?: string; meanwhile: 'carries_on' | 'parked' | 'paused' | 'stopped'; meanwhile_text?: string
   ticket_id?: string; source_handover_id?: string; suggested_outcome?: DeskOutcome
   source_request_id?: string; doctrine?: DeskDoctrineTarget
+  /** The verified session that asked (api/areas/shared.yaml QuestionInput); questions bind to a session by it, never by principal. */
+  session_id?: string
 }
 export interface QuestionAnswer {
   id: string; revision: number; answer: string; option_id?: string; reason?: string; outcome: DeskOutcome
@@ -25,7 +27,7 @@ export interface QuestionAnswer {
 export interface Question {
   id: string; project_id: string; revision: number; state: 'open' | 'answered'; input: QuestionInput
   suggested_outcome: DeskOutcome; suggestion_reason: 'agent_suggestion' | 'ticket_default' | 'project_default'
-  askers: { id: string; principal_id: string; reply_root_id: string; comment_node_id: string; input: QuestionInput; from_record?: { label: 'From the record'; decision_id: string; revision: number } }[]
+  askers: { id: string; principal_id: string; session_id?: string; reply_root_id: string; comment_node_id: string; input: QuestionInput; from_record?: { label: 'From the record'; decision_id: string; revision: number } }[]
   answer?: QuestionAnswer; created_at: string; updated_at: string
   outcomes?: DeskOutcomeAvailability[]; pending: DeskOutcomeEffect[]
 }
