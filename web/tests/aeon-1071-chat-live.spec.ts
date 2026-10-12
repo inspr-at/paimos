@@ -405,7 +405,14 @@ test('AEON-1071 every visible chat-native post is recorded on its chat thread', 
   const panel = panelOf(page)
   // The three identical posts render as one row.
   await expect(panel.locator('.msg', { hasText: 'Same check passed.' }).locator('.duplicate')).toHaveText('×3')
-  for (const body of bodies.slice(0, 3)) await expect(panel.locator('.msg', { hasText: body })).toBeInViewport({ ratio: 1 })
+  // The approved split has a narrower detail pane. Each post must be fully
+  // visible when read, including when the thread needs scrolling to show it.
+  for (const body of bodies.slice(0, 3)) {
+    const row = panel.locator('.msg', { hasText: body })
+    await row.scrollIntoViewIfNeeded()
+    await expect(row).toBeInViewport({ ratio: 1 })
+    await page.clock.runFor(2_000)
+  }
   await page.clock.runFor(2_000)
   await expect.poll(() => [...seen].sort()).toEqual(ids)
 })

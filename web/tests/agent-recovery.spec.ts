@@ -98,8 +98,9 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     const fixture = await setup(page, 'restart', true, true)
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     const panel = page.getByRole('complementary', { name: 'Session details' })
+    const close = panel.getByRole('button', { name: width < 1100 ? 'Back to the list' : 'Close session details', exact: true })
     let restart = panel.getByRole('button', { name: 'Restart', exact: true })
-    if (width === 390) {
+    if (width < 1100) {
       const more = panel.getByRole('button', { name: 'More session controls', exact: true })
       await more.click()
       restart = page.getByRole('menuitem', { name: 'Restart', exact: true })
@@ -111,7 +112,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
       // Picking an action closes the menu. Its trigger and the panel controls
       // remain on screen throughout the request and result transitions.
       const requestControls = await controlStability(page, {
-        more, close: panel.getByRole('button', { name: 'Close session details' }),
+        more, close,
         overview: panel.getByRole('tab', { name: 'Overview', exact: true }),
         messages: panel.getByRole('tab', { name: /Chat/ }),
       })
@@ -129,7 +130,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
       expect(fixture.request()?.action).toBe('restart')
     }
     const controls = await controlStability(page, {
-      close: panel.getByRole('button', { name: 'Close session details' }),
+      close,
       overview: panel.getByRole('tab', { name: 'Overview', exact: true }),
       messages: panel.getByRole('tab', { name: /Chat/ }),
       managed: panel.locator('.managed-controls'),

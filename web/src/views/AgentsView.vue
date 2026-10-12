@@ -535,13 +535,17 @@ function changed(event?: string, identity?: AgentEventIdentity) {
 }
 let stopTierWatch: (() => void) | undefined
 onMounted(() => {
+  const measureWidth = () => { workWidth.value = Math.floor(work.value?.getBoundingClientRect().width ?? 0) }
+  measureWidth()
   layoutResize = new ResizeObserver(() => {
-    // Applying a breakpoint changes the observed work area's height. Read on
-    // the next frame so that write cannot feed the same observer delivery.
+    // Width only depends on the surrounding page. Apply its breakpoint before
+    // paint; deferring it lets the old split move controls during interaction.
+    measureWidth()
+    // Applying a breakpoint changes the work area's height. Defer that read
+    // so the height write cannot feed the same observer delivery.
     if (layoutFrame !== undefined) return
     layoutFrame = requestAnimationFrame(() => {
       layoutFrame = undefined
-      workWidth.value = Math.floor(work.value?.getBoundingClientRect().width ?? 0)
       paneHeight.value = Math.max(0, (work.value?.closest('main')?.clientHeight ?? 0) - 8)
       if (!canSplit.value) { drag = null; dragWidth.value = null }
     })
