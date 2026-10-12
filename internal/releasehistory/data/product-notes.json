@@ -6581,8 +6581,8 @@
     "261012211543.0.0": {
       "release_channel": "stable",
       "release_sequence": 131,
-      "snapshot_sha256": "efc37cfe0415c3527873d648368a3ab511a83a1ffa527c3054c4acc0a4ff0ab5",
-      "captured_at": "2026-10-12T21:16:39Z",
+      "snapshot_sha256": "5dac47085d4fdecc35c44e3df7a2e44bfdec59280931cc84dd2a69a88edb15ca",
+      "captured_at": "2026-10-12T21:20:55Z",
       "release_revision": 1,
       "items": [
         {
@@ -6605,8 +6605,8 @@
           "key": "AEON-1256",
           "pill_en": "Collapsible lead panel",
           "pill_de": "Einklappbares Lead-Panel",
-          "benefit_en": "The lead panel on a project page can be collapsed to one line, and its numbers no longer make the page jump.",
-          "benefit_de": "Das Lead-Panel auf einer Projektseite lässt sich auf eine Zeile einklappen, und seine Zahlen lassen die Seite nicht mehr springen.",
+          "benefit_en": "The lead panel on a project page can be collapsed to its header, and reserved space beneath its counters reduces page movement when ticket labels appear.",
+          "benefit_de": "Das Lead-Panel auf einer Projektseite lässt sich auf seine Kopfzeile einklappen, und reservierter Platz unter den Zählern verringert Seitensprünge, wenn Ticket-Bezeichnungen erscheinen.",
           "group": "features"
         }
       ]
