@@ -3,8 +3,21 @@ package delivery
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -13,6 +26,143 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
+
+func TestDeliveryHistoryActionsRefusalFromGitHub(t *testing.T) {
+	// Risk: GitHub omits its permission header, hiding an Actions refusal and
+	// sending history into the generic short retry path. No response text leaks.
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyFile := filepath.Join(dir, "fixture.pem")
+	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, path, body, reason string
+		status                   int
+		permission               bool
+	}{
+		{"runs", "/actions/runs", "Resource not accessible by integration", "actions_read_missing", 403, true},
+		{"workflow runs", "/actions/workflows/ci.yml/runs", "Resource not accessible by integration", "actions_read_missing", 403, true},
+		{"jobs", "/actions/runs/7/attempts/1/jobs", "Resource not accessible by integration", "actions_read_missing", 403, true},
+		{"other Actions refusal", "/actions/runs/7/jobs", "Other private response", "actions_read_missing", 403, true},
+		{"missing", "/actions/runs", "Not Found", "not_installed", 404, false},
+		{"non Actions refusal", "/pulls/7", "Resource not accessible by integration", "github_unavailable", 403, false},
+		{"outage", "/actions/runs", "Private server error", "github_unavailable", 503, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var reads, revoked atomic.Int64
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method + " " + r.URL.Path {
+				case "POST /app/installations/456/access_tokens":
+					var in struct {
+						Permissions map[string]string `json:"permissions"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Permissions["actions"] != "read" {
+						t.Error("fixture did not request actions:read")
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"token": "fixture-only-token", "permissions": in.Permissions, "repositories": []any{map[string]string{"full_name": "example/delivery"}}})
+				case "DELETE /installation/token":
+					revoked.Add(1)
+					w.WriteHeader(204)
+				case "GET /repos/example/delivery" + tc.path:
+					reads.Add(1)
+					w.WriteHeader(tc.status)
+					_ = json.NewEncoder(w).Encode(map[string]string{"message": tc.body})
+				default:
+					t.Errorf("unexpected stub request %s %s", r.Method, r.URL.Path)
+					w.WriteHeader(500)
+				}
+			}))
+			defer server.Close()
+			stubURL, err := url.Parse(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := server.Client()
+			transport := client.Transport
+			client.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+				copy := r.Clone(r.Context())
+				copy.URL.Scheme, copy.URL.Host = stubURL.Scheme, stubURL.Host
+				return transport.RoundTrip(copy)
+			})
+			reader := AppReader{App: &crossreview.GitHubApp{Config: crossreview.AppConfig{ID: "123", InstallationID: "456", TenantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", Repository: "example/delivery", KeyFile: keyFile}, Client: client}}
+			err = reader.MetricsRead(t.Context(), reader.App.Config.TenantID, func(get func(string, any) error) error {
+				return get(tc.path, &map[string]any{})
+			})
+			at := time.Date(2026, 10, 12, 17, 0, 0, 0, time.UTC)
+			diagnostic := metricError(err, at)
+			if err == nil || diagnostic.Reason != tc.reason || (diagnostic.Permission != nil) != tc.permission || reads.Load() != 1 || revoked.Load() != 1 {
+				t.Fatalf("Actions refusal classification: %+v err=%v reads=%d revoked=%d", diagnostic, err, reads.Load(), revoked.Load())
+			}
+			if tc.permission && (*diagnostic.Permission != "actions:read" || !metricRetry(err, diagnostic, &metricSourceRow{}).Equal(at.Add(30*time.Minute))) {
+				t.Fatal("Actions refusal lost the permission or long retry")
+			}
+			if strings.Contains(err.Error(), tc.body) {
+				t.Fatal("GitHub response text escaped the error boundary")
+			}
+		})
+	}
+}
+
+func TestDeliveryHistoryRetryBackoffGrowsAndCaps(t *testing.T) {
+	// Risk: permanent refusals hot-loop after restarts or never cap, while
+	// timeouts/server outages wait like missing permissions. Clocks are injected.
+	for _, tc := range []struct {
+		name      string
+		failure   error
+		base      time.Duration
+		transient bool
+	}{
+		{"unknown read failure", errRead, time.Minute, false},
+		{"unauthorized", &crossreview.GitHubHTTPError{StatusCode: 401}, time.Minute, false},
+		{"Actions forbidden", &crossreview.GitHubHTTPError{StatusCode: 403, ActionsReadRequired: true}, 30 * time.Minute, false},
+		{"not found", &crossreview.GitHubHTTPError{StatusCode: 404}, 30 * time.Minute, false},
+		{"canceled", context.Canceled, time.Minute, false},
+		{"server outage", &crossreview.GitHubHTTPError{StatusCode: 503}, 0, true},
+		{"timeout", context.DeadlineExceeded, 0, true},
+		{"connection reset", syscall.ECONNRESET, 0, true},
+		{"redacted transport", crossreview.ErrTransient, 0, true},
+		{"partial transport", io.ErrUnexpectedEOF, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			at := time.Date(2026, 10, 12, 17, 0, 0, 0, time.UTC)
+			source := &metricSourceRow{}
+			want := tc.base
+			for attempt := int64(1); attempt <= 10; attempt++ {
+				diagnostic := metricError(tc.failure, at)
+				next := metricRetry(tc.failure, diagnostic, source)
+				delay := next.Sub(at)
+				receiptDelay := webhookErrorBackoff(attempt, tc.failure)
+				if tc.transient {
+					if delay < 30*time.Second || delay >= time.Minute || receiptDelay < 30*time.Second || receiptDelay >= time.Minute {
+						t.Fatalf("transient retry outside jitter bounds: source=%s receipt=%s", delay, receiptDelay)
+					}
+				} else if delay != want || receiptDelay != want {
+					t.Fatalf("attempt %d: source=%s receipt=%s want %s", attempt, delay, receiptDelay, want)
+				}
+				// Only persisted fields carry the prior delay into the next call.
+				source = &metricSourceRow{LastReadError: &diagnostic, RetryAt: &next}
+				at = next
+				want = min(want*2, time.Hour)
+			}
+			if !tc.transient {
+				diagnostic := metricError(tc.failure, at)
+				if got := metricRetry(tc.failure, diagnostic, &metricSourceRow{}).Sub(at); got != tc.base {
+					t.Fatalf("successful read did not reset backoff: %s", got)
+				}
+				if got := webhookErrorBackoff(1<<62, tc.failure); got != time.Hour {
+					t.Fatalf("large attempt overflowed cap: %s", got)
+				}
+			}
+		})
+	}
+}
 
 func emptyHistory(repository string) func(string) (any, error) {
 	return func(path string) (any, error) {
@@ -70,6 +220,10 @@ func TestDeliveryHistoryFirstReadFailurePreservesSelectedWindow(t *testing.T) {
 			}
 			// Ordinary continuation waits for retry_at; Check again clears it.
 			if action == "backfill" {
+				f.call(t, f.person, "POST", path+"/backfill", map[string]any{}, 200, nil)
+				if len(g.calls) != 1 {
+					t.Fatal("continuation erased the first-read retry deadline")
+				}
 				f.at = f.at.Add(30 * time.Minute)
 			}
 			wantSince := dayStart(f.at.AddDate(0, 0, -90))
@@ -90,7 +244,15 @@ func TestDeliveryHistoryFirstReadFailurePreservesSelectedWindow(t *testing.T) {
 			// Once a cursor exists, continuation must retain its days even if a
 			// caller supplies another window without explicitly restarting.
 			g.respond = emptyHistory(f.m.config.Repository)
-			f.at = f.at.Add(30 * time.Minute)
+			second := historySource(t, f)
+			wantDelay := 30 * time.Minute
+			if action == "backfill" {
+				wantDelay = time.Hour
+			}
+			if second.RetryAt == nil || !second.RetryAt.Equal(f.at.Add(wantDelay)) {
+				t.Fatalf("repeated permission refusal did not grow the stored backoff: %+v", second)
+			}
+			f.at = *second.RetryAt
 			var out BackfillResult
 			f.call(t, f.person, "POST", path+"/backfill", map[string]any{"days": 7}, 200, &out)
 			if !out.Since.Equal(wantSince) {
@@ -190,10 +352,13 @@ func TestDeliveryHistoryPermissionRetryCheckAgainAndTenantIsolation(t *testing.T
 	}
 	// A permission failure among successful job reads still owns the same
 	// 30-minute source retry, rather than waiting the ordinary job retry hour.
-	seedBareRuns(t, f, 2)
+	seedBareRuns(t, f, 3)
 	g.respond = func(path string) (any, error) {
 		if strings.Contains(path, "/1002/") {
 			return nil, &crossreview.GitHubHTTPError{StatusCode: 403, ActionsReadRequired: true}
+		}
+		if strings.Contains(path, "/1001/") {
+			return nil, &crossreview.GitHubHTTPError{StatusCode: 503}
 		}
 		return githubJobsBody(f.at.Add(-time.Hour), 30, nil), nil
 	}
@@ -205,8 +370,31 @@ func TestDeliveryHistoryPermissionRetryCheckAgainAndTenantIsolation(t *testing.T
 	f.at = f.at.Add(30 * time.Minute)
 	g.respond = func(string) (any, error) { return githubJobsBody(f.at.Add(-time.Hour), 30, nil), nil }
 	f.call(t, f.person, "POST", path+"/backfill", map[string]any{}, 200, &jobs)
-	if jobs.State != "done" || jobs.Jobs != 1 {
+	if jobs.State != "done" || jobs.Jobs != 2 {
 		t.Fatalf("job permission retry did not run at deadline: %+v", jobs)
+	}
+	// Partial transient failures use the same short stored retry and remain
+	// eligible at that deadline, rather than waiting the per-run retry hour.
+	seedBareRuns(t, f, 5)
+	g.respond = func(path string) (any, error) {
+		if strings.Contains(path, "/1005/") {
+			return nil, &crossreview.GitHubHTTPError{StatusCode: 503}
+		}
+		return githubJobsBody(f.at.Add(-time.Hour), 30, nil), nil
+	}
+	f.call(t, f.person, "POST", path+"/backfill", map[string]any{}, 200, &jobs)
+	if jobs.Jobs != 1 || jobs.RetryAt == nil || jobs.RetryAt.Sub(f.at) < 30*time.Second || jobs.RetryAt.Sub(f.at) >= time.Minute {
+		t.Fatalf("partial transient failure did not get a short retry: %+v", jobs)
+	}
+	stored := historySource(t, f)
+	if stored.RetryAt == nil || !stored.RetryAt.Equal(*jobs.RetryAt) {
+		t.Fatal("UI retry deadline differs from the job schedule")
+	}
+	f.at = *jobs.RetryAt
+	g.respond = func(string) (any, error) { return githubJobsBody(f.at.Add(-time.Hour), 30, nil), nil }
+	f.call(t, f.person, "POST", path+"/backfill", map[string]any{}, 200, &jobs)
+	if jobs.State != "done" || jobs.Jobs != 1 {
+		t.Fatalf("transient job was ineligible at its stored deadline: %+v", jobs)
 	}
 }
 

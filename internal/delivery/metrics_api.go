@@ -821,7 +821,10 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 				f, err := readJobFacts(counted, id, 1)
 				if err != nil {
 					failedRuns = append(failedRuns, id)
-					readFailure = err
+					// A later run's outage must not hide an Actions refusal.
+					if readFailure == nil || metricError(readFailure, now).Reason != "actions_read_missing" {
+						readFailure = err
+					}
 					continue
 				}
 				facts[id] = f
@@ -873,11 +876,12 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 			}
 		}
 		permissionFailure := readFailure != nil && metricError(readFailure, at).Reason == "actions_read_missing"
+		sourceFailure := permissionFailure || crossreview.IsTransientGitHubError(readFailure)
 		for _, id := range failedRuns {
-			// A missing App permission is repository-wide. The source's 30-minute
-			// retry owns this delay, rather than each run's ordinary retry hour.
+			// Permission refusals and transient outages use the source's retry
+			// schedule, leaving these runs eligible when that retry is due.
 			var failedAt *time.Time
-			if !permissionFailure {
+			if !sourceFailure {
 				failedAt = &at
 			}
 			if _, err = tx.Exec(ctx, `UPDATE delivery_metric_runs SET jobs_failed_at=$3 WHERE repository=$1 AND run_id=$2 AND attempt=1`, source.Repository, id, failedAt); err != nil {
@@ -916,8 +920,8 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 			if err != nil {
 				return err
 			}
-			if permissionFailure {
-				retry := at.Add(30 * time.Minute)
+			if sourceFailure {
+				retry := metricRetry(readFailure, metricError(readFailure, at), current)
 				result.RetryAt = &retry
 			}
 		}

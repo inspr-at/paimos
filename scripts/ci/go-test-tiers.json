@@ -5758,9 +5758,13 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowWorkflowRunShowsRunningChecks","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryActionsRefusalFromGitHub","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryFirstReadFailurePreservesSelectedWindow","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryPermissionRetryCheckAgainAndTenantIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryRetryBackoffGrowsAndCaps","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistorySourceChangeRejectsOldStepAndResumesAfterRestart","tier":"ESSENTIAL"}
     ,

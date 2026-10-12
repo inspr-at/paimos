@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"time"
 
@@ -41,11 +42,29 @@ func metricError(err error, at time.Time) MetricReadError {
 	return out
 }
 
-func metricRetry(err MetricReadError) time.Time {
-	if err.Reason == "actions_read_missing" || err.Reason == "not_installed" {
-		return err.At.Add(30 * time.Minute)
+func metricRetryBase(reason string) time.Duration {
+	if reason == "actions_read_missing" || reason == "not_installed" {
+		return 30 * time.Minute
 	}
-	return err.At.Add(5 * time.Minute)
+	return time.Minute
+}
+
+func shortMetricRetry() time.Duration {
+	return 30*time.Second + time.Duration(rand.Int64N(int64(30*time.Second)))
+}
+
+func metricRetry(failure error, readError MetricReadError, source *metricSourceRow) time.Time {
+	if crossreview.IsTransientGitHubError(failure) {
+		return readError.At.Add(shortMetricRetry())
+	}
+	delay := metricRetryBase(readError.Reason)
+	// The stored diagnostic and due time retain the previous delay across
+	// replicas/restarts. A successful read clears both and resets the backoff.
+	if source.LastReadError != nil && source.RetryAt != nil {
+		previous := min(source.RetryAt.Sub(source.LastReadError.At), time.Hour)
+		delay = max(delay, previous*2)
+	}
+	return readError.At.Add(min(delay, time.Hour))
 }
 
 func (m *Module) wakeMetrics() {
@@ -116,9 +135,9 @@ func (m *Module) scheduleMetricBackfill(ctx context.Context, p tenant.Principal,
 		_, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_pending=true,backfill_actor_id=$2,backfill_key_id=NULLIF($3,'')::uuid,
    backfill_cursor=coalesce($4,backfill_cursor),backfill_since=CASE WHEN $4::jsonb IS NOT NULL THEN ($4::jsonb->>'since')::timestamptz ELSE backfill_since END,
    backfill_done_at=CASE WHEN $4::jsonb IS NULL THEN backfill_done_at END,
-   backfill_retry_at=CASE WHEN $4::jsonb IS NULL AND NOT $5 THEN backfill_retry_at END,
-   last_read_error=CASE WHEN $4::jsonb IS NULL THEN last_read_error END,backfill_days=$6,backfill_revision=backfill_revision+1
-   WHERE project_id=$1`, project, p.ID, p.KeyID, raw, check, days)
+   backfill_retry_at=CASE WHEN NOT $5 AND NOT $7 THEN backfill_retry_at END,
+   last_read_error=CASE WHEN NOT $7 THEN last_read_error END,backfill_days=$6,backfill_revision=backfill_revision+1
+   WHERE project_id=$1`, project, p.ID, p.KeyID, raw, check, days, in.Restart)
 		return err
 	})
 }
@@ -168,7 +187,7 @@ func (m *Module) metricReadFailed(ctx context.Context, p tenant.Principal, proje
 		if current == nil || current.Revision != source.Revision || current.Repository != source.Repository {
 			return fail(409, "the backfill moved or the source changed meanwhile; call again to continue")
 		}
-		_, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET last_read_error=$2,backfill_retry_at=$3,backfill_pending=true,backfill_revision=backfill_revision+1 WHERE project_id=$1`, project, raw, metricRetry(readError))
+		_, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET last_read_error=$2,backfill_retry_at=$3,backfill_pending=true,backfill_revision=backfill_revision+1 WHERE project_id=$1`, project, raw, metricRetry(failure, readError, current))
 		return err
 	})
 }
