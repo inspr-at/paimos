@@ -10826,6 +10826,10 @@
     ,
     {"kind":"browser","file":"tests/profile.spec.ts","name":"with the greeting off there is no block and no draw","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: approved repository reference states and check.mjs audit against the build","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/project-delivery-settings.spec.ts","name":"AEON-1226: repository states stay put and delivery edits preserve authority, inheritance and identity","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/project-groups.spec.ts","name":"390: cards reflow to one column and nothing is clipped (dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-groups.spec.ts","name":"390: cards reflow to one column and nothing is clipped (light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -17943,6 +17947,8 @@
     {"kind":"vitest","file":"tests/profile-form.unit.test.ts","name":"the preview > loads the preview’s fonts under a new name whenever the faces change","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/profile-permissions.unit.test.ts","name":"profile permissions describe the caller’s personal profile","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-delivery-settings.unit.test.ts","name":"AEON-1226: saved repository failures take precedence over history and stale events","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"AEON-1038: launch-off or unreadable policy refuses Start without a POST","tier":"GATED-FULL"}
     ,

@@ -9,9 +9,15 @@ import { createScope, scopeOwner } from '../../lib/identityScope'
 import { deliveryLanguage, liftDeliveryHold, minutesSince, readDelivery, sortDelivery, type DeliveryItem, type DeliveryPage } from '../../lib/delivery'
 import { useSession } from '../../stores/session'
 import { useProfile } from '../../stores/profile'
+import { useProjects } from '../../stores/projects'
+import { readDeliveryMetrics } from '../../lib/deliveryNumbers'
+import { projectSettingsPath } from '../../lib/projectSettings'
 
 const props = defineProps<{ nodeId: string; projectId: string; ticketKey?: string }>()
 const session = useSession(), profile = useProfile()
+const projects = useProjects(), noRepository = ref(false)
+const project = computed(() => projects.projects.find(item => item.id === props.projectId))
+const settingsLink = computed(() => project.value ? `${projectSettingsPath(project.value.routeKey, 'delivery')}#repository` : undefined)
 const lang = computed(() => deliveryLanguage(profile.profile?.locale))
 const de = computed(() => lang.value === 'de')
 const read = computed(() => can('delivery.read', props.projectId)), manage = computed(() => can('delivery.manage', props.projectId))
@@ -25,7 +31,7 @@ const items = computed(() => {
 })
 const showSlot = computed(() => items.value.length === 0)
 const updated = computed(() => items.value.reduce((latest, item) => item.updated_at > latest ? item.updated_at : latest, ''))
-function reset() { scope.reset(); result.value = null; error.value = ''; mutationError.value = ''; loading.value = true; busy.value = ''; order.value = []; lifted.value = []; liftedAt.value = {} }
+function reset() { scope.reset(); result.value = null; noRepository.value = false; error.value = ''; mutationError.value = ''; loading.value = true; busy.value = ''; order.value = []; lifted.value = []; liftedAt.value = {} }
 function load() {
   if (!read.value || busy.value) return Promise.resolve()
   const id = props.nodeId
@@ -44,6 +50,8 @@ function load() {
       return true
     })
     liftedAt.value = nextAt
+    if (sorted.length) { noRepository.value = false; return }
+    return after(readDeliveryMetrics(props.projectId, signal).catch(() => null), metrics => { noRepository.value = metrics !== null && metrics.source === null })
   }), { failed: cause => { error.value = cause instanceof Error ? cause.message : 'Delivery unavailable' }, settled: () => { loading.value = false } })
 }
 function lift(item: DeliveryItem) {
@@ -66,10 +74,11 @@ onBeforeUnmount(() => { scope.dispose(); clearInterval(poll); stopAccess() })
   <section v-if="read" class="delivery" :lang="lang" :aria-label="de ? 'Lieferstatus' : 'Delivery'">
     <header class="head"><h3 class="eyebrow">{{ de ? 'Lieferstatus' : 'Delivery' }}</h3><div class="head-aside"><span class="updated">{{ updated ? de ? `Vor ${minutesSince(updated, now)} Min. aktualisiert` : `Updated ${minutesSince(updated, now)} min ago` : '' }}</span><button class="icon-btn flat sm" type="button" :aria-label="de ? 'Lieferstatus neu laden' : 'Reload delivery status'" :disabled="loading || !!busy" @click="load"><AppIcon name="refresh" :size="13" /></button></div></header>
     <div v-if="showSlot" class="slot" :aria-busy="loading">
-      <span class="slot-icon"><AppIcon :name="error ? 'alert' : !result ? 'clock' : !result.available ? 'link' : 'merge'" :size="18" /></span>
+      <span class="slot-icon"><AppIcon :name="error ? 'alert' : !result ? 'clock' : noRepository || !result.available ? 'link' : 'merge'" :size="18" /></span>
       <div>
-        <p class="slot-title">{{ error ? de ? 'Lieferstatus konnte nicht geladen werden' : 'Delivery status could not be loaded' : !result ? de ? 'Lieferstatus wird geladen…' : 'Loading delivery status…' : !result.available ? de ? 'Lieferstatus nicht verfügbar' : 'Delivery status is not available' : de ? 'Noch kein Pull Request' : 'No pull request yet' }}</p>
-        <p class="slot-text">{{ error ? de ? 'Der Rest des Tickets ist aktuell.' : 'The rest of the ticket is up to date.' : result && !result.available ? de ? 'Mit diesem Arbeitsbereich ist keine GitHub-App verbunden, daher erhält PAIMOS keine Pull-Request-Ereignisse. Sie wird auf dem Server eingerichtet, nicht in den Einstellungen.' : 'No GitHub App is connected to this workspace, so PAIMOS receives no pull request events. It is set up on the server, not in Settings.' : result ? de ? `Der Lieferstatus erscheint hier, sobald ein Pull Request für ${ticketKey || 'dieses Ticket'} offen ist.` : `Delivery status shows here once a pull request for ${ticketKey || 'this ticket'} is open.` : '' }}</p>
+        <p class="slot-title">{{ error ? de ? 'Lieferstatus konnte nicht geladen werden' : 'Delivery status could not be loaded' : !result ? de ? 'Lieferstatus wird geladen…' : 'Loading delivery status…' : noRepository ? de ? 'Noch kein Repository verknüpft' : 'No repository linked yet' : !result.available ? de ? 'Lieferstatus nicht verfügbar' : 'Delivery status is not available' : de ? 'Noch kein Pull Request' : 'No pull request yet' }}</p>
+        <p class="slot-text">{{ error ? de ? 'Der Rest des Tickets ist aktuell.' : 'The rest of the ticket is up to date.' : noRepository ? de ? `Mit ${project?.routeKey || 'diesem Projekt'} ist kein Repository verknüpft. Pull Requests dieses Tickets werden noch nicht verfolgt.` : `No repository is linked to ${project?.routeKey || 'this project'}, so this ticket’s pull requests aren’t tracked yet.` : result && !result.available ? de ? 'Mit diesem Arbeitsbereich ist keine GitHub-App verbunden, daher erhält PAIMOS keine Pull-Request-Ereignisse. Sie wird auf dem Server eingerichtet, nicht in den Einstellungen.' : 'No GitHub App is connected to this workspace, so PAIMOS receives no pull request events. It is set up on the server, not in Settings.' : result ? de ? `Der Lieferstatus erscheint hier, sobald ein Pull Request für ${ticketKey || 'dieses Ticket'} offen ist.` : `Delivery status shows here once a pull request for ${ticketKey || 'this ticket'} is open.` : '' }}</p>
+        <RouterLink v-if="noRepository && settingsLink" class="settings-link" :to="settingsLink">{{ de ? 'Repository & Lieferung' : 'Repository & delivery' }}<AppIcon name="chevron-right" :size="12" /></RouterLink>
       </div>
     </div>
     <ol v-else class="list"><DeliveryRow v-for="item in items" :key="item.id" :item="item" :can-manage="manage" :now="now" :lang="lang" :busy="busy === item.id" :lifted="lifted.includes(item.id)" @lift="lift" /></ol>
@@ -87,4 +96,5 @@ onBeforeUnmount(() => { scope.dispose(); clearInterval(poll); stopAccess() })
 .foot { display:grid; grid-template-columns:auto minmax(0,1fr); gap:7px; margin:8px 0 0; font-size:12px; line-height:1.45; color:var(--ink-3); }.foot svg { margin-top:2px; }.problem { font-size:12.5px; color:var(--danger); overflow-wrap:anywhere; }
 @container delivery (max-width:479px) { .slot { min-height:150px; } }
 @media (pointer:coarse) { .head .icon-btn { min-width:44px; min-height:44px; } }
+.settings-link { display:inline-flex; align-items:center; gap:3px; min-height:30px; font-size:12.5px; color:var(--ink-2); } @media(pointer:coarse) { .settings-link { min-height:44px; } }
 </style>

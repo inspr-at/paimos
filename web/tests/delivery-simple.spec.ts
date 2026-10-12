@@ -16,6 +16,7 @@ async function setup(page: Page, options: { theme?: 'light' | 'dark'; lang?: 'en
   let answer: { status: number; body: unknown } = { status: 200, body: deliveryMetrics() }
   await mockDelivery(page, async () => answer)
   return {
+    preferences: work.preferences,
     answer: (status: number, body: unknown) => { answer = { status, body } },
     metrics: (metricOptions: Parameters<typeof deliveryMetrics>[0] = {}) => { answer = { status: 200, body: deliveryMetrics(metricOptions) } },
   }
@@ -36,7 +37,7 @@ for (const lang of ['en', 'de'] as const) {
     test.setTimeout(90_000)
     const text = copy(lang)
     await page.setViewportSize({ width: 1440, height: 1000 })
-    await setup(page, { lang })
+    const world = await setup(page, { lang })
     let reject = true
     await page.route('**/api/preferences/delivery*', async route => {
       if (route.request().method() !== 'PUT') return route.fallback()
@@ -67,6 +68,9 @@ for (const lang of ['en', 'de'] as const) {
     })
     guard.done()
     await expect(chosen).toHaveAttribute('aria-checked', 'true')
+    // The warning clears when retry starts; wait for the stored choice before
+    // enabling failure again and reloading, or the retry races this navigation.
+    await expect.poll(() => world.preferences['delivery:numbers']).toEqual({ level: 'simple', window: 30 })
 
     // Phone: the same warning wraps, and Learn still stays put through failure and retry.
     await page.setViewportSize({ width: 400, height: 860 })

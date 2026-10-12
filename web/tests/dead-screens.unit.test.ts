@@ -11,6 +11,7 @@ import { ref, type App } from 'vue'
 import { createMemoryHistory, createRouter, type Router, type RouteRecordRaw } from 'vue-router'
 import { sourceModule } from './record-source'
 import { mountView, textOf } from './webcore-view-harness'
+import * as projectSettings from '../src/lib/projectSettings'
 
 const root = fileURLToPath(new URL('../src/', import.meta.url))
 const removed = [
@@ -98,6 +99,7 @@ it('approval evidence opens the canonical Decision Desk route', () => {
 it('Check computers opens the real Computers settings section without the retired anchor', async () => {
   const router = routeRecords(), push = vi.fn((path: string) => router.push(path))
   const view = mountView('../src/components/lead/LeadBand.vue', {
+    '../../lib/projectSettings': projectSettings,
     'vue-router': { useRouter: () => ({ push }) },
     '../../lib/authz': { can: () => true },
     '../../lib/lead': { LEAD_WORDS: { l: 'lead' }, canLaunchLead: () => true },
