@@ -831,10 +831,19 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     Object.assign(worker, { management_mode: 'managed', advertised_capabilities: ['interrupt', 'stop', 'steer'], activity: 'busy' })
     messages[0]!.body = shellBody(40)
     await page.route('**/api/me/profile', route => route.fulfill({ json: { principal_id: me.id, locale: 'de', avatar_hashes: {}, initials: 'MB', first_name: 'Markus', last_name: 'Barta', preferred_name: 'Markus', short_name: 'markus', timezone: 'Europe/Vienna', greeting_enabled: false, avatar_color: '#888888', week_start: 1, revision: 1 } }))
+    // AEON-1212 fix9: chat mounts behind Overview while the opening reads
+    // settle. Hold that read so the zero-size mount is deterministic.
+    let reveal!: () => void
+    const opening = new Promise<void>(resolve => { reveal = resolve })
+    await page.route('**/api/projects/p-pharos/lead', async route => { await opening; await route.fallback() })
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.setViewportSize({ width, height: 900 })
     await page.goto(`/agents/${worker.id}?tab=messages`)
     const panel = panelOf(page), thread = scroller(page), code = panel.locator('.chat-code'), pre = code.locator('pre')
+    try {
+      await expect(code).toBeAttached()
+      await expect(code).toBeHidden()
+    } finally { reveal() }
     await expect(code).toBeVisible()
     await expect(panel.getByRole('heading', { name: 'Prüfung abgeschlossen' })).toBeAttached()
     await expect(panel.locator('table th')).toHaveText(['Prüfung', 'Ergebnis'])
@@ -902,6 +911,16 @@ test('AEON-976 shell updates: follow newest output until the reader scrolls up i
   messages[0]!.body = shellBody(50)
   await signal976(page)
   await expect(pre).toContainText('Prüfschritt 050')
+  await expect.poll(() => pre.evaluate(el => el.scrollTop)).toBe(top)
+  // Hiding the tab must retain the reader's position and upward intent.
+  await panelOf(page).getByRole('tab', { name: /^Overview/ }).click()
+  await expect(pre).toBeHidden()
+  await messagesTab(page).click()
+  await expect(pre).toBeVisible()
+  await expect.poll(() => pre.evaluate(el => el.scrollTop)).toBe(top)
+  messages[0]!.body = shellBody(55)
+  await signal976(page)
+  await expect(pre).toContainText('Prüfschritt 055')
   await expect.poll(() => pre.evaluate(el => el.scrollTop)).toBe(top)
 })
 
