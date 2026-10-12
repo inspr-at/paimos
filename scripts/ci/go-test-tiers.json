@@ -3528,6 +3528,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestAttach","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestAuthenticationActivityRenewalKeepsLiveValidity","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestAuthenticationCanaryUsesAuthAdmissionWithoutRenewal","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestBootstrapAdminRequiresASCIIMailboxMatch","tier":"GATED-FULL"}
@@ -6840,6 +6842,8 @@
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestHealthDatabase","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/httpapi","name":"TestLongMutationPreservesEventPositionAfterAuthentication","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadStatementTimeoutReturns503","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadyGate","tier":"GATED-FULL"}
@@ -6847,6 +6851,8 @@
     {"kind":"go","package":"internal/httpapi","name":"TestReadyPoolSaturationAndDatabaseFailure","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadyProbeDeadlineAndDrain","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/httpapi","name":"TestRequestBudgetPrecedesAuthenticationAndPreservesHandlerLifetime","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestRequestLogRoutes","tier":"GATED-FULL"}
     ,
