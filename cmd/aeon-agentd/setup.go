@@ -366,7 +366,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 			}
 			if e != nil {
 				stage := "login_required"
-				if errors.Is(e, piprobe.ErrStart) || errors.Is(e, piprobe.ErrPrivateProfile) {
+				if errors.Is(e, piprobe.ErrStart) || errors.Is(e, piprobe.ErrPrivateProfile) || agentsetup.HarnessFailureReason(e) == "probe_failed" {
 					stage = "blocked"
 				}
 				_ = printSetupProgress(out, jsonOutput, agentsetup.Progress{Schema: "aeon.agent-setup.v1", Stage: stage, Action: e.Error()})

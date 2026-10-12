@@ -165,6 +165,7 @@ func (e *Engine) SyncFences(ctx context.Context) (resultErr error) {
 	proof.Progress = reportRelease(s.View, &SetupProgress{State: "provisioning"})
 	if e.Local != nil {
 		if local, err := e.Local.Status(ctx, ""); err == nil && local.DaemonID == s.View.DaemonID {
+			local = pinRenewalDetails(s, local)
 			proof.Progress = observedProgress(s.View, local)
 		}
 	}
@@ -188,7 +189,10 @@ func (e *Engine) SyncFences(ctx context.Context) (resultErr error) {
 	s.View = v
 	s.View.RuntimePrefix = prefix
 	cause = PairingLocalUnavailable
-	return e.save(s, false)
+	if err := e.save(s, false); err != nil {
+		return err
+	}
+	return e.autoRenewCodexPins(ctx, s)
 }
 
 func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
@@ -389,6 +393,7 @@ func (e *Engine) connectionProgress(ctx context.Context, s *snapshot) Progress {
 	if e.Local != nil {
 		local, err := e.Local.Status(ctx, "")
 		if err == nil && local.DaemonID == v.DaemonID {
+			local = pinRenewalDetails(s, local)
 			accountReport := local.AccountStatuses != nil
 			local = enrollmentReadiness(v, local)
 			p.AccountStatuses = local.AccountStatuses
@@ -633,6 +638,7 @@ func (e *Engine) AddHarness(ctx context.Context, candidates []Candidate) (Progre
 		c.Key = key
 		s.Request.Accounts = append(s.Request.Accounts, c)
 		s.Candidates = append(s.Candidates, LocalCandidate{c, c.Path, c.Home, c.Identity, c.Version})
+		recordCodexLauncher(s, c)
 	}
 	s.Response = DeviceResponse{}
 	s.NextPoll = e.now()
@@ -716,6 +722,9 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 	if current.Path != c.Path || current.Home != c.Home || current.Identity != c.Identity {
 		return e.progress(s), errors.New("the signed-in account or executable differs from the enrolled one; remove this enrollment, then add the harness again")
 	}
+	if hash := s.CodexLauncherHashes[current.Key]; hash != "" && codexLauncherHash(c.Path, config.Workspace) != hash {
+		return e.progress(s), errors.New("the enrolled launcher content changed; use the existing person-approved enrollment flow")
+	}
 	if !pinBlocked(config, enrolled.AccountID) {
 		identity := RecordAttachIdentity(c.Harness, c.Path, config.Workspace)
 		if identity == nil || config.AttachIdentities[c.Harness] == *identity {
@@ -768,6 +777,14 @@ func (e *Engine) renewPin(s *snapshot, enrolled Enrollment, c Candidate) (Progre
 		return Progress{}, err
 	}
 	s.Candidates[candidate].Candidate.Node, s.Candidates[candidate].Candidate.PiNode = c.Node, c.PiNode
+	c.Key = enrolled.AccountKey
+	recordCodexLauncher(s, c)
+	if c.Harness == "codex" {
+		if s.PinRenewals == nil {
+			s.PinRenewals = map[string]harnesslaunch.Node{}
+		}
+		s.PinRenewals[c.Key] = c.Node
+	}
 	if err := e.save(s, false); err != nil {
 		return Progress{}, err
 	}

@@ -2946,6 +2946,12 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestCodexGuardWrapperPinsNodeWithoutBypassingGuard","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestCodexIdentityFailuresExposeOnlyAllowlistedCauses","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestCodexIdentityRetryUsesCandidateNode","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestCodexNodeUpgradeRenewalFences","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestConcurrentStatusDoesNotBlockPairingWriter","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestDarwinClaudeSDKAdminDirectories","tier":"GATED-FULL"}

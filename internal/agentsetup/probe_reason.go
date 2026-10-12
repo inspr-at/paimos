@@ -18,11 +18,18 @@ const (
 	ProbeDifferentIdentity    = "the signed-in account differs from the approved identity"
 	ProbeAPIKeyLogin          = "the sign-in command reported an API key instead of the approved subscription"
 	ProbeExitFailed           = "the sign-in command exited unsuccessfully"
+	ProbePinRenewed           = "the interpreter pin was renewed after checking the unchanged launcher, home and approved identity"
 )
 
 const maxProbeDetail = 160
 
 func SafeProbeDetail(reason, detail string) string {
+	if detail == ProbePinRenewed {
+		switch reason {
+		case "", PinMissing, PinPartial, PinDrifted, PinInvalid, "probe_pending", "starting":
+			return detail
+		}
+	}
 	if reason == PairingSyncFailed {
 		return SafePairingDetail(detail)
 	}
@@ -65,6 +72,10 @@ func (d HarnessDetail) WithProbeDetail(harness, detail string) HarnessDetail {
 		return d
 	}
 	d.Fix = report.Fix
+	if d.State == "ready" && d.Reason == "" && detail == ProbePinRenewed {
+		d.ReasonDetail = ProbePinRenewed
+		return d
+	}
 	if d.State != "blocked" && d.State != "login_required" {
 		return d
 	}

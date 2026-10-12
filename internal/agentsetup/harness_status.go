@@ -146,6 +146,8 @@ func (d *HarnessDetail) UnmarshalJSON(raw []byte) error {
 	*d = HarnessDetail{State: wire.State, Reason: wire.Reason}
 	if wire.State == "blocked" || wire.State == "login_required" {
 		d.ReasonDetail = decodeProbeDetail(wire.Reason, wire.ReasonDetail)
+	} else if wire.State == "ready" && wire.Reason == "" && decodeProbeDetail(wire.Reason, wire.ReasonDetail) == ProbePinRenewed {
+		d.ReasonDetail = ProbePinRenewed
 	}
 	if len(wire.Fix) > 0 && wire.Fix[0] == '{' {
 		_ = json.Unmarshal(wire.Fix, &d.Fix)

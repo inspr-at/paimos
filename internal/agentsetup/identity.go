@@ -22,6 +22,39 @@ import (
 // response has no email. It must never satisfy a named account's identity pin.
 const CodexChatGPTLogin = "ChatGPT login"
 
+type codexIdentityFailure struct {
+	detail string
+	err    error
+}
+
+func (e *codexIdentityFailure) Error() string { return e.detail }
+func (e *codexIdentityFailure) Unwrap() error { return e.err }
+
+func identityFailure(detail string, err error) error {
+	return &codexIdentityFailure{detail: detail, err: err}
+}
+
+func safeCodexIdentityError(err error) error {
+	switch {
+	case errors.Is(err, ownedprocess.ErrCleanupUnconfirmed):
+		return identityFailure("identity_cleanup_unconfirmed", err)
+	case errors.Is(err, context.DeadlineExceeded):
+		return identityFailure("identity_timeout", err)
+	case errors.Is(err, context.Canceled):
+		return identityFailure("identity_canceled", err)
+	case errors.Is(err, harnesslaunch.ErrStart):
+		return identityFailure("identity_interpreter_invalid", err)
+	}
+	var failure *codexIdentityFailure
+	if errors.As(err, &failure) {
+		switch failure.detail {
+		case "identity_start_failed", "identity_rpc_failed", "identity_response_invalid":
+			return identityFailure(failure.detail, err)
+		}
+	}
+	return identityFailure("identity_probe_failed", err)
+}
+
 func CodexAccountMatches(expected, email string) bool {
 	if expected == CodexChatGPTLogin {
 		return email == ""
@@ -46,14 +79,14 @@ func codexIdentity(ctx context.Context, path, home, nodePath, dir string) (email
 	cmd.Env = harnesslaunch.Environment([]string{"HOME=" + os.Getenv("HOME"), "CODEX_HOME=" + home}, nodePath)
 	input, err := cmd.StdinPipe()
 	if err != nil {
-		return "", errors.New("account identity unavailable")
+		return "", identityFailure("identity_start_failed", err)
 	}
 	defer input.Close()
 	// Own this descriptor so cancellation can interrupt Scan and Wait cannot
 	// close it before a final buffered account response has been consumed.
 	output, childOutput, err := os.Pipe()
 	if err != nil {
-		return "", errors.New("account identity unavailable")
+		return "", identityFailure("identity_start_failed", err)
 	}
 	defer output.Close()
 	defer childOutput.Close()
@@ -61,7 +94,7 @@ func codexIdentity(ctx context.Context, path, home, nodePath, dir string) (email
 	cmd.Stderr = io.Discard
 	proc, err := ownedprocess.Start(ctx, cmd)
 	if err != nil {
-		return "", errors.New("account identity unavailable")
+		return "", identityFailure("identity_start_failed", err)
 	}
 	_ = childOutput.Close()
 	closed := make(chan struct{})
@@ -78,15 +111,15 @@ func codexIdentity(ctx context.Context, path, home, nodePath, dir string) (email
 		_ = input.Close()
 		_ = output.Close()
 		if err := proc.Wait(); errors.Is(err, ownedprocess.ErrCleanupUnconfirmed) {
-			email, resultErr = "", errors.New("account identity cleanup unconfirmed")
+			email, resultErr = "", safeCodexIdentityError(errors.Join(resultErr, err))
 		}
 	}()
 	encoder := json.NewEncoder(input)
 	scanner := bufio.NewScanner(output)
 	scanner.Buffer(make([]byte, 4096), 16<<10)
 	rpc := func(id int, method string, params any) (json.RawMessage, error) {
-		if encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}) != nil {
-			return nil, errors.New("account identity unavailable")
+		if err := encoder.Encode(map[string]any{"jsonrpc": "2.0", "id": id, "method": method, "params": params}); err != nil {
+			return nil, safeCodexIdentityError(identityFailure("identity_rpc_failed", errors.Join(ctx.Err(), err)))
 		}
 		for i := 0; i < 32 && scanner.Scan(); i++ {
 			var f struct {
@@ -101,13 +134,13 @@ func codexIdentity(ctx context.Context, path, home, nodePath, dir string) (email
 				return f.Result, nil
 			}
 		}
-		return nil, errors.New("account identity unavailable")
+		return nil, safeCodexIdentityError(identityFailure("identity_rpc_failed", errors.Join(ctx.Err(), scanner.Err())))
 	}
 	if _, err = rpc(1, "initialize", map[string]any{"clientInfo": map[string]string{"name": "aeon-setup", "version": "1"}}); err != nil {
 		return "", err
 	}
 	if encoder.Encode(map[string]any{"jsonrpc": "2.0", "method": "initialized", "params": map[string]any{}}) != nil {
-		return "", errors.New("account identity unavailable")
+		return "", safeCodexIdentityError(identityFailure("identity_rpc_failed", ctx.Err()))
 	}
 	raw, err := rpc(2, "account/read", map[string]bool{"refreshToken": false})
 	if err != nil {
@@ -120,7 +153,7 @@ func codexIdentity(ctx context.Context, path, home, nodePath, dir string) (email
 		} `json:"account"`
 	}
 	if json.Unmarshal(raw, &result) != nil || result.Account == nil || result.Account.Type != "chatgpt" || result.Account.Email != "" && (!safeLabel.MatchString(result.Account.Email) || strings.TrimSpace(result.Account.Email) == "") {
-		return "", errors.New("Codex subscription identity unavailable")
+		return "", identityFailure("identity_response_invalid", nil)
 	}
 	return strings.TrimSpace(result.Account.Email), nil
 }

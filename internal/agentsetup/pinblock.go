@@ -4,9 +4,13 @@ package agentsetup
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -104,6 +108,10 @@ func accountPinHits(c RuntimeConfig) []pinHit {
 }
 
 func nodePinReason(launcher, workspace string, node harnesslaunch.Node) string {
+	return nodePinReasonWithExecutor(context.Background(), launcher, workspace, node, OSExecutor{})
+}
+
+func nodePinReasonWithExecutor(ctx context.Context, launcher, workspace string, node harnesslaunch.Node, executor Executor) string {
 	needed, err := harnesslaunch.NeedsNode(launcher)
 	if err != nil {
 		return PinInvalid
@@ -123,12 +131,193 @@ func nodePinReason(launcher, workspace string, node harnesslaunch.Node) string {
 		}
 		return PinInvalid
 	}
-	raw, err := (OSExecutor{}).Run(context.Background(), Command{Path: node.Path, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, node.Path), Dir: commandDir(workspace, userHome())})
+	raw, err := executor.Run(ctx, Command{Path: node.Path, Args: []string{"--version"}, Env: harnesslaunch.Environment(nil, node.Path), Dir: commandDir(workspace, userHome())})
 	match := safeVersion.FindSubmatch(raw)
 	if err != nil || len(match) != 2 || string(match[1]) != node.Version {
 		return PinDrifted
 	}
 	return ""
+}
+
+// Hash only a checked physical launcher, with an explicit read bound. This is
+// local approval metadata; neither the hash nor its path enters telemetry.
+func codexLauncherHash(path, workspace string) string {
+	physical, info, err := TrustedAttachExecutable(path, workspace)
+	const maximum = 32 << 20
+	if err != nil || physical != path || info.Size() > maximum {
+		return ""
+	}
+	f, err := os.Open(physical)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		return ""
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, maximum+1))
+	if err != nil || len(raw) > maximum {
+		return ""
+	}
+	return Hash(raw)
+}
+
+func recordCodexLauncher(s *snapshot, c Candidate) {
+	if c.Harness != "codex" {
+		return
+	}
+	if hash := codexLauncherHash(c.Path, s.Request.Workspace); hash != "" {
+		if s.CodexLauncherHashes == nil {
+			s.CodexLauncherHashes = map[string]string{}
+		}
+		s.CodexLauncherHashes[c.Key] = hash
+	}
+}
+
+// Unknown installations have no automatic upgrade authority. Homebrew keeps
+// its prefix and formula fence; Nix keeps its nodejs package class.
+func nodeLocationClass(path string) string {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return ""
+	}
+	for _, prefix := range []string{"/opt/homebrew", "/usr/local", "/usr/local/Homebrew", "/home/linuxbrew/.linuxbrew"} {
+		parts := strings.Split(strings.TrimPrefix(path, prefix+"/Cellar/"), "/")
+		if strings.HasPrefix(path, prefix+"/Cellar/") && len(parts) == 4 && parts[1] != "" && parts[2] == "bin" && parts[3] == "node" && (parts[0] == "node" || strings.HasPrefix(parts[0], "node@") && len(parts[0]) > 5) {
+			return prefix + "/Cellar/" + parts[0]
+		}
+	}
+	parts := strings.Split(strings.TrimPrefix(path, "/nix/store/"), "/")
+	if strings.HasPrefix(path, "/nix/store/") && len(parts) == 3 && strings.Contains(parts[0], "-nodejs-") && parts[1] == "bin" && parts[2] == "node" {
+		return "/nix/store/nodejs"
+	}
+	return ""
+}
+
+func (d Discovery) locationClass(path string) string {
+	if d.nodeClass != nil {
+		return d.nodeClass(path)
+	}
+	return nodeLocationClass(path)
+}
+
+// autoRenewCodexPins runs after current lifecycle fences, under setup.lock.
+// A failed check leaves the original block and its existing repair intact.
+func (e *Engine) autoRenewCodexPins(ctx context.Context, s *snapshot) error {
+	if s.DisconnectAll || s.ComputerCleaned || s.View.ComputerState != "connected" || s.Phase != "connected" && s.Phase != "verification_pending" {
+		return nil
+	}
+	d := Discovery{Home: userHome(), Workspace: s.Request.Workspace}
+	if e.PinDiscovery != nil {
+		d = *e.PinDiscovery
+		d.Workspace = s.Request.Workspace
+	}
+	if d.Executor == nil {
+		d.Executor = OSExecutor{}
+	}
+	raw, err := e.Store.Read(RuntimeName, 128<<10)
+	var config RuntimeConfig
+	if err != nil || json.Unmarshal(raw, &config) != nil || config.Schema != "aeon.agent-runtime.v1" || config.Origin != s.Origin || config.Workspace != s.Request.Workspace || config.TenantID != s.View.TenantID || config.PrincipalID != s.BoundPrincipal || config.ComputerID != s.BoundComputer || config.DaemonID != s.BoundDaemon {
+		return errors.New("automatic pin renewal runtime unavailable")
+	}
+	for _, enrolled := range s.View.Enrollments {
+		if enrolled.State != "connected" || enrolled.Harness != "codex" || s.Removed[enrolled.AccountID] {
+			continue
+		}
+		for _, current := range config.Accounts {
+			if current.AccountID != enrolled.AccountID || current.Key != enrolled.AccountKey || current.Harness != "codex" || current.Node.Path == "" || current.Node.Version == "" || current.Identity == CodexChatGPTLogin {
+				continue
+			}
+			reason := nodePinReasonWithExecutor(ctx, current.Path, config.Workspace, current.Node, d.Executor)
+			if reason == "" || reason == PinUnsafe {
+				continue
+			}
+			oldClass := d.locationClass(current.Node.Path)
+			hash := s.CodexLauncherHashes[current.Key]
+			if oldClass == "" || hash == "" || codexLauncherHash(current.Path, config.Workspace) != hash {
+				continue
+			}
+			approved := false
+			for _, local := range s.Candidates {
+				approved = approved || local.Candidate.Key == current.Key && local.Candidate.Harness == "codex" && local.Path == current.Path && local.Home == current.Home && local.Identity == current.Identity && local.Candidate.Node == current.Node
+			}
+			if !approved || current.Home != filepath.Join(d.Home, ".codex") {
+				continue
+			}
+			retry := d
+			retry.NodePath = ""
+			if d.LookPath == nil && strings.Contains(oldClass, "/Cellar/") {
+				prefix, formula, _ := strings.Cut(oldClass, "/Cellar/")
+				retry.NodePath = filepath.Join(prefix, "opt", formula, "bin", "node")
+			}
+			if retry.NodePath == "" {
+				lookup := d.LookPath
+				if lookup == nil {
+					lookup = exec.LookPath
+				}
+				retry.NodePath, err = lookup("node")
+				if err != nil {
+					continue
+				}
+			}
+			// Check the candidate's location before executing even --version.
+			nodePath, err := pinnedRegular(retry.NodePath, config.Workspace, true)
+			if err != nil || d.locationClass(nodePath) != oldClass {
+				continue
+			}
+			retry.LookPath = func(name string) (string, error) {
+				if name == "codex" {
+					return current.Path, nil
+				}
+				return "", os.ErrNotExist
+			}
+			candidate, err := retry.Detect(ctx, "codex", current.Identity)
+			if err != nil || candidate.Node.Path != nodePath || candidate.Path != current.Path || candidate.Home != current.Home || candidate.Identity != current.Identity || codexLauncherHash(current.Path, config.Workspace) != hash {
+				continue
+			}
+			candidate.Key, candidate.Label = current.Key, enrolled.Label
+			if _, err := e.renewPin(s, enrolled, candidate); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// The event is advisory and never changes readiness or a recovery command.
+// Ready reports use existing reason_detail; blocked siblings retain their
+// existing pin reason in attention_accounts until the daemon's fresh probe.
+func pinRenewalDetails(s *snapshot, local LocalStatus) LocalStatus {
+	if len(s.PinRenewals) == 0 {
+		return local
+	}
+	local.AccountStatuses = maps.Clone(local.AccountStatuses)
+	local.HarnessDetails = maps.Clone(local.HarnessDetails)
+	for _, enrolled := range s.View.Enrollments {
+		if enrolled.Harness != "codex" || enrolled.State != "connected" || s.Removed[enrolled.AccountID] {
+			continue
+		}
+		renewed, found := s.PinRenewals[enrolled.AccountKey]
+		if !found || renewed.Path == "" {
+			continue
+		}
+		if detail, ok := local.AccountStatuses[enrolled.AccountID]; ok {
+			local.AccountStatuses[enrolled.AccountID] = detail.WithProbeDetail("codex", ProbePinRenewed)
+		}
+		if detail, ok := local.HarnessDetails["codex"]; ok {
+			if detail.State == "ready" || local.AccountStatuses[enrolled.AccountID].Reason == detail.Reason {
+				detail = detail.WithProbeDetail("codex", ProbePinRenewed)
+			}
+			detail.Attention = append([]AccountAttention(nil), detail.Attention...)
+			for i := range detail.Attention {
+				if detail.Attention[i].AccountID == enrolled.AccountID {
+					detail.Attention[i].ReasonDetail = SafeProbeDetail(detail.Attention[i].Reason, ProbePinRenewed)
+				}
+			}
+			local.HarnessDetails["codex"] = detail
+		}
+	}
+	return local
 }
 
 func claudeSharedReason(c RuntimeConfig) string {

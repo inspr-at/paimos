@@ -2,6 +2,8 @@
 package agentsetup
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,6 +13,226 @@ import (
 
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
 )
+
+// A synthetic Homebrew Cellar plus a Nix-style bash guard that execs an
+// env-node shim. Only temp files and fake vendor executors are involved.
+func codexUpgradeFixture(t *testing.T) (Discovery, string, harnesslaunch.Node, harnesslaunch.Node) {
+	t.Helper()
+	root, home := physicalTemp(t), physicalTemp(t)
+	if err := os.Mkdir(filepath.Join(home, ".codex"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	nodes := []harnesslaunch.Node{}
+	for _, version := range []string{"26.10.0", "26.11.1"} {
+		node := harnesslaunch.Node{Path: filepath.Join(root, "Cellar", "node", version, "bin", "node"), Version: version}
+		if err := os.MkdirAll(filepath.Dir(node.Path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(node.Path, []byte("#!/bin/sh\nprintf '%s\\n' v"+version+"\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		nodes = append(nodes, node)
+	}
+	launcher := filepath.Join(root, "store", "synthetic-codex", "bin", "codex")
+	shim := filepath.Join(root, "npm", "codex")
+	for _, path := range []string{launcher, shim} {
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(shim, []byte("#!/usr/bin/env node\n// synthetic shim\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(launcher, []byte("#!/bin/bash\nexec "+shim+" \"$@\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	d := Discovery{Home: home, Workspace: physicalTemp(t), LookPath: func(name string) (string, error) {
+		switch name {
+		case "codex":
+			return launcher, nil
+		case "node":
+			return nodes[1].Path, nil
+		}
+		return "", os.ErrNotExist
+	}, nodeClass: func(path string) string {
+		if !within(root, path) {
+			return ""
+		}
+		return nodeLocationClass("/opt/homebrew/" + strings.TrimPrefix(path, root+"/"))
+	}, Executor: executorFunc(func(_ context.Context, c Command) ([]byte, error) {
+		for _, node := range nodes {
+			if c.Path == node.Path && len(c.Args) == 1 && c.Args[0] == "--version" {
+				return []byte("v" + node.Version), nil
+			}
+		}
+		if c.Path == launcher && len(c.Args) > 0 {
+			switch c.Args[0] {
+			case "--version":
+				return []byte("codex-cli 0.157.1"), nil
+			case "login":
+				return []byte("Logged in using ChatGPT"), nil
+			}
+		}
+		t.Fatal("unexpected vendor command in renewal fixture")
+		return nil, os.ErrInvalid
+	}), CodexProbe: func(_ context.Context, _, _, node, _ string) (string, error) {
+		if node == "" {
+			return "", harnesslaunch.ErrStart
+		}
+		return "agent@example.test", nil
+	}}
+	return d, launcher, nodes[0], nodes[1]
+}
+
+func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
+	for _, scenario := range []string{"automatic", "add harness", "healthy", "launcher content", "launcher path", "home", "identity", "location class", "unsafe candidate", "unsafe old pin", "missing launcher hash", "runtime owner", "revoked"} {
+		t.Run(scenario, func(t *testing.T) {
+			e, api, local, options, _ := engineFixture(t)
+			defer e.Store.Close()
+			d, launcher, old, next := codexUpgradeFixture(t)
+			d.NodePath = old.Path
+			c, err := d.Detect(t.Context(), "codex", "agent@example.test")
+			if err != nil {
+				t.Fatal(err)
+			}
+			options.Candidates, options.Workspace = []Candidate{c}, d.Workspace
+			approveFixture(t, e, api, options)
+			before, err := ReadRuntimeConfig(e.Store.Path())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if scenario != "healthy" && scenario != "unsafe old pin" {
+				if err := os.Remove(old.Path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			d.NodePath = ""
+			probes := 0
+			d.CodexProbe = func(_ context.Context, path, home, node, _ string) (string, error) {
+				probes++
+				if path != launcher || home != c.Home || node != next.Path {
+					t.Fatal("automatic probe did not use the candidate binding")
+				}
+				if scenario == "identity" {
+					return "other@example.test", nil
+				}
+				return c.Identity, nil
+			}
+			saved, err := e.load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			switch scenario {
+			case "launcher content":
+				if err := os.WriteFile(launcher, []byte("#!/bin/bash\n# changed guard\n"), 0700); err != nil {
+					t.Fatal(err)
+				}
+			case "launcher path":
+				before.Accounts[0].Path = next.Path
+			case "home":
+				before.Accounts[0].Home = physicalTemp(t)
+			case "location class":
+				class := d.nodeClass
+				d.nodeClass = func(path string) string {
+					if path == next.Path {
+						return "/nix/store/nodejs"
+					}
+					return class(path)
+				}
+			case "unsafe candidate":
+				if err := os.Chmod(next.Path, 0777); err != nil {
+					t.Fatal(err)
+				}
+			case "unsafe old pin":
+				if err := os.Chmod(old.Path, 0777); err != nil {
+					t.Fatal(err)
+				}
+			case "missing launcher hash":
+				saved.CodexLauncherHashes = nil
+			case "runtime owner":
+				before.PrincipalID = testComputer
+			case "revoked":
+				api.view.Enrollments[0].State = "revoked"
+			}
+			if err := e.save(saved, false); err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := json.Marshal(before)
+			if err := e.Store.Write(RuntimeName, raw, false); err != nil {
+				t.Fatal(err)
+			}
+			e.PinDiscovery = &d
+			creates := api.createCount
+			if scenario == "add harness" {
+				d.NodePath = next.Path
+				c, err = d.Detect(t.Context(), "codex", c.Identity)
+				if err == nil {
+					_, err = e.AddHarness(t.Context(), []Candidate{c})
+				}
+			} else {
+				err = e.SyncFences(t.Context())
+			}
+			if scenario == "runtime owner" {
+				if err == nil {
+					t.Fatal("wrong runtime owner accepted")
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			after, err := e.Store.Read(RuntimeName, 128<<10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(e.Store.Path())
+			if err != nil {
+				t.Fatal(err)
+			}
+			journals := 0
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), "pin-renewal-") {
+					journals++
+				}
+			}
+			if scenario != "automatic" && scenario != "add harness" {
+				if !bytes.Equal(raw, after) || journals != 0 {
+					t.Fatal("refused renewal changed the runtime or journal")
+				}
+				if scenario != "identity" && probes != 0 {
+					t.Fatal("renewal probed before its safety fences")
+				}
+				return
+			}
+			if journals != 1 || probes != 1 || api.createCount != creates {
+				t.Fatal("renewal was not exactly one local, identity-checked event")
+			}
+			config, err := ReadRuntimeConfig(e.Store.Path())
+			if err != nil || config.Accounts[0].Node != next || len(AccountPinBlocks(config)) != 0 {
+				t.Fatal("renewed pin remains blocked", err)
+			}
+			savedOptions, err := e.SavedOptions()
+			if err != nil || savedOptions.Candidates[0].Node != next {
+				t.Fatal("saved discovery would restore the removed Node", err)
+			}
+			blocked, _ := HarnessReport("codex", "blocked", PinInvalid)
+			blocked.Attention = []AccountAttention{{AccountID: testAccount, Reason: PinInvalid}}
+			local.states[""] = LocalStatus{DaemonID: "paired-daemon", HarnessStatuses: map[string]string{"codex": "blocked"}, HarnessDetails: map[string]HarnessDetail{"codex": blocked}, AccountStatuses: map[string]HarnessDetail{testAccount: blocked}}
+			if err := e.SyncFences(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			detail := api.progress.HarnessDetails["codex"]
+			if detail.ReasonDetail != ProbePinRenewed || len(detail.Attention) != 1 || detail.Attention[0].ReasonDetail != ProbePinRenewed {
+				t.Fatal("renewal absent from safe attention details")
+			}
+			public, _ := json.Marshal(detail)
+			if strings.Contains(string(public), next.Path) || strings.Contains(string(public), c.Identity) {
+				t.Fatal("renewal attention leaked a local binding")
+			}
+			if probes != 1 {
+				t.Fatal("a healthy pin was automatically replaced")
+			}
+		})
+	}
+}
 
 func npmFixture(t *testing.T, harness string) (Discovery, string, harnesslaunch.Node) {
 	t.Helper()
