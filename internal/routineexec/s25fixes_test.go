@@ -136,8 +136,8 @@ func TestRoutineClaimReplayRetainsBindingAndLiveGuards(t *testing.T) {
 	// A separate paired account keeps each account's immutable one-run cap
 	// intact, so the expected refusal proves the computer-wide ceiling.
 	var siblingAccount string
-	must(t, d.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,label,registered_by_principal_id,owner_person_id)
- SELECT tenant_id,account_key||'-sibling',harness,daemon_id,'Host guard sibling',registered_by_principal_id,owner_person_id
+	must(t, d.d.Admin.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,label,registered_by_principal_id,owner_person_id,capacity_owner,linked_at)
+ SELECT tenant_id,account_key||'-sibling',harness,daemon_id,'Host guard sibling',registered_by_principal_id,owner_person_id,capacity_owner,linked_at
  FROM agent_accounts WHERE id=$1 RETURNING id::text`, g.AccountID).Scan(&siblingAccount))
 	d.exec(`INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at)
  SELECT tenant_id,$2,computer_id,request_id,model_profile_id,verification_expires_at,ongoing_approved_at
