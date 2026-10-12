@@ -605,6 +605,11 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 @media (pointer: coarse) { .act { min-width: 44px; min-height: 44px; } }
 @media (max-width: 720px), (pointer: coarse) {
   .host-fact.editable { padding-right: 46px; }
-  .host-fact :deep(.host-badge), .host-fact :deep(.host-pencil) { min-width: 44px; height: 44px; }
+  /* 44 px tap area, the visible pill stays 24 px and the row keeps its height */
+  .host-fact :deep(.host-badge) { position: relative; isolation: isolate; min-width: 44px; height: 44px; margin: -10px 0; background: transparent; }
+  .host-fact :deep(.host-badge)::before { content: ''; position: absolute; inset: 10px 0; z-index: -1; border-radius: 999px; background: color-mix(in srgb, var(--ink-3) 8%, transparent); }
+  .host-fact :deep(.host-badge:focus-visible) { outline: none; }
+  .host-fact :deep(.host-badge:focus-visible)::before { outline: 2px solid var(--ink-3); outline-offset: 2px; }
+  .host-fact :deep(.host-pencil) { width: 44px; height: 44px; top: -10px; }
 }
 </style>

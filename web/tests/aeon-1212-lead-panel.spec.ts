@@ -298,6 +298,26 @@ async function checkPanel(page: Page, phone: boolean) {
   expect(failures).toEqual([])
 }
 
+// Risk: expanding the computer's touch background also expands its detail row.
+async function checkHostPill(page: Page, desktopRowHeight: number) {
+  const layout = await panel(page).locator('.host-fact').evaluate(row => {
+    const badge = row.querySelector('.host-badge')!, rename = row.querySelector('.host-pencil')!
+    const tap = badge.getBoundingClientRect(), pencil = rename.getBoundingClientRect()
+    const background = getComputedStyle(badge, '::before')
+    return { pillHeight: background.content === 'none' ? tap.height : parseFloat(background.height),
+      rowHeight: row.getBoundingClientRect().height, tapWidth: tap.width, tapHeight: tap.height,
+      pencilWidth: pencil.width, pencilHeight: pencil.height, overlap: tap.right - pencil.left }
+  })
+  expect(Math.abs(layout.pillHeight - 24), 'visible Runs on pill is 24 ±0.5 px').toBeLessThanOrEqual(0.5)
+  expect(desktopRowHeight, 'desktop Runs on computer row has a positive height').toBeGreaterThan(0)
+  expect(Math.abs(layout.rowHeight - desktopRowHeight), 'Runs on computer row keeps its desktop height ±0.5 px').toBeLessThanOrEqual(0.5)
+  for (const size of [layout.tapWidth, layout.tapHeight, layout.pencilWidth, layout.pencilHeight]) {
+    expect(size, 'computer name and rename tap targets stay at least 44 px').toBeGreaterThanOrEqual(44)
+  }
+  expect(layout.overlap, 'computer name and rename touch targets do not overlap').toBeLessThanOrEqual(0.5)
+  console.log(`AEON-1212 Runs on: pill ${layout.pillHeight} px; row ${layout.rowHeight} px = desktop ${desktopRowHeight} px; tap ${layout.tapWidth}×${layout.tapHeight} px`)
+}
+
 // Copy/reply must remain reachable without leaving an empty action row or
 // moving the message, its neighbours, the question, or the pinned composer.
 async function checkChatSpacing(page: Page, output: string) {
@@ -338,18 +358,36 @@ async function checkChatSpacing(page: Page, output: string) {
 
 for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','dark'] as const) {
   test(`AEON-1212 check.mjs: ${width} ${look} Lead Session Chat controls stay put and the real answer records in place`, async ({ page }, info) => {
-    await page.setViewportSize({ width, height: 1000 })
+    await page.setViewportSize({ width: width <= 400 ? 1440 : width, height: 1000 })
     await page.emulateMedia({ colorScheme: look, reducedMotion: 'reduce' })
     const errors = watchErrors(page), world = await setup(page)
     await page.goto(`/agents/${LEAD_SESSION}`)
     await expect(tab(page, 'Chat')).toHaveAttribute('aria-selected', 'true')
+    let desktopRowHeight = 0
+    if (width <= 400) {
+      await tab(page, 'Session').click()
+      await expect(panel(page).locator('.host-fact')).toBeVisible()
+      desktopRowHeight = await panel(page).locator('.host-fact').evaluate(row => row.getBoundingClientRect().height)
+      await tab(page, 'Chat').click()
+      await page.setViewportSize({ width, height: 1000 })
+    }
     await expect(panel(page).locator('.why')).toContainText('it asks you something')
     await expect(question(page)).toContainText('Asks you')
     if (width === 1000) await page.screenshot({ path: info.outputPath(`AEON-1212/1000-sheet-${width}-${look}.png`) })
     const stable = { frame: panel(page), header: panel(page).locator('.pane-bar'), actions: panel(page).getByRole('group', { name: 'Session actions' }), tabs: panel(page).getByRole('tablist'), pin: panel(page).getByRole('button', { name: 'Make this your default tab' }), close: panel(page).getByRole('button', { name: 'Close session details' }) }
     await expectStableControls({ controls: stable, scrollAreas: { panel: panel(page) }, interactions: [
       { name: 'Lead', run: async () => { await tab(page, 'Lead').click(); await expect(panel(page).locator('#lp-checks')).toHaveText('Before every start'); await expect(panel(page).locator('.admission-caption')).toContainText('All passed at the last start'); await expect(panel(page).locator('[data-check]')).toHaveCount(4); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-sheet-${width}-${look}.png`) }) } },
-      { name: 'Session', run: async () => { await tab(page, 'Session').click(); await expect(panel(page).locator('#session-panel-overview')).toBeVisible(); await checkPanel(page, width <= 400); await page.screenshot({ path: info.outputPath(`AEON-1212/session-${width}-${look}.png`) }) } },
+      { name: 'Session', run: async () => {
+        await tab(page, 'Session').click()
+        await expect(panel(page).locator('#session-panel-overview')).toBeVisible()
+        await checkPanel(page, width <= 400)
+        if (width <= 400) await checkHostPill(page, desktopRowHeight)
+        await page.screenshot({ path: info.outputPath(`AEON-1212/session-${width}-${look}.png`) })
+        if (width === 400) {
+          await panel(page).locator('.host-fact').scrollIntoViewIfNeeded()
+          await page.screenshot({ path: info.outputPath(`AEON-1212/details-400-${look}.png`) })
+        }
+      } },
       { name: 'Chat', run: async () => { await tab(page, 'Chat').click(); await expect(question(page)).toBeVisible(); await checkPanel(page, width <= 400); await checkChatSpacing(page, info.outputPath(`AEON-1212/chat-spacing-${width}-${look}.md`)); await page.screenshot({ path: info.outputPath(`AEON-1212/lead-chat-${width}-${look}.png`) }) } },
     ] })
     world.hold()
@@ -361,6 +399,25 @@ for (const width of [1440, 1024, 1000, 400, 390]) for (const look of ['light','d
     expect(world.state.calls[0]).toMatchObject({ expected_revision: 1, option_id: 'yes', outcome: 'once' })
     expect(world.state.calls[0]?.request_id).toMatch(/^[a-f0-9-]{36}$/)
     expect(errors).toEqual([])
+    if (width === 390) {
+      const touch = await page.context().browser()!.newContext({ baseURL: new URL(page.url()).origin, viewport: { width: 390, height: 1000 }, hasTouch: true, isMobile: true, colorScheme: look, reducedMotion: 'reduce' })
+      try {
+        const phone = await touch.newPage(), touchErrors = watchErrors(phone)
+        await setup(phone)
+        await phone.goto(`/agents/${LEAD_SESSION}`)
+        await tab(phone, 'Session').click()
+        await expect(panel(phone).locator('.host-fact')).toBeVisible()
+        expect(await phone.evaluate(() => matchMedia('(pointer: coarse)').matches), 'real touch context uses a coarse pointer').toBe(true)
+        await checkPanel(phone, true)
+        await checkHostPill(phone, desktopRowHeight)
+        await panel(phone).locator('.host-fact').scrollIntoViewIfNeeded()
+        await phone.screenshot({ path: info.outputPath(`AEON-1212/details-390-touch-${look}.png`) })
+        // The coarse-pointer rule also applies beyond the phone breakpoint (iPad).
+        await phone.setViewportSize({ width: 1024, height: 1000 })
+        await checkHostPill(phone, desktopRowHeight)
+        expect(touchErrors).toEqual([])
+      } finally { await touch.close() }
+    }
   })
 }
 
