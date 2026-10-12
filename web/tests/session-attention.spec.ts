@@ -63,12 +63,14 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     Object.assign(agents.sessions[0]!, { run_id: 'bk5-run', needs_attention: true,
       attention_reasons: [{ kind: 'approval', scope: 'run', actor: 'person', count: 1, blocking: true, location: 'approvals' }, shared] })
     agents.approvals.push({ id: 'bk5-approval', agent_principal_id: template.agent_principal_id, agent_name: 'Shared fixture principal', resource_kind: 'run', resource_id: 'bk5-run', run_id: 'bk5-run', scope: 'nodes.read', rationale: '', risk: 'low', decision: null, decided_by_principal_id: null, expires_at: new Date(stateNow + 60_000).toISOString(), proposed_at: new Date(stateNow).toISOString() })
-    await page.goto('/agents/bk5-worker-0')
+    // Read the header before opening the phone's full-screen session sheet.
+    await page.goto('/agents')
     await expect(queue).toHaveCount(0)
     await expect(desk).toHaveAccessibleName('Decision Desk, 1 open')
     await page.getByRole('button', { name: 'Preview the Decision Desk', exact: true }).click()
     await expect(page.getByTestId('desk-preview-item-a:bk5-approval')).toHaveAttribute('href', '/decision-desk?item=a:bk5-approval')
     await page.keyboard.press('Escape')
+    await page.locator('[data-row="s:bk5-worker-0"] .agent-link').click()
     await expect(panel.locator('.head-top .agent-state-label')).toHaveText('Awaiting approval')
     // The panel reopens on the remembered tab (Chat, above); evidence lives in Overview.
     await panel.getByRole('tab', { name: 'Overview' }).click()
