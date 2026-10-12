@@ -75,3 +75,11 @@ both an absent settings row and an existing tuning row. Against the unchanged
 `ca9694ae` installer, it reproduces duplicate catalogue insertion (`23505`) and
 concurrent tuple update (`XX000`). Both cases pass with the installation fence
 on the approved remote PostgreSQL runner.
+
+Fix-round 2 validation passed all 42 merge-main static checks without skips and
+all 22 remote work-kind browser cases. The full Go run passed 142 packages;
+four fixture-clone lock-table exhaustion failures passed focused remote retries
+with assertions and explicit concurrency retained. The planning performance
+guard still fails on the unchanged `ca9694ae` baseline: 207.101 ms against
+200 ms, compared with 216.931 ms in the isolated fixed-code run and 282.666 ms
+in the full run. Its budget and assertions remain unchanged.
