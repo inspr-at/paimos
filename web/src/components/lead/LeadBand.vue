@@ -25,7 +25,7 @@ const props = defineProps<{ projectId: string; projectKey: string; routeKey: str
 const w = LEAD_WORDS
 const leads = useProjectLeads(), queue = useWorkQueue(), session = useSession(), router = useRouter()
 const summary = useLeadSummary(toRef(props, 'projectId'), toRef(props, 'projectKey'))
-const { lead, band, leadSession, workers, stations, questions, questionsPartial } = summary
+const { lead, band, leadSession, workers, workersKnown, workersPartial, stations, questions, questionsPartial } = summary
 const person = computed(() => session.identity?.principal.kind === 'person')
 const mayControl = computed(() => person.value && can('harness.control', props.projectId))
 const mayStart = computed(() => mayControl.value && can('run.create', props.projectId))
@@ -46,13 +46,15 @@ onMounted(() => poller.start())
 onBeforeUnmount(() => poller.stop())
 
 const time = (iso?: string | null) => iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''
+// Workers by their real parent (AEON-1210 G2): no count while that tree can't be read, “3+” while only part of it was.
+const workerWord = computed(() => !workersKnown.value ? '' : `${workers.value.length}${workersPartial.value ? '+' : ''} ${workers.value.length === 1 && !workersPartial.value ? 'worker' : 'workers'}`)
 const stateDetail = computed(() => {
   const s = leadSession.value
   if (!s || !lead.value) return ''
   const parts: string[] = []
-  if (lead.value.state === 'working') parts.push(`since ${time(s.since)}`, `${workers.value.length} ${workers.value.length === 1 ? 'worker' : 'workers'}`)
+  if (lead.value.state === 'working') parts.push(`since ${time(s.since)}`, workerWord.value)
   if (s.model) parts.push([s.model, s.reasoning_effort].filter(Boolean).join(', '))
-  return parts.join(' · ')
+  return parts.filter(Boolean).join(' · ')
 })
 const nowLine = computed(() => {
   if (unmanaged.value && lead.value?.state === 'paused') return 'Continue from the session itself; PAIMOS cannot restart an unmanaged process.'

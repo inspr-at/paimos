@@ -2,10 +2,10 @@
 // Risk: a disabled control still opens/submits a start, or cancelling an existing
 // intent gets blocked by launch policy. Exercise the real component handlers.
 import { afterEach, expect, it, vi } from 'vitest'
-import { computed, reactive, ref } from 'vue'
+import { computed, effectScope, reactive, ref } from 'vue'
 import * as leadAPI from '../src/lib/lead'
 import * as projectSettings from '../src/lib/projectSettings'
-import { flush, setupSource } from './record-source'
+import { flush, setupSource, sourceModule } from './record-source'
 
 const scopes: { stop(): void }[] = []
 afterEach(() => { scopes.splice(0).forEach(scope => scope.stop()); vi.unstubAllGlobals() })
@@ -26,7 +26,7 @@ function environment(initial = fresh()) {
     '../../lib/leadOverlay': { openStartLead: open, openLeadPause: vi.fn(), openLeadPanel: vi.fn(), closeLeadSheet: vi.fn(), leadOverlay: reactive({ start: {} }) },
     '../../lib/toast': { toast: vi.fn() },
     '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
-    '../../lib/useLeadSummary': { useLeadSummary: () => ({ lead: current, band: computed(() => leadAPI.leadBand(current.value, 'AIT', 0)), leadSession: ref(null), workers: ref([]), stations: ref([]), questions: ref([]), questionsPartial: ref(false) }) },
+    '../../lib/useLeadSummary': { useLeadSummary: () => ({ lead: current, band: computed(() => leadAPI.leadBand(current.value, 'AIT', 0)), leadSession: ref(null), workers: ref([]), workersKnown: ref(true), workersPartial: ref(false), stations: ref([]), questions: ref([]), questionsPartial: ref(false) }) },
     '../../lib/leadCardFold': { useLeadCardFold: () => ({ ready: ref(true), collapsed: ref(false), moving: ref(false), toggle() {}, settle() {} }) },
   }
   return { current, start, pause, open, modules }
@@ -55,17 +55,19 @@ it('AEON-1038: the card disables Start and Resume with a reason, preserves Cance
   env.current.value = fresh({ automatic_launch_enabled: undefined })
   expect(component.state.action.value.disabled).toBe(true)
   expect(component.state.action.value.tip).toContain('could not be read')
-  const list = setupSource('components/lead/LeadsList.vue', {}, {
+  // The Agents page's New menu reads the same through useAgentProjects (AEON-1210 moved it out of LeadsList).
+  const { useAgentProjects } = sourceModule<typeof import('../src/components/agents/useAgentProjects')>('components/agents/useAgentProjects.ts', {
     ...env.modules,
     '../../stores/projects': { useProjects: () => ({ projects: [{ id: 'p1', routeKey: 'AIT' }] }) },
-    '../../stores/agents': { useAgents: () => ({ views: [] }) },
-    '../../lib/workQueue': { queueRequest: async () => ({ items: [] }) },
+    '../../stores/agentProjection': { useAgentProjection: () => ({ watchProjects: () => () => {}, queuedOf: () => null, asksOf: () => [] }) },
   })
-  scopes.push(list)
-  expect(list.state.launchAvailable.value).toBe(false)
-  expect(list.state.launchReason.value).toContain('could not be read')
+  const scope = effectScope()
+  scopes.push(scope)
+  const list = scope.run(() => useAgentProjects())!
+  expect(list.launchAvailable.value).toBe(false)
+  expect(list.launchReason.value).toContain('could not be read')
   env.current.value = fresh()
-  expect(list.state.launchReason.value).toBe(leadAPI.LEAD_LAUNCH_OFF)
+  expect(list.launchReason.value).toBe(leadAPI.LEAD_LAUNCH_OFF)
 })
 
 it('AEON-1038: a sheet with launch off rejects pointer and keyboard submissions before any settings write', async () => {

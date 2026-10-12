@@ -61,3 +61,52 @@ panel); when a search or filter hides the session under the cursor, the cursor
 moves to the first match, or to none.
 One control height applies to the head, the capacity row and the card head:
 36 px, 44 px on touch and on phones.
+
+## Sessions grouped by project (AEON-1210, P2)
+
+**Groups.** Each project is one group, parted from the next by a hairline. The
+groups keep a fixed order: the person's own order of projects (their Custom
+sort on Projects), then the rest by key; activity never moves a group. The
+lead row heads its group, its workers nested below in start order, then the
+project's other sessions. Only the session the lead currently names counts
+as the lead: an ended generation keeps its place under the current lead and
+never hides what the lead does now. A lead without a running session on the
+list (starting, waiting for room, paused, can't start) still heads its group
+from the project's lead state; its line says why it waits, and only a full
+dial says the dial is full. A project with queued work and no lead is one slim line
+with Start a lead, or the reason it cannot start. "No project" and "Ended"
+come at the end. An ended family keeps its place and end state for 10
+minutes, then moves to Ended.
+
+**Queue chip.** A lead with queued work shows how much on its title line
+(on the state line in compact rows); the chip opens the lead panel at Next
+up. One chip per project, on the current lead. The lead row's ⋯ also offers
+the lead panel and Next up.
+
+**Folds.** A lead's fold is the person's own, on every device (the
+`agents:layout` preference, `folded_projects`). Folded, the lead's line sums
+up what it holds: "5 workers · 1 problem · 1 question". Collapse all /
+Expand all beside the title writes the same preference; Left and Right
+arrows on a lead row fold and unfold it.
+
+**Filter and Display.** Filter offers State (the head counts' filter),
+Project, Harness and Computer; each applied filter is a pill under the card
+head that reopens its choices, × removes it, Clear all ends them all.
+Display groups by Project (the default), Lead, Harness, State, Computer or
+None, above the sort. `?group=`, `?project=`, `?harness=` and `?computer=`
+carry them; the values are bounded.
+
+**One projection.** The tree, the New menu and the lead band and panel read
+one shared projection (`stores/agentProjection.ts`): each project's lead, the
+queued work, the open questions and the session tree. Workers belong to a
+lead by their real parent session; a question belongs to the exact session
+that asked, so another generation's ask stays on the Decision Desk. Reads
+are bounded and say when they failed or were cut short: a queue that can't
+be read leaves a line under the list instead of silently dropping chips and
+no-lead lines, a queue read in part shows its counts as lower bounds ("4+"),
+and when not every open question could be read the list points to the
+Decision Desk. The lead panel and band show a worker count read from a
+session list cut short as "3+". The lead, decision, queue, question and
+reparent events wake a batched reread of what changed; a reconnect and the
+30-second reread refresh everything, including the Next up list of an open
+lead panel or band.

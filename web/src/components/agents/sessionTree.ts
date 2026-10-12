@@ -36,12 +36,13 @@ export const isProblem = (status: SessionStatus) => status.group === 'problem' |
 export const isAsk = (status: SessionStatus) => status.group === 'needs'
 
 export interface Below { problem: number; ask: number; names: { problem: string[]; ask: string[] } }
-/** What needs a look anywhere under a parent, at any depth. */
-export function below<T extends Viewish>(branch: SessionBranch<T>, name: (view: T) => string): Below {
+/** What needs a look anywhere under a parent, at any depth. `asks` adds a session with an open
+ * question bound to it (the shared projection, AEON-1210), so the count and the Desk agree. */
+export function below<T extends Viewish>(branch: SessionBranch<T>, name: (view: T) => string, asks?: (view: T) => boolean): Below {
   const out: Below = { problem: 0, ask: 0, names: { problem: [], ask: [] } }
   const walk = (b: SessionBranch<T>) => b.children.forEach(child => {
     if (isProblem(child.view.status)) { out.problem++; out.names.problem.push(name(child.view)) }
-    else if (isAsk(child.view.status)) { out.ask++; out.names.ask.push(name(child.view)) }
+    else if (isAsk(child.view.status) || asks?.(child.view)) { out.ask++; out.names.ask.push(name(child.view)) }
     walk(child)
   })
   walk(branch)

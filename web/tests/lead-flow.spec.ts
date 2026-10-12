@@ -19,11 +19,12 @@ test('AEON-1195: focus cycles retain the same lead DOM rows, order and controls 
   // Equal states exercise the project tie breaker, independent of server order.
   data.projects.reverse()
   await page.goto('/agents')
-  const rows = page.locator('.lead-row')
+  // AEON-1210: each lead heads its project's group in Sessions.
+  const rows = page.locator('.sessions .lead-row')
   await expect(rows).toHaveCount(2)
   expect(await rows.evaluateAll(list => list.map(row => row.getAttribute('data-project')))).toEqual(['AEON', 'PHAROS'])
   await page.evaluate(() => {
-    const section = document.getElementById('leads-title')!.closest('section')!
+    const section = document.querySelector('.agents-page .sessions .table')!
     const original = [...section.querySelectorAll('.lead-row')]
     const removed: Node[] = []
     const observer = new MutationObserver(records => { for (const record of records) removed.push(...record.removedNodes) })
@@ -46,10 +47,10 @@ test('AEON-1195: focus cycles retain the same lead DOM rows, order and controls 
         await expect(rows).toHaveCount(2)
         expect(await page.evaluate(() => {
           const evidence = (window as unknown as { focusEvidence: { section: Element; original: Element[]; removed: Node[] } }).focusEvidence
-          return evidence.section.isConnected && evidence.original.every((row, index) => row === document.querySelectorAll('.lead-row')[index]) && !evidence.removed.some(node => node === evidence.section || evidence.original.some(row => node === row || node.contains(row)))
+          return evidence.section.isConnected && evidence.original.every((row, index) => row === document.querySelectorAll('.sessions .lead-row')[index]) && !evidence.removed.some(node => node === evidence.section || evidence.original.some(row => node === row || node.contains(row)))
         })).toBe(true)
       })
-      await page.locator('section.zone').filter({ has: page.locator('#leads-title') }).screenshot({ path: info.outputPath(`aeon-1195-focus-${width}-${look}.png`) })
+      await page.locator('.agents-page .sessions').screenshot({ path: info.outputPath(`aeon-1195-focus-${width}-${look}.png`) })
       await guard.check(async () => {
         const responses = Promise.all(['p-aeon', 'p-pharos'].map(id => page.waitForResponse(response => new URL(response.url()).pathname === `/api/projects/${id}/lead`)))
         release()
@@ -75,7 +76,7 @@ test('AEON-1195: focus cycles retain the same lead DOM rows, order and controls 
   expect(await page.evaluate(() => {
     const evidence = (window as unknown as { focusEvidence: { section: Element; original: Element[]; removed: Node[]; observer: MutationObserver } }).focusEvidence
     evidence.observer.disconnect()
-    return evidence.section.isConnected && evidence.original.every((row, index) => row === document.querySelectorAll('.lead-row')[index]) && !evidence.removed.some(node => node === evidence.section || evidence.original.some(row => node === row || node.contains(row)))
+    return evidence.section.isConnected && evidence.original.every((row, index) => row === document.querySelectorAll('.sessions .lead-row')[index]) && !evidence.removed.some(node => node === evidence.section || evidence.original.some(row => node === row || node.contains(row)))
   })).toBe(true)
 })
 
@@ -224,7 +225,8 @@ test('leaving the page that opened the docked lead panel closes it', async ({ pa
   await page.setViewportSize({ width: 1440, height: 1000 })
   await mockLeadFlow(page, { lead: 'working', aeon: 'none' })
   await page.goto('/agents')
-  await page.locator('section.zone[aria-labelledby="leads-title"] [data-project="PHAROS"]').click()
+  // The working lead's own session heads PHAROS; its queue chip opens the lead panel (AEON-1210).
+  await page.locator('.sessions .lead-row[data-project="PHAROS"] .qchip.q-l1').click()
   await expect(panel(page)).toBeVisible()
   await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects' }).click()
   await expect(page).toHaveURL(/\/$/)
@@ -303,10 +305,11 @@ for (const look of ['light', 'dark'] as const) test(`Agents page: one line per l
   await mockLeadFlow(page, { lead: 'working', aeon: 'none', queue: ['n-4', 'n-a1'] })
   await page.goto('/agents')
   await theme(page, look)
-  const leads = page.locator('section.zone[aria-labelledby="leads-title"]')
-  await expect(leads.locator('.lead-row')).toHaveCount(2)
-  await expect(leads.locator('[data-project="PHAROS"]')).toContainText('PHAROS lead')
-  await expect(leads.locator('[data-project="AEON"]')).toContainText('No lead in AEON')
+  // AEON-1210: Sessions heads PHAROS with its lead row and AEON, which has queued work and no lead, with one slim line.
+  const leads = page.locator('.agents-page .sessions')
+  await expect(leads.locator('.lead-row[data-project="PHAROS"]')).toContainText('Claude lead')
+  await expect(leads.locator('.lead-row[data-project="PHAROS"] .role')).toHaveText('Lead')
+  await expect(leads.locator('.row.nolead[data-project="AEON"]')).toContainText('1 queued · no lead')
   await page.screenshot({ path: info.outputPath(`agents-leads-${look}.png`) })
   await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
   await expect(page.getByRole('menuitem', { name: /^Start lead…/ })).toContainText('AEON has none. One per project.')
@@ -315,7 +318,7 @@ for (const look of ['light', 'dark'] as const) test(`Agents page: one line per l
   const sheet = page.getByRole('dialog', { name: 'Start lead for AEON' })
   await expect(sheet.locator('[data-row="project"]')).toContainText('The only project without a lead.')
   await page.keyboard.press('Escape')
-  await leads.locator('[data-project="PHAROS"]').click()
+  await leads.locator('.lead-row[data-project="PHAROS"] .qchip.q-l1').click()
   await expect(panel(page)).toBeVisible()
 })
 

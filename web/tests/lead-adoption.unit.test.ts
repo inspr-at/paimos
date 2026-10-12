@@ -82,7 +82,7 @@ it('an empty adoption list explains missing person ownership without offering th
 it('an unmanaged lead card offers cooperative pause and hides restart controls after exit', async () => {
   for (const state of ['starting', 'working', 'paused'] as const) {
     const lead: ProjectLead = { project_id: 'project', revision: 4, generation: 1, session_id: 'running', state, reason: '', process_active: state !== 'paused' }
-    const summary = { lead: ref(lead), band: ref(leadBand(lead, 'AEON', 1)), leadSession: ref(state === 'paused' ? null : { management_mode: 'unmanaged' }), workers: ref([]), stations: ref([]), questions: ref([]), questionsPartial: ref(false) }
+    const summary = { lead: ref(lead), band: ref(leadBand(lead, 'AEON', 1)), leadSession: ref(state === 'paused' ? null : { management_mode: 'unmanaged' }), workers: ref([]), workersKnown: ref(true), workersPartial: ref(false), stations: ref([]), questions: ref([]), questionsPartial: ref(false) }
     const view = mountView('../src/components/lead/LeadBand.vue', {
       '../../lib/projectSettings': projectSettings,
       '../../lib/authz': { can: () => true }, 'vue-router': { useRouter: () => ({}) },

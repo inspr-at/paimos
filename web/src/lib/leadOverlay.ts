@@ -6,13 +6,16 @@ import { reactive } from 'vue'
 // Closing hands focus back to whatever opened that overlay.
 export interface LeadOverlayState {
   panel: string | null
+  /** Where the panel opens: its top, or Next up (the queue chip on an Agents lead row, AEON-1210). */
+  section: LeadPanelSection | null
   start: { projects: string[]; showProject: boolean } | null
   pause: string | null
 }
-export const leadOverlay = reactive<LeadOverlayState>({ panel: null, start: null, pause: null })
+export type LeadPanelSection = 'next-up'
+export const leadOverlay = reactive<LeadOverlayState>({ panel: null, section: null, start: null, pause: null })
 let panelFrom: HTMLElement | null = null, sheetFrom: HTMLElement | null = null
 const active = () => document.activeElement instanceof HTMLElement ? document.activeElement : null
-export function openLeadPanel(project: string, from?: HTMLElement | null) { panelFrom = from ?? active(); leadOverlay.panel = project }
+export function openLeadPanel(project: string, from?: HTMLElement | null, section: LeadPanelSection | null = null) { panelFrom = from ?? active(); leadOverlay.panel = project; leadOverlay.section = section }
 /** Several projects let the sheet offer a choice; one fixes the project. */
 export function openStartLead(projects: string[], from?: HTMLElement | null, showProject = false) {
   if (!projects.length) return
@@ -25,8 +28,8 @@ export function closeLeadSheet(restore = true) {
   sheetFrom = null
 }
 export function closeLeadPanel(restore = true) {
-  leadOverlay.panel = null
+  leadOverlay.panel = null; leadOverlay.section = null
   if (restore && panelFrom?.isConnected) panelFrom.focus({ preventScroll: true })
   panelFrom = null
 }
-export function resetLeadOverlays() { leadOverlay.panel = null; leadOverlay.start = null; leadOverlay.pause = null; panelFrom = null; sheetFrom = null }
+export function resetLeadOverlays() { leadOverlay.panel = null; leadOverlay.section = null; leadOverlay.start = null; leadOverlay.pause = null; panelFrom = null; sheetFrom = null }

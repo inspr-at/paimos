@@ -45,8 +45,9 @@ for (const width of [390, 1024, 1440]) for (const look of ['light', 'dark'] as c
     await capture('ticket-lead-off')
 
     await page.goto('/agents')
-    const row = page.locator('[data-project="PHAROS"].lead-row'), add = page.getByRole('button', { name: /^New: / })
-    await expect(row).toHaveAttribute('aria-disabled', 'true')
+    // AEON-1210: Sessions heads PHAROS with its no-lead line; launch off, it offers no Start and says why.
+    const row = page.locator('.sessions .row.nolead[data-project="PHAROS"]'), add = page.getByRole('button', { name: /^New: / })
+    await expect(row.getByRole('button', { name: /^Start a/ })).toHaveCount(0)
     await expect(row).toContainText(OFF)
     await expectStableControls({ controls: { row, add }, scrollAreas: { page: page.locator('html') }, interactions: [
       { name: 'unavailable row ignores activation', run: async () => { await row.dispatchEvent('click'); await expect(page.locator('dialog.lead-sheet')).toHaveCount(0) } },
