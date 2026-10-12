@@ -52,9 +52,9 @@ test('workers nest by session ID, display their label, harness and ticket, and e
   await expect(row(page, lead)).toContainText('1 worker')
   await expect(row(page, child)).toHaveAttribute('data-depth', '1')
   await expect(row(page, child)).toHaveAttribute('data-parent', lead)
-  await expect(row(page, child)).toContainText('AC4 hierarchy')
+  await expect(row(page, child).locator('.ava')).toHaveAttribute('aria-label', /AC4 hierarchy:/)
   await expect(row(page, child).locator('.live-bot')).toHaveAttribute('data-harness', 'codex')
-  await expect(row(page, child).getByRole('link', { name: 'PHAROS-12' })).toBeVisible()
+  await expect(row(page, child).locator('.key-inline')).toHaveText('PHAROS-12 ·')
   // The fold button is reached from its row: ← and → fold and unfold; Enter and Space work on the button.
   const toggle = row(page, lead).getByRole('button', { name: 'Fold Release lead’s workers: 1 worker, 1 working' })
   await toggle.focus()
@@ -74,7 +74,7 @@ test('workers nest by session ID, display their label, harness and ticket, and e
   await expect(page.locator('.page-head .freshness')).toHaveCount(0)
 })
 
-test('new workers update through the live channel and stopped workers fold immediately into recoverable history', async ({ page }) => {
+test('new workers update through the live channel; a stopped worker keeps its place for 10 minutes, then folds into recoverable history', async ({ page }) => {
   const { data } = await setup(page)
   const worker = data.sessions.pop()!
   await page.clock.install()
@@ -87,6 +87,11 @@ test('new workers update through the live channel and stopped workers fold immed
   Object.assign(worker, { phase: 'stopped', stopped_at: new Date().toISOString(), stop_reason: 'process_exited' })
   await signal(page, 'harness.stopped')
   await page.clock.runFor(500)
+  // AEON-1211: it keeps its place and end state, and says when it moves; then, with the pointer away, it folds away.
+  await expect(row(page, child)).toHaveClass(/stopped/)
+  await expect(row(page, child).locator('.l2t')).toContainText('moves to Ended at')
+  await page.mouse.move(0, 0)
+  await page.clock.runFor(10 * 60_000 + 2_000)
   await expect(row(page, child)).toHaveCount(0)
   await row(page, lead).getByRole('button', { name: 'Show stopped workers of Release lead' }).click()
   await expect(row(page, child)).toBeVisible()
@@ -100,14 +105,14 @@ test('returning to a visible tab refreshes immediately and failed reads keep the
   const lastGood = Math.ceil(Date.now() / 60_000) * 60_000, failedAt = lastGood + 10 * 60_000
   await page.clock.install({ time: lastGood })
   await page.goto('/agents')
-  await expect(row(page, child)).toContainText('AC4 hierarchy')
+  await expect(row(page, child).locator('.ava')).toHaveAttribute('aria-label', /AC4 hierarchy:/)
   await page.route('**/api/harness-sessions?*', route => route.fulfill({ status: 503, json: { error: 'temporarily unavailable' } }))
   await page.clock.pauseAt(failedAt)
   const delayed = page.locator('.page-head .freshness')
   await expect(delayed).toContainText('Update delayed')
   // The failed read keeps the last good list and dates it: the head's tip and the footer (AEON-785)
   // name the last success, never the failed read.
-  await expect(row(page, child)).toContainText('AC4 hierarchy')
+  await expect(row(page, child).locator('.ava')).toHaveAttribute('aria-label', /AC4 hierarchy:/)
   const [good, failed] = await page.evaluate(times => times.map(at => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })), [lastGood, failedAt])
   expect(good).not.toBe(failed)
   const footer = page.locator('.app-footer .sum')
@@ -123,7 +128,7 @@ test('returning to a visible tab refreshes immediately and failed reads keep the
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
     document.dispatchEvent(new Event('visibilitychange'))
   })
-  await expect(row(page, child)).toContainText('Returned worker', { timeout: 3000 })
+  await expect(row(page, child).locator('.ava')).toHaveAttribute('aria-label', /Returned worker:/, { timeout: 3000 })
   // Only a delay is said in the head; once updates land again it goes (AEON-780: no "Live").
   await expect(delayed).toHaveCount(0)
   await expect(footer).toHaveAttribute('data-conn', 'on')

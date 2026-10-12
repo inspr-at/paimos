@@ -7,6 +7,7 @@ import { useSession } from '../../stores/session'
 import { can } from '../../lib/authz'
 import { TIER_NAME, tierOptions, tierPrice, tierSpeed, offeredTier, tierEstimate, estimateCostText, estimateTimeText } from '../../lib/serviceTier'
 import TierGlyph from './TierGlyph.vue'
+import TierCell from './TierCell.vue'
 import AppIcon from '../AppIcon.vue'
 const props = defineProps<{ session: HarnessSession; name: string }>()
 const tiers = useServiceTiers(), auth = useSession()
@@ -54,7 +55,8 @@ async function checkResult() {
       <p>{{ request.reason }}</p>
       <p v-if="request.state === 'pending'">{{ tierPrice(options.find(t => t.tier === request?.tier)) }} · nothing changes until a person approves.</p>
     </div>
-    <div class="tier-head"><TierGlyph :active="state.active_tier" :report="report" :pending="state.pending?.value" :scale="1.5" /><strong :class="{ paid: state.active_tier && state.active_tier !== 'default' }">{{ state.active_tier ? TIER_NAME[state.active_tier] : 'Not reported' }}</strong>
+    <!-- The tier lives here, not in the list (AEON-1211): the same control, one step per Left/Right arrow. -->
+    <div class="tier-head"><TierCell :session="session" :name="name" /><strong :class="{ paid: state.active_tier && state.active_tier !== 'default' }">{{ state.active_tier ? TIER_NAME[state.active_tier] : 'Not reported' }}</strong>
       <span>{{ tierSpeed(active) }} · {{ tierPrice(active) }}</span>
     </div>
     <p class="tier-applies">{{ explanation }}</p>

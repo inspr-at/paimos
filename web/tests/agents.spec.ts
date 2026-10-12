@@ -57,8 +57,13 @@ test('pi sessions retain their SVG harness icon and provider account label', asy
   await openAgents(page)
   const item = row(page, pi.id)
   await expect(item).toBeVisible()
-  await expect(item.locator('.exec-account')).toContainText('Pi · pi / anthropic (local profile)')
-  await expect(item.locator('svg[viewBox="165.29 165.29 469.43 469.43"] path').first()).toBeVisible()
+  // Execution's second line is the account (AEON-1211); the harness is named with it in the cell's name.
+  await expect(item.locator('.exec-account')).toHaveText('pi / anthropic (local profile)')
+  await expect(item.locator('.c-exec')).toHaveAttribute('aria-label', /pi \/ anthropic \(local profile\)\. Pi$/)
+  // AEON-1211: the avatar carries the state badge only; a compact row opens with the harness's own mark.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(item.locator('.op-mark svg[viewBox="165.29 165.29 469.43 469.43"] path').first()).toBeVisible()
+  await expect(item.locator('.op-mark')).toHaveAttribute('aria-label', /Pi · pi \/ anthropic \(local profile\)$/)
   if (process.env.PI_PAIRING_SHOTS) {
     for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
@@ -93,12 +98,14 @@ test('sessions are grouped by project, the lead heading its group, with ticket a
   await expect(page.getByRole('button', { name: /^Ended\s*1/ })).toBeVisible()
   const lead = row(page, camy)
   await expect(lead.getByRole('link', { name: /Claude Code camy, Working/ })).toBeVisible()
-  await expect(lead).toContainText('camy')
+  await expect(lead.locator('.result')).toHaveAttribute('title', /camy$/)
   await expect(lead).toContainText('Lead')
-  await expect(lead.getByRole('link', { name: 'PHAROS-11' })).toHaveAttribute('href', '/p/PHAROS/PHAROS-11')
-  await expect(lead.locator('.agent-state-label')).toHaveText('Working')
-  await expect(row(page, session(5)).locator('.agent-state-label')).toHaveText('Heartbeat overdue')
-  await expect(row(page, session(6)).locator('.agent-state-label')).toHaveText('Working')
+  await expect(lead.locator('.key-inline')).toHaveText('PHAROS-11 ·')
+  // AEON-1211: the state lives in the avatar (its badge, name and tooltip); a precise word opens line 2.
+  await expect(lead.locator('.ava')).toHaveAttribute('aria-label', /: Working$/)
+  await expect(row(page, session(5)).locator('.ava')).toHaveAttribute('data-tip', /^Awaiting heartbeat · Heartbeat overdue · /)
+  await expect(row(page, session(5)).locator('.l2t')).toContainText(/^Heartbeat overdue/)
+  await expect(row(page, session(6)).locator('.ava')).toHaveAttribute('aria-label', /: Working$/)
   // Stopped sessions fold away until asked for.
   await expect(row(page, session(7))).toHaveCount(0)
   await page.getByRole('button', { name: /^Ended/ }).click()
@@ -124,8 +131,8 @@ test('session setup and work context appear from the mocked harness API', async 
     commits: [{ sha: 'abc1234', subject: 'Store session setup' }, { sha: 'def5678', subject: 'Show work context' }],
   })
   await openAgents(page)
-  await expect(row(page, nova).locator('.exec-model')).toHaveText('gpt-6-sol · xhigh')
-  await expect(row(page, nova).locator('.exec-account')).toHaveText('Codex · Codex Pro')
+  await expect(row(page, nova).locator('.exec-model')).toHaveText('GPT-6 Sol · xhigh')
+  await expect(row(page, nova).locator('.exec-account')).toHaveText('Codex Pro')
   await expect(row(page, nova).locator('.result')).toHaveText('Add an Oracle Cloud connector')
   await row(page, nova).locator('.agent-link').click()
   const setupBlock = panel(page).locator('section[aria-labelledby="setup-title"]')
@@ -377,7 +384,7 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   const order = await page.locator('.sessions .grp', { has: row(page, camy) }).locator('[data-row^="s:"]').evaluateAll(rows => rows.map(r => r.getAttribute('data-row')!.slice(2)))
   expect(order[0]).toBe(camy)
   expect(order).toContain(nova)
-  await row(page, camy).locator('.c-state').click()
+  await row(page, camy).locator('.c-time').click()
   await expect(page).toHaveURL(`/agents/${camy}`)
   await expect(panel(page).getByRole('heading', { name: /camy/ })).toBeVisible()
   await panel(page).focus()
@@ -669,7 +676,9 @@ for (const colorScheme of ['light', 'dark'] as const) for (const width of [1600,
     await page.emulateMedia({ colorScheme })
     await setup(page)
     await openAgents(page)
-    await row(page, camy).getByRole('link', { name: 'PHAROS-11', exact: true }).click()
+    // Every form carries the ticket key in the name; its link lives in the session's details.
+    await row(page, camy).locator('.l2').click()
+    await panel(page).getByRole('link', { name: /^PHAROS-11/ }).first().click()
     const ticket = page.getByRole('complementary', { name: 'Ticket details' })
     await expect(ticket).toBeVisible()
     const box = (await ticket.boundingBox())!

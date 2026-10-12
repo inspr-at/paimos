@@ -24,19 +24,27 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await mockAgents(page, data)
     await page.goto('/agents')
     const row = page.locator(`[data-row="s:${oneShot.id}"]`)
-    await expect(row.getByText('No inbox', { exact: true })).toBeVisible()
-    await expect(row.locator('.no-inbox')).toHaveAttribute('title', /managed worker/)
-    await expect(page.locator(`[data-row="s:${managed.id}"] .no-inbox`)).toHaveCount(0)
-    await expect(page.locator(`[data-row="s:${interactive.id}"] .no-inbox`)).toHaveCount(0)
+    // AEON-1211 (design AEON-1196): rows carry no inbox or listening cue; the details say it in words.
+    await expect(row).toBeVisible()
+    await expect(page.locator('.sessions .row .no-inbox')).toHaveCount(0)
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    const open = async (id: string) => { await page.goto(`/agents/${id}`); await panel.getByRole('tab', { name: 'Overview' }).click(); await expect(panel.locator('.now-listen')).toBeVisible() }
+    await open(oneShot.id)
+    const cue = panel.locator('.now-listen .no-inbox')
+    await expect(cue).toHaveText('No inbox · this run cannot receive follow-up messages')
+    await expect(cue).toHaveAttribute('data-tip', /managed worker/)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
-    const box = await row.locator('.no-inbox').boundingBox()
+    const box = await cue.boundingBox()
     expect(box!.x).toBeGreaterThanOrEqual(0)
     expect(box!.x + box!.width).toBeLessThanOrEqual(width)
     const out = process.env.INBOX_SHOTS
     if (out) {
       mkdirSync(out, { recursive: true })
-      await row.scrollIntoViewIfNeeded()
       await page.screenshot({ path: resolve(out, `inbox-${theme}-${width}.png`), fullPage: true })
+    }
+    for (const other of [managed, interactive]) {
+      await open(other.id)
+      await expect(panel.locator('.no-inbox')).toHaveCount(0)
     }
   })
 }

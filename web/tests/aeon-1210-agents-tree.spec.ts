@@ -155,7 +155,7 @@ test('a fold is the person’s, survives a reload, sums up the workers and moves
   const before = { fold: await box(page, `.sessions [data-row="s:${LEAD}"] .tree-fold`), row: await box(page, `.sessions [data-row="s:${LEAD}"]`), chip: await box(page, `.sessions [data-row="s:${LEAD}"] .qchip.q-l1`) }
   await fold.click()
   await expect(row(page, sid(2))).toHaveCount(0)
-  await expect(leadRow(page).locator('.current-activity')).toContainText('2 workers')
+  await expect(leadRow(page).locator('.l2t')).toContainText('2 workers')
   await expect.poll(() => layoutWrites(calls).at(-1)).toEqual(['p-pharos'])
   // Folding changes the line's words only: the row, its fold button and its chip keep their boxes.
   expect(await box(page, `.sessions [data-row="s:${LEAD}"] .tree-fold`)).toEqual(before.fold)

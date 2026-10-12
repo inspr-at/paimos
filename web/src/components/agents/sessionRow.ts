@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Row copy for the session list. Uses only fields the session already carries.
 // A heartbeat, activity flag or work shape is not an intended result.
+import type { ModelProfile } from '../../lib/agents'
+import { fullName, lineFallback } from '../../lib/modelsSimple'
 import type { SessionView } from '../../stores/agents'
 
 export type ModelProvider = 'openai' | 'anthropic' | 'xai' | 'google' | 'cursor' | 'unknown'
@@ -37,15 +39,15 @@ export function intendedResult(view: SessionView) {
   return view.name
 }
 
-// The muted second line is the session identity, or host/project when the name is already the result.
+// The execution-column CI captures the base SessionList with this branch's helpers.
+// Keep its context read compatible; the approved rows use their activity line instead.
 export function sessionContext(view: SessionView, primary: string) {
   const name = view.name.trim()
   if (primary !== name) return name
   const host = view.session.host?.trim()
   if (host && host !== name) return host
   const project = view.projectTitle?.trim() || view.projectKey?.trim()
-  if (project && project !== name) return project
-  return name
+  return project && project !== name ? project : name
 }
 
 // Known public model-name prefixes only. Harness identity never implies a provider.
@@ -62,7 +64,10 @@ export function modelProvider(model: string): ModelProvider {
 
 export interface SessionExecution {
   kind: 'ai' | 'media' | 'terminal'
+  /** The reported or launched model id: search and the provider mark read it, the row never shows it. */
   model: string
+  /** What the row shows: the registry's name for the model ("Opus 5.5"), or the run's label for media and terminal. */
+  name: string
   effort: string
   modelLine: string
   account: string
@@ -71,26 +76,69 @@ export interface SessionExecution {
   providerLabel: string
 }
 
-// Unknown fields are omitted, never filled with "unknown" words.
-export function sessionExecution(view: SessionView): SessionExecution {
+// ---------- Model names (AEON-1211) ----------
+// The row names a model the way Settings › Models does, never by its raw id: the registry's
+// display name and version ("Opus 5.5", "GPT-6.1 Sol"), then the level ("Opus 5.5 · xhigh").
+export interface ModelNames { bySlug: Map<string, ModelProfile>; byModel: Map<string, ModelProfile> }
+const modelKey = (harness: string, model: string) => `${harness}\u0000${model}`
+export function modelNames(profiles: readonly ModelProfile[]): ModelNames {
+  const names: ModelNames = { bySlug: new Map(), byModel: new Map() }
+  for (const profile of profiles) {
+    if (profile.slug) names.bySlug.set(profile.slug, profile)
+    const key = modelKey(profile.harness, profile.model)
+    if (!names.byModel.has(key)) names.byModel.set(key, profile)
+  }
+  return names
+}
+const LEVEL_SUFFIX = /^(.+?)[-_](minimal|low|medium|high|xhigh|max)$/i
+// A model the registry does not list still reads as a name (Settings › Models, AEON-1062): "gpt-6.1-sol" →
+// "GPT-6.1 Sol", "claude-opus-5-5" → "Claude Opus 5.5". A trailing level becomes the level.
+function unlistedName(id: string): { name: string; level: string } {
+  const suffix = LEVEL_SUFFIX.exec(id)
+  const base = suffix ? suffix[1]! : id
+  const gpt = fullName({ id: '', harness: 'codex', family: '', model: base, effort: '', tier: '', enabled: true })
+  return { name: gpt !== base ? gpt : lineFallback(base.replace(/(\d)[-_](?=\d)/g, '$1.')), level: suffix ? suffix[2]!.toLowerCase() : '' }
+}
+// A profile slug (the run's pinned profile) names the model and its level; a model id names the model only.
+// A profile's "default" level says nothing, so it is left out.
+function nameOf(model: string, harness: string, names: ModelNames | undefined): { name: string; level: string } {
+  const pinned = names?.bySlug.get(model)
+  if (pinned) return { name: fullName(pinned), level: pinned.effort === 'default' ? '' : pinned.effort }
+  const listed = names?.byModel.get(modelKey(harness, model))
+  return listed ? { name: fullName(listed), level: '' } : unlistedName(model)
+}
+
+// Unknown fields are omitted, never filled with "unknown" words. Line 2 is the account
+// ("Claude Max · markus"); a session without one names its harness there.
+export function sessionExecution(view: SessionView, names?: ModelNames): SessionExecution {
   const harness = view.session.harness
   if (harness === 'media' || harness === 'terminal') {
     const label = (harness === 'media' ? view.session.generator : view.session.command)?.trim() ?? ''
-    return { kind: harness, model: label, effort: '', modelLine: label, account: '', accountLine: harness === 'media' ? 'Media' : 'Terminal', provider: 'unknown', providerLabel: harness === 'media' ? 'Media' : 'Terminal' }
+    return { kind: harness, model: label, name: label, effort: '', modelLine: label, account: '', accountLine: harness === 'media' ? 'Media' : 'Terminal', provider: 'unknown', providerLabel: harness === 'media' ? 'Media' : 'Terminal' }
   }
   const reported = view.session.model?.trim() ?? ''
   const model = reported || view.model?.trim() || ''
-  const effort = model ? (view.session.reasoning_effort?.trim() || '') : ''
+  const named = model ? nameOf(model, harness, names) : { name: '', level: '' }
+  const effort = model ? (view.session.reasoning_effort?.trim() || named.level) : ''
   const account = view.session.account_label?.trim() || view.account?.trim() || ''
   const provider = modelProvider(model)
   return {
     kind: 'ai',
     model,
+    name: named.name,
     effort,
-    modelLine: [model, effort].filter(Boolean).join(' · '),
+    modelLine: [named.name, effort].filter(Boolean).join(' · '),
     account,
-    accountLine: [view.harness, account].filter(Boolean).join(' · '),
+    accountLine: account || view.harness,
     provider,
     providerLabel: PROVIDER_LABEL[provider],
   }
+}
+
+// What the list's search reads (AEON-1209): the words the row shows, so its model matches as the
+// registry names it ("Opus 5.5 · high"), and the raw launch and reported ids, so a pasted id still finds it.
+export function sessionSearchText(view: SessionView, names?: ModelNames): string {
+  const exec = sessionExecution(view, names)
+  return [view.name, view.harness, view.account, exec.accountLine, view.model, exec.model, exec.modelLine, view.projectKey, view.projectTitle, view.ticket?.key, view.ticket?.title, view.session.host, view.session.display_label, intendedResult(view)]
+    .filter(Boolean).join(' ').toLowerCase()
 }

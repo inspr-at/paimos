@@ -328,7 +328,7 @@
         ,
         {"file":"tests/managed-controls.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":3.896,"median":2.507,"min":2.352},"seconds":65.324,"selectedTests":25},"weightSeconds":61.988304,"weightSource":"web-13"}
         ,
-        {"file":"tests/no-shift-agents.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":22.178,"median":6.7085,"min":2.703},"estimatedTests":3,"measuredTests":20,"seconds":194.4282,"selectedTests":23},"weightSeconds":67.322244,"weightSource":"tierTiming:37377299349"}
+        {"file":"tests/no-shift-agents.spec.ts","listedTests":29,"tierTiming":{"caseSeconds":{"max":22.178,"median":6.7085,"min":2.703},"estimateReason":"AEON-1211: six added cases estimated at the existing median; measured cases retained.","estimatedTests":9,"measuredTests":20,"seconds":234.6792,"selectedTests":29},"weightSeconds":67.322244,"weightSource":"tierTiming:37377299349"}
         ,
         {"file":"tests/no-shift-dialogs.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":5.68,"median":3.5155,"min":2.121},"seconds":81.696,"selectedTests":22},"weightSeconds":36.564633,"weightSource":"tierTiming:37377299349"}
         ,
@@ -743,6 +743,8 @@
         {"file":"tests/aeon-1209-agents-head.spec.ts","listedTests":19,"weightSeconds":75,"weightSource":"remote-one-worker-AEON-1209-60s-plus-margin"}
         ,
         {"file":"tests/aeon-1210-agents-tree.spec.ts","listedTests":19,"weightSeconds":54,"weightSource":"remote-one-worker-AEON-1210-24s-plus-margin"}
+        ,
+        {"file":"tests/aeon-1211-agents-rows.spec.ts","listedTests":33,"weightSeconds":24,"weightSource":"local-single-worker-AEON-1211-15s-plus-margin"}
         ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,

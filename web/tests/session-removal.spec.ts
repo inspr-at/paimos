@@ -75,7 +75,7 @@ test('overflow button is quiet until hover or focus and keeps the column width',
   await row(page, selected.id).hover()
   await expect(more).toHaveCSS('opacity', '1')
   const cell = await row(page, selected.id).locator('.c-actions').boundingBox()
-  const running = await row(page, selected.id).locator('.c-elapsed').boundingBox()
+  const running = await row(page, selected.id).locator('.c-beat').boundingBox()
   // AEON-524 (a14794341) reserves 108px for Resume, Remove and More.
   expect(await page.locator('.sessions .table').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').at(-1))).toBe('108px')
   for (const button of await row(page, selected.id).locator('.c-actions button').all()) {
