@@ -41,9 +41,13 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     await expect(panel.locator('.head-top .agent-state-label')).toHaveText('Working')
     const inbox = panel.getByRole('region', { name: 'Inbox attention' })
     // AEON-313: shared-inbox obligations stay outside the session thread, in
-    // Messages as well as in Now.
+    // Chat as well as in Now. AEON-977 (2c33f633d) renamed the tab and its panel.
     await panel.getByRole('tab', { name: /Chat/ }).click()
-    await expect(panel.getByRole('tabpanel', { name: /Messages/ }).getByRole('region', { name: 'Conversation' })).toBeVisible()
+    const chat = panel.getByRole('tabpanel', { name: /Chat/ })
+    // The same change gives an empty session thread its own Chat empty state.
+    await expect(chat.getByRole('heading', { name: 'Chat with Backlog worker 1', exact: true })).toBeVisible()
+    await expect(chat.getByRole('region', { name: 'Conversation' })).toHaveCount(0)
+    await expect(chat.getByRole('textbox', { name: 'Message to Backlog worker 1', exact: true })).toBeVisible()
     await expect(inbox).toHaveCount(0)
     await expect(panel).not.toContainText('Shared inbox')
     await expect(panel.locator('.now-block')).not.toContainText('Shared inbox')
@@ -64,7 +68,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     await expect(desk.getByLabel('Open decisions')).toHaveText('1')
     await expect(page.getByTestId('agents-desk-item-a:bk5-approval')).toHaveAttribute('href', '/decision-desk?item=a:bk5-approval')
     await expect(panel.locator('.head-top .agent-state-label')).toHaveText('Awaiting approval')
-    // The panel reopens on the remembered tab (Messages, above); evidence lives in Overview.
+    // The panel reopens on the remembered tab (Chat, above); evidence lives in Overview.
     await panel.getByRole('tab', { name: 'Overview' }).click()
     await expect(panel.locator('.now-step')).toContainText('awaiting a person’s decision')
     await expect(panel.getByRole('region', { name: 'Session state evidence' }).getByRole('link', { name: 'Permission requests' })).toHaveAttribute('href', '/decision-desk')

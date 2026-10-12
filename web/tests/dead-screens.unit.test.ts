@@ -129,6 +129,7 @@ function routeRecords(): Router {
   const empty = { render: () => null }
   const views = (routes: RouteRecordRaw[]): RouteRecordRaw[] => routes.map(route => ({ ...route, ...(route.component ? { component: empty } : {}), ...(route.children ? { children: views(route.children) } : {}) })) as RouteRecordRaw[]
   return sourceModule<{ router: Router }>('router.ts', {
+    './lib/projectSettings': sourceModule('lib/projectSettings.ts', {}),
     'vue-router': { createWebHistory: createMemoryHistory, createRouter: (options: Parameters<typeof createRouter>[0]) => createRouter({ ...options, routes: views(options.routes) }) },
     './lib/brand': { setPageTitle() {} }, './stores/projects': {},
     './stores/session': { useSession: () => ({ identity: { principal: { kind: 'person' } }, refresh: async () => {} }) },

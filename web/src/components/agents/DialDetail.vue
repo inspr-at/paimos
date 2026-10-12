@@ -96,6 +96,10 @@ function boostClear() { if (boost.value) change({ boost_today: null }) }
 watch(harness, () => { paceEditing.value = false; paceNote.value = ''; boostEditing.value = false; boostNote.value = ''; asLocal.value = 'used' })
 const SETTINGS = '/settings/accounts'
 const active = computed(() => props.view.account?.account_id)
+// Pace has its home in Settings › Capacity, at this harness's row; the inline edit writes the
+// same value (AEON-1176 P6, folded into AEON-1209). Per-account settings open the account in use.
+const paceHome = computed(() => `/settings/capacity#pace-${harness.value}`)
+const accountHome = computed(() => active.value ? `${SETTINGS}?${new URLSearchParams({ account: active.value })}` : SETTINGS)
 </script>
 
 <template>
@@ -140,7 +144,7 @@ const active = computed(() => props.view.account?.account_id)
           <div v-if="open('pace')" :id="id('pace')" class="cd-fb" role="group" aria-label="Pace">
             <label class="cap-opt"><input type="radio" :name="`use-${harness}`" :checked="!everything" @change="paceMode('pace')"><span>Stay on pace</span></label>
             <p class="cap-pp"><input class="field n" :value="paceShown" :disabled="everything" inputmode="numeric" maxlength="2" aria-label="Percentage points a day" @focus="paceFocus" @input="paceInput" @blur="paceCommit" @keydown.enter.prevent="paceCommit" @keydown.esc.stop.prevent="paceCancel"> percentage points a day
-              <span class="cap-def">{{ settings.pace.points_per_day === null ? 'default' : `default is ${defaultPoints}` }} · <RouterLink class="link-btn" :to="SETTINGS">edit</RouterLink></span></p>
+              <span class="cap-def">{{ settings.pace.points_per_day === null ? 'default' : `default is ${defaultPoints}` }} · <RouterLink class="link-btn" :to="paceHome" :tabindex="tabbable()">in Capacity</RouterLink></span></p>
             <label class="cap-opt"><input type="radio" :name="`use-${harness}`" :checked="everything" @change="paceMode('everything')"><span>Use everything before the reset</span></label>
             <p class="cap-note" aria-live="polite">{{ paceNote }}</p>
           </div>
@@ -163,7 +167,7 @@ const active = computed(() => props.view.account?.account_id)
             <li v-for="a in view.accounts" :key="a.account_id" :class="{ now: a.account_id === active }"><span class="an">{{ a.label }}</span><span class="au">{{ a.details_redacted || a.used_pct === null ? 'usage private' : `${pct(a.used_pct)} % used${a.limit_used_pct !== null ? ` of ${pct(a.limit_used_pct)} %` : ''}` }}</span><span class="af">{{ a.floor_pct === null || a.details_redacted ? '' : `floor ${pct(a.floor_pct)} %` }}</span></li>
           </ol>
           <span v-else class="cd-acc1">{{ view.account?.label }}</span>
-          <p class="cd-links"><RouterLink v-if="view.accounts.length > 1" class="link-btn" :to="SETTINGS" :tabindex="tabbable()">Per-account settings</RouterLink><RouterLink class="link-btn cd-add" :to="`${SETTINGS}#add-account`" :tabindex="tabbable()"><AppIcon name="plus" :size="11" />Add account</RouterLink></p>
+          <p class="cd-links"><RouterLink v-if="view.accounts.length > 1" class="link-btn" :to="accountHome" :tabindex="tabbable()">Per-account settings</RouterLink><RouterLink class="link-btn cd-add" :to="`${SETTINGS}#add-account`" :tabindex="tabbable()"><AppIcon name="plus" :size="11" />Add account</RouterLink></p>
         </dd>
       </dl>
     </template>

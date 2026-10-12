@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-780: the Agents head is one line whose counts filter Sessions.
+// AEON-780: the Agents head is one line whose counts filter Sessions. The active filter shows as
+// a pill under the Sessions card head (AEON-1209).
 import { expect, test, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
@@ -95,13 +96,14 @@ for (const width of [1440, 390]) {
   })
 }
 
-test('"…" keeps six items; moved actions have their home on the page', async ({ page }) => {
+test('"…" keeps five items; moved actions have their home on the page', async ({ page }) => {
   await setup(page)
   await page.goto('/agents')
   const more = page.locator('.page-head').getByRole('button', { name: 'More agent actions', exact: true })
   await more.click()
   const menu = page.getByRole('menu')
-  await expect(menu.getByRole('menuitem')).toHaveText([/^Model preferences/, /^Usage/, /^Routines/, /^Decision Desk/, /^Agent keys/, /^Agent settings/])
+  // The Decision Desk is a place in the app header (AEON-1209, AEON-1139), not an item here.
+  await expect(menu.getByRole('menuitem')).toHaveText([/^Model preferences/, /^Usage/, /^Routines/, /^Agent keys/, /^Agent settings/])
   await page.keyboard.press('Escape')
   await expect(menu).toHaveCount(0)
   await expect(more).toBeFocused()

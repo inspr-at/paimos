@@ -135,6 +135,20 @@ func (m *Module) rejectWebhook(w http.ResponseWriter, r *http.Request, action, s
 	w.WriteHeader(status)
 }
 
+func (m *Module) logWebhookGaveUp(ctx context.Context, receipt *webhookReceipt, step string, cause error) {
+	logger := m.webhookFailures.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	class := "pending"
+	if cause != nil {
+		class = webhookErrorClass(cause)
+	}
+	logger.WarnContext(ctx, "GitHub webhook delivery gave up", "event", receipt.event, "action", receipt.action,
+		"delivery_id", receipt.id, "step", step, "attempts", receipt.attempts, "outcome", string(webhookGaveUp),
+		"error_class", "retry_exhausted", "cause_class", class)
+}
+
 // closeAfterFailedRead ends the keep-alive connection after a body read that
 // failed or overran its deadline. net/http has already cancelled the
 // connection's context in that read; if it drained the late body and reused

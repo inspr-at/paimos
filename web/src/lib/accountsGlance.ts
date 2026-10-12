@@ -9,6 +9,7 @@ import { readiness } from './computerAccounts.ts'
 import { ago, when, type AccountRow, type CapacityWindow } from './capacity.ts'
 import { hostCapacityReason } from './hostCapacity.ts'
 import type { QuotaWarningSettings } from './quotaWarnings.ts'
+import type { RefreshStatus } from './usePolledData.ts'
 
 export const DEFAULT_QUOTA_THRESHOLDS: Readonly<QuotaWarningSettings> = Object.freeze({ early_percent: 10, urgent_percent: 3 })
 
@@ -184,6 +185,84 @@ export function computerCaptionParts(c: PairingView): { long: string; short: str
   const max = host.policy.maximum_agents
   const count = max ? `${host.running} of ${max}` : `${host.running}`
   return { long: `${state} · ${count} ${max || host.running !== 1 ? 'agents' : 'agent'}`, short: count, tone }
+}
+
+// ---------- The accounts chip on the Agents page (AEON-1209, AEON-1176 P6) ----------
+// The chip in the capacity row names what there is; its popover holds three tiles that
+// open the three parts of Settings, each with its own state words.
+export type GlancePart = 'accounts' | 'computers' | 'capacity'
+export interface GlanceAvailability {
+  state: 'loading' | 'ready' | 'empty' | 'error' | 'forbidden' | 'stale'
+  updatedAt: number | null
+  reason: string
+}
+/** A claim is readable only when every source it needs is readable. Failures keep
+ * last-good values with their oldest timestamp; forbidden reads never show them. */
+export function glanceAvailability(sources: readonly RefreshStatus[], empty = false, now = Date.now()): GlanceAvailability {
+  const denied = sources.find(source => source.state === 'forbidden')
+  if (denied) return { state: 'forbidden', updatedAt: null, reason: denied.error }
+  const unreadable = sources.find(source => source.updatedAt === null && source.state === 'error')
+  if (unreadable) return { state: 'error', updatedAt: null, reason: unreadable.error }
+  if (!sources.length || sources.some(source => source.updatedAt === null)) return { state: 'loading', updatedAt: null, reason: '' }
+  const updatedAt = Math.min(...sources.map(source => source.updatedAt!))
+  const failed = sources.filter(source => source.failures > 0 || source.state === 'error')
+  if (failed.length || now - updatedAt > 45_000) return { state: 'stale', updatedAt, reason: failed.map(source => source.error).filter(Boolean).join(' · ') }
+  return { state: empty ? 'empty' : 'ready', updatedAt, reason: '' }
+}
+export interface GlanceTile { part: GlancePart; title: string; line: string; detail: string; warn: boolean; to: string }
+const counted = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+
+/** "5 accounts · 3 computers"; computers only when accounts are not shown to this person. */
+export function glanceChipText(accounts: number, computers: number, showAccounts: boolean): string {
+  if (!accounts && !computers) return showAccounts ? 'No accounts yet' : 'No computers yet'
+  return showAccounts ? `${counted(accounts, 'account')} · ${counted(computers, 'computer')}` : counted(computers, 'computer')
+}
+
+/** The chip's one flag: sign-ins first (they stop an account), then anything else that needs a person. */
+export function glanceFlag(signins: number, items: GlanceItem[]): string {
+  if (signins) return counted(signins, 'sign-in')
+  return items.length ? `${items.length} ${items.length === 1 ? 'needs' : 'need'} you` : ''
+}
+
+export interface GlanceTilesInput {
+  accounts: OverviewAccount[]; computers: PairingView[]; items: GlanceItem[]; summary: GlanceSummary
+  /** When supplied, the connectivity tile uses only computer-owned evidence. */
+  computerItems?: GlanceItem[]
+  /** Accounts waiting for a new sign-in on their computer. */
+  signins: number
+  /** The plan in words ("5 days · keep auto · no nights"); empty while unread. */
+  pacing: string
+  /** "until 18:00" while the person is away; empty otherwise. */
+  away: string
+  showAccounts: boolean
+}
+/** Accounts, Computers, Capacity. Quota warnings belong to Accounts; sign-in problems and cleanups to Computers. */
+export function glanceTiles(input: GlanceTilesInput): GlanceTile[] {
+  const { accounts, computers, items, summary, signins } = input
+  const quota = items.filter(i => i.kind === 'quota'), fix = (input.computerItems ?? items).filter(i => i.kind !== 'quota')
+  const online = onlineComputers(computers)
+  const vendors = [...new Set(accounts.map(a => a.vendor))]
+  const names = computers.map(c => c.computer_name)
+  const accountsLine = !accounts.length ? 'No accounts yet'
+    : `${summary.ready === summary.total ? `All ${summary.total} ready` : `${summary.ready} of ${summary.total} ready`}${signins ? ` · ${signins} ${signins === 1 ? 'needs' : 'need'} a sign-in` : ''}`
+  const tiles: GlanceTile[] = []
+  if (input.showAccounts) tiles.push({
+    part: 'accounts', title: 'Accounts', line: accountsLine,
+    detail: quota[0]?.name ?? (accounts.length ? vendors.join(', ') : 'Sign in to a harness on a connected computer.'),
+    warn: !!signins || !!quota.length || summary.ready < summary.total, to: '/settings/accounts',
+  })
+  tiles.push({
+    part: 'computers', title: 'Computers',
+    line: fix[0]?.name ?? (computers.length ? `${online} of ${computers.length} online` : 'No computers yet'),
+    detail: computers.length ? `${names.slice(0, 4).join(' · ')}${names.length > 4 ? ` · +${names.length - 4}` : ''}` : 'Connect a computer so agents can run.',
+    warn: !!fix.length, to: '/settings/computers',
+  })
+  if (input.showAccounts) tiles.push({
+    part: 'capacity', title: 'Capacity',
+    line: input.away ? `Away ${input.away}` : input.pacing || 'Your plan',
+    detail: 'Work days, nights, pace and what is kept for you', warn: false, to: '/settings/capacity',
+  })
+  return tiles
 }
 
 // ---------- Settings › Computers: one table, a row per computer, a column per account (AEON-1174, design AEON-1149) ----------

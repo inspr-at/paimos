@@ -212,6 +212,32 @@
     ,
     "browser:tests/aeon-1188-displayhome.spec.ts:with the header folded on a phone, the link opens the Display menu beside New"
     ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:390: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:768: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:dark 1440: head order, the capacity row and no Desk panel"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:dark: hovering a unit shows its − / + in place, wide and tight"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1024 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1024 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:design gate at 1440 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:design gate at 390 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:design gate at 390 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:phone › dark 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:touch targets › 1280 with seven harnesses: the wide row shows −, the number and + as three distinct 44 px targets in every unit"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:touch targets › 390 with seven harnesses: an open plate holds −, the number and + as three distinct 44 px targets"
+    ,
+    "browser:tests/aeon-1209-agents-head.spec.ts:touch targets › 768 with seven harnesses: an open plate holds −, the number and + as three distinct 44 px targets"
+    ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
     ,
     "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
@@ -292,7 +318,7 @@
     ,
     "browser:tests/agents-cleanup.spec.ts:a section preference that lands after a run link keeps Queued open until the person folds it"
     ,
-    "browser:tests/agents-cleanup.spec.ts:a stored open choice opens open, without a flash of the folded line"
+    "browser:tests/agents-cleanup.spec.ts:accounts and computers is one chip whose popover states the state; a stored fold changes nothing"
     ,
     "browser:tests/agents-dial-daily.spec.ts:1024 dark: folding, picking a harness, folds and the info area keep every control put"
     ,
@@ -308,19 +334,17 @@
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: \"● N running (M waiting) ▾\" opens the info area, from the folded dial too, and it is remembered"
     ,
-    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: a flag opens the dial at that harness, and a pick is remembered per person"
-    ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: a harness with no account says so and links to add one"
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: a stale reading never claims the limit, although the server also refuses starts then"
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: an older plan without daily fields still draws the dial"
     ,
-    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: at the limit the flag is red and says where new work goes"
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: at the limit the flag is a gold pause mark and the unit says where new work goes"
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: each row shows its usage lines and pace state in a fixed 88 px row"
     ,
-    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: folded, the dial is one row as high as the other folded cards and flags only what needs attention"
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: folded, the dial is one light control in the capacity row and flags only what needs attention"
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: honest states: no reading is not on pace, and nothing is flagged"
     ,
@@ -335,6 +359,8 @@
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the info area states demand against the dial, with and without waiting work"
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: the old header Boost today is gone and nothing writes to its endpoint"
+    ,
+    "browser:tests/agents-dial-daily.spec.ts:AEON-1036: unfolding opens at what needs attention, and a pick is remembered per person"
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1036: vendor-reported resets are shown, and nothing else is claimed about them"
     ,
@@ -352,7 +378,7 @@
     ,
     "browser:tests/agents-dial-daily.spec.ts:AEON-1166 390 light: at the limit the detail follows Settings › Models and the line keeps every control put"
     ,
-    "browser:tests/agents-dial-daily.spec.ts:phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list"
+    "browser:tests/agents-dial-daily.spec.ts:phone › AEON-1036: a tap lifts a unit onto its plate; every target reaches 44 px and the detail sits under the list"
     ,
     "browser:tests/agents-dial-daily.spec.ts:settings written from the detail › AEON-1166: at the limit the dial follows Settings › Models: one line and a link, no choice of its own"
     ,
@@ -378,7 +404,9 @@
     ,
     "browser:tests/agents-dial.spec.ts:AEON-781: an arrow key keeps its own pace; leaving, blur and a disabled end stop a hold"
     ,
-    "browser:tests/agents-dial.spec.ts:AEON-781: the chevron comes first, folding moves nothing above the body, and the fold follows the person"
+    "browser:tests/agents-dial.spec.ts:AEON-781: the chevron comes first, folding moves nothing in the capacity row, and the fold follows the person"
+    ,
+    "browser:tests/agents-dial.spec.ts:phone touch targets › every dial target reaches 44 px and all seven harnesses stay stable"
     ,
     "browser:tests/agents-harness-status.spec.ts:a blocked harness is a Needs you row with its one fix, beside a ready one at 1600 dark"
     ,
@@ -422,7 +450,7 @@
     ,
     "browser:tests/agents-harness-status.spec.ts:the specific pin_missing command is the row's fix at 390 light"
     ,
-    "browser:tests/agents-head.spec.ts:\"…\" keeps six items; moved actions have their home on the page"
+    "browser:tests/agents-head.spec.ts:\"…\" keeps five items; moved actions have their home on the page"
     ,
     "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 1600px"
     ,
@@ -432,9 +460,7 @@
     ,
     "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 390px with reported metadata"
     ,
-    "browser:tests/agents-worker-tree.spec.ts:a live-line count and the menu History open a folded Sessions section without a preference write"
-    ,
-    "browser:tests/agents-worker-tree.spec.ts:a live-line count keeps Sessions open when the section preference lands after the jump"
+    "browser:tests/agents-worker-tree.spec.ts:a Sessions fold stored before shows the list; a count and History lead straight into it without a preference write"
     ,
     "browser:tests/agents-worker-tree.spec.ts:the footer problem jump switches a Working filter to Problem and focuses the folded row"
     ,
@@ -5202,53 +5228,33 @@
     ,
     {"kind":"browser","file":"tests/account-use-matrix.spec.ts","name":"where 390 light › where 390 light: the design's checks hold on the built page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/accounts-card-fit.spec.ts","name":"accounts and computers fit every width, panel open and closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/accounts-card-fit.spec.ts","name":"the capacity row and the accounts popover fit every width, panel open and closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 1020 to 950px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away shows on the chip; Back now in the popover ends it with one click","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 1100 to 1030px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"a problem: the chip flags it, the line names it, and Verify again fixes it from the popover","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 700 to 700px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"an approval link opens the popover once and offers that account's check","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 780 to 710px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"calm: the chip names what there is; its popover says all is ready and offers the three parts","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 860 to 790px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"each tile opens its part of Settings","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away and Back now stay put through fold and unfold from 940 to 870px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"loading, a failed read with Try again, and an empty workspace each say so","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away stays in the head with Back now, and one click ends it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"people without account management see the problem, not Verify again","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away with an expired verification keeps the head inside the card and its controls put at 640, 720 and 800","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the chip and the popover keep their controls put through verify and refresh at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Needs you lists what blocks agents with the fix or its details; a low-quota notice moves here with its urgency","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the chip and the popover keep their controls put through verify and refresh at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"a name, a cell and Details open the right panel in Settings","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the chip and the popover keep their controls put through verify and refresh at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"a problem: the line names the first thing and counts the rest, and Verify again fixes it from the folded head","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the chip and the popover keep their controls put through verify and refresh at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"an approval link shows the folded section once and offers that account's check; the fold preference stays","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the chip and the popover keep their controls put through verify and refresh at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"calm: one status line folded; unfolded, nothing needs you and the grid names every sign-in","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"loading, a failed read with Try again, and an empty workspace each say so in the status place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"people without account management see Details, not Verify again","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head keeps its height, and the toggle stays put, whether or not Verify again is shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the wide status scan encounters Away beside Verify again","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the chip and the popover keep their controls put through verify and refresh at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-quota-bar.spec.ts","name":"1024 dark › accounts 1024 dark: Remove and End now leave “Agents may use it” and everything below in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5505,6 +5511,62 @@
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"the Filters sheet filters and links to the Display menu at 768px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-1188-displayhome.spec.ts","name":"with the header folded on a phone, the link opens the Display menu beside New","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1024: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1024: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1440: the Sessions card head sticks inside its card with the same box and insides","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"1440: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"390: the Sessions card head sticks inside its card with the same box and insides","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"390: the head, the capacity row and the card head stay put through search, filters, Display and the accounts popover","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"390: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"768: with all seven harnesses every unit's −, number and +, the fold and the live state stay reachable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"AEON-1209 G7: the chip and each tile tell loading, unreadable, stale, forbidden and authorized empty apart","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"F and / search this list; typing in the search only types; Esc clears, then leaves","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"a search that hides the session under the cursor moves the cursor to a match; Enter and p never act on a hidden session","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"dark 1440: head order, the capacity row and no Desk panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"dark: hovering a unit shows its − / + in place, wide and tight","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"design gate at 1024 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"design gate at 1024 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"design gate at 1440 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"design gate at 1440 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"design gate at 390 dark: no edge accents, SVG icons only, English only, no sideways scroll, through every state","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"design gate at 390 light: no edge accents, SVG icons only, English only, no sideways scroll, through every state","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"light 1440: head order, the capacity row and no Desk panel","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"light: hovering a unit shows its − / + in place, wide and tight","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"phone › dark 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"phone › light 390: no sideways scroll, 44 px targets in the head, the capacity row and the card head","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"the accounts chip opens three tiles that lead into Settings; its tooltip stays away while open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"touch targets › 1280 with seven harnesses: the wide row shows −, the number and + as three distinct 44 px targets in every unit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"touch targets › 390 with seven harnesses: an open plate holds −, the number and + as three distinct 44 px targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"touch targets › 390: an open plate holds −, the number and + as three distinct 44 px targets","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1209-agents-head.spec.ts","name":"touch targets › 768 with seven harnesses: an open plate holds −, the number and + as three distinct 44 px targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -6050,9 +6112,7 @@
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a section preference that lands after a run link keeps Queued open until the person folds it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a stored open choice opens open, without a flash of the folded line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"accounts and computers fold into one calm line, remembered per person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"accounts and computers is one chip whose popover states the state; a stored fold changes nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"1024 dark: folding, picking a harness, folds and the info area keep every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6068,19 +6128,17 @@
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: \"● N running (M waiting) ▾\" opens the info area, from the folded dial too, and it is remembered","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a flag opens the dial at that harness, and a pick is remembered per person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a harness with no account says so and links to add one","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: a stale reading never claims the limit, although the server also refuses starts then","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: an older plan without daily fields still draws the dial","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: at the limit the flag is red and says where new work goes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: at the limit the flag is a gold pause mark and the unit says where new work goes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: each row shows its usage lines and pace state in a fixed 88 px row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: folded, the dial is one row as high as the other folded cards and flags only what needs attention","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: folded, the dial is one light control in the capacity row and flags only what needs attention","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: honest states: no reading is not on pace, and nothing is flagged","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6095,6 +6153,8 @@
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the info area states demand against the dial, with and without waiting work","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: the old header Boost today is gone and nothing writes to its endpoint","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: unfolding opens at what needs attention, and a pick is remembered per person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1036: vendor-reported resets are shown, and nothing else is claimed about them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6112,7 +6172,7 @@
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"AEON-1166 390 light: at the limit the detail follows Settings › Models and the line keeps every control put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"phone › AEON-1036: icons with counts open the dial at their harness; every target is 44 px and the detail sits under the list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"phone › AEON-1036: a tap lifts a unit onto its plate; every target reaches 44 px and the detail sits under the list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial-daily.spec.ts","name":"settings written from the detail › AEON-1166: at the limit the dial follows Settings › Models: one line and a link, no choice of its own","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6154,7 +6214,7 @@
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: an arrow key keeps its own pace; leaving, blur and a disabled end stop a hold","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: the chevron comes first, folding moves nothing above the body, and the fold follows the person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: the chevron comes first, folding moves nothing in the capacity row, and the fold follows the person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"a changed plan revision discards a typed draft even when its value is unchanged","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6174,7 +6234,7 @@
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"long German waiting details wrap at every evidence width and theme","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"phone touch targets › every dial target is at least 44 px and all seven harnesses stay stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"phone touch targets › every dial target reaches 44 px and all seven harnesses stay stable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"running agents hover, look and blink with motion allowed, and stop under reduced motion","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6284,7 +6344,7 @@
     ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific pin_missing command is the row's fix at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-head.spec.ts","name":"\"…\" keeps six items; moved actions have their home on the page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-head.spec.ts","name":"\"…\" keeps five items; moved actions have their home on the page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-head.spec.ts","name":"one head line; a count filters Sessions, keeps ancestors as context and clears with × or Esc at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6370,21 +6430,19 @@
     ,
     {"kind":"browser","file":"tests/agents-phone-rows.spec.ts","name":"phone session rows are compact and aligned at 430px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Manage opens Settings / Accounts","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"chores preserve the sign-in and its command while approvals live in the desk","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"nothing waits: no chores, a compact live line, and Accounts and computers as one status line","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"sign-in prompts only for a confirmed sign-out of that account","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"the Accounts tile opens Settings / Accounts","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a Sessions fold stored before shows the list; a count and History lead straight into it without a preference write","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a deep problem marks every ancestor, folded parents name it, and arrow keys fold and walk the tree","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a lead with only stopped workers opens history only through its stopped count","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a live-line count and the menu History open a folded Sessions section without a preference write","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a live-line count keeps Sessions open when the section preference lands after the jump","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a stopped lead links its successor instead of claiming live workers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10160,11 +10218,11 @@
     ,
     {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Agents working harness modes stay put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Sessions tree and section folds keep their controls put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Sessions tree folds and History keep their controls put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Sessions tree and section folds keep their controls put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Sessions tree folds and History keep their controls put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Sessions tree and section folds keep their controls put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Sessions tree folds and History keep their controls put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/no-shift-agents.spec.ts","name":"Stop now menu and Pause dialog stay put through the session series at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -15700,6 +15758,16 @@
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > treats provisional windows as unknown and does not rank unmeasured zero as the greatest allowance","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"AEON-1209: a multi-source claim requires every read, preserves stale timestamps and hides forbidden values","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the accounts chip and its tiles > names what there is, and flags sign-ins before anything else","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the accounts chip and its tiles > opens the three parts of Settings, each with its own state words","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the accounts chip and its tiles > puts a low quota on Accounts and a sign-in problem on Computers, both as warnings","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the accounts chip and its tiles > shows only Computers to someone who may not read accounts, and Away on Capacity","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not call a computer that stopped reporting broken, and does not ask for action while a repin settles","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not count a draining account or an account on Hold as ready","tier":"GATED-FULL"}
@@ -15862,7 +15930,7 @@
     ,
     {"kind":"vitest","file":"tests/agents-after-write.unit.test.ts","name":"AEON-623: an initial service or parse failure is not an empty inventory","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/agents-after-write.unit.test.ts","name":"AEON-623: only explicit optional pairing access denial becomes an empty successful read","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/agents-after-write.unit.test.ts","name":"AEON-623: explicit pairing access denial remains forbidden","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-after-write.unit.test.ts","name":"Cancel run: no older read brings queued or its held capacity back","tier":"GATED-FULL"}
     ,
@@ -16170,6 +16238,8 @@
     ,
     {"kind":"vitest","file":"tests/capacity-pace.unit.test.ts","name":"the stored pace > follows the default when the number equals it, keeps the number under \"use everything\", and reads back as the choice","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/capacity-reset.unit.test.ts","name":"AEON-1209: a refused computer read stays forbidden and never becomes a successful empty inventory","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/capacity-reset.unit.test.ts","name":"clears person-owned snapshots and load state before a failed read after clearPermissions","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/capacity-reset.unit.test.ts","name":"clears person-owned snapshots and load state before a failed read after resetPositions","tier":"ESSENTIAL"}
@@ -16187,6 +16257,8 @@
     {"kind":"vitest","file":"tests/capacity-reset.unit.test.ts","name":"refreshes pairing after a write without joining an older inventory read","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/capacity-reset.unit.test.ts","name":"reports a failed pairing refresh while retaining the current identity snapshot","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/clip-tip.unit.test.ts","name":"a phone selection hold suppresses only its own row and pointer click","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/clip-tip.unit.test.ts","name":"detects horizontal ellipsis and vertical clamps, excluding hidden and fitting text","tier":"GATED-FULL"}
     ,

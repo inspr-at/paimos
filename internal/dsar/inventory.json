@@ -651,6 +651,31 @@
       "table": "delivery_ship_settings"
     },
     {
+      "classification": "review",
+      "columns": {
+        "action": "metadata",
+        "attempts": "metadata",
+        "checkpoints": "metadata",
+        "delivery_id": "metadata",
+        "event": "metadata",
+        "finished_at": "metadata",
+        "flow_runs": "metadata",
+        "installation_id": "personal",
+        "last_error_class": "metadata",
+        "last_step": "metadata",
+        "next_attempt_at": "metadata",
+        "payload": "review",
+        "payload_sha256": "metadata",
+        "received_at": "metadata",
+        "repository": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_webhook_receipts"
+    },
+    {
       "classification": "metadata",
       "columns": {
         "claimant_id": "personal",

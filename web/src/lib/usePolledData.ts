@@ -12,7 +12,7 @@ export function refreshStatus(previous: RefreshStatus, result: { ok: true; at: n
   if (result.ok) return { state: 'ready', failures: 0, updatedAt: result.at, error: '' }
   const failures = previous.failures + 1
   return {
-    state: result.forbidden && previous.updatedAt === null ? 'forbidden' : previous.updatedAt === null || failures >= 3 ? 'error' : 'ready',
+    state: result.forbidden || previous.state === 'forbidden' ? 'forbidden' : previous.updatedAt === null || failures >= 3 ? 'error' : 'ready',
     failures, updatedAt: previous.updatedAt, error: result.error,
   }
 }
