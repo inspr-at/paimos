@@ -80,8 +80,13 @@ meaningful. No production predicate, permission or audit is disabled.
 The previous-image harness checks the latest published release's reads on the
 candidate schema and checks activated empty and denied pools.
 The pinned release's embedded principal-entry migration identifies whether it
-supports the capability. Supported releases must return only a catalog preview
-for an empty pool, refuse denied context selection and account hand-outs, and
+supports the capability. Before Models v2, supported releases must return only
+a catalog preview for an empty pool. Releases embedding the Models v2 migration
+must instead return no selected profile, no preview or executable command, and
+the exact no-qualified-account reason with `owner_required`. Their identity-only
+catalog bootstrap is followed by one explicitly seeded disposable Codex profile
+before activation; it creates no account grant or saved daily setting.
+Both contracts must refuse denied context selection and account hand-outs, and
 leave reservations, claims, starts and background state unchanged. The rollback
 checks use Release 128 (`v261009095632.0.0`), pinned to its published image digest.
 Both probes seed and migrate separate fresh disposable databases, even when the
