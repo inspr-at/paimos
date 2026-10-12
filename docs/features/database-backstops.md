@@ -55,3 +55,13 @@ not request additional privileges for this logging setting. PostgreSQL documents
 [role/database defaults](https://www.postgresql.org/docs/18/sql-alterrole.html),
 [timeout semantics](https://www.postgresql.org/docs/18/runtime-config-client.html)
 and the [logging privilege requirement](https://www.postgresql.org/docs/18/runtime-config-logging.html).
+
+Validation for AEON-1230 passed the database backstop/stream/backfill behavior
+test, work-kind count parity, concurrent-index crash recovery, both negative
+controls, all 22 work-kind browser cases and all 42 merge-main static checks.
+The full affected Go run passed 126 packages; failed schema/fixture cases in
+20 further packages passed focused retries after contract generation and with
+parallel cloning tested separately at its original eight-way concurrency.
+The remaining planning performance guard also failed on unchanged base
+`f95e4d39e`: 206.845 ms against 200 ms, versus 204.071 ms with this change.
+Its assertions and budget remain unchanged.
