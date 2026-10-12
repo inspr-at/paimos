@@ -162,7 +162,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "19 passed (24.6s)",
       "pass_lines": [
@@ -198,7 +198,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2607 via local-heavy.sh after remote capacity refusal",
+      "location": "local test host via local-heavy.sh after remote capacity refusal",
       "exit_code": 0,
       "summary_line": "21 passed (39.1s)",
       "pass_lines": [
@@ -236,7 +236,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2607 via local-heavy.sh after remote capacity refusal",
+      "location": "local test host via local-heavy.sh after remote capacity refusal",
       "exit_code": 0,
       "summary_line": "36 passed (32.7s)",
       "pass_lines": [
@@ -289,7 +289,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2607 via local-heavy.sh after remote capacity refusal",
+      "location": "local test host via local-heavy.sh after remote capacity refusal",
       "exit_code": 0,
       "summary_line": "47 passed (57.0s)",
       "pass_lines": [
@@ -353,7 +353,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2607 via local-heavy.sh after remote capacity refusal",
+      "location": "local test host via local-heavy.sh after remote capacity refusal",
       "exit_code": 0,
       "summary_line": "44 passed (45.7s)",
       "pass_lines": [
@@ -414,7 +414,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2607 via local-heavy.sh after remote capacity refusal",
+      "location": "local test host via local-heavy.sh after remote capacity refusal",
       "exit_code": 0,
       "summary_line": "25 passed (35.9s)",
       "pass_lines": [
@@ -457,7 +457,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "13 passed (22.4s)",
       "pass_lines": [
@@ -488,7 +488,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "14 passed (21.2s)",
       "pass_lines": [
@@ -519,7 +519,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "17 passed (22.0s)",
       "pass_lines": [
@@ -554,7 +554,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "21 passed (18.3s)",
       "pass_lines": [
@@ -594,7 +594,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "25 passed (41.3s)",
       "pass_lines": [
@@ -637,7 +637,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "29 passed (32.1s)",
       "pass_lines": [
@@ -683,7 +683,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2607 via local-heavy.sh after remote capacity refusal",
+      "location": "local test host via local-heavy.sh after remote capacity refusal",
       "exit_code": 0,
       "summary_line": "8 passed (9.4s)",
       "pass_lines": [
@@ -709,7 +709,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "20 passed (18.5s)",
       "pass_lines": [
@@ -748,7 +748,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "14 passed (21.0s)",
       "pass_lines": [
@@ -779,7 +779,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "17 passed (15.8s)",
       "pass_lines": [
@@ -813,7 +813,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "12 passed (17.1s)",
       "pass_lines": [
@@ -842,7 +842,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "28 passed (2.3m)",
       "pass_lines": [
@@ -887,7 +887,7 @@
       ],
       "workers": 1,
       "headless": true,
-      "location": "mbp2606",
+      "location": "remote test host",
       "exit_code": 0,
       "summary_line": "23 passed (47.3s)",
       "pass_lines": [
