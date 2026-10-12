@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -110,5 +111,23 @@ func TestGitHubReadRetainsMissingActionsPermission(t *testing.T) {
 	var response *GitHubHTTPError
 	if !errors.As(err, &response) || response.StatusCode != 403 || !response.ActionsReadRequired || !errors.Is(err, ErrUnavailable) || strings.Contains(err.Error(), "private response") {
 		t.Fatalf("permission metadata lost: %v", err)
+	}
+	for _, tc := range []struct {
+		name      string
+		cause     error
+		transient bool
+	}{
+		{"timeout", context.DeadlineExceeded, true},
+		{"connection reset", syscall.ECONNRESET, true},
+		{"truncated transport", io.ErrUnexpectedEOF, true},
+		{"permanent transport refusal", errors.New("private transport detail"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			app.Client.Transport = transportFunc(func(*http.Request) (*http.Response, error) { return nil, tc.cause })
+			err := app.requestBounded(t.Context(), "fixture-only", "GET", "/repos/example/test/actions/runs", nil, nil, 1024)
+			if !errors.Is(err, ErrUnavailable) || IsTransientGitHubError(err) != tc.transient || strings.Contains(err.Error(), "private") || strings.Contains(err.Error(), "https://") {
+				t.Fatalf("transport classification/redaction failed: %v", err)
+			}
+		})
 	}
 }

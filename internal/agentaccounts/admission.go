@@ -70,7 +70,16 @@ func admissionInputs(ctx context.Context, tx pgx.Tx, a Account, all []Window, no
 		return nil, waitFor("offline"), nil
 	}
 	if slots >= a.MaxParallel {
-		return nil, waitFor("capacity"), nil
+		wait := waitFor("capacity")
+		var unconfirmed bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs WHERE account_id=$1
+ AND trace->'work_lifecycle_release'->>'exit_unconfirmed'='true')`, a.ID).Scan(&unconfirmed); err != nil {
+			return nil, nil, err
+		}
+		if unconfirmed {
+			wait.HostReason = "managed_exit_unconfirmed"
+		}
+		return nil, wait, nil
 	}
 	var approved bool
 	err := tx.QueryRow(ctx, `SELECT NOT EXISTS(

@@ -9736,6 +9736,14 @@
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"AEON-1195: focus cycles retain the same lead DOM rows, order and controls during delayed refresh","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"AEON-1256: the lead card collapses to its header row and stays collapsed after a reload at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"AEON-1256: the lead card collapses to its header row and stays collapsed after a reload at 400","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"AEON-1256: the stations row has one height with and without sub-labels at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"AEON-1256: the stations row has one height with and without sub-labels at 400","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}

@@ -141,7 +141,7 @@ func requireRoutineCapacityInputs(ctx context.Context, tx pgx.Tx, owner, runID, 
 	var host string
 	var running int
 	err = tx.QueryRow(ctx, `SELECT c.id::text,c.capacity_signals,c.capacity_policy,c.capacity_reported_at,
- (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.id<>$4::uuid AND (r.status IN ('starting','running','waiting') OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))
+ (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.account_id IS NOT NULL AND r.id<>$4::uuid AND (r.status IN ('starting','running','waiting') OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))
  FROM agent_pairing_enrollments e JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
  JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
  WHERE e.account_id=$1 AND c.principal_id=$3 AND e.state='connected' AND e.ongoing_approved_at IS NOT NULL

@@ -73,8 +73,8 @@ type BackfillResult struct {
 	Jobs      int  `json:"jobs"`
 	Truncated bool `json:"truncated"`
 	// RetryAt is the earliest time a deferred jobs read should be tried again.
-	// Set only when nothing is eligible now but a failed read is still inside
-	// its retry hour. Callers stop only when state is done.
+	// A failed read defers the source until this persisted deadline.
+	// Callers stop only when state is done.
 	RetryAt *time.Time `json:"retry_at,omitempty"`
 }
 
@@ -487,24 +487,15 @@ func (m *Module) metricBackfillStep(ctx context.Context, p tenant.Principal, pro
 			return err
 		}
 		// Runs and pulls are in. Stay on the jobs phase while any first
-		// attempt still lacks a complete job map, including one whose read
-		// failed and is waiting out its hour. The cursor records that, so a
+		// attempt still lacks a complete job map. The cursor records that, so a
 		// caller that stops at done cannot stop early.
 		if next.Phase == "done" {
 			pending, err := jobWorklistTx(ctx, tx, current, now, 1)
 			if err != nil {
 				return err
 			}
-			unfinished, err := jobDeferredSinceTx(ctx, tx, current, now)
-			if err != nil {
-				return err
-			}
-			if len(pending) > 0 || unfinished != nil {
+			if len(pending) > 0 {
 				next.Phase = "jobs"
-				if len(pending) == 0 && unfinished != nil {
-					t := unfinished.Add(jobFillRetry)
-					retryAt = &t
-				}
 			}
 		}
 		raw, err := json.Marshal(next)
@@ -680,10 +671,7 @@ func (m *Module) reportMetricFacts(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, map[string]int{"stored": stored})
 }
 
-const (
-	jobFillBudget = 40 // GitHub reads per step
-	jobFillRetry  = time.Hour
-)
+const jobFillBudget = 40 // GitHub reads per step
 
 // jobFactsMissing matches a run whose job map is absent or not complete.
 // A legacy flat map (no "complete": true) is missing and is read once more.
@@ -754,17 +742,17 @@ func startPreflightCatchup(cursor *backfillCursor, source *metricSourceRow) back
 // the CI workflow that still lack a complete map, newest first, within one
 // step's budget. The map holds every job conclusion, so a later project's
 // checks are present or truly missing. A run whose jobs GitHub could not
-// return is tried again after an hour. While any such retry is outstanding
-// the phase stays jobs and retry_at names when to call; state done means
-// nothing is left. Authority is checked again in the write transaction.
+// return is tried again at the source's persisted retry deadline. While any
+// retry is outstanding the phase stays jobs and retry_at names when to call;
+// state done means nothing is left. Authority is checked again in the write
+// transaction.
 
 func jobWorklistTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now time.Time, limit int) ([]int64, error) {
 	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
 	rows, err := tx.Query(ctx, `SELECT run_id FROM delivery_metric_runs
 		WHERE repository=$1 AND attempt=1 AND event IN ('pull_request','merge_group') AND completed_at>=$2
 		AND regexp_replace(workflow_path,'^.*/','')=$3 AND `+jobFactsMissing+`
-		AND (jobs_failed_at IS NULL OR jobs_failed_at<=$4)
-		ORDER BY completed_at DESC LIMIT $5`, source.Repository, from, path.Base(source.CIWorkflow), now.Add(-jobFillRetry), limit)
+		ORDER BY completed_at DESC LIMIT $4`, source.Repository, from, path.Base(source.CIWorkflow), limit)
 	if err != nil {
 		return nil, err
 	}
@@ -778,19 +766,6 @@ func jobWorklistTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now 
 		out = append(out, id)
 	}
 	return out, rows.Err()
-}
-
-// jobDeferredSinceTx is the earliest jobs_failed_at of a run that still lacks
-// a complete map and is inside its retry hour. Nil when nothing is waiting.
-func jobDeferredSinceTx(ctx context.Context, tx pgx.Tx, source *metricSourceRow, now time.Time) (*time.Time, error) {
-	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
-	var at *time.Time
-	err := tx.QueryRow(ctx, `SELECT min(jobs_failed_at) FROM delivery_metric_runs
-		WHERE repository=$1 AND attempt=1 AND event IN ('pull_request','merge_group') AND completed_at>=$2
-		AND regexp_replace(workflow_path,'^.*/','')=$3 AND `+jobFactsMissing+`
-		AND jobs_failed_at IS NOT NULL AND jobs_failed_at>$4`,
-		source.Repository, from, path.Base(source.CIWorkflow), now.Add(-jobFillRetry)).Scan(&at)
-	return at, err
 }
 
 func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project string, source *metricSourceRow, reader metricsReader, cursor *backfillCursor, now time.Time) (BackfillResult, error) {
@@ -821,7 +796,12 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 				f, err := readJobFacts(counted, id, 1)
 				if err != nil {
 					failedRuns = append(failedRuns, id)
-					readFailure = err
+					// Actions refusals take priority; otherwise retain a transient
+					// failure so a later ordinary error cannot lengthen its retry.
+					if readFailure == nil || metricError(err, now).Reason == "actions_read_missing" ||
+						(metricError(readFailure, now).Reason != "actions_read_missing" && crossreview.IsTransientGitHubError(err)) {
+						readFailure = err
+					}
 					continue
 				}
 				facts[id] = f
@@ -872,23 +852,14 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 				return err
 			}
 		}
-		permissionFailure := readFailure != nil && metricError(readFailure, at).Reason == "actions_read_missing"
 		for _, id := range failedRuns {
-			// A missing App permission is repository-wide. The source's 30-minute
-			// retry owns this delay, rather than each run's ordinary retry hour.
-			var failedAt *time.Time
-			if !permissionFailure {
-				failedAt = &at
-			}
-			if _, err = tx.Exec(ctx, `UPDATE delivery_metric_runs SET jobs_failed_at=$3 WHERE repository=$1 AND run_id=$2 AND attempt=1`, source.Repository, id, failedAt); err != nil {
+			// Keep the diagnostic timestamp; the source deadline controls retries
+			// for every error class, with no extra fixed per-run delay.
+			if _, err = tx.Exec(ctx, `UPDATE delivery_metric_runs SET jobs_failed_at=$3 WHERE repository=$1 AND run_id=$2 AND attempt=1`, source.Repository, id, at); err != nil {
 				return err
 			}
 		}
 		pending, err := jobWorklistTx(ctx, tx, current, now, 1)
-		if err != nil {
-			return err
-		}
-		unfinished, err := jobDeferredSinceTx(ctx, tx, current, now)
 		if err != nil {
 			return err
 		}
@@ -898,13 +869,9 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 		stored.Phase = "done"
 		result.State, result.Phase = "done", "done"
 		result.RetryAt = nil
-		if len(pending) > 0 || unfinished != nil {
+		if len(pending) > 0 {
 			stored.Phase = "jobs"
 			result.State, result.Phase = "running", "jobs"
-			if len(pending) == 0 && unfinished != nil {
-				t := unfinished.Add(jobFillRetry)
-				result.RetryAt = &t
-			}
 		}
 		raw, err := json.Marshal(stored)
 		if err != nil {
@@ -912,14 +879,13 @@ func (m *Module) fillJobs(ctx context.Context, p tenant.Principal, project strin
 		}
 		var readError []byte
 		if readFailure != nil {
-			readError, err = json.Marshal(metricError(readFailure, at))
+			diagnostic := metricError(readFailure, at)
+			readError, err = json.Marshal(diagnostic)
 			if err != nil {
 				return err
 			}
-			if permissionFailure {
-				retry := at.Add(30 * time.Minute)
-				result.RetryAt = &retry
-			}
+			retry := metricRetry(readFailure, diagnostic, current)
+			result.RetryAt = &retry
 		}
 		if _, err = tx.Exec(ctx, `UPDATE delivery_metric_sources SET backfill_cursor=$2,backfill_revision=backfill_revision+1,last_read_error=$3,backfill_retry_at=$4,backfill_pending=$5 WHERE project_id=$1`, project, raw, readError, result.RetryAt, result.State != "done"); err != nil {
 			return err

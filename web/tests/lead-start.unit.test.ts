@@ -27,7 +27,10 @@ function environment(initial = fresh()) {
     '../../lib/toast': { toast: vi.fn() },
     '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) },
     '../../lib/useLeadSummary': { useLeadSummary: () => ({ lead: current, band: computed(() => leadAPI.leadBand(current.value, 'AIT', 0)), leadSession: ref(null), workers: ref([]), workersKnown: ref(true), workersPartial: ref(false), stations: ref([]), questions: ref([]), questionsPartial: ref(false) }) },
-    '../../lib/leadCardFold': { useLeadCardFold: () => ({ ready: ref(true), collapsed: ref(false), moving: ref(false), toggle() {}, settle() {} }) },
+    '../../lib/leadCardFold': {
+      useLeadCardFold: () => ({ ready: ref(true), collapsed: ref(false), moving: ref(false), toggle() {}, settle() {} }),
+      useLeadPanelCollapse: () => ({ ready: ref(true), collapsed: ref(false), moving: ref(false), toggle() {}, settle() {} }),
+    },
   }
   return { current, start, pause, open, modules }
 }

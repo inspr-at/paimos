@@ -6577,6 +6577,39 @@
           "group": "fixes"
         }
       ]
+    },
+    "261012211543.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 131,
+      "snapshot_sha256": "5dac47085d4fdecc35c44e3df7a2e44bfdec59280931cc84dd2a69a88edb15ca",
+      "captured_at": "2026-10-12T21:20:55Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-1251",
+          "pill_en": "Model starts unblocked",
+          "pill_de": "Modellstarts wieder frei",
+          "benefit_en": "Routines and starts from PAIMOS pick an available model again instead of waiting with no reason.",
+          "benefit_de": "Routinen und Starts aus PAIMOS wählen wieder ein verfügbares Modell, statt ohne Grund zu warten.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1252",
+          "pill_en": "Clear GitHub access errors",
+          "pill_de": "Klare GitHub-Zugriffsfehler",
+          "benefit_en": "When GitHub refuses access to Actions, the delivery history names the missing permission and stops retrying every few seconds.",
+          "benefit_de": "Verweigert GitHub den Zugriff auf Actions, nennt die Lieferhistorie die fehlende Berechtigung und versucht es nicht mehr alle paar Sekunden erneut.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-1256",
+          "pill_en": "Collapsible lead panel",
+          "pill_de": "Einklappbares Lead-Panel",
+          "benefit_en": "The lead panel on a project page can be collapsed to its header, and reserved space beneath its counters reduces page movement when ticket labels appear.",
+          "benefit_de": "Das Lead-Panel auf einer Projektseite lässt sich auf seine Kopfzeile einklappen, und reservierter Platz unter den Zählern verringert Seitensprünge, wenn Ticket-Bezeichnungen erscheinen.",
+          "group": "features"
+        }
+      ]
     }
   }
 }

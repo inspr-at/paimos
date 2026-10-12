@@ -207,7 +207,9 @@ are partial and name how many runs lack job facts. The backfill lists the CI wor
 nightly workflow when it differs, and `ci-preflight.yml` on a fresh backfill. It ends with a
 jobs pass (`phase: jobs`) that reads the jobs of first attempts whose map is not complete, at
 most 40 GitHub reads a step, newest first. A run whose jobs GitHub could not return is not
-eligible again until an hour after the failure. While any such retry is still outstanding the
+eligible again until the source's persisted retry deadline. Partial failures use the same
+bounded exponential backoff as other history reads, with short jittered retries for transient
+errors and priority for missing Actions permissions. While any retry is still outstanding the
 step stays `state: running`, `phase: jobs`, and names `retry_at`. A caller stops only when
 `state` is `done`. When nothing is unfinished the pass is done and does not read GitHub again.
 Nothing readable at all answers 502. A deployment whose backfill finished before preflight was

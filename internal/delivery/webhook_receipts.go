@@ -179,11 +179,18 @@ func (m *Module) saveWebhook(ctx context.Context, name, id string, raw []byte, e
 }
 
 func webhookBackoff(attempt int64) time.Duration {
-	delay := 5 * time.Second
-	for n := int64(1); n < attempt && delay < 5*time.Minute; n++ {
+	return webhookErrorBackoff(attempt, nil)
+}
+
+func webhookErrorBackoff(attempt int64, cause error) time.Duration {
+	if crossreview.IsTransientGitHubError(cause) {
+		return shortMetricRetry()
+	}
+	delay := metricRetryBase(metricError(cause, time.Time{}).Reason)
+	for n := int64(1); n < attempt && delay < time.Hour; n++ {
 		delay *= 2
 	}
-	return min(delay, 5*time.Minute)
+	return min(delay, time.Hour)
 }
 
 // Session locks serialize a receipt across HTTP requests and replicas without
@@ -307,7 +314,7 @@ func (m *Module) deferWebhook(ctx context.Context, receipt *webhookReceipt, step
 		_, err := tx.Exec(ctx, `UPDATE delivery_webhook_receipts SET next_attempt_at=$2,last_step=$3,last_error_class=$4,
 			finished_at=CASE WHEN $5 THEN $6 ELSE finished_at END,
 			checkpoints=CASE WHEN $5 THEN jsonb_set(checkpoints,ARRAY[$7::text],to_jsonb($8::text)) ELSE checkpoints END
-			WHERE delivery_id=$1`, receipt.id, at.Add(webhookBackoff(receipt.attempts)), failedStep, class, exhausted, at, step, string(webhookGaveUp))
+			WHERE delivery_id=$1`, receipt.id, at.Add(webhookErrorBackoff(receipt.attempts, cause)), failedStep, class, exhausted, at, step, string(webhookGaveUp))
 		return err
 	})
 	if err == nil && exhausted {

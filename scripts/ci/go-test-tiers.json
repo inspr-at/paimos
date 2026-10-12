@@ -690,6 +690,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityEnforcesSchedulesSnapshotsAndResourceStops","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityHostDiagnosticsRequireComputerPersonOwner","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityIngestRouteResetAndRLS","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestCapacityLimitingResetPreservesExistingSprintEnd","tier":"GATED-FULL"}
@@ -2429,6 +2431,8 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestHostCapacityBoundsHeldByWritersWithoutDatabaseChecks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestHostCapacityOwnerRevisionRuntimeAndClaimFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestHostCapacitySeparatesExternalAssignmentsFromManagedRuns","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLaterConnectOnlyApprovalCancelsQueuedVerification","tier":"GATED-FULL"}
     ,
@@ -5760,9 +5764,17 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryFlowWorkflowRunShowsRunningChecks","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryActionsRefusalFromGitHub","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryFirstReadFailurePreservesSelectedWindow","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryPartialJobsPersistGrowingBackoffAndReset","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryPartialJobsRetainTransientAndPermissionPriority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryPermissionRetryCheckAgainAndTenantIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistoryRetryBackoffGrowsAndCaps","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryHistorySourceChangeRejectsOldStepAndResumesAfterRestart","tier":"ESSENTIAL"}
     ,
