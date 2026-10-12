@@ -44,7 +44,7 @@ if(process.argv.includes('version')) {
   const result=spawnSync(process.execPath,[cli,'check','go'],{env,encoding:'utf8',timeout:30_000})
   assert.equal(result.error,undefined)
   assert.equal(result.status,1,result.stderr)
-  assert.match(result.stdout,/FAIL go: "internal\/proof" — "\(package\)"/)
+  assert.match(result.stdout,/FAIL go: "internal\/proof" — "\(package\)"/,result.stderr.slice(-2000))
   assert.match(result.stdout,/enumeration fixture failure/)
   assert.match(result.stderr,/failed \(6\)/)
 })
