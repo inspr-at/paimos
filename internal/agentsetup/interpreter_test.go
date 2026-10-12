@@ -220,6 +220,13 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 				if err == nil {
 					t.Fatal("changed binding accepted")
 				}
+				want := "automatic pin renewal runtime unavailable"
+				if scenario == "launcher during version read" {
+					want = "content changed during renewal"
+				}
+				if !strings.Contains(err.Error(), want) {
+					t.Fatal("renewal refused for the wrong reason", err)
+				}
 			} else if err != nil {
 				t.Fatal(err)
 			}
@@ -241,8 +248,12 @@ func TestCodexNodeUpgradeRenewalFences(t *testing.T) {
 				if !bytes.Equal(raw, after) || journals != 0 {
 					t.Fatal("refused renewal changed the runtime or journal")
 				}
-				if scenario != "identity" && scenario != "launcher during probe" && scenario != "home during probe" && scenario != "launcher during version read" && probes != 0 {
-					t.Fatal("renewal probed before its safety fences")
+				wantProbes := 0
+				if scenario == "identity" || scenario == "launcher during probe" || scenario == "home during probe" || scenario == "launcher during version read" {
+					wantProbes = 1
+				}
+				if probes != wantProbes {
+					t.Fatal("renewal did not reach exactly its intended refusal fence")
 				}
 				return
 			}
