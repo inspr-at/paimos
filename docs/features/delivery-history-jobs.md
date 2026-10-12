@@ -29,6 +29,9 @@ reports the granted permissions. A repository-scoped token requests only
 checks/contents/pull_requests/metadata read, adding Actions read only when already
 granted. No new credential or write grant is needed; tokens are revoked after
 the bounded read. `history_source` records the source of the last successful step.
+The Repository card shows it below its controls; checks explicitly names partial
+history and unavailable attempt/runner-wait metrics. Longer source text grows
+downward without moving Change, More or the history links.
 Grant changes restart the selected history window with the appropriate reader.
 
 The 90-day rate estimate is `ceil(C/100) + C + S + ceil(P/100) + H + Q + 2`
