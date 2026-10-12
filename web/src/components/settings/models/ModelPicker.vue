@@ -94,7 +94,10 @@ const second = (entry: ModelEntry) => entry.replacedBy
             <span v-if="!entry.replacedBy && cant(entry.line)" class="d cant"><AppIcon name="info" :size="12" />{{ routes(entry) }} · {{ cant(entry.line) }}</span>
             <span v-else class="d">{{ second(entry) }}</span>
           </span>
-          <span v-if="entry.replacedBy" />
+          <!-- An older version shows its levels as the current rows do (AEON-1240), only to read: it is never picked. -->
+          <span v-if="entry.replacedBy && entry.efforts.length > 1" class="lvp" data-old-levels><span v-for="effort in entry.efforts" :key="effort.name" class="lvc" :data-eff="effort.name" aria-hidden="true">{{ effort.name }}</span></span>
+          <span v-else-if="entry.replacedBy && entry.efforts.length" class="lvp one" data-old-levels>{{ entry.efforts[0]!.name }}</span>
+          <span v-else-if="entry.replacedBy" />
           <span v-else-if="entry.efforts.length > 1" class="lvp"><span v-for="effort in entry.efforts" :key="effort.name" class="lvc" :data-eff="effort.name" aria-hidden="true" :data-on="effort.name === effortOf(entry) ? '' : undefined" @click.stop="choose(entry, effort.name)">{{ effort.name }}</span></span>
           <span v-else-if="entry.efforts.length" class="lvp one">{{ entry.efforts[0]!.name }}</span>
           <span v-else />

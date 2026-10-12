@@ -440,15 +440,23 @@ const activityLine = (branch: Branch, view: SessionView) => view.session.agent_a
 const workingChildren = (branch: Branch) => descendants(branch).filter(sessionWorking).length
 // Line 2 says what the session works on, or what it asks, or how it ended; never the state word,
 // which lives in the avatar (AEON-1211). A pending control or tier ask leads; an ended row that
-// keeps its place says when it moves to Ended. `view` is the newest copy; the branch places it.
+// keeps its place says when it ended and when it moves to Ended. `view` is the newest copy; the branch places it.
 function lineTwo(branch: Branch, view: SessionView) {
   const lead = view.session.archived_at ? 'Removed' : tierRequestLabel(view) || pendingLabel(view)
   const handedOver = view.session.stopped_at && view.session.handed_over_to_id ? `Handed over to ${lineageName(view.session.handed_over_to_id)}` : ''
+  if (keepsPlace(branch.view)) return [lead, handedOver, endedLine(view)].filter(Boolean).join(' · ')
   const step = handedOver || activityLine(branch, view) || currentStep(view, descendants(branch).filter(countedLive).length, props.now)
   // A word more precise than the badge's ("Stop requested", "Lost contact") opens the line.
   const precise = view.status.label !== STATE_LABEL[view.status.state] && view.status.label !== step ? view.status.label : ''
-  const moves = keepsPlace(branch.view) ? `moves to Ended at ${clockTime(movesAt(view.session))}` : ''
-  return [lead, precise, step, moves].filter(Boolean).join(' · ')
+  return [lead, precise, step].filter(Boolean).join(' · ')
+}
+// A session that ended in the last 10 minutes and keeps its place says so, never its last activity or an
+// estimate (AEON-1240): "Finished 22:20 · moves to Ended at 22:30"; an end it did not choose says which.
+function endedLine(view: SessionView) {
+  const at = Date.parse(view.session.stopped_at ?? '')
+  if (!Number.isFinite(at)) return ''
+  const how = view.status.state === 'stopped' && view.status.label !== STATE_LABEL.stopped ? view.status.label : 'Finished'
+  return `${how} ${clockTime(at)} · moves to Ended at ${clockTime(movesAt(view.session))}`
 }
 // A filter shows every kept child; otherwise the list hides stopped ones until asked.
 const offered = (branch: Branch) => filtering.value ? branch.children.filter(keeps) : candidates(branch)

@@ -198,6 +198,13 @@ function cutTrail(trail: HTMLElement) {
   }
   return false
 }
+// What steps aside leaves sight and the tab order; screen readers keep it (the last rule below).
+function drop(part: HTMLElement) {
+  if (part.dataset.dropped !== undefined) return
+  const tab = part.matches('a[href], button') && !part.hasAttribute('tabindex')
+  if (tab) part.tabIndex = -1
+  part.dataset.dropped = tab ? 'tab' : ''
+}
 function fitTrail(trail: HTMLElement | null, wide: boolean) {
   if (!trail) return
   delete trail.dataset.empty
@@ -206,12 +213,6 @@ function fitTrail(trail: HTMLElement | null, wide: boolean) {
     delete part.dataset.dropped
   }
   if (!wide) return
-  const drop = (part: HTMLElement) => {
-    if (part.dataset.dropped !== undefined) return
-    const tab = part.matches('a[href], button') && !part.hasAttribute('tabindex')
-    if (tab) part.tabIndex = -1
-    part.dataset.dropped = tab ? 'tab' : ''
-  }
   const name = trail.querySelector<HTMLElement>('.crumb-name')
   if (name && name.scrollWidth > name.clientWidth && name.clientWidth < 3 * (parseFloat(getComputedStyle(name).fontSize) || 13.5)) drop(name)
   const parts = [...trail.children] as HTMLElement[]
@@ -225,6 +226,35 @@ function fitTrail(trail: HTMLElement | null, wide: boolean) {
     if (!first) trail.dataset.empty = ''
   }
 }
+// Phones (AEON-1240): a key, the project's chip or a ticket's, shows whole or not at all. It is never clipped by its
+// slot, never half under Search and never ends in an ellipsis; a name may end in one but keeps three characters' room.
+function phoneCut(trail: HTMLElement): boolean {
+  const frame = trail.getBoundingClientRect()
+  for (const part of trail.children) {
+    if (!(part instanceof HTMLElement) || part.dataset.dropped !== undefined) continue
+    const style = getComputedStyle(part), box = part.getBoundingClientRect()
+    if (style.display === 'none' || box.width <= 1) continue
+    const keys = part.matches('.mono-crumb') ? [part] : [...part.querySelectorAll<HTMLElement>('.key-badge')].filter(key => key.dataset.dropped === undefined && getComputedStyle(key).display !== 'none')
+    // The trail is the key's slot; a crumb that hides its overflow narrows it.
+    const left = Math.max(frame.left, style.overflowX === 'hidden' ? box.left : -Infinity), right = Math.min(frame.right, style.overflowX === 'hidden' ? box.right : Infinity)
+    for (const key of keys) {
+      const rect = key.getBoundingClientRect()
+      if (rect.left < left - 0.5 || rect.right > right + 0.5 || key.scrollWidth > key.clientWidth) return true
+    }
+    if (!keys.length && style.textOverflow === 'ellipsis' && part.scrollWidth > part.clientWidth && part.clientWidth < 3 * (parseFloat(style.fontSize) || 13.5)) return true
+  }
+  return false
+}
+// The page names its project and its ticket, so a key that cannot show whole leaves the trail. The project fold keeps
+// its chevron, a full 44 px target; its key stays in its accessible name.
+function dropKeys(trail: HTMLElement) {
+  const parts = [...trail.children].filter((part): part is HTMLElement => part instanceof HTMLElement && getComputedStyle(part).display !== 'none')
+  for (const part of parts) {
+    if (part.matches('.phone-header-fold')) part.querySelectorAll<HTMLElement>('.key-badge').forEach(drop)
+    else drop(part)
+  }
+  if (parts.every(part => part.dataset.dropped !== undefined)) trail.dataset.empty = ''
+}
 function fitHeader() {
   const el = header.value
   if (!el) return
@@ -234,19 +264,25 @@ function fitHeader() {
   if (!narrow.matches) { show(0); awaySteps.value = 0; fitTrail(trail, true); return }
   // Phones keep only where you are; the steps below keep it whole.
   fitTrail(trail, false)
-  const over = (n: number) => { show(n); return overflow(el) }
-  let n = Math.min(awaySteps.value, order.length)
-  if (over(n) > 0.5) { while (n < order.length && over(++n) > 0.5) { /* the next one steps aside too */ } }
-  else {
-    // Coming back needs the free room for its 44 px (the moon also its gap), within
-    // a tenth of a pixel: a crumb that would shrink by less never shows as overflow.
-    const spacer = el.querySelector<HTMLElement>('.spacer'), gap = parseFloat(getComputedStyle(el).columnGap) || 0
-    while (n > 0 && spacer && spacer.getBoundingClientRect().width - Math.max(0, overflow(el)) >= 44 + (order[n - 1] === 'moon' ? gap : 0) - 0.1) {
-      if (over(n - 1) > 0.5) break
-      n--
+  const over = (n: number) => { show(n); return Math.max(overflow(el), trail && phoneCut(trail) ? 1 : 0) }
+  const settle = (from: number) => {
+    let n = Math.min(from, order.length)
+    if (over(n) > 0.5) { while (n < order.length && over(++n) > 0.5) { /* the next one steps aside too */ } }
+    else {
+      // Coming back needs the free room for its 44 px (the moon also its gap), within
+      // a tenth of a pixel: a crumb that would shrink by less never shows as overflow.
+      const spacer = el.querySelector<HTMLElement>('.spacer'), gap = parseFloat(getComputedStyle(el).columnGap) || 0
+      while (n > 0 && spacer && spacer.getBoundingClientRect().width - Math.max(0, overflow(el)) >= 44 + (order[n - 1] === 'moon' ? gap : 0) - 0.1) {
+        if (over(n - 1) > 0.5) break
+        n--
+      }
     }
+    show(n)
+    return n
   }
-  show(n)
+  let n = settle(awaySteps.value)
+  // With everything aside a key still cut leaves the trail; what stepped aside for it comes back where it fits.
+  if (trail && phoneCut(trail)) { dropKeys(trail); n = settle(n) }
   awaySteps.value = n
 }
 let fitFrame = 0
@@ -507,7 +543,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 @media (max-width: 600px) {
   .app-header { gap: 4px; padding: 0 10px; }
   .app-density, .density-spacer { display: none; }
-  .app-header .crumbs > .phone-header-fold { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 44px; flex: none; padding: 0 4px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); }
+  .app-header .crumbs > .phone-header-fold { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 44px; min-inline-size: 44px; flex: none; padding: 0 4px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); }
   .phone-header-fold:focus-visible { box-shadow: var(--focus-ring); }
   .crumbs > .project-crumb.has-fold { display: none; }
   .lockup { min-height: 44px; min-width: 44px; justify-content: center; }

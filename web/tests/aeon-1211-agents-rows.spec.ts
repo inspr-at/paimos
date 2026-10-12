@@ -294,7 +294,8 @@ test('an ended session keeps its place and end state for 10 minutes, then moves 
   const done = row(page, DONE)
   await expect(done).toBeVisible()
   await expect(done.locator('.ava')).toHaveAttribute('aria-label', /: Done$/)
-  await expect(done.locator('.l2t')).toContainText(/moves to Ended at \d{1,2}:07/)
+  // AEON-1240: it says when it finished and when it moves, never its last activity or an estimate.
+  await expect(done.locator('.l2t')).toHaveText(/^Finished \d{1,2}:57 · moves to Ended at \d{1,2}:07$/)
   await expect(done.locator('.c-time')).toHaveText('3 min ago')
   // It sits among the live rows, not in the folded Ended group.
   await expect(page.locator('.sessions .ended-head .group-toggle')).toHaveAttribute('aria-expanded', 'false')
@@ -304,6 +305,19 @@ test('an ended session keeps its place and end state for 10 minutes, then moves 
   await page.clock.runFor(60_000 + 2_000)
   await expect(done).toHaveCount(0)
 })
+
+// AEON-1240 evidence: a finished row that keeps its place, at three widths, light and dark.
+for (const width of [1440, 1024, 390]) for (const colorScheme of ['light', 'dark'] as const) {
+  test(`a finished row says when it finished and when it moves at ${width} ${colorScheme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 }); await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
+    await setup(page, colorScheme)
+    await page.goto('/agents')
+    const done = row(page, DONE)
+    await expect(done.locator('.l2t')).toHaveText(/^Finished \d{1,2}:57 · moves to Ended at \d{1,2}:07$/)
+    await done.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`AEON-1240-finished-row-${width}-${colorScheme}.png`) })
+  })
+}
 
 test('keyboard focus in a row holds changes like the pointer does', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })

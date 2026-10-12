@@ -206,9 +206,9 @@ describe('the can’t-run sentence', () => {
     expect(said({ cause: 'no_account', until: null })).toBe('No Claude account can run Opus 5.5 right now → GPT-6.1 Sol · high runs instead.')
     expect(said({ cause: 'retired', until: null, route: null })).toBe('Opus 5.5 has been retired → GPT-6.1 Sol · high runs instead.')
     expect(said({ cause: 'residency', until: null, runs_instead: null, waits: true, runs_via: null })).toBe('Data residency rules out Opus 5.5 → work waits.')
-    // A reset that has passed is not promised again; an older server without a cause still gets plain words.
+    // A reset that has passed is not promised again; an entry without a cause reads as the server's own fallback, one sentence, never its joined reasons (AEON-1240).
     expect(said({ until: '2026-10-11T21:00:00Z' })).toBe('Claude account is at its daily cap → GPT-6.1 Sol · high runs instead.')
-    expect(said({ cause: undefined, reason: 'column: allowance; default: allowance' })).toBe('The account has no room left until its limit resets → GPT-6.1 Sol · high runs instead.')
+    expect(said({ cause: undefined, until: null, reason: 'column: allowance; default: daily_limit' })).toBe('No Claude account can run Opus 5.5 right now → GPT-6.1 Sol · high runs instead.')
     expect(cantSentence(null, entries, now)).toBeNull()
   })
   it('never says a code, "allowance", a list or the same word twice, and names a reset time once', () => {

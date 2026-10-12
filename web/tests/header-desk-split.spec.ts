@@ -378,6 +378,84 @@ test('from 601 to 1440 px the trail never cuts a chip and returns whole when the
   }
 })
 
+// AEON-1240 (Tick's pre-cut pass on 07717bdb4; AEON-1213 fix7 at 320 px): on phones a key, the project's chip or a
+// ticket's, shows whole or not at all. It was clipped to "PHARO" at 390 and to "P" at 400, half under Search. Probe:
+// every key in sight lies whole in its slot, ends in no ellipsis and sits under no other header control; every
+// control stays inside the header's padding; neither the header nor the page scrolls sideways; and a refit at the
+// same width moves nothing (no shift).
+const PHONE_PAGES = [
+  { slug: 'tickets', path: '/p/PHAROS/tickets' },
+  { slug: 'settings', path: '/p/PHAROS/settings' },
+  { slug: 'delivery', path: '/p/PHAROS/delivery' },
+  { slug: 'ticket', path: '/p/PHAROS/PHAROS-11?view=full' },
+  { slug: 'agents', path: '/agents' },
+  { slug: 'desk', path: '/decision-desk' },
+]
+const phoneFit = (page: Page) => page.locator('.app-header').evaluate(header => {
+  const shown = (el: Element) => {
+    for (let at: Element | null = el; at && at !== header.parentElement; at = at.parentElement) {
+      const box = at.getBoundingClientRect(), style = getComputedStyle(at)
+      if (box.width <= 1 || box.height <= 1 || style.display === 'none' || style.visibility === 'hidden') return false
+    }
+    return true
+  }
+  const own = header.getBoundingClientRect(), pad = getComputedStyle(header)
+  const start = own.left + parseFloat(pad.paddingLeft), end = own.right - parseFloat(pad.paddingRight)
+  const name = (el: Element) => el.getAttribute('aria-label') || (el as HTMLElement).innerText.trim() || el.className
+  const controls = [...header.querySelectorAll('a[href], button')].filter(el => shown(el) && !el.closest('.crumbs'))
+  const slot = header.querySelector('.crumbs')?.getBoundingClientRect()
+  const keys = [...header.querySelectorAll<HTMLElement>('.crumbs .key-badge, .crumbs .mono-crumb')].filter(shown)
+  const cut: string[] = []
+  for (const key of keys) {
+    const r = key.getBoundingClientRect(), text = key.textContent!.trim()
+    if (slot && (r.left < slot.left - 0.5 || r.right > slot.right + 0.5)) cut.push(`${text} outside its slot`)
+    if (key.scrollWidth > key.clientWidth) cut.push(`${text} ends in an ellipsis`)
+    for (let at = key.parentElement; at && at !== header; at = at.parentElement) {
+      if (getComputedStyle(at).overflowX === 'visible') continue
+      const b = at.getBoundingClientRect()
+      if (r.left < b.left - 0.5 || r.right > b.right + 0.5) cut.push(`${text} clipped by ${at.className}`)
+    }
+    for (const control of controls) {
+      const c = control.getBoundingClientRect()
+      if (Math.min(r.right, c.right) - Math.max(r.left, c.left) > 0.5 && Math.min(r.bottom, c.bottom) - Math.max(r.top, c.top) > 0.5) cut.push(`${text} under ${name(control)}`)
+    }
+  }
+  const outside = controls.filter(el => { const r = el.getBoundingClientRect(); return r.left < start - 0.5 || r.right > end + 0.5 }).map(name)
+  return { keys: keys.map(key => key.textContent!.trim()), cut, outside, header: header.scrollWidth - header.clientWidth, page: document.documentElement.scrollWidth - innerWidth, away: header.dataset.away ?? '' }
+})
+for (const width of [320, 360, 390, 400, 420, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`at ${width} ${theme} the header shows a key whole or not at all and fits the window (AEON-1240)`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 844 })
+    await setup(page, { theme })
+    const dir = testInfo.outputPath('AEON-1240')
+    await mkdir(dir, { recursive: true })
+    for (const target of PHONE_PAGES) {
+      await page.goto(target.path)
+      await expect(places(page)).toBeVisible()
+      if (target.slug !== 'agents' && target.slug !== 'desk') await expect(page.getByRole('navigation', { name: 'Breadcrumb' })).toHaveCount(1)
+      await page.evaluate(() => document.fonts.ready.then(() => undefined))
+      await settle(page)
+      const fit = await phoneFit(page)
+      const where = `${target.path} at ${width} (keys ${fit.keys.join(', ') || 'none'}; aside ${fit.away || 'nothing'})`
+      expect(fit.cut, where).toEqual([])
+      expect(fit.outside, `${where}: controls past the header`).toEqual([])
+      expect(fit.header, `${where}: header scrolls sideways`).toBeLessThanOrEqual(0)
+      expect(fit.page, `${where}: page scrolls sideways`).toBeLessThanOrEqual(0)
+      // The key leaves only when it can't show whole: from 390 the project's chip fits once the Desk's chevron is aside.
+      if (width >= 390 && (target.slug === 'settings' || target.slug === 'delivery')) expect(fit.keys, where).toContain('PHAROS')
+      const key = page.locator('.app-header .crumbs').locator('.key-badge, .mono-crumb').filter({ visible: true })
+      const controls = { places: places(page), search: page.getByRole('button', { name: 'Search everything' }), account: page.locator('.app-header .account'), ...(fit.keys.length ? { key: key.first() } : {}) }
+      await expectStableControls({ controls, interactions: [
+        { name: 'a font swap refits the header', run: async () => { await page.evaluate(() => document.fonts.dispatchEvent(new Event('loadingdone'))); await settle(page) } },
+        { name: 'hover the places', run: async () => { await places(page).hover(); await settle(page) } },
+      ] })
+      expect((await phoneFit(page)).keys, `${where}: the same keys after a refit`).toEqual(fit.keys)
+      await page.mouse.move(0, 400)
+      await page.screenshot({ path: join(dir, `header-${target.slug}-${width}-${theme}.png`), clip: { x: 0, y: 0, width, height: 72 } })
+    }
+  })
+}
+
 // AEON-1214 fix round 2: inside the Desk place the preview must not inherit the
 // place's one-line label, so a long request wraps beside its Open, never under it.
 const LONG_TITLE = 'Decide whether the release train may ship the tenant isolation migration together with the reporter contract bump before Monday: https://github.com/inspr-at/paimos/pull/181/files#diff-0123456789abcdef0123456789abcdef0123456789abcdef'

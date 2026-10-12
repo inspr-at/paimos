@@ -38,8 +38,8 @@ test('the registry groups lines by provider, folded by default, each with its so
   await expect(card(page).locator('[data-reg-count]')).toHaveText('9 models · 10 routes · 9 lines')
   await expect(card(page).locator('[data-reg-fold][aria-expanded="true"]')).toHaveCount(0)
   const sol = fold(page, SOL)
-  await expect(sol.locator('.ln-name')).toHaveText('GPT Sol')
-  await expect(sol.locator('.ln-v')).toHaveText('6.1')
+  // One name per model (AEON-1240): the row says it as the picker, the tray and the Agents rows do.
+  await expect(sol.locator('.ln-name')).toHaveText('GPT-6.1 Sol')
   await expect(sol.locator('.srcb')).toHaveText('From harness')
   await expect(sol.locator('.ln-m')).toHaveText('Codex · strongest for building')
   await expect(sol.locator('.lv span')).toHaveText(['low', 'medium', 'high', 'xhigh'])

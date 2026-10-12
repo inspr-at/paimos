@@ -90,21 +90,27 @@ export interface ModelEntry {
 const harnessRank = (harness: string) => { const index = HARNESS_ORDER.indexOf(harness); return index < 0 ? HARNESS_ORDER.length : index }
 export const providerRank = (provider: string) => { const index = PROVIDER_ORDER.indexOf(provider); return index < 0 ? PROVIDER_ORDER.length - 1 : index }
 const levelValue = (effort: EffortName) => effort.level ?? NAMED_LEVEL[effort.name] ?? 2
-/** "GPT-6.1 Sol", "Opus 5.5": the model's own name and version, never a harness or a profile revision. */
+const titled = (word: string) => word.charAt(0).toUpperCase() + word.slice(1)
+const LINE_WORD = /^[a-z]+$/, NAMED_VERSION = /^[0-9]+(?:\.[0-9]{1,2})?$/
+/**
+ * The one name of a model (AEON-1240): "GPT-6.1 Sol", "Opus 5.5", "Grok 4.7", never a harness or a profile revision.
+ * The picker, the registry rows, the outdated tray and sheet, Routines and the Agents rows all say it this way, so
+ * every new view names models through it. Codex's GPT models and Anthropic's models are named from their id, so a
+ * route's raw id, a provider's own name ("Claude Opus 5.5") or an alias never changes it; other models by the
+ * registry's short name and version, the version said once. A model added by hand keeps the name it was given.
+ */
 export function fullName(profile: RegistryProfile): string {
-  if (profile.harness === 'codex') {
-    const gpt = /^gpt-([0-9]+(?:\.[0-9]+)*)-(.+)$/.exec(profile.model)
-    if (gpt) return `GPT-${gpt[1]} ${gpt[2]!.charAt(0).toUpperCase()}${gpt[2]!.slice(1)}`
+  if (profile.source !== 'manual') {
+    const gpt = profile.harness === 'codex' ? /^gpt-([0-9]+(?:\.[0-9]+)*)-(.+)$/.exec(profile.model) : null
+    if (gpt) return `GPT-${gpt[1]} ${titled(gpt[2]!)}`
+    if (profile.family === 'anthropic') {
+      const { line, version } = modelLine(profile), word = line.slice(line.indexOf(':') + 1)
+      if (LINE_WORD.test(word) && version === 'alias') return titled(word)
+      if (LINE_WORD.test(word) && NAMED_VERSION.test(version)) return `${titled(word)} ${version}`
+    }
   }
-  return `${profile.short_name || profile.display_name || profile.model} ${profile.model_version ?? ''}`.trim()
-}
-/** The line a model version belongs to, without its version ("GPT Sol", "Claude Opus"), from the same fields as fullName. */
-export function registryLineName(profile: RegistryProfile): string {
-  if (profile.harness === 'codex') {
-    const gpt = /^gpt-([0-9]+(?:\.[0-9]+)*)-(.+)$/.exec(profile.model)
-    if (gpt) return `GPT ${gpt[2]!.charAt(0).toUpperCase()}${gpt[2]!.slice(1)}`
-  }
-  return profile.display_name || profile.short_name || profile.model
+  const name = (profile.short_name || profile.display_name || profile.model).trim(), version = profile.model_version?.trim() ?? ''
+  return version && name !== version && !name.endsWith(` ${version}`) ? `${name} ${version}` : name
 }
 
 /**
@@ -133,8 +139,9 @@ function routesOf(profiles: RegistryProfile[]): EntryRoute[] {
 }
 function entryOf(line: string, key: string, profiles: RegistryProfile[], now: number): ModelEntry {
   const routes = routesOf(profiles), first = routes[0]!
-  // The name comes from the route that runs first: its registry display is the model's own.
-  const ordered = [...profiles].sort((a, b) => harnessRank(a.harness) - harnessRank(b.harness)), named = ordered[0]!
+  // The name comes from the first concrete route, as on the registry's row: an alias ("opus") names no version.
+  const ordered = [...profiles].sort((a, b) => harnessRank(a.harness) - harnessRank(b.harness))
+  const named = ordered.find(profile => modelLine(profile).version !== 'alias') ?? ordered[0]!
   const retire = profiles.flatMap(profile => [profile.retire_at, profile.lifecycle?.state === 'retiring' ? profile.lifecycle.date : null])
     .filter((at): at is string => !!at && Date.parse(at) > now).sort()[0] ?? null
   return {
@@ -359,8 +366,9 @@ export function cantSentence(item: SimpleUnavailable | null | undefined, entries
     retired: `${name} has been retired`,
     residency: `Data residency rules out ${name}`,
   }
-  const plain = reasonText(item.reason)
-  const cause = item.cause && causes[item.cause] ? causes[item.cause] : plain.charAt(0).toUpperCase() + plain.slice(1)
+  // One cause, never a list (AEON-1240): the server that ships with this page names one per entry and falls back to
+  // no_account itself (simple_causes.go), so the words of an older server's joined reasons are no longer read here.
+  const cause = causes[item.cause ?? 'no_account'] ?? causes.no_account
   if (item.waits || !item.runs_instead) return { cause, then: until ? 'work waits until then' : 'work waits' }
   if (item.runs_instead === item.line) return { cause, then: `${name} runs through ${item.runs_via ? harnessLabel(item.runs_via) : 'another route'} instead` }
   return { cause, then: `${pickText(entryFor(entries, item.runs_instead), item.effort, lineFallback(item.runs_instead))} runs instead` }
