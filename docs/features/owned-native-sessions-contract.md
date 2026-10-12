@@ -170,6 +170,40 @@ and paired-daemon requests; it also checks alternate input scopes, person-only
 view denials, unchanged unrelated routes, zero body reads, zero session/run/event
 side effects and pairing revocation. Browser validation is not applicable.
 
-Validation results are recorded after the guarded remote checks. The affected
-planner selects the full CI lane because C0 changes the OpenAPI contract; final
-PR CI and the cross-family review remain coordinator-owned.
+Validation for fix round 4 (2026-10-13):
+
+- Guarded remote Go at `5860c5b2b` passed `internal/nativecontract` (1.375 s),
+  `internal/nativesessions` (0.229 s), `internal/reportercontract` (8.695 s)
+  and the full `internal/authz` suite (40.361 s). After correcting the new
+  regression's expected content type and revoked-computer status to the
+  established server behavior, full `internal/auth` passed at `fda01bae8`
+  (77.194 s). No production authentication decision changed for those fixes.
+- The negative-control branch at `1997eace1` contains only the two regression
+  files over `ea72d848`. Guarded remote `-run NativeRoutes` fails both tests
+  for the reported bugs: every authorized-person route gets 403 instead of
+  503, and every anonymous route lacks the native envelope/header. The
+  assigned branch is restored and does not contain that control commit.
+- Declaration generation/check, OpenAPI bundle parity, canonical tier
+  manifests, Go formatting, exact R0 row checks and `git diff --check` pass.
+  All ten legacy pins remain unchanged; 103 native reply shapes are pinned.
+  The ownership audit passes all 33 tests on a stable checkout.
+- The first guarded static run passed 41 of 42 checks, including Go vet,
+  contract checks, ownership, tiers, frontend dependencies and shard unit
+  checks. Its single seven-shard LPT failure was corrected in `5860c5b2b`.
+  Final `ci-static-locked.sh` at `fda01bae8` exits 0 with all 42 checks passed,
+  zero optional skips (212.35 s), including both shard tables and the full
+  `--merge-main` static pre-filter.
+
+The affected planner selects `FULL: R2 full: OpenAPI lint package changed with
+the contract`; authoritative full PR CI and cross-family review remain with the
+coordinator. Local node inventory checks initially lacked Vue dependencies;
+the guarded remote static run supplies them and passes those checks. Browser
+validation is not applicable, and no review gate or real model CLI was run.
+
+Runner cleanup handoff: an earlier remote invocation used a parenthesized
+`-run` expression that the shared runner flattened without shell quoting. It
+exited 2 before test execution/cleanup for run `1997eace17-74802`; its temporary
+remote checkout/ref and empty test database may remain. The literal
+`-run NativeRoutes` retry completed its cleanup normally. Cleanup of the failed
+runner's remote artifacts belongs to the coordinator; no direct SSH cleanup or
+shared runner edit was attempted.
