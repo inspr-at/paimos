@@ -113,8 +113,8 @@ func TestNativeRoutesThroughProductionAuthentication(t *testing.T) {
 		if w.Code != status {
 			t.Fatalf("%s %s: status %d, want %d; %s", method, path, w.Code, status, w.Body.String())
 		}
-		if w.Header().Get(reportercontract.Header) != reportercontract.NativeSession || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Content-Type") != "application/json" {
-			t.Fatal("native contract/cache/content header missing at production boundary")
+		if w.Header().Get(reportercontract.Header) != reportercontract.NativeSession || w.Header().Get("Cache-Control") != "no-store" || w.Header().Get("Content-Type") != "application/json; charset=utf-8" {
+			t.Fatalf("native headers: contract %q, cache %q, content %q", w.Header().Get(reportercontract.Header), w.Header().Get("Cache-Control"), w.Header().Get("Content-Type"))
 		}
 		if err := validator.ValidateJSON("NativeError", w.Body.Bytes()); err != nil {
 			t.Fatal("invalid native authentication envelope:", err)
