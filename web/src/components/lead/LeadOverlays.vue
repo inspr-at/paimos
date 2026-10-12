@@ -5,10 +5,11 @@ import { useRoute } from 'vue-router'
 import { leadOverlay, resetLeadOverlays } from '../../lib/leadOverlay'
 import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
-import LeadPauseSheet from './LeadPauseSheet.vue'
-import StartLeadSheet from './StartLeadSheet.vue'
-// Session and Chat belong to the opened panel, not every cold app page.
+// Lead controls and their session state belong to the opened overlay, not
+// every cold app page. All three share the same on-demand loading boundary.
 const LeadPanel = defineAsyncComponent(() => import('./LeadPanel.vue'))
+const LeadPauseSheet = defineAsyncComponent(() => import('./LeadPauseSheet.vue'))
+const StartLeadSheet = defineAsyncComponent(() => import('./StartLeadSheet.vue'))
 
 // The app shell's one host for the docked lead panel and the lead sheets, so a
 // ticket preview over any page can open them. Leaving the view that opened an

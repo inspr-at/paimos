@@ -18,7 +18,7 @@ async function throttle(page: Page) {
   page.on('request', request => {
     const path = new URL(request.url()).pathname
     pending.add(path)
-    if (/\/components\/agents\/(?:SessionPanel|SessionChat|ChatLiveBlock)\.vue$/.test(path)) panelModules.push(path)
+    if (/\/components\/(?:agents\/(?:SessionPanel|SessionChat|ChatLiveBlock)|lead\/(?:LeadPanel|LeadPauseSheet|StartLeadSheet))\.vue$/.test(path)) panelModules.push(path)
   })
   page.on('requestfinished', request => pending.delete(new URL(request.url()).pathname))
   page.on('requestfailed', request => pending.delete(new URL(request.url()).pathname))
