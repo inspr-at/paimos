@@ -84,6 +84,7 @@ async function setup(page: Page, options: { admin?: boolean; theme?: 'light' | '
   await mockWork(page, work, { admin: options.admin ?? true })
   const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {} })
   const worker = data.sessions[0]!
+  const managedRun = data.runs[0]!
   Object.assign(worker, { display_label: 'release-lead', run_id: null, activity: 'idle' })
   data.sessions.splice(1); data.runs.splice(0); data.approvals.splice(0)
   const template = data.messages[1]!
@@ -130,7 +131,7 @@ async function setup(page: Page, options: { admin?: boolean; theme?: 'light' | '
     })
     return route.fulfill({ json: { items } })
   })
-  return { data, worker, calls, messages, receipts }
+  return { data, worker, calls, messages, receipts, managedRun }
 }
 // The viewer has read up to the post with this sent_event_id (200 + index).
 const readUpTo = (sessionId: string, event: number) => ({ 'aeon.session-read.v1': JSON.stringify({ [`${me.id}:${sessionId}`]: { event, id: 'seen', at: 1 } }) })
@@ -905,9 +906,11 @@ test('AEON-976 shell updates: follow newest output until the reader scrolls up i
 })
 
 test('AEON-976 Stop: Esc leaves the field then interrupts with captured process ownership', async ({ page }) => {
-  const { worker } = await setup(page, { count: 1 })
+  const { data, worker, managedRun } = await setup(page, { count: 1 })
+  // Managed interruption requires a running run bound to this exact session.
+  data.runs.push(managedRun)
   const ownership = { daemon_id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', generation: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', process_id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', root_pid: 420, group_id: 420, started_at: new Date(now).toISOString() }
-  Object.assign(worker, { management_mode: 'managed', advertised_capabilities: ['managed_control_v1', 'interrupt', 'stop', 'steer'], process_ownership: ownership, process_observed_at: new Date(now).toISOString(), activity: 'busy' })
+  Object.assign(worker, { run_id: managedRun.id, management_mode: 'managed', advertised_capabilities: ['managed_control_v1', 'interrupt', 'stop', 'steer'], process_ownership: ownership, process_observed_at: new Date(now).toISOString(), activity: 'busy' })
   const payloads: Record<string, unknown>[] = []
   await page.route('**/managed-controls', async route => {
     payloads.push(route.request().postDataJSON())
