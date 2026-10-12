@@ -367,6 +367,9 @@ func testCoordinatorHeartbeatRetriesActiveGeneration(t *testing.T, message strin
 	rt, stdout, stderr := heartbeatRuntime(t, srv)
 	o := heartbeatTestOptions(t.TempDir())
 	o.Role, o.SourceSession, o.Interval = "coordinator", transcriptSessionID, 50
+	// A successful native registration must retain a verifiable live owner
+	// so its inbox index can be published and the diagnostic can report clear.
+	o.OwnerPID = os.Getpid()
 	err := rt.runHeartbeat(context.Background(), o, heartbeatDeps{
 		alive: func(int) bool { return true },
 		wait: func(_ context.Context, pid int, interval time.Duration) error {
@@ -425,7 +428,7 @@ func testCoordinatorHeartbeatRetriesActiveGeneration(t *testing.T, message strin
 		t.Fatal("binding report did not follow the accepted heartbeat's exact worker identity")
 	}
 	if code, exists := diagnostics[0].body["inbox_binding_error"]; !exists || code != nil {
-		t.Fatal("successful source registration did not report a clear binding diagnostic")
+		t.Fatalf("successful source registration did not report a clear binding diagnostic: %v (present %t)", code, exists)
 	}
 	wantLog := strings.Repeat("heartbeat: predecessor generation is still active; retrying registration in 50s\n", 3)
 	if stderr.String() != wantLog || stdout.Len() != 0 {
