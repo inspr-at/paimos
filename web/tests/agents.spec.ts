@@ -373,6 +373,7 @@ test('Enter opens a session, j and k move the panel along, Escape closes it', as
   await openAgents(page)
   // A click anywhere on the row that is not a link or button opens the session.
   // AEON-1210: the PHAROS lead heads its group; j walks its project's other sessions in list order.
+  await expect(row(page, camy)).toBeVisible()
   const order = await page.locator('.sessions .grp', { has: row(page, camy) }).locator('[data-row^="s:"]').evaluateAll(rows => rows.map(r => r.getAttribute('data-row')!.slice(2)))
   expect(order[0]).toBe(camy)
   expect(order).toContain(nova)
@@ -409,6 +410,7 @@ test('AEON-1219: registry navigation and hints respect menus, fields, IME and na
   })
   guard.done()
   // AEON-1210 groups the list by project; navigation follows the displayed lead and its workers.
+  await expect(row(page, camy)).toBeVisible()
   const order = await page.locator('.sessions .grp', { has: row(page, camy) }).locator('[data-row^="s:"]').evaluateAll(rows => rows.map(r => r.getAttribute('data-row')!.slice(2)))
   expect(order[0]).toBe(camy)
   expect(order.length).toBeGreaterThan(1)
