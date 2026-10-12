@@ -145,6 +145,39 @@ one row per reported gate. It never promises current availability. An absent
 report says No start yet, unreadable history offers Try again without check
 marks, and reports older than the session or 24 hours are labelled stale.
 
+## The split, the fixed preset dock and keys (AEON-1213, P5)
+
+The divider sets the list's width continuously: 280 px minimum, compact rows
+below 560 px, table rows from 560 px. Releasing with less than 380 px left for
+details closes them and retains the last valid handle. The handle is stored in
+the person's `agents:layout.handle` preference; other fields in that preference
+are preserved, including when the first preference read is still pending. A
+failed read keeps the chosen handle local; the next change retries the read
+and saves only after shared fields can be merged. A person change closes
+details and cancels the old person's drag
+and queued preference write. A failed save says the layout lasts for this visit.
+
+One sticky button stays at the work area's top-right corner. Both heads reserve
+its space. It jumps through Focus (list 320 px), Overview (details 480 px) and
+List only; its icon follows the current list form and its tooltip names the next
+preset. Presets take 240 ms, or no animation with reduced motion. Selecting from
+List only reopens the remembered handle, with Overview as the first default.
+Escape and the close button return directly to List only.
+
+A split fits at 1056 px of work area (560 + 16 + 480). Below that threshold,
+details open over the list as a sheet and the preset button hides. Phones have a
+full-height sheet with a 44 px Back control and safe-area padding. In a split,
+the work area comes directly under the app header; the list and details have
+viewport-high panes with separate scrolling. A new selection resets the details
+to their top while the picked row stays in view. Opening a sheet, including when
+a smaller window replaces the split, also starts its body at the top.
+
+F and / (including numpad slash) search this list; S jumps the presets when they
+fit. These actions, their hints and the focused divider's Left/Right (16 px),
+Home (list 280 px) and End (details 380 px) use the shared shortcut registry.
+Fields and browser shortcuts keep their native behavior. The app header leaves
+slash to `/agents` and its session routes alongside the header's Desk navigation.
+
 ## State in the avatar, compact rows and calm enter/leave (AEON-1211, P3)
 
 **The avatar carries the state.** Each session row shows the person's live
@@ -174,15 +207,24 @@ arrow keys.
 runs ("1 h 12 min"), how long ago it ended ("12 min ago"), or since when it is
 paused ("since 09:58"). Sorting by Time orders by what the column shows.
 
+**Columns.** Session, Time, Execution, Computer and Beat. The ticket key is
+part of the session name in every form; Display still offers sorting by Ticket.
+Service tier and its keyboard controls live in the details panel, with Change
+tier also available through the row menu. Ticket estimates are shown in the
+details.
+
 **The list's width decides its form.** From 880 px the full table; from 560 px
-a table without Computer and the account line (the details name and rename the
-computer); under 560 px (phones) compact rows.
+a table without Computer and the account line, with the ticket key before the name
+(the details name and rename the computer); under 560 px (phones) compact rows.
 A compact row opens line 1 with a 12 px harness mark whose tooltip and name say
 the model, level, harness and account ("GPT-6.1 Sol · xhigh · Codex · ChatGPT
-Pro"), ends line 1 with the short time ("42m", "3m ago"), and keeps ⋯ beside
-the two lines (an ended or silent row also keeps its one-tap bin): Pause,
-Resume and Change tier are in its menu, and the details name and rename the
-computer.
+Pro"), ends line 1 with the short time ("42m", "3m ago"), and reserves one slot
+for ⋯ beside the two lines. Its trigger appears on hover or focus and stays visible
+on touch. Remove stale session, Pause, Resume and Change tier are in its menu;
+table rows retain the one-tap bin for ended or silent sessions. The lead's second
+line summarizes its workers; the table omits the extra sub-agent count. The
+details name and rename the computer; a failed service tier read explains what
+failed and offers Try again.
 
 **Rows enter and leave calmly.** New sessions, rows leaving the list, rows
 moving to another group or parent, rows that start or stop matching the filter

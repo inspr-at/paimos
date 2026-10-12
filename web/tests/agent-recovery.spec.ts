@@ -99,6 +99,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     const fixture = await setup(page, 'restart', true, true)
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
     const panel = page.getByRole('complementary', { name: 'Session details' })
+    const close = panel.getByRole('button', { name: 'Close session details', exact: true })
     {
       const more = panel.getByRole('button', { name: 'More session actions', exact: true })
       await more.click()
@@ -111,7 +112,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
       // Picking an action closes the menu. Its trigger and the panel controls
       // remain on screen throughout the request and result transitions.
       const requestControls = await controlStability(page, {
-        more, close: panel.getByRole('button', { name: 'Close session details' }),
+        more, close,
         overview: panel.getByRole('tab', { name: 'Overview', exact: true }),
         messages: panel.getByRole('tab', { name: /Chat/ }),
       })
@@ -124,7 +125,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
       requestControls.done()
     }
     const controls = await controlStability(page, {
-      close: panel.getByRole('button', { name: 'Close session details' }),
+      close,
       overview: panel.getByRole('tab', { name: 'Overview', exact: true }),
       messages: panel.getByRole('tab', { name: /Chat/ }),
       managed: panel.locator('.managed-controls'),

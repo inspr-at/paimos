@@ -1055,11 +1055,19 @@ defineExpose({ focusComposer: () => textarea.value?.focus(), interrupted, workin
 .compose textarea { width: 100%; min-width: 0; min-height: 56px; height: 64px; resize: none; padding: 9px 11px; font: inherit; font-size: 13.5px; line-height: 1.45; }
 .compose-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
 .compose-hint { margin-left: auto; display: inline-flex; gap: 2px; }
-/* With the steer action always present, a narrow panel drops the new-line hint
-   so Stop stays on the action row (AEON-1071). */
+/* Narrow panes keep a row for either the steer action or its transport note.
+   Ctrl keycaps can wrap the desktop actions too (AEON-1213); changing the
+   transport must never remove a row and move the field above it. */
 @container (max-width: 640px) {
   .compose-row.steering .compose-hint { display: none; }
   .compose-row.steering .compose-hint + * { margin-left: auto; }
+  @media (min-width: 721px) {
+    .compose-row.steering { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+    .compose-row .steer-send, .compose-row .steer-note { grid-column: 1 / -1; }
+    .compose-row .steer-send, .compose-row .send { justify-self: end; }
+    /* Same minimum as the shared .btn.sm; longer copy can grow within its row. */
+    .compose-row .steer-note { display: flex; align-items: center; justify-content: flex-end; min-height: 28px; }
+  }
 }
 .compose-block { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 6px 2px; overflow-wrap: anywhere; }
 .compose-block svg { flex: none; }

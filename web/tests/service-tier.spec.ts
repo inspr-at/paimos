@@ -6,6 +6,7 @@ import { agentData, mockAgents } from './agents-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { mockEffectivePermissions } from './authz-fixtures'
 import type { TierReport, TierState } from '../src/lib/serviceTier'
+import type { HarnessSession } from '../src/lib/agents'
 
 const id = '5e000000-0000-4000-8000-000000000001'
 const ownership = { daemon_id: 'fixture', generation: 'a'.repeat(32), process_id: 'b'.repeat(32), root_pid: 1234, group_id: 1234, started_at: '2026-10-02T00:00:00Z' }
@@ -59,6 +60,8 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
     Object.assign(data.sessions[0]!, { service_tier_revision: state.revision })
   }
   await page.route('**/api/projects/*/harness-sessions/*/tier**', async route => {
+    const target = data.sessions.find(session => new URL(route.request().url()).pathname.split('/')[5] === session.id) as unknown as HarnessSession | undefined
+    if (route.request().method() === 'GET' && target && target.id !== id) return route.fulfill({ json: { session_id: target.id, revision: target.service_tier_revision, active_tier: target.service_tier, pending: null, reports: target.service_tier_reports, requests: [], read_only: false, read_only_reason: '' } })
     if (route.request().method() === 'GET') { reads++; if (options.tierRead === 'delayed') await tierReadGate; if (options.tierRead === 'error') return route.fulfill({ status: 503, json: { error: 'Tier evidence unavailable.' } }); return route.fulfill({ json: state }) }
     const body = route.request().postDataJSON(); writes.push(body)
     if (options.fail) return route.fulfill({ status: 409, json: { error: 'process ownership changed; refresh' } })
@@ -76,9 +79,9 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
   return { data, writes, releaseTierRead, getReads: () => reads, cancelElsewhere: () => cancel('other-viewer-undo'), reject: () => { state = { ...state, pending: null, last_change: { ...state.pending!, state: 'completed', outcome: 'rejected', reason: 'vendor_rejected' } } }, confirm: () => { state = { ...state, active_tier: state.pending!.value, pending: null, revision: state.revision + 1 }; Object.assign(data.sessions[0]!, { service_tier: state.active_tier, service_tier_revision: state.revision }) }, getState: () => state }
 }
 const row = (page: Page) => page.locator(`[data-row="s:${id}"]`)
-// The tier lives in the details, not in the list (AEON-1211, design AEON-1196): the same control,
-// one step per Left/Right arrow. Do not focus a hidden copy: Undo and rejection assertions must still execute.
-const glyph = (page: Page) => page.locator('.service-tier [data-tier]:visible')
+// Tier controls belong to the selected session's panel; Undo and rejection
+// assertions still target the actual visible focus node after their move.
+const glyph = (page: Page) => page.locator('.session-panel .service-tier [data-tier]:visible')
 const picker = (page: Page) => page.getByRole('dialog', { name: 'Change tier', exact: true })
 
 for (const width of [320, 390]) test(`${width}: phone Change tier menu opens and restores its actual trigger`, async ({ page }) => {
@@ -115,14 +118,18 @@ test('1440: compact Default tier control keeps its box through confirmation and 
   await page.setViewportSize({ width: 1440, height: 900 })
   const { writes, confirm, getState } = await setup(page)
   await page.goto(`/agents/${id}`)
-  await expect(page.locator('.agents-page')).toHaveClass(/panel-open/)
-  // The tier is in the details; the table beside them keeps Time and the menu, and Computer moves to the details (AEON-1211, design AEON-1196).
+  await expect(page.locator('.session-panel')).toHaveClass(/docked/)
+  // Overview can open wider than the compact-table boundary. Use the live
+  // divider to exercise the narrow layout without changing its width checks.
+  await page.getByRole('separator', { name: 'Resize the session list' }).press('ArrowLeft')
+  // The five-column list retains the menu; tier controls live in the panel (AEON-1213).
   const list = page.locator('.sessions'), time = row(page).locator('.c-time'), actions = row(page).locator('.more')
   expect((await list.boundingBox())!.width).toBeLessThanOrEqual(880)
   await expect(glyph(page)).toHaveCount(1)
   await expect(glyph(page)).toBeVisible()
   await expect(glyph(page)).toHaveAccessibleName(/^Service tier: Default/)
-  await expectStableControls({ controls: { tier: glyph(page), time, actions, row: row(page) }, scrollAreas: { list }, interactions: [
+  await glyph(page).scrollIntoViewIfNeeded()
+  await expectStableControls({ controls: { tier: glyph(page), time, actions, row: row(page) }, scrollAreas: { list, details: page.locator('.session-panel .scroll:visible') }, interactions: [
     { name: 'keyboard step from Default', run: async () => {
       await glyph(page).focus(); await expect(glyph(page)).toBeFocused()
       await glyph(page).press('ArrowRight'); await expect(page.locator('.tier-toast')).toBeVisible()
@@ -145,9 +152,11 @@ for (const width of [1280, 1366, 1440]) test(`${width}: panel-open session table
   const { data } = await setup(page)
   Object.assign(data.sessions[0]!, { eta_ready_at: new Date(Date.now() + 600_000).toISOString(), progress_pct: 50 })
   await page.goto(`/agents/${id}`)
-  await expect(page.locator('.agents-page')).toHaveClass(/panel-open/)
+  await expect(page.locator('.session-panel')).toHaveClass(/docked/)
+  await page.getByRole('separator', { name: 'Resize the session list' }).press('ArrowLeft')
   await expect(row(page)).toBeVisible()
   const list = page.locator('.sessions'), actions = row(page).locator('.more'), tier = glyph(page), panel = page.getByRole('complementary', { name: 'Session details' })
+  await tier.scrollIntoViewIfNeeded()
   await row(page).hover()
   await expect(actions).toBeVisible(); await expect(tier).toBeVisible()
   await expect(row(page).locator('.host-badge')).toBeHidden()
@@ -164,7 +173,7 @@ for (const width of [1280, 1366, 1440]) test(`${width}: panel-open session table
     expect(await actions.evaluate(el => { const r = el.getBoundingClientRect(); return !!document.elementFromPoint(r.right - 1, r.y + r.height / 2)?.closest('.more') })).toBe(true)
   }
   await measure()
-  await expectStableControls({ controls: { actions, tier, row: row(page) }, interactions: [{ name: 'open overflow', run: async () => { await actions.click(); await expect(page.getByRole('menuitem', { name: 'Change tier…' })).toBeVisible() } }] })
+  await expectStableControls({ controls: { actions, tier, row: row(page) }, scrollAreas: { details: panel.locator('.scroll:visible') }, interactions: [{ name: 'open overflow', run: async () => { await actions.click(); await expect(page.getByRole('menuitem', { name: 'Change tier…' })).toBeVisible() } }] })
   await measure()
 })
 test('an unopened row shows its pending agent tier request', async ({ page }) => {
@@ -286,14 +295,21 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
   })
 }
 
-// The cross-row centre check went with the Tier column (AEON-1211): no column of glyphs is left to align.
+// The tier lives in the details; every offered-tier count keeps the same control centre.
 test('the tier control in the details holds its box through hover, step and pending Undo', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  const { writes } = await setup(page)
-  await page.goto(`/agents/${id}`)
-  await expect(glyph(page)).toBeVisible()
-  const cell = page.locator('.service-tier .tier-cell')
-  await expectStableControls({ controls: { row: row(page), cell, glyph: glyph(page) }, interactions: [
+  const { writes, data } = await setup(page)
+  const centres: number[] = []
+  // Sample the one-, two- and three-tier sessions at the same panel position.
+  for (const session of [data.sessions[1]!, data.sessions[2]!, data.sessions[0]!]) {
+    await page.goto(`/agents/${session.id}`)
+    await expect(glyph(page)).toBeVisible()
+    centres.push(await glyph(page).locator('.tier-glyph').evaluate(el => { const r = el.getBoundingClientRect(); return r.x + r.width / 2 }))
+  }
+  expect(centres).toHaveLength(3); expect(Math.max(...centres) - Math.min(...centres)).toBeLessThanOrEqual(.5)
+  const cell = page.locator('.session-panel .tier-head .tier-cell')
+  await glyph(page).scrollIntoViewIfNeeded()
+  await expectStableControls({ controls: { row: row(page), cell, glyph: glyph(page) }, scrollAreas: { details: page.locator('.session-panel .scroll:visible') }, interactions: [
     { name: 'hover', run: () => cell.hover() },
     { name: 'step up', run: async () => { await glyph(page).focus(); await glyph(page).press('ArrowRight'); await expect(page.locator('.tier-toast')).toBeVisible() } },
     { name: 'Undo pending', run: async () => { await page.locator('.tier-toast').getByRole('button', { name: 'Undo' }).click(); await expect(page.locator('.tier-toast')).toHaveCount(0) } },
@@ -384,22 +400,26 @@ for (const width of [320, 390]) test(`${width}: agent request labels keep phone 
 test('an agent asks for its own tier; field shortcuts and the active tier stay intact', async ({ page }) => {
   const { writes, getState } = await setup(page, { agent: true })
   await page.goto(`/agents/${id}`)
-  await page.getByRole('button', { name: 'Ask for a tier', exact: true }).click()
-  await expect(picker(page).locator('[data-option=fast]')).toHaveAttribute('aria-disabled', 'false')
-  await picker(page).locator('[data-option=fast]').click()
-  const reason = picker(page).getByRole('textbox', { name: 'Why' })
-  const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform))
-  await reason.fill('replace this text')
-  await reason.press(mac ? 'Meta+a' : 'Control+a')
-  await reason.pressSequentially('QA waits on this screen')
-  await expect(reason).toHaveValue('QA waits on this screen')
-  await reason.press('Enter'); expect(writes).toHaveLength(0)
-  await reason.press('Escape'); await expect(picker(page)).toBeVisible()
-  await reason.focus()
-  await reason.press(mac ? 'Meta+Enter' : 'Control+Enter')
-  await expect(picker(page)).toHaveCount(0)
-  await expect(page.locator('.tier-request')).toContainText('You asked for Fast')
-  await expect(page.locator('.tier-request')).toContainText('Waiting for a person')
+  const change = page.getByRole('button', { name: 'Ask for a tier', exact: true })
+  await glyph(page).scrollIntoViewIfNeeded()
+  await expectStableControls({ controls: { tier: glyph(page), change }, scrollAreas: { details: page.locator('.session-panel .scroll:visible') }, interactions: [{ name: 'request text grows below the tier controls', run: async () => {
+    await change.click()
+    await expect(picker(page).locator('[data-option=fast]')).toHaveAttribute('aria-disabled', 'false')
+    await picker(page).locator('[data-option=fast]').click()
+    const reason = picker(page).getByRole('textbox', { name: 'Why' })
+    const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform))
+    await reason.fill('replace this text')
+    await reason.press(mac ? 'Meta+a' : 'Control+a')
+    await reason.pressSequentially('QA waits on this screen')
+    await expect(reason).toHaveValue('QA waits on this screen')
+    await reason.press('Enter'); expect(writes).toHaveLength(0)
+    await reason.press('Escape'); await expect(picker(page)).toBeVisible()
+    await reason.focus()
+    await reason.press(mac ? 'Meta+Enter' : 'Control+Enter')
+    await expect(picker(page)).toHaveCount(0)
+    await expect(page.locator('.tier-request')).toContainText('You asked for Fast')
+    await expect(page.locator('.tier-request')).toContainText('Waiting for a person')
+  } }] })
   expect(writes[0]).toMatchObject({ tier: 'fast', reason: 'QA waits on this screen' })
   expect(getState().active_tier).toBe('default')
 })
@@ -466,9 +486,12 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
   })
 }
 test('failed evidence reads show placeholders, never a zero-run or vendor conclusion', async ({ page }) => {
-  await setup(page, { tierRead: 'error' }); await page.goto(`/agents/${id}`)
+  const { getState } = await setup(page, { tierRead: 'error' }); await page.goto(`/agents/${id}`)
   const panel = page.getByRole('region', { name: 'Service tier', exact: true })
-  await expect(panel.getByRole('alert')).toContainText('Tier evidence unavailable')
+  await expect(panel.getByRole('alert')).toContainText("Couldn't read the service tier.")
+  await expect(panel.getByRole('alert')).not.toContainText('Tier evidence unavailable')
+  const retry = panel.getByRole('button', { name: 'Try again', exact: true })
+  await expect(retry).toBeVisible()
   await expect(panel.locator('.compare-estimate').first()).toHaveText('—')
   await expect(panel.locator('.estimate-source')).toHaveCount(0)
   await panel.getByRole('button', { name: 'Change tier', exact: true }).click()
@@ -477,6 +500,16 @@ test('failed evidence reads show placeholders, never a zero-run or vendor conclu
   await expect(dialog.locator('[data-option=fast] .tp-estimate')).toHaveText('—')
   await expect(dialog.locator('[data-option=fast] .tp-text')).not.toContainText('not offered')
   await expect(dialog.locator('.estimate-source')).toHaveCount(0)
+  await page.keyboard.press('Escape'); await expect(dialog).toHaveCount(0)
+  await expectStableControls({ controls: { retry, change: panel.getByRole('button', { name: 'Change tier', exact: true }) }, scrollAreas: { details: page.locator('.session-panel > .scroll') }, interactions: [{ name: 'failed retry keeps the human error and its controls', run: async () => {
+    const failed = page.waitForResponse(response => response.url().endsWith(`/harness-sessions/${id}/tier`) && response.status() === 503)
+    await retry.click(); await (await failed).finished()
+    await expect(panel.getByRole('alert')).toContainText("Couldn't read the service tier.")
+  } }] })
+  await page.route('**/api/projects/*/harness-sessions/*/tier', route => route.fulfill({ json: getState() }))
+  await retry.click()
+  await expect(panel.getByRole('alert')).toHaveCount(0)
+  await expect(panel.locator('.source')).toContainText('fixture-adapter')
 })
 
 test('live evidence ignores sibling sessions and batches selected telemetry over five seconds', async ({ page }) => {

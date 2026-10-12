@@ -5774,6 +5774,36 @@
     ,
     {"kind":"browser","file":"tests/aeon-1212-lead-panel.spec.ts","name":"AEON-1212: server action omission and decision denial remain read-only, and more than four real options link to the Desk","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 dark 1024: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 dark 1440: one dock, presets, live divider and top-starting panes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 dark 390: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 light 1024: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 light 1440: one dock, presets, live divider and top-starting panes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 light 390: a sheet replaces the split without losing the list","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 regression: delayed fold recovery cannot follow a person switch","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 regression: failed layout reads keep fold intents local until recovery preserves shared fields","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 regression: failed layout reads retain the local handle until recovery merges shared fields","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213 regression: the table uses the approved columns with the ticket in the session name","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: a failed handle save is visible without moving the preset","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: a person change closes details and cancels the previous handle save","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: registered F, numpad slash, S and divider keys respect fields and native keys","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"AEON-1213: the work-area threshold and 240 ms presets honor reduced motion","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/aeon-1213-agents-split.spec.ts","name":"touch › AEON-1213: the preset, divider hit area and phone Back target are 44 px","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"rules names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -18079,6 +18109,8 @@
     {"kind":"vitest","file":"tests/position.unit.test.ts","name":"takes the lowest position of several answers, and none when one has none","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/position.unit.test.ts","name":"the server position decides before the order the reads started in","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/preferences-owner.unit.test.ts","name":"AEON-1213: shared preference reads retry failures, coalesce recovery and accept an empty value","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/preferences-owner.unit.test.ts","name":"S9-001: a queued tail behind A's in-flight write is cancelled on sign-out","tier":"ESSENTIAL"}
     ,

@@ -26,24 +26,34 @@ const explanation = computed(() => {
   return `A change applies from the ${report.value?.applies === 'next_turn' ? 'next turn' : 'next run'}. The current run keeps its tier and cost.`
 })
 const source = computed(() => { try { const url = new URL(report.value?.source || ''); return ['https:', 'http:'].includes(url.protocol) ? url.href : null } catch { return null } })
+const readError = "Couldn't read the service tier."
+const readFailed = computed(() => tiers.errors[props.session.id] === readError)
 let epoch = 0
 watch([() => props.session.id, () => props.session.model, () => props.session.harness, () => props.session.reasoning_effort, () => props.session.service_tier_revision, () => props.session.service_tier_request], async () => {
   const own = ++epoch, s = props.session
-  try { await tiers.load(s); if (own === epoch && props.session.id === s.id) tiers.follow(s) }
-  catch (error) { if (own === epoch && props.session.id === s.id) tiers.errors[s.id] = error instanceof Error ? error.message : 'Tier information unavailable.' }
+  try {
+    const answer = await tiers.load(s)
+    if (answer && own === epoch && props.session.id === s.id) {
+      if (readFailed.value) tiers.errors[s.id] = ''
+      tiers.follow(s)
+    }
+  } catch { if (own === epoch && props.session.id === s.id) tiers.errors[s.id] = readError }
 }, { immediate: true })
 async function checkResult() {
   const s = props.session, own = ++epoch
   try {
     const answer = await tiers.load(s)
     if (answer && own === epoch && props.session.id === s.id) { tiers.errors[s.id] = ''; tiers.follow(s) }
-  } catch { /* Keep the visible error until a read confirms the result. */ }
+  } catch { if (own === epoch && props.session.id === s.id) tiers.errors[s.id] = readError }
 }
 </script>
 <template>
   <section class="service-tier block" aria-label="Service tier">
     <div class="tier-title"><h3 class="eyebrow">Service tier</h3>
       <button v-if="!tiers.unavailable(session) || tiers.canAsk(session)" type="button" class="btn sm ghost tier-change" :disabled="!canOpen" aria-haspopup="dialog" @click="tiers.open(session, name, $event.currentTarget as HTMLElement)">{{ tiers.canAsk(session) ? 'Ask for a tier' : 'Change tier' }}</button>
+    </div>
+    <div class="tier-head"><TierCell :session="session" :name="name" /><strong :class="{ paid: state.active_tier && state.active_tier !== 'default' }">{{ state.active_tier ? TIER_NAME[state.active_tier] : 'Not reported' }}</strong>
+      <span>{{ tierSpeed(active) }} · {{ tierPrice(active) }}</span>
     </div>
     <div v-if="request" class="tier-request" :class="{ settled: request.state !== 'pending' }" role="note">
       <!-- Actions retain their boxes when the outcome appears below them. -->
@@ -54,10 +64,6 @@ async function checkResult() {
       <strong><AppIcon name="shield" :size="14" />{{ request.state === 'pending' ? `${tiers.canAsk(session) ? 'You asked' : name + ' asks'} for ${TIER_NAME[request.tier]}` : `${request.state === 'approved' ? 'Approved' : 'Declined'} · ${TIER_NAME[request.tier]}` }}</strong>
       <p>{{ request.reason }}</p>
       <p v-if="request.state === 'pending'">{{ tierPrice(options.find(t => t.tier === request?.tier)) }} · nothing changes until a person approves.</p>
-    </div>
-    <!-- The tier lives here, not in the list (AEON-1211): the same control, one step per Left/Right arrow. -->
-    <div class="tier-head"><TierCell :session="session" :name="name" /><strong :class="{ paid: state.active_tier && state.active_tier !== 'default' }">{{ state.active_tier ? TIER_NAME[state.active_tier] : 'Not reported' }}</strong>
-      <span>{{ tierSpeed(active) }} · {{ tierPrice(active) }}</span>
     </div>
     <p class="tier-applies">{{ explanation }}</p>
     <div class="compare" role="table" aria-label="Service tiers for this session">
@@ -71,7 +77,7 @@ async function checkResult() {
     <p class="basis">Same model and effort. Speed estimates apply only to model time; tools, tests and waits keep their time. The estimates apply price to frozen token costs and speed to measured model time only.</p>
     <p v-if="tierEstimate(state, 'default')" class="basis estimate-source" aria-label="Last-run estimate source">{{ tierEstimate(state, 'default')?.basis }}<template v-if="tierEstimate(state, 'default')?.run_id"> Run {{ tierEstimate(state, 'default')?.run_id }}.</template></p>
     <p v-if="report" class="source">{{ report.model }} · {{ report.harness }} {{ report.harness_version }} · adapter {{ report.adapter_version }} · checked <time :datetime="report.checked_at">{{ report.checked_at }}</time>.<br><a v-if="source" :href="source" target="_blank" rel="noopener noreferrer">Vendor source</a><span v-else>{{ report.source }}</span></p>
-    <p v-if="tiers.errors[session.id] || rejection" class="tier-error" role="alert">{{ tiers.errors[session.id] || `The last tier change was rejected: ${rejection?.reason || 'reason unavailable'}.` }} <button type="button" class="btn sm ghost" @click="checkResult">Check result</button> <button v-if="tiers.canDismissRejection(session)" type="button" class="btn sm ghost" @click="tiers.dismissRejection(session)">Dismiss</button></p>
+    <p v-if="tiers.errors[session.id] || rejection" class="tier-error" role="alert">{{ readFailed ? readError : tiers.errors[session.id] || `The last tier change was rejected: ${rejection?.reason || 'reason unavailable'}.` }} <button type="button" class="btn sm ghost" @click="checkResult">{{ readFailed ? 'Try again' : 'Check result' }}</button> <button v-if="tiers.canDismissRejection(session)" type="button" class="btn sm ghost" @click="tiers.dismissRejection(session)">Dismiss</button></p>
     <p v-if="tiers.unavailable(session) && session.management_mode === 'managed' && !session.stopped_at" class="rights">{{ tiers.unavailable(session) }}</p>
   </section>
 </template>
@@ -82,4 +88,5 @@ async function checkResult() {
 <style scoped>
 .compare-estimate{text-align:right;font-size:11.5px;font-variant-numeric:tabular-nums}.compare-estimate small{font-family:var(--font)}
 @container panel (max-width:460px){.compare-head{display:none}.compare-row{grid-template-columns:minmax(0,1fr) 112px;gap:6px 12px}.compare-name{grid-column:1}.compare-estimate{grid-column:2;grid-row:1}.compare-row>span:nth-child(2){grid-column:1/-1;grid-row:2}.compare-row{position:relative}}
+@media(pointer:coarse),(max-width:720px){.tier-head :deep(.tier-cell){display:inline-flex}.tier-head :deep(.tier-step){display:none}.tier-head :deep(.tier-mark){width:44px;height:44px}}
 </style>

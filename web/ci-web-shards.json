@@ -748,6 +748,8 @@
         ,
         {"file":"tests/aeon-1212-lead-panel.spec.ts","listedTests":32,"weightSeconds":240,"weightSource":"AEON-1212 fix4 estimate: viewport acceptance, G3/G6 evidence, bounded wide worker metadata and the original approved check"}
         ,
+        {"file":"tests/aeon-1213-agents-split.spec.ts","listedTests":13,"weightSeconds":40,"weightSource":"unmeasured-P5-one-worker-budget"}
+        ,
         {"file":"tests/aeon-635.spec.ts","listedTests":21,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/aeon-908-polish.spec.ts","weightSeconds":120}

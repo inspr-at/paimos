@@ -15,7 +15,7 @@ export type IconName =
   | 'command' | 'option' | 'backspace'
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash' | 'graph'
   | 'leaf' | 'bookmark' | 'pin' | 'lock' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
-  | 'merge' | 'person-check' | 'person-wait' | 'sentence' | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
+  | 'merge' | 'person-check' | 'person-wait' | 'sentence' | 'cards' | 'columns' | 'layout-focus' | 'layout-overview' | 'layout-list' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
   | 'bars' | 'flow' | 'half' | 'v-on' | 'v-close' | 'v-far' | 'v-none'
   | 'folder-kanban' | 'folder-tree' | 'list-tree' | 'network' | 'workflow' | 'component' | 'blocks' | 'kanban' | 'package' | 'package-check'
   | 'check-check' | 'square-check-big' | 'circle-check' | 'circle-dot' | 'list-checks' | 'list-todo' | 'clipboard-list' | 'clipboard-check'
@@ -89,6 +89,9 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'layers'" d="M8 2 14 5 8 8 2 5ZM2 8.2l6 3 6-3M2 11.2l6 3 6-3" />
     <template v-else-if="name === 'cards'"><rect x="2" y="2" width="5.2" height="5.2" rx="1.4" /><rect x="8.8" y="2" width="5.2" height="5.2" rx="1.4" /><rect x="2" y="8.8" width="5.2" height="5.2" rx="1.4" /><rect x="8.8" y="8.8" width="5.2" height="5.2" rx="1.4" /></template>
     <template v-else-if="name === 'columns'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="1.8" /><path d="M6 2.6v10.8M10 2.6v10.8" /></template>
+    <template v-else-if="name === 'layout-focus'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="2" /><path d="M6 2.6v10.8M3.4 5.4h1.2M3.4 7.6h1.2M3.4 9.8h1.2" /></template>
+    <template v-else-if="name === 'layout-overview'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="2" /><path d="M10.4 2.6v10.8M3.6 5.4h5M3.6 7.6h5M3.6 9.8h5" /></template>
+    <template v-else-if="name === 'layout-list'"><rect x="1.8" y="2.6" width="12.4" height="10.8" rx="2" /><path d="M4 5.4h8M4 7.6h8M4 9.8h8" /></template>
     <template v-else-if="name === 'grip'"><circle cx="6" cy="3.8" r="1.1" fill="currentColor" stroke="none" /><circle cx="10" cy="3.8" r="1.1" fill="currentColor" stroke="none" /><circle cx="6" cy="8" r="1.1" fill="currentColor" stroke="none" /><circle cx="10" cy="8" r="1.1" fill="currentColor" stroke="none" /><circle cx="6" cy="12.2" r="1.1" fill="currentColor" stroke="none" /><circle cx="10" cy="12.2" r="1.1" fill="currentColor" stroke="none" /></template>
     <template v-else-if="name === 'archive'"><rect x="1.8" y="2.8" width="12.4" height="3.4" rx="1" /><path d="M3 6.2v6.2c0 .6.4 1 1 1h8c.6 0 1-.4 1-1V6.2M6.4 9h3.2" /></template>
     <path v-else-if="name === 'expand'" d="M9.4 2.6h4v4M13.4 2.6 9.2 6.8M6.6 13.4h-4v-4M2.6 13.4l4.2-4.2" />

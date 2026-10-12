@@ -82,7 +82,9 @@ test('a created child moved away remotely and back locally remains expandable af
     await expect(row(page, 'PHAROS-30')).toBeVisible()
     await expect(row(page, 'PHAROS-30').locator('.twisty')).toHaveCount(0)
     await row(page, 'PHAROS-10').getByRole('button', { name: 'Expand PHAROS-10' }).click()
-    await row(page, child.key).getByText(child.key, { exact: true }).click()
+    // AEON-522: the key copies; the title opens this child's workspace.
+    await row(page, child.key).getByRole('link', { name: child.title, exact: true }).click()
+    await expect(panel.getByRole('heading', { name: child.title, exact: true })).toBeVisible()
     await panel.getByRole('button', { name: 'More actions' }).click()
     await page.getByRole('menuitem', { name: 'Move to another parent…' }).click()
     await page.getByLabel('Find a parent').fill('Empty epic')
@@ -135,7 +137,9 @@ test('epics show subtree progress; children indent under their parents with guid
   // With closed work shown all root levels share one lazy page.
   const roots = lists(calls).filter(call => call.query.get('parent_id') === 'p-pharos')
   expect(roots.map(call => call.query.get('kind')).sort()).toEqual(['work,epic,ticket,task'])
-  await expect(row(page, 'PHAROS-10').locator('.epic-progress')).toHaveText('0/3')
+  // AEON-655: progress counts leaves, excluding PHAROS-12, which owns a task.
+  await expect(row(page, 'PHAROS-10').locator('.epic-progress')).toHaveText('0/2')
+  expect(lists(calls).find(call => call.query.get('within') === 'n-epic' && call.query.has('facets'))?.query.get('shape')).toBe('leaf')
   await expect(row(page, 'PHAROS-30').locator('.epic-progress')).toHaveText('1/2')
   // Chevrons only where there are children.
   await expect(row(page, 'PHAROS-14').locator('.twisty')).toHaveCount(0)

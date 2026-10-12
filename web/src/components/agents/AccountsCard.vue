@@ -25,7 +25,7 @@ import HarnessMark from './HarnessMark.vue'
 // `all` is every account in the workspace when this card shows a subset (one
 // shared-quota account in Settings → Accounts and computers): name clashes and
 // pool candidates are found across all of them.
-const props = defineProps<{ accounts: AgentAccount[]; all?: AgentAccount[]; state: Availability; now: number; admin: boolean }>()
+const props = defineProps<{ accounts: AgentAccount[]; all?: AgentAccount[]; state: Availability; now: number; admin: boolean; preserveReadiness?: boolean }>()
 // "I'm away…" leads to the pacing editors, which the page owns (AEON-782).
 const emit = defineEmits<{ away: [] }>()
 const session = useSession()
@@ -59,6 +59,19 @@ const readinessText = (a: AgentAccount) => {
   const readiness = capacity.accountLines.get(a.id)?.readiness
   return readiness ? readiness.kind === 'ready' ? '' : readiness.text : STATE_TEXT[stateOf(a)]
 }
+// An ended Hold keeps its Limits row, but the Login caption below can lose a
+// wrapped line too. In a pane scrolled to the bottom that shrinks the maximum
+// scroll offset and moves every control on screen. Keep the caption's natural
+// space until this held/ended account leaves the pane; only live words are read.
+const retainedReadiness = ref(new Map<string, string>())
+watch(() => [
+  `${session.identity?.tenant.id ?? ''}/${session.identity?.principal.id ?? ''}/${!!props.preserveReadiness}/${props.accounts.map(a => a.id).join(',')}`,
+  props.accounts.map(a => readinessText(a)),
+] as const, ([key, words], before) => {
+  const retained = key === before?.[0] ? new Map(retainedReadiness.value) : new Map<string, string>()
+  if (props.preserveReadiness) for (const [i, a] of props.accounts.entries()) if (words[i]) retained.set(a.id, words[i]!)
+  retainedReadiness.value = retained
+}, { immediate: true, flush: 'sync' })
 
 function toggleOpen(id: string) {
   open.value = open.value === id ? '' : id
@@ -181,10 +194,17 @@ async function backInPool(account: AgentAccount) {
                 <span v-if="a.group_name" class="chip">{{ a.group_name }}</span>
                 <button v-if="mayManage && a.group_id" type="button" class="btn sm quiet-act" :disabled="busy === a.id" @click="backInPool(a)">Back in the pool</button>
                 <button v-else-if="mayManage" type="button" class="btn sm quiet-act" :disabled="busy === a.id" @click="openSeparate(a)">Keep separate…</button>
-                <span class="meta">
-                  <template v-if="readinessText(a)"><span class="state">{{ readinessText(a) }}</span><span class="sep"> · </span></template>
-                  <template v-if="accountPlan(a)"><span class="plan">{{ accountPlan(a) }}</span><span class="sep"> · </span></template>
-                  <span class="reads">{{ readingSupport(a.harness) }}</span>
+                <span class="meta" :class="{ 'meta-reserved': retainedReadiness.has(a.id) }">
+                  <span class="meta-current">
+                    <template v-if="readinessText(a)"><span class="state">{{ readinessText(a) }}</span><span class="sep"> · </span></template>
+                    <template v-if="accountPlan(a)"><span class="plan">{{ accountPlan(a) }}</span><span class="sep"> · </span></template>
+                    <span class="reads">{{ readingSupport(a.harness) }}</span>
+                  </span>
+                  <span v-if="retainedReadiness.has(a.id)" class="meta-sizer" aria-hidden="true">
+                    <span class="state">{{ retainedReadiness.get(a.id) }}</span><span class="sep"> · </span>
+                    <template v-if="accountPlan(a)"><span class="plan">{{ accountPlan(a) }}</span><span class="sep"> · </span></template>
+                    <span class="reads">{{ readingSupport(a.harness) }}</span>
+                  </span>
                 </span>
               </div>
               <button type="button" class="icon-btn flat more" :aria-expanded="open === a.id" :aria-controls="`account-detail-${a.id}`" :aria-label="`Details for ${accountName(a)}`" @click="toggleOpen(a.id)"><AppIcon name="chevron" :size="16" /></button>
@@ -252,7 +272,10 @@ async function backInPool(account: AgentAccount) {
 .chip.host { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-variant-ligatures: none; }
 .meta { font-size: 12.5px; color: var(--ink-3); }
 /* A long line breaks between its parts, never inside one. */
-.meta > span:not(.sep) { white-space: nowrap; }
+.meta :is(.state, .plan, .reads) { white-space: nowrap; }
+.meta-reserved { display: inline-grid; min-width: 0; }
+.meta-reserved > span { grid-area: 1 / 1; }
+.meta-sizer { visibility: hidden; }
 .plan { color: var(--ink-2); }
 .state { color: var(--ink-2); font-weight: 600; }
 .account.signin .state { color: var(--warn-ink); }
