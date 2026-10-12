@@ -404,3 +404,62 @@ for (const look of ['light', 'dark'] as const) test(`phone: band, full-height pa
   expect(action!.height).toBeGreaterThanOrEqual(44)
   await page.screenshot({ path: info.outputPath(`phone-pause-${look}.png`) })
 })
+
+// AEON-1256: a running lead's card collapses to its header row; the choice is the person's and survives a reload.
+for (const width of [1440, 400]) test(`AEON-1256: the lead card collapses to its header row and stays collapsed after a reload at ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: width < 600 ? 844 : 1000 })
+  const { data } = await mockLeadFlow(page, { lead: 'working', question: true })
+  await page.goto('/p/PHAROS')
+  const toggle = band(page).locator('[data-act="collapse"]'), head = band(page).locator('.lead-top')
+  const pause = band(page).locator('[data-act="main"]'), menu = band(page).locator('[data-act="lead-menu"]'), name = band(page).getByRole('button', { name: /PHAROS lead: open details/ })
+  const below = [band(page).getByRole('group', { name: 'Where the work is' }), band(page).locator('.lead-now').first(), band(page).locator('.asks'), band(page).locator('.lead-foot')]
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(toggle).toHaveAccessibleName('Collapse lead panel')
+  await expect(toggle.locator('svg')).toHaveCount(1)
+  await expect(toggle).toHaveText('')
+  for (const part of below) await expect(part).toBeVisible()
+  await expectStableControls({ controls: { collapse: toggle, pause, menu, name }, interactions: [
+    { name: 'collapse with the pointer', run: async () => { await toggle.click(); await expect(toggle).toHaveAttribute('aria-expanded', 'false') } },
+    { name: 'expand with Enter', run: async () => { await toggle.focus(); await page.keyboard.press('Enter'); await expect(toggle).toHaveAttribute('aria-expanded', 'true') } },
+    { name: 'collapse with Space', run: async () => { await page.keyboard.press('Space'); await expect(toggle).toHaveAttribute('aria-expanded', 'false') } },
+  ] })
+  // Only the header row stays: name, status, Pause… and the menu; nothing below it.
+  await expect(toggle).toHaveAccessibleName('Expand lead panel')
+  for (const part of below) await expect(part).toBeHidden()
+  await expect(band(page).locator('#lead-body')).toHaveAttribute('inert', '')
+  await expect(band(page).locator('.lead-state')).toContainText('Working')
+  const card = (await band(page).boundingBox())!, row = (await head.boundingBox())!
+  expect(card.y + card.height - (row.y + row.height), 'the card ends just below its header row').toBeLessThanOrEqual(20)
+  // The collapse control sits left of Pause… and the menu, without overlapping either.
+  const c = (await toggle.boundingBox())!, p = (await pause.boundingBox())!, m = (await menu.boundingBox())!
+  expect(c.x + c.width, 'collapse before Pause…').toBeLessThanOrEqual(p.x + 0.5)
+  expect(p.x + p.width, 'Pause… before the menu').toBeLessThanOrEqual(m.x + 0.5)
+  if (width < 600) for (const [label, rect] of [['collapse', c], ['pause', p]] as const) expect(Math.min(rect.width, rect.height), `${label} is a 44 px target`).toBeGreaterThanOrEqual(44)
+  await expect.poll(() => data.preferences['ui.project.lead-panel']).toEqual({ collapsed: true })
+  await page.reload()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  for (const part of below) await expect(part).toBeHidden()
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  for (const part of below) await expect(part).toBeVisible()
+  await expect.poll(() => data.preferences['ui.project.lead-panel']).toEqual({ collapsed: false })
+})
+
+// AEON-1256: the sub-label under a station count (“PHAROS-13”, “+5”) always takes its line, so the card never jumps when it appears.
+for (const width of [1440, 400]) test(`AEON-1256: the stations row has one height with and without sub-labels at ${width}`, async ({ page, context }) => {
+  const lineOf = async (tab: Page, options: Parameters<typeof mockLeadFlow>[1]) => {
+    await tab.setViewportSize({ width, height: width < 600 ? 844 : 1000 })
+    await mockLeadFlow(tab, { lead: 'paused', ...options })
+    await tab.goto('/p/PHAROS')
+    const line = band(tab).getByRole('group', { name: 'Where the work is' })
+    await expect(line).toBeVisible()
+    return line
+  }
+  const withKeys = await lineOf(page, {})
+  await expect(withKeys.locator('[data-station="gate"] .st-keys')).toContainText('PHAROS-13')
+  const bare = await lineOf(await context.newPage(), { queue: [], decisions: false })
+  await expect(bare.locator('[data-station="queued"] .st-label b')).toHaveText('0')
+  for (const key of await bare.locator('.st-keys').all()) await expect(key).toHaveText('')
+  const a = (await withKeys.boundingBox())!, b = (await bare.boundingBox())!
+  expect(Math.abs(a.height - b.height), `stations row ${a.height} px with sub-labels, ${b.height} px without`).toBeLessThanOrEqual(0.5)
+})
