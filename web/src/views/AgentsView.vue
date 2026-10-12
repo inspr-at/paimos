@@ -423,7 +423,9 @@ async function closePanel() {
   }
   else await router.replace({ path: '/agents', query: route.query })
   await nextTick()
-  if (id && owner === person.value && !sessionId.value) focusRow(cursor.value)
+  // Returning focus must leave the preset dock under the pointer. Keyboard
+  // navigation scrolls rows into view; closing details preserves page scroll.
+  if (id && owner === person.value && !sessionId.value) focusRow(cursor.value, false)
 }
 
 // ---------- Keyboard: j/k move, Enter opens, Esc closes ----------
@@ -436,10 +438,10 @@ watch([query, filter], () => {
   if (!cursor.value || onScreen(cursor.value)) return
   cursor.value = document.querySelector<HTMLElement>('.agents-page .sessions .row[data-row]:not(.filter-context)')?.dataset.row ?? ''
 }, { flush: 'post' })
-function focusRow(id: string) {
+function focusRow(id: string, scroll = true) {
   const el = document.querySelector<HTMLElement>(`.agents-page [data-row="${CSS.escape(id)}"]`)
   el?.focus({ preventScroll: true })
-  el?.scrollIntoView({ block: 'nearest' })
+  if (scroll) el?.scrollIntoView({ block: 'nearest' })
 }
 function move(step: number) {
   const list = rows()

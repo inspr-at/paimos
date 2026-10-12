@@ -197,10 +197,12 @@ for (const theme of ['light', 'dark'] as const) {
     await row(page, data.sessions[1]!.id).click()
     await expect.poll(() => pane(page).locator('.scroll:visible').evaluate(el => el.scrollTop)).toBe(0)
     await dragTo(page, 280)
+    const closingScroll = await page.locator('main').evaluate(el => el.scrollTop)
     await stability.check(async () => {
       await dragTo(page, width - 16 - 379, false)
       await expect(page.locator('.agents-page')).toHaveClass(/will-close/)
       await page.mouse.up(); await preset(page, 'list'); await expect(pane(page)).toHaveCount(0)
+      expect(await page.locator('main').evaluate(el => el.scrollTop), 'closing the split preserves page scroll').toBe(closingScroll)
     })
     expect(await dock(page).evaluate(el => el === (window as unknown as { p5Dock: Element }).p5Dock)).toBe(true)
     stability.done()
