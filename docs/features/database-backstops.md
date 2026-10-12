@@ -36,6 +36,13 @@ totals. Counts retain their prior semantics, including archived kinds, project
 visibility, deleted-node exclusion and tenant isolation. API fields and routes
 are unchanged.
 
+The PostgreSQL 18 behavior fixture contains 12,000 nodes, project-less nodes,
+two projects, deleted nodes, archived kinds and another tenant. One measured
+run changed the count plan from 47 node scan loops to one grouped scan, from
+17,159 shared buffer hits to 399, and from 46.729 ms to 4.815 ms. These are
+fixture measurements, not latency guarantees; the test asserts plan structure
+and count parity under tenant and project visibility rather than a time limit.
+
 Operators can start slow-statement observation at one second, using their
 existing privileged database administration authority:
 
