@@ -2,7 +2,7 @@
 // Row copy for the session list. Uses only fields the session already carries.
 // A heartbeat, activity flag or work shape is not an intended result.
 import type { ModelProfile } from '../../lib/agents'
-import { fullName, lineFallback } from '../../lib/modelsSimple'
+import { fullName, lineFallback } from '../../lib/modelsSimple.ts'
 import type { SessionView } from '../../stores/agents'
 
 export type ModelProvider = 'openai' | 'anthropic' | 'xai' | 'google' | 'cursor' | 'unknown'
@@ -101,7 +101,7 @@ function unlistedName(id: string): { name: string; level: string } {
 }
 // A profile slug (the run's pinned profile) names the model and its level; a model id names the model only.
 // A profile's "default" level says nothing, so it is left out.
-function nameOf(model: string, harness: string, names: ModelNames | undefined): { name: string; level: string } {
+export function nameOf(model: string, harness: string, names: ModelNames | undefined): { name: string; level: string } {
   const pinned = names?.bySlug.get(model)
   if (pinned) return { name: fullName(pinned), level: pinned.effort === 'default' ? '' : pinned.effort }
   const listed = names?.byModel.get(modelKey(harness, model))

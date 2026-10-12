@@ -12,6 +12,7 @@ import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
+import TicketPeekLink from '../TicketPeekLink.vue'
 import { useRoute, useRouter } from 'vue-router'
 import SessionChat from './SessionChat.vue'
 import SessionTabs from './SessionTabs.vue'
@@ -410,6 +411,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
           <div v-if="modelLine" class="fact"><dt>Model</dt><dd class="mono">{{ modelLine }}<span v-if="run && run.model_evidence === 'vendor_reported'" class="evidence" data-tip="Reported by the vendor, not only requested"><AppIcon name="check" :size="11" /></span></dd></div>
           <div v-if="reported?.account_label || view.account" class="fact"><dt>Account</dt><dd>{{ reported?.account_label || view.account }}</dd></div>
           <div class="fact"><dt>Harness</dt><dd>{{ setupLine }}</dd></div>
+          <div v-if="view.ticket" class="fact wide"><dt>Ticket</dt><dd><TicketPeekLink class="ticket-fact" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title"><span class="key">{{ view.ticket.key }}</span> <span class="ticket-title">{{ view.ticket.title }}</span></TicketPeekLink><span v-if="ticketState" class="faint"> · {{ ticketState }}</span></dd></div>
         </dl>
         <ol v-if="metadataHistory.length" class="metadata-history" aria-label="Recent session changes">
           <li v-for="item in metadataHistory" :key="item.id"><time :datetime="item.at">{{ relativeTime(item.at, { now }) }}</time><span>{{ item.text }}</span></li>
@@ -489,17 +491,6 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .name { min-width: 0; white-space: normal; overflow-wrap: anywhere; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
 .state-text { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .state-text.needs { color: var(--warn-ink); }
-.head-sub { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 6px; padding-right: 8px; font-size: 12.5px; color: var(--ink-2); }
-.head-sub .ticket-detail { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; color: var(--ink); text-decoration: none; }
-.head-sub .ticket-detail:hover .head-ticket { color: var(--teal-ink); }
-.head-sub .ticket-detail:focus-visible { box-shadow: var(--focus-ring); border-radius: 6px; }
-.head-ticket { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-@media (max-width: 600px) {
-  .head-sub { flex-wrap: nowrap; align-items: flex-start; }
-  .head-sub .ticket-detail { flex: 1 1 0; align-items: flex-start; }
-  .head-sub .ticket-status { padding-top: 3px; }
-  .head-ticket { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
-}
 .spacer { flex: 1; }
 .bar-sep { width: 1px; height: 18px; margin: 0 4px; background: var(--line-2); }
 .panel-head [aria-disabled="true"] { opacity: .35; cursor: not-allowed; }
@@ -518,7 +509,6 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .metadata-history li { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 8px 0; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink); }
 .metadata-history time { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
 .metadata-history span { overflow-wrap: anywhere; }
-.ticket-status { flex: none; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
 .callout { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 12px 12px 14px; border-radius: 12px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent); color: var(--warn-ink); }
 .callout-text { display: grid; flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); }
 .callout-text strong { color: var(--ink); font-size: 13px; }
@@ -543,7 +533,10 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .evidence { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--chip-teal-bg); color: var(--teal-ink); }
 .project-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
 .project-link:hover { color: var(--teal-ink); }
-.ticket-chip { flex-shrink: 0; display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); font-variant-ligatures: none; }
+.ticket-fact { min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
+.ticket-fact .key { font: 600 11.5px var(--mono); color: var(--teal-ink); }
+.ticket-fact:hover .ticket-title { text-decoration: underline; }
+@media (max-width: 720px), (pointer: coarse) { .ticket-fact { min-height: 44px; align-content: center; } }
 .block { margin-top: 24px; }
 .block.first { margin-top: 18px; }
 .block h3 { margin-bottom: 10px; }

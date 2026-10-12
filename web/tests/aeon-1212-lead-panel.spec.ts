@@ -621,7 +621,7 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
     const row = panel(page).locator('.worker').first()
     await expect(row.locator('.worker-name')).toHaveText('PHAROS-11 · Connect Hetzner Cloud for managed provisioning')
     await expect(row.locator('.worker-name')).not.toContainText('imac0')
-    await expect(row.locator('.worker-execution')).toContainText('Sol 6 · medium')
+    await expect(row.locator('.worker-execution')).toContainText('GPT-6 Sol · medium')
     await expect(row.locator('.worker-execution')).toContainText('Codex')
     await expect(row.locator('.worker-execution')).toContainText('ChatGPT Pro')
     await expect(row.locator('.worker-computer')).toHaveText('imac0')

@@ -15078,7 +15078,7 @@
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"the docking width leaves the list 560px beside a 560px pane","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/lead-panel.test.ts","name":"AEON-1212 fix3: panel model names come from the matching harness registry and never expose an unrecognised identity","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/lead-panel.test.ts","name":"AEON-1249: panel model names and effort match the session row for registered and unlisted models","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/lead-panel.test.ts","name":"AEON-1212: admission uses four real gates and a timestamp; no report, unreadable, stale and held states never claim current passes","tier":"GATED-FULL"}
     ,

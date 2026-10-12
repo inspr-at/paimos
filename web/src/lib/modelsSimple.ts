@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // The minimal Models page (AEON-1011). Display and editing only: the server owns eligibility, account
 // qualification and the automatic fallback. Everything here is pure so the card can be tested without a browser.
-import { compareModelVersions, profileLine, type PrefProfile } from './modelPrefs'
-import { harnessLabel } from './agentState'
-import { HARNESS_NAME as ACCOUNT_NAME } from './capacity'
+import { compareModelVersions, profileLine, type PrefProfile } from './modelPrefs.ts'
+import { harnessLabel } from './agentState.ts'
+import { HARNESS_NAME as ACCOUNT_NAME } from './capacity.ts'
 
 export type Scope = 'me' | 'default'
 export interface SimplePick { line: string | null; effort: string | null; harness?: string; model?: string }
