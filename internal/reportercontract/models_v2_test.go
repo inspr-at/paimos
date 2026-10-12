@@ -57,7 +57,7 @@ func TestModelsV2PageOpenAPIContract(t *testing.T) {
 	}
 	for name, fields := range map[string][]string{
 		"ModelSimpleRow":         {"column", "mine", "lock", "chain", "end", "never"},
-		"ModelSimpleSituation":   {"chain", "end"},
+		"ModelSimpleSituation":   {"chain", "end", "not"},
 		"ModelSimplePreferences": {"all", "exceptions", "situations", "quick", "outdated", "unavailable"},
 		"ModelSimpleStep":        {"line", "effort"},
 		"ModelSimpleNever":       {"line", "by", "at", "why"},

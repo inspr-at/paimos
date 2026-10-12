@@ -328,7 +328,7 @@
         ,
         {"file":"tests/managed-controls.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":3.896,"median":2.507,"min":2.352},"seconds":65.324,"selectedTests":25},"weightSeconds":61.988304,"weightSource":"web-13"}
         ,
-        {"file":"tests/no-shift-agents.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":22.178,"median":6.7085,"min":2.703},"estimatedTests":3,"measuredTests":20,"seconds":194.4282,"selectedTests":23},"weightSeconds":67.322244,"weightSource":"tierTiming:37377299349"}
+        {"file":"tests/no-shift-agents.spec.ts","listedTests":29,"tierTiming":{"caseSeconds":{"max":22.178,"median":6.7085,"min":2.703},"estimateReason":"AEON-1211: six added cases estimated at the existing median; measured cases retained.","estimatedTests":9,"measuredTests":20,"seconds":234.6792,"selectedTests":29},"weightSeconds":67.322244,"weightSource":"tierTiming:37377299349"}
         ,
         {"file":"tests/no-shift-dialogs.spec.ts","listedTests":22,"tierTiming":{"caseSeconds":{"max":5.68,"median":3.5155,"min":2.121},"seconds":81.696,"selectedTests":22},"weightSeconds":36.564633,"weightSource":"tierTiming:37377299349"}
         ,
@@ -530,13 +530,19 @@
         ,
         {"file":"tests/model-refresh.spec.ts","listedTests":1,"tierTiming":{"caseSeconds":{"max":1.449,"median":1.449,"min":1.449},"seconds":1.449,"selectedTests":1},"weightSeconds":3.5,"weightSource":"e2e-4"}
         ,
-        {"file":"tests/models-registry.spec.ts","listedTests":26,"tierTiming":{"caseSeconds":{"max":5.706,"median":0.594,"min":0.244},"seconds":23.353,"selectedTests":26},"weightSeconds":22,"weightSource":"AEON-1012 fix3 adds the revision-snapshot spec to the fix2 16.0s run"}
+        {"file":"tests/models-registry-shots.spec.ts","listedTests":3,"weightSeconds":20,"weightSource":"AEON-1163 mbp2606 single worker 12.8s for 3 cases plus margin"}
+        ,
+        {"file":"tests/models-registry.spec.ts","listedTests":33,"tierTiming":{"caseSeconds":{"max":5.706,"median":0.594,"min":0.244},"seconds":23.353,"selectedTests":26},"weightSeconds":30,"weightSource":"AEON-1163 mbp2606 single worker 23.8s for 31 cases; the two pause stability guards add about 3s, within the margin"}
         ,
         {"file":"tests/models-simple-shots.spec.ts","listedTests":18,"tierTiming":{"caseSeconds":{"max":1.402,"median":0.8975,"min":0.644},"seconds":16.304,"selectedTests":18},"weightSeconds":8,"weightSource":"AEON-1011 local-single-worker-5.3s-plus-margin"}
         ,
         {"file":"tests/models-simple.spec.ts","listedTests":21,"tierTiming":{"caseSeconds":{"max":2.142,"median":0.68,"min":0.466},"seconds":17.886,"selectedTests":22},"weightSeconds":12,"weightSource":"AEON-1011 local-single-worker-7.1s-plus-margin"}
         ,
+        {"file":"tests/models-situations.spec.ts","listedTests":4,"weightSeconds":3,"weightSource":"AEON-1162 mbp2606 single-worker 1.9s plus margin"}
+        ,
         {"file":"tests/policies-ladders-moved.spec.ts","listedTests":2,"weightSeconds":4,"weightSource":"AEON-1204 local-single-worker-2.1s-plus-margin"}
+        ,
+        {"file":"tests/policies-rules.spec.ts","listedTests":9,"weightSeconds":20,"weightSource":"AEON-1165 estimate, 9 cases replacing the ladder editor spec"}
       ]
     }
     ,
@@ -736,7 +742,9 @@
         ,
         {"file":"tests/aeon-1209-agents-head.spec.ts","listedTests":19,"weightSeconds":75,"weightSource":"remote-one-worker-AEON-1209-60s-plus-margin"}
         ,
-        {"file":"tests/aeon-1210-agents-tree.spec.ts","listedTests":18,"weightSeconds":51,"weightSource":"remote-one-worker-AEON-1210-24s-plus-margin"}
+        {"file":"tests/aeon-1210-agents-tree.spec.ts","listedTests":19,"weightSeconds":54,"weightSource":"remote-one-worker-AEON-1210-24s-plus-margin"}
+        ,
+        {"file":"tests/aeon-1211-agents-rows.spec.ts","listedTests":33,"weightSeconds":24,"weightSource":"local-single-worker-AEON-1211-15s-plus-margin"}
         ,
         {"file":"tests/aeon-1212-lead-panel.spec.ts","listedTests":32,"weightSeconds":240,"weightSource":"AEON-1212 fix4 estimate: viewport acceptance, G3/G6 evidence, bounded wide worker metadata and the original approved check"}
         ,
@@ -924,7 +932,11 @@
         ,
         {"file":"tests/markdown-ticket-links.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/models-outdated.spec.ts","listedTests":9,"weightSeconds":10,"weightSource":"AEON-1164 local-single-worker-7.5s-plus-margin"}
+        {"file":"tests/models-fallback.spec.ts","listedTests":13,"weightSeconds":14,"weightSource":"AEON-1161 mbp2606 single worker: with models-simple and its shots (20s weight) the three specs ran in 30.1s; plus margin"}
+        ,
+        {"file":"tests/models-outdated.spec.ts","listedTests":10,"weightSeconds":11,"weightSource":"AEON-1164 local-single-worker-7.5s-plus-margin; AEON-1163 adds the phone tray case"}
+        ,
+        {"file":"tests/models-situations-shots.spec.ts","listedTests":12,"weightSeconds":8,"weightSource":"AEON-1162 evidence screenshots, mbp2606 single-worker 6.5s plus margin"}
         ,
         {"file":"tests/multiple-account-pairing.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":1.722,"median":1.5945,"min":1.491},"seconds":9.596,"selectedTests":6},"weightSeconds":13.317072,"weightSource":"unmeasured-test-rate"}
         ,
@@ -958,11 +970,17 @@
         ,
         {"file":"tests/profile.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/project-advanced.spec.ts","listedTests":4,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
+        ,
+        {"file":"tests/project-delivery-settings.spec.ts","listedTests":2,"weightSeconds":180,"weightSource":"unmeasured-estimate"}
+        ,
         {"file":"tests/project-groups.spec.ts","listedTests":18,"weightSeconds":39.95122,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/project-list.spec.ts","listedTests":28,"weightSeconds":62.146341,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/project-sections.spec.ts","listedTests":24,"weightSeconds":53.268293,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/project-settings.spec.ts","listedTests":4,"weightSeconds":120,"weightSource":"unmeasured-estimate"}
         ,
         {"file":"tests/project-sort.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
         ,

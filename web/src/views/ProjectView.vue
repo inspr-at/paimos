@@ -79,8 +79,7 @@ import { DOCK_LIST_RESERVE, DOCK_MEDIA, entryPath, isKnowledgeType, parseEntryPa
 import { filtersFromQuery as knowledgeFiltersFrom, filtersToQuery as knowledgeQuery, useKnowledge, type KnowledgeFilters } from '../lib/useKnowledge'
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
 
-const RecurringWorkCard = defineAsyncComponent(() => import('../components/recurrences/RecurringWorkCard.vue'))
-const ProjectWorkContextCard = defineAsyncComponent(() => import('../components/settings/ProjectWorkContextCard.vue'))
+const ProjectSettings = defineAsyncComponent(() => import('../components/settings/ProjectSettings.vue'))
 // Knowledge loads with its tab, not with every project page.
 const KnowledgeTab = defineAsyncComponent(() => import('../components/knowledge/KnowledgeTab.vue'))
 const KnowledgeEntryPage = defineAsyncComponent(() => import('../components/knowledge/KnowledgeEntryPage.vue'))
@@ -1787,6 +1786,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
             <h1 id="project-title" v-clip-tip>{{ project.title }}</h1>
             <span v-if="project.frozen" class="chip state-chip">Frozen</span>
             <span v-else-if="project.archived" class="chip state-chip">Archived</span>
+            <RouterLink v-if="can('nodes.write', project.id)" class="icon-btn sm head-edit" :to="`/p/${encodeURIComponent(project.routeKey)}/settings#f-name`" aria-label="Edit name and description in Settings" data-tip="Edit in Settings › General"><AppIcon name="edit" :size="14" /></RouterLink>
           </div>
           <div v-if="project.description" ref="descriptionBlock" class="description-block" @keydown.esc.stop.prevent="closeDescription">
             <button v-if="descriptionClipped && descriptionNeedsPanel" ref="descriptionMore" type="button" class="description-more" :aria-expanded="descriptionExpanded" aria-controls="project-description-full" @click="toggleDescription">{{ descriptionExpanded ? 'Less' : 'More' }}</button>
@@ -1867,8 +1867,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </div>
 
       <template v-if="settingsActive">
-        <RecurringWorkCard :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" :consent="route.query.consent === '1'" />
-        <ProjectWorkContextCard :key="project.id" :project="{ id: project.id, title: project.title }" />
+        <ProjectSettings :key="project.id" :project="project" />
       </template>
       <DeliveryView v-else-if="deliveryActive" :key="`${project.id}/${me?.id ?? ''}`" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" />
       <KnowledgeTab
@@ -1971,6 +1970,8 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 </template>
 
 <style scoped>
+.head-edit { flex: none; margin-top: 2px; color: var(--ink-3); }
+@media (pointer: coarse), (max-width: 600px) { .head-edit { width: 44px; height: 44px; } }
 /* Lists use the full width; the gutter grows with the screen. */
 .project-page { width: 100%; margin: 0; padding: 22px var(--gutter) 12px; }
 /* The header follows its own width, not the window's: a docked ticket panel can

@@ -524,47 +524,50 @@ func (m *Module) writeNeverRule(w http.ResponseWriter, r *http.Request) {
 		if revision != *in.Revision {
 			return prefFail(409, "stale_revision")
 		}
+		c, err := loadBoardCatalog(ctx, tx)
+		if err != nil {
+			return err
+		}
+		// The page shows provider identities, while earlier writers stored
+		// harness-derived aliases. Match, replace and remove every equivalent
+		// line, and store only the provider identity.
+		canonical := modelsIdentity(c)
+		identity := canonical(line)
 		var before *modelprefs.Rule
 		count := 0
+		equivalent := []string{line, identity}
 		for _, rule := range s.Rules {
 			if rule.Column != column {
 				continue
 			}
 			count++
-			if rule.Line == line {
+			if canonical(rule.Line) == identity {
 				if rule.Lock != "not" {
 					return prefFail(409, "rule_conflict")
 				}
-				copy := rule
-				before = &copy
+				if before == nil {
+					copy := rule
+					before = &copy
+				}
+				equivalent = append(equivalent, rule.Line)
 			}
 		}
-		if r.Method == http.MethodDelete {
-			if _, err := tx.Exec(ctx, `DELETE FROM model_rules WHERE scope='workspace' AND column_key=$1 AND line=$2 AND lock='not' AND moved_to_models IS NOT TRUE`, column, line); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, `DELETE FROM model_row_constraints WHERE scope='workspace' AND column_key=$1 AND line=$2 AND kind='never'`, column, line); err != nil {
-				return err
-			}
-		} else {
-			c, err := loadBoardCatalog(ctx, tx)
-			if err != nil {
-				return err
-			}
-			c = modelsWriteCatalog(c)
-			if _, ok := c.profiles[line]; !ok {
+		if r.Method != http.MethodDelete {
+			if _, ok := modelsWriteCatalog(c).profiles[line]; !ok {
 				return prefFail(422, "unknown_line")
 			}
 			if before == nil && (count >= 512 || len(s.Rules) >= 4096) {
 				return modelprefs.ErrBoardBounds
 			}
-			if _, err := tx.Exec(ctx, `DELETE FROM model_rules WHERE scope='workspace' AND column_key=$1 AND line=$2 AND lock='not' AND moved_to_models IS NOT TRUE`, column, line); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, `DELETE FROM model_row_constraints WHERE scope='workspace' AND column_key=$1 AND line=$2 AND kind='never'`, column, line); err != nil {
-				return err
-			}
-			if _, err := tx.Exec(ctx, `INSERT INTO model_row_constraints(tenant_id,scope,column_key,line,kind,why,set_by) VALUES($1,'workspace',$2,$3,'never',$4,$5)`, p.TenantID, column, line, in.Why, p.ID); err != nil {
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM model_rules WHERE scope='workspace' AND column_key=$1 AND line=ANY($2::text[]) AND lock='not' AND moved_to_models IS NOT TRUE`, column, equivalent); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM model_row_constraints WHERE scope='workspace' AND column_key=$1 AND line=ANY($2::text[]) AND kind='never'`, column, equivalent); err != nil {
+			return err
+		}
+		if r.Method != http.MethodDelete {
+			if _, err := tx.Exec(ctx, `INSERT INTO model_row_constraints(tenant_id,scope,column_key,line,kind,why,set_by) VALUES($1,'workspace',$2,$3,'never',$4,$5)`, p.TenantID, column, identity, in.Why, p.ID); err != nil {
 				return err
 			}
 		}
@@ -584,7 +587,7 @@ func (m *Module) writeNeverRule(w http.ResponseWriter, r *http.Request) {
 				audit.Rules = append(audit.Rules, rule)
 			}
 		}
-		_, err = events.Append(ctx, tx, p, events.Change{Type: "model.rules_changed", Before: map[string]any{"column": column, "line": line, "rule": before}, After: audit})
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "model.rules_changed", Before: map[string]any{"column": column, "line": identity, "rule": before}, After: audit})
 		return err
 	})
 	if err != nil {

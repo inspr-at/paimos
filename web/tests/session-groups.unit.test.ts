@@ -2,7 +2,8 @@
 // AEON-1210 (design AEON-1196 §3.3–3.4): Sessions grouped by project. Risk: a group moves with
 // activity instead of keeping its fixed place, a lead does not head its group, a lead line shows
 // for a project that has its lead on the list (or hides one that waits), an ended lead generation
-// hides what the current lead does, a count read in part looks complete, the address carries
+// hides what the current lead does, sessions without a lead look different from queued work without
+// one, a count read in part looks complete, the address carries
 // unbounded filters, or the folded-groups preference grows past its bound.
 import { describe, expect, it } from 'vitest'
 import { facetChoices, foldSummary, keyedGroups, matchesFacets, NO_PROJECT, orderProjects, parseFacet, parseGroup, projectGroups, queueHeads, queuedWord, queueNote, MAX_FACET_VALUES } from '../src/components/agents/sessionGroups'
@@ -41,6 +42,21 @@ describe('project groups', () => {
     expect(projectGroups(input).groups.map(g => g.project.key)).toEqual(['AEON', 'OPS'])
     expect(projectGroups({ ...input, lines: false }).groups.map(g => g.project.key)).toEqual(['AEON'])
     expect(projectGroups({ ...input, onlyProjects: ['OPS'] }).groups.map(g => g.project.key)).toEqual(['AEON', 'OPS'])
+  })
+
+  it('head a project’s sessions without a lead with the same no-lead line, queued work or not, read or not', () => {
+    const leads: Record<string, ProjectLead | undefined> = { web: lead('none') }
+    const queued: Record<string, number | null> = { web: 0 }
+    const input = { roots: [root('w1', 'web'), root('w2', 'web')], projects, lead: (id: string) => leads[id], queued: (id: string) => queued[id] ?? null, lines: true }
+    const web = () => projectGroups(input).groups.find(g => g.project.key === 'WEB')!
+    // Sessions run and nothing is queued: the line heads them, without a count.
+    expect([web().line, web().roots.map(r => r.view.session.id)]).toEqual([{ kind: 'none', lead: leads.web, queued: 0 }, ['w1', 'w2']])
+    // The queue can't be read: the line still says there is no lead, and claims no count.
+    queued.web = null
+    expect(web().line).toEqual({ kind: 'none', lead: leads.web, queued: null })
+    // The lead is not read yet: a plain header, never a line that guesses.
+    leads.web = undefined
+    expect(web().line).toBeNull()
   })
 
   it('an ended lead generation never hides what the current lead does: starting, removed, paused or running anew', () => {

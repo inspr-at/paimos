@@ -113,7 +113,8 @@ test('Undo is offered only when the server says this person may undo', async ({ 
 test('No heartbeat rows carry a bin; live rows keep the confirm', async ({ page }) => {
   const { silent, live } = await setup(page)
   await page.goto('/agents')
-  await expect(row(page, silent.id)).toContainText('No heartbeat')
+  // AEON-1211: the state is in the row's avatar.
+  await expect(row(page, silent.id).locator('.ava')).toHaveAttribute('aria-label', /: No heartbeat$/)
   await row(page, silent.id).getByRole('button', { name: 'Remove grok-quiet' }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(row(page, silent.id)).toHaveCount(0)
@@ -282,7 +283,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await expect(row(page, lost.id)).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
     if (width === 390) {
-      for (const button of await row(page, silent.id).locator('.c-actions button').all()) {
+      for (const button of await row(page, silent.id).locator('.c-actions button:visible').all()) {
         const box = (await button.boundingBox())!
         expect(box.width).toBeGreaterThanOrEqual(44)
         expect(box.height).toBeGreaterThanOrEqual(44)

@@ -10,6 +10,10 @@ import (
 
 const DefaultDailyPoints = 10
 
+// DailyAtLimitFollowsModels is what GET /agents/plan reports for every
+// harness at its daily cap: Settings › Models decides (AEON-1166).
+const DailyAtLimitFollowsModels = "follows_models"
+
 var ErrDailyWrite = errors.New("invalid daily plan write")
 
 type DailyPace struct {
@@ -24,7 +28,9 @@ type DailyBoost struct {
 type DailySettings struct {
 	Pace       DailyPace   `json:"pace"`
 	BoostToday *DailyBoost `json:"boost_today"`
-	AtLimit    string      `json:"at_limit"`
+	// AtLimit is deprecated and ignored (AEON-1166). Writes still carry ladder
+	// or wait, so the previous release can read the plan; reads say ladder.
+	AtLimit string `json:"at_limit"`
 }
 
 func DefaultDaily() DailySettings {
@@ -87,10 +93,16 @@ func (d *DailySettings) UnmarshalJSON(raw []byte) error {
 		}
 	}
 	*d = DailySettings(out)
-	return d.Validate()
+	if err := d.Validate(); err != nil {
+		return err
+	}
+	// A saved Wait is accepted and ignored: at the cap the walk continues the
+	// Models order, and only an order that ends in Wait waits.
+	d.AtLimit = "ladder"
+	return nil
 }
 func SameDaily(a, b DailySettings) bool {
-	if a.Pace.Mode != b.Pace.Mode || a.AtLimit != b.AtLimit || (a.Pace.PointsPerDay == nil) != (b.Pace.PointsPerDay == nil) {
+	if a.Pace.Mode != b.Pace.Mode || (a.Pace.PointsPerDay == nil) != (b.Pace.PointsPerDay == nil) {
 		return false
 	}
 	if a.Pace.PointsPerDay != nil && *a.Pace.PointsPerDay != *b.Pace.PointsPerDay {

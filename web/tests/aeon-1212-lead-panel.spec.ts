@@ -607,7 +607,7 @@ for (const width of [1440, 1000, 400]) for (const look of ['light', 'dark'] as c
         await page.reload()
         await expect(caption).toHaveText("Couldn't read the last start")
         await expect(checks).toHaveCount(0)
-        await expect(panel(page).getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
+        await expect(panel(page).locator('[aria-labelledby="lp-checks"]').getByRole('button', { name: 'Try again', exact: true })).toBeVisible()
         await admissionShot('unreadable')
       } },
       { name: 'stale history', run: async () => {

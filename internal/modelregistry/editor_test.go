@@ -174,6 +174,17 @@ func editorError(t *testing.T, w *httptest.ResponseRecorder, status int, code st
 }
 func editorJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 
+// retiredLadderRefusal reports the retired writer's 410 by its decoded
+// message: the JSON encoder escapes ">" as >, so the raw body never
+// contains "Settings > Models".
+func retiredLadderRefusal(status int, body []byte) bool {
+	var refusal struct {
+		Error string `json:"error"`
+	}
+	return status == http.StatusGone && json.Unmarshal(body, &refusal) == nil &&
+		refusal.Error == "Role ladders moved to Settings > Models; use model preference orders and model pauses."
+}
+
 func editorFixture(t *testing.T) (tenant.Principal, *editorHTTP) {
 	t.Helper()
 	var p tenant.Principal
@@ -525,7 +536,7 @@ func modelsState(t *testing.T, p tenant.Principal) string {
 func retiredLadderWrite(t *testing.T, h *editorHTTP, p tenant.Principal, path, body string, headers map[string]string) {
 	t.Helper()
 	w := h.call(t, p, "PUT", path, body, headers)
-	if w.Code != http.StatusGone || w.Header().Get("Deprecation") != "true" || w.Header().Get("Link") != `</api/model-preferences/orders>; rel="successor-version"` {
+	if !retiredLadderRefusal(w.Code, w.Body.Bytes()) || w.Header().Get("Deprecation") != "true" || w.Header().Get("Link") != `</api/model-preferences/orders>; rel="successor-version"` {
 		t.Fatalf("retired ladder writer answered %d: %s", w.Code, w.Body.String())
 	}
 }

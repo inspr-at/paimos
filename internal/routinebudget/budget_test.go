@@ -393,6 +393,9 @@ func TestRoutineBudgetUnknownRetainsSlotAndChildBinding(t *testing.T) {
 // paid account launches, owner revocation races and tenant/personal leakage.
 func TestRoutineBudgetAdmissionAndOwnership(t *testing.T) {
 	f := setup(t, "both", true)
+	// Paired observation writes retain the enrollment's required one-slot
+	// binding; the generic budget fixture also serves unpaired slot tests.
+	f.exec(`UPDATE agent_accounts SET max_parallel_runs=1 WHERE id=$1`, f.account)
 	in := f.attempt("build", Amount{Tokens: 10, PaidMicroUSD: 10, RecoveryMS: 1000})
 	original := f.gate
 	f.gate.HostMaxAgeMS = 0
@@ -406,7 +409,23 @@ func TestRoutineBudgetAdmissionAndOwnership(t *testing.T) {
 	f.exec(`UPDATE agent_pairing_computers SET capacity_reported_at=clock_timestamp()-interval '61 seconds' WHERE id=$1`, f.computer)
 	_, err = reserve(t, f, f.d.App, t.Context(), in)
 	wantError(t, err, "host_inputs_unreadable")
+	// Missing/future mandatory readings must refuse before a budget hold, just
+	// like the existing stale-reading controls. SQL clock offsets are exact
+	// boundary inputs; no elapsed duration establishes the claim.
+	for _, reading := range []string{"NULL", "clock_timestamp()+interval '1 minute'"} {
+		f.exec(`UPDATE agent_pairing_computers SET capacity_reported_at=`+reading+` WHERE id=$1`, f.computer)
+		_, err = reserve(t, f, f.d.App, t.Context(), in)
+		wantError(t, err, "host_inputs_unreadable")
+	}
 	f.exec(`UPDATE agent_pairing_computers SET capacity_reported_at=clock_timestamp() WHERE id=$1`, f.computer)
+	// A missing probe keeps the schema's all-or-none observation tuple intact.
+	f.exec(`UPDATE agent_accounts SET last_probe_at=NULL,last_probe_ok=NULL,last_daemon_generation=NULL WHERE id=$1`, f.account)
+	_, err = reserve(t, f, f.d.App, t.Context(), in)
+	wantError(t, err, "account_inputs_unreadable")
+	f.exec(`UPDATE agent_accounts SET last_probe_at=clock_timestamp()+interval '1 minute',last_probe_ok=true,last_daemon_generation='budget-generation' WHERE id=$1`, f.account)
+	_, err = reserve(t, f, f.d.App, t.Context(), in)
+	wantError(t, err, "account_inputs_unreadable")
+	f.exec(`UPDATE agent_accounts SET last_probe_at=clock_timestamp() WHERE id=$1`, f.account)
 	f.exec(`UPDATE account_allowance_windows SET capacity_read_at=clock_timestamp()-interval '11 minutes' WHERE account_id=$1`, f.account)
 	_, err = reserve(t, f, f.d.App, t.Context(), in)
 	wantError(t, err, "account_inputs_unreadable")

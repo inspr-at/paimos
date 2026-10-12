@@ -35,6 +35,16 @@ or a More item for it.
   first thing that blocks agents with its one fix command and Verify again
   where the person may verify, and the status line. The Needs-you list and the
   sign-ins table live in those Settings parts.
+  Each claim follows its own reads: account readiness needs accounts, quota
+  and computers; connectivity needs computers; the pacing summary needs the
+  schedule. The chip combines all four sources. Loading uses a same-size
+  skeleton; an unreadable source shows a warning and a retry for that part.
+  Last-good values carry a clock and “as of” time. Forbidden reads show a lock
+  with no values, including after a previously successful read. “No accounts
+  yet” requires an authorized successful accounts read; admins can Connect.
+  Chip and tile controls keep their size through these states. The inline
+  pace edit uses the shared guarded writer and follows the default with null;
+  a changed revision is re-read. At the limit follows Settings › Models.
 
 **Sessions card head.** The card's head carries the list's own tools: the
 title with the count of sessions on show, Search sessions (it filters this list;
@@ -134,3 +144,55 @@ Before every start displays the last admission report, with its timestamp and
 one row per reported gate. It never promises current availability. An absent
 report says No start yet, unreadable history offers Try again without check
 marks, and reports older than the session or 24 hours are labelled stale.
+
+## State in the avatar, compact rows and calm enter/leave (AEON-1211, P3)
+
+**The avatar carries the state.** Each session row shows the person's live
+indicator with its state badge and nothing else on it (the harness badge is
+gone). The state word is the avatar's tooltip and part of its accessible name
+("Lead AEON lead: Needs something"); a more precise word, such as "Stop
+requested" or "Lost contact", follows it in the tooltip and opens line 2. The
+State column is gone; Display › Sort still orders by state.
+
+**Two lines per row.** Line 1 is the name only: the ticket key opens it
+("PHAROS-12 · Restore the backups"), and a lead adds Lead. The session's own
+label is in the name's tooltip; its computer has its own column, never line 1.
+Line 2 says what it works on, what it asks or how it ended. A state change
+changes the badge, line 2 and the time, never the row's height.
+
+**The columns.** Session · Time · Execution · Computer · Beat, as the design
+has them. Execution names the model the way Settings › Models does, with its
+level ("Opus 5.5 · xhigh"), and the account under it ("Claude Max · markus");
+a model the registry does not list still reads as words, never as its raw id.
+Search sessions finds a row by that name, and still by the raw id.
+The ticket has no column (its key opens the name; Display › Sort still orders
+by it). The tier, the estimate and whether the session listens or has an inbox
+live in the details, in words; the tier there keeps its one-step Left/Right
+arrow keys.
+
+**Time.** The Time column sits beside the name: running time while a session
+runs ("1 h 12 min"), how long ago it ended ("12 min ago"), or since when it is
+paused ("since 09:58"). Sorting by Time orders by what the column shows.
+
+**The list's width decides its form.** From 880 px the full table; from 560 px
+a table without Computer and the account line (the details name and rename the
+computer); under 560 px (phones) compact rows.
+A compact row opens line 1 with a 12 px harness mark whose tooltip and name say
+the model, level, harness and account ("GPT-6.1 Sol · xhigh · Codex · ChatGPT
+Pro"), ends line 1 with the short time ("42m", "3m ago"), and keeps ⋯ beside
+the two lines (an ended or silent row also keeps its one-tap bin): Pause,
+Resume and Change tier are in its menu, and the details name and rename the
+computer.
+
+**Rows enter and leave calmly.** New sessions, rows leaving the list, rows
+moving to another group or parent, rows that start or stop matching the filter
+or search (a model renamed in Settings › Models included), and new orders wait while the pointer is on the list, a row has
+keyboard focus or one of the list's menus is open; the last row stays even when
+the live list empties. Badges, line 2, the counts and times keep updating
+meanwhile. The card head then says "2 changes wait while you point here · Show
+now"; otherwise, quietly, "Live · updated 4 s ago". The changes apply 1.5 s
+after the pointer leaves, on Show now, or when the page loads. Your own
+removals and moves apply at once, and so do a new sort order, filter or search.
+A done or ended session keeps its place among its siblings and its end state
+for 10 minutes (line 2 says when it moves to Ended), then moves to Ended at the
+next allowed moment.

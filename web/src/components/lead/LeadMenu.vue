@@ -10,6 +10,7 @@ import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 
 const props = defineProps<{ projectId: string; projectKey: string; lead: ProjectLead }>()
+const emit = defineEmits<{ removed: [projectId: string] }>()
 const leads = useProjectLeads(), session = useSession(), router = useRouter()
 const menu = ref<HTMLElement | null>(null)
 const confirmation = ref<{ project: string; revision: number; viewer: string } | null>(null)
@@ -39,7 +40,14 @@ async function remove() {
   if (!current()) { close(); return }
   try {
     const result = await leads.remove(target.project, target.revision)
-    if (current() && result) close(true)
+    // The store publishes the result before returning; its revision watcher may already
+    // have closed this menu. Still notify this record's list, never a newer lead or viewer.
+    const sameRecord = target.project === props.projectId && target.viewer === viewer.value
+    const showingResult = result && props.lead.revision === result.revision && props.lead.state === result.state && props.lead.session_id === result.session_id
+    if (result && sameRecord && (current() || showingResult)) {
+      emit('removed', target.project)
+      close(true)
+    }
   } catch (e) {
     if (current()) error.value = e instanceof Error ? e.message : 'The lead could not be removed.'
   }

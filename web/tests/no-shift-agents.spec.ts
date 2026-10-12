@@ -198,10 +198,10 @@ for (const width of [1440, 1024, 390]) {
     const search = sessions.getByRole('searchbox', { name: 'Search sessions in this list' })
     await expect(worker).toBeVisible()
     await expectStableControls({
-      controls: { fold, more: lead.getByRole('button', { name: /^Actions for / }), glyph: lead.locator('.bot'), history, search },
+      controls: { fold, more: lead.getByRole('button', { name: /^Actions for / }), glyph: lead.locator('.ava'), history, search },
       interactions: [
         { name: 'hover fold', run: () => fold.hover() },
-        { name: 'fold the lead', run: async () => { await fold.click(); await expect(worker).toHaveCount(0); await expect(lead.locator('.current-activity')).toContainText('1 worker') } },
+        { name: 'fold the lead', run: async () => { await fold.click(); await expect(worker).toHaveCount(0); await expect(lead.locator('.l2t')).toContainText('1 worker') } },
         { name: 'unfold the lead', run: async () => { await fold.click(); await expect(worker).toBeVisible() } },
         { name: '← folds', run: async () => { await lead.focus(); await page.keyboard.press('ArrowLeft'); await expect(fold).toHaveAttribute('aria-expanded', 'false') } },
         { name: '→ unfolds', run: async () => { await page.keyboard.press('ArrowRight'); await expect(worker).toBeVisible() } },
@@ -216,6 +216,37 @@ for (const width of [1440, 1024, 390]) {
         { name: 'history off', run: async () => { await sessions.getByRole('button', { name: 'Back to sessions' }).click(); await expect(title).toHaveText('Sessions') } },
       ],
     })
+  })
+
+  for (const theme of ['light', 'dark'] as const) test(`AEON-1211: History and stale actions keep their toolbar slots at ${width} ${theme}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    const data = await setup(page)
+    data.sessions[4]!.heartbeat_at = new Date(Date.now() - 20 * 60_000).toISOString()
+    await page.goto('/agents')
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    const sessions = page.locator('.sessions'), title = sessions.locator('#sessions-title')
+    const history = sessions.locator('.head-tools button[aria-pressed]')
+    const stale = sessions.getByRole('button', { name: /^Clear stale:/ })
+    await expect(stale).toBeVisible()
+    // Both one-line and wrapped heads matter. A disappearing stale action must not
+    // let History jump to another flex line; use real container widths, in both themes.
+    for (const size of width === 390 ? [0] : [0, 900, 780]) {
+      await sessions.evaluate((el, value) => { (el as HTMLElement).style.maxInlineSize = value ? `${value}px` : '' }, size)
+      await expectStableControls({
+        controls: { history, search: sessions.getByRole('searchbox'), filter: sessions.getByRole('button', { name: 'Filter', exact: true }), display: sessions.getByRole('button', { name: /^Display:/ }) },
+        scrollAreas: { sessions },
+        interactions: [
+          { name: 'History hides the stale action without reflow', run: async () => {
+            await history.click(); await expect(title).toHaveText('History'); await expect(stale).toBeHidden()
+            if (!size) await page.screenshot({ path: info.outputPath(`history-${width}-${theme}.png`) })
+          } },
+          { name: 'Sessions restores the stale action in place', run: async () => {
+            await history.click(); await expect(title).toHaveText('Sessions'); await expect(stale).toBeVisible()
+            if (!size) await page.screenshot({ path: info.outputPath(`sessions-${width}-${theme}.png`) })
+          } },
+        ],
+      })
+    }
   })
 }
 

@@ -119,7 +119,14 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await head(page).getByRole('button', { name: 'Cancel the wind-down', exact: true }).click()
     await expect.poll(() => mock.deletes.length).toBe(2); await expect(windButton(page)).toBeFocused()
     // Pause all… and Resume all… sit under "Right now" in the same popover.
-    await expect(page.getByRole('button', { name: 'Pause worker-1', exact: true })).toBeVisible()
+    // A phone's compact rows keep only ⋯; Pause… is in its menu (AEON-1211).
+    const pauseRow = async () => {
+      if (width !== 390) return page.getByRole('button', { name: 'Pause worker-1', exact: true }).click()
+      await page.getByRole('button', { name: 'Actions for worker-1', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'Pause…', exact: true }).click()
+    }
+    if (width === 390) await expect(page.getByRole('button', { name: 'Actions for worker-1', exact: true })).toBeVisible()
+    else await expect(page.getByRole('button', { name: 'Pause worker-1', exact: true })).toBeVisible()
     await windButton(page).click(); const rightNow = formPopover(page)
     await expect(rightNow.getByRole('button', { name: /^Resume all…/ })).toHaveAttribute('aria-disabled', 'true'); await expect(rightNow).toContainText('Nothing is paused.')
     await rightNow.getByRole('button', { name: /^Pause all…/ }).click(); await expect(rightNow).toHaveCount(0)
@@ -129,14 +136,14 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     for (const level of ['Pause quickly', 'Wrap up', 'Stop now', 'Pause']) { await dialog.locator(`[data-level="${({ 'Pause quickly': 'pause_quickly', 'Wrap up': 'wrap_up', 'Stop now': 'stop_now', Pause: 'pause' } as Record<string, string>)[level]}"]`).click(); await stable(action, actionBounds); await stable(submit, submitBounds); await stable(cancel, cancelBounds); await stable(note, noteBounds) }
     await dialog.getByRole('combobox', { name: 'Level for worker-1' }).selectOption('wrap_up'); await stable(action, actionBounds)
     await note.fill('Commit work in progress before handing over.'); await note.press('Escape'); await expect(dialog).toBeVisible(); await dialog.press('Escape'); await expect(dialog).not.toBeVisible()
-    await page.getByRole('button', { name: 'Pause worker-1', exact: true }).click()
+    await pauseRow()
     const single = page.getByRole('dialog', { name: 'Pause worker-1', exact: true }); await expect(single.getByRole('radio', { name: /^Stop now/ })).toHaveCount(0)
     const singleBar = single.locator('.pause-actions'), singleBounds = await bounds(singleBar)
     for (const level of ['Wrap up', 'Pause quickly', 'Pause']) { await single.locator(`[data-level="${({ 'Pause quickly': 'pause_quickly', 'Wrap up': 'wrap_up', Pause: 'pause' } as Record<string, string>)[level]}"]`).click(); await stable(singleBar, singleBounds) }
     await screenshot(page, `${width}-${theme}-pause`)
     await single.locator('[data-submit]').click(); await expect.poll(() => mock.calls.length).toBe(3)
     expect(mock.calls[2]?.body.level).toBe('pause')
-    await expect(page.locator('.agents-page .row').filter({ hasText: 'worker-1' })).toContainText('Pausing')
+    await expect(page.locator(`[data-row="s:${mock.data.sessions[0]!.id}"] .ava`)).toHaveAttribute('aria-label', /: Pausing$/)
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true); expect(errors).toEqual([])
   })
 }
@@ -186,7 +193,9 @@ test('wind-down previews only owned work and a reloaded all-computer report leav
   const barrier = new Promise<void>(resolve => { release = resolve }), requested = new Promise<void>(resolve => { observed = resolve })
   await page.route('**/api/me/leaving-at', async route => {
     if (waiting && route.request().method() === 'GET') {
-      waiting = false; observed(); await barrier
+      // The healthy stream can request another ownership read. Hold every
+      // concurrent answer, so none can open the gate before this barrier.
+      observed(); await barrier
       return route.fulfill({ json: { owner_principal_id: me.id, deadline_at: null, request_id: null, hosts: 'all', agents: [], stop_in_flight: false, items: [] } })
     }
     return route.fallback()
@@ -195,7 +204,7 @@ test('wind-down previews only owned work and a reloaded all-computer report leav
   const pop = formPopover(page), submit = pop.locator('button[type=submit]')
   await requested
   await expect(submit).toBeDisabled(); await expect(pop.locator('#wd-hint')).toHaveText('Reading owned sessions…')
-  release()
+  waiting = false; release()
   await expect(submit).toBeEnabled()
   await expect(pop.getByLabel('Where').locator('option')).toHaveText(['All computers · 1 agent', 'Chosen agents…'])
   await expect(pop.locator('.wdf-prev')).toContainText('1 agent on all computers'); await expect(pop.locator('.wdf-prev')).toContainText('0 hand over · 1 finish · 0 stop, no handover')
@@ -440,14 +449,15 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.goto(`/agents/${session.id}`)
     const row = page.locator(`[data-row="s:${session.id}"]`)
     const shotTarget = width === 390 ? page.getByRole('complementary', { name: 'Session details' }) : row
-    await expect(row.locator('.c-state .state-word')).toHaveText('Working')
+    // AEON-1211: the state lives in the row's avatar; its tooltip names the precise word.
+    await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Working( · |$)/)
     const guard = await controlStability(page, { row, menu: row.locator('.more') })
     await guard.check(async () => {
       await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop now…', exact: true }).click()
       const dialog = page.getByRole('dialog', { name: /^Stop now / })
       await dialog.locator('[data-submit]').click()
       await expect(dialog).not.toBeVisible()
-      await expect(row.locator('.c-state .state-word')).toHaveText('Stop requested')
+      await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Stop requested( · |$)/)
       expect(mock.calls).toHaveLength(1)
       expect(mock.calls[0]?.body.level).toBe('stop_now')
       expect(mock.calls[0]?.path).toContain(`/harness-sessions/${session.id}/pause`)
@@ -457,12 +467,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await guard.check(async () => {
       Object.assign(session, { row_version: Number(session.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'stopped' })
       await page.evaluate(() => window.dispatchEvent(new Event('online')))
-      await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
+      await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Stopped( · |$)/)
     })
     guard.done()
     await shotTarget.screenshot({ path: testInfo.outputPath(`stopped-${width}-${theme}.png`) })
     await page.reload()
-    await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
+    await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Stopped( · |$)/)
     expect(errors).toEqual([])
   })
 }
@@ -483,7 +493,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.goto(`/agents/${session.id}`)
     await page.addStyleTag({ content: '.agents-page .page-head { letter-spacing: .06em }' })
     const row = page.locator(`[data-row="s:${session.id}"]`)
-    await expect(row.locator('.c-state .state-word')).toHaveText('Working')
+    await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Working( · |$)/)
     const open = windButton(page)
     await expect(open).toBeVisible()
     await expect(open.locator('.wl')).toBeHidden()
@@ -496,12 +506,12 @@ for (const theme of ['light', 'dark'] as const) {
     await guard.check(async () => {
       await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop now…', exact: true }).click()
       await page.getByRole('dialog', { name: /^Stop now / }).locator('[data-submit]').click()
-      await expect(row.locator('.c-state .state-word')).toHaveText('Stop requested')
+      await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Stop requested( · |$)/)
     })
     await guard.check(async () => {
       Object.assign(session, { row_version: Number(session.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'stopped' })
       await page.evaluate(() => window.dispatchEvent(new Event('online')))
-      await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
+      await expect(row.locator('.ava')).toHaveAttribute('data-tip', /(^| · )Stopped( · |$)/)
     })
     guard.done()
     const after = await lines()

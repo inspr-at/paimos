@@ -1221,3 +1221,34 @@ func TestProjectLeadActionsTrackCurrentPersonAndGeneration(t *testing.T) {
 		}
 	})
 }
+
+func TestProjectLeadFrozenBlocksStartAndDispatch(t *testing.T) {
+	// Risk: an existing working lead keeps dispatching or a new lead starts
+	// while frozen. Freeze must retain the running process's ownership.
+	f := projectLeadFixture(t, readyLeadChecks)
+	session, lease, _ := leadCandidate(t, f)
+	l := startLead(t, f, 0)
+	l = claimLead(t, f, session, lease, l["revision"])
+	expect(t, f.call(f.agent, "POST", "/api/projects/"+f.project+"/harness-sessions/"+session+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1}, lease), 200)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='frozen' WHERE id=$1`, f.project)
+		return err
+	})
+	w := f.call(f.person, "GET", "/api/projects/"+f.project+"/lead", nil, "")
+	expect(t, w, 200)
+	got := decode(t, w)
+	if got["state"] != "cannot_start" || got["reason"] != "project_frozen" || got["process_active"] != true {
+		t.Fatalf("frozen lead: %+v", got)
+	}
+	w = f.call(f.person, "POST", "/api/projects/"+f.project+"/lead", map[string]any{"expected_revision": l["revision"]}, "")
+	expect(t, w, 409)
+	if !strings.Contains(w.Body.String(), "project_frozen") {
+		t.Fatal("start denied for wrong reason")
+	}
+	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+		return harness.RequireCurrentLeadTx(t.Context(), tx, f.agent, f.project, session, 1)
+	})
+	if err == nil || !strings.Contains(err.Error(), "project_frozen") {
+		t.Fatalf("frozen dispatch: %v", err)
+	}
+}

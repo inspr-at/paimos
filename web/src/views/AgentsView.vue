@@ -3,7 +3,7 @@
 import { tierEvidenceRefresh, type AgentEventIdentity } from '../lib/tierEvidenceLive'
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { can, myPermissions } from '../lib/authz'
+import { can, myPermissions, permissionsKnown } from '../lib/authz'
 import type { AttachQueueRow, AttachReview } from '../lib/attachWatch'
 import { pairingPermissions } from '../lib/agentPairing'
 import { message, subscribeAgents, type Approval, type SessionControl } from '../lib/agents'
@@ -183,10 +183,12 @@ watch([sessionId, () => agents.loaded, () => agents.historyState], ([id, loaded,
   else if (state === 'ready' && agents.historyMore) void agents.loadOlderHistory()
 }, { immediate: true })
 const writable = computed(() => can('harness.control'))
-const showCapacity = computed(() => agents.loaded && capacity.state !== 'forbidden' && agents.accountsState !== 'forbidden')
+const showCapacity = computed(() => can('account.read'))
 
 // ---------- Accounts and computers: one computer-first panel (AEON-499) ----------
-const showSetup = computed(() => agents.loaded && (showCapacity.value || (pairingAccess.value.canListComputers && capacity.computers.length > 0)))
+// The capacity sources read independently of Sessions. Mount their reserved row
+// once access is known so a pending accounts read can show its loading skeleton.
+const showSetup = computed(() => permissionsKnown())
 const pageTitle = ref<HTMLElement>()
 const attachRows = ref<AttachQueueRow[]>([])
 const attachHistory = ref<AttachQueueRow[]>([])
@@ -365,8 +367,10 @@ const shortcutDisposers = [
   onAction('agents.row.open', event => {
     if (event.target instanceof HTMLElement && event.target.closest('a, button, summary')) return false
     if (!onScreen(cursor.value)) return false
-    if (cursor.value.startsWith('s:')) openSession(cursor.value.slice(2))
-    else if (cursor.value.startsWith('l:')) openLeadPanel(cursor.value.slice(2), document.querySelector<HTMLElement>(`.agents-page [data-row="l:${CSS.escape(cursor.value.slice(2))}"]`))
+    const [kind, id] = [cursor.value.slice(0, 1), cursor.value.slice(2)]
+    if (kind === 's') openSession(id)
+    // A lead without a session on the list opens its lead panel (AEON-1210).
+    else if (kind === 'l') openLeadPanel(id, document.querySelector<HTMLElement>(`.agents-page [data-row="l:${CSS.escape(id)}"]`))
     else return false
   }, actionScope),
   onAction('agents.session.pause', () => pauseSelected('pause'), actionScope),
@@ -470,8 +474,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       </FloatingPanel>
     </header>
 
-    <!-- The first load swaps the loading layout for the real one in one step, so the
-         page does not jump as each read lands. -->
+    <!-- Capacity keeps its own loading slots; Sessions admits its first bundle
+         after its metadata and permissions have settled. -->
     <div class="layout">
       <div class="main-col">
         <!-- The capacity row: what may run. The folded dial, then the accounts chip; it scrolls with the page. -->

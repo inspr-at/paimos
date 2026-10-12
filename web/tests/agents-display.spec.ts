@@ -36,7 +36,8 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', unrelated = 
     phase: stopped ? 'stopped' : 'working', activity: 'busy',
     created_at: new Date(NOW - (1000 + n) * 1000).toISOString(),
     heartbeat_at: new Date(NOW - 1000).toISOString(),
-    stopped_at: stopped ? new Date(NOW - 60_000).toISOString() : null,
+    // Ended eleven minutes ago, past the 10 minutes an ended row keeps its place (AEON-1211).
+    stopped_at: stopped ? new Date(NOW - 660_000).toISOString() : null,
     eta_ready_at: new Date(NOW + 5 * 60_000).toISOString(), eta_reported_at: new Date(NOW).toISOString(), progress_pct: 80,
   }) as unknown as typeof data.sessions[number]
   data.sessions = [...Array.from({ length: 4 }, (_, i) => session(i + 1)), ...Array.from({ length: endedCount }, (_, i) => session(i + 10, true))]
@@ -66,8 +67,8 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', unrelated = 
 test('live families count all external workers, hide hundreds of ended siblings and retain counts when folded', async ({ page }) => {
   await setup(page)
   await page.goto('/agents')
-  await expect(page.locator('.live-total')).toHaveText('4 live')
-  await expect(headCount(page, 'working')).toContainText('4')
+  // The head's counts replaced the live line (AEON-780): all four live sessions, each started outside PAIMOS.
+  await expect(headCount(page, 'working').locator('b')).toHaveText('4')
   await expect(page.locator('.sessions .row')).toHaveCount(4)
   await expect(row(page, 1).locator('.history-toggle')).toHaveText('696 stopped')
   await expect(row(page, 1).locator('.history-toggle')).toHaveAttribute('aria-expanded', 'false')
@@ -101,7 +102,8 @@ test('another person’s visible account never becomes your full account or your
   await setup(page, 'light', true)
   await page.route('**/api/agents/plan', route => route.fulfill({ json: { total: 20, limits: {}, principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: null } }))
   await page.goto('/agents')
-  await expect(page.locator('.live-total')).toHaveText('4 live')
+  // Everyone's live sessions show in the head's count (AEON-780); the dial counts only yours.
+  await expect(headCount(page, 'working')).toContainText('4')
   await expect(dial(page).locator('.f-status')).toContainText('0 running · account room not measured yet · your agents')
   await expect(dial(page).locator('.f-live')).not.toContainText('accounts full')
 })
@@ -159,7 +161,7 @@ test('attention counts relevant descendants through family folds and stopped his
   await expect(row(page, 3)).toHaveAttribute('data-state', 'problem')
   await expect(row(page, 4)).toHaveAttribute('data-state', 'paused')
   // Folded, the lead's line sums up both problems below it: the live one and the failed ended worker.
-  const line = row(page, 1).locator('.current-activity')
+  const line = row(page, 1).locator('.l2t')
   const fold = familyFold(page, 1)
   const history = row(page, 1).locator('.history-toggle')
   // Folded, the problem roll joins the line end; the stopped-history control stays put and clickable.
@@ -181,15 +183,22 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
     const { data } = await setup(page, theme, false, 1)
     for (const session of data.sessions) Object.assign(session, { eta_ready_at: null, eta_reported_at: null, progress_pct: null })
-    await page.goto('/agents')
+    // The rows carry no estimate (AEON-1211, design AEON-1196): it lives in the details, open beside or
+    // over the list here, and the rows hold still when one arrives.
+    await page.goto(`/agents/${id(1)}`)
     const lead = row(page, 1), worker = row(page, 2)
-    await expect(lead.locator('.eta-cell')).toHaveText('no ETA')
-    await expect(lead.locator('.report-source')).not.toBeVisible()
+    const panel = page.getByRole('complementary', { name: 'Session details' })
+    const estimate = panel.locator('.now-eta')
+    await expect(estimate.locator('.eta-cell')).toContainText('no ETA')
+    await expect(estimate.locator('.report-source')).not.toBeVisible()
+    await expect(page.locator('.sessions .row .session-estimate')).toHaveCount(0)
     const refresh = async () => {
+      const read = page.waitForResponse(r => new URL(r.url()).pathname === '/api/harness-sessions')
       await page.evaluate(() => {
         Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
         document.dispatchEvent(new Event('visibilitychange'))
       })
+      await read
     }
     await expectStableControls({
       controls: { lead, workers: familyFold(page, 1), history: lead.locator('.history-toggle'), leadActions: lead.locator('.more'), nextWorker: worker, nextActions: worker.locator('.more') },
@@ -198,17 +207,18 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
         { name: 'first reported estimate', run: async () => {
           Object.assign(data.sessions[0]!, { revision: 3, eta_ready_at: new Date(NOW + 5 * 60_000).toISOString(), eta_reported_at: new Date(NOW).toISOString(), progress_pct: 80 })
           await refresh()
-          await expect(lead.locator('.report-source')).toBeVisible()
-          await expect(lead.locator('.report-source')).toHaveAttribute('tabindex', '0')
-          await expect(lead.locator('.pct')).toHaveText('80%')
-          await page.locator('.sessions').screenshot({ path: testInfo.outputPath(`first-report-${width}-${theme}.png`) })
+          await expect(estimate.locator('.report-source')).toBeVisible()
+          await expect(estimate.locator('.report-source')).toHaveAttribute('tabindex', '0')
+          await expect(estimate.locator('.pct')).toHaveText('80%')
+          await expect(page.locator('.sessions .row .session-estimate')).toHaveCount(0)
+          await page.screenshot({ path: testInfo.outputPath(`first-report-${width}-${theme}.png`) })
         } },
         { name: 'report cleared', run: async () => {
           Object.assign(data.sessions[0]!, { revision: 4, eta_ready_at: null, eta_reported_at: null, progress_pct: null })
           await refresh()
-          await expect(lead.locator('.eta-cell')).toHaveText('no ETA')
-          await expect(lead.locator('.report-source')).not.toBeVisible()
-          await expect(lead.locator('.report-source')).not.toHaveAttribute('tabindex', '0')
+          await expect(estimate.locator('.eta-cell')).toContainText('no ETA')
+          await expect(estimate.locator('.report-source')).not.toBeVisible()
+          await expect(estimate.locator('.report-source')).not.toHaveAttribute('tabindex', '0')
         } },
       ],
     })
@@ -216,15 +226,16 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
 }
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
-  test(`${width} ${theme}: existing Agents layout shows the report source and stable capacity controls`, async ({ page }) => {
+  test(`${width} ${theme}: existing Agents layout shows the report source and stable capacity controls`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
     await setup(page, theme)
     await page.goto('/agents')
     await expect(headCount(page, 'working')).toContainText('4')
     await expect(dial(page).locator('.f-status')).toContainText('room for 16 more')
-    await expect(row(page, 2).locator('.report-source')).toBeVisible()
-    await expect(row(page, 2).locator('.pct')).toHaveText('80%')
+    // Rows (AEON-1211, design AEON-1196) leave the estimate to the details, checked below.
+    await expect(row(page, 2)).toBeVisible()
+    await expect(page.locator('.sessions .row .session-estimate')).toHaveCount(0)
     await expectStableControls({
       controls: { more: dial(page).getByRole('button', { name: 'One agent more at once' }), fewer: dial(page).getByRole('button', { name: 'One agent fewer at once' }), fold: dial(page).locator('.fs-tog') },
       scrollAreas: { dial: page.locator('.cdial'), page: page.locator('.agents-page') },
@@ -243,11 +254,18 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await row(page, 2).locator('.agent-link').click()
     const panel = page.getByRole('complementary', { name: 'Session details' })
     await expect(panel.locator('.now-eta .report-source')).toBeVisible()
+    // Each action in the sheet's head keeps its whole label (AEON-1062): on a phone a row that is too
+    // narrow wraps, so no label spills past its button or the sheet's edge (the panel overflow below).
+    const actions = panel.locator('.head-actions .btn')
+    expect(await actions.count()).toBeGreaterThan(0)
+    for (const action of await actions.all()) expect(await action.evaluate(el => el.scrollWidth - el.clientWidth), await action.innerText()).toBeLessThanOrEqual(1)
+    await panel.screenshot({ path: testInfo.outputPath(`session-sheet-${width}-${theme}.png`) })
+    // The Messages tab is Chat since AEON-977.
     await expectStableControls({
-      controls: { overview: panel.getByRole('tab', { name: 'Overview' }), messages: panel.getByRole('tab', { name: 'Messages' }), tabs: panel.getByRole('tablist'), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel },
+      controls: { overview: panel.getByRole('tab', { name: 'Overview' }), chat: panel.getByRole('tab', { name: 'Chat' }), tabs: panel.getByRole('tablist'), close: panel.getByRole('button', { name: 'Close session details' }), frame: panel },
       scrollAreas: { panel },
       interactions: [
-        { name: 'show messages', run: async () => { await panel.getByRole('tab', { name: 'Messages' }).click(); await expect(panel.getByRole('tab', { name: 'Messages' })).toHaveAttribute('aria-selected', 'true') } },
+        { name: 'show the chat', run: async () => { await panel.getByRole('tab', { name: 'Chat' }).click(); await expect(panel.getByRole('tab', { name: 'Chat' })).toHaveAttribute('aria-selected', 'true') } },
         { name: 'return to reported progress', run: async () => { await panel.getByRole('tab', { name: 'Overview' }).click(); await expect(panel.locator('.now-eta .report-source')).toBeVisible() } },
       ],
     })

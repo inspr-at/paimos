@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -66,6 +67,10 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
+	if errors.Is(err, authz.ErrForbidden) {
+		authz.WriteForbidden(w, err)
+		return
+	}
 	var pgerr *pgconn.PgError
 	scopeLimit := errors.As(err, &pgerr) && pgerr.Code == "54000" &&
 		(pgerr.Message == "work shape budget exceeded" || pgerr.Message == "work scope root budget exceeded" || pgerr.Message == "work scope expansion budget exceeded")

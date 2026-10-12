@@ -41,6 +41,14 @@ describe('session tree rows', () => {
     expect(below(a, v => v.name).problem).toBe(1)
     expect(below(a.children[0]!, v => v.name).problem).toBe(1)
     expect(below(a.children[0]!.children[0]!, v => v.name).problem).toBe(0)
+    // A held tree places old copies, but fresh states and exact-session questions still count.
+    const fresh = new Map<string, View>([
+      ['a1x', node('a1x', 'working').view],
+      ['a', node('a', 'problem').view],
+      ['b', node('b', 'working').view],
+    ])
+    expect(below(lead!, v => v.name, v => v.session.id === 'b', v => fresh.get(v.session.id) ?? v))
+      .toEqual({ problem: 1, ask: 1, names: { problem: ['a'], ask: ['b'] } })
   })
 
   it('names a problem hidden by a fold, including a lost heartbeat, and the ancestors that must open', () => {

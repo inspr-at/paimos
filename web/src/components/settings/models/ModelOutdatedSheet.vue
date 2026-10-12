@@ -8,7 +8,7 @@ import { getMembers } from '../../../lib/access'
 import { can } from '../../../lib/authz'
 import { listWorkKinds } from '../../../lib/workKinds'
 import { useSession } from '../../../stores/session'
-import { SOURCE_NAME, SOURCE_TIP, outdatedUseText, peopleInUses, type FactSource, type OutdatedEntry } from '../../../lib/modelRegistry'
+import { SOURCE_NAME, SOURCE_TIP, atLevel, outdatedUseText, peopleInUses, type FactSource, type OutdatedEntry } from '../../../lib/modelRegistry'
 
 // Settings › Models › Model registry › Review… (AEON-1164). A sheet over the page:
 // every old version with why it is old, a box each, every use that moves with it,
@@ -44,9 +44,10 @@ onMounted(() => {
   }
 })
 onBeforeUnmount(() => controller.abort())
-// Each use moves from the old version to its successor; the server names both by identity.
+// Each use moves from the old version to its successor, at the level it runs now and the nearest one it lands on
+// ("Opus 5 · xhigh → Opus 5.5 · xhigh"). The server names both by identity and sends the levels (AEON-1163).
 const moving = computed(() => chosen.value.flatMap(entry => entry.uses.map((use, index) => ({
-  key: `${entry.version}\u0000${index}`, from: entry.name, to: use.to && use.to !== entry.successor ? use.to : entry.successorName,
+  key: `${entry.version}\u0000${index}`, from: atLevel(entry.name, use.from_effort), to: atLevel(use.to && use.to !== entry.successor ? use.to : entry.successorName, use.to_effort),
   ...outdatedUseText(use, kinds.value, names.value, me.value),
 }))))
 

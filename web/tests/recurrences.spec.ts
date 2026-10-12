@@ -54,7 +54,7 @@ async function setup(page: Page, readOnly = false, canonical = false) {
 }
 const editor = (page: Page) => page.getByRole('dialog', { name: /Repeat|New routine|Edit routine|Let agents run it/ })
 const row = (page: Page, name = 'Weekly tool sweep') => page.getByRole('row', { name, exact: true })
-async function settings(page: Page) { await page.goto('/p/PHAROS/settings'); await expect(row(page)).toBeVisible() }
+async function settings(page: Page) { await page.goto('/p/PHAROS/settings/routines'); await expect(page).toHaveURL('/p/PHAROS/settings/routines'); await expect(row(page)).toBeVisible() }
 async function newEditor(page: Page) {
   await page.getByRole('button', { name: 'New routine…', exact: true }).click()
   await editor(page).getByRole('textbox', { name: 'Name', exact: true }).fill('Weekly inspection')
@@ -181,6 +181,8 @@ test('a delayed Run now read is discarded when the project changes', async ({ pa
   await row(page).getByRole('button', { name: 'Run now', exact: true }).click(); await arrived
   await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects', exact: true }).click()
   await page.locator('a[href="/p/AEON"]').first().click(); await page.getByRole('tab', { name: 'Settings', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Project settings sections' }).getByRole('link', { name: /^Routines/ }).click()
+  await expect(page).toHaveURL('/p/AEON/settings/routines')
   release()
   await expect(page.getByText('No routines yet. Use New routine…, or Repeat… on a ticket.', { exact: true })).toBeVisible()
   await expect(page.getByRole('dialog', { name: 'Run recurring work now' })).toHaveCount(0)

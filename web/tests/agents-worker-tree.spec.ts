@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Coordinator: PLAYWRIGHT_PORT=5835 WT1_SCREENSHOT_DIR=<scratchpad> npm test -- agents-worker-tree.spec.ts agents-hierarchy.spec.ts
-import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import type { HarnessSession } from '../src/lib/agents'
@@ -9,6 +7,8 @@ import { agentData, mockAgents } from './agents-fixtures'
 
 const now = Date.parse('2026-09-26T16:00:00Z')
 const ago = (seconds: number) => new Date(now - seconds * 1000).toISOString()
+// An ended session keeps its place for 10 minutes (AEON-1211); these ended before that.
+const longAgo = (seconds = 0) => ago(11 * 60 + seconds)
 const id = (n: number) => `5e000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const lead = id(1)
 const row = (page: Page, key: string) => page.locator(`[data-row="s:${key}"]`)
@@ -50,7 +50,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
   data.sessions.splice(0, data.sessions.length,
     session(1, { parent_harness_session_id: null, role: 'coordinator', display_label: 'Release lead', created_at: ago(1800) }),
     // Oldest starts and newest heartbeats belong to history: neither may lead.
-    ...Array.from({ length: 8 }, (_, index) => session(10 + index, { phase: 'stopped', stopped_at: ago(index), heartbeat_at: ago(index), created_at: ago(1200 + index) })),
+    ...Array.from({ length: 8 }, (_, index) => session(10 + index, { phase: 'stopped', stopped_at: longAgo(index), heartbeat_at: ago(index), created_at: ago(1200 + index) })),
     session(2, { display_label: 'ss1-handoff-supersession', heartbeat_at: ago(20) }),
     session(3, { display_label: 'Starting worker', phase: 'starting', heartbeat_at: ago(5) }),
     session(4, { display_label: 'Permission checks', heartbeat_at: ago(10) }),
@@ -73,7 +73,8 @@ test('four live workers lead eight collapsed stopped workers, and labels disting
   await expect(history(page)).toHaveAttribute('aria-expanded', 'false')
   // Equal start times: session ID decides, never the latest heartbeat (AEON-468).
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(4), id(5)])
-  await expect(row(page, id(2)).getByRole('link', { name: 'Claude ss1-handoff-supersession, Working' })).toBeVisible()
+  // AEON-1160 (dbf44284b) names the harness Claude Code; labels still distinguish workers.
+  await expect(row(page, id(2)).getByRole('link', { name: 'Claude Code ss1-handoff-supersession, Working' })).toBeVisible()
   await expect(children(page)).not.toContainText(['aeon-coordinator'])
   await history(page).focus()
   await page.keyboard.press('Enter')
@@ -81,7 +82,7 @@ test('four live workers lead eight collapsed stopped workers, and labels disting
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(4), id(5), ...Array.from({ length: 8 }, (_, n) => id(10 + n))])
   await expand(page).click()
   await expect(children(page)).toHaveCount(0)
-  await expect(row(page, lead).locator('.current-activity')).toContainText('12 workers')
+  await expect(row(page, lead).locator('.l2t')).toContainText('12 workers')
   await expand(page).click()
   await expect(children(page)).toHaveCount(12)
   // A fresh heartbeat on the last worker leaves every row where it is.
@@ -99,9 +100,9 @@ test('four live workers lead eight collapsed stopped workers, and labels disting
   await expect(history(page)).toHaveAttribute('aria-expanded', 'false')
 })
 
-test('idle follows working; newly stopped workers hide immediately and histories stay independent', async ({ page }) => {
+test('idle follows working; a newly stopped worker keeps its place for 10 minutes, then joins its history; histories stay independent', async ({ page }) => {
   const { data, session } = await setup(page)
-  data.sessions.push(session(90, { role: 'coordinator', parent_harness_session_id: null, display_label: 'Second lead' }), session(91, { parent_harness_session_id: id(90), phase: 'stopped', stopped_at: ago(0) }))
+  data.sessions.push(session(90, { role: 'coordinator', parent_harness_session_id: null, display_label: 'Second lead' }), session(91, { parent_harness_session_id: id(90), phase: 'stopped', stopped_at: longAgo() }))
   Object.assign(data.sessions.find(s => s.id === id(4))!, { activity: 'idle', heartbeat_at: ago(0) })
   await page.goto('/agents')
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(5), id(4)])
@@ -112,15 +113,24 @@ test('idle follows working; newly stopped workers hide immediately and histories
   await history(page).click()
   Object.assign(data.sessions.find(s => s.id === id(5))!, { phase: 'stopped', stopped_at: ago(0) })
   await refresh(page)
+  // AEON-1211: it keeps its place with its end state; line 2 says when it moves.
+  await expect(row(page, id(5)).locator('.ava')).toHaveAttribute('aria-label', /: Ended$/)
+  await expect(row(page, id(5)).locator('.l2t')).toContainText('moves to Ended at')
+  await expect(history(page)).toHaveText('8 stopped')
+  await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead’s workers: 4 workers, 2 working')
+  // Ten minutes later, with the pointer away from the list, it joins the stopped workers.
+  await page.mouse.move(0, 0)
+  await page.clock.runFor(10 * 60_000 + 2_000)
   await expect(row(page, id(5))).toHaveCount(0)
   await expect(history(page)).toHaveText('9 stopped')
-  await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead’s workers: 3 workers, 2 working')
+  // Ten fixture minutes age the others' heartbeats too, so only the count of sub-agents is asserted here.
+  await expect(expand(page)).toHaveAttribute('aria-label', /^Fold Release lead’s workers: 3 workers, \d+ working$/)
   await expect(children(page, id(90))).toHaveCount(1)
 })
 
 test('a lead with only stopped workers opens history only through its stopped count', async ({ page }) => {
   const { data } = await setup(page)
-  for (const worker of data.sessions.filter(s => s.id !== lead)) Object.assign(worker, { phase: 'stopped', stopped_at: ago(0) })
+  for (const worker of data.sessions.filter(s => s.id !== lead)) Object.assign(worker, { phase: 'stopped', stopped_at: longAgo() })
   await page.goto('/agents')
   await expect(children(page)).toHaveCount(0)
   // Nothing live to fold: no fold button, only the stopped count.
@@ -134,8 +144,8 @@ test('a lead with only stopped workers opens history only through its stopped co
 
 test('nested live workers stay visible through stopped parents and each level closes its last connector', async ({ page }) => {
   const { data, session } = await setup(page)
-  Object.assign(data.sessions.find(s => s.id === id(3))!, { phase: 'stopped', stopped_at: ago(0) })
-  data.sessions.push(session(100, { parent_harness_session_id: id(3), display_label: 'Nested scout' }), session(101, { parent_harness_session_id: id(3), phase: 'stopped', stopped_at: ago(0) }))
+  Object.assign(data.sessions.find(s => s.id === id(3))!, { phase: 'stopped', stopped_at: longAgo() })
+  data.sessions.push(session(100, { parent_harness_session_id: id(3), display_label: 'Nested scout' }), session(101, { parent_harness_session_id: id(3), phase: 'stopped', stopped_at: longAgo() }))
   await page.goto('/agents')
   await expect(row(page, id(100))).toHaveAttribute('data-depth', '2')
   await expect(row(page, id(101))).toHaveCount(0)
@@ -167,23 +177,25 @@ test('a deep problem marks every ancestor, folded parents name it, and arrow key
   await expect(row(page, id(4))).toHaveAttribute('aria-posinset', '3')
   await expect(row(page, id(4))).toHaveAttribute('aria-setsize', '4')
   await expect(row(page, id(4))).not.toHaveAttribute('aria-expanded', /.*/)
-  // The lead heads its project's group (AEON-1210); only ancestors carry the dot.
+  // The family sits with its most urgent member; only ancestors say a problem is below. The avatar carries
+  // its own state badge only (AEON-1211), so the ancestors say it in their name and, folded, on their line.
   await expect(page.locator('.sessions .grp', { has: row(page, lead) }).locator('[role="row"]').first()).toHaveAttribute('data-row', `s:${lead}`)
-  for (const key of [lead, id(2), id(100)]) await expect(row(page, key).locator('.roll-dot')).toHaveCount(1)
-  for (const key of [id(200), id(3)]) await expect(row(page, key).locator('.roll-dot')).toHaveCount(0)
+  for (const key of [lead, id(2), id(100)]) await expect(row(page, key).locator('.agent-link')).toHaveAccessibleName(/, 1 problem below(?:\.|$)/)
+  for (const key of [id(200), id(3)]) await expect(row(page, key).locator('.agent-link')).not.toHaveAccessibleName(/problem below/)
+  for (const key of [lead, id(2), id(100), id(200), id(3)]) await expect(row(page, key).locator('.ava .agent-state-mark')).toHaveCount(1)
 
   await row(page, id(100)).focus()
   await page.keyboard.press('ArrowLeft')
   await expect(row(page, id(200))).toHaveCount(0)
   await expect(row(page, id(100))).toHaveAttribute('aria-expanded', 'false')
   // Folded, a parent sums up what it holds on its line 2 (AEON-1210).
-  await expect(row(page, id(100)).locator('.current-activity')).toContainText('1 worker · 1 problem')
+  await expect(row(page, id(100)).locator('.l2t')).toContainText('1 worker · 1 problem')
   await expect(row(page, id(100))).toBeFocused()
   await page.keyboard.press('ArrowLeft')
   await expect(row(page, id(2))).toBeFocused()
   await page.keyboard.press('ArrowLeft')
   await expect(row(page, id(100))).toHaveCount(0)
-  await expect(row(page, id(2)).locator('.current-activity')).toContainText('2 workers · 1 problem')
+  await expect(row(page, id(2)).locator('.l2t')).toContainText('2 workers · 1 problem')
   await page.keyboard.press('ArrowRight')
   await expect(row(page, id(100))).toBeVisible()
   await expect(row(page, id(2))).toBeFocused()
@@ -237,14 +249,13 @@ for (const theme of ['light', 'dark'] as const) {
       await page.goto('/agents')
       await expect(row(page, id(100))).toBeVisible()
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
-      const dir = process.env.WT1_SCREENSHOT_DIR ?? testInfo.outputDir
       for (const state of ['live', 'history']) {
         if (state === 'history') await history(page).click()
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
         expect(await page.locator('.sessions .row').evaluateAll(rows => rows.filter(row => row.scrollWidth > row.clientWidth + 1).map(row => row.getAttribute('data-row')))).toEqual([])
         const axe = await new AxeBuilder({ page }).include('.sessions').withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'best-practice']).analyze()
         expect(axe.violations).toEqual([])
-        await page.locator('.sessions').screenshot({ path: join(dir, `wt1-${width}-${theme}-${state}.png`), animations: 'disabled' })
+        await page.locator('.sessions').screenshot({ path: testInfo.outputPath(`wt1-${width}-${theme}-${state}.png`), animations: 'disabled' })
       }
     })
   }
@@ -253,12 +264,13 @@ for (const theme of ['light', 'dark'] as const) {
 test('a stopped lead links its successor instead of claiming live workers', async ({ page }) => {
   const { data, session } = await setup(page)
   data.sessions.push(session(90, { role: 'coordinator', parent_harness_session_id: null, display_label: 'Resumed lead' }))
-  Object.assign(data.sessions.find(s => s.id === lead)!, { phase: 'stopped', stopped_at: ago(0), handed_over_to_id: id(90) })
+  Object.assign(data.sessions.find(s => s.id === lead)!, { phase: 'stopped', stopped_at: longAgo(), handed_over_to_id: id(90) })
   for (const worker of data.sessions.filter(s => s.parent_harness_session_id === lead && s.phase !== 'stopped')) {
     Object.assign(worker, { parent_harness_session_id: id(90), adopted_from_id: lead })
   }
   await page.goto('/agents')
-  // It stopped just now, so it keeps its place and end state for 10 minutes (AEON-1210, design §3.2).
+  // Past ten minutes it is in Ended; opening that group exposes its successor and stopped history.
+  await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(row(page, lead).getByRole('link', { name: 'Handed over to Resumed lead' })).toBeVisible()
   await expect(row(page, lead).locator('.worker-tools')).toHaveCount(0)
   await expect(row(page, id(2)).getByRole('link', { name: 'Adopted from Release lead' })).toBeVisible()

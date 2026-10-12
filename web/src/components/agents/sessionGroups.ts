@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Sessions grouped and narrowed for the Agents page (AEON-1210, design AEON-1196 §3.3–3.4).
 // By default each project is one group in a fixed order, its lead heading it; a project
-// with queued work and no lead is one slim line. Display offers grouping by lead,
+// without a lead, with queued work or sessions, is headed by one slim line. Display offers grouping by lead,
 // harness, state, computer or none; Filter narrows by project, harness and computer.
 // Free of Vue so it can be unit tested; the list renders what this decides.
 import type { ProjectLead } from '../../lib/lead'
@@ -73,8 +73,8 @@ export function orderProjects<P extends ProjectRef>(projects: readonly P[], cust
 
 // ---------- Group by Project (the default) ----------
 interface Rootish { view: { session: { id: string; project_id?: string | null; role?: string; stopped_at?: string | null }; projectKey: string; projectTitle: string } }
-/** A project's lead that has no running session on this list (starting, waiting for room, paused, can't start), or queued work and no lead. */
-export type LeadLine = { kind: 'pending'; lead: ProjectLead } | { kind: 'none'; lead: ProjectLead; queued: number }
+/** A project's lead that has no running session on this list (starting, waiting for room, paused, can't start), or no lead: queued work or sessions wait without one (null queued: not read). */
+export type LeadLine = { kind: 'pending'; lead: ProjectLead } | { kind: 'none'; lead: ProjectLead; queued: number | null }
 export interface ProjectGroup<B> { project: ProjectRef; roots: B[]; leads: number; line: LeadLine | null }
 export interface ProjectGrouping<B> {
   /** Live family roots in list order. */
@@ -115,7 +115,8 @@ export function projectGroups<B extends Rootish>(input: ProjectGrouping<B>): { g
     if (!current.length && lead && input.lines && (!input.onlyProjects?.length || input.onlyProjects.includes(project.key))) {
       const queued = input.queued(project.id)
       if (lead.state !== 'none') line = { kind: 'pending', lead }
-      else if (queued) line = { kind: 'none', lead, queued }
+      // No lead: the same slim line for queued work that waits for one and for sessions running without one.
+      else if (queued || own.length) line = { kind: 'none', lead, queued }
     }
     if (own.length || line) groups.push({ project: known.has(project.id) ? project : refs.get(project.id) ?? project, roots: [...leads, ...rest], leads: leads.length, line })
   }
@@ -149,7 +150,7 @@ export function keyedGroups<T>(items: readonly T[], keyOf: (item: T) => string, 
 export const queuedWord = (count: number, partial: boolean) => partial ? `${count}+` : `${count}`
 /** The list's line about its queue read: why chips and no-lead lines are missing, or that the counts are lower bounds. */
 export function queueNote({ queueError, queuePartial }: { queueError: string; queuePartial: boolean }): string {
-  if (queueError) return 'Queued work can’t be read right now, so queue counts and no-lead lines are missing here.'
+  if (queueError) return 'Queued work can’t be read right now, so queue counts are missing here, and so is the no-lead line of a project without sessions.'
   return queuePartial ? 'Only part of the queue could be read: each queued count is at least what it shows, and a project may wait for a lead without its line.' : ''
 }
 

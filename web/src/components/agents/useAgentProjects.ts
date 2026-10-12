@@ -2,7 +2,7 @@
 // The Agents page's view of every project's lead, queued work and open asks (AEON-741, moved into
 // the Sessions list by AEON-1210). It reads the shared projection (stores/agentProjection.ts) for
 // every active project while the page shows it: the list heads each project group with its lead,
-// or a slim line while work waits for one; the New menu offers Start lead only while a project has none.
+// or a slim line while work or sessions go without one; the New menu offers Start lead only while a project has none.
 import { computed, onScopeDispose } from 'vue'
 import { can } from '../../lib/authz'
 import { canLaunchLead, leadLaunchReason, LEAD_LAUNCH_OFF, type ProjectLead } from '../../lib/lead'
@@ -16,7 +16,7 @@ export interface AgentProjects {
   lead: (projectId: string) => ProjectLead | null | undefined
   /** Queued work items per project; null while the queue cannot be read; at least this many while `queuePartial`. */
   queued: (projectId: string) => number | null
-  /** The queue could not be read: queue chips and no-lead lines are missing, not absent. Empty once it is read. */
+  /** The queue could not be read: queue chips and the no-lead lines of projects without sessions are missing, not absent. Empty once it is read. */
   queueError: string
   /** Only part of the queue was read: each queued count is at least what it shows. */
   queuePartial: boolean

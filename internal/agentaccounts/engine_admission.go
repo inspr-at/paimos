@@ -36,17 +36,21 @@ func EngineCapacityTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner,
 	return engineCapacityTx(ctx, tx, p, owner, harness, hours, now, projectID, runRow{Purpose: "managed"})
 }
 
-// EngineRunCapacityTx checks only the account already reserved for this queued
-// routine. Its own slot and window holds are excluded from projections; sibling
-// runs remain counted across projects and shared quotas. Callers retain the
+// EngineRunCapacityTx checks only the account bound to this routine actor,
+// including an exact claimed replay or settled completion. Its own slot and
+// window holds are excluded from projections; sibling runs remain counted
+// across projects and shared quotas. Callers retain the
 // tenant/tree/pairing fences and the durable-intent check in RequireRoutineTx.
 func EngineRunCapacityTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner, harness string, hours float64, now time.Time, projectID, runID string) (EngineCapacity, error) {
 	run, err := lockRun(ctx, tx, runID)
 	if err != nil {
 		return EngineCapacity{}, err
 	}
-	if run.AccountID == nil || run.ProfileID == nil || run.Status != "queued" || run.Purpose != "managed" {
+	if run.AccountID == nil || run.ProfileID == nil || run.Purpose != "managed" {
 		return EngineCapacity{}, workorders.Fail(409, "routine_account_unbound")
+	}
+	if err := requireRoutineAccountPhase(ctx, tx, run, true); err != nil {
+		return EngineCapacity{}, err
 	}
 	return engineCapacityTx(ctx, tx, p, owner, harness, hours, now, projectID, run)
 }
@@ -207,7 +211,7 @@ func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, ow
 		if !fitsAll {
 			continue
 		}
-		reason, err := engineHost(ctx, tx, a.ID, owner, now)
+		reason, err := engineHost(ctx, tx, a.ID, owner, now, run.ID)
 		if err != nil {
 			return EngineCapacity{}, err
 		}
@@ -223,18 +227,18 @@ func engineCapacityInputs(ctx context.Context, tx pgx.Tx, p tenant.Principal, ow
 	return out, nil
 }
 
-func engineHost(ctx context.Context, tx pgx.Tx, account, owner string, now time.Time) (string, error) {
+func engineHost(ctx context.Context, tx pgx.Tx, account, owner string, now time.Time, excludeRun string) (string, error) {
 	var raw, policyRaw []byte
 	var at *time.Time
 	var running int
 	err := tx.QueryRow(ctx, `SELECT c.capacity_signals,c.capacity_policy,c.capacity_reported_at,
- (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND (r.status IN ('starting','running','waiting')
+ (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND ($3::text='' OR r.id::text<>$3) AND (r.status IN ('starting','running','waiting')
   OR r.trace->'work_lifecycle_release'->>'exit_unconfirmed'='true'))
  FROM agent_pairing_enrollments e
  JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
  JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
  WHERE e.account_id=$1 AND e.state='connected' AND e.ongoing_approved_at IS NOT NULL AND c.state='connected'
- AND q.state='redeemed' AND `+modelprefs.CanonicalPersonSQL("q.approved_by")+`=$2::uuid`, account, owner).Scan(&raw, &policyRaw, &at, &running)
+ AND q.state='redeemed' AND `+modelprefs.CanonicalPersonSQL("q.approved_by")+`=$2::uuid`, account, owner, excludeRun).Scan(&raw, &policyRaw, &at, &running)
 	if isNoRows(err) {
 		return "host_inputs_unreadable", nil
 	}

@@ -3,10 +3,12 @@
 // python3 /Users/markus/Code/aeon-worktrees/bin/fleet-gate.py -- npm test -- session-attention.spec.ts --workers=2
 import { test, expect } from '@playwright/test'
 import { mockStateColours, stateNow } from './state-colours-fixtures'
+import { mockAgents } from './agents-fixtures'
 
 for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390]) {
   test(`${theme} ${width}: shared replies leave five siblings working and Needs you empty`, async ({ page }, testInfo) => {
     const { agents, data } = await mockStateColours(page, theme)
+    await mockAgents(page, agents, { now: () => stateNow })
     await page.setViewportSize({ width, height: width === 1440 ? 1000 : 844 })
     const template = agents.sessions[0]!
     const shared = { kind: 'reply', scope: 'shared', actor: 'agent', count: 1, blocking: false, location: 'messages' }
@@ -19,16 +21,18 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     data.projects.splice(1)
     await page.goto('/agents')
     const queue = page.getByRole('region', { name: 'Needs you' })
-    // Production removes Needs you when nothing is pending and there is no decided
-    // history. The sentence "Nothing waits on you" exists only inside that region.
+    const desk = page.getByRole('link', { name: /^Decision Desk,/ })
+    // The inline desk is retired (P1); its canonical header link still reports the exact count.
     await expect(page.locator('.page-head .count[data-filter="working"] b')).toHaveText('5')
     await expect(queue).toHaveCount(0)
-    await expect(page.getByText('Nothing waits on you')).toHaveCount(0)
+    await expect(desk).toHaveAccessibleName('Decision Desk, 0 open')
+    await expect(desk).toHaveAttribute('href', '/decision-desk')
+    await expect(page.locator('.agents-page').getByRole('region', { name: 'Decision Desk', exact: true })).toHaveCount(0)
     await expect(page.getByRole('list', { name: 'Requests waiting for you' })).toHaveCount(0)
     for (const session of agents.sessions) {
       const row = page.locator(`[data-row="s:${session.id}"]`)
       await expect(row).toHaveAttribute('data-state', 'working')
-      await expect(row.locator('.agent-state-label')).toHaveText('Working')
+      await expect(row.locator('.ava')).toHaveAttribute('aria-label', /: Working$/)
     }
     await expect(page.locator('.row[data-state="waiting"]')).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath(`aeon-240-${theme}-${width}-working-siblings.png`), fullPage: true })
@@ -38,9 +42,13 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     await expect(panel.locator('.head-top .agent-state-label')).toHaveText('Working')
     const inbox = panel.getByRole('region', { name: 'Inbox attention' })
     // AEON-313: shared-inbox obligations stay outside the session thread, in
-    // Messages as well as in Now.
+    // Chat as well as in Now. AEON-977 (2c33f633d) renamed the tab and its panel.
     await panel.getByRole('tab', { name: /Chat/ }).click()
-    await expect(panel.getByRole('tabpanel', { name: /Messages/ }).getByRole('region', { name: 'Conversation' })).toBeVisible()
+    const chat = panel.getByRole('tabpanel', { name: /Chat/ })
+    // The same change gives an empty session thread its own Chat empty state.
+    await expect(chat.getByRole('heading', { name: 'Chat with Backlog worker 1', exact: true })).toBeVisible()
+    await expect(chat.getByRole('region', { name: 'Conversation' })).toHaveCount(0)
+    await expect(chat.getByRole('textbox', { name: 'Message to Backlog worker 1', exact: true })).toBeVisible()
     await expect(inbox).toHaveCount(0)
     await expect(panel).not.toContainText('Shared inbox')
     await expect(panel.locator('.now-block')).not.toContainText('Shared inbox')
@@ -55,13 +63,16 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     Object.assign(agents.sessions[0]!, { run_id: 'bk5-run', needs_attention: true,
       attention_reasons: [{ kind: 'approval', scope: 'run', actor: 'person', count: 1, blocking: true, location: 'approvals' }, shared] })
     agents.approvals.push({ id: 'bk5-approval', agent_principal_id: template.agent_principal_id, agent_name: 'Shared fixture principal', resource_kind: 'run', resource_id: 'bk5-run', run_id: 'bk5-run', scope: 'nodes.read', rationale: '', risk: 'low', decision: null, decided_by_principal_id: null, expires_at: new Date(stateNow + 60_000).toISOString(), proposed_at: new Date(stateNow).toISOString() })
-    await page.goto('/agents/bk5-worker-0')
-    await expect(queue).toBeVisible()
-    await expect(queue).not.toContainText('Nothing waits on you')
-    await expect(queue.getByRole('list', { name: 'Requests waiting for you' })).toBeVisible()
-    await expect(queue).toContainText('Read tickets')
+    // Read the header before opening the phone's full-screen session sheet.
+    await page.goto('/agents')
+    await expect(queue).toHaveCount(0)
+    await expect(desk).toHaveAccessibleName('Decision Desk, 1 open')
+    await page.getByRole('button', { name: 'Preview the Decision Desk', exact: true }).click()
+    await expect(page.getByTestId('desk-preview-item-a:bk5-approval')).toHaveAttribute('href', '/decision-desk?item=a:bk5-approval')
+    await page.keyboard.press('Escape')
+    await page.locator('[data-row="s:bk5-worker-0"] .agent-link').click()
     await expect(panel.locator('.head-top .agent-state-label')).toHaveText('Awaiting approval')
-    // The panel reopens on the remembered tab (Messages, above); evidence lives in Overview.
+    // The panel reopens on the remembered tab (Chat, above); evidence lives in Overview.
     await panel.getByRole('tab', { name: 'Overview' }).click()
     await expect(panel.locator('.now-step')).toContainText('awaiting a person’s decision')
     await expect(panel.getByRole('region', { name: 'Session state evidence' }).getByRole('link', { name: 'Permission requests' })).toHaveAttribute('href', '/decision-desk')

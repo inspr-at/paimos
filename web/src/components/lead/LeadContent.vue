@@ -36,7 +36,18 @@ let clock: ReturnType<typeof setInterval> | undefined
 const mayStart = computed(() => session.identity?.principal.kind === 'person' && leadActionAvailable(lead.value, 'start'))
 const mayDecide = computed(() => session.identity?.principal.kind === 'person' && can('questions.read', props.projectId) && can('questions.decide', props.projectId))
 const poller = usePoller(() => leads.load(props.projectId), 15_000)
-watch(() => [props.projectId, session.identity?.tenant.id, session.identity?.principal.id], () => { void leads.load(props.projectId); void queue.load(props.projectId) }, { immediate: true })
+// Retain P2's honest failed-read states in the shared P4 panel body.
+const queueFailed = computed(() => !!queue.errors[props.projectId])
+const retrying = ref<'queue' | 'history' | null>(null)
+let retryTurn = 0
+async function retry(what: 'queue' | 'history') {
+  if (retrying.value) return
+  const turn = ++retryTurn
+  retrying.value = what
+  try { await (what === 'queue' ? queue.load(props.projectId, true) : leads.load(props.projectId)) }
+  finally { if (turn === retryTurn) retrying.value = null }
+}
+watch(() => [props.projectId, session.identity?.tenant.id, session.identity?.principal.id], () => { retryTurn++; retrying.value = null; void leads.load(props.projectId); void queue.load(props.projectId) }, { immediate: true })
 onMounted(async () => { poller.start(); clock = setInterval(() => { now.value = Date.now() }, 10_000); await nextTick(); showSection() })
 // The queue chip on an Agents lead row opens the panel at Next up (AEON-1210), also when it is open already.
 const nextUp = ref<HTMLElement>()
@@ -140,8 +151,12 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
       </section>
       <section id="next-up" ref="nextUp" class="p-sec" tabindex="-1" aria-labelledby="lp-next">
         <div class="p-head"><h3 id="lp-next">Next up</h3><span class="small">Queue order · {{ queued ? `${queued.length} queued` : 'unavailable' }}</span></div>
-        <p v-if="!queued" class="small warn">The queue can’t be read right now.</p>
-        <p v-else-if="!next.length" class="small faint">Nothing is queued. Queue work on a ticket with <kbd class="keycap">Q</kbd>.</p>
+        <div v-if="queueFailed" class="read-fail" data-read-fail="queue">
+          <p class="small warn">{{ queued ? 'The queue couldn’t be read again, so Next up may be out of date.' : 'The queue can’t be read right now, so Next up is unknown.' }}</p>
+          <button type="button" class="btn sm" :aria-disabled="!!retrying" :aria-busy="retrying === 'queue'" @click="retry('queue')"><AppIcon name="refresh" :size="12" />Try again</button>
+        </div>
+        <p v-if="!queued && !queueFailed" class="small faint">Reading the queue…</p>
+        <p v-else-if="queued && !next.length" class="small faint">Nothing is queued. Queue work on a ticket with <kbd class="keycap">Q</kbd>.</p>
         <TicketPeekLink v-for="item in next" :key="item.ticket_id" class="wk queued-item" :ticket-key="item.key" :href="href(item.key)">
           <AppIcon name="queue" :size="14" />
           <span class="wk-t"><span class="key">{{ item.key }}</span>{{ item.title }}<small>{{ item.waiting_reason ? `Waits: ${item.waiting_reason}` : item.expected_model ? `${item.expected_model}${item.expected_effort ? `, ${item.expected_effort}` : ''}` : `Model chosen by role when the ${w.l} picks it up` }}</small></span>
@@ -160,7 +175,10 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
       </section>
       <section class="p-sec" aria-labelledby="lp-recent">
         <div class="p-head"><h3 id="lp-recent">Recent</h3><span class="small">From the project’s event log</span></div>
-        <p v-if="view?.decisionsError" class="small warn">{{ view.decisionsError }}</p>
+        <div v-if="view?.decisionsError" class="read-fail" data-read-fail="history">
+          <p class="small warn">The {{ w.l }}’s history can’t be read right now, so Recent, Gate and Merged are unknown.</p>
+          <button type="button" class="btn sm" :aria-disabled="!!retrying" :aria-busy="retrying === 'history'" @click="retry('history')"><AppIcon name="refresh" :size="12" />Try again</button>
+        </div>
         <p v-else-if="!complete && lead?.session_id" class="small faint">Reading the {{ w.l }}’s history…</p>
         <p v-else-if="!recent.length" class="small faint">Nothing reported yet.</p>
         <ul v-else class="log"><li v-for="r in recent" :key="r.id"><time>{{ r.at }}</time><span>{{ r.text }}</span></li></ul>
@@ -202,6 +220,10 @@ function openWorker(id?: string | null) { if (id) void router.push(`/agents/${en
 .p-head h3 { margin: 0; font-size: 13px; font-weight: 600; }
 .small { margin: 0; font-size: 12.5px; color: var(--ink-3); }
 .small.warn { color: var(--warn-ink); }
+.read-fail { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; }
+.read-fail p { flex: 1 1 16em; }
+.read-fail .btn { gap: 6px; }
+.read-fail .btn[aria-disabled="true"] { opacity: .55; cursor: default; }
 .faint { color: var(--ink-3); }
 .now-copy { margin: 4px 0 0; font-size: 13.5px; color: var(--ink); }
 .facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 12px 0 0; }

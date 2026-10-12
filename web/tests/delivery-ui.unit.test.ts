@@ -9,21 +9,24 @@ import ts from 'typescript'
 const http = vi.hoisted(() => ({ handle: async (_path: string, _init?: RequestInit) => new Response('{}') }))
 vi.mock('../src/lib/api.ts', () => ({ api:(path:string, init?:RequestInit) => http.handle(path,init), APIError:class extends Error { constructor(readonly status:number,message:string) { super(message) } }, getProjects:async () => ({ items:[] }) }))
 import * as delivery from '../src/lib/delivery'
+import * as deliveryNumbers from '../src/lib/deliveryNumbers'
+import * as projectSettings from '../src/lib/projectSettings'
 import * as policy from '../src/lib/reviewPolicy'
 import * as identity from '../src/lib/identityScope'
 import * as reviews from '../src/lib/reviews'
+import * as policies from '../src/lib/policies'
 import * as api from '../src/lib/api'
 const session = Vue.reactive({ identity:{ tenant:{ id:'tenant' }, principal:{ id:'person', kind:'person' } } })
 const profile = Vue.reactive({ profile:{ locale:'en' } })
 const access = Vue.reactive({ manage:true, read:true })
 const scopes: Vue.EffectScope[] = [], unmounts:(() => void)[] = [], actions:(() => void)[] = []
-const settings = (): policy.ReviewPolicySettings => ({ project_id:null, policy:{ mode:'other_family', allowed_families:[] }, effective:{ mode:'other_family', allowed_families:[] }, workspace:{ mode:'other_family', allowed_families:[] }, valid_families:['openai','anthropic'], source:'tenant', updated_by:'editor', updated_at:'2026-10-07T00:00:00Z' })
+const settings = (): policy.ReviewPolicySettings => ({ project_id:null, policy:{ mode:'other_family', allowed_families:[] }, effective:{ mode:'other_family', allowed_families:[] }, workspace:{ mode:'other_family', allowed_families:[] }, valid_families:['openai','anthropic'], source:'tenant', updated_by:'editor', updated_at:'2026-10-07T00:00:00Z', family_order:['openai','xai','anthropic','cursor','google','local'], floor:{ tiers:['strong','frontier'], min_effort_level:4 }, security_excludes:['anthropic'] })
 const item = (): delivery.DeliveryItem => ({ id:'held', project_id:'project',ticket_node_id:'ticket',repository:'example/repo',pull_request:7,branch:'work/long-branch',head_sha:'b'.repeat(40),state:'held',state_since:'2026-10-07T00:00:00Z',owner:'person',deadline_at:null,held_reason:'Release freeze',held_from_state:'pushed',required_checks_passed:3,required_checks_total:5,link_source:'title_key',updated_at:'2026-10-07T00:00:00Z' })
 const json = (body:unknown, status=200) => new Response(JSON.stringify(body), { status, headers:{'Content-Type':'application/json'} })
 const deferred = () => { let release!:(value:Response) => void; const promise = new Promise<Response>(resolve => { release=resolve }); return {promise,release} }
 async function settle() { for(let i=0;i<15;i++) await Promise.resolve(); await Vue.nextTick() }
 function setup<T>(file:string,props:object):T {
- const modules:Record<string,unknown> = { vue:{...Vue,onBeforeUnmount:(fn:() => void) => unmounts.push(fn)}, '../../lib/api':api, '../../lib/authz':{can:(key:string) => key.endsWith('.read') ? access.read : access.manage,onAccessRevalidate:() => () => {}}, '../../lib/delivery':delivery,'../../lib/reviewPolicy':policy,'../../lib/reviews':reviews,'../../lib/identityScope':identity,'../../lib/toast':{toast:(_text:string,options:{action:{run:() => void}}) => actions.push(options.action.run)},'../../stores/session':{useSession:() => session},'../../stores/profile':{useProfile:() => profile}, '../AppIcon.vue':{}, '../KeyCap.vue':{}, './DeliveryRow.vue':{}, './DeliveryQueue.vue':{}, './SettingsCard.vue':{} }
+ const modules:Record<string,unknown> = { vue:{...Vue,onBeforeUnmount:(fn:() => void) => unmounts.push(fn)}, '../../lib/api':api, '../../lib/authz':{can:(key:string) => key.endsWith('.read') ? access.read : access.manage,onAccessRevalidate:() => () => {}}, '../../lib/delivery':delivery,'../../lib/reviewPolicy':policy,'../../lib/reviews':reviews,'../../lib/policies':policies,'../../lib/identityScope':identity,'../../lib/toast':{toast:(_text:string,options:{action:{run:() => void}}) => actions.push(options.action.run)},'../../stores/session':{useSession:() => session},'../../stores/profile':{useProfile:() => profile}, '../../stores/projects':{useProjects:() => ({projects:[{id:'project',routeKey:'AEON'}]})}, '../../lib/deliveryNumbers':deliveryNumbers, '../../lib/projectSettings':projectSettings, '../AppIcon.vue':{}, '../KeyCap.vue':{}, './DeliveryRow.vue':{}, './DeliveryQueue.vue':{}, './SettingsCard.vue':{} }
  const {descriptor}=parse(readFileSync(new URL(`../src/components/${file}`,import.meta.url),'utf8'))
  const {content}=compileScript(descriptor,{id:file})
  const exports:{default?:{setup:(props:object,context:object) => T}}={}
@@ -34,7 +37,7 @@ function setup<T>(file:string,props:object):T {
 beforeEach(() => { vi.useFakeTimers();vi.stubGlobal('navigator',{platform:'Mac'});session.identity.principal.id='person';access.manage=true;access.read=true;http.handle=async () => json(settings()) })
 afterEach(() => {for(const stop of unmounts.splice(0))stop();for(const scope of scopes.splice(0))scope.stop();actions.splice(0);vi.useRealTimers();vi.unstubAllGlobals()})
 type Ticket = { result:Vue.Ref<delivery.DeliveryPage|null>; lift:(item:delivery.DeliveryItem) => Promise<unknown>; load:() => Promise<unknown>; mutationError:Vue.Ref<string>; error:Vue.Ref<string>; lifted:Vue.Ref<string[]>; showSlot:Vue.ComputedRef<boolean> }
-type Card = { base:Vue.Ref<policy.ReviewPolicySettings|null>; selected:Vue.Ref<string>; mode:Vue.Ref<string>; families:Vue.Ref<string[]>; save:() => Promise<unknown>; write:(policy:policy.ReviewPolicy|null,reset:boolean) => Promise<unknown>; message:Vue.Ref<string>; dirty:Vue.ComputedRef<boolean>; feedback:Vue.ComputedRef<string> }
+type Card = { rules:Vue.Ref<policies.ReviewerRules|null>; base:Vue.Ref<policy.ReviewPolicySettings|null>; selected:Vue.Ref<string>; mode:Vue.Ref<string>; families:Vue.Ref<string[]>; save:() => Promise<unknown>; write:(policy:policy.ReviewPolicy|null,reset:boolean) => Promise<unknown>; message:Vue.Ref<string>; dirty:Vue.ComputedRef<boolean>; feedback:Vue.ComputedRef<string> }
 it('the paused step and configured check progress are shown without inventing a completed step', () => {
  const held=item();expect(delivery.stepIndex(held.state,held.held_from_state)).toBe(2);expect(delivery.stepIndex('held',null)).toBe(-1)
  expect(delivery.nextAction({...held,state:'pushed'},'de')).toContain('3 von 5 bestanden')
@@ -103,6 +106,21 @@ it('a denied or failed review-policy read selects no saved mode', async () => {
  expect(failed.base.value).toBeNull();expect(failed.mode.value).toBe('')
  expect(failed.message.value).toBe('The review rule could not be loaded.')
  expect(failed.feedback.value).not.toContain('Saved rules apply')
+})
+// Risk: "How reviewers are chosen" blinks out on a project switch, or a late read
+// shows the previous person's rules to the next one.
+it('reviewer rules stay through a project switch and never land for another person', async () => {
+ const card=setup<Card>('settings/CrossFamilyReviewCard.vue',{});await settle()
+ expect(card.rules.value).toEqual({ family_order:['openai','xai','anthropic','cursor','google','local'], floor:{ tiers:['strong','frontier'], min_effort_level:4 }, security_excludes:['anthropic'] })
+ const reads=[deferred(),deferred()];let call=0;http.handle=async () => reads[call++]!.promise
+ card.selected.value='project';await settle()
+ expect(call).toBe(1);expect(card.rules.value?.family_order[0]).toBe('openai')
+ session.identity.principal.id='different';await settle()
+ expect(call).toBe(2);expect(card.rules.value).toBeNull()
+ reads[0]!.release(json({...settings(),project_id:'project',family_order:['xai']}));await settle()
+ expect(card.rules.value).toBeNull()
+ reads[1]!.release(json({...settings(),project_id:'project',family_order:['google','openai']}));await settle()
+ expect(card.rules.value?.family_order).toEqual(['google','openai'])
 })
 it('a policy save cannot report success after the person changes', async () => {
  const card=setup<Card>('settings/CrossFamilyReviewCard.vue',{});await settle();card.mode.value='off'

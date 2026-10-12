@@ -14,7 +14,7 @@
 import { shallowRef } from 'vue'
 import { releaseChordOpen, SEQUENCE_MS } from './places'
 
-export type ShortcutScope = 'app' | 'app without list search' | 'agents page' | 'agents page, when a split fits' | 'session list' | 'a lead row' | 'a session row' | 'the divider, when focused'
+export type ShortcutScope = 'app' | 'app without list search' | 'agents page' | 'agents page, when a split fits' | 'session list' | 'a lead row' | 'a session row' | 'the divider, when focused' | 'project settings'
 export interface ShortcutEntry { id: string; keys: readonly string[]; scope: ShortcutScope; label: string; labelParts?: readonly string[]; when?: string }
 // Approved transition labels draw an SVG arrow between parts. Plain-text
 // consumers retain the same named states, with the direction spoken as "to".
@@ -43,6 +43,8 @@ export const SHORTCUT_ENTRIES = [
   { id: 'agents.divider.min', keys: ['Home'], scope: 'the divider, when focused', label: 'Move the divider (the list’s width)', when: 'list 280' },
   { id: 'agents.divider.max', keys: ['End'], scope: 'the divider, when focused', label: 'Move the divider (the list’s width)', when: 'details 380' },
   { id: 'agents.groups.toggle_all', keys: [], scope: 'session list', label: 'Collapse all / Expand all' },
+  { id: 'project.settings.submit', keys: ['Mod+Enter'], scope: 'project settings', label: 'Save the field or confirm the open project action' },
+  { id: 'project.settings.dismiss', keys: ['Escape'], scope: 'project settings', label: 'Leave the field, then close the project overlay' },
 ] as const satisfies readonly ShortcutEntry[]
 export type ShortcutAction = typeof SHORTCUT_ENTRIES[number]['id']
 type Handler = (event: KeyboardEvent) => void | false
@@ -68,6 +70,7 @@ function matches(binding: string, event: KeyboardEvent): boolean {
 }
 function scopesOverlap(a: ShortcutScope, b: ShortcutScope): boolean {
   if (a === b || a === 'app' || b === 'app') return true
+  if (a === 'project settings' || b === 'project settings') return false
   if (a === 'app without list search' || b === 'app without list search') return false
   if (a.startsWith('agents page') || b.startsWith('agents page')) return true
   if (a === 'the divider, when focused' || b === 'the divider, when focused') return false
@@ -109,6 +112,13 @@ export function createShortcutRegistry(context = browserContext, now = () => Dat
     const capture = phase !== 'bubble'
     if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.key === 'Process' || event.key === 'Dead' || event.altKey) { if (capture) cancelSequence(); return }
     const current = context(event), time = now()
+    // Project forms and overlays opt in with an exact focus/record predicate.
+    // Their Enter/Escape bindings may run while typing or inside their own
+    // dialog; no other page/global action gains that exception.
+    if (capture) for (const registration of registrations.values()) {
+      if (registration.entry.scope !== 'project settings' || !registration.options.when || !available(registration, event)) continue
+      if (registration.entry.keys.some(binding => matches(binding, event)) && invoke(registration, event)) { cancelSequence(); return }
+    }
     if (capture && pending && time - pending.started > SEQUENCE_MS) cancelSequence()
     // Only capture advances sequences; bubble must not process the prefix twice
     // or cancel it when the prefix has opened its existing release menu.
@@ -134,6 +144,7 @@ export function createShortcutRegistry(context = browserContext, now = () => Dat
     }
     const candidates: { registration: Registration; keys: string[] }[] = []
     for (const registration of registrations.values()) {
+      if (registration.entry.scope === 'project settings') continue
       if (!available(registration, event)) continue
       for (const binding of registration.entry.keys) {
         const keys = steps(binding)

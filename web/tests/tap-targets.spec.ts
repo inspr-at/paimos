@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { mkdir } from 'node:fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
 import { expectStableControls } from './helpers/stable'
 import { mockEffectivePermissions } from './authz-fixtures'
 import type { TierReport } from '../src/lib/serviceTier'
+
+test.use({ screenshot: 'only-on-failure' })
 
 const sessionId = '5e000000-0000-4000-8000-000000000001'
 const longName = 'Berechtigungsprüfung für die österreichische Unternehmensverwaltung und Wiederherstellungskoordination'
@@ -115,11 +116,10 @@ async function edgeClick(page: Page, control: Locator, expanded: boolean, phone:
   await page.mouse.click(x, y)
 }
 async function capture(page: Page, label: string) {
-  const directory = 'test-results/aeon-630-tap-targets'
-  await mkdir(directory, { recursive: true })
   // Capture the relevant list, including the control, rather than the page's
   // independently scrolling main area (a full-page shot can show its tail).
-  await page.locator(label.startsWith('tickets-') ? '.table-card' : '.sessions').screenshot({ path: `${directory}/${label}.png`, animations: 'disabled' })
+  const area = label.startsWith('tickets-') ? page.locator('.table-card') : page.getByRole('complementary', { name: 'Session details' })
+  await area.screenshot({ path: test.info().outputPath(`${label}.png`), animations: 'disabled' })
 }
 
 for (const { width, coarse } of [
@@ -250,7 +250,23 @@ for (const { width, coarse } of [
 
       await page.goto('/agents')
       const session = page.locator(`[data-row="s:${sessionId}"]`)
-      const tier = session.locator('.tier-mark:visible')
+      await expect(session).toBeVisible()
+      await expect(session.locator('.tier-mark')).toHaveCount(0)
+      if (width < 560) {
+        // A phone's list shows compact rows (AEON-1211, design AEON-1196): no Tier cell; the row menu leads to it.
+        await expect(session).toBeVisible()
+        const more = session.locator('.more')
+        const box = (await more.boundingBox())!
+        expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44)
+        await more.click()
+        await expect(page.getByRole('menuitem', { name: 'Change tier…' })).toBeVisible()
+        await page.keyboard.press('Escape')
+      }
+      // P3 moves the same tier control into details in every form; retain its reach and stability checks there.
+      await session.locator('.agent-link').click()
+      const panel = page.getByRole('complementary', { name: 'Session details' })
+      await panel.getByRole('tab', { name: 'Overview' }).click()
+      const tier = panel.locator('.service-tier .tier-mark:visible')
       await expect(tier).toBeVisible()
       // The initial report can replace a read-only span with the live button.
       // Wait for the actionable control before measuring its settled visual.
@@ -262,7 +278,7 @@ for (const { width, coarse } of [
       // to the viewport before the guard records its coordinate-click baseline.
       await tier.scrollIntoViewIfNeeded()
       const picker = page.getByRole('dialog', { name: 'Change tier', exact: true })
-      await expectStableControls({ controls: { tier, session, title: session.locator('.result') }, interactions: [
+      await expectStableControls({ controls: { tier, panel, session, title: panel.locator('.head-top .name') }, interactions: [
         { name: 'tier picker at hit-area edge', run: async () => { await edgeClick(page, tier, expanded, phone); await expect(picker).toBeVisible() } },
         { name: 'dismiss tier picker', run: async () => { await picker.getByRole('button', { name: /Cancel/ }).click(); await expect(picker).toHaveCount(0) } },
       ] })
