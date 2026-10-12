@@ -108,7 +108,7 @@ func TestRecoveryClosesControlsAndPreservesOtherGenerations(t *testing.T) {
 	base := "/api/projects/" + f.project + "/harness-sessions"
 	register := func(ref, lease string) string {
 		t.Helper()
-		w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test-host", "harness_session_ref": ref, "worker_lease": lease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "advertised_capabilities": []string{"stop", "interrupt"}}, "")
+		w := f.call(f.person, "POST", base, map[string]any{"agent_principal_id": f.agent.ID, "harness": "codex", "host": "test-host", "harness_session_ref": ref, "worker_lease": lease, "management_mode": "managed", "role": "worker", "run_id": run, "work_order_id": order, "ticket_node_id": order, "work_shape": "ship", "parallel_reason": "Exercise independent generation recovery on the same work order", "advertised_capabilities": []string{"stop", "interrupt"}}, "")
 		expect(t, w, 201)
 		return decode(t, w)["id"].(string)
 	}

@@ -93,7 +93,6 @@ func TestLeavingHeartbeatReplansEarlierAndCapsWrapUp(t *testing.T) {
 }
 
 func TestLeavingHeartbeatHandoverAndCommandSelection(t *testing.T) {
-	f := fixture(t)
 	for _, tc := range []struct {
 		name, level string
 		report      map[string]any
@@ -104,6 +103,7 @@ func TestLeavingHeartbeatHandoverAndCommandSelection(t *testing.T) {
 		{"command cannot be interrupted", "pause", map[string]any{"next_point_in_min": 5, "command_left_min": 1.5, "interrupt": false}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			f := fixture(t)
 			path, lease := registerPauseWorker(t, f, []string{"pause"})
 			tc.report["phase"], tc.report["activity_sequence"] = "working", 1
 			expect(t, f.call(f.agent, "POST", path+"/heartbeat", tc.report, lease), 200)

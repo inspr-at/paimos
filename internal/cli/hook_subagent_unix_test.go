@@ -569,14 +569,19 @@ func TestClaudeSubagentHookEndToEnd(t *testing.T) {
 	if code != 0 || json.Unmarshal([]byte(out), &ticket) != nil || !validUUID(ticket.ID) {
 		t.Fatalf("ticket fixture failed: %s", stderr)
 	}
+	// Delegation starts from a coordinator: a worker parent would already
+	// occupy this ticket's single builder slot before its child registers.
 	var parent harness.Session
 	body := map[string]any{
 		"agent_principal_id": key.PrincipalID, "harness": "claude", "host": "subagent-test",
-		"management_mode": "unmanaged", "role": "worker", "ticket_node_id": ticket.ID, "work_shape": "ship",
+		"management_mode": "unmanaged", "role": "coordinator", "ticket_node_id": ticket.ID, "work_shape": "ship",
 		"harness_session_ref": "fixture-parent-ref-00000000000000001", "worker_lease": "fixture-parent-lease-00000000000000001", "vendor_session_ref": indexSourceID,
 	}
 	if err := c.Do(t.Context(), http.MethodPost, harnessPath(project, ""), body, &parent); err != nil {
 		t.Fatal(err)
+	}
+	if parent.Role != "coordinator" || parent.TicketNodeID == nil || *parent.TicketNodeID != ticket.ID {
+		t.Fatal("delegating parent lost its coordinator role or ticket binding")
 	}
 	dir := t.TempDir()
 	writeIndexState(t, dir, parent.ID, "Parent", `"project_id":"`+project+`"`)
@@ -592,6 +597,9 @@ func TestClaudeSubagentHookEndToEnd(t *testing.T) {
 	}
 	if child.ParentID == nil || *child.ParentID != parent.ID || child.TicketNodeID == nil || *child.TicketNodeID != ticket.ID || child.WorkShape != "ship" || child.Role != "worker" || child.Harness != "claude" || child.Phase != "working" || child.ActivitySequence != 1 || child.StoppedAt != nil || child.HasVendorSessionRef {
 		t.Fatal("real child lost metadata, liveness or parent vendor isolation")
+	}
+	if child.ParallelReason != nil || child.StartedByPrincipalID == nil || *child.StartedByPrincipalID != key.PrincipalID {
+		t.Fatal("hook invented parallel authority or lost the builder initiator")
 	}
 	var sessions []harness.Session
 	if err := c.Do(t.Context(), http.MethodGet, harnessPath(project, ""), nil, &sessions); err != nil || len(sessions) != 2 {
@@ -611,6 +619,20 @@ func TestClaudeSubagentHookEndToEnd(t *testing.T) {
 	}
 	if !visible {
 		t.Fatal("child was not visible under its parent in the Agents API")
+	}
+	// A coordinator parent is not implicit parallel authority: a second child
+	// must still be refused while the first child owns this ticket's slot.
+	rt.stdin = strings.NewReader(`{"hook_event_name":"SubagentStart","session_id":"` + indexSourceID + `","agent_id":"second-agent","agent_type":"Explore"}`)
+	err = rt.runSubagentHook(t.Context(), "SubagentStart")
+	var refused *exitError
+	if !errors.As(err, &refused) || refused.apiStatus != http.StatusConflict || !strings.HasPrefix(refused.msg, "api 409: build in flight: ") || !strings.Contains(refused.msg, child.ID) {
+		t.Fatal("second child was not refused by the active-builder admission guard")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "subagents", subagentName("second-agent"), "state.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("refused child persisted a successful session identity")
+	}
+	if err := c.Do(t.Context(), http.MethodGet, harnessPath(project, ""), nil, &sessions); err != nil || len(sessions) != 2 {
+		t.Fatal("refused child changed the Agents session inventory")
 	}
 	if stderr := f.invoke(t, "SubagentStop", ""); stderr != "" {
 		t.Fatal(stderr)

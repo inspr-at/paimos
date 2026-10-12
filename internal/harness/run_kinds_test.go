@@ -26,7 +26,8 @@ func TestRunKindsRegisterBeatAndAggregate(t *testing.T) {
 	} {
 		lease := "child-lease-" + uid()
 		body := map[string]any{"agent_principal_id": f.agent.ID, "harness": tc.harness, "host": "build-6", "role": "worker", "management_mode": "unmanaged", "parent_harness_session_id": lead, "ticket_node_id": f.ticket, "work_shape": "ship", "harness_session_ref": "child-ref-" + uid(), "worker_lease": lease, tc.field: tc.label}
-		w := f.call(f.agent, "POST", base, body, "")
+		body["parallel_reason"] = "Compare simultaneous execution kinds in coordinator aggregation"
+		w := f.call(f.person, "POST", base, body, "")
 		expect(t, w, 201)
 		child := decode(t, w)
 		id := child["id"].(string)
@@ -113,7 +114,7 @@ func TestCoordinatorProgressCountsMissingAndFinishedWorkers(t *testing.T) {
 		{60, false, false}, {nil, false, false}, {100, true, false}, {90, true, false}, {100, false, true},
 	} {
 		lease := "worker-lease-" + uid()
-		child := f.registerSession(t, f.agent.ID, "worker", f.ticket, "worker-ref-"+uid(), lease)
+		child := f.registerSession(t, f.agent.ID, "worker", f.ticket, "worker-ref-"+uid(), lease, "Compare simultaneous worker progress and completion")
 		f.tx(t, f.person, func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET parent_id=$2,progress_pct=$3 WHERE id=$1`, child, lead, tc.progress)
 			return err

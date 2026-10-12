@@ -348,6 +348,7 @@ func harnessAgentMismatch(name string) error {
 func (rt *runtime) harnessRegister() *Command {
 	var project, agent, harness, generator, commandLabel, host, label, model, effort, accountLabel, harnessVersion, brief, worktree, branch, refFile, leaseFile, registrationFile, management, role, parent, ticket, shape, runID, orderID, succeeds string
 	var ticketIDFlag int
+	var parallelReason string
 	var caps []string
 	return &Command{Name: "register", Short: "Register one public harness generation", Use: "harness register --project KEY --agent NAME --harness KIND --host HOST --harness-session-file PATH --worker-lease-file PATH", addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key")
@@ -369,6 +370,7 @@ func (rt *runtime) harnessRegister() *Command {
 		fs.string(&registrationFile, "registration-file", 0, "private JSON with both registration secrets, or - for stdin")
 		fs.string(&management, "management", 0, "managed or unmanaged")
 		fs.string(&role, "role", 0, "worker or coordinator")
+		fs.string(&parallelReason, "parallel-reason", 0, "explicit public reason for parallel work; requires person or coordinator authority")
 		fs.string(&parent, "parent-session", 0, "parent public session UUID")
 		fs.string(&succeeds, "succeeds", 0, "paused worker or stopped/heartbeat-lost coordinator UUID")
 		fs.string(&ticket, "ticket", 0, "ticket node key")
@@ -479,6 +481,9 @@ func (rt *runtime) harnessRegister() *Command {
 			order = &orderID
 		}
 		body := map[string]any{"succeeds_session_id": predecessor, "max_session_file_bytes": rules.SessionFileLimit(harness), "rules_client_version": version.Version, "agent_principal_id": me.Principal.ID, "harness": harness, "host": host, "display_label": label, "model": model, "reasoning_effort": effort, "account_label": accountLabel, "harness_version": harnessVersionOrProbe(context.Background(), harness, harnessVersion), "brief": brief, "worktree": worktree, "branch": branch, "harness_session_ref": ref, "worker_lease": lease, "management_mode": management, "role": role, "parent_harness_session_id": parentID, "ticket_node_id": ticketID, "work_shape": shape, "work_order_id": order, "run_id": run, "advertised_capabilities": caps}
+		if parallelReason != "" {
+			body["parallel_reason"] = parallelReason
+		}
 		putText(body, "generator", generator, true)
 		putText(body, "command", commandLabel, true)
 		attachVendorSessionRef(body, harness, ref, lease, parent, "")

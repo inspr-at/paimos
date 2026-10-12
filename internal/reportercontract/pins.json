@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/3.1",
-    "sha256": "93b3b2be14f47fd1af1debcc4367ff5b56c33431fb0b4d94d9d39e32ce15a9e6",
+    "version": "harness-session/3.2",
+    "sha256": "6b84c52f684b709be930b55744a963dceb8178daf88248b8343cfa4f62ba0dee",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -1440,6 +1440,14 @@
               "null"
             ]
           },
+          "parallel_reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "parent_harness_session_id": {
             "format": "uuid",
             "type": [
@@ -1921,6 +1929,11 @@
           "service_tier_revision": {
             "minimum": 0,
             "type": "integer"
+          },
+          "started_by_principal_id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": "string"
           },
           "stop_reason": {
             "type": [
@@ -2797,6 +2810,14 @@
               "null"
             ]
           },
+          "parallel_reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "parent_harness_session_id": {
             "format": "uuid",
             "type": [
@@ -3279,6 +3300,11 @@
             "minimum": 0,
             "type": "integer"
           },
+          "started_by_principal_id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": "string"
+          },
           "stop_reason": {
             "type": [
               "string",
@@ -3428,6 +3454,7 @@
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/harness_version",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/inbox_binding_error",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/model",
+      "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/parallel_reason",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/pause/properties/handover",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/pause/properties/level",
       "/GET ~1projects~1{projectId}~1harness-sessions~1{sessionId} 200/properties/process_ownership",
@@ -3448,6 +3475,7 @@
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/harness_version",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/inbox_binding_error",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/model",
+      "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/parallel_reason",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/pause/properties/handover",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/pause/properties/level",
       "/POST ~1projects~1{projectId}~1harness-sessions~1{sessionId}~1heartbeat 200/properties/process_ownership",

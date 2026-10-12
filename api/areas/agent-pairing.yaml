@@ -174,6 +174,10 @@ paths:
         A snapshot with mode=lease attaches metadata only: transcript and file_id must be
         empty, text is rejected, and no conversation stream is available. Both modes require
         consent_digest at approval, activation and every active poll; approval is single-use.
+        Activation uses the shared ticket builder admission policy. An active worker or
+        linked unmerged delivery returns 409 build_in_flight with caller-visible metadata.
+        Attach consent does not authorize parallel work; a refused activation retains
+        its unconsumed approval and creates no session or lease.
         The exited operation is only for a kernel confirmation that the pinned process
         has exited; loss of contact is unreachable.
         Snapshots without mode select the default conversation watch; status-only is an explicit local choice.
@@ -212,8 +216,13 @@ paths:
           description: Registered memory-only poll key required; lifecycle proof only authorizes registration. Only an authenticated owning daemon receives a diagnostic.
           content: {application/json: {schema: {$ref: '#/components/schemas/AttachRefusal'}}}
         '409':
-          description: Snapshot or consent mismatch, poll sequence rejected, or update agentd required. Only an authenticated owning daemon receives a diagnostic.
-          content: {application/json: {schema: {$ref: '#/components/schemas/AttachRefusal'}}}
+          description: "Snapshot or consent mismatch, poll sequence rejected, update agentd required, or ticket build in flight. Only an authenticated owning daemon receives a diagnostic."
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - {$ref: '#/components/schemas/AttachRefusal'}
+                  - {$ref: '#/components/schemas/BuildInFlightError'}
         '410':
           description: Expired or revoked; new owner approval required
           content: {application/json: {schema: {$ref: '#/components/schemas/AttachRefusal'}}}

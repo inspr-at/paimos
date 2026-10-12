@@ -90,7 +90,7 @@ func TestRegisteredPlacementUsesStarterAndFreezesAcrossReplay(t *testing.T) {
 	expect(t, w, 201)
 	path := base + "/" + decode(t, w)["id"].(string)
 	current := decode(t, f.call(f.person, "GET", path, nil, ""))
-	expect(t, f.call(f.person, "PATCH", path+"/binding", map[string]any{"expected_revision": current["revision"], "ticket_node_id": f.ticket, "work_shape": "ship"}, ""), 200)
+	expect(t, f.call(f.person, "PATCH", path+"/binding", map[string]any{"expected_revision": current["revision"], "ticket_node_id": f.ticket, "work_shape": "ship", "parallel_reason": "Compare starter-owned placement with an operator generation"}, ""), 200)
 	var bound modelregistry.WorkPlacement
 	if err := json.Unmarshal(read(current["id"].(string)), &bound); err != nil {
 		t.Fatal(err)

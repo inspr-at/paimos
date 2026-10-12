@@ -72,6 +72,7 @@
         "internal/httpapi/body_test.go",
         "internal/auth/transport_canary_test.go",
         "internal/httpapi/body_deadline_guard_test.go",
+        "internal/httpapi/budget_position_test.go",
         "internal/httpapi/auth_readiness.go",
         "internal/httpapi/auth_readiness_test.go",
         "internal/httpapi/transport_metrics.go",
@@ -283,6 +284,7 @@
         "internal/quotepdf/**",
         "internal/deliveryvote/**",
         "internal/workorders/**",
+        "internal/workorders/build_guard.go",
         "internal/nodes/project_lookup.go",
         "internal/nodes/project_lookup_test.go"
       ]

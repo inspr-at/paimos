@@ -32,9 +32,12 @@ type PublicModule interface {
 
 // Server holds what every module needs.
 type Server struct {
-	Mux        *http.ServeMux
-	Pool       *pgxpool.Pool
-	Middleware []func(http.Handler) http.Handler // applied outermost-first to /api
+	Mux  *http.ServeMux
+	Pool *pgxpool.Pool
+	// Middleware applies outermost-first to /api. The first middleware performs
+	// authentication and authorization under the admission deadline; remaining
+	// middleware runs with the handler lifetime and authenticated context.
+	Middleware []func(http.Handler) http.Handler
 	Modules    []Module
 	// Web is the SPA filesystem (AEON_WEB_DIR or the webembed dist).
 	// Nil serves a placeholder page.
@@ -114,10 +117,17 @@ func (s *Server) build() {
 	s.Mux.HandleFunc("/api", handleNotFound)
 
 	var api http.Handler = s.Mux
-	for i := len(s.Middleware) - 1; i >= 0; i-- {
+	for i := len(s.Middleware) - 1; i > 0; i-- {
 		api = s.Middleware[i](api)
 	}
+	// Restore the handler lifetime before response middleware captures the
+	// request for post-mutation reads such as the event-position watermark.
+	api = handlerBudgetMiddleware(api)
+	if len(s.Middleware) > 0 {
+		api = s.Middleware[0](api)
+	}
 	api = readStatementTimeoutMiddleware(api)
+	api = requestBudgetMiddleware(api)
 	api = routePatternMiddleware(s.Mux, api)
 	api = requestIDMiddlewareWithMetrics(recoverMiddleware(securityMiddleware(api)), &s.Metrics)
 

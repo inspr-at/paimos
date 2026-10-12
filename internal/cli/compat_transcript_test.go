@@ -518,44 +518,73 @@ func TestModelResolveRejectsAmbiguousAndUnknownAuthorFamilies(t *testing.T) {
 }
 
 func TestModelResolveOwnerRequiredTranscript(t *testing.T) {
-	isolate(t)
-	var paths []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		paths = append(paths, r.Method+" "+r.URL.String())
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/api/models/resolve" {
-			_, _ = w.Write([]byte(`{"role":"review-gate","profile":null,"ladder":[{"profile_id":"55555555-5555-4555-8555-555555555555","selected":false,"skip_reasons":["author family"]}],"owner_required":true,"source":"aeon"}`))
-		} else if r.URL.Path == "/api/models" {
-			_, _ = w.Write([]byte(`[{"id":"55555555-5555-4555-8555-555555555555","slug":"codex-astra-xhigh"}]`))
-		} else {
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-	t.Setenv("PAIMOS_URL", srv.URL)
-	t.Setenv("PAIMOS_API_KEY", testKey)
-	base := []string{"paimos", "--config", filepath.Join(t.TempDir(), "missing"), "--json", "model", "resolve", "review-gate"}
-	code, out, stderr := runCLI(append(append([]string{}, base...), "--author-family", "openai"), "")
-	if code != 1 || !strings.Contains(stderr, "owner approval required") {
-		t.Fatalf("owner gate exit %d out %q stderr %q", code, out, stderr)
-	}
-	var got map[string]any
-	if err := json.Unmarshal([]byte(out), &got); err != nil || got["owner_required"] != true {
-		t.Fatalf("owner gate JSON %q: %v", out, err)
-	}
-	want := []string{"GET /api/models/resolve?author_family=openai&role=review-gate", "GET /api/models"}
-	if !reflect.DeepEqual(paths, want) {
-		t.Fatalf("requests %v, want %v", paths, want)
-	}
-	for _, argv := range [][]string{
-		base,
-		append(append([]string{}, base...), "--author-family", "other"),
-		{"paimos", "--config", base[2], "model", "resolve", "unknown-role"},
+	// Risk: an exhausted ordinary order hides safe causes and falsely claims a
+	// review/approval failure; review orders must still fail closed.
+	const buildLadder = `[{"profile_id":"55555555-5555-4555-8555-555555555555","selected":false,"skip_reasons":["Codex account cannot take new work right now"]},{"profile_id":"66666666-6666-4666-8666-666666666666","selected":false,"skip_reasons":["Claude account cannot take new work right now"]},{"profile_id":"pi-profile","selected":false,"skip_reasons":["no qualified account with available capacity"]},{"profile_id":"gemini-profile","selected":false,"skip_reasons":["no qualified account with available capacity"]},{"profile_id":"opencode-profile","selected":false,"skip_reasons":["no qualified account with available capacity"]}]`
+	const buildJSONLadder = `[{"profile_id":"codex-astra-xhigh","selected":false,"skip_reasons":["Codex account cannot take new work right now"]},{"profile_id":"claude-build","selected":false,"skip_reasons":["Claude account cannot take new work right now"]},{"profile_id":"pi-build","selected":false,"skip_reasons":["no qualified account with available capacity"]},{"profile_id":"gemini-build","selected":false,"skip_reasons":["no qualified account with available capacity"]},{"profile_id":"opencode-build","selected":false,"skip_reasons":["no qualified account with available capacity"]}]`
+	const buildText = "codex-astra-xhigh: Codex account cannot take new work right now\nclaude-build: Claude account cannot take new work right now\npi-build: no qualified account with available capacity\ngemini-build: no qualified account with available capacity\nopencode-build: no qualified account with available capacity\n"
+	const reviewLadder = `[{"profile_id":"55555555-5555-4555-8555-555555555555","selected":false,"skip_reasons":["author family"]}]`
+	const reviewJSONLadder = `[{"profile_id":"codex-astra-xhigh","selected":false,"skip_reasons":["author family"]}]`
+	for _, tc := range []struct {
+		role, author, family, ladder, jsonLadder, text, failure string
+	}{
+		{"build", "claude", "anthropic", buildLadder, buildJSONLadder, buildText, "no allowed model route can run right now"},
+		{"build-hard", "claude", "anthropic", buildLadder, buildJSONLadder, buildText, "no allowed model route can run right now"},
+		{"scout", "claude", "anthropic", buildLadder, buildJSONLadder, buildText, "no allowed model route can run right now"},
+		{"mechanical", "claude", "anthropic", buildLadder, buildJSONLadder, buildText, "no allowed model route can run right now"},
+		{"review-gate", "openai", "openai", reviewLadder, reviewJSONLadder, "codex-astra-xhigh: author family\n", "owner approval required; review gate remains closed"},
+		{"review-gate-security", "openai", "openai", reviewLadder, reviewJSONLadder, "codex-astra-xhigh: author family\n", "owner approval required; review gate remains closed"},
 	} {
-		code, _, _ = runCLI(argv, "")
-		if code != 2 || len(paths) != 2 {
-			t.Fatalf("invalid argv %q: exit %d, requests %v", argv, code, paths)
-		}
+		t.Run(tc.role, func(t *testing.T) {
+			isolate(t)
+			var paths []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				paths = append(paths, r.Method+" "+r.URL.String())
+				w.Header().Set("Content-Type", "application/json")
+				switch r.URL.Path {
+				case "/api/models/resolve":
+					fmt.Fprintf(w, `{"role":%q,"author_family":%q,"profile":null,"ladder":%s,"command_template":"","owner_required":true,"source":"aeon"}`, tc.role, tc.family, tc.ladder)
+				case "/api/models":
+					_, _ = w.Write([]byte(`[{"id":"55555555-5555-4555-8555-555555555555","slug":"codex-astra-xhigh"},{"id":"66666666-6666-4666-8666-666666666666","slug":"claude-build"},{"id":"pi-profile","slug":"pi-build"},{"id":"gemini-profile","slug":"gemini-build"},{"id":"opencode-profile","slug":"opencode-build"}]`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+			t.Setenv("PAIMOS_URL", srv.URL)
+			t.Setenv("PAIMOS_API_KEY", testKey)
+			base := []string{"paimos", "--config", filepath.Join(t.TempDir(), "missing"), "model", "resolve", tc.role}
+			args := append(append([]string{}, base...), "--author-family", tc.author)
+			code, out, stderr := runCLI(append(append([]string{}, args...), "--json"), "")
+			// Pin the legacy JSON bytes, including the absent profile and empty
+			// command; diagnostics must not make an exhausted route executable.
+			wantJSON := fmt.Sprintf(`{"author_family":%q,"command_template":"","ladder":%s,"owner_required":true,"role":%q,"source":"instance","stale":false}`+"\n", tc.family, tc.jsonLadder, tc.role)
+			wantErr := fmt.Sprintf(`{"error":%q}`+"\n", tc.failure)
+			if code != 1 || out != wantJSON || stderr != wantErr {
+				t.Fatalf("JSON resolve exit %d out %q stderr %q; want out %q stderr %q", code, out, stderr, wantJSON, wantErr)
+			}
+			code, out, stderr = runCLI(args, "")
+			if code != 1 || out != tc.text || stderr != "paimos: "+tc.failure+"\n" {
+				t.Fatalf("text resolve exit %d out %q stderr %q; want ladder %q and failure %q", code, out, stderr, tc.text, tc.failure)
+			}
+			want := []string{"GET /api/models/resolve?author_family=" + tc.family + "&role=" + tc.role, "GET /api/models"}
+			want = append(want, want...)
+			if !reflect.DeepEqual(paths, want) {
+				t.Fatalf("requests %v, want %v", paths, want)
+			}
+			if strings.HasPrefix(tc.role, "review-gate") {
+				for _, argv := range [][]string{
+					base,
+					append(append([]string{}, base...), "--author-family", "other"),
+					{"paimos", "--config", base[2], "model", "resolve", "unknown-role"},
+				} {
+					code, _, _ = runCLI(argv, "")
+					if code != 2 || len(paths) != len(want) {
+						t.Fatalf("invalid argv %q: exit %d, requests %v", argv, code, paths)
+					}
+				}
+			}
+		})
 	}
 }
 

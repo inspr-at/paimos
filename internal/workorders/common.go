@@ -305,7 +305,15 @@ func WriteError(w http.ResponseWriter, err error) {
 		ErrorCode() string
 	}
 	if errors.As(err, &coded) {
-		httpapi.WriteJSON(w, coded.HTTPStatus(), map[string]string{"error": coded.Error(), "code": coded.ErrorCode()})
+		body := map[string]any{"error": coded.Error(), "code": coded.ErrorCode()}
+		if details, ok := coded.(interface{ ErrorDetails() map[string]any }); ok {
+			for key, value := range details.ErrorDetails() {
+				if key != "error" && key != "code" {
+					body[key] = value
+				}
+			}
+		}
+		httpapi.WriteJSON(w, coded.HTTPStatus(), body)
 		return
 	}
 	if errors.Is(err, authz.ErrForbidden) {
