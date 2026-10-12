@@ -136,10 +136,11 @@ func TestWorkNodesMigrationPreservesRowsHistoryAndIdentities(t *testing.T) {
 	sessionSQL := `SELECT jsonb_agg(%s ORDER BY id) FROM harness_sessions s`
 	deskSQL := `SELECT jsonb_agg(to_jsonb(n) ORDER BY key) FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE k.slug='question'`
 	before := workSnapshot(t, d, tid, nodesSQL)
-	// 1262 adds NULL lineage and 1343 adds NULL builder-admission metadata to
-	// old generations. Expect exactly those expansions while comparing every
-	// historical field and rejecting any backfill.
-	sessions := workSnapshot(t, d, tid, fmt.Sprintf(sessionSQL, `to_jsonb(s)||jsonb_build_object('usage_lead_session_id',NULL,'parallel_reason',NULL,'started_by_principal_id',NULL)`))
+	// 1262 adds NULL lineage, 1342 adds a NULL inbox binding diagnostic and
+	// 1343 adds NULL builder-admission metadata to old generations. Expect
+	// exactly those expansions while comparing every historical field and
+	// rejecting any backfill.
+	sessions := workSnapshot(t, d, tid, fmt.Sprintf(sessionSQL, `to_jsonb(s)||jsonb_build_object('usage_lead_session_id',NULL,'inbox_binding_error',NULL,'parallel_reason',NULL,'started_by_principal_id',NULL)`))
 	historySQL := `SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e WHERE type='import.node_created'`
 	history := workSnapshot(t, d, tid, historySQL)
 	desk := workSnapshot(t, d, tid, deskSQL)
@@ -825,11 +826,12 @@ func TestWorkNodesUpgradeFromRelease122(t *testing.T) {
 		t.Fatal("fixture already includes later schema")
 	}
 	tid := workSeed(t, d, "release-122-upgrade")
-	// 1117 adds desk_answers after release 122. 1262 adds NULL lineage and 1343
-	// adds NULL builder-admission metadata to old generations; compare every
-	// pre-existing column plus those exact new values.
+	// 1117 adds desk_answers after release 122. 1262 adds NULL lineage, 1342
+	// adds a NULL inbox binding diagnostic and 1343 adds NULL builder-admission
+	// metadata to old generations; compare every pre-existing column plus
+	// those exact new values.
 	preserved := `SELECT jsonb_build_object('nodes',(SELECT jsonb_agg(to_jsonb(n)-ARRAY['kind_id','benefit_generation'] ORDER BY key) FROM nodes n),'sessions',(SELECT jsonb_agg((%s)-'desk_answers' ORDER BY id) FROM harness_sessions s),'questions',(SELECT jsonb_agg(to_jsonb(q) ORDER BY node_id) FROM desk_questions q))`
-	before := workSnapshot(t, d, tid, fmt.Sprintf(preserved, `to_jsonb(s)||jsonb_build_object('usage_lead_session_id',NULL,'parallel_reason',NULL,'started_by_principal_id',NULL)`))
+	before := workSnapshot(t, d, tid, fmt.Sprintf(preserved, `to_jsonb(s)||jsonb_build_object('usage_lead_session_id',NULL,'inbox_binding_error',NULL,'parallel_reason',NULL,'started_by_principal_id',NULL)`))
 	if err := db.MigrateWithHook(t.Context(), d.App, nil); err != nil {
 		t.Fatal(err)
 	}

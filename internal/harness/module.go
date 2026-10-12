@@ -58,6 +58,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/deskdelivery"
+	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/modelregistry"
@@ -244,14 +245,16 @@ type Session struct {
 	CurrentActivityHistory  []agentactivity.Activity `json:"current_activity_history,omitempty"`
 	doing, toolActivity     *string
 	doingAt, toolActivityAt *time.Time
-	CanReparent             *bool                  `json:"can_reparent,omitempty"`
-	OwnerPrincipalID        *string                `json:"owner_principal_id,omitempty"`
-	StartedByPrincipalID    *string                `json:"started_by_principal_id,omitempty"`
-	ParallelReason          *string                `json:"parallel_reason,omitempty"`
-	HandedOverToID          *string                `json:"handed_over_to_id,omitempty"`
-	AdoptedFromID           *string                `json:"adopted_from_id,omitempty"`
-	Controls                []Control              `json:"controls,omitempty"`
-	Watch                   *AttachStatus          `json:"watch,omitempty"`
+	CanReparent             *bool           `json:"can_reparent,omitempty"`
+	OwnerPrincipalID        *string         `json:"owner_principal_id,omitempty"`
+	StartedByPrincipalID    *string         `json:"started_by_principal_id,omitempty"`
+	ParallelReason          *string         `json:"parallel_reason,omitempty"`
+	HandedOverToID          *string         `json:"handed_over_to_id,omitempty"`
+	AdoptedFromID           *string         `json:"adopted_from_id,omitempty"`
+	Controls                []Control       `json:"controls,omitempty"`
+	Watch                   *AttachStatus   `json:"watch,omitempty"`
+	InboxBindingError       json.RawMessage `json:"inbox_binding_error,omitempty"`
+	inboxBindingCode        *string
 	ProcessOwnership        *ownedprocess.Identity `json:"process_ownership,omitempty"`
 	ProcessObservedAt       *time.Time             `json:"process_observed_at,omitempty"`
 	ArchivedAt              *time.Time             `json:"archived_at"`
@@ -446,13 +449,13 @@ func normalizeActivityNote(raw string) (string, bool) {
 // row_version is the row's own revision (AEON-449): a trigger bumps it inside every
 // statement that changes the row, so of two copies the larger is the newer one.
 // revision, by contrast, is an optimistic-lock token only some writers advance.
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,pause_record,continuation_handover,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp(),pause_progress,desk_answers,service_tier,service_tier_revision,service_tier_reports,(SELECT q.tier FROM harness_tier_requests q WHERE q.session_id=harness_sessions.id AND q.state='pending' ORDER BY q.created_at DESC,q.id DESC LIMIT 1),parallel_reason,started_by_principal_id::text`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,pause_record,continuation_handover,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp(),pause_progress,desk_answers,service_tier,service_tier_revision,service_tier_reports,(SELECT q.tier FROM harness_tier_requests q WHERE q.session_id=harness_sessions.id AND q.state='pending' ORDER BY q.created_at DESC,q.id DESC LIMIT 1),parallel_reason,started_by_principal_id::text,inbox_binding_error`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
 	var activityNow time.Time
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.OwnerPrincipalID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.PauseProgress, &s.DeskAnswers, &s.ServiceTier, &s.ServiceTierRevision, &s.ServiceTierReports, &s.ServiceTierRequest, &s.ParallelReason, &s.StartedByPrincipalID)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.OwnerPrincipalID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.PauseProgress, &s.DeskAnswers, &s.ServiceTier, &s.ServiceTierRevision, &s.ServiceTierReports, &s.ServiceTierRequest, &s.ParallelReason, &s.StartedByPrincipalID, &s.inboxBindingCode)
 	if err != nil {
 		return s, err
 	}
@@ -463,6 +466,16 @@ func scanSession(row pgx.Row) (Session, error) {
 	if progress != nil {
 		value := int(*progress)
 		s.ProgressPct = &value
+	}
+	// NULL is a legacy/unreported value, so its wire bytes stay unchanged.
+	// A reported clear is stored as the empty sentinel and emitted as JSON null
+	// so row merges discard the previous refusal instead of keeping it forever.
+	if s.inboxBindingCode != nil {
+		if *s.inboxBindingCode == "" {
+			s.InboxBindingError = json.RawMessage("null")
+		} else {
+			s.InboxBindingError, _ = json.Marshal(*s.inboxBindingCode)
+		}
 	}
 	projectActivity(&s, activityNow)
 	s.HasVendorSessionRef = len(s.vendorRefDigest) > 0
@@ -1396,19 +1409,21 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		ModelReports []modelregistry.Observation `json:"model_reports"`
 		pauseProgressReport
 		rules.ClientReport
-		AttachedHook     bool                    `json:"attached_hook"`
-		ProcessOwnership *ownedprocess.Identity  `json:"process_ownership"`
-		Phase            string                  `json:"phase"`
-		Activity         string                  `json:"activity"`
-		ActivitySequence int64                   `json:"activity_sequence"`
-		ActivityNote     *string                 `json:"activity_note"`
-		Doing            *string                 `json:"doing"`
-		DoingAt          *time.Time              `json:"doing_at"`
-		ToolActivity     *agentactivity.Activity `json:"tool_activity"`
-		DisplayLabel     json.RawMessage         `json:"display_label"`
-		EtaReadyAt       json.RawMessage         `json:"eta_ready_at"`
-		EtaLiveAt        json.RawMessage         `json:"eta_live_at"`
-		ProgressPct      json.RawMessage         `json:"progress_pct"`
+		AttachedHook       bool                    `json:"attached_hook"`
+		InboxBindingError  json.RawMessage         `json:"inbox_binding_error"`
+		InboxBindingReport bool                    `json:"inbox_binding_report"`
+		ProcessOwnership   *ownedprocess.Identity  `json:"process_ownership"`
+		Phase              string                  `json:"phase"`
+		Activity           string                  `json:"activity"`
+		ActivitySequence   int64                   `json:"activity_sequence"`
+		ActivityNote       *string                 `json:"activity_note"`
+		Doing              *string                 `json:"doing"`
+		DoingAt            *time.Time              `json:"doing_at"`
+		ToolActivity       *agentactivity.Activity `json:"tool_activity"`
+		DisplayLabel       json.RawMessage         `json:"display_label"`
+		EtaReadyAt         json.RawMessage         `json:"eta_ready_at"`
+		EtaLiveAt          json.RawMessage         `json:"eta_live_at"`
+		ProgressPct        json.RawMessage         `json:"progress_pct"`
 		sessionText
 		Commits []Commit `json:"commits"`
 	}
@@ -1435,12 +1450,28 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		}
 	}
 	s, err := worker(ctx, tx, r, p)
-	if err != nil && lostContact(s) && leaseProof(s, r, p) {
+	if err != nil && !in.InboxBindingReport && lostContact(s) && leaseProof(s, r, p) {
 		// AEON-291: the sweeper closed a silent generation; its own worker is back.
 		s, err = revive(ctx, tx, p, s, in.Phase)
 	}
 	if err != nil {
 		return nil, err
+	}
+	bindingError := s.inboxBindingCode
+	if in.InboxBindingError != nil {
+		// Preserve the stored value for change detection and the audit record.
+		var reportedError *string
+		if err := json.Unmarshal(in.InboxBindingError, &reportedError); err != nil || reportedError != nil && !hookbinding.Valid(*reportedError) {
+			return nil, workorders.Fail(400, "invalid inbox binding refusal code")
+		}
+		bindingError = reportedError
+		if bindingError == nil {
+			cleared := ""
+			bindingError = &cleared
+		}
+		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: s.ProjectID}); err != nil {
+			return nil, err
+		}
 	}
 	isolated := false
 	if m.heartbeatIsolation != nil {
@@ -1448,6 +1479,28 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		if err != nil {
 			return nil, err
 		}
+	}
+	// Binding diagnostics follow the accepted beat, but are not another
+	// liveness/progress/rules report. Never revive a generation or reset its
+	// client capability, warning grace period or scheduled controls here.
+	if in.InboxBindingReport {
+		if in.InboxBindingError == nil || in.AttachedHook || in.ProcessOwnership != nil || in.ActivitySequence != s.ActivitySequence || in.Phase != s.Phase || in.Activity != s.Activity {
+			return nil, workorders.Fail(409, "binding report requires the current heartbeat identity")
+		}
+		if !same(s.inboxBindingCode, bindingError) {
+			before := s
+			s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET inbox_binding_error=$2 WHERE id=$1 RETURNING `+sessionColumns, s.ID, bindingError))
+			if err != nil {
+				return nil, err
+			}
+			if err = record(ctx, tx, p, s, "heartbeat", before, s); err != nil {
+				return nil, err
+			}
+		}
+		if isolated {
+			return heartbeatReceipt(s), nil
+		}
+		return s, nil
 	}
 	if in.AttachedHook && in.ProcessOwnership == nil {
 		return nil, workorders.Fail(400, "exact attached hook identity required")
@@ -1551,7 +1604,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if err = reportActivity(ctx, tx, s, in.Doing, in.DoingAt, in.ToolActivity); err != nil {
 		return nil, err
 	}
-	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5,model=$6,reasoning_effort=$7,account_label=coalesce($8,account_label),harness_version=coalesce($9,harness_version),brief=coalesce($10,brief),worktree=coalesce($11,worktree),branch=coalesce($12,branch),commits=$13::jsonb,display_label=$14,model_raw=$15,model_profile_id=$16 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, string(commits), label, modelRaw, identity.ProfileID))
+	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,activity=$3,activity_sequence=$4,heartbeat_at=clock_timestamp(),activity_note=$5,model=$6,reasoning_effort=$7,account_label=coalesce($8,account_label),harness_version=coalesce($9,harness_version),brief=coalesce($10,brief),worktree=coalesce($11,worktree),branch=coalesce($12,branch),commits=$13::jsonb,display_label=$14,model_raw=$15,model_profile_id=$16,inbox_binding_error=$17 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.Phase, in.Activity, in.ActivitySequence, note, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, string(commits), label, modelRaw, identity.ProfileID, bindingError))
 	if err != nil {
 		return nil, err
 	}
