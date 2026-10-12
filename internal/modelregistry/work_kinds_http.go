@@ -72,6 +72,27 @@ func kindScan(ctx context.Context, tx pgx.Tx, id string) (workKind, error) {
 	err := tx.QueryRow(ctx, `SELECT id::text,slug,coalesce(label_override,label),hint,project_id::text,system,position,archived_at,coalesce(examples,'{}'),coalesce(labels,'{}'),`+modelprefs.KindWordsDeSQL+`,(SELECT count(*) FROM nodes n WHERE n.tenant_id=work_kinds.tenant_id AND n.deleted_at IS NULL AND n.fields->>'area'=work_kinds.slug AND (work_kinds.project_id IS NULL OR n.project_id=work_kinds.project_id)) FROM work_kinds WHERE id=$1`, id).Scan(&k.ID, &k.Slug, &k.Label, &k.Hint, &k.ProjectID, &k.System, &k.Position, &k.ArchivedAt, &k.Examples, &k.Labels, &k.WordsDe, &k.TicketCount)
 	return k, err
 }
+
+// Bound the kind page before scanning nodes. GROUPING distinguishes the tenant
+// total from a project-less node group; workspace kinds still count all visible
+// projects, even when the request also includes project-specific kinds.
+const workKindPageSQL = `WITH kind_page AS MATERIALIZED (
+ SELECT * FROM work_kinds WHERE (project_id IS NULL OR project_id=$1::uuid)
+ AND ($2 OR archived_at IS NULL) AND ($3::uuid IS NULL OR id>$3::uuid) ORDER BY id LIMIT $4
+), counts AS (
+ SELECT n.tenant_id,n.fields->>'area' AS slug,n.project_id,GROUPING(n.project_id) AS workspace,count(*) AS total
+ FROM nodes n WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.deleted_at IS NULL
+ AND n.fields->>'area' IS NOT NULL AND n.fields->>'area' IN (SELECT slug FROM kind_page)
+ GROUP BY n.tenant_id,n.fields->>'area',GROUPING SETS ((n.project_id),())
+)
+SELECT work_kinds.id::text,work_kinds.slug,coalesce(work_kinds.label_override,work_kinds.label),work_kinds.hint,
+ work_kinds.project_id::text,work_kinds.system,work_kinds.position,work_kinds.archived_at,
+ coalesce(work_kinds.examples,'{}'),coalesce(work_kinds.labels,'{}'),` + modelprefs.KindWordsDeSQL + `,coalesce(counts.total,0)
+FROM kind_page work_kinds LEFT JOIN counts ON counts.tenant_id=work_kinds.tenant_id AND counts.slug=work_kinds.slug
+ AND ((work_kinds.project_id IS NULL AND counts.workspace=1)
+ OR (work_kinds.project_id IS NOT NULL AND counts.workspace=0 AND counts.project_id=work_kinds.project_id))
+ORDER BY work_kinds.id`
+
 func (m *Module) listWorkKinds(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
 	if !ok {
@@ -118,7 +139,7 @@ func (m *Module) listWorkKinds(w http.ResponseWriter, r *http.Request) {
 		if err := readableProject(ctx, tx, p, project); err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT id::text,slug,coalesce(label_override,label),hint,project_id::text,system,position,archived_at,coalesce(examples,'{}'),coalesce(labels,'{}'),`+modelprefs.KindWordsDeSQL+`,(SELECT count(*) FROM nodes n WHERE n.tenant_id=work_kinds.tenant_id AND n.deleted_at IS NULL AND n.fields->>'area'=work_kinds.slug AND (work_kinds.project_id IS NULL OR n.project_id=work_kinds.project_id)) FROM work_kinds WHERE (project_id IS NULL OR project_id=$1::uuid) AND ($2 OR archived_at IS NULL) AND ($3::uuid IS NULL OR id>$3::uuid) ORDER BY id LIMIT $4`, optionalUUID(project), archived, optionalUUID(cursor), limit+1)
+		rows, err := tx.Query(ctx, workKindPageSQL, optionalUUID(project), archived, optionalUUID(cursor), limit+1)
 		if err != nil {
 			return err
 		}
