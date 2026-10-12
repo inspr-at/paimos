@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 )
 
@@ -343,5 +345,52 @@ func TestAttachedHookHelperCrashResumePreservesBinding(t *testing.T) {
 			default:
 			}
 		})
+	}
+}
+
+// Reproduce the worker proof rejection without any real key or daemon access.
+type refusedAttachedHookAPI struct{ *fakeAPI }
+
+func (a *refusedAttachedHookAPI) HeartbeatHarness(context.Context, HarnessSession, string) error {
+	return &client.StatusError{Status: 403, Message: "harness worker proof rejected"}
+}
+func TestAEON1254RefusedBindingDoesNotInterceptGenericInbox(t *testing.T) {
+	s, api, _ := testSupervisor(t)
+	s.api = &refusedAttachedHookAPI{api}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+	m, peer, target, _, _ := attachIdentityFixture(t, Claude)
+	s.attachedHookVerifier = m
+	in := AttachedHookRequest{Origin: m.cfg.Origin, ProjectID: "11111111-1111-4111-8111-111111111111", SessionID: "22222222-2222-4222-8222-222222222222", Harness: Claude, Lease: strings.Repeat("fixture-", 8), OwnerPID: target.PID, Sequence: 1, Activity: "busy"}
+	in.PrincipalID = "workstation-agents-fixture"
+	var refusal *hookbinding.Refusal
+	if err := s.bindAttachedHook(t.Context(), peer, in); !errors.As(err, &refusal) || refusal.Code != "principal_mismatch" {
+		t.Fatalf("exact principal refusal: %v", err)
+	}
+	in.PrincipalID = ""
+	err := s.bindAttachedHook(t.Context(), peer, in)
+	var status *client.StatusError
+	if !errors.As(err, &status) || status.Status != 403 || status.Message != "harness worker proof rejected" {
+		t.Fatalf("wrong refusal: %v", err)
+	}
+	if binding := s.attachedHooks[in.SessionID]; binding != nil && binding.ready {
+		t.Fatal("refused binding remained active")
+	}
+	// A legitimate descendant would otherwise reach the daemon's API.
+	// An unrelated helper must not let this assertion pass for the wrong reason.
+	hook := *target
+	hook.PID, hook.Started, hook.Parent = target.PID+100, "foreground-fixture", target.PID
+	observe := m.observe
+	m.observe = func(pid int) (attachObservation, error) {
+		if pid == hook.PID {
+			return hook, nil
+		}
+		return observe(pid)
+	}
+	m.ancestry = m.observe
+	if _, err := s.serviceAttachedHook(t.Context(), hook, AttachedHookRequest{Operation: "pull", SessionID: in.SessionID}); !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("generic fallback was intercepted: %v", err)
+	}
+	if len(m.sessions) != 0 {
+		t.Fatal("binding failure created watch consent")
 	}
 }
