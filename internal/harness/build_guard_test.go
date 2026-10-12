@@ -149,6 +149,12 @@ func TestTicketBuilderAdmissionRaceBindingRevivalAndQueue(t *testing.T) {
 	})
 	limited := db.OnlyProjects(tenant.WithPrincipal(t.Context(), f.person), destination)
 	if err := db.InTenant(limited, f.db.App, f.person.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockWorkTreeTx(limited, tx); err != nil {
+			return err
+		}
+		if err := authz.RequireTx(limited, tx, f.person, "harness.write", authz.Scope{ProjectID: destination}); err != nil {
+			return err
+		}
 		err := workqueue.RequireBuildAdmissionTx(limited, tx, f.person, f.ticket, "", nil)
 		var conflict *workqueue.BuildConflict
 		if !errors.As(err, &conflict) || conflict.Reason != "active_builder" {
