@@ -100,3 +100,26 @@ const EXPL = {
 
 export { EXPL as PROJECT_SETTINGS_EXPLAINERS };
 export type ProjectSettingsExplainerId = keyof typeof EXPL;
+
+export interface ProjectSettingsExplainerContext {
+  projectKey: string
+  ticketNumber?: string
+  secondTicketNumber?: string
+  repository?: string
+  computer?: string
+}
+
+export function fillProjectSettingsExplainer(value: string, context: ProjectSettingsExplainerContext): string {
+  const tickets: Record<string, string> = {
+    N: context.ticketNumber ? `${context.projectKey}-${context.ticketNumber}` : `a ${context.projectKey} ticket`,
+    N2: context.secondTicketNumber ? `${context.projectKey}-${context.secondTicketNumber}` : `another ${context.projectKey} ticket`,
+  }
+  const tokens: Record<string, string> = {
+    K: context.projectKey,
+    R: context.repository ?? 'the linked repository',
+    O: context.repository?.split('/')[0] ?? 'the repository’s organisation',
+    C: context.computer ?? 'the selected computer',
+  }
+  return value.replace(/\{K\}-\{(N2?)\}/g, (_, key: string) => tickets[key]!)
+    .replace(/\{(K|R|O|C)\}/g, (_, key: string) => tokens[key]!)
+}

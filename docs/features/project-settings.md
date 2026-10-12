@@ -55,6 +55,31 @@ new saved values requires an explicit reload before that draft can overwrite the
 Delivery’s empty banners and problem chips, the unlinked ticket delivery slot,
 the lead launch reason and each Projects row menu link to the settings owner.
 
+AEON-1235’s Advanced fold follows the repository and delivery editors.
+Advanced is visible to workspace or project admins. Each machine retains its own
+read and write permissions. Queue, review and shipping writes carry the displayed
+revision; admission also requires a person. Routing supports Off and Shadow only.
+Queue editing preserves the switch and freeze setting, and supports release-set
+branch prefixes, exact held slugs and held PR numbers. Unfreezing does not requeue
+parked rounds. Chat roles remains a read-only link to the workspace setup.
+
+Merge repair accepts up to 100 unique PR numbers. Delivered requires a chosen
+published release and the server’s frozen membership and completion gates. Preview
+shows refusals, unmerged PRs and PRs without a matching ticket. Apply sends the same
+project, PRs, release and persisted preview event; editing either input discards the
+preview. A stale preview or partial result never claims that every ticket moved.
+The approved mock omits the published-release selector required by the existing
+API; that addition preserves its authorization and release gates.
+
+The Projects page offers a New project sheet to people with workspace `nodes.write`.
+It suggests an editable key from the name, creates the project through the node API,
+and uses `/project-groups/assign` for an optional shared group. A server 409 keeps
+the draft and shows its conflict message. Server key uniqueness is supplied by
+AEON-1234 (P2), which is a required delivery dependency. If group assignment fails
+after creation, the UI opens the created project and reports that the group still
+needs choosing; it never retries creation. General opens with a next-step link to
+Repository & delivery (`?link=1#repository`, consumed by P3).
+
 Legacy `#project-work-context` selects Agents. `#recurring-work`, `?recurrence=`
 and `?consent=1` select Routines while retaining their hash and query. The header
 edit button opens General and focuses Name. Other project tabs keep their routes.

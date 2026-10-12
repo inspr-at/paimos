@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -54,6 +55,8 @@ func TestSlowBodyRouteClassesCloseConnection(t *testing.T) {
 		{"daemon step-up", 256, 5 * time.Second},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			var probes atomic.Int32
+			settled := make(chan http.ConnState, 4)
 			s := &Server{Modules: []Module{moduleFunc(func(mux *http.ServeMux) {
 				mux.HandleFunc("POST /api/body", func(w http.ResponseWriter, r *http.Request) {
 					injected := &bodyDeadlineWriter{ResponseWriter: w, expire: true}
@@ -68,6 +71,7 @@ func TestSlowBodyRouteClassesCloseConnection(t *testing.T) {
 					WriteError(w, http.StatusRequestTimeout, "body timed out")
 				})
 				mux.HandleFunc("GET /api/probe", func(w http.ResponseWriter, r *http.Request) {
+					probes.Add(1)
 					if r.Context().Err() != nil {
 						t.Error("fresh request was cancelled")
 					}
@@ -76,6 +80,11 @@ func TestSlowBodyRouteClassesCloseConnection(t *testing.T) {
 			})}}
 			server := httptest.NewUnstartedServer(s.Handler())
 			server.Config.ConnContext = s.ConnContext
+			server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+				if state == http.StateIdle || state == http.StateClosed {
+					settled <- state
+				}
+			}
 			server.Start()
 			defer server.Close()
 			conn, err := net.Dial("tcp", server.Listener.Addr().String())
@@ -99,17 +108,33 @@ func TestSlowBodyRouteClassesCloseConnection(t *testing.T) {
 				t.Fatal(err)
 			}
 			_ = response.Body.Close()
-			_, _ = io.WriteString(conn, "GET /api/probe HTTP/1.1\r\nHost: aeon.test\r\n\r\n")
+			// The server must close without returning the failed connection
+			// to keep-alive. StateIdle fails immediately; the timeout guards
+			// against hangs and is never evidence of closure.
+			select {
+			case state := <-settled:
+				if state != http.StateClosed {
+					t.Fatalf("failed body connection returned to %s instead of closing", state)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("failed body connection never reached a terminal state; hang guard")
+			}
+			// Read the server's EOF before sending any more bytes. A probe
+			// racing the close can cause a TCP reset even though the server
+			// correctly refused keep-alive.
 			if _, err = http.ReadResponse(reader, nil); !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 				t.Fatalf("connection remained reusable: %v", err)
+			}
+			if probes.Load() != 0 {
+				t.Fatal("failed body connection served another handler")
 			}
 			fresh, err := server.Client().Get(server.URL + "/api/probe")
 			if err != nil {
 				t.Fatal(err)
 			}
 			_ = fresh.Body.Close()
-			if fresh.StatusCode != 204 {
-				t.Fatalf("fresh connection: %d", fresh.StatusCode)
+			if fresh.StatusCode != 204 || probes.Load() != 1 {
+				t.Fatalf("fresh connection: status=%d probes=%d", fresh.StatusCode, probes.Load())
 			}
 		})
 	}

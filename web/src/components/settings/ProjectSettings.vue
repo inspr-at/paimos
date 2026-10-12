@@ -16,6 +16,7 @@ import ProjectGeneralSettings from './ProjectGeneralSettings.vue'
 
 const RecurringWorkCard = defineAsyncComponent(() => import('../recurrences/RecurringWorkCard.vue'))
 const ProjectWorkContextCard = defineAsyncComponent(() => import('./ProjectWorkContextCard.vue'))
+const ProjectAdvancedSettings = defineAsyncComponent(() => import('./ProjectAdvancedSettings.vue'))
 const ProjectRepositorySettings = defineAsyncComponent(() => import('./ProjectRepositorySettings.vue'))
 const ProjectDeliveryChecks = defineAsyncComponent(() => import('./ProjectDeliveryChecks.vue'))
 const props = defineProps<{ project: Project }>()
@@ -124,6 +125,7 @@ onBeforeUnmount(() => { focusRun++; overlay.value?.close(); disposeKeys.forEach(
         </template>
         <SettingsCard v-else title="Repository & delivery" icon="link" anchor="repository" variant="project"><p class="owner-line">People with Read delivery permission can see this project’s repository, checks and deadlines.</p></SettingsCard>
       </slot>
+      <ProjectAdvancedSettings v-if="section === 'delivery'" :key="`${owner}/${project.id}`" :project="project" />
     </div>
   </div>
 </template>

@@ -5,17 +5,16 @@ import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import { claimSettingsPopover } from '../../lib/settingsOverlays'
 import { useProjectSettingsOverlay } from '../../lib/projectSettings'
-import { PROJECT_SETTINGS_EXPLAINERS, type ProjectSettingsExplainerId } from '../../lib/projectSettingsExplainers'
+import { fillProjectSettingsExplainer, PROJECT_SETTINGS_EXPLAINERS, type ProjectSettingsExplainerContext, type ProjectSettingsExplainerId } from '../../lib/projectSettingsExplainers'
 
-const props = defineProps<{ id: ProjectSettingsExplainerId; projectKey: string; ticketNumber?: string; secondTicketNumber?: string; repository?: string; computer?: string }>()
+const props = defineProps<ProjectSettingsExplainerContext & { id: ProjectSettingsExplainerId }>()
 const button = ref<HTMLButtonElement>(), heading = ref<HTMLElement>(), content = ref<HTMLElement>()
 const open = ref(false), phone = ref(false), headingId = useId()
 const registerOverlay = useProjectSettingsOverlay()
 let release: (() => void) | undefined, unregister: (() => void) | undefined
 const text = computed(() => PROJECT_SETTINGS_EXPLAINERS[props.id])
 function fill(value: string): string {
-  const tokens: Record<string, string> = { K: props.projectKey, N: props.ticketNumber ?? '<number>', N2: props.secondTicketNumber ?? '<other number>', R: props.repository ?? 'the linked repository', O: props.repository?.split('/')[0] ?? 'the repository’s organisation', C: props.computer ?? 'the selected computer' }
-  return value.replace(/\{(K|N2?|R|O|C)\}/g, (_, key: string) => tokens[key]!)
+  return fillProjectSettingsExplainer(value, props)
 }
 function close(restore = true) {
   open.value = false; release?.(); release = undefined; unregister?.(); unregister = undefined
