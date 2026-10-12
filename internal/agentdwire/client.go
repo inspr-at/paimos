@@ -22,6 +22,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/stepup"
 )
 
@@ -187,6 +188,18 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
+		if in, ok := body.(agentd.AttachedHookRequest); ok && path == "/v1/attached-hook" && in.Operation == "" {
+			var refusal hookbinding.Refusal
+			raw, readErr := io.ReadAll(io.LimitReader(res.Body, 1025))
+			if readErr == nil && len(raw) <= 1024 && json.Unmarshal(raw, &refusal) == nil && hookbinding.Valid(refusal.Code) {
+				return &refusal
+			}
+			code := "daemon_refused"
+			if res.StatusCode == http.StatusNotFound || res.StatusCode == http.StatusBadRequest {
+				code = "daemon_unavailable"
+			}
+			return &hookbinding.Refusal{Code: code}
+		}
 		if path == "/v1/attached-hook" && res.StatusCode == 404 {
 			return ErrAttachedHookUnavailable
 		}

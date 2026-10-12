@@ -4,7 +4,9 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -12,15 +14,200 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
+
+// AEON-1231 risk: activity renewal serializes parallel authentication, or a
+// coarse activity window also delays revocation/expiry and breaks sliding login.
+func TestAuthenticationActivityRenewalKeepsLiveValidity(t *testing.T) {
+	for _, kind := range []string{"session", "key"} {
+		t.Run(kind, func(t *testing.T) {
+			reset(t)
+			tid := insertTenant(t, "activity", "Activity")
+			person, identity := signinPerson(t, tid, "activity-owner", "Owner", "owner@example.com", "owner@example.com", "admin")
+			m := newMod(t, Config{})
+			var authenticate func(context.Context) (tenant.Principal, bool, error)
+			var id, principal, table, activity string
+			if kind == "session" {
+				token, err := m.startSession(t.Context(), identity, tid, person)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw, err := decodeSessionToken(token)
+				if err != nil {
+					t.Fatal("invalid session fixture")
+				}
+				id, principal, table, activity = sessionID(raw), person, "sessions", "last_seen_at"
+				authenticate = func(ctx context.Context) (tenant.Principal, bool, error) { return m.authenticateSession(ctx, raw) }
+			} else {
+				key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tid, KeyCreatorID: person}, "worker", "", []string{"nodes.read"}, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				prefix, secret, ok := parseBearer("Bearer " + key.Token)
+				if !ok {
+					t.Fatal("invalid key fixture")
+				}
+				id, principal, table, activity = key.ID, key.PrincipalID, "agent_keys", "last_used_at"
+				authenticate = func(ctx context.Context) (tenant.Principal, bool, error) {
+					return m.authenticateAgent(ctx, prefix, secret)
+				}
+			}
+			exec := func(query string) {
+				t.Helper()
+				if _, err := adminPool.Exec(t.Context(), query, id); err != nil {
+					t.Fatal(err)
+				}
+			}
+			check := func(want bool) {
+				t.Helper()
+				p, ok, err := authenticate(t.Context())
+				if err != nil || ok != want || ok && (p.ID != principal || p.TenantID != tid) {
+					t.Fatalf("live authentication: accepted=%t want=%t err=%v", ok, want, err)
+				}
+				if ok && kind == "key" && (p.KeyID != id || p.KeyCreatorID != person || !slices.Equal(p.Scopes, []string{"nodes.read"})) {
+					t.Fatal("key lookup lost its live creator or scopes")
+				}
+			}
+			snapshot := func() (time.Time, string) {
+				t.Helper()
+				var at time.Time
+				var revision string
+				if err := adminPool.QueryRow(t.Context(), fmt.Sprintf("SELECT %s,xmin::text FROM %s WHERE id=$1", activity, table), id).Scan(&at, &revision); err != nil {
+					t.Fatal(err)
+				}
+				return at, revision
+			}
+			stale := fmt.Sprintf("UPDATE %s SET %s=clock_timestamp()-interval '2 minutes' WHERE id=$1", table, activity)
+			exec(stale)
+			before, revision := snapshot()
+			check(true)
+			after, renewed := snapshot()
+			if !after.After(before) || renewed == revision {
+				t.Fatal("due activity was not renewed")
+			}
+			for range 3 {
+				check(true)
+			}
+			if at, current := snapshot(); !at.Equal(after) || current != renewed {
+				t.Fatal("recent authentication still writes the activity row")
+			}
+			// Hold the credential row before admitting concurrent requests. A
+			// lock-wait observation, not latency, proves unwanted serialization.
+			for _, due := range []bool{false, true} {
+				if due {
+					exec(stale)
+				}
+				at, current := snapshot()
+				ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second) // hang guard
+				tx, err := adminPool.Begin(ctx)
+				if err != nil {
+					cancel()
+					t.Fatal(err)
+				}
+				t.Cleanup(func() {
+					cancel()
+					cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+					defer stop()
+					_ = tx.Rollback(cleanup)
+				})
+				var locked string
+				if err := tx.QueryRow(ctx, fmt.Sprintf("SELECT id::text FROM %s WHERE id=$1 FOR NO KEY UPDATE", table), id).Scan(&locked); err != nil {
+					_ = tx.Rollback(ctx)
+					cancel()
+					t.Fatal(err)
+				}
+				var holder uint32
+				if err := tx.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&holder); err != nil {
+					_ = tx.Rollback(ctx)
+					cancel()
+					t.Fatal(err)
+				}
+				results := make(chan error, 4)
+				done := make(chan struct{})
+				var workers sync.WaitGroup
+				for range 4 {
+					workers.Add(1)
+					go func() {
+						defer workers.Done()
+						p, ok, err := authenticate(ctx)
+						if err == nil && (!ok || p.ID != principal || p.TenantID != tid) {
+							err = fmt.Errorf("valid parallel credential was rejected")
+						}
+						results <- err
+					}()
+				}
+				go func() { workers.Wait(); close(done) }()
+				lock := dbtest.BlockedOrDone(t, ctx, adminPool, holder, done)
+				if err := tx.Rollback(ctx); err != nil {
+					cancel()
+					t.Fatal(err)
+				}
+				dbtest.Await(t, ctx, done)
+				cancel()
+				if lock != "" {
+					t.Fatalf("parallel authentication queued on %s (renewal due=%t)", lock, due)
+				}
+				for range 4 {
+					if err := <-results; err != nil {
+						t.Fatal(err)
+					}
+				}
+				if got, row := snapshot(); !got.Equal(at) || row != current {
+					t.Fatal("busy credential activity was written")
+				}
+			}
+			check(true) // skipped due renewal is retried after the holder releases
+			if got, _ := snapshot(); !got.After(after) {
+				t.Fatal("skipped renewal was not retried")
+			}
+			if kind == "session" {
+				// A short live lease must renew even with a recent activity stamp.
+				exec("UPDATE sessions SET last_seen_at=clock_timestamp(),expires_at=clock_timestamp()+interval '30 seconds' WHERE id=$1")
+				check(true)
+				var sliding bool
+				if err := adminPool.QueryRow(t.Context(), "SELECT expires_at>=last_seen_at+interval '30 days' FROM sessions WHERE id=$1", id).Scan(&sliding); err != nil || !sliding {
+					t.Fatalf("sliding 30-day lease lost: %v", err)
+				}
+			}
+			// Expiry and revocation take effect on the very next request even
+			// inside the activity window. Keep the expiry fixture for revocation.
+			if kind == "key" {
+				exec("UPDATE agent_keys SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1")
+				check(false)
+				exec("UPDATE agent_keys SET expires_at=NULL WHERE id=$1")
+				check(true)
+				exec("UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE id=$1")
+			} else {
+				exec("DELETE FROM sessions WHERE id=$1")
+			}
+			check(false)
+			if kind == "session" {
+				token, err := m.startSession(t.Context(), identity, tid, person)
+				if err != nil {
+					t.Fatal(err)
+				}
+				raw, err := decodeSessionToken(token)
+				if err != nil {
+					t.Fatal("invalid expiry fixture")
+				}
+				id = sessionID(raw)
+				authenticate = func(ctx context.Context) (tenant.Principal, bool, error) { return m.authenticateSession(ctx, raw) }
+				exec("UPDATE sessions SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1")
+				check(false)
+			}
+		})
+	}
+}
 
 func TestOIDCTenantSelection(t *testing.T) {
 	reset(t)

@@ -22,12 +22,130 @@ import (
 	"github.com/inspr-at/paimos/internal/brand"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/version"
 )
 
 type moduleFunc func(*http.ServeMux)
 
 func (f moduleFunc) Mount(mux *http.ServeMux) { f(mux) }
+
+// AEON-1231 risk: authentication can wait without a deadline, or its new
+// deadline cuts off streams, long handler budgets, or live authorization values.
+func TestRequestBudgetPrecedesAuthenticationAndPreservesHandlerLifetime(t *testing.T) {
+	fixtures := []struct {
+		pattern, path string
+		separate      bool
+	}{
+		{"GET /api/ordinary", "/api/ordinary", false},
+		{"GET /api/ordinary/{id}", "/api/ordinary/stream", false},
+		{"GET /api/events/stream", "/api/events/stream", true},
+		{"GET /api/events/subscribe", "/api/events/subscribe", true},
+		{"GET /api/inbox/stream", "/api/inbox/stream", true},
+		{"GET /api/chat-threads/{id}/live", "/api/chat-threads/thread/live", true},
+		{"GET /api/quotes/{quoteId}/collaboration/stream", "/api/quotes/quote/collaboration/stream", true},
+		{"GET /api/projects/{projectId}/delivery/flow/stream", "/api/projects/project/delivery/flow/stream", true},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/notifications", "/api/projects/project/harness-sessions/session/notifications", true},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/watch", "/api/projects/project/harness-sessions/session/watch", true},
+		{"GET /api/runs/queued/notifications", "/api/runs/queued/notifications", true},
+		{"POST /api/projects/{projectId}/delivery/metrics/backfill", "/api/projects/project/delivery/metrics/backfill", true},
+		{"POST /api/projects/{projectId}/delivery/metrics/check-again", "/api/projects/project/delivery/metrics/check-again", true},
+		{"POST /api/projects/{projectId}/delivery/merge-backfill", "/api/projects/project/delivery/merge-backfill", true},
+	}
+	for _, fixture := range fixtures {
+		for _, earlier := range []bool{false, true} {
+			t.Run(fixture.pattern+map[bool]string{false: "", true: " with caller deadline"}[earlier], func(t *testing.T) {
+				parent, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				var callerDeadline time.Time
+				if earlier {
+					callerDeadline = time.Now().Add(4 * time.Second)
+					var stop context.CancelFunc
+					parent, stop = context.WithDeadline(parent, callerDeadline)
+					defer stop()
+				}
+				var admission, handler context.Context
+				var admittedAt time.Time
+				served := false
+				principal := tenant.Principal{ID: "person", TenantID: "tenant", Kind: tenant.Person}
+				type guardKey struct{}
+				s := &Server{Modules: []Module{moduleFunc(func(mux *http.ServeMux) {
+					mux.HandleFunc(fixture.pattern, func(w http.ResponseWriter, r *http.Request) {
+						served = true
+						handler = r.Context()
+						p, ok := tenant.PrincipalFrom(handler)
+						if !ok || p.ID != principal.ID || handler.Value(guardKey{}) != "live guard" {
+							t.Fatal("handler lost authenticated principal/guard values")
+						}
+						if handler.Err() != nil || context.Cause(handler) != nil {
+							t.Fatal("handler inherited a cancelled authentication context")
+						}
+						deadline, bounded := handler.Deadline()
+						if fixture.separate {
+							if bounded != earlier || earlier && !deadline.Equal(callerDeadline) {
+								t.Fatal("handler lifetime differs from caller lifetime")
+							}
+							if admission.Err() != context.Canceled {
+								t.Fatal("authentication timer retained after handler admission")
+							}
+							// Existing long handlers can still choose their two-minute
+							// budget, independently of the five-second admission cap.
+							long, stop := context.WithTimeout(handler, 2*time.Minute)
+							defer stop()
+							longDeadline, _ := long.Deadline()
+							if earlier && !longDeadline.Equal(callerDeadline) || !earlier && !longDeadline.After(admittedAt.Add(authenticationBudget)) {
+								t.Fatal("long handler budget was shortened by authentication")
+							}
+						} else if !bounded {
+							t.Fatal("ordinary handler lost its request budget")
+						}
+						w.WriteHeader(http.StatusNoContent)
+					})
+				})}, Middleware: []func(http.Handler) http.Handler{func(next http.Handler) http.Handler {
+					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						admission, admittedAt = r.Context(), time.Now()
+						deadline, ok := admission.Deadline()
+						duration := ordinaryRequestBudget
+						if fixture.separate {
+							duration = authenticationBudget
+						}
+						if !ok || earlier && !deadline.Equal(callerDeadline) || !earlier && deadline.After(admittedAt.Add(duration)) {
+							t.Fatal("authentication has no bounded admission or extended caller deadline")
+						}
+						ctx := context.WithValue(tenant.WithPrincipal(r.Context(), principal), guardKey{}, "live guard")
+						next.ServeHTTP(w, r.WithContext(ctx))
+					})
+				}}}
+				method, _, _ := strings.Cut(fixture.pattern, " ")
+				req := httptest.NewRequest(method, fixture.path, nil).WithContext(parent)
+				req.Header.Set("Accept", "text/event-stream") // headers cannot exempt ordinary routes
+				w := httptest.NewRecorder()
+				s.Handler().ServeHTTP(w, req)
+				if !served || w.Code != http.StatusNoContent {
+					t.Fatal("authenticated request did not reach its handler")
+				}
+				if fixture.separate {
+					child, stop := context.WithCancel(handler)
+					defer stop()
+					if child.Err() != nil {
+						t.Fatal("derived handler context inherited authentication cancellation")
+					}
+					cancel()
+					guard, end := context.WithTimeout(t.Context(), 5*time.Second)
+					defer end()
+					select {
+					case <-child.Done():
+					case <-guard.Done():
+						t.Fatal("stream lost caller cancellation")
+					}
+					if handler.Err() != context.Canceled || child.Err() != context.Canceled {
+						t.Fatal("wrong handler cancellation reason")
+					}
+				}
+			})
+		}
+	}
+}
 
 func TestHandlersAndMiddleware(t *testing.T) {
 	t.Run("version", func(t *testing.T) {

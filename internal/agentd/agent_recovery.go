@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/hookbinding"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -259,23 +260,25 @@ func (s *Supervisor) applyAgentRecovery(ctx context.Context, entry *owned, q Rec
 // AttachedHookRequest transfers only the existing worker lease over the
 // owner-only socket. It never names an auth home or a file to change.
 type AttachedHookRequest struct {
-	Operation  string `json:"operation,omitempty"`
-	DeliveryID string `json:"delivery_id,omitempty"`
-	Cursor     int64  `json:"cursor,omitempty"`
-	Origin     string `json:"origin"`
-	ProjectID  string `json:"project_id"`
-	SessionID  string `json:"session_id"`
-	Harness    string `json:"harness"`
-	Lease      string `json:"worker_lease"`
-	OwnerPID   int    `json:"owner_pid"`
-	Sequence   int64  `json:"activity_sequence"`
-	Activity   string `json:"activity"`
+	PrincipalID string `json:"agent_principal_id,omitempty"`
+	Operation   string `json:"operation,omitempty"`
+	DeliveryID  string `json:"delivery_id,omitempty"`
+	Cursor      int64  `json:"cursor,omitempty"`
+	Origin      string `json:"origin"`
+	ProjectID   string `json:"project_id"`
+	SessionID   string `json:"session_id"`
+	Harness     string `json:"harness"`
+	Lease       string `json:"worker_lease"`
+	OwnerPID    int    `json:"owner_pid"`
+	Sequence    int64  `json:"activity_sequence"`
+	Activity    string `json:"activity"`
 }
 type attachedHookBinding struct {
 	helper, process attachwatch.Process
 	image           os.FileInfo
 	session         HarnessSession
 	touched         time.Time
+	ready           bool
 }
 type attachedHookAPI interface {
 	ProbeAttachedInbox(context.Context, HarnessSession) error
@@ -291,6 +294,12 @@ func (s *Supervisor) bindAttachedHook(ctx context.Context, peer attachObservatio
 	s.recoveryMu.Lock()
 	defer s.recoveryMu.Unlock()
 	m := s.attachedHookVerifier
+	if in.PrincipalID != "" && in.PrincipalID != s.principalID {
+		return &hookbinding.Refusal{Code: "principal_mismatch"}
+	}
+	if m != nil && in.Origin != m.cfg.Origin {
+		return &hookbinding.Refusal{Code: "instance_mismatch"}
+	}
 	if m == nil || in.Origin != m.cfg.Origin || !workorders.UUID(in.ProjectID) || !workorders.UUID(in.SessionID) || len(in.Lease) < 32 || len(in.Lease) > 256 || in.Sequence < 1 || (in.Activity != "busy" && in.Activity != "idle" && in.Activity != "throttled") {
 		return ErrScope
 	}
@@ -309,7 +318,7 @@ func (s *Supervisor) bindAttachedHook(ctx context.Context, peer attachObservatio
 	}
 	image, err := m.validateHarnessImage(ctx, process, in.Harness)
 	if err != nil {
-		return ErrNotOwned
+		return &hookbinding.Refusal{Code: "harness_identity_mismatch", Cause: ErrNotOwned}
 	}
 	if s.attachedHooks == nil {
 		s.attachedHooks = make(map[string]*attachedHookBinding)
@@ -326,6 +335,7 @@ func (s *Supervisor) bindAttachedHook(ctx context.Context, peer attachObservatio
 		}
 	}
 	b := s.attachedHooks[in.SessionID]
+	fresh := b == nil
 	if b == nil {
 		if len(s.attachedHooks) >= 32 {
 			return ErrScope
@@ -362,10 +372,19 @@ func (s *Supervisor) bindAttachedHook(ctx context.Context, peer attachObservatio
 	}
 	// Keep the same identity for an uncertain heartbeat reply. A retry must
 	// never manufacture a second binding after the server already committed.
+	b.ready = false
 	s.attachedHooks[in.SessionID] = b
 	if err := s.api.HeartbeatHarness(ctx, b.session, "working"); err != nil {
+		// A confirmed refusal must not leave a binding that intercepts the
+		// generic hook. Uncertain replies retain the identity for retry,
+		// without delivery authority before the server confirms it.
+		var status *client.StatusError
+		if fresh && errors.As(err, &status) && status.Status >= 400 && status.Status < 500 {
+			delete(s.attachedHooks, in.SessionID)
+		}
 		return err
 	}
+	b.ready = true
 	b.touched = time.Now()
 	s.attachedHooks[in.SessionID] = b
 	return nil
@@ -374,7 +393,7 @@ func (s *Supervisor) reconnectAttachedHook(ctx context.Context, q RecoveryReques
 	m := s.attachedHookVerifier
 	b := s.attachedHooks[q.SessionID]
 	api, ok := s.api.(attachedHookAPI)
-	if !ok || m == nil || b == nil || q.Action != "reconnect" || q.RunID != nil || q.ProjectID != b.session.ProjectID || b.session.Ownership == nil || *b.session.Ownership != q.Ownership || q.Ownership.DaemonID != s.daemonID || q.Ownership.Generation != s.generation || q.deadline.IsZero() || time.Until(q.deadline) <= 0 || time.Since(b.touched) > 10*time.Minute {
+	if !ok || m == nil || b == nil || !b.ready || q.Action != "reconnect" || q.RunID != nil || q.ProjectID != b.session.ProjectID || b.session.Ownership == nil || *b.session.Ownership != q.Ownership || q.Ownership.DaemonID != s.daemonID || q.Ownership.Generation != s.generation || q.deadline.IsZero() || time.Until(q.deadline) <= 0 || time.Since(b.touched) > 10*time.Minute {
 		return "rejected"
 	}
 	ctx, cancel := context.WithDeadline(ctx, q.deadline)
@@ -411,7 +430,7 @@ func (s *Supervisor) serviceAttachedHook(ctx context.Context, peer attachObserva
 	defer s.recoveryMu.Unlock()
 	b := s.attachedHooks[in.SessionID]
 	m := s.attachedHookVerifier
-	if b == nil || m == nil {
+	if b == nil || m == nil || !b.ready {
 		return nil, ErrNotOwned
 	}
 	m.mu.Lock()

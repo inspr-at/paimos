@@ -72,6 +72,7 @@
         "internal/httpapi/body_test.go",
         "internal/auth/transport_canary_test.go",
         "internal/httpapi/body_deadline_guard_test.go",
+        "internal/httpapi/budget_position_test.go",
         "internal/httpapi/auth_readiness.go",
         "internal/httpapi/auth_readiness_test.go",
         "internal/httpapi/transport_metrics.go",
@@ -244,7 +245,10 @@
         "internal/cli/hook_subagent_unix.go",
         "internal/cli/hook_subagent_other.go",
         "internal/cli/hook_subagent_unix_test.go",
-        "internal/inbox/routine_notice.go"
+        "internal/inbox/routine_notice.go",
+        "internal/hookbinding/**",
+        "internal/cli/hook_binding.go",
+        "internal/cli/hook_binding_unix_test.go"
       ]
     },
     {

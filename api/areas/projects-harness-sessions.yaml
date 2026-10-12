@@ -233,6 +233,8 @@ paths:
                 rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80}
                 process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
                 attached_hook: {type: boolean, default: false, description: "Bind an existing unmanaged inbox hook to its paired daemon and exact process identity. Requires the current worker lease, inbox capability and active pairing; never grants process controls or watch consent."}
+                inbox_binding_report: {type: boolean, default: false, description: "Update only the refusal after an accepted heartbeat. Requires the same phase, activity and sequence; never renews liveness or changes progress, rules capabilities or process authority."}
+                inbox_binding_error: {$ref: '#/components/schemas/InboxBindingError'}
                 phase: {type: string, enum: [starting, working, yielded, stopping]}
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}
                 activity_sequence: {type: integer, format: int64, minimum: 0}
@@ -913,8 +915,12 @@ paths:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
 components:
   headers:
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum. Version 3 adds projection_unavailable to the closed warning code enum for isolated heartbeat receipts.", schema: {type: string, enum: ['harness-session/3.0']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 3.1 adds an optional value-free inbox binding refusal code.", schema: {type: string, enum: ['harness-session/3.1']}}
   schemas:
+    InboxBindingError:
+      type: [string, 'null']
+      enum: [instance_mismatch, principal_mismatch, worker_proof_rejected, hook_cli_mismatch, hook_instance_mismatch, hook_unavailable, hook_index_mismatch, daemon_unavailable, process_unverified, harness_identity_mismatch, generation_mismatch, pairing_unavailable, daemon_refused, null]
+      description: "Value-free refusal from the registered worker. Null clears a previous refusal; omission preserves it. No credentials or transcript content."
     HarnessManagedControl:
       type: object
       required: [id, session_id, kind, state, sequence, outcome, reason, created_at, expected_ownership, expires_at]

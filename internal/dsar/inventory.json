@@ -757,6 +757,19 @@
     {
       "classification": "personal",
       "columns": {
+        "agent_principal_id": "personal",
+        "inbox_binding_error": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "agent_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "harness_sessions"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "resend_of_id": "metadata"
       },
       "locator": {
