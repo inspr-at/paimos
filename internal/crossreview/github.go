@@ -13,13 +13,16 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -48,6 +51,27 @@ var errGitHub = errors.New("GitHub review status could not be confirmed")
 // ErrUnavailable identifies transport, permission and partial-read refusals
 // without exposing their request, response or credential contents.
 var ErrUnavailable = errGitHub
+
+// ErrTransient preserves a retryable transport failure without retaining a
+// request URL, response body or credential-bearing underlying error.
+var ErrTransient = fmt.Errorf("%w: transient transport failure", errGitHub)
+
+func IsTransientGitHubError(err error) bool {
+	var response *GitHubHTTPError
+	var network net.Error
+	return errors.Is(err, ErrTransient) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.As(err, &response) && response.StatusCode >= 500 && response.StatusCode <= 599 ||
+		errors.As(err, &network) && network.Timeout() ||
+		errors.Is(err, syscall.ECONNRESET) || errors.Is(err, syscall.ECONNREFUSED) ||
+		errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+func githubTransportError(err error) error {
+	if IsTransientGitHubError(err) {
+		return ErrTransient
+	}
+	return errGitHub
+}
 
 // ErrNotFound is a confirmed absence of the requested GitHub resource.
 // Transport failures, permission failures and partial bodies stay errGitHub.
@@ -103,7 +127,7 @@ func (g *GitHubApp) requestBounded(ctx context.Context, token, method, path stri
 	}
 	res, err := client.Do(req)
 	if err != nil {
-		return errGitHub
+		return githubTransportError(err)
 	}
 	defer res.Body.Close()
 	id := res.Header.Get("X-GitHub-Request-Id")
@@ -115,7 +139,10 @@ func (g *GitHubApp) requestBounded(ctx context.Context, token, method, path stri
 	}
 	// Retain only the known permission, never arbitrary header text.
 	permissions := res.Header.Get("X-Accepted-GitHub-Permissions")
-	actionsRead := false
+	// Actions endpoints identify the required permission even when GitHub
+	// omits its permission header ("Resource not accessible by integration").
+	parts := strings.SplitN(path, "/", 6)
+	actionsRead := res.StatusCode == http.StatusForbidden && len(parts) == 6 && parts[1] == "repos" && parts[4] == "actions"
 	if len(permissions) <= 1024 {
 		for _, entry := range strings.FieldsFunc(permissions, func(r rune) bool { return r == ',' || r == ';' }) {
 			if strings.TrimSpace(entry) == "actions=read" {
@@ -128,7 +155,10 @@ func (g *GitHubApp) requestBounded(ctx context.Context, token, method, path stri
 		return responseErr
 	}
 	raw, err = io.ReadAll(io.LimitReader(res.Body, limit+1))
-	if err != nil || int64(len(raw)) > limit {
+	if err != nil {
+		return githubTransportError(err)
+	}
+	if int64(len(raw)) > limit {
 		return responseErr
 	}
 	if out != nil && json.Unmarshal(raw, out) != nil {
