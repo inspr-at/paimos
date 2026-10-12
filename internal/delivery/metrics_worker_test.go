@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -184,6 +185,152 @@ func historySource(t *testing.T, f *fixture) *MetricSource {
 		t.Fatal("source disappeared")
 	}
 	return out.Source
+}
+
+func TestDeliveryHistoryPartialJobsRetainTransientAndPermissionPriority(t *testing.T) {
+	// Risk: a later ordinary error hides a transient failure or Actions refusal,
+	// giving failed runs a deadline at which they still cannot be read.
+	transient := &crossreview.GitHubHTTPError{StatusCode: 503}
+	missing := &crossreview.GitHubHTTPError{StatusCode: 404}
+	permission := &crossreview.GitHubHTTPError{StatusCode: 403, ActionsReadRequired: true}
+	for _, tc := range []struct {
+		name, reason string
+		failures     []error
+	}{
+		{"transient then missing", "github_unavailable", []error{transient, missing}},
+		{"missing then transient", "github_unavailable", []error{missing, transient}},
+		{"transient then permission then missing", "actions_read_missing", []error{transient, permission, missing}},
+		{"missing then permission then transient", "actions_read_missing", []error{missing, permission, transient}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, g := newMetricsFixture(t)
+			n := len(tc.failures) + 1
+			seedBareRuns(t, f, n)
+			g.respond = func(path string) (any, error) {
+				var id int64
+				if _, err := fmt.Sscanf(path, "/actions/runs/%d/attempts/1/jobs?per_page=100&page=1", &id); err != nil {
+					t.Fatalf("unexpected jobs read: %s", path)
+				}
+				if index := 1000 + n - int(id) - 1; index >= 0 {
+					return nil, tc.failures[index]
+				}
+				return githubJobsBody(f.at.Add(-time.Hour), 30, nil), nil
+			}
+			var step BackfillResult
+			f.call(t, f.person, "POST", "/api/projects/"+f.project+"/delivery/metrics/backfill", map[string]any{}, 200, &step)
+			stored := historySource(t, f)
+			if step.State != "running" || step.Phase != "jobs" || step.Jobs != 1 || step.Calls != n || step.RetryAt == nil || stored.LastReadError == nil || stored.LastReadError.Reason != tc.reason || !stored.LastReadError.At.Equal(f.at) || stored.RetryAt == nil || !stored.RetryAt.Equal(*step.RetryAt) {
+				t.Fatalf("mixed partial retry: step=%+v source=%+v", step, stored)
+			}
+			if tc.reason == "actions_read_missing" {
+				if stored.LastReadError.Permission == nil || *stored.LastReadError.Permission != "actions:read" || !step.RetryAt.Equal(f.at.Add(30*time.Minute)) {
+					t.Fatal("mixed failure lost Actions permission priority")
+				}
+			} else if stored.LastReadError.Permission != nil || step.RetryAt.Sub(f.at) < 30*time.Second || step.RetryAt.Sub(f.at) >= time.Minute {
+				t.Fatalf("transient failure did not retain its short retry: %+v", step)
+			}
+			// A new module has only persisted state to control eligibility.
+			fresh := New(f.d.App, f.m.config, f.m.secret, g, nil)
+			fresh.now = f.m.now
+			ctx := tenant.WithPrincipal(t.Context(), f.person)
+			calls := len(g.calls)
+			f.at = step.RetryAt.Add(-time.Microsecond)
+			before, err := fresh.metricBackfillStep(ctx, f.person, f.project, backfillInput{})
+			if err != nil || len(g.calls) != calls || before.RetryAt == nil || !before.RetryAt.Equal(*step.RetryAt) {
+				t.Fatalf("retried before stored deadline: %+v err=%v calls=%v", before, err, g.calls)
+			}
+			f.at = *step.RetryAt
+			g.respond = func(string) (any, error) { return githubJobsBody(f.at.Add(-time.Hour), 30, nil), nil }
+			recovered, err := fresh.metricBackfillStep(ctx, f.person, f.project, backfillInput{})
+			if err != nil || recovered.State != "done" || recovered.Jobs != len(tc.failures) || recovered.Calls != len(tc.failures) || recovered.RetryAt != nil {
+				t.Fatalf("failed runs ineligible at stored deadline: %+v err=%v", recovered, err)
+			}
+			if source := historySource(t, f); source.LastReadError != nil || source.RetryAt != nil {
+				t.Fatalf("recovery retained a failed source: %+v", source)
+			}
+			for id := int64(1001); id <= int64(1000+n); id++ {
+				if run := readStoredRun(t, f, id, 1); !run.jobsRead || run.failed || run.waitMS == nil || *run.waitMS != 30000 {
+					t.Fatalf("recovered run %d lost its facts: %+v", id, run)
+				}
+			}
+		})
+	}
+}
+
+func TestDeliveryHistoryPartialJobsPersistGrowingBackoffAndReset(t *testing.T) {
+	// Risk: partial 404 or malformed responses bypass persisted exponential
+	// backoff, or the failed runs remain ineligible at the displayed deadline.
+	for _, tc := range []struct {
+		name, reason string
+		body         any
+		failure      error
+		base         time.Duration
+	}{
+		{"missing jobs", "not_installed", nil, &crossreview.GitHubHTTPError{StatusCode: 404}, 30 * time.Minute},
+		{"malformed jobs", "github_unavailable", map[string]any{"total_count": "invalid"}, nil, time.Minute},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, g := newMetricsFixture(t)
+			ctx := tenant.WithPrincipal(t.Context(), f.person)
+			failing := true
+			g.respond = func(path string) (any, error) {
+				if failing && strings.Contains(path, "/1001/") {
+					return tc.body, tc.failure
+				}
+				return githubJobsBody(f.at.Add(-time.Hour), 30, nil), nil
+			}
+			want := tc.base
+			for attempt := 1; attempt <= 8; attempt++ {
+				// Add one healthy run without erasing the previously stored facts,
+				// error or deadline; every retry is still a partial failure.
+				seedBareRuns(t, f, attempt+1)
+				fresh := New(f.d.App, f.m.config, f.m.secret, g, nil)
+				fresh.now = f.m.now
+				calls := len(g.calls)
+				step, err := fresh.metricBackfillStep(ctx, f.person, f.project, backfillInput{})
+				stored := historySource(t, f)
+				if err != nil || step.State != "running" || step.Phase != "jobs" || step.Jobs != 1 || step.Calls != 2 || len(g.calls) != calls+2 || step.RetryAt == nil || !step.RetryAt.Equal(f.at.Add(want)) || stored.LastReadError == nil || stored.LastReadError.Reason != tc.reason || !stored.LastReadError.At.Equal(f.at) || stored.RetryAt == nil || !stored.RetryAt.Equal(*step.RetryAt) {
+					t.Fatalf("attempt %d: partial backoff want=%s step=%+v source=%+v err=%v calls=%v", attempt, want, step, stored, err, g.calls)
+				}
+				if run := readStoredRun(t, f, 1001, 1); run.jobsRead {
+					t.Fatal("failed run was reported as filled")
+				}
+				calls = len(g.calls)
+				f.at = step.RetryAt.Add(-time.Microsecond)
+				before, err := fresh.metricBackfillStep(ctx, f.person, f.project, backfillInput{})
+				if err != nil || len(g.calls) != calls || before.RetryAt == nil || !before.RetryAt.Equal(*step.RetryAt) {
+					t.Fatalf("attempt %d retried early: %+v err=%v calls=%v", attempt, before, err, g.calls)
+				}
+				f.at = *step.RetryAt
+				want = min(want*2, time.Hour)
+			}
+			failing = false
+			fresh := New(f.d.App, f.m.config, f.m.secret, g, nil)
+			fresh.now = f.m.now
+			step, err := fresh.metricBackfillStep(ctx, f.person, f.project, backfillInput{})
+			if err != nil || step.State != "done" || step.Jobs != 1 || step.Calls != 1 || step.RetryAt != nil {
+				t.Fatalf("recovery at deadline: %+v err=%v", step, err)
+			}
+			if source := historySource(t, f); source.LastReadError != nil || source.RetryAt != nil {
+				t.Fatalf("successful read retained backoff: %+v", source)
+			}
+			if run := readStoredRun(t, f, 1001, 1); !run.jobsRead || run.failed || run.waitMS == nil || *run.waitMS != 30000 {
+				t.Fatalf("recovered run facts: %+v", run)
+			}
+			// A new partial failure after recovery starts at the base again.
+			seedBareRuns(t, f, 10)
+			f.tx(t, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE delivery_metric_runs SET jobs_read_at=NULL,required_jobs='{}' WHERE run_id=1001 AND attempt=1`)
+				return err
+			})
+			failing = true
+			step, err = fresh.metricBackfillStep(ctx, f.person, f.project, backfillInput{})
+			stored := historySource(t, f)
+			if err != nil || step.Jobs != 1 || step.Calls != 2 || step.RetryAt == nil || !step.RetryAt.Equal(f.at.Add(tc.base)) || stored.LastReadError == nil || stored.LastReadError.Reason != tc.reason || stored.RetryAt == nil || !stored.RetryAt.Equal(*step.RetryAt) {
+				t.Fatalf("backoff did not reset after success: step=%+v source=%+v err=%v", step, stored, err)
+			}
+		})
+	}
 }
 
 func TestDeliveryHistoryFirstReadFailurePreservesSelectedWindow(t *testing.T) {

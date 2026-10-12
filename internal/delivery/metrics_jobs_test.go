@@ -162,23 +162,29 @@ func TestDeliveryMetricsJobsPassFillsRunsWithoutJobFacts(t *testing.T) {
 	}
 	var step BackfillResult
 	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
-	if step.State != "running" || step.Phase != "jobs" || step.Calls != jobFillBudget || step.Jobs != jobFillBudget-1 {
+	if step.State != "running" || step.Phase != "jobs" || step.Calls != jobFillBudget || step.Jobs != jobFillBudget-1 || step.RetryAt == nil || !step.RetryAt.Equal(f.at.Add(time.Minute)) {
 		t.Fatalf("first jobs step (40 tried, the newest one broken): %+v", step)
 	}
-	// The broken run waits an hour; the rest follow.
+	// The persisted source deadline bounds retries, even with more runs pending.
+	callsBeforeRetry := len(g.calls)
 	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
-	if step.Phase != "jobs" || step.Jobs != 5 {
+	if step.Phase != "jobs" || step.Jobs != 0 || step.Calls != 0 || step.RetryAt == nil || !step.RetryAt.Equal(f.at.Add(time.Minute)) || len(g.calls) != callsBeforeRetry {
+		t.Fatalf("jobs step before deadline: %+v", step)
+	}
+	f.at = *step.RetryAt
+	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
+	if step.Phase != "jobs" || step.Jobs != 5 || step.Calls != 6 || step.RetryAt == nil || !step.RetryAt.Equal(f.at.Add(2*time.Minute)) {
 		t.Fatalf("second jobs step: %+v", step)
 	}
 	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
-	if step.State != "running" || step.Phase != "jobs" || step.Jobs != 0 || step.RetryAt == nil || !step.RetryAt.Equal(f.at.Add(jobFillRetry)) {
-		t.Fatalf("with only the broken run left, within its hour: %+v", step)
+	if step.State != "running" || step.Phase != "jobs" || step.Jobs != 0 || step.Calls != 0 || step.RetryAt == nil || !step.RetryAt.Equal(f.at.Add(2*time.Minute)) {
+		t.Fatalf("with only the broken run left, before its deadline: %+v", step)
 	}
 	if s := readStoredRun(t, f, newest, 1); s.jobsRead || !s.failed {
 		t.Fatalf("the broken run is marked, not filled: %+v", s)
 	}
-	// After the hour it is tried again, and filled once GitHub can answer.
-	f.at = f.at.Add(2 * time.Hour)
+	// At the exact deadline it is filled once GitHub can answer.
+	f.at = *step.RetryAt
 	delete(broken, newest)
 	f.call(t, f.person, "POST", path, map[string]any{}, 200, &step)
 	if step.Jobs != 1 {
