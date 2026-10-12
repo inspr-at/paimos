@@ -198,13 +198,9 @@ func TestNativeRoutesThroughProductionAuthentication(t *testing.T) {
 	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_pairing_computers SET state='revoked' WHERE id=$1`, computer); err != nil {
 		t.Fatal(err)
 	}
-	r := httptest.NewRequest(http.MethodPost, "/api/agentd/native-sessions/claim", nil)
-	r.Header.Set("Authorization", "Bearer "+paired.Token)
-	w := httptest.NewRecorder()
-	handler.ServeHTTP(w, r)
-	if w.Code != http.StatusGone || !strings.Contains(w.Body.String(), `"pairing_revoked"`) {
-		t.Fatalf("native allowance bypassed pairing revocation: HTTP %d %s", w.Code, w.Body.String())
-	}
+	// The existing key lookup rejects a revoked computer before the later
+	// pairing boundary. Preserve that 401 and verify its native envelope.
+	check(t, http.MethodPost, "/api/agentd/native-sessions/claim", "", paired.Token, http.StatusUnauthorized, nativecontract.ReasonGrantMissing)
 }
 
 // Agent keys reach shared project groups (AEON-136) through the views scope,
