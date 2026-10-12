@@ -3,8 +3,12 @@ import { expect, test, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 
 const pendingRequests = new WeakMap<Page, Set<string>>()
+const networkDiagnostics = new WeakMap<Page, { received: number; finished: number; responses: string[] }>()
 test.afterEach(({ page }, info) => {
-  if (info.status !== info.expectedStatus) console.log(`PERF pending ${JSON.stringify([...(pendingRequests.get(page) ?? [])].slice(0, 40))}`)
+  if (info.status !== info.expectedStatus) {
+    console.log(`PERF pending ${JSON.stringify([...(pendingRequests.get(page) ?? [])].slice(0, 40))}`)
+    console.log(`PERF network ${JSON.stringify(networkDiagnostics.get(page))}`)
+  }
 })
 
 async function throttle(page: Page) {
@@ -20,6 +24,12 @@ async function throttle(page: Page) {
   page.on('requestfailed', request => pending.delete(new URL(request.url()).pathname))
   page.on('pageerror', error => console.log(`PERF page error: ${error.message}`))
   const cdp = await page.context().newCDPSession(page)
+  const diagnostic = { received: 0, finished: 0, responses: [] as string[] }
+  networkDiagnostics.set(page, diagnostic)
+  await cdp.send('Network.enable')
+  cdp.on('Network.dataReceived', event => { diagnostic.received += event.dataLength })
+  cdp.on('Network.loadingFinished', () => { diagnostic.finished++ })
+  cdp.on('Network.responseReceived', event => { if (diagnostic.responses.length < 20) diagnostic.responses.push(`${event.response.status} ${new URL(event.response.url).pathname}`) })
   await cdp.send('Network.emulateNetworkConditions', {
     offline: false, latency: 150, downloadThroughput: 200_000, uploadThroughput: 93_750,
   })
