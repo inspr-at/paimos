@@ -757,6 +757,19 @@
     {
       "classification": "personal",
       "columns": {
+        "parallel_reason": "personal",
+        "started_by_principal_id": "personal",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "started_by_principal_id"
+      },
+      "table": "harness_sessions"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "resend_of_id": "metadata"
       },
       "locator": {

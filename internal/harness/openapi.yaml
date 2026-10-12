@@ -140,7 +140,7 @@ paths:
             schema: {$ref: '#/components/schemas/HarnessRegistration'}
       responses:
         '201': {description: Registered or exact active replay}
-        '409': {description: 'Conflicting active harness_session_ref lease or metadata, duplicate vendor_session_ref for the agent in the tenant across any harness, or hierarchy/predecessor conflict; private values are never returned'}
+        '409': {description: 'Conflicting registration or hierarchy, or build_in_flight for an active builder or unmerged delivery evidence; private values are never returned', content: {application/json: {schema: {oneOf: [{$ref: '../../api/openapi.yaml#/components/schemas/BuildInFlightError'}, {$ref: '../../api/openapi.yaml#/components/schemas/Error'}]}}}}
   /api/projects/{projectId}/harness-sessions/orchestrator:
     get:
       operationId: resolveHarnessOrchestrator
@@ -682,6 +682,7 @@ components:
         agent_principal_id: {type: string, format: uuid}
         run_id: {type: [string, 'null'], format: uuid}
         ticket_node_id: {type: [string, 'null'], format: uuid}
+        parallel_reason: {$ref: '../../api/openapi.yaml#/components/schemas/BuildParallelReason'}
         work_order_id: {type: [string, 'null'], format: uuid}
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
         display_label: {type: [string, 'null'], maxLength: 128, description: Optional public label. Trimmed; empty becomes null. Control characters are rejected. Part of exact registration replay.}
@@ -703,6 +704,7 @@ components:
         expected_revision: {type: integer, minimum: 1}
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
         ticket_node_id: {type: [string, 'null'], format: uuid}
+        parallel_reason: {$ref: '../../api/openapi.yaml#/components/schemas/BuildParallelReason'}
         work_shape: {type: string, enum: [unknown, ship, scout]}
     HarnessProvenanceWrite:
       type: object

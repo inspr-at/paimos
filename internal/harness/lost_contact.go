@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 // AEON-291. The product must not depend on every launcher marking its run
@@ -105,6 +106,11 @@ func revive(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session, phase
 	}
 	if taken {
 		return s, workorders.Fail(403, "harness worker proof rejected")
+	}
+	if s.Role == "worker" && s.TicketNodeID != nil {
+		if err := workqueue.RequireBuildAdmissionTx(ctx, tx, p, *s.TicketNodeID, s.ID, nil); err != nil {
+			return s, err
+		}
 	}
 	before := s
 	s, err := scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET phase=$2,stopped_at=NULL,stop_reason=NULL,revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, phase))

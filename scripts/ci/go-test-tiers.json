@@ -6598,7 +6598,13 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestThrottledHeartbeatAndStateEvidence","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestTicketBuilderAdmissionRaceBindingRevivalAndQueue","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestTicketBuiltUnmergedAdmissionUsesLinkedDeliveryAndMerge","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestTicketEtaRetainsWorkingHintWithoutReport","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestTicketParallelBuildRequiresCurrentAuthorityAndAudit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestTierAlreadyActiveRetainsIdempotencyReceipt","tier":"GATED-FULL"}
     ,

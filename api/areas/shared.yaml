@@ -824,6 +824,36 @@ components:
         root_pid: {type: integer, minimum: 2}
         group_id: {type: integer, minimum: 2}
         started_at: {type: string, format: date-time}
+    BuildInFlightError:
+      type: object
+      required: [error, code, reason, session_id, label, started_by, since]
+      properties:
+        error: {type: string, description: 'Build in flight, or already built — ship it, with the blocking session or delivery identified.'}
+        code: {type: string, const: build_in_flight}
+        reason: {type: string, enum: [active_builder, built_unmerged]}
+        session_id: {type: [string, 'null'], format: uuid, description: 'The other active worker generation; null for delivery evidence without an active worker.'}
+        label: {type: [string, 'null'], description: 'Public session label or harness name; null for delivery evidence.'}
+        started_by:
+          type: [object, 'null']
+          description: 'The initiating principal; legacy sessions fall back to their owner or agent. Null for delivery evidence.'
+          required: [id, name, kind]
+          properties:
+            id: {type: string, format: uuid}
+            name: {type: string}
+            kind: {type: string, enum: [person, agent]}
+        since: {type: string, format: date-time}
+        delivery:
+          type: object
+          required: [repository, pull_request, branch]
+          properties:
+            repository: {type: string}
+            pull_request: {type: [integer, 'null'], format: int64}
+            branch: {type: string}
+    BuildParallelReason:
+      type: [string, 'null']
+      minLength: 1
+      maxLength: 500
+      description: 'Explicit permission for parallel work on this ticket. Trimmed, nonempty single-line public reason. Only a currently authorized person or coordinator may supply it; recorded in a ticket audit event. A parent session or submitted coordinator role alone grants no authority.'
     HarnessRegistration:
       type: object
       required: [agent_principal_id, harness, host, management_mode, role, harness_session_ref, worker_lease]
@@ -834,6 +864,7 @@ components:
         agent_principal_id: {type: string, format: uuid}
         run_id: {type: [string, 'null'], format: uuid}
         ticket_node_id: {type: [string, 'null'], format: uuid}
+        parallel_reason: {$ref: '#/components/schemas/BuildParallelReason'}
         work_order_id: {type: [string, 'null'], format: uuid}
         parent_harness_session_id: {type: [string, 'null'], format: uuid, description: 'Parent generation in this project. Children register distinct session references and worker leases under the same authenticated agent, including when parent and child use the same harness.'}
         display_label:
@@ -907,6 +938,8 @@ components:
         work_order_id: {type: [string, 'null'], format: uuid}
         parent_harness_session_id: {type: [string, 'null'], format: uuid}
         owner_principal_id: {type: [string, 'null'], format: uuid, readOnly: true, description: 'Canonical person who owns this generation; null or omitted when no owner is recorded. Wind-down selects only the caller-owned running sessions, even for administrators.'}
+        started_by_principal_id: {type: string, format: uuid, readOnly: true, description: 'Principal who registered this generation. Omitted on legacy generations.'}
+        parallel_reason: {$ref: '#/components/schemas/BuildParallelReason', readOnly: true}
         display_label: {type: [string, 'null'], maxLength: 128, description: Public current per-session label; null for unlabeled generations.}
         model: {$ref: '#/components/schemas/HarnessModel'}
         model_raw: {type: [string, 'null'], maxLength: 128, readOnly: true, description: Original cleaned model string before separating an effort suffix; retained for audit.}
@@ -1471,6 +1504,7 @@ components:
               node_id: {type: string, format: uuid}
               revision: {type: string, format: date-time}
               outcome: {type: string, enum: [pending, queued, already_queued, changed, not_ready, active, unavailable]}
+              reason: {type: string, description: 'For builder admission, explains build in flight or already built — ship it without creating new work.'}
               run_id: {type: string, format: uuid}
     PhoneCeremony:
       type: object

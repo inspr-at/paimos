@@ -69,6 +69,7 @@ import (
 	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
+	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
 type Module struct {
@@ -245,6 +246,8 @@ type Session struct {
 	doingAt, toolActivityAt *time.Time
 	CanReparent             *bool                  `json:"can_reparent,omitempty"`
 	OwnerPrincipalID        *string                `json:"owner_principal_id,omitempty"`
+	StartedByPrincipalID    *string                `json:"started_by_principal_id,omitempty"`
+	ParallelReason          *string                `json:"parallel_reason,omitempty"`
 	HandedOverToID          *string                `json:"handed_over_to_id,omitempty"`
 	AdoptedFromID           *string                `json:"adopted_from_id,omitempty"`
 	Controls                []Control              `json:"controls,omitempty"`
@@ -443,13 +446,13 @@ func normalizeActivityNote(raw string) (string, bool) {
 // row_version is the row's own revision (AEON-449): a trigger bumps it inside every
 // statement that changes the row, so of two copies the larger is the newer one.
 // revision, by contrast, is an optimistic-lock token only some writers advance.
-const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,pause_record,continuation_handover,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp(),pause_progress,desk_answers,service_tier,service_tier_revision,service_tier_reports,(SELECT q.tier FROM harness_tier_requests q WHERE q.session_id=harness_sessions.id AND q.state='pending' ORDER BY q.created_at DESC,q.id DESC LIMIT 1)`
+const sessionColumns = `id::text,project_id::text,agent_principal_id::text,run_id::text,ticket_node_id::text,work_order_id::text,parent_id::text,harness,host,management,role,work_shape,capabilities,phase,activity,activity_sequence,revision,heartbeat_at,stopped_at,stop_reason,created_at,ref_digest,lease_digest,display_label,activity_note,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,commits,registration_metadata_digest,archived_at,recovery_process_state,process_ownership,process_observed_at,eta_ready_at,eta_live_at,progress_pct,eta_reported_at,inbox_seen_at,coalesce(inbox_seen_via,''),vendor_ref_digest,handed_over_to_id::text,adopted_from_id::text,owner_principal_id::text,row_version,aeon_session_finished(stopped_at,stop_reason,progress_pct),generator,command,model_raw,model_profile_id::text,pause_record,continuation_handover,doing,doing_at,tool_activity,tool_activity_at,coalesce((SELECT agent_activity_mode FROM harness_settings),'agent_summary'),clock_timestamp(),pause_progress,desk_answers,service_tier,service_tier_revision,service_tier_reports,(SELECT q.tier FROM harness_tier_requests q WHERE q.session_id=harness_sessions.id AND q.state='pending' ORDER BY q.created_at DESC,q.id DESC LIMIT 1),parallel_reason,started_by_principal_id::text`
 
 func scanSession(row pgx.Row) (Session, error) {
 	var s Session
 	var progress *int16
 	var activityNow time.Time
-	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.OwnerPrincipalID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.PauseProgress, &s.DeskAnswers, &s.ServiceTier, &s.ServiceTierRevision, &s.ServiceTierReports, &s.ServiceTierRequest)
+	err := row.Scan(&s.ID, &s.ProjectID, &s.AgentPrincipalID, &s.RunID, &s.TicketNodeID, &s.WorkOrderID, &s.ParentID, &s.Harness, &s.Host, &s.Management, &s.Role, &s.WorkShape, &s.Capabilities, &s.Phase, &s.Activity, &s.ActivitySequence, &s.Revision, &s.HeartbeatAt, &s.StoppedAt, &s.StopReason, &s.CreatedAt, &s.refDigest, &s.leaseDigest, &s.DisplayLabel, &s.ActivityNote, &s.Model, &s.ReasoningEffort, &s.AccountLabel, &s.HarnessVersion, &s.Brief, &s.Worktree, &s.Branch, &s.Commits, &s.registrationMetaDigest, &s.ArchivedAt, &s.RecoveryProcessState, &s.ProcessOwnership, &s.ProcessObservedAt, &s.EtaReadyAt, &s.EtaLiveAt, &progress, &s.EtaReportedAt, &s.InboxSeenAt, &s.InboxSeenVia, &s.vendorRefDigest, &s.HandedOverToID, &s.AdoptedFromID, &s.OwnerPrincipalID, &s.RowVersion, &s.Finished, &s.Generator, &s.Command, &s.ModelRaw, &s.ModelProfileID, &s.Pause, &s.Continuation, &s.doing, &s.doingAt, &s.toolActivity, &s.toolActivityAt, &s.AgentActivityMode, &activityNow, &s.PauseProgress, &s.DeskAnswers, &s.ServiceTier, &s.ServiceTierRevision, &s.ServiceTierReports, &s.ServiceTierRequest, &s.ParallelReason, &s.StartedByPrincipalID)
 	if err != nil {
 		return s, err
 	}
@@ -707,6 +710,7 @@ type registration struct {
 	AgentPrincipalID string  `json:"agent_principal_id"`
 	RunID            *string `json:"run_id"`
 	TicketNodeID     *string `json:"ticket_node_id"`
+	ParallelReason   *string `json:"parallel_reason"`
 	WorkOrderID      *string `json:"work_order_id"`
 	ParentID         *string `json:"parent_harness_session_id"`
 	Harness          string  `json:"harness"`
@@ -818,6 +822,12 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if in.Role != "worker" && in.Role != "coordinator" {
 		return nil, workorders.Fail(400, "invalid hierarchy role")
 	}
+	if err := workqueue.NormalizeParallelReason(in.ParallelReason); err != nil {
+		return nil, err
+	}
+	if in.ParallelReason != nil && (in.Role != "worker" || in.TicketNodeID == nil) {
+		return nil, workorders.Fail(400, "parallel_reason requires a worker bound to a ticket")
+	}
 	if in.SucceedsID != nil && !workorders.UUID(*in.SucceedsID) {
 		return nil, workorders.Fail(400, "valid predecessor required")
 	}
@@ -925,7 +935,7 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		if subtle.ConstantTimeCompare(existing.leaseDigest, lease) != 1 {
 			return nil, workorders.Fail(409, RegistrationLeaseConflict)
 		}
-		if existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || !same(existing.Generator, in.Generator) || !same(existing.Command, in.Command) || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !sameRegistrationMetadata(existing, in.sessionText, metaDigest) || !same(existing.ParentID, in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
+		if existing.AgentPrincipalID != in.AgentPrincipalID || existing.Harness != in.Harness || !same(existing.Generator, in.Generator) || !same(existing.Command, in.Command) || existing.Host != in.Host || existing.Management != in.Management || existing.Role != in.Role || existing.WorkShape != in.WorkShape || !same(existing.DisplayLabel, in.DisplayLabel) || !same(existing.ParallelReason, in.ParallelReason) || !sameRegistrationMetadata(existing, in.sessionText, metaDigest) || !same(existing.ParentID, in.ParentID) || !same(existing.TicketNodeID, in.TicketNodeID) || !same(existing.RunID, in.RunID) || !same(existing.WorkOrderID, in.WorkOrderID) || !sameCaps(existing.Capabilities, caps) {
 			return nil, workorders.Fail(409, "active generation conflicts with registration: harness_session_ref is already active with different registration metadata")
 		}
 		if err = fillVendorRef(ctx, tx, &existing, vendor); err != nil {
@@ -998,7 +1008,19 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err != nil {
 		return nil, err
 	}
-	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command,owner_principal_id,work_placement) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command, owner, placement))
+	if in.Role == "worker" && in.TicketNodeID != nil {
+		admitter := p
+		if in.ParallelReason != nil {
+			admitter, err = workorders.CurrentKeyPrincipal(r, tx, p, "harness.write")
+			if err != nil {
+				return nil, err
+			}
+		}
+		if err = workqueue.RequireBuildAdmissionTx(ctx, tx, admitter, *in.TicketNodeID, "", in.ParallelReason); err != nil {
+			return nil, err
+		}
+	}
+	s, err := scanSession(tx.QueryRow(ctx, `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,parent_id,harness,host,management,role,work_shape,capabilities,ref_digest,lease_digest,display_label,model,reasoning_effort,account_label,harness_version,brief,worktree,branch,registration_metadata_digest,vendor_ref_digest,model_raw,model_profile_id,generator,command,owner_principal_id,work_placement,parallel_reason,started_by_principal_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33) RETURNING `+sessionColumns, p.TenantID, projectID, in.AgentPrincipalID, in.RunID, in.TicketNodeID, in.WorkOrderID, in.ParentID, in.Harness, in.Host, in.Management, in.Role, in.WorkShape, caps, ref, lease, in.DisplayLabel, identity.Model, identity.Effort, in.AccountLabel, in.HarnessVersion, in.Brief, in.Worktree, in.Branch, metaDigest, vendor, in.Model, identity.ProfileID, in.Generator, in.Command, owner, placement, in.ParallelReason, p.ID))
 	if err != nil {
 		return nil, registrationConflict(err, vendor)
 	}
@@ -1035,6 +1057,9 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		if err != nil {
 			return nil, err
 		}
+	}
+	if err = recordParallelBuild(ctx, tx, p, s); err != nil {
+		return nil, err
 	}
 	return s, nil
 }
@@ -1242,9 +1267,13 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		ExpectedRevision int64   `json:"expected_revision"`
 		ParentID         *string `json:"parent_harness_session_id"`
 		TicketNodeID     *string `json:"ticket_node_id"`
+		ParallelReason   *string `json:"parallel_reason"`
 		WorkShape        string  `json:"work_shape"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
+		return nil, err
+	}
+	if err := workqueue.NormalizeParallelReason(in.ParallelReason); err != nil {
 		return nil, err
 	}
 	if in.ExpectedRevision < 1 {
@@ -1252,6 +1281,13 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	ctx := r.Context()
 	if err := lockHierarchy(ctx, tx, r.PathValue("projectId")); err != nil {
+		return nil, err
+	}
+	permission := "harness.write"
+	if p.Kind == tenant.Agent {
+		permission = "harness.worker"
+	}
+	if err := authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: r.PathValue("projectId")}); err != nil {
 		return nil, err
 	}
 	s, err := load(ctx, tx, r.PathValue("projectId"), r.PathValue("sessionId"), true)
@@ -1263,6 +1299,9 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	if s.StoppedAt != nil || s.Revision != in.ExpectedRevision {
 		return nil, workorders.Fail(409, "session revision conflict")
+	}
+	if in.ParallelReason != nil && (s.Role != "worker" || in.TicketNodeID == nil) {
+		return nil, workorders.Fail(400, "parallel_reason requires a worker bound to a ticket")
 	}
 	if in.TicketNodeID == nil {
 		if in.WorkShape != "unknown" {
@@ -1289,6 +1328,18 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	before := s
 	var placement json.RawMessage
 	if !same(s.TicketNodeID, in.TicketNodeID) {
+		if s.Role == "worker" && in.TicketNodeID != nil {
+			admitter := p
+			if in.ParallelReason != nil {
+				admitter, err = workorders.CurrentKeyPrincipal(r, tx, p, "harness.write")
+				if err != nil {
+					return nil, err
+				}
+			}
+			if err = workqueue.RequireBuildAdmissionTx(ctx, tx, admitter, *in.TicketNodeID, s.ID, in.ParallelReason); err != nil {
+				return nil, err
+			}
+		}
 		starter := tenant.Principal{}
 		if s.OwnerPrincipalID != nil {
 			starter = tenant.Principal{ID: *s.OwnerPrincipalID, TenantID: p.TenantID, Kind: tenant.Person}
@@ -1299,13 +1350,14 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 		}
 	}
 	s, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET parent_id=$2,ticket_node_id=$3,work_shape=$4,
+		parallel_reason=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN $6 ELSE parallel_reason END,
 		work_placement=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN $5::jsonb ELSE work_placement END,
 		eta_ready_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_ready_at END,
 		eta_live_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_live_at END,
 		progress_pct=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE progress_pct END,
 		missing_progress_beats=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN 0 ELSE missing_progress_beats END,
 		eta_reported_at=CASE WHEN ticket_node_id IS DISTINCT FROM $3::uuid THEN NULL ELSE eta_reported_at END,
-		revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape, placement))
+		revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, s.ID, in.ParentID, in.TicketNodeID, in.WorkShape, placement, in.ParallelReason))
 	if err != nil {
 		return nil, err
 	}
@@ -1314,7 +1366,13 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 			return nil, err
 		}
 	}
-	return s, record(ctx, tx, p, s, "bound", before, s)
+	if err = record(ctx, tx, p, s, "bound", before, s); err != nil {
+		return nil, err
+	}
+	if !same(before.TicketNodeID, s.TicketNodeID) {
+		err = recordParallelBuild(ctx, tx, p, s)
+	}
+	return s, err
 }
 func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
 	r, flush := deferControlEvents(r, tx)

@@ -122,6 +122,7 @@ type heartbeatOptions struct {
 	Shape             string
 	Management        string
 	Role              string
+	ParallelReason    string
 	SourceSession     string
 	CodexIndex        string
 	ClaudeProjects    string
@@ -185,6 +186,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			fs.string(&o.Shape, "work-shape", 0, "required with --ticket; one of: ship, scout")
 			fs.string(&o.Management, "management", 0, "managed or unmanaged")
 			fs.string(&o.Role, "role", 0, "worker or coordinator")
+			fs.string(&o.ParallelReason, "parallel-reason", 0, "explicit public reason for parallel work; requires person or coordinator authority")
 			fs.string(&o.SourceSession, "source-session", 0, "harness session UUID for the name source and inbox index")
 			fs.string(&o.CodexIndex, "codex-index", 0, "Codex session_index.jsonl (default ~/.codex/session_index.jsonl)")
 			fs.string(&o.ClaudeProjects, "claude-projects", 0, "Claude Code projects directory (default $CLAUDE_CONFIG_DIR/projects or ~/.claude/projects)")
@@ -919,6 +921,9 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 		"management_mode":         o.Management,
 		"role":                    o.Role,
 		"advertised_capabilities": []string{"status"},
+	}
+	if o.ParallelReason != "" {
+		body["parallel_reason"] = o.ParallelReason
 	}
 	if o.PrintControls {
 		body["advertised_capabilities"] = []string{"status", "pause"}
