@@ -121,7 +121,7 @@ test('AEON-1253: repository shows the history source without moving its controls
     await expect(line).toContainText('GitHub checks · partial history; attempt and runner wait metrics unavailable.')
     await expect(card.getByText('accept Actions: Read', { exact: false })).toHaveCount(0)
     const more = card.locator('[data-act=repo-more]')
-    const stable = await controlStability(page, { change: card.locator('[data-act=change]'), more, actions: card.locator('.repo-acts') })
+    const stable = await controlStability(page, { change: card.locator('[data-act=change]'), more, actions: card.locator('.repo-acts'), historyActions: card.locator('.ds-acts') })
     await stable.check(async () => {
       await more.click()
       await expect(page.getByRole('menuitem', { name: /^Read history again/ })).toBeVisible()
