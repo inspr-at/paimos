@@ -80,7 +80,13 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs .
 		} else if route.Wait != nil {
 			wait := route.Wait
 			reader, _ := tenant.PrincipalFrom(ctx)
-			if !visible[account.ID] && !hostReasonVisible(reader, route) {
+			private := !visible[account.ID]
+			if wait.HostReason != "" {
+				// Sharing usage is not permission to disclose host/process
+				// diagnostics. These explanations belong to the person owner.
+				private = !hostReasonVisible(reader, route)
+			}
+			if private {
 				// Availability can be public without releasing the owner's
 				// quota, schedule, reserve or exact next attempt time.
 				wait = &CapacityWait{}
@@ -96,7 +102,7 @@ func HarnessHealthAt(ctx context.Context, tx pgx.Tx, now time.Time, projectIDs .
 }
 
 func hostReasonVisible(reader tenant.Principal, route CapacityRouting) bool {
-	return route.Wait != nil && route.Wait.HostReason != "" && reader.Kind == tenant.Person && reader.ID == route.hostOwner
+	return route.Wait != nil && route.Wait.HostReason != "" && reader.Kind == tenant.Person && reader.ID != "" && reader.ID == route.hostOwner
 }
 
 // ModelWaitReason describes the actual admission gate without account identity

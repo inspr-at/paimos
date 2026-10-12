@@ -918,7 +918,7 @@ func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
 				for _, reader := range []tenant.Principal{owner, member, admin, agent} {
 					t.Run(phase.name+"/"+reader.Name, func(t *testing.T) {
 						want := "Codex account cannot take new work right now"
-						if reader.ID == owner.ID || phase.share {
+						if reader.ID == owner.ID || phase.share && cause != "host" {
 							want = detail
 						}
 						resolved := decode[Resolution](t, &reader, "GET", "/api/models/resolve?role=build-hard", "", 200)
@@ -956,7 +956,7 @@ func TestModelWaitReasonsRespectCurrentAccountSharing(t *testing.T) {
 								t.Fatalf("capacity host wait: %d %s", response.Code, response.Body.String())
 							}
 							wantHost := ""
-							if reader.ID == owner.ID || phase.share {
+							if reader.ID == owner.ID {
 								wantHost = "host_signals_stale"
 							}
 							if advice.Wait.HostReason != wantHost {
