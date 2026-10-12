@@ -33,6 +33,9 @@ const REGISTRY = [
 
 async function setup(page: Page, theme: 'light' | 'dark' = 'light', headings = false) {
   await page.clock.install({ time: NOW })
+  // Heading regressions advance time only by hand: cold-start/measurement work must
+  // not age all fixture heartbeats into unrelated structural changes.
+  if (headings) await page.clock.pauseAt(NOW + 1000)
   const work = fixtures(); work.preferences.theme = { choice: theme }
   work.preferences['ui.agents.sections'] = { dial: false }
   if (headings) {
