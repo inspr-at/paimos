@@ -207,7 +207,7 @@ func (d Discovery) locationClass(path string) string {
 // autoRenewCodexPins runs after current lifecycle fences, under setup.lock.
 // A failed check leaves the original block and its existing repair intact.
 func (e *Engine) autoRenewCodexPins(ctx context.Context, s *snapshot) error {
-	if s.DisconnectAll || s.ComputerCleaned || s.View.ComputerState != "connected" || s.Phase != "connected" && s.Phase != "verification_pending" {
+	if len(s.CodexPins.LauncherHashes) == 0 || s.DisconnectAll || s.ComputerCleaned || s.View.ComputerState != "connected" || s.Phase != "connected" && s.Phase != "verification_pending" {
 		return nil
 	}
 	d := Discovery{Home: userHome(), Workspace: s.Request.Workspace}
@@ -288,6 +288,11 @@ func (e *Engine) autoRenewCodexPins(ctx context.Context, s *snapshot) error {
 			if err != nil || candidate.Node.Path != nodePath || candidate.Path != current.Path || candidate.Home != current.Home || candidate.Identity != current.Identity || codexLauncherHash(current.Path, config.Workspace) != hash {
 				continue
 			}
+			profile, err = openDirectory(current.Home, false, true)
+			if err != nil {
+				continue
+			}
+			profile.Close()
 			candidate.Key, candidate.Label = current.Key, enrolled.Label
 			if _, err := e.renewPin(ctx, s, enrolled, candidate); err != nil {
 				return err

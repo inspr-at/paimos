@@ -47,6 +47,7 @@ func HarnessFailureReason(err error) string {
 //	profile_permissions  the pi profile directory is not private
 //	pairing_sync_failed  pairing reconciliation or runtime refresh prevented polling
 //	unsettled_previous_run prior-generation accounting needs server confirmation
+//	interpreter_pin_renewed verified local renewal awaits the daemon's fresh probe; no fix
 //
 // The pin_* codes come from the static check before launch; dependency_invalid
 // is the runtime failure of the same dependencies. For Claude the pins are the

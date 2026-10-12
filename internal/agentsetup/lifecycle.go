@@ -768,6 +768,11 @@ func (e *Engine) renewPin(ctx context.Context, s *snapshot, enrolled Enrollment,
 	if ctx.Err() != nil || nodePinReasonWithExecutor(ctx, current.Path, config.Workspace, currentInterpreter(current), OSExecutor{}) != "" {
 		return Progress{Stage: "blocked", Action: "the discovered interpreter is still unusable; pass --node-path to an installed Node executable outside the workspace"}, errors.New("interpreter pin still blocked")
 	}
+	// A package update can overlap the interpreter's final version read.
+	// Recheck the approved launcher immediately before recording the write.
+	if hash := s.CodexPins.LauncherHashes[current.Key]; hash != "" && codexLauncherHash(current.Path, config.Workspace) != hash {
+		return e.progress(s), errors.New("the enrolled launcher content changed during renewal; use the existing person-approved enrollment flow")
+	}
 	id, err := uuid()
 	if err != nil {
 		return Progress{}, err
