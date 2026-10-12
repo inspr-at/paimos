@@ -164,10 +164,10 @@ const steps = computed(() => deskPreview.value ? ['desk', 'moon'] : ['moon'])
 const awaySteps = ref(0)
 const away = computed(() => steps.value.slice(0, awaySteps.value).join(' ') || undefined)
 const narrow = window.matchMedia('(max-width: 600px)')
-// How far the header's row runs past its end padding, or its page past the trail.
+// How far the header's row runs past its end padding, or its page past the trail. What left the trail takes no room.
 function overflow(el: HTMLElement) {
-  const crumb = el.querySelector<HTMLElement>('.crumbs > .crumb.current')
-  const trail = el.querySelector<HTMLElement>('.crumbs')
+  const crumb = el.querySelector<HTMLElement>('.crumbs > .crumb.current:not([data-dropped])')
+  const trail = el.querySelector<HTMLElement>('.crumbs:not([data-empty])')
   const end = el.getBoundingClientRect().right - (parseFloat(getComputedStyle(el).paddingRight) || 0)
   const reach = Math.max(0, ...[...el.children].map(child => child.getBoundingClientRect().right))
   return Math.max(reach - end, el.scrollWidth - el.clientWidth, trail ? trail.scrollWidth - trail.clientWidth : 0, crumb ? crumb.scrollWidth - crumb.clientWidth : 0)

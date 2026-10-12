@@ -406,8 +406,11 @@ const phoneFit = (page: Page) => page.locator('.app-header').evaluate(header => 
   const slot = header.querySelector('.crumbs')?.getBoundingClientRect()
   const keys = [...header.querySelectorAll<HTMLElement>('.crumbs .key-badge, .crumbs .mono-crumb')].filter(shown)
   const cut: string[] = []
+  const range = document.createRange()
   for (const key of keys) {
-    const r = key.getBoundingClientRect(), text = key.textContent!.trim()
+    // A chip's border box is what shows; a ticket key is its text (a crumb's hover padding may run under its neighbour).
+    if (key.matches('.mono-crumb')) range.selectNodeContents(key)
+    const r = key.matches('.mono-crumb') ? range.getBoundingClientRect() : key.getBoundingClientRect(), text = key.textContent!.trim()
     if (slot && (r.left < slot.left - 0.5 || r.right > slot.right + 0.5)) cut.push(`${text} outside its slot`)
     if (key.scrollWidth > key.clientWidth) cut.push(`${text} ends in an ellipsis`)
     for (let at = key.parentElement; at && at !== header; at = at.parentElement) {
@@ -443,6 +446,8 @@ for (const width of [320, 360, 390, 400, 420, 1024, 1440]) for (const theme of [
       expect(fit.page, `${where}: page scrolls sideways`).toBeLessThanOrEqual(0)
       // The key leaves only when it can't show whole: from 390 the project's chip fits once the Desk's chevron is aside.
       if (width >= 390 && (target.slug === 'settings' || target.slug === 'delivery')) expect(fit.keys, where).toContain('PHAROS')
+      // A key that left takes no room: what stepped aside for it (the moon) comes back.
+      if (!fit.keys.length && ['settings', 'delivery', 'ticket'].includes(target.slug)) expect(fit.away, where).not.toContain('moon')
       const key = page.locator('.app-header .crumbs').locator('.key-badge, .mono-crumb').filter({ visible: true })
       const controls = { places: places(page), search: page.getByRole('button', { name: 'Search everything' }), account: page.locator('.app-header .account'), ...(fit.keys.length ? { key: key.first() } : {}) }
       await expectStableControls({ controls, interactions: [
