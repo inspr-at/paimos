@@ -38,7 +38,7 @@
       "",
       "<assigned-worktree>/web/test-results/AEON-1235"
     ],
-    "execution": "mbp2606, headless Chromium, one Playwright worker; guarded LEAD runner only.",
+    "execution": "Approved test host, headless Chromium, one Playwright worker; guarded LEAD runner only.",
     "started_at": "2026-10-11T23:07:53.329561+00:00",
     "finished_at": "2026-10-11T23:08:28.790890+00:00",
     "exit_code": 0,
@@ -1872,7 +1872,7 @@
   "ci_static": {
     "runner": "/Users/markus/.aeon/lead/aeon/ci-static-remote.sh",
     "check": "node scripts/ci-static.mjs --merge-main",
-    "execution": "mbp2606, guarded remote run",
+    "execution": "Approved test host, guarded remote run",
     "tested_head": "06108a90ffc59e56169e25609d9b271f9fd8856f",
     "started_at": "2026-10-11T23:09:08.497197+00:00",
     "finished_at": "2026-10-11T23:11:07.724138+00:00",
