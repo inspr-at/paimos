@@ -624,8 +624,8 @@ func TestClaudeSubagentHookEndToEnd(t *testing.T) {
 	// must still be refused while the first child owns this ticket's slot.
 	rt.stdin = strings.NewReader(`{"hook_event_name":"SubagentStart","session_id":"` + indexSourceID + `","agent_id":"second-agent","agent_type":"Explore"}`)
 	err = rt.runSubagentHook(t.Context(), "SubagentStart")
-	var refused *client.StatusError
-	if !errors.As(err, &refused) || refused.Status != http.StatusConflict || !strings.HasPrefix(refused.Message, "build in flight: ") || !strings.Contains(refused.Message, child.ID) {
+	var refused *exitError
+	if !errors.As(err, &refused) || refused.apiStatus != http.StatusConflict || !strings.HasPrefix(refused.msg, "api 409: build in flight: ") || !strings.Contains(refused.msg, child.ID) {
 		t.Fatal("second child was not refused by the active-builder admission guard")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "subagents", subagentName("second-agent"), "state.json")); !errors.Is(err, os.ErrNotExist) {
