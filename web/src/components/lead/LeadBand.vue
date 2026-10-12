@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, toRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { can } from '../../lib/authz'
 import { canLaunchLead, canPause, canResume, leadLaunchReason, unmanagedLeadCopy, LEAD_WORDS } from '../../lib/lead'
-import { useLeadCardFold } from '../../lib/leadCardFold'
+import { useLeadCardFold, useLeadPanelCollapse } from '../../lib/leadCardFold'
 import { openLeadPanel, openLeadPause, openStartLead } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
@@ -38,8 +38,12 @@ const readError = computed(() => leads.views[props.projectId]?.error ?? '')
 const viewer = computed(() => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : '')
 const hasLead = computed(() => !!lead.value && band.value.state !== 'none')
 const { ready: foldReady, collapsed: folded, moving, toggle: toggleFold, settle: settleFold } = useLeadCardFold(toRef(props, 'projectId'), viewer, hasLead)
-const shown = computed(() => !!lead.value && (band.value.state !== 'none' || foldReady.value))
+// AEON-1256: a running lead's card collapses to its header row, once per person for every project.
+const { ready: panelReady, collapsed, moving: panelMoving, toggle: toggleCollapse, settle: settleCollapse } = useLeadPanelCollapse(viewer)
+const shown = computed(() => !!lead.value && (band.value.state === 'none' ? foldReady.value : panelReady.value))
 const foldTip = computed(() => `${folded.value ? 'Unfold' : 'Fold'} the ${w.l} card`)
+const collapseLabel = computed(() => `${collapsed.value ? 'Expand' : 'Collapse'} ${w.l} panel`)
+const launchBlocked = computed(() => ['start', 'resume'].includes(band.value.action) && !canLaunchLead(lead.value))
 const poller = usePoller(() => leads.load(props.projectId), 15_000)
 watch(() => [props.projectId, session.identity?.principal.id], () => { void leads.load(props.projectId); void queue.load(props.projectId) }, { immediate: true })
 onMounted(() => poller.start())
@@ -107,7 +111,7 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
 </script>
 
 <template>
-  <section v-if="shown" class="lead" :class="{ folded, moving }" :data-state="band.state" aria-labelledby="lead-title" aria-live="polite">
+  <section v-if="shown" class="lead" :class="{ folded, collapsed: band.state !== 'none' && collapsed, moving: moving || panelMoving }" :data-state="band.state" aria-labelledby="lead-title" aria-live="polite">
     <div class="lead-top">
       <span class="lead-bot"><LeadBot :busy="band.busy" /></span>
       <div class="lead-who">
@@ -128,7 +132,8 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
         </p>
       </div>
       <div class="lead-acts">
-        <button v-if="action && action.label" type="button" class="btn act-main" :class="{ primary: action.primary }" :aria-disabled="action.disabled || busy" :aria-describedby="['start', 'resume'].includes(band.action) && !canLaunchLead(lead) ? 'lead-launch-reason-band' : undefined" :data-tip="action.tip" data-act="main" @click="act">
+        <button v-if="band.state !== 'none'" type="button" class="icon-btn flat fold-btn collapse-btn" aria-controls="lead-body" :aria-expanded="!collapsed" :aria-label="collapseLabel" :data-tip="collapseLabel" data-act="collapse" @click="toggleCollapse"><AppIcon name="chevron-right" :size="16" /></button>
+        <button v-if="action && action.label" type="button" class="btn act-main" :class="{ primary: action.primary }" :aria-disabled="action.disabled || busy" :aria-describedby="launchBlocked ? 'lead-launch-reason-band' : undefined" :data-tip="action.tip" data-act="main" @click="act">
           <AppIcon v-if="action.icon" :name="action.icon" :size="15" />{{ action.label }}
         </button>
         <LeadMenu v-if="lead && band.state !== 'none'" :project-id="projectId" :project-key="projectKey" :lead="lead" />
@@ -136,37 +141,42 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
       </div>
     </div>
 
-    <p v-if="['start', 'resume'].includes(band.action) && !canLaunchLead(lead)" id="lead-launch-reason-band" class="lead-now"><span data-launch-reason>{{ leadLaunchReason(lead) }}</span> <RouterLink :to="`${projectSettingsPath(routeKey, 'agents')}#lead`" class="settings-link">Settings <AppIcon name="chevron-right" :size="12" /> Agents<AppIcon name="chevron-right" :size="12" /></RouterLink></p>
-
-    <LeadAdoption v-if="band.state !== 'none' && mayStart && lead && !lead.session_id && lead.state !== 'paused'" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
-    <p v-if="unmanaged" class="lead-now small" data-unmanaged>{{ unmanagedLeadCopy }}</p>
     <!-- The fold hides only the details; the head and Start lead stay where they are. -->
-    <div v-if="band.state === 'none'" id="lead-fold" class="lead-fold" :inert="folded || undefined" @transitionend="settleFold" @transitioncancel="settleFold">
-      <div class="lead-fold-inner">
-        <LeadAdoption v-if="mayStart && lead" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
-        <ul class="empty-lead">
-          <li><AppIcon name="queue" :size="14" /><span>Picks up what people queue, in their order, and sizes each item.</span></li>
-          <li><AppIcon name="agent" :size="14" /><span>Chooses harness, model and thinking by role, and starts workers within your dial.</span></li>
-          <li><AppIcon name="inbox" :size="14" /><span>Drives gate, fix, merge and release. You only see its questions, on the Decision Desk.</span></li>
-        </ul>
-        <p class="lead-foot"><AppIcon name="shield" :size="14" /><span>{{ band.foot }}</span></p>
-      </div>
-    </div>
-    <template v-else>
-      <p v-if="nowLine" class="lead-now">{{ nowLine }}</p>
-      <LeadLine :stations="stations" :route-key="routeKey" :empty="band.state === 'starting'" @open="openPanel" />
-      <div v-if="questions.length || questionsPartial" class="asks">
-        <div v-for="q in questions.slice(0, 2)" :key="q.id" class="ask">
-          <span class="ask-icon"><AppIcon name="inbox" :size="16" /></span>
-          <h3>{{ q.input.question }}</h3>
-          <p>The {{ projectKey }} {{ w.l }} asks. {{ q.input.options.length }} {{ q.input.options.length === 1 ? 'option' : 'options' }}<template v-if="q.input.recommend"> and its recommendation</template> wait on the Decision Desk.</p>
-          <RouterLink class="btn primary sm" :to="deskLink(q.id)">Answer</RouterLink>
+    <template v-if="band.state === 'none'">
+      <p v-if="launchBlocked" id="lead-launch-reason-band" class="lead-now"><span data-launch-reason>{{ leadLaunchReason(lead) }}</span> <RouterLink :to="`${projectSettingsPath(routeKey, 'agents')}#lead`" class="settings-link">Settings <AppIcon name="chevron-right" :size="12" /> Agents<AppIcon name="chevron-right" :size="12" /></RouterLink></p>
+      <div id="lead-fold" class="lead-fold" :inert="folded || undefined" @transitionend="settleFold" @transitioncancel="settleFold">
+        <div class="lead-fold-inner">
+          <LeadAdoption v-if="mayStart && lead" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
+          <ul class="empty-lead">
+            <li><AppIcon name="queue" :size="14" /><span>Picks up what people queue, in their order, and sizes each item.</span></li>
+            <li><AppIcon name="agent" :size="14" /><span>Chooses harness, model and thinking by role, and starts workers within your dial.</span></li>
+            <li><AppIcon name="inbox" :size="14" /><span>Drives gate, fix, merge and release. You only see its questions, on the Decision Desk.</span></li>
+          </ul>
+          <p class="lead-foot"><AppIcon name="shield" :size="14" /><span>{{ band.foot }}</span></p>
         </div>
-        <p v-if="questions.length > 2" class="asks-more"><RouterLink to="/decision-desk">{{ questions.length - 2 }} more{{ questionsPartial ? ' and possibly others' : '' }} on the Decision Desk</RouterLink></p>
-        <p v-else-if="questionsPartial" class="asks-more" data-partial><RouterLink to="/decision-desk">Not every open question could be read here; see the Decision Desk</RouterLink></p>
       </div>
     </template>
-    <p v-if="band.state !== 'none'" class="lead-foot"><AppIcon name="shield" :size="14" /><span>{{ unmanaged ? unmanagedLeadCopy : band.foot }}</span></p>
+    <!-- AEON-1256: collapsed, only the head row stays; everything below folds by height alone. -->
+    <div v-else id="lead-body" class="lead-fold" :inert="collapsed || undefined" @transitionend="settleCollapse" @transitioncancel="settleCollapse">
+      <div class="lead-fold-inner">
+        <p v-if="launchBlocked" id="lead-launch-reason-band" class="lead-now"><span data-launch-reason>{{ leadLaunchReason(lead) }}</span> <RouterLink :to="`${projectSettingsPath(routeKey, 'agents')}#lead`" class="settings-link">Settings <AppIcon name="chevron-right" :size="12" /> Agents<AppIcon name="chevron-right" :size="12" /></RouterLink></p>
+        <LeadAdoption v-if="mayStart && lead && !lead.session_id && lead.state !== 'paused'" :key="`${viewer}:${projectId}`" :project-id="projectId" :revision="lead.revision" />
+        <p v-if="unmanaged" class="lead-now small" data-unmanaged>{{ unmanagedLeadCopy }}</p>
+        <p v-if="nowLine" class="lead-now">{{ nowLine }}</p>
+        <LeadLine :stations="stations" :route-key="routeKey" :empty="band.state === 'starting'" @open="openPanel" />
+        <div v-if="questions.length || questionsPartial" class="asks">
+          <div v-for="q in questions.slice(0, 2)" :key="q.id" class="ask">
+            <span class="ask-icon"><AppIcon name="inbox" :size="16" /></span>
+            <h3>{{ q.input.question }}</h3>
+            <p>The {{ projectKey }} {{ w.l }} asks. {{ q.input.options.length }} {{ q.input.options.length === 1 ? 'option' : 'options' }}<template v-if="q.input.recommend"> and its recommendation</template> wait on the Decision Desk.</p>
+            <RouterLink class="btn primary sm" :to="deskLink(q.id)">Answer</RouterLink>
+          </div>
+          <p v-if="questions.length > 2" class="asks-more"><RouterLink to="/decision-desk">{{ questions.length - 2 }} more{{ questionsPartial ? ' and possibly others' : '' }} on the Decision Desk</RouterLink></p>
+          <p v-else-if="questionsPartial" class="asks-more" data-partial><RouterLink to="/decision-desk">Not every open question could be read here; see the Decision Desk</RouterLink></p>
+        </div>
+        <p class="lead-foot"><AppIcon name="shield" :size="14" /><span>{{ unmanaged ? unmanagedLeadCopy : band.foot }}</span></p>
+      </div>
+    </div>
 
   </section>
 </template>
@@ -196,11 +206,14 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
 .fold-btn :deep(svg) { transition: transform .22s ease; }
 .fold-btn[aria-expanded="true"] :deep(svg) { transform: rotate(90deg); }
 .lead-fold { display: grid; grid-template-rows: 1fr; margin-inline: calc(var(--lead-px) * -1); }
-.lead.folded .lead-fold { grid-template-rows: 0fr; visibility: hidden; }
+.lead.folded .lead-fold, .lead.collapsed .lead-fold { grid-template-rows: 0fr; visibility: hidden; }
 .lead.moving .lead-fold { transition: grid-template-rows .26s cubic-bezier(.2, .7, .2, 1), visibility 0s .26s; }
-.lead.moving:not(.folded) .lead-fold { transition: grid-template-rows .26s cubic-bezier(.2, .7, .2, 1), visibility 0s 0s; }
+.lead.moving:not(.folded):not(.collapsed) .lead-fold { transition: grid-template-rows .26s cubic-bezier(.2, .7, .2, 1), visibility 0s 0s; }
 .lead-fold-inner { min-height: 0; min-width: 0; padding-inline: var(--lead-px); }
-.lead.folded .lead-fold-inner, .lead.moving .lead-fold-inner { overflow: hidden; }
+.lead.folded .lead-fold-inner, .lead.collapsed .lead-fold-inner, .lead.moving .lead-fold-inner { overflow: hidden; }
+/* AEON-1256: collapsed, the head row keeps its place and the card closes evenly below it. */
+.lead.collapsed { padding-bottom: 18px; }
+.lead.moving { transition: padding-bottom .26s cubic-bezier(.2, .7, .2, 1); }
 @media (min-width: 721px) { .lead[data-state="none"] .lead-top { align-items: center; min-height: 48px; } }
 .lead-now { margin: 14px 0 0 58px; max-width: 72ch; color: var(--ink); font-size: 15px; line-height: 1.5; }
 .empty-lead { margin: 14px 0 6px 58px; padding: 0; list-style: none; display: grid; gap: 8px; max-width: 64ch; }
@@ -230,6 +243,10 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
   .lead-acts :deep(.lead-menu-trigger) { grid-area: more; }
   .lead-acts .act-main { grid-area: acts; justify-self: end; min-height: 44px; }
   .lead-acts .fold-btn { width: 44px; height: 44px; }
+  /* A running lead: the collapse control sits left of Pause…, the menu stays last. */
+  .lead:not([data-state="none"]) .lead-top { grid-template-columns: 40px minmax(0, 1fr) auto auto; grid-template-areas: 'bot coll acts more' 'who who who who'; }
+  .lead-acts .collapse-btn { grid-area: coll; justify-self: end; }
+  .lead.collapsed { padding-bottom: 16px; }
   /* Phone: the name and state already sit on their own row below the controls; folded, they stay stacked. */
   .lead.folded .lead-who { display: grid; row-gap: 1px; }
   .lead.folded .lead-sep { display: none; }
@@ -241,6 +258,6 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
   .lead-foot { padding: 10px 14px 8px; }
 }
 @media (pointer: coarse) { .fold-btn { width: 44px; height: 44px; } }
-@media (prefers-reduced-motion: reduce) { .lead.moving .lead-fold, .fold-btn :deep(svg) { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .lead.moving, .lead.moving .lead-fold, .fold-btn :deep(svg) { transition: none; } }
 .settings-link { display:inline-flex; align-items:center; gap:3px; min-height:30px; color:var(--ink-2); } @media(pointer:coarse) { .settings-link { min-height:44px; } }
 </style>
