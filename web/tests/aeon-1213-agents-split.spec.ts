@@ -328,7 +328,7 @@ test('AEON-1213: the work-area threshold and 240 ms presets honor reduced motion
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.emulateMedia({ reducedMotion: 'no-preference' })
   const { data } = await setup(page)
-  await page.goto(`/agents/${data.sessions[1]!.id}`)
+  await page.goto(`/agents/${data.sessions[1]!.id}?tab=messages`)
   await expect(pane(page)).toHaveClass(/docked/)
   expect(await page.locator('.agents-list-pane').evaluate(el => getComputedStyle(el).transitionDuration)).toBe('0.24s')
   await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -338,6 +338,30 @@ test('AEON-1213: the work-area threshold and 240 ms presets honor reduced motion
   await expect(pane(page)).toHaveClass(/sheet/); await expect(dock(page)).toBeHidden()
   await page.locator('.agents-work').evaluate(el => { (el as HTMLElement).style.width = '1056px' })
   await expect(pane(page)).toHaveClass(/docked/); await expect(dock(page)).toBeVisible()
+  await page.locator('.agents-work').evaluate(el => { (el as HTMLElement).style.removeProperty('width') })
+  // Fix6: a pane with an uninitialized viewport height can pass visibility
+  // checks while its composer is below the fold. Resize through both pane
+  // forms, then prove typing keeps the entire composer at the pane bottom.
+  const composer = pane(page).locator('.compose textarea')
+  const footer = pane(page).locator('.composer')
+  for (const { width, height } of [{ width: 1440, height: 860 }, { width: 1280, height: 720 }, { width: 1024, height: 1000 }, { width: 390, height: 900 }, { width: 1440, height: 1000 }]) {
+    await page.setViewportSize({ width, height })
+    await expect(pane(page)).toHaveClass(width >= 1280 ? /docked/ : /sheet/)
+    await expect(footer).toBeInViewport({ ratio: 1 })
+    const geometry = await pane(page).evaluate(el => {
+      const frame = el.getBoundingClientRect(), footer = el.querySelector('.composer')!.getBoundingClientRect()
+      return { gap: frame.bottom - footer.bottom, inset: parseFloat(getComputedStyle(el).borderBottomWidth) + parseFloat(getComputedStyle(el).paddingBottom) }
+    })
+    expect(Math.abs(geometry.gap - geometry.inset), `${width}: composer pinned to pane bottom`).toBeLessThanOrEqual(.5)
+    const guard = await controlStability(page, { composer, send: pane(page).locator('.compose .send'), stop: pane(page).locator('.chat-stop') })
+    for (const draft of ['Die vollständigen Berechtigungseinstellungen für sämtliche angeschlossenen Arbeitsbereiche zuverlässig prüfen.', '']) {
+      await guard.check(async () => {
+        await composer.fill(draft); await composer.blur()
+        await expect(footer).toBeInViewport({ ratio: 1 })
+      })
+    }
+    guard.done()
+  }
   expect(errors).toEqual([])
 })
 
