@@ -7,7 +7,6 @@ import { writeFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
-import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
 import { deliveryMetrics } from './delivery-numbers-fixtures'
 import { checkProjectSettings, approvedCheckSHA } from './project-settings-acceptance.mjs'
@@ -263,12 +262,14 @@ test('AEON-1226: approved repository reference states and check.mjs audit agains
     refresh.done()
     await page.screenshot({ path: testInfo.outputPath(`delivery-banner-none-${width}-${theme}.png`), fullPage: true })
 
-    const german = settingsData(); german.profile.locale = 'de-AT'
-    await mockSettings(page, german)
-    await page.goto('/p/AEON/delivery'); await expect(page.getByRole('link', { name: 'Repository verknüpfen', exact: true })).toBeVisible()
-    results.push(await bannerContainsAction(page, `delivery-banner-none-de-${width}-${theme}`))
-    await page.screenshot({ path: testInfo.outputPath(`delivery-banner-none-de-${width}-${theme}.png`), fullPage: true })
-    german.profile.locale = 'en-US'
+    // The app remains English; German is test-only length stress data here.
+    await action.evaluate(element => {
+      for (const child of element.childNodes) if (child.nodeType === Node.TEXT_NODE && child.textContent?.trim()) child.textContent = 'Repository verknüpfen'
+      element.closest('.banner')!.querySelector('.grow')!.textContent = 'Noch kein Repository verknüpft. Eine Person mit Lieferverwaltung verknüpft das GitHub-Repository dieses Projekts; die Historie wird anschließend einmal über die GitHub-API gelesen.'
+    })
+    results.push(await bannerContainsAction(page, `delivery-banner-none-long-de-${width}-${theme}`))
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
+    await page.screenshot({ path: testInfo.outputPath(`delivery-banner-none-long-de-${width}-${theme}.png`), fullPage: true })
     await page.goto('/p/AEON/delivery'); await expect(action).toBeVisible()
     await page.getByRole('link', { name: 'Link repository', exact: true }).click(); await expect(page.locator('#link-form')).toBeVisible()
     world.state = 'appoff'; world.source = source('appoff'); world.metrics = deliveryMetrics().metrics
