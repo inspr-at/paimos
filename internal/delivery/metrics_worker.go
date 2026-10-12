@@ -50,7 +50,7 @@ func metricRetryBase(reason string) time.Duration {
 }
 
 func shortMetricRetry() time.Duration {
-	return 30*time.Second + time.Duration(rand.Int64N(int64(30*time.Second)))
+	return (30 + time.Duration(rand.Int64N(30))) * time.Second
 }
 
 func metricRetry(failure error, readError MetricReadError, source *metricSourceRow) time.Time {
